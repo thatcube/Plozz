@@ -24,6 +24,15 @@ public extension Notification.Name {
     /// (e.g. watched / unwatched). Screens showing media observe it and update
     /// in place. Read the payload via `Notification.mediaItemMutation`.
     static let mediaItemDidMutate = Notification.Name("PlozzMediaItemDidMutate")
+
+    /// Posted each time the cross-server identity index warms a little more (a new
+    /// account finishes indexing, so the shared source-of-truth membership grows).
+    /// Screens that merged their rows against an earlier, sparser snapshot observe
+    /// it and re-fold the *fresh* cross-server sources into their already-loaded
+    /// cards **in place** — no refetch, no focus reset — so a card that cold-loaded
+    /// before its local twin was known picks that twin up and can route playback to
+    /// it. Carries no payload; observers read the live snapshot on receipt.
+    static let identityIndexDidUpdate = Notification.Name("PlozzIdentityIndexDidUpdate")
 }
 
 /// The payload of a `.mediaItemDidMutate` notification: which items changed and
@@ -44,6 +53,22 @@ public extension Notification.Name {
 /// watched badge already flips — no refetch, focus preserved.
 public struct MediaItemMutation: Sendable, Equatable {
     public let itemIDs: Set<String>
+    /// **Account-scoped** targets, each key `"accountID:itemID"` (the same format as
+    /// ``MediaSourceRef/id``). Populated whenever the caller knew which physical
+    /// server(s) the change applies to (a playback stop or watch fan-out carries the
+    /// per-account target set). When present it is authoritative for matching and
+    /// **replaces** the bare `itemIDs` fallback below.
+    ///
+    /// This closes a cross-server collision: Plex `ratingKey`s are small per-server
+    /// integers, so the same bare id (e.g. "42") can name *different* titles on two
+    /// servers. Matching a mutation for server A's "42" against server B's unrelated
+    /// "42" would flip the wrong card's watched badge / resume bar / recency. Scoping
+    /// the match by `(accountID, itemID)` makes it hit only the real copies.
+    ///
+    /// Empty when the caller only knew a bare id (a context-menu toggle on a card
+    /// whose full source set we still fold over) — then matching falls back to
+    /// `itemIDs`, preserving the original single-server behaviour.
+    public let scopedItemIDs: Set<String>
     /// New watched/played state, or `nil` if this mutation doesn't change it.
     public let played: Bool?
     /// New watchlist/favourite state, or `nil` if this mutation doesn't change it.
@@ -58,12 +83,14 @@ public struct MediaItemMutation: Sendable, Equatable {
 
     public init(
         itemIDs: Set<String>,
+        scopedItemIDs: Set<String> = [],
         played: Bool? = nil,
         favorite: Bool? = nil,
         resumePosition: TimeInterval? = nil,
         playedPercentage: Double? = nil
     ) {
         self.itemIDs = itemIDs
+        self.scopedItemIDs = scopedItemIDs
         self.played = played
         self.favorite = favorite
         self.resumePosition = resumePosition
@@ -72,10 +99,45 @@ public struct MediaItemMutation: Sendable, Equatable {
 
     private enum Key {
         static let itemIDs = "itemIDs"
+        static let scopedItemIDs = "scopedItemIDs"
         static let played = "played"
         static let favorite = "favorite"
         static let resumePosition = "resumePosition"
         static let playedPercentage = "playedPercentage"
+    }
+
+    /// Account-scoped key for one physical copy, matching ``MediaSourceRef/id``.
+    private static func scopeKey(_ accountID: String, _ itemID: String) -> String {
+        "\(accountID):\(itemID)"
+    }
+
+    /// Whether this mutation targets a single physical copy identified by its
+    /// owning account + server-local id. When ``scopedItemIDs`` is present the match
+    /// is account-scoped (no cross-server bare-id collision); otherwise it falls
+    /// back to the bare `itemID`.
+    public func matches(accountID: String?, itemID: String) -> Bool {
+        if !scopedItemIDs.isEmpty {
+            guard let accountID else { return false }
+            return scopedItemIDs.contains(Self.scopeKey(accountID, itemID))
+        }
+        return itemIDs.contains(itemID)
+    }
+
+    /// Whether this mutation targets `item`. Matches the item's own id **or any of
+    /// its cross-server source item ids**: a merged card's primary is only one of
+    /// several servers' ids for the title, and the mutation may have been built
+    /// against a *different* server (e.g. the user finished the copy on server B,
+    /// or the identity index was still cold when the stop mutation was assembled so
+    /// its fanned-out `targets` didn't yet include this card's primary id). Because
+    /// the loaded card already knows its full `sources` set, matching against those
+    /// makes the in-place update robust regardless of how complete the mutation's
+    /// own id set was. Account-scoped when ``scopedItemIDs`` is present.
+    public func targets(_ item: MediaItem) -> Bool {
+        if !scopedItemIDs.isEmpty {
+            if matches(accountID: item.sourceAccountID, itemID: item.id) { return true }
+            return item.sources.contains { scopedItemIDs.contains($0.id) }
+        }
+        return itemIDs.contains(item.id) || item.sources.contains { itemIDs.contains($0.itemID) }
     }
 
     /// Applies this mutation to `item` in place, returning the updated copy. Only
@@ -85,18 +147,37 @@ public struct MediaItemMutation: Sendable, Equatable {
     /// is normalised to `nil` (no resume point) so finished/restarted titles drop
     /// their progress bar.
     public func applied(to item: MediaItem) -> MediaItem {
-        guard itemIDs.contains(item.id) else { return item }
+        guard targets(item) else { return item }
         var copy = item
         if let played { copy.isPlayed = played }
         if let favorite { copy.isFavorite = favorite }
         if let resumePosition { copy.resumePosition = resumePosition > 0 ? resumePosition : nil }
         if let playedPercentage { copy.playedPercentage = playedPercentage }
+        // Fold the change into the matching cross-server source ref(s) as well.
+        // The top-level watch-state above is authoritative for the card *now*, but
+        // a later cross-server re-merge (`MediaItemMerger.mergeGroup`) rebuilds the
+        // top-level state from `sources` via `unifiedWatchState`. If we only touch
+        // the top level, that re-fold reverts the change to each source's stale
+        // pre-mutation state — the "Continue Watching card snaps back" bug. Keeping
+        // the played source(s) in sync means the fold preserves the mutation.
+        if !copy.sources.isEmpty {
+            copy.sources = copy.sources.map { ref in
+                guard matches(accountID: ref.accountID, itemID: ref.itemID) else { return ref }
+                var updated = ref
+                if let played { updated.isPlayed = played }
+                if let favorite { updated.isFavorite = favorite }
+                if let resumePosition { updated.resumePosition = resumePosition > 0 ? resumePosition : nil }
+                if let playedPercentage { updated.playedPercentage = playedPercentage }
+                return updated
+            }
+        }
         return copy
     }
 
     /// Posts a `.mediaItemDidMutate` notification carrying this mutation.
     public func post() {
         var userInfo: [String: Any] = [Key.itemIDs: Array(itemIDs)]
+        if !scopedItemIDs.isEmpty { userInfo[Key.scopedItemIDs] = Array(scopedItemIDs) }
         if let played { userInfo[Key.played] = played }
         if let favorite { userInfo[Key.favorite] = favorite }
         if let resumePosition { userInfo[Key.resumePosition] = resumePosition }
@@ -112,6 +193,7 @@ public struct MediaItemMutation: Sendable, Equatable {
     /// payload carries no item ids / no recognised change at all.
     public static func from(_ notification: Notification) -> MediaItemMutation? {
         guard let ids = notification.userInfo?[Key.itemIDs] as? [String] else { return nil }
+        let scoped = (notification.userInfo?[Key.scopedItemIDs] as? [String]).map(Set.init) ?? []
         let played = notification.userInfo?[Key.played] as? Bool
         let favorite = notification.userInfo?[Key.favorite] as? Bool
         let resumePosition = notification.userInfo?[Key.resumePosition] as? TimeInterval
@@ -121,6 +203,7 @@ public struct MediaItemMutation: Sendable, Equatable {
         }
         return MediaItemMutation(
             itemIDs: Set(ids),
+            scopedItemIDs: scoped,
             played: played,
             favorite: favorite,
             resumePosition: resumePosition,

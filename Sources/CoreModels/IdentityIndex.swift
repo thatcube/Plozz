@@ -23,9 +23,23 @@ public struct IndexedSource: Hashable, Sendable, Codable {
     public var serverName: String?
     /// Friendly signed-in user name for the picker, when known.
     public var accountName: String?
+    /// How reachable this source's server is from the device (same-LAN vs
+    /// remote/Tailscale), so an index-only membership fact still steers
+    /// best-source selection toward the local copy. `nil` when unclassified.
+    public var locality: SourceLocality?
     /// The catalogue kind the entry was indexed as (movie / series). Lets episode
     /// expansion ask the index only for series membership.
     public var kind: MediaItemKind
+    /// The source's ``MediaItemIdentity/normalizedTitle(_:)`` title, retained so the
+    /// membership walk can split a bad shared external id apart (one server tagging
+    /// two different movies with the same TMDb/IMDb id). `nil` for entries indexed
+    /// before this field existed / titleless items — treated as "no title signal"
+    /// so a sparse twin is never split (only a positive title+year contradiction
+    /// ejects). Stored normalized so the split-guard needn't re-fold on every walk.
+    public var normalizedTitle: String?
+    /// The source's production year, paired with ``normalizedTitle`` for the
+    /// split-guard's year-corroboration check. `nil` = no year signal.
+    public var year: Int?
 
     public init(
         accountID: String,
@@ -33,14 +47,20 @@ public struct IndexedSource: Hashable, Sendable, Codable {
         providerKind: ProviderKind? = nil,
         serverName: String? = nil,
         accountName: String? = nil,
-        kind: MediaItemKind = .unknown
+        locality: SourceLocality? = nil,
+        kind: MediaItemKind = .unknown,
+        normalizedTitle: String? = nil,
+        year: Int? = nil
     ) {
         self.accountID = accountID
         self.itemID = itemID
         self.providerKind = providerKind
         self.serverName = serverName
         self.accountName = accountName
+        self.locality = locality
         self.kind = kind
+        self.normalizedTitle = normalizedTitle
+        self.year = year
     }
 
     /// Stable identity: a title appears at most once per (account, item) pair.
@@ -60,7 +80,8 @@ public struct IndexedSource: Hashable, Sendable, Codable {
             itemID: itemID,
             providerKind: providerKind,
             serverName: serverName,
-            accountName: accountName
+            accountName: accountName,
+            locality: locality
         )
     }
 }
@@ -86,10 +107,47 @@ public struct IdentityIndexSnapshot: Sendable, Equatable {
     /// identity → its sources, de-duplicated by `IndexedSource.id` and kept in a
     /// stable (sorted) order so lookups are deterministic across rebuilds.
     private let byIdentity: [MediaIdentity: [IndexedSource]]
+    /// Reverse map: a source's `id` ("accountID:itemID") → every identity it was
+    /// indexed under. Lets a **loaded row whose payload carried no strong external
+    /// id** (Plex list responses can omit the `Guid` array) recover the index's
+    /// enriched identities for that exact physical item, so it still resolves its
+    /// full cross-server set and merges with a twin that *does* carry an id.
+    private let bySource: [String: [MediaIdentity]]
 
     public init(byIdentity: [MediaIdentity: [IndexedSource]]) {
-        self.byIdentity = byIdentity.mapValues { sources in
+        let sorted = byIdentity.mapValues { sources in
             sources.sorted { $0.id < $1.id }
+        }
+        self.byIdentity = sorted
+        var reverse: [String: [MediaIdentity]] = [:]
+        for (identity, sources) in sorted {
+            for source in sources {
+                reverse[source.id, default: []].append(identity)
+            }
+        }
+        // Dictionary iteration order is nondeterministic across launches (Swift
+        // seeds its hashing per process), so the identity lists appended above
+        // arrive in an arbitrary order. Sort each list by a stable key so a
+        // recovered-identity lookup — and therefore the unioned source order the
+        // cross-server selector tie-breaks on — is identical across rebuilds.
+        // Without this the "best source" for a title could flip between launches
+        // (the reported "it's almost random which server I end up on" symptom).
+        self.bySource = reverse.mapValues { identities in
+            identities.sorted { Self.stableSortKey($0) < Self.stableSortKey($1) }
+        }
+    }
+
+    /// A deterministic, launch-stable ordering key for a ``MediaIdentity`` (the enum
+    /// is `Hashable` but not `Comparable`). The leading digit groups by case so the
+    /// order is total and cannot collide across cases.
+    private static func stableSortKey(_ identity: MediaIdentity) -> String {
+        switch identity {
+        case let .external(source, value):
+            return "0:\(source):\(value)"
+        case let .title(normalizedTitle, year, kind):
+            return "1:\(normalizedTitle):\(year.map(String.init) ?? "?"):\(kind.rawValue)"
+        case let .sameItemID(id):
+            return "2:\(id)"
         }
     }
 
@@ -123,6 +181,13 @@ public struct IdentityIndexSnapshot: Sendable, Equatable {
     /// de-duplicated by `(account,item)`, in stable order. The union is what makes
     /// a title's set **origin-agnostic**: the same answer whether it was reached
     /// from a Plex or a Jellyfin card.
+    ///
+    /// This is a **single-level** union (the sources indexed directly under the
+    /// given identities). For the transitive connected-component union — needed
+    /// when a title's metadata is spread unevenly across servers — use
+    /// ``sources(forIdentities:kind:)`` or ``sources(for:)``, which walk the shared
+    /// id graph. This kind-less single-level form is kept for the legacy /
+    /// kind-unknown path where a transitive walk could bridge across kinds.
     public func sources(forIdentities identities: [MediaIdentity]) -> [IndexedSource] {
         guard !identities.isEmpty else { return [] }
         var seen = Set<String>()
@@ -136,9 +201,148 @@ public struct IdentityIndexSnapshot: Sendable, Equatable {
         return result
     }
 
-    /// Every indexed source for `item`, by its ``MediaItemIdentity`` identities.
+    /// The transitive, **kind-scoped** connected-component union for a set of seed
+    /// identities. External ids form a graph: two items are the same title if a
+    /// chain of shared ids links them, even when no single id is shared by all
+    /// (A=IMDb+TMDb, B=IMDb-only, C=TMDb-only — B and C are the same title bridged
+    /// by A, though they share no id directly). A single-level union from the
+    /// *sparse* node B would miss C; ``MediaItemMerger`` recovers this via union-find,
+    /// but the direct snapshot lookups did not, so a card resolved from B's
+    /// perspective was missing C's server (r8-transitive-component). Walking the
+    /// closure here makes the index agree with the merger.
+    ///
+    /// Kind is enforced **during** the walk, not merely at the end: TMDb/TVDb reuse
+    /// one integer id space across movies and series (movie 550 ≠ tv 550), so an
+    /// unscoped closure could bridge two unrelated movies *through* a same-id series
+    /// (M1—tmdb:550—S1—tvdb:100—M2) and a trailing kind filter would still hand back
+    /// {M1, M2} as one movie. Only traversing and collecting same-kind sources keeps
+    /// the component confined to the title's own kind.
+    public func sources(forIdentities identities: [MediaIdentity], kind: MediaItemKind?) -> [IndexedSource] {
+        sources(forIdentities: identities, kind: kind, anchorTitle: nil, anchorYear: nil)
+    }
+
+    /// As ``sources(forIdentities:kind:)``, but with an optional **anchor** title/year
+    /// that splits a bad shared external id apart during the walk. Any same-kind
+    /// source whose stored title/year ``MediaItemIdentity/titlesPlausiblyContradict``
+    /// the anchor is dropped **and not traversed through** — so two different works
+    /// bridged by one server's mis-tagged TMDb/IMDb/TVDb id don't contaminate the
+    /// anchor title's version picker, best-source playback, or watch fan-out. This
+    /// covers both a mis-tagged **movie** pair (Scream 6 tagged with Scream 7's id,
+    /// split on title/year) and a mis-tagged **series** pair (a server emitting one
+    /// TVDb id for both the 1999 anime and 2023 live-action "One Piece", split on the
+    /// large production-year gap). `nil`/kind-unknown anchor = the prior unguarded
+    /// union, so legacy callers behave exactly as before. Absent title/year signals
+    /// on a source never contradict, so a sparse twin is never split.
+    public func sources(
+        forIdentities identities: [MediaIdentity],
+        kind: MediaItemKind?,
+        anchorTitle: String?,
+        anchorYear: Int?
+    ) -> [IndexedSource] {
+        guard let kind else {
+            // Kind-unknown (e.g. a legacy mutation predating the kind field): fall
+            // back to a single-level union so a transitive walk can't fold unrelated
+            // kinds together on a shared external id.
+            return sources(forIdentities: identities)
+        }
+        guard !identities.isEmpty else { return [] }
+        // The split-guard can only positively contradict a same-kind movie (needs a
+        // usable title) or series (needs a year to measure the large-gap remake /
+        // anime-vs-live-action signal); anything else leaves it inert (the union is
+        // returned whole, as before). The primitive itself is the final arbiter —
+        // this just skips the call when there's provably no anchor signal.
+        let guardActive: Bool = {
+            switch kind {
+            case .movie: return !(anchorTitle ?? "").isEmpty
+            case .series: return anchorYear != nil
+            default: return false
+            }
+        }()
+        var visitedIdentities = Set<MediaIdentity>()
+        var frontier = identities
+        var seenSources = Set<String>()
+        var result: [IndexedSource] = []
+        while let identity = frontier.popLast() {
+            guard visitedIdentities.insert(identity).inserted else { continue }
+            guard let sources = byIdentity[identity] else { continue }
+            for source in sources where source.kind == kind {
+                // A source that plausibly contradicts the anchor is a different work
+                // riding a bad shared id: exclude it from the result AND from the
+                // frontier, so nothing reachable only *through* it leaks in either.
+                if guardActive,
+                   MediaItemIdentity.titlesPlausiblyContradict(
+                       titleA: anchorTitle ?? "",
+                       yearA: anchorYear,
+                       kindA: kind,
+                       titleB: source.normalizedTitle ?? "",
+                       yearB: source.year,
+                       kindB: source.kind
+                   ) {
+                    continue
+                }
+                if seenSources.insert(source.id).inserted {
+                    result.append(source)
+                }
+                // Expand through this same-kind source's other identities so a
+                // sparse twin (that shares only *one* of the seed's ids) still pulls
+                // in the rest of the component.
+                if let more = bySource[source.id] {
+                    for next in more where !visitedIdentities.contains(next) {
+                        frontier.append(next)
+                    }
+                }
+            }
+        }
+        return result.sorted { $0.id < $1.id }
+    }
+
+    /// Every indexed source for `item`, by its ``MediaItemIdentity`` identities,
+    /// **scoped to the item's kind** and unioned across the full transitive
+    /// connected component (see ``sources(forIdentities:kind:)``). TMDb/TVDb reuse
+    /// the same integer id across movies and series (movie 550 ≠ tv 550), and
+    /// `identities(for:)` emits bare, kind-less external ids — so a kind-scoped walk
+    /// keeps enrichment correct; episode expansion asks for series membership
+    /// through the series probe, not here.
+    ///
+    /// The item's own title/year anchor the walk's split-guard, so a bad shared
+    /// external id can't fold a *different* work (a mis-tagged movie, or the anime
+    /// vs live-action of a same-named series) into this title's picker / play /
+    /// watch-fan-out set (see ``sources(forIdentities:kind:anchorTitle:anchorYear:)``).
     public func sources(for item: MediaItem) -> [IndexedSource] {
-        sources(forIdentities: MediaItemIdentity.identities(for: item))
+        let kind = item.kind
+        var identities = MediaItemIdentity.identities(for: item)
+        // Recover the index's enriched identities for this *exact* physical item
+        // when its loaded payload carried no strong external id (or fewer ids than
+        // the index found by per-item fetch during warm). Without this an id-less
+        // Plex row can't share an identity key with a Jellyfin twin that carries an
+        // IMDb/TMDb id — rule #1 suppresses the twin's title key — so they'd stay
+        // two cards even though the index knows they're one title. Keyed by the
+        // row's own (account,item), so it's the index's confident per-item truth,
+        // never a guess: no false-merge risk.
+        if let accountID = item.sourceAccountID,
+           let recovered = bySource["\(accountID):\(item.id)"] {
+            identities.append(contentsOf: recovered)
+        }
+        // Re-apply rule #1 (see `MediaItemIdentity.identities(for:)`): a strong
+        // external id has a well-defined catalogue identity and *suppresses* the
+        // title/year fallback. `identities(for:)` guarantees this for the row's own
+        // payload, but the recovery above can re-introduce a `.title` alongside a
+        // recovered `.external` for an id-less row. Seeding the walk with both would
+        // let the title key bridge this title to a *different* same-title/same-year
+        // film that is id-less in the index — a false merge (the worst failure mode:
+        // it also mis-targets the watch fan-out at an unrelated title). Drop the
+        // title fallback whenever any strong external id is present so this lookup
+        // upholds the same invariant as `identities(for:)`.
+        if identities.contains(where: { if case .external = $0 { return true } else { return false } }) {
+            identities.removeAll { if case .title = $0 { return true } else { return false } }
+        }
+        let normalized = MediaItemIdentity.normalizedTitle(item.title)
+        return sources(
+            forIdentities: identities,
+            kind: kind,
+            anchorTitle: normalized.isEmpty ? nil : normalized,
+            anchorYear: item.productionYear
+        )
     }
 
     /// Membership ``MediaSourceRef``s for `item` — the picker / merge-enrichment view.
@@ -169,10 +373,29 @@ public struct IdentityIndexSnapshot: Sendable, Equatable {
 public actor IdentityIndex {
     /// account → identity → (sourceID → source).
     private var byAccount: [String: [MediaIdentity: [String: IndexedSource]]] = [:]
+    /// Shadow buckets for accounts with an in-flight rebuild. A rebuild ingests
+    /// into its shadow bucket (never the live one), then ``finishRebuild(for:)``
+    /// atomically swaps it into `byAccount`. This keeps the account's *existing*
+    /// sources serving fan-out for the entire rebuild window (so a watch never
+    /// misses a union just because a re-scan is mid-flight), and means a rebuild
+    /// that never conclusively finishes — an inconclusive scan — leaves the live
+    /// bucket and the persisted membership untouched rather than clobbering them.
+    private var pendingRebuild: [String: [MediaIdentity: [String: IndexedSource]]] = [:]
+    /// Accounts with an in-flight rebuild — routes ``ingest`` to the shadow bucket.
+    private var rebuilding: Set<String> = []
     /// Accounts whose initial catalogue scan has completed at least once.
     private var warmAccounts: Set<String> = []
     /// When each account's catalogue was last (re)built, for staleness checks.
     private var builtAtByAccount: [String: Date] = [:]
+    /// Memoized fold of `byAccount` into one identity → sources snapshot. Cleared
+    /// by every content mutation that changes the **live** index (`ingest` into a
+    /// non-rebuilding account, `finishRebuild`'s shadow swap, `removeAccount`,
+    /// `restore`) so a stale merge is never served, and repopulated lazily on the
+    /// next ``snapshot()``. A rebuild in flight does NOT clear it — the live view is
+    /// unchanged until the atomic swap. Lets repeated reads with no intervening live
+    /// mutation — the post-warm steady state, diagnostics, and the skip-warm restore
+    /// path — reuse the built value instead of re-deriving the full map each time.
+    private var cachedSnapshot: IdentityIndexSnapshot?
     private let now: @Sendable () -> Date
 
     public init(now: @Sendable @escaping () -> Date = { Date() }) {
@@ -180,15 +403,19 @@ public actor IdentityIndex {
     }
 
     /// Folds every account's bucket into one identity → sources map. Cheap enough
-    /// to call after each account finishes warming so readers see progress early.
+    /// to call after each account finishes warming so readers see progress early;
+    /// memoized so a call with no intervening mutation reuses the built value.
     public func snapshot() -> IdentityIndexSnapshot {
+        if let cachedSnapshot { return cachedSnapshot }
         var merged: [MediaIdentity: [IndexedSource]] = [:]
         for (_, identityMap) in byAccount {
             for (identity, sourcesByID) in identityMap {
                 merged[identity, default: []].append(contentsOf: sourcesByID.values)
             }
         }
-        return IdentityIndexSnapshot(byIdentity: merged)
+        let built = IdentityIndexSnapshot(byIdentity: merged)
+        cachedSnapshot = built
+        return built
     }
 
     /// Indexes a freshly fetched page of catalogue `items` for `accountID`,
@@ -202,35 +429,60 @@ public actor IdentityIndex {
         serverInfo: SourceServerInfo? = nil
     ) {
         guard !items.isEmpty else { return }
-        var bucket = byAccount[accountID] ?? [:]
+        // While an account is rebuilding, ingest into its shadow bucket so the live
+        // sources keep serving fan-out untouched until the swap at finishRebuild.
+        let intoShadow = rebuilding.contains(accountID)
+        var bucket = (intoShadow ? pendingRebuild[accountID] : byAccount[accountID]) ?? [:]
         for item in items {
             guard item.kind == .movie || item.kind == .series else { continue }
             let identities = MediaItemIdentity.identities(for: item)
             guard !identities.isEmpty else { continue }
+            let normalized = MediaItemIdentity.normalizedTitle(item.title)
             let source = IndexedSource(
                 accountID: accountID,
                 itemID: item.id,
                 providerKind: serverInfo?.providerKind,
                 serverName: serverInfo?.serverName,
                 accountName: serverInfo?.accountName,
-                kind: item.kind
+                locality: serverInfo?.locality,
+                kind: item.kind,
+                normalizedTitle: normalized.isEmpty ? nil : normalized,
+                year: item.productionYear
             )
             for identity in identities {
                 bucket[identity, default: [:]][source.id] = source
             }
         }
-        byAccount[accountID] = bucket
+        if intoShadow {
+            // The live snapshot is unchanged during a rebuild — don't invalidate it.
+            pendingRebuild[accountID] = bucket
+        } else {
+            byAccount[accountID] = bucket
+            cachedSnapshot = nil
+        }
     }
 
-    /// Clears `accountID`'s bucket so a full re-scan replaces it cleanly. Marks the
-    /// account not-warm until ``finishRebuild(for:)`` is called.
+    /// Opens a shadow bucket for `accountID`'s re-scan. The account's **existing**
+    /// live sources keep serving fan-out (and stay warm, and stay exportable as
+    /// last-known-good) throughout the rebuild; ``ingest`` routes the new page into
+    /// the shadow, and ``finishRebuild(for:)`` atomically swaps it in. A rebuild
+    /// that never finishes therefore leaves the live index untouched — no stale-out
+    /// window, no persisted-membership clobber.
     public func beginRebuild(for accountID: String) {
-        byAccount[accountID] = [:]
-        warmAccounts.remove(accountID)
+        pendingRebuild[accountID] = [:]
+        rebuilding.insert(accountID)
     }
 
-    /// Marks `accountID`'s scan complete and records its freshness timestamp.
+    /// Marks `accountID`'s scan complete: atomically swaps the shadow bucket into
+    /// the live index (if a rebuild was in flight) and records its freshness
+    /// timestamp.
     public func finishRebuild(for accountID: String) {
+        if rebuilding.contains(accountID) {
+            byAccount[accountID] = pendingRebuild[accountID] ?? [:]
+            pendingRebuild[accountID] = nil
+            rebuilding.remove(accountID)
+            cachedSnapshot = nil
+        }
         warmAccounts.insert(accountID)
         builtAtByAccount[accountID] = now()
     }
@@ -239,14 +491,31 @@ public actor IdentityIndex {
     /// appearing in the snapshot immediately.
     public func removeAccount(_ accountID: String) {
         byAccount[accountID] = nil
+        pendingRebuild[accountID] = nil
+        rebuilding.remove(accountID)
         warmAccounts.remove(accountID)
         builtAtByAccount[accountID] = nil
+        cachedSnapshot = nil
     }
 
     /// Prunes any indexed account not in `accountIDs` (e.g. after a profile switch
-    /// narrows the active set), keeping the snapshot honest.
+    /// narrows the active set), keeping the snapshot honest. Also prunes accounts
+    /// that exist only as an in-flight rebuild (a brand-new account whose first scan
+    /// hasn't finished), so a removed server mid-scan leaves no shadow behind.
+    ///
+    /// Resurrection invariant (why a superseded warm wave can't undo this prune):
+    /// the actor serializes all of `ingest`/`beginRebuild`/`retainAccounts`, and the
+    /// caller (`AppState.warmIdentityIndex`) always calls `identityWarmTask.cancel()`
+    /// **before** it awaits the next wave's `retainAccounts`. So by the time this
+    /// runs, every already-issued `ingest` from the prior wave has either completed
+    /// (queued on the actor ahead of us) or been abandoned by the `Task.isCancelled`
+    /// checks guarding each `ingest`/`beginRebuild`. A pruned account therefore has
+    /// no later write racing behind this call to resurrect its bucket — a new wave
+    /// only re-adds an account by re-selecting it into `accountsToWarm`, which
+    /// happens after this prune, not concurrently with it.
     public func retainAccounts(_ accountIDs: Set<String>) {
-        for accountID in byAccount.keys where !accountIDs.contains(accountID) {
+        let known = Set(byAccount.keys).union(pendingRebuild.keys)
+        for accountID in known where !accountIDs.contains(accountID) {
             removeAccount(accountID)
         }
     }
@@ -300,6 +569,7 @@ public actor IdentityIndex {
             builtAtByAccount[accountID] = persisted.builtAtByAccount[accountID] ?? .distantPast
             restoredAny = true
         }
+        if restoredAny { cachedSnapshot = nil }
         return restoredAny
     }
 
@@ -445,8 +715,20 @@ public final class IdentityIndexSnapshotStore: @unchecked Sendable {
         self.snapshot = snapshot
     }
 
-    /// A `@Sendable` identity-sources lookup over the live snapshot, suitable for
-    /// the ``MediaItemMerger`` enrichment seam and the watch fan-out.
+    /// A `@Sendable` identity-sources lookup over the **live** snapshot, suitable
+    /// for the ``MediaItemMerger`` enrichment seam and the watch fan-out.
+    ///
+    /// The closure reads ``current`` on every call by design — it must stay LIVE:
+    /// surface closures (Search / the tab view) are captured once for the view's
+    /// lifetime and have to reflect the index growing as accounts warm, otherwise a
+    /// card would keep a stale cross-server set and play-time selection would miss a
+    /// same-LAN twin discovered later (the very bug the index exists to fix). This
+    /// is cheap: `IdentityIndexSnapshot` is a value type backing onto copy-on-write
+    /// dictionaries, so `current` is an uncontended `NSLock` acquire plus a couple
+    /// of retains — sub-microsecond per item, dwarfed by the identity extraction and
+    /// dictionary lookups in `sourceRefs(for:)`. A frozen snapshot would shave that
+    /// micro-cost off large browse merges but at the cost of live-ness, which is not
+    /// a trade worth making.
     public func sourcesProvider() -> @Sendable (MediaItem) -> [MediaSourceRef] {
         { [weak self] item in self?.current.sourceRefs(for: item) ?? [] }
     }

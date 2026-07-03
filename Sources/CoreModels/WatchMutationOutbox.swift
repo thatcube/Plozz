@@ -1,5 +1,32 @@
 import Foundation
 
+/// A record of an **in-progress resume write** the reconciler applied to one server
+/// target, retained briefly so Home's Continue Watching overlay can undo a server's
+/// drain-time timestamp inflation.
+///
+/// Plex's `/:/progress` stamps its **own** server-side view timestamp and can't
+/// backdate it (see `PlexProvider.setResumePosition`), so an *offline-queued* resume
+/// write that drains late converges at the drain clock, not the play's real time —
+/// which re-floats a stale title to the top of Continue Watching on the next reload.
+/// This record carries both the play's true time (``capturedAt``) and when we wrote
+/// it (``appliedAt``) so the overlay can clamp the card's recency back down to the
+/// real play time — but only while the record is fresh, so it can never fight a
+/// genuine later play the user made on another client.
+public struct AppliedResumeRecord: Codable, Sendable, Equatable {
+    /// The play's real time (the mutation's `capturedAt`) — what the row should
+    /// reflect, in preference to a server's inflated drain-time stamp.
+    public var capturedAt: Date
+    /// When the reconciler actually applied the write (≈ the server's own stamp for
+    /// our write). The device-clock basis for the overlay's freshness gate, so a
+    /// stale record is pruned rather than left to override a later legitimate play.
+    public var appliedAt: Date
+
+    public init(capturedAt: Date, appliedAt: Date) {
+        self.capturedAt = capturedAt
+        self.appliedAt = appliedAt
+    }
+}
+
 /// The full persisted state of the watch-mutation outbox: the queue plus the two
 /// bookkeeping maps that make draining safe across relaunches.
 ///
@@ -21,6 +48,12 @@ public struct WatchOutboxState: Codable, Sendable, Equatable {
     public var appliedAniList: [String: Date]
     /// MAL idempotency ledger.
     public var appliedMAL: [String: Date]
+    /// Recently-applied in-progress resume writes, keyed by ``WatchMutationTarget/id``
+    /// (`"accountID:itemID"`), used by Home's Continue Watching overlay to clamp a
+    /// server's drain-time timestamp inflation back down to the play's real time.
+    /// Pruned aggressively by ``AppliedResumeRecord/appliedAt`` so a stale entry can
+    /// never override a genuine later play (e.g. one made on another client).
+    public var appliedRecency: [String: AppliedResumeRecord]
 
     public init(
         pending: [WatchMutation] = [],
@@ -28,7 +61,8 @@ public struct WatchOutboxState: Codable, Sendable, Equatable {
         appliedTrakt: [String: Date] = [:],
         appliedSimkl: [String: Date] = [:],
         appliedAniList: [String: Date] = [:],
-        appliedMAL: [String: Date] = [:]
+        appliedMAL: [String: Date] = [:],
+        appliedRecency: [String: AppliedResumeRecord] = [:]
     ) {
         self.pending = pending
         self.clock = clock
@@ -36,6 +70,7 @@ public struct WatchOutboxState: Codable, Sendable, Equatable {
         self.appliedSimkl = appliedSimkl
         self.appliedAniList = appliedAniList
         self.appliedMAL = appliedMAL
+        self.appliedRecency = appliedRecency
     }
 
     public static let empty = WatchOutboxState()
@@ -43,7 +78,7 @@ public struct WatchOutboxState: Codable, Sendable, Equatable {
     // MARK: - Codable (back-compatible)
 
     private enum CodingKeys: String, CodingKey {
-        case pending, clock, appliedTrakt, appliedSimkl, appliedAniList, appliedMAL
+        case pending, clock, appliedTrakt, appliedSimkl, appliedAniList, appliedMAL, appliedRecency
     }
 
     public init(from decoder: Decoder) throws {
@@ -54,6 +89,7 @@ public struct WatchOutboxState: Codable, Sendable, Equatable {
         appliedSimkl = (try? container.decodeIfPresent([String: Date].self, forKey: .appliedSimkl)) ?? [:]
         appliedAniList = (try? container.decodeIfPresent([String: Date].self, forKey: .appliedAniList)) ?? [:]
         appliedMAL = (try? container.decodeIfPresent([String: Date].self, forKey: .appliedMAL)) ?? [:]
+        appliedRecency = (try? container.decodeIfPresent([String: AppliedResumeRecord].self, forKey: .appliedRecency)) ?? [:]
     }
 }
 

@@ -86,6 +86,39 @@ final class PlexConnectionSelectorTests: XCTestCase {
             "https://relay.plex.direct:443"
         ])
     }
+
+    func testTailscaleConnectionFlaggedLocalIsDemotedBelowRealLAN() {
+        // Plex marks EVERY bound interface local=1, including a Tailscale tunnel.
+        // A positive .remote classification (CGNAT 100.64/10, *.ts.net) must
+        // override the flag so the real LAN address wins even when the tunnel is
+        // listed first. This is the user's sister-over-Tailscale complaint.
+        let conns = connections("""
+        [
+          {"protocol":"https","uri":"https://100-72-0-9.abcdef.plex.direct:32400","local":true,"relay":false},
+          {"protocol":"https","uri":"https://192-168-1-5.abcdef.plex.direct:32400","local":true,"relay":false}
+        ]
+        """)
+        XCTAssertEqual(
+            PlexConnectionSelector.ranked(from: conns).map(\.absoluteString),
+            [
+                "https://192-168-1-5.abcdef.plex.direct:32400",
+                "https://100-72-0-9.abcdef.plex.direct:32400"
+            ]
+        )
+    }
+
+    func testTailscaleMagicDNSFlaggedLocalIsDemoted() {
+        let conns = connections("""
+        [
+          {"protocol":"https","uri":"https://server.tail1234.ts.net:32400","local":true,"relay":false},
+          {"protocol":"https","uri":"https://192-168-1-5.abcdef.plex.direct:32400","local":true,"relay":false}
+        ]
+        """)
+        XCTAssertEqual(
+            PlexConnectionSelector.best(from: conns)?.absoluteString,
+            "https://192-168-1-5.abcdef.plex.direct:32400"
+        )
+    }
 }
 
 // MARK: - Reachability-aware server resolution
@@ -226,6 +259,59 @@ final class PlexConnectionResolverTests: XCTestCase {
         resolver.reportFailure(first)
         let healed = await resolver.resolved()
         XCTAssertEqual(healed.absoluteString, "https://b.host:32400")
+    }
+
+    func testReportFailureInvalidatesConfirmedReachabilityUntilReProbe() async {
+        // r8-stale-reachability-locality: a confirmed connection that later fails
+        // must revert `hasConfirmedReachableConnection` to false, so locality reads
+        // as `.unknown` (not a stale `.local`) until a fresh probe re-confirms —
+        // otherwise a dead LAN box keeps winning best-source selection over a
+        // genuinely reachable remote twin.
+        let probe = MutableProbe(reachable: ["lan.host"])
+        let resolver = PlexConnectionResolver(
+            candidates: [url("https://lan.host:32400"), url("https://remote.host:32400")],
+            deviceProfile: profile, token: "T", probe: probe, refresh: nil
+        )
+        let first = await resolver.resolved()
+        XCTAssertEqual(first.absoluteString, "https://lan.host:32400")
+        XCTAssertTrue(resolver.hasConfirmedReachableConnection, "A probed connection is confirmed")
+
+        // The LAN box dies. Reporting the failure clears the cache AND the
+        // confidence flag — no probe has re-confirmed anything yet.
+        probe.setReachable([])
+        resolver.reportFailure(first)
+        XCTAssertFalse(
+            resolver.hasConfirmedReachableConnection,
+            "A reported failure must drop confirmed reachability until a fresh probe re-confirms"
+        )
+
+        // Remote comes up; a successful re-resolve re-confirms.
+        probe.setReachable(["remote.host"])
+        let healed = await resolver.resolved()
+        XCTAssertEqual(healed.absoluteString, "https://remote.host:32400")
+        XCTAssertTrue(resolver.hasConfirmedReachableConnection, "A fresh successful probe re-confirms")
+    }
+
+    func testFailedProbeSweepInvalidatesPersistedSeedConfidence() async {
+        // A persisted last-known-good seed makes `hasConfirmedReachableConnection`
+        // true up front (it worked last launch). But once a full probe sweep runs
+        // and even the seed does not answer, confidence must drop to false so the
+        // seed's locality is no longer trusted — the server is demonstrably down.
+        let probe = MutableProbe(reachable: [])   // nothing answers this session
+        let resolver = PlexConnectionResolver(
+            candidates: [url("https://lan.host:32400"), url("https://remote.host:32400")],
+            deviceProfile: profile, token: "T", probe: probe, refresh: { [] },
+            reachableSeed: url("https://lan.host:32400")
+        )
+        XCTAssertTrue(
+            resolver.hasConfirmedReachableConnection,
+            "A persisted seed is trusted before any probe disproves it"
+        )
+        _ = await resolver.resolved()   // full sweep finds nothing reachable
+        XCTAssertFalse(
+            resolver.hasConfirmedReachableConnection,
+            "Once the seed itself fails its probe, its locality is no longer trusted"
+        )
     }
 
     func testFallsBackToFirstCandidateWhenNothingReachable() async {
@@ -409,6 +495,93 @@ final class PlexProviderMappingTests: XCTestCase {
 
         let query = try XCTUnwrap(stub.queryItems(forPathSuffix: "/library/onDeck"))
         XCTAssertEqual(query.first(where: { $0.name == "includeGuids" })?.value, "1")
+    }
+
+    /// r6-plex-cw-recency regression: an onDeck *next* episode has no
+    /// `lastViewedAt` of its own (it's unwatched), so without stamping it sorts to
+    /// the bottom of a merged Continue Watching row. The provider must stamp it with
+    /// its series' last-viewed date, harvested from `/library/all?type=2`, keyed by
+    /// the episode's `grandparentRatingKey`.
+    func testContinueWatchingStampsNextEpisodeWithSeriesRecency() async throws {
+        let stub = StubHTTPClient()
+        // onDeck: an unwatched next episode (no viewOffset, no lastViewedAt) whose
+        // grandparent (series) ratingKey is 900.
+        stub.stub(pathSuffix: "/library/onDeck", json: """
+        {"MediaContainer":{"size":1,"Metadata":[
+          {"ratingKey":"e2","type":"episode","title":"Episode 2","index":2,"parentIndex":1,
+           "grandparentRatingKey":"900","grandparentTitle":"The Series","duration":1800000}
+        ]}}
+        """)
+        // /library/all (type=2 shows, sorted lastViewedAt:desc) reports the series'
+        // real recency.
+        stub.stub(pathSuffix: "/library/all", json: """
+        {"MediaContainer":{"size":1,"Metadata":[
+          {"ratingKey":"900","type":"show","title":"The Series","lastViewedAt":1700000000}
+        ]}}
+        """)
+        let provider = PlexProvider(session: makeSession(), http: stub)
+
+        let items = try await provider.continueWatching(limit: 10)
+        XCTAssertEqual(items.count, 1)
+        let item = items[0]
+        XCTAssertEqual(item.id, "e2")
+        XCTAssertEqual(item.seriesID, "900")
+        XCTAssertEqual(item.lastPlayedAt, Date(timeIntervalSince1970: 1_700_000_000),
+                       "A next-up episode with no lastViewedAt must inherit its series' recency")
+
+        // The recently-viewed-shows query must ask for shows (type=2) by recency.
+        let query = try XCTUnwrap(stub.queryItems(forPathSuffix: "/library/all"))
+        XCTAssertEqual(query.first(where: { $0.name == "type" })?.value, "2")
+        XCTAssertEqual(query.first(where: { $0.name == "sort" })?.value, "lastViewedAt:desc")
+    }
+
+    /// An in-progress onDeck item already carries its own `lastViewedAt`; stamping
+    /// must never overwrite it with a series-level date.
+    func testContinueWatchingKeepsOwnTimestampOverSeriesRecency() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/library/onDeck", json: """
+        {"MediaContainer":{"size":1,"Metadata":[
+          {"ratingKey":"e5","type":"episode","title":"Episode 5","index":5,"parentIndex":1,
+           "grandparentRatingKey":"900","duration":1800000,"viewOffset":600000,
+           "lastViewedAt":1650000000}
+        ]}}
+        """)
+        stub.stub(pathSuffix: "/library/all", json: """
+        {"MediaContainer":{"size":1,"Metadata":[
+          {"ratingKey":"900","type":"show","title":"The Series","lastViewedAt":1700000000}
+        ]}}
+        """)
+        let provider = PlexProvider(session: makeSession(), http: stub)
+
+        let items = try await provider.continueWatching(limit: 10)
+        XCTAssertEqual(items.first?.lastPlayedAt, Date(timeIntervalSince1970: 1_650_000_000),
+                       "An in-progress item's own timestamp must win over its series recency")
+    }
+
+    func testConnectionLocalityUnknownUntilReachableConfirmed() async {
+        // r6-plex-unreachable-local: a Plex server advertises its own LAN address
+        // even to remote clients, so an unproven most-preferred candidate can be a
+        // local-LOOKING URL that is actually dead. Reporting it as `.local` would
+        // wrongly win best-source selection over a genuinely reachable remote twin.
+        // Locality must stay `.unknown` until reachability is confirmed.
+        let key = "plex.reachable.lan-srv"
+        UserDefaults.standard.removeObject(forKey: key)
+        let session = UserSession(
+            server: MediaServer(id: "lan-srv", name: "Home",
+                                baseURL: URL(string: "https://192.168.1.50:32400")!, provider: .plex),
+            userID: "u1", userName: "Alice", deviceID: "d1", accessToken: "TOKEN"
+        )
+        let unconfirmed = PlexProvider(session: session, http: StubHTTPClient())
+        XCTAssertEqual(unconfirmed.connectionLocality, .unknown,
+                       "An unproven LAN-shaped candidate must not be trusted as .local")
+
+        // A persisted last-known-good seed IS a confirmed-reachable address, so the
+        // LAN classification becomes trustworthy again.
+        UserDefaults.standard.set("https://192.168.1.50:32400", forKey: key)
+        defer { UserDefaults.standard.removeObject(forKey: key) }
+        let confirmed = PlexProvider(session: session, http: StubHTTPClient())
+        XCTAssertEqual(confirmed.connectionLocality, .local,
+                       "A persisted reachable seed makes the LAN classification trustworthy")
     }
 
     func testLatestRequestsIncludeGuidsForHomeDedup() async throws {

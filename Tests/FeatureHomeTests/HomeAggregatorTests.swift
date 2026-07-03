@@ -157,6 +157,112 @@ final class HomeAggregatorTests: XCTestCase {
         XCTAssertEqual(card.sources.first?.providerKind, .plex)
     }
 
+    func testContinueWatchingNextUpKeepsItsOwnServersRecencyAcrossMerge() async {
+        // Regression for the reported "Continue Watching shifts / isn't what I
+        // watched last" bug. Server A's activity is OLD: an in-progress episode
+        // (T1) followed by its "Next Up" suggestion whose series-recency stamp
+        // failed, so it arrives untimestamped. Server B has a FRESH in-progress
+        // card (T2 > T1). The two feeds round-robin interleave to
+        // [A-inprogress, B-inprogress, A-nextup].
+        //
+        // An earlier positional carry-forward walked that interleaved row and let
+        // A-nextup inherit B's fresh T2, floating a stale show's next episode to the
+        // #2 slot. With that carry removed, an untimestamped card gets NO recency and
+        // sorts to the tail — it can never steal a foreign server's timestamp. The
+        // correct order is therefore B's fresh card, then server A's old in-progress
+        // card, then its still-unknown Next Up.
+        let old = Date(timeIntervalSince1970: 1_000)
+        let fresh = Date(timeIntervalSince1970: 9_000)
+        let aInProgress = MediaItem(id: "a-ip", title: "A In Progress", kind: .episode,
+                                    resumePosition: 60, lastPlayedAt: old)
+        let aNextUp = MediaItem(id: "a-next", title: "A Next Up", kind: .episode)
+        let bInProgress = MediaItem(id: "b-ip", title: "B In Progress", kind: .episode,
+                                    resumePosition: 60, lastPlayedAt: fresh)
+        let a = AggregatorStub(continueWatching: [aInProgress, aNextUp])
+        let b = AggregatorStub(continueWatching: [bInProgress])
+        let accounts = [
+            resolved("acct-a", user: "A", server: "S-A", kind: .plex, provider: a),
+            resolved("acct-b", user: "B", server: "S-B", kind: .jellyfin, provider: b)
+        ]
+
+        let content = await HomeAggregator().content(from: accounts)
+
+        XCTAssertEqual(
+            content.continueWatching.map(\.id),
+            ["b-ip", "a-ip", "a-next"],
+            "Server B's fresh card leads; server A's untimestamped Next Up sinks to the tail instead of stealing B's recency"
+        )
+    }
+
+    func testContinueWatchingUntimestampedNextUpDoesNotStealNeighborRecency() async {
+        // The definitive regression for the removed positional carry-forward. A real
+        // provider feed is ordered "timestamped first, untimestamped tail" — NOT
+        // in-progress/next-up pairs — so an untimestamped card sits below an UNRELATED
+        // show's timestamped card in the same feed.
+        //
+        // Server A feed: showX in-progress (T=100), then showY's Next Up whose series
+        // stamp failed (untimestamped). Server B: showZ in-progress (T=50) — genuine,
+        // older progress on a real show.
+        //
+        // The old carry-forward gave showY-next server A's T=100, floating a show the
+        // user never watched ABOVE showZ (real, if older, progress). Without carry,
+        // showY-next has no recency and sorts last, so showZ correctly outranks it.
+        let x = Date(timeIntervalSince1970: 100)
+        let z = Date(timeIntervalSince1970: 50)
+        let xInProgress = MediaItem(id: "x-ip", title: "Show X", kind: .episode,
+                                    resumePosition: 60, lastPlayedAt: x)
+        let yNextUp = MediaItem(id: "y-next", title: "Show Y", kind: .episode)
+        let zInProgress = MediaItem(id: "z-ip", title: "Show Z", kind: .episode,
+                                    resumePosition: 60, lastPlayedAt: z)
+        let a = AggregatorStub(continueWatching: [xInProgress, yNextUp])
+        let b = AggregatorStub(continueWatching: [zInProgress])
+        let accounts = [
+            resolved("acct-a", user: "A", server: "S-A", kind: .jellyfin, provider: a),
+            resolved("acct-b", user: "B", server: "S-B", kind: .plex, provider: b)
+        ]
+
+        let content = await HomeAggregator().content(from: accounts)
+
+        XCTAssertEqual(
+            content.continueWatching.map(\.id),
+            ["x-ip", "z-ip", "y-next"],
+            "An untimestamped Next Up must not inherit an unrelated show's timestamp; real (even older) progress outranks it"
+        )
+    }
+
+    func testContinueWatchingStampedNextUpRanksByItsSeriesRecency() async {
+        // Models the real provider pipeline: each provider stamps a "Next Up"
+        // suggestion with its SERIES' recency before the feed reaches the aggregator
+        // (JellyfinProvider/PlexProvider stampingSeriesRecency). A properly-stamped
+        // Next Up therefore ranks by real recency — here A's active show and its next
+        // episode both lead server B's older card — via the correct mechanism
+        // (provider stamping) rather than the removed positional carry-forward.
+        let recent = Date(timeIntervalSince1970: 5_000)
+        let seriesStamp = Date(timeIntervalSince1970: 4_900)
+        let older = Date(timeIntervalSince1970: 3_000)
+        let aInProgress = MediaItem(id: "a-ip", title: "A In Progress", kind: .episode,
+                                    resumePosition: 60, lastPlayedAt: recent)
+        let aNextUp = MediaItem(id: "a-next", title: "A Next Up", kind: .episode,
+                                lastPlayedAt: seriesStamp)
+        let bInProgress = MediaItem(id: "b-ip", title: "B In Progress", kind: .episode,
+                                    resumePosition: 60, lastPlayedAt: older)
+        let a = AggregatorStub(continueWatching: [aInProgress, aNextUp])
+        let b = AggregatorStub(continueWatching: [bInProgress])
+        let accounts = [
+            resolved("acct-a", user: "A", server: "S-A", kind: .plex, provider: a),
+            resolved("acct-b", user: "B", server: "S-B", kind: .jellyfin, provider: b)
+        ]
+
+        let content = await HomeAggregator().content(from: accounts)
+
+        XCTAssertEqual(
+            content.continueWatching.map(\.id),
+            ["a-ip", "a-next", "b-ip"],
+            "A provider-stamped Next Up ranks by its series recency, above a staler foreign server's card"
+        )
+    }
+
+
     func testContentCapsMergedRowsToRequestedLimits() async {
         let a = AggregatorStub(
             continueWatching: [item("a1"), item("a2"), item("a3")],
@@ -199,20 +305,26 @@ final class HomeAggregatorTests: XCTestCase {
 
         _ = await HomeAggregator().content(from: accounts, continueWatchingLimit: 1, latestLimit: 1)
 
+        // Fan-out is bounded (never unbounded) so a large server list can't swamp
+        // the launch-time network/decoding pipeline. The bound is sized to fully
+        // parallelize a typical multi-server household (~5) in a single wave while
+        // still capping pathological (many-server) cases: 8 accounts here must
+        // still run at most 5 at a time.
         XCTAssertLessThanOrEqual(
             tracker.maxConcurrent,
-            3,
+            5,
             "Home aggregation should bound concurrent account fan-out to keep launch responsive"
         )
     }
 
     func testContentDedupesSeriesAcrossServersWhenExternalIDsPresent() async {
         // Series identity is external-id-only (never title/year), so this must
-        // collapse only because both servers carry the same TMDb id.
+        // collapse only because both servers carry the same TMDb id AND the same
+        // debut year (a genuine cross-server duplicate of one show).
         let plexCopy = MediaItem(id: "p-op", title: "One Piece", kind: .series,
                                  productionYear: 1999, providerIDs: ["Tmdb": "37854"])
-        let jellyCopy = MediaItem(id: "j-op", title: "One Piece", kind: .series,
-                                  productionYear: 2023, providerIDs: ["Tmdb": "37854"])
+        let jellyCopy = MediaItem(id: "j-op", title: "ONE PIECE (Subtitled)", kind: .series,
+                                  productionYear: 1999, providerIDs: ["Tmdb": "37854"])
         let plex = AggregatorStub(latest: [plexCopy])
         let jelly = AggregatorStub(latest: [jellyCopy])
         let accounts = [
@@ -227,6 +339,30 @@ final class HomeAggregatorTests: XCTestCase {
         XCTAssertEqual(card.id, "p-op")
         XCTAssertEqual(card.sources.count, 2, "Merged card exposes both server sources for the picker")
         XCTAssertEqual(Set(card.allSourceAccountIDs), ["acct-plex", "acct-jelly"])
+    }
+
+    func testContentSplitsSeriesWithLargeYearGapDespiteSharedExternalID() async {
+        // The One Piece false-merge: the 1999 anime and the 2023 live-action are
+        // bridged by one server emitting the same TMDb id for both. A shared id
+        // alone would hide one show from Home; the large production-year gap splits
+        // them back into two cards so both stay visible.
+        let anime = MediaItem(id: "p-op", title: "One Piece", kind: .series,
+                              productionYear: 1999, providerIDs: ["Tmdb": "37854"])
+        let live = MediaItem(id: "j-op", title: "One Piece", kind: .series,
+                             productionYear: 2023, providerIDs: ["Tmdb": "37854"])
+        let plex = AggregatorStub(latest: [anime])
+        let jelly = AggregatorStub(latest: [live])
+        let accounts = [
+            resolved("acct-plex", user: "Bob", server: "Plex", kind: .plex, provider: plex),
+            resolved("acct-jelly", user: "Alice", server: "Jelly", kind: .jellyfin, provider: jelly)
+        ]
+
+        let content = await HomeAggregator().content(from: accounts)
+
+        XCTAssertEqual(content.latest.count, 2, "Anime and live-action must remain two separate cards")
+        XCTAssertEqual(Set(content.latest.map(\.id)), ["p-op", "j-op"])
+        XCTAssertTrue(content.latest.allSatisfy { $0.sources.isEmpty },
+                      "Neither should absorb the other as a source")
     }
 
     // MARK: - Helpers

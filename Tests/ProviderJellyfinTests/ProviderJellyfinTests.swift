@@ -142,6 +142,70 @@ final class JellyfinProviderMappingTests: XCTestCase {
         XCTAssertEqual(items.first?.resumePosition, 1800, "Dedup must keep the Resume copy that carries resume position")
     }
 
+    func testContinueWatchingStampsNextUpWithSeriesLastPlayedDate() async throws {
+        // A just-finished show surfaces ONLY in NextUp (its next episode), after the
+        // whole Resume block, and its episode carries no LastPlayedDate. Without the
+        // series-recency stamp it has no timestamp and sinks to the bottom of a
+        // merged Continue Watching row — the "doesn't reflect what I watched last"
+        // bug. The provider must stamp it with its SERIES' LastPlayedDate (when the
+        // previous episode was watched) so it sorts by real recency.
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Users/u1/Items/Resume", json: """
+        {"Items":[{"Id":"resume1","Name":"In Progress","Type":"Movie",
+        "UserData":{"PlaybackPositionTicks":18000000000,"Played":false,"LastPlayedDate":"2026-01-01T00:00:00Z"}}],"TotalRecordCount":1}
+        """)
+        stub.stub(pathSuffix: "/Shows/NextUp", json: """
+        {"Items":[{"Id":"next1","Name":"Episode 6","Type":"Episode","SeriesId":"series-x",
+        "IndexNumber":6,"UserData":{"Played":false}}],"TotalRecordCount":1}
+        """)
+        // recentlyWatchedSeries → GET /Users/u1/Items (Series). Suffix "/Items"
+        // never collides with "/Items/Resume".
+        stub.stub(pathSuffix: "/Users/u1/Items", json: """
+        {"Items":[{"Id":"series-x","Name":"My Show","Type":"Series",
+        "UserData":{"Played":false,"LastPlayedDate":"2026-06-15T10:00:00Z"}}],"TotalRecordCount":1}
+        """)
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        let items = try await provider.continueWatching(limit: 10)
+        let nextUp = try XCTUnwrap(items.first { $0.id == "next1" })
+        XCTAssertEqual(
+            nextUp.lastPlayedAt,
+            JellyfinProvider.parseDate("2026-06-15T10:00:00Z"),
+            "A NextUp episode with no play timestamp must inherit its series' LastPlayedDate so it sorts by real recency"
+        )
+
+        let query = try XCTUnwrap(stub.queryItems(forPathSuffix: "/Users/u1/Items"))
+        XCTAssertEqual(query.first(where: { $0.name == "IncludeItemTypes" })?.value, "Series")
+        XCTAssertEqual(query.first(where: { $0.name == "SortBy" })?.value, "DatePlayed")
+    }
+
+    func testContinueWatchingLeavesInProgressTimestampUntouchedBySeriesStamp() async throws {
+        // The stamp is scoped to untimestamped NextUp suggestions: an in-progress
+        // episode already carrying its own LastPlayedDate must NOT be overwritten by
+        // its series' (possibly different) date.
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Users/u1/Items/Resume", json: """
+        {"Items":[{"Id":"ep5","Name":"Episode 5","Type":"Episode","SeriesId":"series-x",
+        "UserData":{"PlaybackPositionTicks":18000000000,"Played":false,"LastPlayedDate":"2026-03-03T08:00:00Z"}}],"TotalRecordCount":1}
+        """)
+        stub.stub(pathSuffix: "/Shows/NextUp", json: """
+        {"Items":[],"TotalRecordCount":0}
+        """)
+        stub.stub(pathSuffix: "/Users/u1/Items", json: """
+        {"Items":[{"Id":"series-x","Name":"My Show","Type":"Series",
+        "UserData":{"Played":false,"LastPlayedDate":"2026-06-15T10:00:00Z"}}],"TotalRecordCount":1}
+        """)
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        let items = try await provider.continueWatching(limit: 10)
+        let inProgress = try XCTUnwrap(items.first { $0.id == "ep5" })
+        XCTAssertEqual(
+            inProgress.lastPlayedAt,
+            JellyfinProvider.parseDate("2026-03-03T08:00:00Z"),
+            "An already-timestamped Resume item keeps its own LastPlayedDate"
+        )
+    }
+
     func testContinueWatchingDegradesToResumeWhenNextUpFails() async throws {
         // /Shows/NextUp is intentionally not stubbed -> StubHTTPClient throws notFound.
         let stub = StubHTTPClient()
@@ -154,6 +218,43 @@ final class JellyfinProviderMappingTests: XCTestCase {
         let items = try await provider.continueWatching(limit: 10)
         XCTAssertEqual(items.map(\.id), ["resume1"],
                        "A NextUp failure must silently degrade to resume-only, never break Continue Watching")
+    }
+
+    /// r6-jf-precap regression: Resume alone fills `limit`, and a just-finished
+    /// show surfaces only in NextUp (its next episode, untimestamped). The old code
+    /// capped `(resume + nextUp)` to `limit` BEFORE stamping series recency, so that
+    /// NextUp episode was dropped even though — once stamped — it's the single most
+    /// recently watched thing. The provider must stamp first, order by effective
+    /// recency, then cap, so the stamped NextUp survives and the oldest Resume item
+    /// is the one dropped.
+    func testContinueWatchingStampedNextUpSurvivesCapOverOlderResume() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Users/u1/Items/Resume", json: """
+        {"Items":[
+          {"Id":"resumeNew","Name":"Resume Newer","Type":"Movie",
+           "UserData":{"PlaybackPositionTicks":18000000000,"Played":false,"LastPlayedDate":"2026-01-02T00:00:00Z"}},
+          {"Id":"resumeOld","Name":"Resume Older","Type":"Movie",
+           "UserData":{"PlaybackPositionTicks":18000000000,"Played":false,"LastPlayedDate":"2026-01-01T00:00:00Z"}}
+        ],"TotalRecordCount":2}
+        """)
+        stub.stub(pathSuffix: "/Shows/NextUp", json: """
+        {"Items":[{"Id":"next1","Name":"Episode 6","Type":"Episode","SeriesId":"series-x",
+        "IndexNumber":6,"UserData":{"Played":false}}],"TotalRecordCount":1}
+        """)
+        // Series was watched most recently of all — newer than either Resume item.
+        stub.stub(pathSuffix: "/Users/u1/Items", json: """
+        {"Items":[{"Id":"series-x","Name":"My Show","Type":"Series",
+        "UserData":{"Played":false,"LastPlayedDate":"2026-06-15T10:00:00Z"}}],"TotalRecordCount":1}
+        """)
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        let items = try await provider.continueWatching(limit: 2)
+        XCTAssertEqual(items.count, 2)
+        XCTAssertEqual(items.first?.id, "next1",
+                       "The stamped just-finished show is the most recent and must sort first")
+        XCTAssertTrue(items.contains { $0.id == "resumeNew" })
+        XCTAssertFalse(items.contains { $0.id == "resumeOld" },
+                       "The oldest item is the one dropped by the cap, not the just-watched NextUp")
     }
 
     func testLatestIncludesProviderIDsForHomeDedup() async throws {
@@ -1067,5 +1168,89 @@ final class JellyfinResumeWriteTests: XCTestCase {
                                        "LastPlayedDate must be present so the item surfaces in Continue Watching")
         XCTAssertNotNil(ISO8601DateFormatter().date(from: String(lastPlayed.prefix(19) + "Z")),
                         "LastPlayedDate should be a valid ISO 8601 timestamp")
+    }
+}
+
+final class JellyfinConnectionLocalityTests: XCTestCase {
+    private func makeSession(host: String) -> UserSession {
+        UserSession(
+            server: MediaServer(id: "s", name: "Home", baseURL: URL(string: host)!, provider: .jellyfin),
+            userID: "u1", userName: "Alice", deviceID: "d1", accessToken: "TOKEN"
+        )
+    }
+
+    func testLocalityIsUnknownUntilAReachableRequestConfirms() async throws {
+        // A LAN-shaped Jellyfin URL must NOT report `.local` before we've proven
+        // the server actually answers — otherwise a dead local server would beat a
+        // reachable remote twin in best-source selection. (r7-jf-locality)
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Users/u1/Items/Resume", json: """
+        {"Items":[{"Id":"i1","Name":"Movie","Type":"Movie"}],"TotalRecordCount":1}
+        """)
+        let provider = JellyfinProvider(session: makeSession(host: "http://192.168.1.50:8096"), http: stub)
+
+        XCTAssertEqual(provider.connectionLocality, .unknown,
+                       "Before any successful request, a LAN-shaped host is an unproven candidate")
+
+        _ = try await provider.continueWatching(limit: 10)
+
+        XCTAssertEqual(provider.connectionLocality, .local,
+                       "After a reachable request confirms the connection, the LAN host classifies local")
+    }
+
+    func testLocalityStaysUnknownWhenServerIsUnreachable() async throws {
+        // A saved LAN server that no longer answers keeps reporting `.unknown`, so
+        // best-source selection prefers a reachable remote copy over the dead LAN one.
+        let stub = StubHTTPClient()
+        stub.error = .serverUnreachable
+        let provider = JellyfinProvider(session: makeSession(host: "http://192.168.1.50:8096"), http: stub)
+
+        _ = try? await provider.continueWatching(limit: 10)
+
+        XCTAssertEqual(provider.connectionLocality, .unknown,
+                       "An unreachable LAN server must not claim local locality")
+    }
+
+    func testLocalityRevertsToUnknownWhenConfirmedServerDiesMidSession() async throws {
+        // r8-stale-reachability-locality: the reachability signal is no longer
+        // one-way. Once a confirmed LAN server stops answering mid-session, its
+        // locality must drop back to `.unknown` so a reachable remote twin can win
+        // best-source selection instead of the selector clinging to the dead LAN box.
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Users/u1/Items/Resume", json: """
+        {"Items":[{"Id":"i1","Name":"Movie","Type":"Movie"}],"TotalRecordCount":1}
+        """)
+        let provider = JellyfinProvider(session: makeSession(host: "http://192.168.1.50:8096"), http: stub)
+
+        _ = try await provider.continueWatching(limit: 10)
+        XCTAssertEqual(provider.connectionLocality, .local, "A reachable LAN server confirms local")
+
+        // The server goes down mid-session.
+        stub.error = .serverUnreachable
+        _ = try? await provider.continueWatching(limit: 10)
+
+        XCTAssertEqual(provider.connectionLocality, .unknown,
+                       "A confirmed server that dies must drop back to unknown locality")
+    }
+
+    func testHttpStatusErrorDoesNotInvalidateConfirmedLocality() async throws {
+        // Only a transport-level failure (the server not answering) invalidates the
+        // latch. A 404/401 proves the server DID answer, so a confirmed connection
+        // must stay `.local` — reachability is about the transport, not the resource.
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Users/u1/Items/Resume", json: """
+        {"Items":[{"Id":"i1","Name":"Movie","Type":"Movie"}],"TotalRecordCount":1}
+        """)
+        let provider = JellyfinProvider(session: makeSession(host: "http://192.168.1.50:8096"), http: stub)
+
+        _ = try await provider.continueWatching(limit: 10)
+        XCTAssertEqual(provider.connectionLocality, .local)
+
+        // The server answers, but with a 404 (resource gone) — still reachable.
+        stub.error = .notFound
+        _ = try? await provider.continueWatching(limit: 10)
+
+        XCTAssertEqual(provider.connectionLocality, .local,
+                       "A 404 proves the server answered; confirmed locality must persist")
     }
 }

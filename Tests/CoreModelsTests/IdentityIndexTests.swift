@@ -72,6 +72,86 @@ final class IdentityIndexTests: XCTestCase {
         XCTAssertEqual(Set(snapshot.targets(for: fromJF).map(\.id)), ["jf:j1", "plex:p1"])
     }
 
+    func testRecoveredIdentityOrderIsStableAcrossRebuilds() {
+        // A payload-id-less item recovers its identities via the reverse (bySource)
+        // map. Those must resolve in a deterministic order so the unioned source
+        // list — and thus the server the cross-server selector ultimately picks —
+        // never varies between launches (the "almost random which server I end up
+        // on" symptom). idA ("imdb:tt9") must sort before idB ("tmdb:500").
+        let idA = MediaIdentity.external(source: "imdb", value: "tt9")
+        let idB = MediaIdentity.external(source: "tmdb", value: "500")
+        let snapshot = IdentityIndexSnapshot(byIdentity: [
+            idA: [indexed("acct-1", "m1"), indexed("acct-2", "m2")],
+            idB: [indexed("acct-1", "m1"), indexed("acct-3", "m3")]
+        ])
+        // The acct-1 physical item, but its loaded payload carries NO strong
+        // external id, so resolution depends entirely on the recovered identities.
+        var probe = MediaItem(id: "m1", title: "Nonesuch", kind: .movie)
+        probe.sourceAccountID = "acct-1"
+
+        XCTAssertEqual(
+            snapshot.sources(for: probe).map(\.id),
+            ["acct-1:m1", "acct-2:m2", "acct-3:m3"],
+            "Recovered-identity union must be in a stable (imdb-before-tmdb) order, not dictionary-iteration order"
+        )
+    }
+
+    // MARK: Transitive connected-component union (r8-transitive-component)
+
+    func testTransitiveUnionFromSparseNodeReachesWholeComponent() {
+        // The identity graph: A carries BOTH ids, B only IMDb, C only TMDb. B and C
+        // are the same title (bridged by A) though they share no id directly. A
+        // lookup from the SPARSE node B must still reach C — the single-level union
+        // (B's own [imdb] → {A, B}) misses C; the transitive walk recovers it, so the
+        // index agrees with MediaItemMerger's union-find.
+        let imdb = MediaIdentity.external(source: "imdb", value: "tt1")
+        let tmdb = MediaIdentity.external(source: "tmdb", value: "42")
+        let snapshot = IdentityIndexSnapshot(byIdentity: [
+            imdb: [indexed("a", "x"), indexed("b", "y")],  // A + B (sparse: imdb only)
+            tmdb: [indexed("a", "x"), indexed("c", "z")]   // A + C (sparse: tmdb only)
+        ])
+        // Probe from B, whose loaded payload carries ONLY the imdb id.
+        var fromB = MediaItem(id: "y", title: "Film", kind: .movie,
+                              productionYear: 2010, providerIDs: ["Imdb": "tt1"])
+        fromB.sourceAccountID = "b"
+        XCTAssertEqual(
+            Set(snapshot.sources(for: fromB).map(\.id)),
+            ["a:x", "b:y", "c:z"],
+            "A lookup from a sparse node must reach the whole connected component"
+        )
+        // And from C (the other sparse node) the answer is identical — origin-agnostic.
+        var fromC = MediaItem(id: "z", title: "Film", kind: .movie,
+                              productionYear: 2010, providerIDs: ["Tmdb": "42"])
+        fromC.sourceAccountID = "c"
+        XCTAssertEqual(Set(snapshot.sources(for: fromC).map(\.id)), ["a:x", "b:y", "c:z"])
+    }
+
+    func testTransitiveUnionDoesNotBridgeAcrossKindsThroughSharedID() {
+        // TMDb/TVDb reuse one integer id space across movies and series. Here movie
+        // M1 and series S1 share tmdb:550, and series S1 and movie M2 share tvdb:100.
+        // A kind-agnostic closure would bridge the two UNRELATED movies M1↔M2 through
+        // the series S1 and (after a trailing kind filter) return them as one movie.
+        // Kind-scoping DURING the walk must confine M1's component to {M1}.
+        let tmdb550 = MediaIdentity.external(source: "tmdb", value: "550")
+        let tvdb100 = MediaIdentity.external(source: "tvdb", value: "100")
+        let snapshot = IdentityIndexSnapshot(byIdentity: [
+            tmdb550: [indexed("a", "m1", kind: .movie), indexed("b", "s1", kind: .series)],
+            tvdb100: [indexed("b", "s1", kind: .series), indexed("c", "m2", kind: .movie)]
+        ])
+        var m1 = MediaItem(id: "m1", title: "Film", kind: .movie,
+                           productionYear: 2010, providerIDs: ["Tmdb": "550"])
+        m1.sourceAccountID = "a"
+        XCTAssertEqual(
+            Set(snapshot.sources(for: m1).map(\.id)),
+            ["a:m1"],
+            "A movie must not merge with an unrelated movie bridged only through a same-id series"
+        )
+        // The series probe stays in series-land too: it sees S1, never the movies.
+        var s1 = MediaItem(id: "s1", title: "Show", kind: .series, providerIDs: ["Tvdb": "100"])
+        s1.sourceAccountID = "b"
+        XCTAssertEqual(Set(snapshot.sources(for: s1).map(\.id)), ["b:s1"])
+    }
+
     func testSnapshotDeduplicatesByAccountItem() {
         let identity = MediaIdentity.external(source: "tmdb", value: "42")
         let snapshot = IdentityIndexSnapshot(byIdentity: [
@@ -211,6 +291,83 @@ final class IdentityIndexTests: XCTestCase {
         await index.retainAccounts(["nobody"])
         snapshot = await index.snapshot()
         XCTAssertTrue(snapshot.isEmpty, "retainAccounts prunes every non-retained account")
+    }
+
+    // MARK: Atomic rebuild (shadow bucket)
+
+    func testRebuildKeepsExistingSourcesLiveUntilFinish() async {
+        let index = IdentityIndex()
+        await index.ingest([movie("old", account: "jf", tmdb: "42")], accountID: "jf")
+        await index.finishRebuild(for: "jf")
+
+        // A re-scan begins: the account's existing source must keep serving fan-out.
+        await index.beginRebuild(for: "jf")
+        var refs = await index.snapshot().sourceRefs(for: movie("probe", account: "jf", tmdb: "42"))
+        XCTAssertEqual(Set(refs.map(\.id)), ["jf:old"],
+                       "A rebuild in flight must keep serving the account's existing sources")
+
+        // The new page ingests into the shadow bucket — still not visible live.
+        await index.ingest([movie("new", account: "jf", tmdb: "42")], accountID: "jf")
+        refs = await index.snapshot().sourceRefs(for: movie("probe", account: "jf", tmdb: "42"))
+        XCTAssertEqual(Set(refs.map(\.id)), ["jf:old"],
+                       "Ingest during a rebuild must not mutate the live index before the swap")
+
+        // finishRebuild atomically swaps the shadow into the live index.
+        await index.finishRebuild(for: "jf")
+        refs = await index.snapshot().sourceRefs(for: movie("probe", account: "jf", tmdb: "42"))
+        XCTAssertEqual(Set(refs.map(\.id)), ["jf:new"],
+                       "finishRebuild swaps the shadow bucket into the live index")
+    }
+
+    func testInconclusiveRebuildDoesNotClobberExportedMembership() async {
+        // r6-rewarm-nonatomic: a re-scan that never conclusively finishes (an
+        // inconclusive page) must leave the last-known-good membership intact — both
+        // live AND exported — so a mid-rebuild persist can't wipe the account from disk.
+        let index = IdentityIndex()
+        await index.ingest([movie("good", account: "jf", tmdb: "42")], accountID: "jf")
+        await index.finishRebuild(for: "jf")
+
+        await index.beginRebuild(for: "jf")
+        await index.ingest([movie("partial", account: "jf", tmdb: "42")], accountID: "jf") // never finished
+
+        let exported = await index.export()
+        XCTAssertEqual(exported.entriesByAccount["jf"]?.map(\.source.itemID), ["good"],
+                       "An inconclusive rebuild must export last-known-good, never the partial shadow")
+        let refs = await index.snapshot().sourceRefs(for: movie("probe", account: "jf", tmdb: "42"))
+        XCTAssertEqual(Set(refs.map(\.id)), ["jf:good"],
+                       "The live index keeps last-known-good sources during an unfinished rebuild")
+    }
+
+    func testRebuildDoesNotUndercountIndexedAccountsMidWave() async {
+        // r6-warm-progressive-stall: while account "b" re-scans, the snapshot's
+        // indexed-account set must not lose "b", or the monotonic publish guard
+        // (accountCount >= published) would reject every publish for the rest of the
+        // warm wave and pin a stale snapshot.
+        let index = IdentityIndex()
+        await index.ingest([movie("a1", account: "a", tmdb: "1")], accountID: "a")
+        await index.finishRebuild(for: "a")
+        await index.ingest([movie("b1", account: "b", tmdb: "2")], accountID: "b")
+        await index.finishRebuild(for: "b")
+        var indexed = await index.snapshot().indexedAccountIDs
+        XCTAssertEqual(indexed, ["a", "b"])
+
+        await index.beginRebuild(for: "b")
+        indexed = await index.snapshot().indexedAccountIDs
+        XCTAssertEqual(indexed, ["a", "b"],
+                       "A rebuild must not drop an account from the indexed set mid-scan")
+    }
+
+    func testRetainAccountsPrunesInFlightRebuildOnlyAccount() async {
+        // A brand-new account whose first scan is still in flight (shadow only, no
+        // live bucket) must still be pruned by retainAccounts when it's removed.
+        let index = IdentityIndex()
+        await index.beginRebuild(for: "c")
+        await index.ingest([movie("c1", account: "c", tmdb: "9")], accountID: "c")
+        await index.retainAccounts(["a"]) // "c" not retained
+
+        await index.finishRebuild(for: "c") // must not resurrect the pruned shadow
+        let refs = await index.snapshot().sourceRefs(for: movie("probe", account: "c", tmdb: "9"))
+        XCTAssertTrue(refs.isEmpty, "A removed account's in-flight rebuild must not survive retain")
     }
 
     func testStaleAccountsRespectTTL() async {

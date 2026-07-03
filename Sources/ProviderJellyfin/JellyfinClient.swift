@@ -19,6 +19,9 @@ public struct JellyfinClient: Sendable {
     /// enrichment traffic on the shared default pool.
     private let interactiveHTTP: HTTPClient
     private let capabilityProfile: JellyfinCapabilityProfile
+    /// One-way latch flipped the first time any request through this connection
+    /// succeeds. See ``hasConfirmedReachableConnection``.
+    private let reachability: ReachabilityLatch
 
     public init(
         baseURL: URL,
@@ -28,22 +31,72 @@ public struct JellyfinClient: Sendable {
         interactiveHTTP: HTTPClient? = nil,
         capabilityProfile: JellyfinCapabilityProfile = .detected()
     ) {
+        let latch = ReachabilityLatch()
+        // Wrap the transport(s) so the FIRST successful request against this
+        // server latches reachability. `connectionLocality` reads that latch to
+        // avoid reporting a saved-but-now-unreachable LAN server as `.local`
+        // (which would wrongly win best-source selection over a reachable remote
+        // twin). Mirrors Plex's resolver-confirmed reachability. (r7-jf-locality)
+        let observedHTTP = ReachabilityObservingHTTPClient(wrapped: http, latch: latch)
         self.baseURL = baseURL
         self.deviceProfile = deviceProfile
         self.token = token
-        self.http = http
-        // Falls back to `http` when no dedicated foreground client is supplied, so
-        // a test (or any caller) that injects a single stub for `http` routes the
-        // `item()` fetch through it too instead of silently hitting a live session.
-        // The production foreground-pool isolation is opted into explicitly by the
-        // provider (see AppState), which passes a real `plozzInteractive` client.
-        self.interactiveHTTP = interactiveHTTP ?? http
+        self.reachability = latch
+        self.http = observedHTTP
+        // Falls back to the observed `http` when no dedicated foreground client is
+        // supplied, so a test (or any caller) that injects a single stub for
+        // `http` routes the `item()` fetch through it too instead of silently
+        // hitting a live session. The production foreground-pool isolation is
+        // opted into explicitly by the provider (see AppState), which passes a
+        // real `plozzInteractive` client.
+        self.interactiveHTTP = interactiveHTTP.map {
+            ReachabilityObservingHTTPClient(wrapped: $0, latch: latch)
+        } ?? observedHTTP
         self.capabilityProfile = capabilityProfile
     }
 
+    /// Rebuilds a client that preserves the caller's already-wrapped transports
+    /// and reachability latch, so a token refresh doesn't discard a connection
+    /// we've already confirmed reachable.
+    private init(
+        preserving reachability: ReachabilityLatch,
+        baseURL: URL,
+        deviceProfile: JellyfinDeviceProfile,
+        token: String?,
+        http: HTTPClient,
+        interactiveHTTP: HTTPClient,
+        capabilityProfile: JellyfinCapabilityProfile
+    ) {
+        self.baseURL = baseURL
+        self.deviceProfile = deviceProfile
+        self.token = token
+        self.reachability = reachability
+        self.http = http
+        self.interactiveHTTP = interactiveHTTP
+        self.capabilityProfile = capabilityProfile
+    }
+
+    /// Whether this connection has answered at least one request successfully.
+    /// Until it has, `session.server.baseURL` is an UNPROVEN candidate that may
+    /// be a local-looking host that's actually dead — so
+    /// ``JellyfinProvider/connectionLocality`` reports `.unknown` rather than a
+    /// misleading `.local`. Mirrors
+    /// ``PlexConnectionResolver/hasConfirmedReachableConnection``.
+    public var hasConfirmedReachableConnection: Bool { reachability.isConfirmed }
+
     /// Returns a copy of this client carrying an auth token.
     public func authenticated(token: String) -> JellyfinClient {
-        JellyfinClient(baseURL: baseURL, deviceProfile: deviceProfile, token: token, http: http, interactiveHTTP: interactiveHTTP, capabilityProfile: capabilityProfile)
+        // Reuse the already-wrapped transports and shared latch so the refreshed
+        // client keeps any reachability we've already confirmed.
+        JellyfinClient(
+            preserving: reachability,
+            baseURL: baseURL,
+            deviceProfile: deviceProfile,
+            token: token,
+            http: http,
+            interactiveHTTP: interactiveHTTP,
+            capabilityProfile: capabilityProfile
+        )
     }
 
     // MARK: Header
@@ -181,6 +234,34 @@ public struct JellyfinClient: Sendable {
         let endpoint = Endpoint(
             path: "/Shows/NextUp",
             queryItems: queryItems,
+            headers: authHeaders
+        )
+        return try await http.decode(ItemsResponse.self, from: endpoint, baseURL: baseURL).Items
+    }
+
+    /// Series the user has watched, most-recently-played first, each carrying its
+    /// series-level `UserData.LastPlayedDate` (the date of the most recent episode
+    /// play). Used to stamp NextUp suggestions — whose own episode
+    /// `LastPlayedDate` is nil — with their series' true last-watched time.
+    ///
+    /// Without this a just-finished show (present only in `/Shows/NextUp`, after
+    /// the whole `/Items/Resume` block) has no timestamp and either inherits an
+    /// unrelated in-progress item's date or sinks to the bottom of a merged
+    /// Continue Watching row — so the row stops reflecting what was watched last.
+    /// `/Users/{id}/Items` returns `UserData` by default, so no extra field is
+    /// requested. Best-effort at the call site: an older server that rejects the
+    /// query degrades to unstamped ordering.
+    func recentlyWatchedSeries(userID: String, limit: Int) async throws -> [BaseItemDto] {
+        let endpoint = Endpoint(
+            path: "/Users/\(userID)/Items",
+            queryItems: [
+                URLQueryItem(name: "IncludeItemTypes", value: "Series"),
+                URLQueryItem(name: "Recursive", value: "true"),
+                URLQueryItem(name: "SortBy", value: "DatePlayed"),
+                URLQueryItem(name: "SortOrder", value: "Descending"),
+                URLQueryItem(name: "Limit", value: String(limit)),
+                URLQueryItem(name: "Fields", value: "ProviderIds")
+            ],
             headers: authHeaders
         )
         return try await http.decode(ItemsResponse.self, from: endpoint, baseURL: baseURL).Items
@@ -439,7 +520,7 @@ public struct JellyfinClient: Sendable {
     ///
     /// Available on Jellyfin **10.9+**. Older servers (10.8) lack this endpoint
     /// and return `404`/``AppError/notFound``; the caller handles that fallback.
-    func updatePlaybackPosition(_ seconds: TimeInterval, userID: String, itemID: String) async throws {
+    func updatePlaybackPosition(_ seconds: TimeInterval, userID: String, itemID: String, lastPlayedAt: Date = Date()) async throws {
         var endpoint = Endpoint(
             method: .post,
             path: "/UserItems/\(itemID)/UserData",
@@ -448,7 +529,7 @@ public struct JellyfinClient: Sendable {
         )
         endpoint = try endpoint.jsonBody(UpdateUserItemDataBody(
             PlaybackPositionTicks: JellyfinTicks.ticks(fromSeconds: max(seconds, 0)),
-            LastPlayedDate: JellyfinDate.iso8601(from: Date())
+            LastPlayedDate: JellyfinDate.iso8601(from: lastPlayedAt)
         ))
         _ = try await http.send(endpoint, baseURL: baseURL)
     }
@@ -781,4 +862,61 @@ private struct PlaybackProgressBody: Encodable {
 private struct UpdateUserItemDataBody: Encodable {
     let PlaybackPositionTicks: Int64
     var LastPlayedDate: String?
+}
+
+// MARK: - Reachability latching
+
+/// A thread-safe reachability signal for a Jellyfin connection. It flips to
+/// *confirmed* the first time a request through the connection succeeds, and back
+/// to *unconfirmed* when a request fails with a transport-level `serverUnreachable`
+/// error (the server stopped answering). Jellyfin, unlike Plex, has no connection
+/// resolver, so this is where a Jellyfin connection records whether it is
+/// *currently* answering — letting ``JellyfinProvider/connectionLocality`` withhold
+/// a `.local` verdict for a saved-but-now-unreachable LAN server until it is proven
+/// live, AND drop the `.local` verdict again the instant the server dies
+/// mid-session so a reachable remote twin can take over playback rather than the
+/// selector clinging to the dead LAN box. (r8-stale-reachability-locality)
+final class ReachabilityLatch: @unchecked Sendable {
+    private let lock = NSLock()
+    private var confirmed = false
+
+    var isConfirmed: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return confirmed
+    }
+
+    func confirm() {
+        lock.lock(); defer { lock.unlock() }
+        confirmed = true
+    }
+
+    /// Drops the confirmed state after a transport failure, so locality reverts to
+    /// `.unknown` until the next successful request re-confirms a live connection.
+    func invalidate() {
+        lock.lock(); defer { lock.unlock() }
+        confirmed = false
+    }
+}
+
+/// Decorates an `HTTPClient`, confirming a ``ReachabilityLatch`` the first time a
+/// request completes without throwing and invalidating it when a request fails
+/// with a transport-level `serverUnreachable`. A non-2xx status maps to a
+/// *different* `AppError` (`.notFound`, `.unauthorized`, …) — the server DID
+/// answer — so those propagate without touching the latch; only a genuine
+/// transport failure (host unreachable / timeout / connection lost) flips the
+/// connection back to unconfirmed, matching Plex's probe semantics.
+struct ReachabilityObservingHTTPClient: HTTPClient {
+    let wrapped: HTTPClient
+    let latch: ReachabilityLatch
+
+    func send(_ endpoint: Endpoint, baseURL: URL) async throws -> (Data, HTTPURLResponse) {
+        do {
+            let result = try await wrapped.send(endpoint, baseURL: baseURL)
+            latch.confirm()
+            return result
+        } catch AppError.serverUnreachable {
+            latch.invalidate()
+            throw AppError.serverUnreachable
+        }
+    }
 }

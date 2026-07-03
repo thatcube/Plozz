@@ -17,8 +17,14 @@ import Foundation
 public enum MediaIdentity: Hashable, Sendable, Codable {
     case external(source: String, value: String)
     case title(normalizedTitle: String, year: Int?, kind: MediaItemKind)
-    /// Same raw item ID — catches duplicates from the same server seen through
-    /// different user accounts (Jellyfin IDs are server-global, not per-user).
+    /// Same raw item ID on the **same physical server** — catches duplicates from
+    /// one server seen through two different user accounts (a server-global item
+    /// id returned by both). Deliberately **not** emitted by
+    /// ``MediaItemIdentity/identities(for:)`` (a bare item id collides across
+    /// servers — Plex `ratingKey`s are small per-server integers); the
+    /// same-server dedup that needs it is applied inside ``MediaItemMerger`` where
+    /// the physical server id is known. The case is retained for
+    /// ``FanoutDiagnostics`` / persisted-snapshot backward compatibility.
     case sameItemID(String)
 }
 
@@ -30,41 +36,60 @@ public enum MediaIdentity: Hashable, Sendable, Codable {
 /// so the safety carve-outs are encoded once, here, and exhaustively tested.
 public enum MediaItemIdentity {
     /// External id namespaces that uniquely identify a catalogue entry across
-    /// providers, in match-priority order. Lower-cased for case-insensitive
-    /// comparison against `MediaItem.providerIDs` keys.
-    public static let strongExternalSources = ["imdb", "tmdb", "tvdb"]
+    /// providers, in match-priority order, each paired with the canonical token
+    /// used as its merge key.
+    ///
+    /// Resolution goes through ``ProviderIDNamespace`` so every backend spelling
+    /// of a key collapses to one identity: `IMDb`/`imdb`, `Tmdb`/`tmdbid`,
+    /// `Tvdb`/`TheTvdb`, `AniList`/`anilistid`, `myanimelist`/`mal`, `anidb`, …
+    /// Anime namespaces are included so anime series — which frequently carry
+    /// **only** an AniList/MAL/AniDB/TVmaze id and no IMDb/TMDb/TVDb — still merge
+    /// across servers. Cross-kind false merges are impossible: an identity is only
+    /// a merge key *within one media kind* (see ``MediaItemMerger/merge(_:serverInfo:identitySources:)``),
+    /// and each of these ids is unique per work within its kind.
+    public static let strongExternalNamespaces: [(namespace: ProviderIDNamespace, canonical: String)] = [
+        (.imdb, "imdb"),
+        (.tmdb, "tmdb"),
+        (.tvdb, "tvdb"),
+        (.tvmaze, "tvmaze"),
+        (.aniList, "anilist"),
+        (.myAnimeList, "myanimelist"),
+        (.aniDB, "anidb")
+    ]
+
+    /// The canonical strong-external tokens (back-compat / diagnostics).
+    public static let strongExternalSources = strongExternalNamespaces.map(\.canonical)
 
     /// The candidate identities for an item, strongest first. Two items are the
     /// same title when *any* of their identities match.
     ///
     /// ## Safety rules (do not relax without new tests)
-    /// 1. **External ids win and suppress the title key.** An item with a
-    ///    TMDb/IMDb/TVDb id has a well-defined catalogue identity; adding a title
-    ///    key on top risks bridging two completely different shows that merely
-    ///    share a name/year via a false transitive merge (anime vs live-action
-    ///    remake with bad year metadata).
+    /// 1. **External ids win and suppress the title key.** An item with a strong
+    ///    external id has a well-defined catalogue identity; adding a title key on
+    ///    top risks bridging two completely different shows that merely share a
+    ///    name/year via a false transitive merge (anime vs live-action remake with
+    ///    bad year metadata).
     /// 2. **Title identity is movies-only.** Two films with the same title and
     ///    year are almost certainly the same release; two *series* with the same
     ///    name routinely are not (original vs reboot, anime vs live-action), and
     ///    a wrong year on one server would silently collapse them. Series must
     ///    rely on external ids alone.
+    /// 3. **No bare `.sameItemID`.** A raw item id is only unique *within one
+    ///    server* — Plex `ratingKey`s are small per-server integers that collide
+    ///    across unrelated servers, so emitting `.sameItemID(item.id)` here would
+    ///    false-merge two different titles that happen to share a ratingKey. The
+    ///    same-server / two-account dedup that a bare id enables is applied inside
+    ///    ``MediaItemMerger`` instead, where the *physical server id* is known and
+    ///    the collision can't happen.
     public static func identities(for item: MediaItem) -> [MediaIdentity] {
         var result: [MediaIdentity] = []
 
-        // Always emit the raw item ID so same-server items seen through
-        // different user accounts (same Jellyfin ID) merge unconditionally.
-        result.append(.sameItemID(item.id))
-
-        let normalizedIDs = Dictionary(
-            item.providerIDs.compactMap { key, value -> (String, String)? in
-                let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-                return trimmed.isEmpty ? nil : (key.lowercased(), trimmed.lowercased())
-            },
-            uniquingKeysWith: { first, _ in first }
-        )
-        for source in strongExternalSources {
-            if let value = normalizedIDs[source] {
-                result.append(.external(source: source, value: value))
+        // Alias- and punctuation-insensitive resolution (`providerID(_:)`) so a
+        // backend that spells a key `TheTvdb`, `TMDb ID` or `myanimelist` still
+        // matches — the old plain-`.lowercased()` compare missed those.
+        for entry in strongExternalNamespaces {
+            if let value = item.providerIDs.providerID(entry.namespace) {
+                result.append(.external(source: entry.canonical, value: value.lowercased()))
             }
         }
 
@@ -80,6 +105,111 @@ public enum MediaItemIdentity {
         let normalized = normalizedTitle(item.title)
         guard !normalized.isEmpty else { return nil }
         return .title(normalizedTitle: normalized, year: year, kind: item.kind)
+    }
+
+    /// Whether two items almost certainly refer to **different works** despite
+    /// sharing a merge key — the positive-contradiction signal the cross-server
+    /// split-guard ejects on. Shared by both the full-item merger
+    /// (``MediaItemMerger/refineComponent(_:)``) and the identity index's
+    /// membership walk (``IdentityIndex``), which stores only a title/year per
+    /// source, so a bad shared external id is split back apart identically
+    /// everywhere a title resolves its cross-server set — Home cards, Search, the
+    /// detail server/version picker, best-source playback, and the watch fan-out.
+    ///
+    /// Only same-kind **movie/movie** or **series/series** pairs can contradict;
+    /// episodes and cross-kind pairs never do (episodes aren't merged through this
+    /// path, and TMDb/TVDb reuse one integer id space across kinds but the merge is
+    /// already kind-scoped). The two kinds decide differently because a series
+    /// title carries far less signal than a movie's:
+    ///
+    /// **Series** — a series title is identical across the same show and unreliable
+    /// across localizations, so the *only* confident contradiction is a **large
+    /// production-year gap** (both years present, ≥ ``largeProductionYearGap``
+    /// apart): an in-place remake/reboot or, crucially, an anime vs its much later
+    /// live-action adaptation ("One Piece" anime 1999 vs live-action 2023, bridged
+    /// by a server emitting one TVDb id for both). A legitimate same-show copy on
+    /// two servers shares the same debut year (gap 0), so this never false-splits a
+    /// real twin; without two years present we never split.
+    ///
+    /// **Movies** — with both titles present and normalized, the decision is:
+    /// - **Identical titles** → never contradict. Deliberately conservative: a
+    ///   same-title remake sharing a bad id (rare) stays merged rather than risk
+    ///   false-splitting one film whose year merely slips between servers.
+    /// - **Prefix-compatible but not identical** ("Dune" vs "Dune 2021", "Scream"
+    ///   vs "Scream 6") → contradict **only** on a hard year conflict (> 1yr): that
+    ///   distinguishes the base-vs-sequel false merge from a same-film edition
+    ///   suffix; otherwise keep merged.
+    /// - **Fully different titles** (a localized title or a genuinely different
+    ///   film) → contradict **unless** the years corroborate (both present within
+    ///   one year). A matching year rescues a localized twin; a missing or
+    ///   conflicting year lets the clash split them ("Scream 6" 2023 vs a yearless,
+    ///   mis-tagged "Scream 7").
+    ///
+    /// Absent signal never contradicts (a series with < 2 years; a movie with an
+    /// empty normalized title), so sparse rows always stay merged. Titles/years may
+    /// be raw; title normalization is idempotent.
+    public static func titlesPlausiblyContradict(
+        titleA: String,
+        yearA: Int?,
+        kindA: MediaItemKind,
+        titleB: String,
+        yearB: Int?,
+        kindB: MediaItemKind
+    ) -> Bool {
+        guard kindA == kindB, kindA == .movie || kindA == .series else { return false }
+
+        if kindA == .series {
+            // Series: title is no signal (identical across the same show, differently
+            // spelled across localizations), so only a large production-year gap can
+            // contradict. Same-show twins share a debut year, so this never splits
+            // them; a missing year on either side leaves the pair merged.
+            guard let ya = yearA, let yb = yearB else { return false }
+            return abs(ya - yb) >= largeProductionYearGap
+        }
+
+        // Movies: title-structure decision (unchanged from the Scream 6/7 design).
+        let a = normalizedTitle(titleA)
+        let b = normalizedTitle(titleB)
+        guard !a.isEmpty, !b.isEmpty else { return false }
+
+        let yearsCorroborate: Bool
+        let yearsConflict: Bool
+        if let ya = yearA, let yb = yearB {
+            let gap = abs(ya - yb)
+            yearsCorroborate = gap <= 1
+            yearsConflict = gap > 1
+        } else {
+            yearsCorroborate = false
+            yearsConflict = false
+        }
+
+        if a == b { return false }
+        if normalizedTitlesCompatible(a, b) {
+            // Prefix (edition suffix vs base-vs-sequel): only a hard year conflict
+            // proves a different work; otherwise treat as the same film's variant.
+            return yearsConflict
+        }
+        // Fully different titles: a corroborating year rescues a localized twin;
+        // anything else (conflict or a missing year) lets the clash split them.
+        return !yearsCorroborate
+    }
+
+    /// The production-year gap (in years) at or beyond which two same-kind **series**
+    /// sharing a merge key are treated as **different works** — a remake/reboot or
+    /// an anime vs its later live-action adaptation. Chosen well above any plausible
+    /// cross-server metadata slip for a single show (a debut year is well-defined
+    /// and both servers scrape it, so 0–1yr, at most 2), so it never false-splits a
+    /// legitimate twin, while comfortably catching real remakes/adaptations
+    /// (essentially always ≥ 10yr apart).
+    static let largeProductionYearGap = 5
+
+    /// Normalized titles are compatible when identical or one is a word-boundary
+    /// prefix of the other ("dune" vs "dune 2021"), so subtitle/year suffixes
+    /// don't read as a clash while a differing trailing token ("scream 6" vs
+    /// "scream 7") does. Inputs are assumed already ``normalizedTitle(_:)``-folded.
+    public static func normalizedTitlesCompatible(_ a: String, _ b: String) -> Bool {
+        if a == b { return true }
+        return a.hasPrefix(b + " ") || b.hasPrefix(a + " ")
     }
 
     /// Canonical title form: lower-cased, accent-folded, punctuation removed and

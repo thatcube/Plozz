@@ -121,6 +121,56 @@ final class ItemDetailViewModelTests: XCTestCase {
         XCTAssertTrue(vm.sources.isEmpty, "A single-server title carries no sources (no server picker)")
     }
 
+    func testSeedSourcesPrunesInactiveAccountFromPicker() async {
+        // A merged card built while three servers were enabled, but "gone" has
+        // since signed out / been excluded from the active profile (its resolver
+        // returns nil). The picker must seed only the two reachable servers.
+        let primary = MediaItem(id: "p1", title: "Dune", kind: .movie, productionYear: 2021, sourceAccountID: "plex")
+        let provider = FakeMediaProvider(allItems: [primary])
+        let vm = ItemDetailViewModel(
+            provider: provider, itemID: "p1", sourceAccountID: "plex",
+            initialSources: [
+                MediaSourceRef(accountID: "plex", itemID: "p1"),
+                MediaSourceRef(accountID: "jelly", itemID: "j1"),
+                MediaSourceRef(accountID: "gone", itemID: "g1")
+            ],
+            alternateProviderResolver: { accountID in
+                accountID == "jelly" ? provider : nil
+            }
+        )
+
+        await vm.load()
+
+        XCTAssertFalse(
+            vm.sources.contains { $0.accountID == "gone" },
+            "A source whose account is no longer active must be pruned from the picker"
+        )
+        XCTAssertTrue(vm.sources.contains { $0.accountID == "plex" }, "Active primary source retained")
+        XCTAssertTrue(vm.sources.contains { $0.accountID == "jelly" }, "Other active source retained")
+    }
+
+    func testSeedSourcesDropsPickerWhenPruningLeavesOneServer() async {
+        // Same card, but now only the primary survives pruning — the second server
+        // is dead. That collapses to a single-server title: no picker.
+        let primary = MediaItem(id: "p1", title: "Dune", kind: .movie, productionYear: 2021, sourceAccountID: "plex")
+        let provider = FakeMediaProvider(allItems: [primary])
+        let vm = ItemDetailViewModel(
+            provider: provider, itemID: "p1", sourceAccountID: "plex",
+            initialSources: [
+                MediaSourceRef(accountID: "plex", itemID: "p1"),
+                MediaSourceRef(accountID: "gone", itemID: "g1")
+            ],
+            alternateProviderResolver: { _ in nil }
+        )
+
+        await vm.load()
+
+        XCTAssertTrue(
+            vm.sources.isEmpty,
+            "Pruning to a single reachable server yields no picker (single-server contract)"
+        )
+    }
+
     func testOriginSourceAccountIDDefaultsNilForHomeAndSearchFlows() {
         let provider = FakeMediaProvider(allItems: [])
         let vm = ItemDetailViewModel(provider: provider, itemID: "m1", sourceAccountID: "plex")
@@ -135,6 +185,99 @@ final class ItemDetailViewModelTests: XCTestCase {
         let vm = ItemDetailViewModel(provider: provider, itemID: "m1",
                                      sourceAccountID: "jelly", originSourceAccountID: "jelly")
         XCTAssertEqual(vm.originSourceAccountID, "jelly")
+    }
+
+    // MARK: - Initial locality preference (series server picking)
+
+    func testMergedOpenLoadsFromLocalCopyWhenPrimaryIsRemote() async {
+        // A merged series whose merge-primary is the REMOTE (sister's Tailscale)
+        // server, with a same-LAN copy on another account. Opened from Home
+        // (originSourceAccountID nil), the page must load from the LOCAL copy so
+        // every episode streams locally — not from the remote merge-primary.
+        let remoteShow = MediaItem(id: "r-show", title: "Avatar", kind: .series, sourceAccountID: "remote")
+        let localShow = MediaItem(id: "l-show", title: "Avatar", kind: .series, sourceAccountID: "local")
+        let remote = FakeMediaProvider(allItems: [remoteShow])
+        remote.localityOverride = .remote
+        let local = FakeMediaProvider(allItems: [localShow])
+        local.localityOverride = .local
+
+        let vm = ItemDetailViewModel(
+            provider: remote, itemID: "r-show", sourceAccountID: "remote",
+            initialSources: [
+                MediaSourceRef(accountID: "remote", itemID: "r-show"),
+                MediaSourceRef(accountID: "local", itemID: "l-show")
+            ],
+            alternateProviderResolver: { accountID in
+                accountID == "local" ? local : (accountID == "remote" ? remote : nil)
+            }
+        )
+
+        await vm.load()
+
+        XCTAssertEqual(vm.state.value?.item.id, "l-show",
+                       "Merged open retargets onto the local copy before fetching")
+        XCTAssertEqual(vm.state.value?.item.sourceAccountID, "local")
+    }
+
+    func testLibraryOpenKeepsItsServerEvenWhenRemote() async {
+        // A deliberate library-tile browse (originSourceAccountID set) must stay on
+        // that library's server even if another copy is more local — the user
+        // chose that library.
+        let remoteShow = MediaItem(id: "r-show", title: "Avatar", kind: .series, sourceAccountID: "remote")
+        let localShow = MediaItem(id: "l-show", title: "Avatar", kind: .series, sourceAccountID: "local")
+        let remote = FakeMediaProvider(allItems: [remoteShow])
+        remote.localityOverride = .remote
+        let local = FakeMediaProvider(allItems: [localShow])
+        local.localityOverride = .local
+
+        let vm = ItemDetailViewModel(
+            provider: remote, itemID: "r-show", sourceAccountID: "remote",
+            originSourceAccountID: "remote",
+            initialSources: [
+                MediaSourceRef(accountID: "remote", itemID: "r-show"),
+                MediaSourceRef(accountID: "local", itemID: "l-show")
+            ],
+            alternateProviderResolver: { accountID in
+                accountID == "local" ? local : (accountID == "remote" ? remote : nil)
+            }
+        )
+
+        await vm.load()
+
+        XCTAssertEqual(vm.state.value?.item.id, "r-show",
+                       "A library-tile open keeps its own server, locality notwithstanding")
+    }
+
+    func testSwitchToSourceIsNotOverriddenByInitialLocalityPreference() async {
+        // After a user explicitly switches servers, a later load() must NOT re-apply
+        // the automatic local-first preference and drag them back.
+        let remoteShow = MediaItem(id: "r-show", title: "Avatar", kind: .series, sourceAccountID: "remote")
+        let localShow = MediaItem(id: "l-show", title: "Avatar", kind: .series, sourceAccountID: "local")
+        let remote = FakeMediaProvider(allItems: [remoteShow])
+        remote.localityOverride = .remote
+        let local = FakeMediaProvider(allItems: [localShow])
+        local.localityOverride = .local
+
+        let vm = ItemDetailViewModel(
+            provider: local, itemID: "l-show", sourceAccountID: "local",
+            initialSources: [
+                MediaSourceRef(accountID: "local", itemID: "l-show"),
+                MediaSourceRef(accountID: "remote", itemID: "r-show")
+            ],
+            alternateProviderResolver: { accountID in
+                accountID == "local" ? local : (accountID == "remote" ? remote : nil)
+            }
+        )
+
+        await vm.load()
+        XCTAssertEqual(vm.state.value?.item.sourceAccountID, "local")
+
+        await vm.switchToSource(accountID: "remote")
+        XCTAssertEqual(vm.state.value?.item.sourceAccountID, "remote", "User switch takes effect")
+
+        await vm.load()
+        XCTAssertEqual(vm.state.value?.item.sourceAccountID, "remote",
+                       "A subsequent load() must not re-apply the local-first preference over the user's pick")
     }
 
     func testLoadEpisodesFetchesAndCachesPerSeason() async {

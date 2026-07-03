@@ -13,7 +13,10 @@ public protocol WatchMutationApplying: Sendable {
     /// Marks `target` played/unplayed on its server (addressed by `target.itemID`).
     func setPlayed(_ played: Bool, on target: WatchMutationTarget) async throws
     /// Writes a resume position (seconds) to `target`'s server, session-lessly.
-    func setResumePosition(_ seconds: TimeInterval, on target: WatchMutationTarget) async throws
+    /// `capturedAt` is the play's real timestamp (see ``ResumeStateWriting``), used
+    /// for the server's recency stamp so an offline-drained write doesn't falsely
+    /// float a stale title to the top of Continue Watching.
+    func setResumePosition(_ seconds: TimeInterval, on target: WatchMutationTarget, capturedAt: Date) async throws
     /// Mirrors a finished watch to Trakt.
     func scrobbleTrakt(_ intent: TraktScrobbleIntent) async throws
     /// Mirrors a finished watch to Simkl.
@@ -56,6 +59,11 @@ public actor WatchStateReconciler {
     /// so the file can't grow unbounded). Long enough that an offline device coming
     /// back after a while is still protected from rewinds.
     private let clockTTL: TimeInterval
+    /// How long an ``AppliedResumeRecord`` is retained (device clock, by
+    /// `appliedAt`). Kept short: it only needs to bridge a drain to the next Home
+    /// reload (both around app-foreground), and a short window guarantees a stale
+    /// record can never override a genuine later play made on another client.
+    private let resumeRecencyTTL: TimeInterval
 
     private var state: WatchOutboxState
     private var isDraining = false
@@ -77,13 +85,15 @@ public actor WatchStateReconciler {
         applier: any WatchMutationApplying,
         now: @escaping @Sendable () -> Date = Date.init,
         traktTTL: TimeInterval = 48 * 3600,
-        clockTTL: TimeInterval = 30 * 24 * 3600
+        clockTTL: TimeInterval = 30 * 24 * 3600,
+        resumeRecencyTTL: TimeInterval = 30 * 60
     ) {
         self.store = store
         self.applier = applier
         self.now = now
         self.traktTTL = traktTTL
         self.clockTTL = clockTTL
+        self.resumeRecencyTTL = resumeRecencyTTL
         self.state = store.load()
     }
 
@@ -214,7 +224,25 @@ public actor WatchStateReconciler {
                 mutation.attempts += 1
 
                 if let idx = state.pending.firstIndex(where: { $0.id == mutationID }) {
-                    if mutation.isFullyApplied {
+                    // Actor reentrancy guard. `apply` suspends on the network, and
+                    // this reconciler is an actor, so a concurrently-enqueued NEWER
+                    // action for the same `coalesceKey` can run during that
+                    // suspension: `enqueue` → `coalesce` keeps the same entry id but
+                    // bumps `capturedAt`, unions the target set, and advances the
+                    // clock. Our local `mutation` copy is now stale. Writing it back
+                    // would clobber the newer desired state (played / resumePosition)
+                    // and the unioned targets; and if our OLD copy happened to be
+                    // fully applied, `remove(at:)` would DROP the newer action
+                    // entirely — the classic "Continue Watching reverted to what I
+                    // watched before" loss. Detect the coalesce by `capturedAt`
+                    // advancing and leave the live (newer) entry untouched, requesting
+                    // a follow-up drain to apply it. Every server / tracker write is
+                    // idempotent (setting played/resume is a no-op if already set, and
+                    // the applied-caches suppress duplicate scrobbles), so re-applying
+                    // the shared targets on the next drain is safe.
+                    if state.pending[idx].capturedAt > mutation.capturedAt {
+                        drainRequestedWhileDraining = true
+                    } else if mutation.isFullyApplied {
                         state.pending.remove(at: idx)
                     } else {
                         state.pending[idx] = mutation
@@ -285,11 +313,30 @@ public actor WatchStateReconciler {
                     outcome += "setPlayed(\(played))=OK "
                 }
                 if let resume = mutation.resumePosition {
-                    try await applier.setResumePosition(resume, on: target)
+                    try await applier.setResumePosition(resume, on: target, capturedAt: mutation.capturedAt)
                     outcome += "setResume(\(Int(resume)))=OK"
+                    // Record the play's *real* time for this target so Home's Continue
+                    // Watching overlay can clamp a server that stamps its own drain-time
+                    // view timestamp (Plex) back down to it — otherwise an offline-drained
+                    // resume re-floats a stale play to the top of the row. Only for a real
+                    // in-progress position (`> 0`, not a finish/clear, which leaves the
+                    // row anyway); keyed by target and kept newest-wins so a fresh play
+                    // supersedes an older one.
+                    if resume > 0, mutation.played != true {
+                        let prior = state.appliedRecency[target.id]?.capturedAt ?? .distantPast
+                        if mutation.capturedAt >= prior {
+                            state.appliedRecency[target.id] = AppliedResumeRecord(
+                                capturedAt: mutation.capturedAt,
+                                appliedAt: now()
+                            )
+                        }
+                    }
                 } else if mutation.clearResume {
-                    try await applier.setResumePosition(0, on: target)
+                    try await applier.setResumePosition(0, on: target, capturedAt: mutation.capturedAt)
                     outcome += "clearResume=OK"
+                    // The in-progress position is gone (a finish clears resume
+                    // everywhere), so drop any recency record guarding it.
+                    state.appliedRecency[target.id] = nil
                 }
                 FanoutDiagnostics.emit(FanoutDiagnostics.drainTargetLine(
                     target,
@@ -400,6 +447,10 @@ public actor WatchStateReconciler {
         // Keep clock entries that still guard a queued mutation regardless of age.
         let activeKeys = Set(state.pending.map(\.coalesceKey))
         state.clock = state.clock.filter { $0.value >= cutoffClock || activeKeys.contains($0.key) }
+        // Resume-recency records are short-lived by design: prune by `appliedAt`
+        // (device clock) so a stale record can never override a genuine later play.
+        let cutoffRecency = now().addingTimeInterval(-resumeRecencyTTL)
+        state.appliedRecency = state.appliedRecency.filter { $0.value.appliedAt >= cutoffRecency }
     }
 
     private func persist() {

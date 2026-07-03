@@ -10,11 +10,30 @@ public struct SourceServerInfo: Sendable, Hashable {
     public var providerKind: ProviderKind?
     public var serverName: String?
     public var accountName: String?
+    /// The **physical** server id (``MediaServer/id``) this account connects to.
+    /// Stable across two user accounts on the *same* server, so the merge can
+    /// collapse a title returned by both accounts (same server-global item id)
+    /// without a bare `.sameItemID` that would also collide across *different*
+    /// servers. `nil` when the merge runs without an account→server resolver.
+    public var serverID: String?
+    /// How reachable this account's server is from the device right now
+    /// (same-LAN vs remote/Tailscale), used to prefer the local copy of a merged
+    /// title for playback. `nil` when unknown/unclassified (treated as the middle
+    /// tier by ``CrossSourceSelector``).
+    public var locality: SourceLocality?
 
-    public init(providerKind: ProviderKind? = nil, serverName: String? = nil, accountName: String? = nil) {
+    public init(
+        providerKind: ProviderKind? = nil,
+        serverName: String? = nil,
+        accountName: String? = nil,
+        serverID: String? = nil,
+        locality: SourceLocality? = nil
+    ) {
         self.providerKind = providerKind
         self.serverName = serverName
         self.accountName = accountName
+        self.serverID = serverID
+        self.locality = locality
     }
 }
 
@@ -100,13 +119,77 @@ public enum MediaItemMerger {
             if rootA < rootB { parent[rootB] = rootA } else { parent[rootA] = rootB }
         }
 
-        var seen: [MediaIdentity: Int] = [:]
+        // Union by shared identity, but scoped to the media **kind**: TMDb/TVDb
+        // reuse the same integer id space across movies and series (TMDb *movie*
+        // 550 is a different work from TMDb *tv* 550), so two items that merely
+        // share an id across kinds must NOT collapse into one card. We can't fix
+        // this in `identities(for:)` — several call sites/tests rely on it
+        // emitting bare, kind-less external ids — so the kind scoping lives here:
+        // an identity is only a merge key *within* one kind.
+        //
+        // There is deliberately NO cross-kind wildcard. An item we couldn't
+        // confidently type (`.unknown`/`.folder`/`.collection`) merges only with
+        // other items of the *same* kind sharing the identity — never bridging,
+        // say, a movie and a series that happen to reuse an external integer id,
+        // which a wildcard would collapse into one wrong card.
+        var seen: [KindScopedIdentity: Int] = [:]
         for index in items.indices {
+            let kind = items[index].kind
             for identity in MediaItemIdentity.identities(for: items[index]) {
-                if let existing = seen[identity] {
+                let key = KindScopedIdentity(identity: identity, kind: kind)
+                if let existing = seen[key] {
                     union(existing, index)
                 } else {
-                    seen[identity] = index
+                    seen[key] = index
+                }
+            }
+        }
+
+        // Same-server / two-account dedup: a single physical server seen through
+        // two different user accounts returns the *same server-global item id* for
+        // a title, which must collapse to one card (fixes the "ghost spacing"
+        // empty gaps). This is scoped by the **physical server id** — a bare item
+        // id can't be a cross-server identity because Plex `ratingKey`s are small
+        // per-server integers that collide across unrelated servers. When no
+        // server resolver is supplied (serverID unknown) we fall back to the
+        // account id, which still collapses exact same-account duplicates and can
+        // never bridge two servers.
+        var seenServerItem: [String: Int] = [:]
+        for index in items.indices {
+            let item = items[index]
+            let scope = item.sourceAccountID.flatMap { serverInfo($0)?.serverID } ?? item.sourceAccountID
+            guard let scope else { continue }
+            let key = "\(scope)\u{1F}\(item.id)"
+            if let existing = seenServerItem[key] {
+                union(existing, index)
+            } else {
+                seenServerItem[key] = index
+            }
+        }
+
+        // Cross-server union by the eager index's **membership**, to recover rows
+        // the identity keys above can't merge. A row whose list payload lacked a
+        // strong external id (Plex omits `Guid` on some list responses) shares no
+        // `.external` key with a twin that *does* carry one — and rule #1 suppresses
+        // the twin's `.title` key — so the two stay separate cards even though the
+        // index, enriched via per-item fetch during warm, knows both are one title.
+        // `identitySources(row)` returns that recovered membership set (each entry a
+        // server's own item id, incl. via the snapshot's reverse (account,item)→
+        // identity lookup for the id-less row itself); if a row's membership names
+        // another *loaded* row's own (account,item) they are the same work and must
+        // collapse. Safe: it unions only on the index's confident per-item
+        // enrichment, never a guessed title, so it can't false-merge distinct works.
+        // A no-op `identitySources` (cold start / most tests) skips this entirely.
+        var ownerByRef: [String: Int] = [:]
+        for index in items.indices {
+            guard let accountID = items[index].sourceAccountID else { continue }
+            ownerByRef["\(accountID):\(items[index].id)"] = index
+        }
+        if !ownerByRef.isEmpty {
+            for index in items.indices {
+                for ref in identitySources(items[index]) {
+                    guard let owner = ownerByRef["\(ref.accountID):\(ref.itemID)"], owner != index else { continue }
+                    union(index, owner)
                 }
             }
         }
@@ -122,9 +205,66 @@ public enum MediaItemMerger {
             let root = find(index)
             guard emitted.insert(root).inserted else { continue }
             let members = membersByRoot[root] ?? [index]
-            output.append(mergeGroup(members.map { items[$0] }, serverInfo: serverInfo, identitySources: identitySources))
+            // Split-guard: a shared *external id* is normally authoritative, but a
+            // single bad id on one server (e.g. an unreleased sequel scraped with
+            // its predecessor's TMDb/IMDb id) would otherwise collapse two distinct
+            // films into one card. Refine the union component into sub-groups of
+            // mutually-plausible items, ejecting any member that POSITIVELY
+            // contradicts the others (titles disagree AND years don't corroborate).
+            // Conservative by construction — sparse-metadata / id-less rows carry no
+            // positive contradiction, so the index-membership merges we rely on are
+            // never wrongly split; only a genuine mismatch separates.
+            for group in refineComponent(members.map { items[$0] }) {
+                output.append(mergeGroup(group, serverInfo: serverInfo, identitySources: identitySources))
+            }
         }
         return output
+    }
+
+    /// Partitions one union component into sub-groups of mutually-plausible items,
+    /// so a false merge (two different works bridged by a bad shared external id)
+    /// is broken back apart. Greedy: each member joins the first existing group it
+    /// contradicts no member of, else opens a new group. Order-preserving — the
+    /// anchor (first) member's group stays first, so the primary card keeps its
+    /// display position and any ejected impostor follows it. A single-member
+    /// component is returned unchanged.
+    static func refineComponent(_ members: [MediaItem]) -> [[MediaItem]] {
+        guard members.count > 1 else { return [members] }
+        var groups: [[MediaItem]] = []
+        for member in members {
+            if let idx = groups.firstIndex(where: { group in
+                !group.contains(where: { plausiblyContradicts($0, member) })
+            }) {
+                groups[idx].append(member)
+            } else {
+                groups.append([member])
+            }
+        }
+        return groups
+    }
+
+    /// Whether two items are almost certainly *different* works despite sharing a
+    /// merge key — the positive-contradiction signal the split-guard ejects on.
+    /// Delegates to the shared, index-reusable primitive so a bad shared external
+    /// id is split identically here (full-item merges) and inside the identity
+    /// index's membership walk (which stores only title/year per source).
+    static func plausiblyContradicts(_ a: MediaItem, _ b: MediaItem) -> Bool {
+        MediaItemIdentity.titlesPlausiblyContradict(
+            titleA: a.title,
+            yearA: a.productionYear,
+            kindA: a.kind,
+            titleB: b.title,
+            yearB: b.productionYear,
+            kindB: b.kind
+        )
+    }
+
+    /// Normalized titles are compatible when identical or one is a word-boundary
+    /// prefix of the other ("dune" vs "dune 2021"), so subtitle/year suffixes don't
+    /// read as a clash while a differing trailing token ("scream 6" vs "scream 7")
+    /// does.
+    static func titlesCompatible(_ a: String, _ b: String) -> Bool {
+        MediaItemIdentity.normalizedTitlesCompatible(a, b)
     }
 
     /// Merges one duplicate set (already in display order) into a single item:
@@ -225,6 +365,7 @@ public enum MediaItemMerger {
             providerKind: info?.providerKind,
             serverName: info?.serverName,
             accountName: info?.accountName,
+            locality: info?.locality,
             versions: versions,
             resumePosition: item.resumePosition,
             playedPercentage: item.playedPercentage,
@@ -245,10 +386,15 @@ public enum MediaItemMerger {
             return UnifiedWatchState(resumePosition: nil, playedPercentage: nil, isPlayed: false, lastPlayedAt: nil)
         }
 
-        let timestamped = sources.compactMap { source -> (MediaSourceRef, Date)? in
-            source.lastPlayedAt.map { (source, $0) }
+        let timestamped = sources.enumerated().compactMap { offset, source -> (offset: Int, source: MediaSourceRef, date: Date)? in
+            source.lastPlayedAt.map { (offset, source, $0) }
         }
-        if let winner = timestamped.max(by: { $0.1 < $1.1 })?.0 {
+        // Newest timestamp wins; on an exact tie (e.g. two servers both stamped
+        // `now` by a mark-watched fan-out) the lower offset — the primary, listed
+        // first — wins, so `resumePosition` can't flip between reloads.
+        if let winner = timestamped.max(by: { lhs, rhs in
+            lhs.date != rhs.date ? lhs.date < rhs.date : lhs.offset > rhs.offset
+        })?.source {
             return UnifiedWatchState(
                 resumePosition: winner.isPlayed ? nil : winner.resumePosition,
                 playedPercentage: winner.playedPercentage,
@@ -309,9 +455,39 @@ public extension Array where Element == ResolvedAccount {
             map[resolved.account.id] = SourceServerInfo(
                 providerKind: resolved.account.server.provider,
                 serverName: resolved.account.server.name,
-                accountName: resolved.account.userName
+                accountName: resolved.account.userName,
+                serverID: resolved.account.server.id,
+                locality: resolved.provider.connectionLocality
             )
         }
         return map
     }
+}
+
+/// A ``MediaIdentity`` scoped to a media **kind**, so an external id shared
+/// across different kinds (TMDb/TVDb reuse integer ids between movies and series)
+/// can't merge a movie into a series. See the union step in ``MediaItemMerger``.
+/// The scope is the raw ``MediaItemKind`` (not a coarse bucket) so every kind —
+/// including the untyped `.unknown`/`.folder`/`.collection` — only ever merges
+/// with its own kind, never bridging two kinds that happen to reuse an id.
+/// A merge key scoped to one ``MediaItemKind`` (see the union loop above): an
+/// identity only unifies items of the *same* kind, so a movie and a series that
+/// reuse an external integer id never collapse.
+///
+/// KNOWN LIMITATION (deliberately not addressed here — r6-episode-false-merge):
+/// this scopes by kind but NOT by episode position. If two DIFFERENT episodes of
+/// one series are ever merged together (e.g. an aggregated row containing raw
+/// episode items), and their metadata carries *series-level* external ids
+/// (anilist/tvdb on the episode instead of episode-level ids), they would share a
+/// `.episode` KindScopedIdentity and collapse into one card. In practice this
+/// doesn't fire: episodes are never indexed (see ``IdentityIndex.ingest``) and
+/// both providers stamp episode-LEVEL external ids, so Ep1/Ep2 get distinct
+/// identities. Adding season+episode number to the key for `.episode` would make
+/// the guard airtight, but the conservative stance ("a missed merge is far better
+/// than a wrong merge") plus the no-episode-indexing rule makes it unnecessary
+/// today. Revisit only if a provider is found emitting series-level ids on
+/// episode items.
+struct KindScopedIdentity: Hashable {
+    let identity: MediaIdentity
+    let kind: MediaItemKind
 }

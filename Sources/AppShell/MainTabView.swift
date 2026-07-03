@@ -122,6 +122,14 @@ struct MainTabView: View {
     let mediaItemActionHandler: any MediaItemActionHandling
     let enqueueWatchMutation: (WatchMutation) -> Void
     let watchBridge: WatchOutboxBridge
+    /// Snapshot of the durable outbox's not-yet-confirmed plays, so Home's Continue
+    /// Watching row reflects in-app plays the servers haven't recorded yet
+    /// (r8-cw-outbox-patch).
+    let pendingWatchMutations: @Sendable () async -> [WatchMutation]
+    /// Recently-applied in-progress resume writes, so Home's Continue Watching row
+    /// can clamp a server's drain-time timestamp inflation back down to the real
+    /// play time (h2-cw-clamp).
+    let appliedWatchRecency: @Sendable () async -> [String: AppliedResumeRecord]
     let displayAccounts: [Account]
     let activeAccountID: String?
     let profiles: [Profile]
@@ -180,6 +188,8 @@ struct MainTabView: View {
                 watchBridge: watchBridge,
                 identitySources: identitySources,
                 pendingPlayItemID: $pendingPlayItemID,
+                pendingWatchMutations: pendingWatchMutations,
+                appliedWatchRecency: appliedWatchRecency,
                 onSubtitleStyleChanged: { subtitleStyleModel.style = $0 }
             )
             .tabItem { Label("Home", systemImage: "house.fill") }
@@ -308,11 +318,24 @@ struct MainTabView: View {
 }
 
 /// Resolves the provider that owns `accountID`, falling back to the primary
-/// (first) account for untagged items. `accounts` is guaranteed non-empty by the
-/// caller (`RootView`).
+/// (first) account. `accounts` is guaranteed non-empty by the caller
+/// (`RootView`).
+///
+/// The fallback is legitimate only for a **nil** `accountID` (a genuinely
+/// untagged item — e.g. a route with no owning server — plays from the primary
+/// account). A **non-nil but unmatched** `accountID` is different: it means the
+/// caller handed an explicit source whose account is no longer signed in, and
+/// silently playing it from `accounts[0]` is the "random / wrong server" symptom
+/// — you'd stream a *different server's* copy than the one selected. The play
+/// paths prune to live accounts first (`bestSourcePlayItem`) so this shouldn't
+/// be reached in practice; when it is, emit a (gated) diagnostic so the stale
+/// pick is observable on device rather than masquerading as a successful play.
 private func resolveProvider(_ accountID: String?, in accounts: [ResolvedAccount]) -> any MediaProvider {
-    if let accountID, let match = accounts.first(where: { $0.account.id == accountID }) {
-        return match.provider
+    if let accountID {
+        if let match = accounts.first(where: { $0.account.id == accountID }) {
+            return match.provider
+        }
+        FanoutDiagnostics.emit("resolveProvider fallback: explicit account \(accountID) not signed in; using primary \(accounts[0].account.id)")
     }
     return accounts[0].provider
 }
@@ -374,6 +397,7 @@ private func crossServerSourceResolver(
 ) -> (@Sendable (MediaItem) async -> [MediaSourceRef])? {
     guard !accounts.isEmpty else { return nil }
     let serverInfo = accounts.sourceServerInfo()
+    let orderedAccountIDs = accounts.map(\.account.id)
     let providersByAccountID: [String: any MediaProvider] = Dictionary(
         accounts.map { ($0.account.id, $0.provider) },
         uniquingKeysWith: { first, _ in first }
@@ -382,6 +406,15 @@ private func crossServerSourceResolver(
         // Start from the eager index's known sources for this title — the shared
         // source of truth — so the picker is at least as complete as the watch
         // fan-out even before (or without) an on-demand probe.
+        //
+        // KNOWN COST (r6-playtime-fanout, documented/deferred): even when the index
+        // already knows this title's sources, we still probe EVERY account below
+        // for live versions/watch-state and same-server duplicates. That's a
+        // fan-out of N searches per open. It's bounded (each search is deadline-
+        // capped at 4s via `searchWithDeadline`) and only runs on detail-open, not
+        // per-card, so it isn't hot. Using the index as the primary answer and
+        // probing only the *selected* source is folded into the upcoming
+        // preferred-server/bandwidth feature rather than changed here.
         var sources: [MediaSourceRef] = identitySources(primary)
         var seen = Set(sources.map(\.id))
         // Probe EVERY signed-in account, including the primary's own. The
@@ -389,7 +422,14 @@ private func crossServerSourceResolver(
         // duplicate movie items (two Jellyfin items, one film) group into one
         // detail with a multi-entry version picker — without this only OTHER
         // servers' twins were discovered and a same-server duplicate was invisible.
-        let everyAccount = Array(providersByAccountID.keys)
+        //
+        // Use the caller's stable `accounts` order (NOT `Dictionary.keys`, whose
+        // iteration order is unspecified and re-hashed per process): the resolver
+        // reassembles hits by this input order and `bestSelection`'s final
+        // primary-first tiebreak reads it, so a dictionary order would flip which
+        // server backs a tied merged card between launches — a source of the
+        // "server feels random" symptom.
+        let everyAccount = orderedAccountIDs
         let resolved = await CrossServerSourceResolver.resolve(
             primary: primary,
             otherAccountIDs: everyAccount,
@@ -448,6 +488,201 @@ private func resolveLibraryBrowse(
         }
     }
     return (resolveProvider(library.sourceAccountID, in: accounts), library.sourceAccountID)
+}
+
+/// Retargets a cross-server-merged card to the **locality-best** copy before it
+/// is handed to the player, mirroring the detail page's best-source routing.
+///
+/// Home "Continue Watching" and Search play items directly (`requestPlay`)
+/// instead of opening the detail page, so without this they'd launch the
+/// arbitrary merge-primary source — which is why the server a card played from
+/// felt random. Routing through ``CrossSourceSelector/bestSelection(from:capabilities:)``
+/// makes a merged title stream from the copy on the same LAN when one exists
+/// (a remote/Tailscale copy only wins when it's the sole source), and
+/// ``MediaItem/retargetedForPlayback(item:sources:activeAccountID:versionID:)``
+/// reconciles resume to the cross-server furthest progress so switching to the
+/// local copy never rewinds. Single-source items pass through untouched.
+///
+/// Locality is refreshed **live** from each owning provider right here, at the
+/// moment of selection, rather than trusting the value the merge/index captured
+/// earlier. Locality is a runtime property — it flips the instant you leave the
+/// LAN, and a Plex server advertises its own LAN address even to remote clients,
+/// so a value sampled before the connection resolver had probed (and then
+/// persisted in the identity index) can wrongly read `.local`. By play time every
+/// provider has been exercised, so its resolver has settled on the truly-reachable
+/// connection; reading `provider.connectionLocality` now and overriding each
+/// source's stale locality is what makes "play from the local server" actually
+/// hold instead of feeling random.
+///
+/// `accounts` are the currently signed-in accounts. A merged card's `sources`
+/// can still list a server the user has since removed (the eager index snapshot
+/// lags an account sign-out), and ``resolveProvider(_:in:)`` silently falls back
+/// to `accounts[0]` for an unknown account — so selecting a dead source would
+/// play the *wrong* server's copy (or fail). Pruning to live accounts before
+/// selection guarantees we only ever pick a server we can actually resolve, and
+/// drops the stale refs from the item handed to the player.
+///
+/// `identitySources` folds in cross-server twins the **live** identity index
+/// knows but this card's own `sources` don't yet carry. Home "Continue Watching"
+/// and Search play directly (no detail-page resolver runs), so a card that was
+/// merged before a local twin finished indexing lists only the server(s) known
+/// then — often the remote merge-primary. By play time the index has usually
+/// warmed the local copy; unioning it here (deduped by `account:item`, the
+/// card's own refs winning on collision because they carry live versions and
+/// watch-state) lets the locality selection route to the LAN copy instead of
+/// streaming remotely. This is the direct-play counterpart to the detail page's
+/// cross-server resolver.
+///
+/// Episodes are a deliberate exception: the identity index only ingests movies
+/// and series, so `identitySources` returns nothing for an episode and a
+/// Continue-Watching episode keeps its single CW-feed source. That is by design —
+/// resume progress lives on the specific server the episode was watched on, so
+/// continuity (resume where you left off) beats locality for a mid-episode card.
+/// Local-first for episodic content is instead achieved by navigating into the
+/// series (whose detail page retargets to the most-local source once its
+/// cross-server twins are discovered).
+private func bestSourcePlayItem(
+    _ item: MediaItem,
+    accounts: [ResolvedAccount],
+    identitySources: (MediaItem) -> [MediaSourceRef]
+) -> MediaItem {
+    let activeAccountIDs = Set(accounts.map(\.account.id))
+    let liveLocality: [String: SourceLocality] = Dictionary(
+        accounts.map { ($0.account.id, $0.provider.connectionLocality) },
+        uniquingKeysWith: { first, _ in first }
+    )
+    func withLiveLocality(_ source: MediaSourceRef) -> MediaSourceRef {
+        guard let locality = liveLocality[source.accountID] else { return source }
+        var copy = source
+        copy.locality = locality
+        return copy
+    }
+
+    // Union the card's own sources with any twin the live index knows. The card's
+    // refs come first and win on id collision (live versions/watch-state).
+    var unioned = item.sources
+    var seen = Set(unioned.map(\.id))
+    for ref in identitySources(item) where seen.insert(ref.id).inserted {
+        unioned.append(ref)
+    }
+
+    let liveSources = (activeAccountIDs.isEmpty
+        ? unioned
+        : unioned.filter { activeAccountIDs.contains($0.accountID) })
+        .map(withLiveLocality)
+
+    // Honor an already-applied EXPLICIT source pick. The detail page's play path
+    // retargets through `MediaItem.retargetedForPlayback` first, stamping
+    // `selectedSourceAccountID` from the server picker (or its origin-aware smart
+    // default) and repointing the item — but it preserves the full `sources`
+    // array for further switching. Re-running best-source selection here would
+    // then clobber that pick back to the locality-best copy, making the picker
+    // cosmetic (a user who deliberately chose the remote/Tailscale copy would
+    // still be sent to the LAN one). Only honor picks the user actually made
+    // (`explicitSourceSelection`): an AUTO default (origin-following detail
+    // default, or a Home/Search item that carries no explicit choice) is instead
+    // re-selected below against *live* locality, so a title opened from a
+    // remote/Tailscale library still plays from a same-LAN copy when one exists.
+    if item.explicitSourceSelection,
+       let picked = item.selectedSourceAccountID,
+       liveSources.contains(where: { $0.accountID == picked }) {
+        return item
+    }
+
+    guard liveSources.count > 1,
+          let selection = CrossSourceSelector.bestSelection(
+              from: liveSources,
+              capabilities: .detected(),
+              preferring: item.selectedSourceAccountID ?? item.sourceAccountID
+          )
+    else {
+        // One (or zero) live source. If pruning dropped servers, or the primary
+        // pointed at a now-removed account, retarget onto the surviving copy so we
+        // don't mis-resolve; otherwise the single-source item passes through.
+        if let only = liveSources.first,
+           liveSources.count < unioned.count || only.accountID != item.sourceAccountID {
+            return MediaItem.retargetedForPlayback(
+                item: item,
+                sources: liveSources,
+                activeAccountID: only.accountID,
+                versionID: nil
+            )
+        }
+        return item
+    }
+    return MediaItem.retargetedForPlayback(
+        item: item,
+        sources: liveSources,
+        activeAccountID: selection.source.accountID,
+        versionID: selection.version?.id
+    )
+}
+
+/// Re-selects the next-best playable source after the server a card was already
+/// routed to failed to start playback, so a dead/unreachable copy transparently
+/// falls through to another server's copy instead of dead-ending on an error
+/// screen (r8-play-failover). `tried` is the set of source account IDs already
+/// attempted (the just-failed one included); the function returns `nil` once every
+/// live source has been exhausted, letting the caller surface the graceful player
+/// error rather than loop forever.
+///
+/// It mirrors ``bestSourcePlayItem``'s live-locality refresh and identity-index
+/// union so failover still prefers a same-LAN copy, but differs in two ways that
+/// matter only on the failure path: it does **not** honor an explicit user pick
+/// (that pick is exactly what just failed, so it must be allowed to fall through),
+/// and it does **not** pass a single source through untouched — a lone source that
+/// failed has no alternative, so an empty untried set is a real dead end. Resume
+/// is still reconciled across the full live source set (not just the untried
+/// subset) so switching servers mid-title never rewinds.
+private func failoverPlayItem(
+    _ item: MediaItem,
+    accounts: [ResolvedAccount],
+    identitySources: (MediaItem) -> [MediaSourceRef],
+    tried: Set<String>
+) -> MediaItem? {
+    let activeAccountIDs = Set(accounts.map(\.account.id))
+    let liveLocality: [String: SourceLocality] = Dictionary(
+        accounts.map { ($0.account.id, $0.provider.connectionLocality) },
+        uniquingKeysWith: { first, _ in first }
+    )
+    func withLiveLocality(_ source: MediaSourceRef) -> MediaSourceRef {
+        guard let locality = liveLocality[source.accountID] else { return source }
+        var copy = source
+        copy.locality = locality
+        return copy
+    }
+
+    var unioned = item.sources
+    var seen = Set(unioned.map(\.id))
+    for ref in identitySources(item) where seen.insert(ref.id).inserted {
+        unioned.append(ref)
+    }
+
+    let liveSources = (activeAccountIDs.isEmpty
+        ? unioned
+        : unioned.filter { activeAccountIDs.contains($0.accountID) })
+        .map(withLiveLocality)
+
+    // Delegate the exclusion + exhaustion decision to the (tested) selector: it
+    // drops every already-tried server and returns nil when none remain.
+    guard let selection = CrossSourceSelector.bestSelection(
+        from: liveSources,
+        capabilities: .detected(),
+        preferring: nil,
+        excluding: tried
+    ) else {
+        return nil
+    }
+
+    // Retarget against the FULL live source set so resume reconciliation still sees
+    // every server's progress (furthest-wins), while the chosen account comes from
+    // the untried subset the selector picked.
+    return MediaItem.retargetedForPlayback(
+        item: item,
+        sources: liveSources,
+        activeAccountID: selection.source.accountID,
+        versionID: selection.version?.id
+    )
 }
 
 /// Builds the player for a play request. Online (TMDb → YouTube) trailers carry a
@@ -696,20 +931,30 @@ func makePlaybackStoppedHandler(
 @MainActor
 private struct PlayerPresentation: View {
     let make: (PlayRequest) -> PlayerViewModel
+    /// Re-selects the next-best source after the current target fails to start,
+    /// excluding every account already attempted; `nil` means no untried source
+    /// remains, so the player's own error state stays on screen (r8-play-failover).
+    let makeFailover: (_ failedItem: MediaItem, _ tried: Set<String>) -> MediaItem?
     let showDiagnostics: Bool
     let themePalette: ThemePalette
 
     /// The currently-active play request; changes when auto-advancing episodes.
     @State private var activeRequest: PlayRequest
     @State private var viewModel: PlayerViewModel?
+    /// Source account IDs already attempted for the active title, so failover never
+    /// re-tries a server that already failed and can detect true exhaustion. Reset
+    /// whenever the title changes (episode auto-advance).
+    @State private var triedAccountIDs: Set<String> = []
 
     init(
         request: PlayRequest,
         make: @escaping (PlayRequest) -> PlayerViewModel,
+        makeFailover: @escaping (_ failedItem: MediaItem, _ tried: Set<String>) -> MediaItem?,
         showDiagnostics: Bool,
         themePalette: ThemePalette
     ) {
         self.make = make
+        self.makeFailover = makeFailover
         self.showDiagnostics = showDiagnostics
         self.themePalette = themePalette
         self._activeRequest = State(initialValue: request)
@@ -741,6 +986,33 @@ private struct PlayerPresentation: View {
                 // block so SwiftUI batches the render: the .id change forces a
                 // fresh PlayerView that picks up the new VM via @State init.
                 let newRequest = PlayRequest(item: next, startPosition: 0)
+                // A new title starts its own failover attempt history.
+                triedAccountIDs = []
+                viewModel = make(newRequest)
+                activeRequest = newRequest
+            }
+        }
+        .onChange(of: viewModel?.phase) { _, phase in
+            // Playback failed to start on the routed server. Silently retarget to
+            // the next-best untried source (a dead/unreachable copy falls through to
+            // another server's copy) and re-present at the same resume point. When
+            // no untried source remains, the player's `.failed` error stays visible.
+            guard case .failed = phase else { return }
+            let failedAccountID = activeRequest.item.selectedSourceAccountID
+                ?? activeRequest.item.sourceAccountID
+            var attempted = triedAccountIDs
+            if let failedAccountID { attempted.insert(failedAccountID) }
+            guard let nextItem = makeFailover(activeRequest.item, attempted) else {
+                triedAccountIDs = attempted
+                return
+            }
+            Task { @MainActor in
+                await viewModel?.stop()
+                let newRequest = PlayRequest(
+                    item: nextItem,
+                    startPosition: activeRequest.startPosition
+                )
+                triedAccountIDs = attempted
                 viewModel = make(newRequest)
                 activeRequest = newRequest
             }
@@ -770,6 +1042,14 @@ private struct HomeTab: View {
     let watchBridge: WatchOutboxBridge
     let identitySources: @Sendable (MediaItem) -> [MediaSourceRef]
     @Binding var pendingPlayItemID: String?
+    /// Snapshot of the durable outbox's not-yet-confirmed plays, folded into the
+    /// Continue Watching row so a reload reflects in-app plays the servers haven't
+    /// recorded yet (r8-cw-outbox-patch).
+    let pendingWatchMutations: @Sendable () async -> [WatchMutation]
+    /// Recently-applied in-progress resume writes, folded into the Continue Watching
+    /// row so a server's drain-time timestamp inflation can't re-float a stale play
+    /// (h2-cw-clamp).
+    let appliedWatchRecency: @Sendable () async -> [String: AppliedResumeRecord]
     /// Persist an in-player subtitle-appearance edit to the profile store.
     let onSubtitleStyleChanged: (SubtitleStyle) -> Void
 
@@ -784,7 +1064,9 @@ private struct HomeTab: View {
                     accounts: accounts,
                     layoutStore: homeLayoutStore,
                     identitySources: identitySources,
-                    currentVisibility: { homeVisibility.visibility }
+                    currentVisibility: { homeVisibility.visibility },
+                    pendingWatchMutations: pendingWatchMutations,
+                    recentlyAppliedRecency: appliedWatchRecency
                 ),
                 visibility: homeVisibility,
                 spoilerSettings: spoilerSettings,
@@ -958,10 +1240,11 @@ private struct HomeTab: View {
     /// In-progress items prompt "Resume vs Start Over"; fully-unwatched items
     /// play immediately from the start.
     private func requestPlay(_ item: MediaItem) {
-        if let resume = item.resumePosition, resume > 1 {
-            resumePrompt = item
+        let target = bestSourcePlayItem(item, accounts: accounts, identitySources: identitySources)
+        if let resume = target.resumePosition, resume > 1 {
+            resumePrompt = target
         } else {
-            playRequest = PlayRequest(item: item, startPosition: 0)
+            playRequest = PlayRequest(item: target, startPosition: 0)
         }
     }
 }
@@ -1014,6 +1297,14 @@ private extension View {
                         watchBridge: watchBridge,
                         identitySources: identitySources,
                         onSubtitleStyleChanged: onSubtitleStyleChanged
+                    )
+                },
+                makeFailover: { failedItem, tried in
+                    failoverPlayItem(
+                        failedItem,
+                        accounts: accounts,
+                        identitySources: identitySources,
+                        tried: tried
                     )
                 },
                 showDiagnostics: showDiagnostics,
@@ -1238,10 +1529,11 @@ private struct SearchTab: View {
     /// In-progress items prompt "Resume vs Start Over"; fully-unwatched items
     /// play immediately from the start.
     private func requestPlay(_ item: MediaItem) {
-        if let resume = item.resumePosition, resume > 1 {
-            resumePrompt = item
+        let target = bestSourcePlayItem(item, accounts: accounts, identitySources: identitySources)
+        if let resume = target.resumePosition, resume > 1 {
+            resumePrompt = target
         } else {
-            playRequest = PlayRequest(item: item, startPosition: 0)
+            playRequest = PlayRequest(item: target, startPosition: 0)
         }
     }
 }

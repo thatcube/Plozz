@@ -9,10 +9,10 @@ final class CardStyleSettingsStoreTests: XCTestCase {
         return defaults
     }
 
-    func testDefaultIsFramedWhenEmpty() {
+    func testDefaultIsBorderlessWhenEmpty() {
         let store = CardStyleSettingsStore(defaults: makeDefaults())
-        XCTAssertEqual(store.load(), .framed)
-        XCTAssertEqual(CardStyle.default, .framed)
+        XCTAssertEqual(store.load(), .borderless)
+        XCTAssertEqual(CardStyle.default, .borderless)
     }
 
     func testRoundTripForEveryStyle() {

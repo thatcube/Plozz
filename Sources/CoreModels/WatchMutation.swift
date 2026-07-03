@@ -149,6 +149,27 @@ public struct WatchMutation: Codable, Hashable, Sendable, Identifiable {
     /// these identities (movie / series index union).
     public var identities: [MediaIdentity]
 
+    /// The played title's media **kind** (movie / series), persisted so the
+    /// identity fan-out at drain time can scope the eager index lookup to the same
+    /// kind. TMDb/TVDb reuse one integer id space across movies and series
+    /// (movie 550 ≠ tv 550), so an unscoped union could fan a movie's watched-write
+    /// out to a *series* on another server that merely shares the id. `nil` for
+    /// mutations enqueued before this field existed — treated as "don't scope" so a
+    /// legacy queued write keeps its prior (unscoped) behaviour rather than
+    /// silently fanning out to nothing.
+    public var kind: MediaItemKind?
+
+    /// The played title's ``MediaItemIdentity/normalizedTitle(_:)`` + production
+    /// year, persisted so the drain-time identity fan-out can split a bad shared
+    /// external id apart (one server tagging two different movies with the same
+    /// TMDb/IMDb id). Without an anchor the index union would fan a Scream 7 watch
+    /// out to a mis-tagged Scream 6 on another server. `nil` for episodes, for
+    /// titleless items, and for mutations enqueued before these fields existed —
+    /// treated as "no title signal" so the union stays unguarded (prior behaviour)
+    /// rather than dropping a queued write.
+    public var anchorTitle: String?
+    public var anchorYear: Int?
+
     public init(
         id: UUID = UUID(),
         capturedAt: Date,
@@ -164,6 +185,9 @@ public struct WatchMutation: Codable, Hashable, Sendable, Identifiable {
         episodeOrigin: EpisodeOrigin? = nil,
         expansionPending: Bool = false,
         identities: [MediaIdentity] = [],
+        kind: MediaItemKind? = nil,
+        anchorTitle: String? = nil,
+        anchorYear: Int? = nil,
         simklPending: Bool? = nil,
         anilistPending: Bool? = nil,
         malPending: Bool? = nil
@@ -186,6 +210,9 @@ public struct WatchMutation: Codable, Hashable, Sendable, Identifiable {
         self.episodeOrigin = episodeOrigin
         self.expansionPending = expansionPending
         self.identities = identities
+        self.kind = kind
+        self.anchorTitle = anchorTitle
+        self.anchorYear = anchorYear
     }
 
     // MARK: - Codable (back-compatible)
@@ -194,13 +221,14 @@ public struct WatchMutation: Codable, Hashable, Sendable, Identifiable {
         case id, capturedAt, canonicalMediaID, seasonNumber, episodeNumber
         case resumePosition, played, clearResume, targets, trakt, traktPending
         case simklPending, anilistPending, malPending
-        case attempts, episodeOrigin, expansionPending, identities
+        case attempts, episodeOrigin, expansionPending, identities, kind
+        case anchorTitle, anchorYear
     }
 
     /// Decodes tolerating outbox files written before `episodeOrigin` /
-    /// `expansionPending` / `identities` / tracker pending flags existed (they
-    /// decode to `nil` / `false` / `[]`), so an in-app upgrade never drops a
-    /// queued watch. `encode(to:)` is synthesized.
+    /// `expansionPending` / `identities` / `kind` / `anchorTitle` / `anchorYear` /
+    /// tracker pending flags existed (they decode to `nil` / `false` / `[]`), so an
+    /// in-app upgrade never drops a queued watch. `encode(to:)` is synthesized.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)
@@ -221,13 +249,23 @@ public struct WatchMutation: Codable, Hashable, Sendable, Identifiable {
         episodeOrigin = try container.decodeIfPresent(EpisodeOrigin.self, forKey: .episodeOrigin)
         expansionPending = try container.decodeIfPresent(Bool.self, forKey: .expansionPending) ?? false
         identities = try container.decodeIfPresent([MediaIdentity].self, forKey: .identities) ?? []
+        kind = try container.decodeIfPresent(MediaItemKind.self, forKey: .kind)
+        anchorTitle = try container.decodeIfPresent(String.self, forKey: .anchorTitle)
+        anchorYear = try container.decodeIfPresent(Int.self, forKey: .anchorYear)
     }
 
     /// Title-level key used to COALESCE queued mutations (latest wins, targets
     /// unioned) and to key the stale-write clock. Excludes the account/day so any
     /// server's write for the same title/episode collapses to one queue entry.
+    ///
+    /// Scoped by media **kind**: TMDb/TVDb reuse one integer id space across movies
+    /// and series (movie 550 ≠ tv 550), so an unscoped key would collapse a movie's
+    /// and a series' write into one entry and cross-apply watched state — the same
+    /// kind scoping the merger applies (``KindScopedIdentity``). A legacy mutation
+    /// with no persisted `kind` uses a stable `?` token so it keeps coalescing with
+    /// its own kind rather than silently splitting mid-flight.
     public var coalesceKey: String {
-        "\(canonicalMediaID)|s\(seasonNumber.map(String.init) ?? "-")|e\(episodeNumber.map(String.init) ?? "-")"
+        "\(kind?.rawValue ?? "?")|\(canonicalMediaID)|s\(seasonNumber.map(String.init) ?? "-")|e\(episodeNumber.map(String.init) ?? "-")"
     }
 
     /// Durable Trakt idempotency key (`profile | canonicalMediaId | episode |
@@ -247,31 +285,68 @@ public struct WatchMutation: Codable, Hashable, Sendable, Identifiable {
     // MARK: - Canonical id
 
     /// Derives a stable cross-server canonical id from a provider id map, preferring
-    /// the most authoritative namespace. Falls back to a normalized title (+year)
-    /// and finally to a supplied per-item id so a title with no external ids still
-    /// enqueues safely (it just won't coalesce across servers — which it couldn't
-    /// have merged across anyway).
+    /// the most authoritative namespace. After Trakt (the watch-sync authority, which
+    /// is not a merge namespace) this mirrors ``MediaItemIdentity/strongExternalNamespaces``
+    /// **exactly** — same order, same alias resolution, same canonical tokens — so the
+    /// outbox's notion of "same title across servers" matches the identity index. If
+    /// they diverged, a mutation could fail to coalesce or fan out across servers the
+    /// merger treats as one title (r6-canonical-weak).
+    ///
+    /// The **title fallback is kind-scoped** so it never coalesces two titles the
+    /// merger would not have united (r8-canonicalid):
+    ///  - `.movie` falls back to `title:slug:year` **only when a year is present**,
+    ///    mirroring ``MediaItemIdentity/titleIdentity(for:)`` exactly (movies-only,
+    ///    year-required). A year-less movie has no title identity in the merger, so a
+    ///    bare `title:slug` here would collapse two *different* same-named movies that
+    ///    were never merged, cross-applying watched state.
+    ///  - `.episode` falls back to a `title:slug(:year)` keyed on the **series (parent)
+    ///    title** the caller supplies. This is a deliberate outbox-coalescing behavior
+    ///    (NOT a merge-identity mirror): the season/episode numbers on ``coalesceKey``
+    ///    disambiguate within the series and the parent title disambiguates across
+    ///    series, so the *same* episode reached through two servers with no external
+    ///    ids still collapses into one write.
+    ///  - Everything else (whole `.series`, `.season`, unknown/`nil` kind) gets **no**
+    ///    title fallback — the merger has no title identity for these, so we must not
+    ///    invent one. They use the per-item fallback (never coalesces across servers,
+    ///    which is correct because they could not have merged across them either).
     public static func canonicalMediaID(
         providerIDs: [String: String],
         title: String? = nil,
         year: Int? = nil,
+        kind: MediaItemKind? = nil,
         fallback: String
     ) -> String {
-        let normalized: [String: String] = Dictionary(
-            providerIDs.compactMap { key, value in
-                let v = value.trimmingCharacters(in: .whitespaces)
-                return v.isEmpty ? nil : (key.lowercased(), v)
-            },
-            uniquingKeysWith: { first, _ in first }
-        )
-        for namespace in ["trakt", "imdb", "tmdb", "tvdb"] {
-            if let value = normalized[namespace] {
-                return "\(namespace):\(value)"
+        // Trakt is the watch-sync authority and is NOT one of the merge identity's
+        // external namespaces, so it stays the highest-priority canonical key.
+        for (key, value) in providerIDs where key.lowercased() == "trakt" {
+            let v = value.trimmingCharacters(in: .whitespaces)
+            if !v.isEmpty { return "trakt:\(v.lowercased())" }
+        }
+        // Then mirror the merge identity's strong external namespaces via the same
+        // alias-insensitive resolution (`providerID(_:)`), so `TheTvdb`, `TMDb ID`,
+        // `myanimelist`, an AniList/MAL/AniDB/TVmaze-only anime series, etc. all
+        // produce the same canonical id the merger keys on.
+        for entry in MediaItemIdentity.strongExternalNamespaces {
+            if let value = providerIDs.providerID(entry.namespace)?.trimmingCharacters(in: .whitespaces),
+               !value.isEmpty {
+                return "\(entry.canonical):\(value.lowercased())"
             }
         }
-        if let title, !title.trimmingCharacters(in: .whitespaces).isEmpty {
-            let slug = title.lowercased().trimmingCharacters(in: .whitespaces)
-            return year.map { "title:\(slug):\($0)" } ?? "title:\(slug)"
+        // Kind-scoped title fallback (see doc above). Uses the SAME normalization as
+        // the merge identity (accent-fold + punctuation-strip + whitespace-collapse)
+        // so "Spider-Man" and "spider man" canonicalise identically.
+        if let title {
+            let slug = MediaItemIdentity.normalizedTitle(title)
+            if !slug.isEmpty {
+                switch kind {
+                case .movie:
+                    if let year { return "title:\(slug):\(year)" }
+                case .episode:
+                    return year.map { "title:\(slug):\($0)" } ?? "title:\(slug)"
+                default:
+                    break
+                }
+            }
         }
         return "local:\(fallback)"
     }

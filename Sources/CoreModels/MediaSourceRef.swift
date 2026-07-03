@@ -37,6 +37,11 @@ public struct MediaSourceRef: Codable, Hashable, Identifiable, Sendable {
     /// Display name of the signed-in user on this server, to disambiguate two
     /// accounts on the same server. `nil` when unknown.
     public var accountName: String?
+    /// How reachable this source's server is from the device right now (same-LAN
+    /// vs remote/Tailscale). The **top** ranking key in ``CrossSourceSelector`` so
+    /// a merged title plays from its local copy when one exists. `nil` when the
+    /// merge ran without a locality-aware resolver (treated as the middle tier).
+    public var locality: SourceLocality?
     /// This server's selectable versions for the title. Empty until a detail
     /// fetch populates them (rows/cards never carry versions), so a server can be
     /// chosen before its file list is known (the server default plays).
@@ -63,6 +68,7 @@ public struct MediaSourceRef: Codable, Hashable, Identifiable, Sendable {
         providerKind: ProviderKind? = nil,
         serverName: String? = nil,
         accountName: String? = nil,
+        locality: SourceLocality? = nil,
         versions: [MediaVersion] = [],
         resumePosition: TimeInterval? = nil,
         playedPercentage: Double? = nil,
@@ -76,6 +82,7 @@ public struct MediaSourceRef: Codable, Hashable, Identifiable, Sendable {
         self.providerKind = providerKind
         self.serverName = serverName
         self.accountName = accountName
+        self.locality = locality
         self.versions = versions
         self.resumePosition = resumePosition
         self.playedPercentage = playedPercentage

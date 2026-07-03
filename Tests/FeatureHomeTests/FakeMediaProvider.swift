@@ -51,7 +51,10 @@ final class FakeMediaProvider: MediaProvider, @unchecked Sendable {
     /// How many times `libraries()` was called — lets a test prove whether the
     /// Home aggregator re-ran (e.g. that a redundant reload was skipped).
     private(set) var librariesCallCount = 0
-    func continueWatching(limit: Int) async throws -> [MediaItem] { [] }
+    /// Items returned by `continueWatching(limit:)` — empty by default so existing
+    /// tests are unaffected; a test that exercises the Continue Watching row sets it.
+    var continueWatchingItems: [MediaItem] = []
+    func continueWatching(limit: Int) async throws -> [MediaItem] { Array(continueWatchingItems.prefix(limit)) }
     func latest(limit: Int) async throws -> [MediaItem] { [] }
     func item(id: String) async throws -> MediaItem {
         itemCallCounts[id, default: 0] += 1
@@ -108,6 +111,13 @@ final class FakeMediaProvider: MediaProvider, @unchecked Sendable {
     }
 
     func search(query: String, limit: Int) async throws -> [MediaItem] { [] }
+
+    /// Overrides the default (baseURL-derived) locality so tests can model a
+    /// LAN vs remote/Tailscale server without a real network.
+    var localityOverride: SourceLocality?
+    var connectionLocality: SourceLocality {
+        localityOverride ?? SourceLocalityClassifier.classify(url: session.server.baseURL)
+    }
 
     func playbackInfo(for itemID: String) async throws -> PlaybackRequest { throw AppError.notFound }
     func reportPlayback(_ progress: PlaybackProgress, event: PlaybackEvent) async throws {}

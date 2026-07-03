@@ -39,6 +39,18 @@ public final class PlexConnectionResolver: @unchecked Sendable {
     private var candidates: [URL]
     private var cached: URL?
     private var inFlight: Task<URL, Never>?
+    /// Set once a reported failure clears the cache, or a full probe sweep finds
+    /// nothing reachable (the persisted seed itself was probed and failed). While
+    /// set, the last-known-good `reachableSeed` is no longer trusted for the
+    /// synchronous `hasConfirmedReachableConnection` read, so locality falls back
+    /// to `.unknown` until a fresh probe re-confirms a live connection. Cleared by
+    /// `store` the moment any probe succeeds. (r8-stale-reachability-locality)
+    private var reachabilityInvalidated = false
+    /// The last-known-good connection persisted across launches, if any. Probed
+    /// first *within its rank group* so a warm server re-confirms on a single
+    /// probe and the winner among otherwise-equivalent same-rank candidates is
+    /// deterministic. It never competes across ranks, so locality still wins.
+    private let reachableSeed: URL?
 
     public init(
         candidates: [URL],
@@ -55,6 +67,7 @@ public final class PlexConnectionResolver: @unchecked Sendable {
         self.probe = probe
         self.refresh = refresh
         self.onReachable = onReachable
+        self.reachableSeed = reachableSeed
         // Seed with the last-known-good connection (persisted across launches) so
         // a previously-reachable server resolves on the first probe instead of
         // re-discovering through dead/stale addresses.
@@ -62,13 +75,43 @@ public final class PlexConnectionResolver: @unchecked Sendable {
         self.candidates = Self.prioritized(seeded)
     }
 
-    /// Best-known base URL available synchronously: the cached reachable URL, or
-    /// the most-preferred candidate if probing hasn't settled. Used by the
-    /// synchronous URL builders (artwork, stream/transcode URLs), which only run
-    /// after a `resolved()` request has already populated the cache.
+    /// Best-known base URL available synchronously: the cached reachable URL, then
+    /// the last-known-good reachable seed (persisted across launches), then the
+    /// most-preferred candidate if nothing has been probed yet. Used by the
+    /// synchronous URL builders (artwork, stream/transcode URLs) and the
+    /// `connectionLocality` read, which normally run only after a `resolved()`
+    /// request has already populated `cached`.
+    ///
+    /// Preferring `reachableSeed` over `candidates[0]` before the first probe
+    /// matters for the rare synchronous read that races ahead of resolution (e.g. a
+    /// detail page classifying locality at first paint): `candidates[0]` is the
+    /// highest-*priority* address, which — because a server advertises its own LAN
+    /// address even to remote clients — can be a local-looking URL that isn't
+    /// actually reachable, whereas the seed is by definition an address that worked
+    /// last launch. The live probe still corrects both the moment it settles.
     public var current: URL {
         lock.lock(); defer { lock.unlock() }
-        return cached ?? candidates[0]
+        return cached ?? reachableSeed ?? candidates[0]
+    }
+
+    /// True when the resolver has a connection whose locality can be trusted: a
+    /// probe-confirmed `cached` URL or a persisted last-known-good `reachableSeed`
+    /// (an address that demonstrably worked) that has **not** since been
+    /// invalidated by a reported failure or a failed probe sweep. When neither
+    /// holds, `current` falls back to the most-preferred but **unproven** candidate
+    /// — and because a Plex server advertises its own LAN address even to remote
+    /// clients, that guess can be a local-looking URL that isn't actually
+    /// reachable. Best-source selection must treat locality as `.unknown` until
+    /// this is true, or a dead LAN-shaped guess would wrongly win as `.local`.
+    ///
+    /// Crucially this drops back to `false` after a failure until a fresh probe
+    /// re-confirms: a server that dies mid-session must stop advertising itself as
+    /// a confirmed-local candidate, so a genuinely reachable remote twin can take
+    /// over playback instead of the selector clinging to the now-dead LAN box.
+    public var hasConfirmedReachableConnection: Bool {
+        lock.lock(); defer { lock.unlock() }
+        if cached != nil { return true }
+        return !reachabilityInvalidated && reachableSeed != nil
     }
 
     /// The base URL to use for the next request. Probes for a reachable
@@ -104,10 +147,15 @@ public final class PlexConnectionResolver: @unchecked Sendable {
 
     /// Reports that `url` failed to respond. If it was the cached choice, the
     /// cache is cleared so the next `resolved()` re-probes (and re-heals onto a
-    /// reachable connection).
+    /// reachable connection), and reachability confidence is invalidated so the
+    /// synchronous locality read reports `.unknown` until a fresh probe confirms a
+    /// live connection (a dead server must not keep winning as `.local`).
     public func reportFailure(_ url: URL) {
         lock.lock(); defer { lock.unlock() }
-        if cached == url { cached = nil }
+        if cached == url {
+            cached = nil
+            reachabilityInvalidated = true
+        }
     }
 
     private func performResolve() async -> URL {
@@ -130,18 +178,66 @@ public final class PlexConnectionResolver: @unchecked Sendable {
             }
         }
         // Still nothing reachable: return the most-preferred candidate WITHOUT
-        // caching, so the next attempt re-probes once connectivity returns.
-        return currentCandidates()[0]
+        // caching, so the next attempt re-probes once connectivity returns. The
+        // persisted seed was just probed (within its rank group) and did not
+        // answer, so invalidate reachability confidence — the synchronous locality
+        // read must now report `.unknown` rather than trusting a stale seed.
+        lock.lock()
+        reachabilityInvalidated = true
+        let fallback = candidates[0]
+        lock.unlock()
+        return fallback
     }
 
     /// The first candidate that answers a lightweight `/identity` probe, or `nil`
-    /// if none respond. All candidates are probed concurrently; the **first to
-    /// answer wins** and resolution returns immediately — losing probes are
-    /// cancelled and left to unwind on their own, so a dead candidate (an
-    /// unreachable LAN/Docker/relay address that only fails after a connect
-    /// timeout) never stalls resolution behind its timeout.
+    /// if none respond — **locality-tiered, then rank-ordered within a tier**:
+    /// same-LAN candidates are tried before a less-local tier (unknown hostname,
+    /// then remote / Tailscale / relay), and *within* the local tier a real home
+    /// LAN address (192.168/10) is tried before a container-bridge address
+    /// (172.16/12) that shares the same RFC1918 `.local` classification. This
+    /// guarantees a reachable LAN address is chosen over a reachable remote *or*
+    /// Docker-bridge one even when the other path happens to answer first, which
+    /// is the whole point of locality-first playback (a title on both the local
+    /// box and the sister's Tailscale server must stream from the local box, and
+    /// the LAN address must win over the machine's own Docker gateway). Within a
+    /// single rank group the **first to answer wins** and losing probes are
+    /// cancelled, so a dead candidate never stalls behind its connect timeout.
     private func firstReachable(among urls: [URL]) async -> URL? {
         guard !urls.isEmpty else { return nil }
+        let byTier = Dictionary(grouping: urls) { SourceLocalityClassifier.classify(url: $0) }
+        for tier in [SourceLocality.local, .unknown, .remote] {
+            guard let tierURLs = byTier[tier], !tierURLs.isEmpty else { continue }
+            // The coarse locality tier can't distinguish a real LAN address from a
+            // Docker-bridge address (both are RFC1918 `.local`), so racing the
+            // whole tier makes the winner depend on which probe answers first —
+            // non-deterministic under load. Sub-group by the finer connection rank
+            // and probe rank groups in order so the preferred address wins
+            // deterministically; equally-ranked candidates still race for liveness.
+            let byRank = Dictionary(grouping: tierURLs) { Self.rank($0) }
+            for rank in byRank.keys.sorted() {
+                guard let group = byRank[rank], !group.isEmpty else { continue }
+                // Prefer the last-known-good seed within its rank group: probe it
+                // first so a warm server re-confirms on a single probe and the
+                // winner among equivalent same-rank candidates is deterministic
+                // (a concurrent race would otherwise pick whichever probe answers
+                // first). Falls through to racing the rest only if the seed is
+                // now stale/unreachable.
+                if let seed = reachableSeed,
+                   group.contains(where: { $0.absoluteString == seed.absoluteString }) {
+                    if await probeReachable(seed) { return seed }
+                    let rest = group.filter { $0.absoluteString != seed.absoluteString }
+                    if !rest.isEmpty, let reachable = await raceReachable(among: rest) { return reachable }
+                    continue
+                }
+                if let reachable = await raceReachable(among: group) { return reachable }
+            }
+        }
+        return nil
+    }
+
+    /// Races every URL in one locality tier concurrently, resuming with the first
+    /// to answer (cancelling the rest) or `nil` when none in the tier respond.
+    private func raceReachable(among urls: [URL]) async -> URL? {
         guard urls.count > 1 else {
             return await probeReachable(urls[0]) ? urls[0] : nil
         }
@@ -180,6 +276,7 @@ public final class PlexConnectionResolver: @unchecked Sendable {
     private func store(_ url: URL) {
         lock.lock()
         cached = url
+        reachabilityInvalidated = false
         lock.unlock()
         onReachable?(url)
     }

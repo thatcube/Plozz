@@ -26,8 +26,13 @@ struct AppShellWatchMutationApplier: WatchMutationApplying {
     let anilistScrobbler: @Sendable () async -> any AniListScrobbling
     /// The active MAL scrobbler.
     let malScrobbler: @Sendable () async -> any MALScrobbling
-    /// Every signed-in `Account.id`, so episode twin expansion knows which *other*
-    /// servers to probe. Resolved live (main-actor) so a sign-in/out is reflected.
+    /// The **active** `Account.id`s (the set the identity index warms and that
+    /// Home/Search fan out over), so episode twin expansion knows which *other*
+    /// servers to probe and identity expansion can conclude once they're all
+    /// indexed. Resolved live (main-actor) so a sign-in/out or profile switch is
+    /// reflected. Deliberately NOT every signed-in account: an inactive account is
+    /// never indexed, so including it would keep expansion perpetually inconclusive
+    /// and make episode expansion probe servers outside the active profile.
     var allAccountIDs: @Sendable () async -> [String] = { [] }
     /// The eager identity index's known **series** sources for an origin series —
     /// the shared source of truth for "which servers host this show", each carrying
@@ -44,8 +49,11 @@ struct AppShellWatchMutationApplier: WatchMutationApplying {
     /// every server as the index warms. Read live off the published snapshot so a
     /// queued mutation re-resolves against ever-more-complete data on each drain.
     /// Empty (cold index / no match) ⇒ no extra targets that pass, so a watch is
-    /// never dropped while the index warms.
-    var indexedSources: @Sendable ([MediaIdentity]) -> [IndexedSource] = { _ in [] }
+    /// never dropped while the index warms. The trailing `(anchorTitle, anchorYear)`
+    /// split the union apart when a server mis-tagged a *different* movie with the
+    /// same external id (so a Scream 7 watch never fans out to a mis-tagged
+    /// Scream 6); `nil` anchor ⇒ prior unguarded union.
+    var indexedSources: @Sendable ([MediaIdentity], MediaItemKind?, String?, Int?) -> [IndexedSource] = { _, _, _, _ in [] }
     /// Every `Account.id` the identity index has indexed at least once. A movie /
     /// series identity expansion is **conclusive** only once every active account
     /// appears here (the union can still grow until then), so a mutation stopped
@@ -77,7 +85,7 @@ struct AppShellWatchMutationApplier: WatchMutationApplying {
         try await watch.setPlayed(played, itemID: target.itemID)
     }
 
-    func setResumePosition(_ seconds: TimeInterval, on target: WatchMutationTarget) async throws {
+    func setResumePosition(_ seconds: TimeInterval, on target: WatchMutationTarget, capturedAt: Date) async throws {
         guard let provider = await resolveProvider(target.accountID) else {
             FanoutDiagnostics.emit("write.setResume acct=\(target.accountID) item=\(target.itemID) -> provider=nil (unreachable/unresolved, will retry)")
             throw AppError.serverUnreachable
@@ -86,7 +94,7 @@ struct AppShellWatchMutationApplier: WatchMutationApplying {
             FanoutDiagnostics.emit("write.setResume acct=\(target.accountID) item=\(target.itemID) -> provider=\(provider.kind.rawValue) NOT ResumeStateWriting (no write, treated success)")
             return
         }
-        try await resumeWriter.setResumePosition(seconds, itemID: target.itemID)
+        try await resumeWriter.setResumePosition(seconds, itemID: target.itemID, capturedAt: capturedAt)
     }
 
     func scrobbleTrakt(_ intent: TraktScrobbleIntent) async throws {
@@ -150,7 +158,16 @@ struct AppShellWatchMutationApplier: WatchMutationApplying {
     /// error, and the origin target is written regardless.
     private func expandIdentityTargets(for mutation: WatchMutation) async -> WatchTargetExpansion {
         guard !mutation.identities.isEmpty else { return .none }
-        let targets = indexedSources(mutation.identities).map(\.target)
+        // TMDb/TVDb reuse one integer id space across movies and series
+        // (movie 550 ≠ tv 550), so the union must be scoped to the played title's
+        // kind — otherwise a movie's watched-write could fan out to a *series* on
+        // another server that merely shares the id (and vice-versa). The index does
+        // the kind-scoping (and the transitive connected-component walk) internally
+        // when a kind is supplied. Legacy mutations (nil kind, enqueued before this
+        // field existed) get the prior unscoped single-level union so a queued write
+        // is never dropped.
+        let scopedSources = indexedSources(mutation.identities, mutation.kind, mutation.anchorTitle, mutation.anchorYear)
+        let targets = scopedSources.map(\.target)
         let everyAccount = Set(await allAccountIDs())
         // Conclusive only once every active account has been indexed at least once
         // (the union can still grow until then), unless we've exhausted the attempt

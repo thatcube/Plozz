@@ -39,9 +39,11 @@ public struct HomeAggregator: Sendable {
     }
 
     /// Loads and merges Continue Watching, Recently Added, and Libraries across
-    /// `accounts`. Per-account results keep their server order; rows from
-    /// different servers are round-robin interleaved so every server gets fair
-    /// top-of-row representation (`MediaItem` carries no timestamp to sort by).
+    /// `accounts`. Per-account results keep their server order; Recently Added and
+    /// Watchlist rows from different servers are round-robin interleaved so every
+    /// server gets fair top-of-row representation, while Continue Watching is
+    /// additionally sorted by ``MediaItem/lastPlayedAt`` (most-recent-wins across
+    /// servers) so it reflects what was actually watched last.
     public func content(
         from accounts: [ResolvedAccount],
         continueWatchingLimit: Int = 20,
@@ -79,7 +81,8 @@ public struct HomeAggregator: Sendable {
                 from: perAccount.map(\.continueWatching),
                 limit: continueWatchingLimit,
                 serverInfo: resolve,
-                identitySources: identitySources
+                identitySources: identitySources,
+                sortByRecency: true
             ),
             latest: Self.mergedRow(
                 from: perAccount.map(\.latest),
@@ -125,8 +128,10 @@ public struct HomeAggregator: Sendable {
 
     /// Bounded account-level fan-out for Home aggregation so launch-time network
     /// and decoding work can't swamp the UI and image pipeline when many accounts
-    /// are active.
-    private static let accountFanoutLimit = 3
+    /// are active. Sized to a typical multi-server household so the last accounts
+    /// don't wait behind the first few (a slow/asleep server in the first slots
+    /// would otherwise ~double the time the remaining accounts take to surface).
+    private static let accountFanoutLimit = 5
 
     /// Executes per-account work preserving account order while capping how many
     /// accounts run concurrently.
@@ -149,7 +154,11 @@ public struct HomeAggregator: Sendable {
             var byIndex: [Int: T] = [:]
             while let (index, value) = await group.next() {
                 byIndex[index] = value
-                if nextIndex < accounts.count {
+                // Stop spooling up the remaining accounts once the aggregation has
+                // been cancelled (Home dismissed / re-triggered). Without this the
+                // window keeps refilling and fires a fetch for every remaining
+                // account even though nobody is waiting for the result.
+                if nextIndex < accounts.count, !Task.isCancelled {
                     let queuedIndex = nextIndex
                     nextIndex += 1
                     let resolved = accounts[queuedIndex]
@@ -249,20 +258,71 @@ public struct HomeAggregator: Sendable {
 
     /// Interleaves and de-duplicates one Home row, then caps the rendered count so
     /// Home remains responsive with many accounts.
+    ///
+    /// When `sortByRecency` is set (the Continue Watching row) the merged result is
+    /// stable-sorted by ``sortedByRecency(_:)`` so the row reflects what the user
+    /// actually watched last instead of a round-robin interleave that shuffles
+    /// between launches. Recency comes straight from each card's `lastPlayedAt`,
+    /// which the cross-server merge already folds to the newest timestamp across a
+    /// title's servers (``MediaItemMerger`` — most-recent-wins). Untimestamped "Next
+    /// Up" cards — which each provider stamps with their series' recency up front,
+    /// and which only remain untimestamped when that lookup genuinely fails — keep
+    /// their interleave order *after* the timestamped ones (they never inherit a
+    /// neighbouring show's timestamp).
     private static func mergedRow(
         from groups: [[MediaItem]],
         limit: Int,
         serverInfo: (String) -> SourceServerInfo?,
-        identitySources: (MediaItem) -> [MediaSourceRef] = { _ in [] }
+        identitySources: (MediaItem) -> [MediaSourceRef] = { _ in [] },
+        sortByRecency: Bool = false
     ) -> [MediaItem] {
         guard limit > 0 else { return [] }
-        let merged = MediaItemMerger.merge(
+        var merged = MediaItemMerger.merge(
             Self.interleave(groups),
             serverInfo: serverInfo,
             identitySources: identitySources
         )
+        if sortByRecency {
+            merged = sortedByRecency(merged)
+        }
         guard merged.count > limit else { return merged }
         return Array(merged.prefix(limit))
+    }
+
+    /// Stable descending sort of a merged Continue Watching row by `lastPlayedAt`.
+    ///
+    /// Each card's recency is its own `lastPlayedAt`, which for a cross-server card
+    /// the merger already sets to the newest timestamp across every server backing
+    /// it (``MediaItemMerger`` — most-recent-wins), and which each provider stamps
+    /// onto "Next Up" suggestions from their series' recency before the feed ever
+    /// reaches here. Cards we still can't timestamp (a suggestion whose series
+    /// recency lookup failed) sort *after* the timestamped ones in their incoming
+    /// order — they are never handed a neighbouring show's timestamp.
+    ///
+    /// The sort is stable (equal `lastPlayedAt` breaks by the original offset) and
+    /// idempotent, so re-sorting an already-ordered row leaves it unchanged.
+    ///
+    /// > Note: an earlier version manufactured recency for untimestamped cards by
+    /// > carrying the previous card's timestamp forward through each feed. Because a
+    /// > feed is ordered "timestamped first, untimestamped tail" (not
+    /// > in-progress/next-up pairs), that let an unrelated show's next episode
+    /// > inherit the feed's oldest real timestamp and jump ahead of another server's
+    /// > genuine progress — the reported "Continue Watching keeps shifting / isn't
+    /// > what I watched last" symptom. Provider-side series stamping now handles the
+    /// > legitimate case correctly, so the positional carry-forward was removed.
+    static func sortedByRecency(_ items: [MediaItem]) -> [MediaItem] {
+        items.enumerated().sorted { lhs, rhs in
+            switch (lhs.element.lastPlayedAt, rhs.element.lastPlayedAt) {
+            case let (l?, r?):
+                return l == r ? lhs.offset < rhs.offset : l > r
+            case (.some, nil):
+                return true
+            case (nil, .some):
+                return false
+            case (nil, nil):
+                return lhs.offset < rhs.offset
+            }
+        }.map(\.element)
     }
 
     // MARK: - Merge

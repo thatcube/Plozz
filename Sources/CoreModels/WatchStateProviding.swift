@@ -33,5 +33,12 @@ public protocol WatchStateProviding: Sendable {
 public protocol ResumeStateWriting: Sendable {
     /// Sets the saved resume position (seconds) for `itemID` on this server. A
     /// position of `0` clears the resume point (title finished / start over).
-    func setResumePosition(_ seconds: TimeInterval, itemID: String) async throws
+    ///
+    /// `capturedAt` is *when the play that produced this position actually
+    /// happened* — not when the write is being flushed. It matters for the
+    /// server's recency stamp (Jellyfin's `LastPlayedDate`, which orders its
+    /// Continue Watching row): a mutation that was queued offline and drained
+    /// hours later must converge with its original play time, otherwise a stale
+    /// play jumps to the top of Continue Watching on the next Home load.
+    func setResumePosition(_ seconds: TimeInterval, itemID: String, capturedAt: Date) async throws
 }

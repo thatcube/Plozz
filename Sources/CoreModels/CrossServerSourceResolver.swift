@@ -95,9 +95,21 @@ public enum CrossServerSourceResolver {
         guard !queries.isEmpty, !otherAccountIDs.isEmpty else { return [] }
         let primaryAccountID = primary.sourceAccountID
         let primaryItemID = primary.id
+        // The primary's strong external identities (imdb/tmdb/tvdb). Once a query
+        // on an account yields a hit sharing one of these, that server's copy is
+        // confidently matched — the remaining title-variant queries only widen
+        // recall for a *differently-titled* copy we've now already found by id, so
+        // we stop early and free that account's search budget (each query carries
+        // its own 4s deadline; a cold Plex exhausting all four is up to ~16s).
+        let primaryStrongIDs = Set(
+            MediaItemIdentity.identities(for: primary).filter {
+                if case .external = $0 { return true }
+                return false
+            }
+        )
 
-        let hits: [MediaItem] = await withTaskGroup(of: [MediaItem].self) { group in
-            for accountID in otherAccountIDs {
+        let hits: [MediaItem] = await withTaskGroup(of: (Int, [MediaItem]).self) { group in
+            for (index, accountID) in otherAccountIDs.enumerated() {
                 group.addTask {
                     var seenItemIDs = Set<String>()
                     // The primary's own id is never a duplicate of itself —
@@ -114,12 +126,34 @@ public enum CrossServerSourceResolver {
                         for hit in await search(accountID, query) where seenItemIDs.insert(hit.id).inserted {
                             accountHits.append(hit.taggingSource(accountID))
                         }
+                        // Strong-id match found → further title queries are
+                        // redundant for this account; stop probing it. Require the
+                        // hit to be the **same kind** as the primary: TMDb/TVDb
+                        // reuse one integer id space across movies and series, so a
+                        // wrong-kind hit sharing id 550 must NOT satisfy the abort
+                        // (the kind-scoped merge would discard it anyway) or we'd
+                        // stop before finding the real same-kind twin on this
+                        // account and drop it from the picker.
+                        if !primaryStrongIDs.isEmpty,
+                           accountHits.contains(where: {
+                               $0.kind == primary.kind
+                                   && !primaryStrongIDs.isDisjoint(with: MediaItemIdentity.identities(for: $0))
+                           }) {
+                            break
+                        }
                     }
-                    return accountHits
+                    return (index, accountHits)
                 }
             }
+            // Collect keyed by account index and re-assemble in `otherAccountIDs`
+            // order: the task group yields in *completion* order, which varies with
+            // per-server latency, so without this the merged `sources` (and thus the
+            // detail server-picker order + any order-sensitive tiebreak) would shift
+            // between loads. Deterministic order in → deterministic picker out.
+            var byIndex: [Int: [MediaItem]] = [:]
+            for await (index, accountHits) in group { byIndex[index] = accountHits }
             var all: [MediaItem] = []
-            for await accountHits in group { all.append(contentsOf: accountHits) }
+            for index in otherAccountIDs.indices { all.append(contentsOf: byIndex[index] ?? []) }
             return all
         }
         guard !hits.isEmpty else { return [] }

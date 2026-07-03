@@ -243,8 +243,8 @@ final class MediaItemMergerTests: XCTestCase {
 }
 
 final class CrossSourceSelectorTests: XCTestCase {
-    private func source(_ account: String, versions: [MediaVersion]) -> MediaSourceRef {
-        MediaSourceRef(accountID: account, itemID: "\(account)-i", versions: versions)
+    private func source(_ account: String, versions: [MediaVersion], locality: SourceLocality? = nil) -> MediaSourceRef {
+        MediaSourceRef(accountID: account, itemID: "\(account)-i", locality: locality, versions: versions)
     }
 
     private let h264 = MediaVersion(id: "v", height: 1080, videoCodec: "h264", videoRange: "SDR", audioCodec: "aac")
@@ -292,33 +292,61 @@ final class CrossSourceSelectorTests: XCTestCase {
         XCTAssertNil(CrossSourceSelector.bestSelection(from: [], capabilities: .default))
     }
 
-    // MARK: - Origin-aware selection
+    // MARK: - Origin-aware selection (soft tie-break)
 
-    func testOriginPreferenceDefaultsToThatServerEvenOverBetterAlternative() {
+    func testOriginPreferenceDoesNotOverrideQuality() {
         // The origin (library tile) server holds only a 720p file; another server
-        // holds a 1080p Direct Play. Without an origin preference `bestSelection`
-        // would pick the 1080p; with the origin set we must stay on the origin.
+        // (equal locality) holds a 1080p Direct Play. Origin preference is a SOFT
+        // tie-break — it must NOT drag playback down to the worse copy. The
+        // higher-quality copy wins.
         let lo = MediaVersion(id: "lo", height: 720, videoCodec: "h264", videoRange: "SDR", audioCodec: "aac")
         let hi = MediaVersion(id: "hi", height: 1080, videoCodec: "h264", videoRange: "SDR", audioCodec: "aac")
         let origin = source("origin", versions: [lo])
         let other = source("other", versions: [hi])
 
-        let pick = CrossSourceSelector.selection(
+        let pick = CrossSourceSelector.bestSelection(
             from: [other, origin],
             capabilities: .default,
-            preferredAccountID: "origin"
+            preferring: "origin"
         )
-        XCTAssertEqual(pick?.source.accountID, "origin", "Item opened from a library tile defaults to that server")
-        XCTAssertEqual(pick?.version?.id, "lo", "Origin's own smart-recommended version is selected")
+        XCTAssertEqual(pick?.source.accountID, "other", "Origin affinity must not override a higher-quality copy")
+        XCTAssertEqual(pick?.version?.id, "hi")
+    }
+
+    func testOriginPreferenceDoesNotOverrideLocality() {
+        // Origin is remote (sister's Tailscale server); another server is local.
+        // Locality is the top rank key, so the local copy wins even though the
+        // remote one is the browsed library.
+        let remoteOrigin = source("origin", versions: [h264], locality: .remote)
+        let localOther = source("other", versions: [h264], locality: .local)
+
+        let pick = CrossSourceSelector.bestSelection(
+            from: [remoteOrigin, localOther],
+            capabilities: .default,
+            preferring: "origin"
+        )
+        XCTAssertEqual(pick?.source.accountID, "other", "A local copy must beat a remote origin")
+    }
+
+    func testOriginPreferenceBreaksExactTie() {
+        // Two identical copies (same locality, same quality). Origin affinity is
+        // the last tie-break, so the browsed library's copy wins even though it is
+        // not the primary (first) source.
+        let pick = CrossSourceSelector.bestSelection(
+            from: [source("primary", versions: [h264]), source("origin", versions: [h264])],
+            capabilities: .default,
+            preferring: "origin"
+        )
+        XCTAssertEqual(pick?.source.accountID, "origin", "On an exact tie the browsed library's copy wins")
     }
 
     func testNilPreferenceFallsBackToBestSelection() {
         let lo = MediaVersion(id: "lo", height: 720, videoCodec: "h264", videoRange: "SDR", audioCodec: "aac")
         let hi = MediaVersion(id: "hi", height: 1080, videoCodec: "h264", videoRange: "SDR", audioCodec: "aac")
-        let pick = CrossSourceSelector.selection(
+        let pick = CrossSourceSelector.bestSelection(
             from: [source("a", versions: [lo]), source("b", versions: [hi])],
             capabilities: .default,
-            preferredAccountID: nil
+            preferring: nil
         )
         XCTAssertEqual(pick?.source.accountID, "b", "Home/Search (no origin) keeps the smart best default")
         XCTAssertEqual(pick?.version?.id, "hi")
@@ -326,19 +354,73 @@ final class CrossSourceSelectorTests: XCTestCase {
 
     func testAbsentPreferenceFallsBackToBestSelection() {
         // The preferred account isn't among the sources (e.g. that server signed
-        // out) → fall back to best rather than returning nil.
+        // out) → behaves exactly like no preference.
         let lo = MediaVersion(id: "lo", height: 720, videoCodec: "h264", videoRange: "SDR", audioCodec: "aac")
         let hi = MediaVersion(id: "hi", height: 1080, videoCodec: "h264", videoRange: "SDR", audioCodec: "aac")
-        let pick = CrossSourceSelector.selection(
+        let pick = CrossSourceSelector.bestSelection(
             from: [source("a", versions: [lo]), source("b", versions: [hi])],
             capabilities: .default,
-            preferredAccountID: "ghost"
+            preferring: "ghost"
         )
         XCTAssertEqual(pick?.source.accountID, "b")
     }
 
     func testOriginPreferenceEmptySourcesIsNil() {
-        XCTAssertNil(CrossSourceSelector.selection(from: [], capabilities: .default, preferredAccountID: "x"))
+        XCTAssertNil(CrossSourceSelector.bestSelection(from: [], capabilities: .default, preferring: "x"))
+    }
+
+    // MARK: - Failover exclusion (r8-play-failover)
+
+    func testExcludingSkipsTriedServerAndPicksNextBest() {
+        // The local copy failed to start; failover excludes it and must fall
+        // through to the next-best (remote) copy rather than re-trying the dead one.
+        let localFailed = source("local", versions: [h264], locality: .local)
+        let remote = source("remote", versions: [h264], locality: .remote)
+        let pick = CrossSourceSelector.bestSelection(
+            from: [localFailed, remote],
+            capabilities: .default,
+            preferring: nil,
+            excluding: ["local"]
+        )
+        XCTAssertEqual(pick?.source.accountID, "remote", "A tried (failed) server must be skipped")
+    }
+
+    func testExcludingAllSourcesIsNilExhaustion() {
+        // Every server has been tried → true exhaustion, so the caller surfaces the
+        // graceful error instead of looping.
+        let pick = CrossSourceSelector.bestSelection(
+            from: [source("a", versions: [h264]), source("b", versions: [h264])],
+            capabilities: .default,
+            preferring: nil,
+            excluding: ["a", "b"]
+        )
+        XCTAssertNil(pick, "No untried source remains → nil")
+    }
+
+    func testExcludingStillPrefersLocalAmongUntried() {
+        // First attempt was the remote copy (excluded); of the two remaining, the
+        // local one must still win — failover keeps the local-first guarantee.
+        let remoteTried = source("remote", versions: [h264], locality: .remote)
+        let localA = source("localA", versions: [h264], locality: .local)
+        let unknownB = source("unknownB", versions: [h264], locality: .unknown)
+        let pick = CrossSourceSelector.bestSelection(
+            from: [remoteTried, unknownB, localA],
+            capabilities: .default,
+            preferring: nil,
+            excluding: ["remote"]
+        )
+        XCTAssertEqual(pick?.source.accountID, "localA", "Failover still prefers a local copy among untried servers")
+    }
+
+    func testExcludingUnknownAccountIsNoOp() {
+        // Excluding an account that isn't present behaves like no exclusion.
+        let pick = CrossSourceSelector.bestSelection(
+            from: [source("a", versions: [h264])],
+            capabilities: .default,
+            preferring: nil,
+            excluding: ["ghost"]
+        )
+        XCTAssertEqual(pick?.source.accountID, "a")
     }
 }
 
@@ -372,6 +454,46 @@ final class MediaItemSourceHelpersTests: XCTestCase {
         let base = MediaItem(id: "p1", title: "X", kind: .movie, sources: [alt])
         let retargeted = base.selectingSource(alt, versionID: "does-not-exist")
         XCTAssertNil(retargeted.selectedVersionID, "An invalid version id falls back to the server default")
+    }
+
+    // MARK: - explicitSourceSelection flag (locality re-selection gate)
+
+    func testSelectingSourceDefaultsToNonExplicit() {
+        // An auto default (no `explicit:`) leaves the flag false so the play
+        // router (`bestSourcePlayItem`) may re-select a more-local copy.
+        let alt = ref("jelly", item: "j99", versions: [MediaVersion(id: "v")])
+        let base = MediaItem(id: "p1", title: "X", kind: .movie, sources: [alt])
+        XCTAssertFalse(base.selectingSource(alt).explicitSourceSelection)
+    }
+
+    func testSelectingSourceExplicitSetsFlag() {
+        // A deliberate user pick sets the flag so the router honors it as-is.
+        let alt = ref("jelly", item: "j99", versions: [MediaVersion(id: "v")])
+        let base = MediaItem(id: "p1", title: "X", kind: .movie, sources: [alt])
+        XCTAssertTrue(base.selectingSource(alt, explicit: true).explicitSourceSelection)
+    }
+
+    func testRetargetedForPlaybackThreadsExplicitFlag() {
+        let alt = ref("jelly", item: "j99", versions: [MediaVersion(id: "v")])
+        let base = MediaItem(id: "p1", title: "X", kind: .movie, sourceAccountID: "plex",
+                             sources: [ref("plex", item: "p1"), alt])
+        let auto = MediaItem.retargetedForPlayback(item: base, sources: base.sources,
+                                                   activeAccountID: "jelly", versionID: nil)
+        XCTAssertFalse(auto.explicitSourceSelection, "Auto retarget stays re-selectable")
+        let picked = MediaItem.retargetedForPlayback(item: base, sources: base.sources,
+                                                     activeAccountID: "jelly", versionID: nil, explicit: true)
+        XCTAssertTrue(picked.explicitSourceSelection, "An explicit pick is honored downstream")
+    }
+
+    func testExplicitFlagIsTransientAcrossCoding() throws {
+        // The flag is per-play UI state, never persisted — a decoded item is
+        // always non-explicit so a cached pick can't wrongly pin a remote server.
+        let alt = ref("jelly", item: "j99", versions: [MediaVersion(id: "v")])
+        let base = MediaItem(id: "p1", title: "X", kind: .movie, sources: [alt])
+            .selectingSource(alt, explicit: true)
+        XCTAssertTrue(base.explicitSourceSelection)
+        let decoded = try JSONDecoder().decode(MediaItem.self, from: JSONEncoder().encode(base))
+        XCTAssertFalse(decoded.explicitSourceSelection, "explicitSourceSelection must not survive encode/decode")
     }
 
     func testAllSourceAccountIDsDerivesFromSourcesPrimaryFirst() {

@@ -31,6 +31,18 @@ public struct JellyfinProvider: MediaProvider {
 
     // MARK: Browsing
 
+    /// Locality of this Jellyfin connection. Unlike Plex, Jellyfin uses a single
+    /// fixed `baseURL` (no connection resolver), so locality derives from that
+    /// host — but only once we've **confirmed the server is reachable**. A saved
+    /// server whose LAN address (`192.168.x`, `.local`, …) no longer answers must
+    /// not report `.local`, or best-source selection would route a merged title to
+    /// the dead local copy over a genuinely reachable remote twin. Until the first
+    /// successful request latches reachability, report `.unknown`. (r7-jf-locality)
+    public var connectionLocality: SourceLocality {
+        guard client.hasConfirmedReachableConnection else { return .unknown }
+        return SourceLocalityClassifier.classify(url: session.server.baseURL)
+    }
+
     public func libraries() async throws -> [MediaLibrary] {
         try await client.userViews(userID: session.userID).map { dto in
             MediaLibrary(
@@ -58,18 +70,78 @@ public struct JellyfinProvider: MediaProvider {
     public func continueWatching(limit: Int) async throws -> [MediaItem] {
         async let resumeTask = client.resumeItems(userID: session.userID, limit: limit)
         async let nextUpTask = nextUpItemsBestEffort(limit: limit)
+        async let seriesDatesTask = seriesLastPlayedDatesBestEffort(limit: limit)
         let resume = try await resumeTask
         let nextUp = await nextUpTask
+        let seriesDates = await seriesDatesTask
 
         var seen = Set<String>()
         let merged = (resume + nextUp).filter { seen.insert($0.Id).inserted }
-        return merged.prefix(limit).map(map(item:))
+        // Stamp NextUp recency BEFORE capping: a just-finished show's next episode
+        // must be able to survive the `limit` cut on its stamped recency rather than
+        // being dropped merely because in-progress Resume items filled the limit
+        // first (r6-jf-precap).
+        let stamped = merged.map(map(item:)).map { stampingSeriesRecency($0, using: seriesDates) }
+        return Array(orderedByEffectiveRecency(stamped).prefix(limit))
+    }
+
+    /// Orders Continue Watching items by **effective recency** before any cap is
+    /// applied: timestamped items (in-progress Resume, plus NextUp suggestions the
+    /// provider stamped with their series' recency) first, most-recent first;
+    /// untimestamped items after, in arrival order (Resume before NextUp). The sort
+    /// is stable — equal timestamps and the untimestamped tail keep their original
+    /// order — so capping to `limit` keeps the genuinely most-recent items instead
+    /// of dropping a just-finished show's next episode just because Resume happened
+    /// to fill the limit first.
+    private func orderedByEffectiveRecency(_ items: [MediaItem]) -> [MediaItem] {
+        items.enumerated().sorted { lhs, rhs in
+            switch (lhs.element.lastPlayedAt, rhs.element.lastPlayedAt) {
+            case let (l?, r?):
+                return l == r ? lhs.offset < rhs.offset : l > r
+            case (_?, nil): return true
+            case (nil, _?): return false
+            case (nil, nil): return lhs.offset < rhs.offset
+            }
+        }.map(\.element)
     }
 
     /// Wraps `/Shows/NextUp` so a failure never propagates into Continue
     /// Watching, which is anchored by the in-progress Resume items.
     private func nextUpItemsBestEffort(limit: Int) async -> [BaseItemDto] {
         (try? await client.nextUpItems(userID: session.userID, limit: limit)) ?? []
+    }
+
+    /// Best-effort map of `seriesID → series last-played date`, used to stamp
+    /// NextUp episodes with their series' true recency (see
+    /// ``JellyfinClient/recentlyWatchedSeries(userID:limit:)``). Run concurrently
+    /// with the Resume/NextUp fetches so it adds no latency to the common path; a
+    /// failure yields an empty map and Continue Watching falls back to unstamped
+    /// ordering.
+    private func seriesLastPlayedDatesBestEffort(limit: Int) async -> [String: Date] {
+        guard let series = try? await client.recentlyWatchedSeries(userID: session.userID, limit: limit) else {
+            return [:]
+        }
+        var result: [String: Date] = [:]
+        for dto in series {
+            guard let date = Self.parseDate(dto.UserData?.LastPlayedDate) else { continue }
+            result[dto.Id] = date
+        }
+        return result
+    }
+
+    /// Stamps a Continue Watching item that carries no play timestamp of its own —
+    /// a NextUp suggestion, whose next-episode `LastPlayedDate` is nil — with its
+    /// series' last-played date, so a just-finished show sorts by real recency in a
+    /// merged Continue Watching row instead of inheriting a foreign timestamp or
+    /// sinking to the bottom. In-progress Resume items (already timestamped) and
+    /// non-series items are returned unchanged.
+    private func stampingSeriesRecency(_ item: MediaItem, using seriesDates: [String: Date]) -> MediaItem {
+        guard item.lastPlayedAt == nil,
+              let seriesID = item.seriesID,
+              let date = seriesDates[seriesID] else { return item }
+        var copy = item
+        copy.lastPlayedAt = date
+        return copy
     }
 
     public func latest(limit: Int) async throws -> [MediaItem] {
@@ -88,15 +160,27 @@ public struct JellyfinProvider: MediaProvider {
 
         let userID = session.userID
         let client = self.client
+        async let seriesDatesTask = seriesLastPlayedDatesBestEffort(limit: limit)
+        // Cap concurrent per-library requests: a user with many libraries would
+        // otherwise fire 2×libraries requests (resume + next-up) in one burst,
+        // flooding the shared URLSession pool and the server. 4 in flight keeps
+        // Home load fast without swamping either.
+        let limiter = ConcurrencyLimiter(limit: 4)
         let perLibrary: [[BaseItemDto]] = await withTaskGroup(of: (Int, [BaseItemDto]).self) { group in
             for (index, libraryID) in libraryIDs.enumerated() {
                 group.addTask {
-                    async let resumeTask = try? client.resumeItems(userID: userID, limit: limit, parentID: libraryID)
-                    let nextUp = (try? await client.nextUpItems(userID: userID, limit: limit, parentID: libraryID)) ?? []
-                    let resume = (await resumeTask) ?? []
-                    var seen = Set<String>()
-                    let merged = (resume + nextUp).filter { seen.insert($0.Id).inserted }
-                    return (index, Array(merged.prefix(limit)))
+                    await limiter.run {
+                        async let resumeTask = try? client.resumeItems(userID: userID, limit: limit, parentID: libraryID)
+                        let nextUp = (try? await client.nextUpItems(userID: userID, limit: limit, parentID: libraryID)) ?? []
+                        let resume = (await resumeTask) ?? []
+                        var seen = Set<String>()
+                        let merged = (resume + nextUp).filter { seen.insert($0.Id).inserted }
+                        // No inner per-library cap: capping here (before series-recency
+                        // stamping and the final effective-recency ordering) could drop a
+                        // just-finished show's next episode within a library whose Resume
+                        // list is long. The single recency-aware cap below handles it.
+                        return (index, merged)
+                    }
                 }
             }
             var byIndex: [Int: [BaseItemDto]] = [:]
@@ -104,14 +188,19 @@ public struct JellyfinProvider: MediaProvider {
             return libraryIDs.indices.compactMap { byIndex[$0] }
         }
 
+        // Series play dates are user-global (not library-scoped), so fetch once and
+        // stamp every library's NextUp suggestions with their series' true recency.
+        let seriesDates = await seriesDatesTask
         var seen = Set<String>()
         var result: [MediaItem] = []
         for (libraryID, dtos) in zip(libraryIDs, perLibrary) {
             for dto in dtos where seen.insert(dto.Id).inserted {
-                result.append(map(item: dto).taggingLibrary(libraryID))
+                result.append(stampingSeriesRecency(map(item: dto).taggingLibrary(libraryID), using: seriesDates))
             }
         }
-        return Array(result.prefix(limit))
+        // Order by effective recency, then cap once — same rationale as the unscoped
+        // path: a just-finished show's stamped next episode must survive the cut.
+        return Array(orderedByEffectiveRecency(result).prefix(limit))
     }
 
     /// Library-scoped Recently Added — see ``continueWatching(limit:inLibraries:)``
@@ -122,11 +211,15 @@ public struct JellyfinProvider: MediaProvider {
 
         let userID = session.userID
         let client = self.client
+        // Bound concurrent per-library fetches (see continueWatching above).
+        let limiter = ConcurrencyLimiter(limit: 4)
         let perLibrary: [[BaseItemDto]] = await withTaskGroup(of: (Int, [BaseItemDto]).self) { group in
             for (index, libraryID) in libraryIDs.enumerated() {
                 group.addTask {
-                    let items = (try? await client.latestItems(userID: userID, limit: limit, parentID: libraryID)) ?? []
-                    return (index, items)
+                    await limiter.run {
+                        let items = (try? await client.latestItems(userID: userID, limit: limit, parentID: libraryID)) ?? []
+                        return (index, items)
+                    }
                 }
             }
             var byIndex: [Int: [BaseItemDto]] = [:]
@@ -1005,9 +1098,9 @@ extension JellyfinProvider: ResumeStateWriting {
     /// silently dropped (durability / never-drop). Documented caveat: on that
     /// older-server fallback only, a convergence write can still disturb a
     /// concurrent live session of the same title.
-    public func setResumePosition(_ seconds: TimeInterval, itemID: String) async throws {
+    public func setResumePosition(_ seconds: TimeInterval, itemID: String, capturedAt: Date = Date()) async throws {
         do {
-            try await client.updatePlaybackPosition(max(seconds, 0), userID: session.userID, itemID: itemID)
+            try await client.updatePlaybackPosition(max(seconds, 0), userID: session.userID, itemID: itemID, lastPlayedAt: capturedAt)
         } catch AppError.notFound {
             let progress = PlaybackProgress(
                 itemID: itemID,

@@ -1,6 +1,9 @@
 import XCTest
 import CoreModels
 import TraktService
+import SimklService
+import AniListService
+import MALService
 @testable import AppShell
 
 /// Unit tests for ``AppShellWatchMutationApplier``'s **movie / series** identity
@@ -12,13 +15,16 @@ import TraktService
 final class WatchIdentityExpansionTests: XCTestCase {
     private func applier(
         allAccounts: @escaping @Sendable () async -> [String],
-        indexedSources: @escaping @Sendable ([MediaIdentity]) -> [IndexedSource],
+        indexedSources: @escaping @Sendable ([MediaIdentity], MediaItemKind?, String?, Int?) -> [IndexedSource],
         indexedAccountIDs: @escaping @Sendable () -> Set<String>,
         maxAttempts: Int = 6
     ) -> AppShellWatchMutationApplier {
         AppShellWatchMutationApplier(
             resolveProvider: { _ in nil },
             traktScrobbler: { DisabledTraktScrobbler() },
+            simklScrobbler: { DisabledSimklScrobbler() },
+            anilistScrobbler: { DisabledAniListScrobbler() },
+            malScrobbler: { DisabledMALScrobbler() },
             allAccountIDs: allAccounts,
             indexedSeriesSources: { _ in [] },
             indexedSources: indexedSources,
@@ -47,7 +53,7 @@ final class WatchIdentityExpansionTests: XCTestCase {
         var union: [IndexedSource] = [IndexedSource(accountID: "a", itemID: "420", providerKind: .plex, kind: .movie)]
         let applier = applier(
             allAccounts: { ["a", "b", "c", "d"] },
-            indexedSources: { _ in union },
+            indexedSources: { _, _, _, _ in union },
             indexedAccountIDs: { indexed }
         )
         let mutation = movieMutation()
@@ -76,7 +82,7 @@ final class WatchIdentityExpansionTests: XCTestCase {
     func testAttemptBudgetForcesConclusionSoOutboxCantLeak() async {
         let applier = applier(
             allAccounts: { ["a", "ghost"] },
-            indexedSources: { _ in [IndexedSource(accountID: "a", itemID: "420", kind: .movie)] },
+            indexedSources: { _, _, _, _ in [IndexedSource(accountID: "a", itemID: "420", kind: .movie)] },
             indexedAccountIDs: { ["a"] }, // "ghost" never indexes
             maxAttempts: 3
         )
@@ -94,7 +100,7 @@ final class WatchIdentityExpansionTests: XCTestCase {
     func testIdentitylessMutationIsConclusiveNoOp() async {
         let applier = applier(
             allAccounts: { ["a", "b"] },
-            indexedSources: { _ in [] },
+            indexedSources: { _, _, _, _ in [] },
             indexedAccountIDs: { ["a"] }
         )
         var mutation = movieMutation()
@@ -102,5 +108,49 @@ final class WatchIdentityExpansionTests: XCTestCase {
         let expansion = await applier.expandTargets(for: mutation)
         XCTAssertEqual(expansion, .none)
         XCTAssertTrue(expansion.isConclusive)
+    }
+
+    // MARK: - Split-guard: a bad shared external id must not cross-mark
+
+    /// Real-world bug (Scream 6 tagged with Scream 7's TMDb id): marking Scream 7
+    /// watched must NOT fan the write out to the mis-tagged Scream 6 on another
+    /// server. The factory persists the played title's normalized-title/year anchor
+    /// on the mutation, and the applier threads it into the index union so the
+    /// impostor is split out at drain time — even though both films key on the same
+    /// external id.
+    func testMovieFanOutSplitsBadSharedExternalID() async {
+        // The index knows both films under the SAME (wrong) tmdb id.
+        let sharedID = MediaIdentity.external(source: "tmdb", value: "934433")
+        let snapshot = IdentityIndexSnapshot(byIdentity: [
+            sharedID: [
+                IndexedSource(accountID: "plex", itemID: "s7", providerKind: .plex, kind: .movie,
+                              normalizedTitle: MediaItemIdentity.normalizedTitle("Scream 7"), year: 2026),
+                IndexedSource(accountID: "jf", itemID: "s6", providerKind: .jellyfin, kind: .movie,
+                              normalizedTitle: MediaItemIdentity.normalizedTitle("Scream 6"), year: 2023)
+            ]
+        ])
+        // The applier resolves the union through the guarded snapshot API, exactly
+        // as AppState wires it in production.
+        let applier = applier(
+            allAccounts: { ["plex", "jf"] },
+            indexedSources: { identities, kind, anchorTitle, anchorYear in
+                snapshot.sources(forIdentities: identities, kind: kind, anchorTitle: anchorTitle, anchorYear: anchorYear)
+            },
+            indexedAccountIDs: { ["plex", "jf"] }
+        )
+
+        var scream7 = MediaItem(id: "s7", title: "Scream 7", kind: .movie, productionYear: 2026, providerIDs: ["Tmdb": "934433"])
+        scream7.sourceAccountID = "plex"
+        let mutation = WatchMutationFactory.playedToggle(item: scream7, played: true, primaryAccountID: "plex")
+        let unwrapped = try! XCTUnwrap(mutation)
+
+        // The factory captured the anchor.
+        XCTAssertEqual(unwrapped.anchorTitle, "scream 7")
+        XCTAssertEqual(unwrapped.anchorYear, 2026)
+
+        // The fan-out reaches only Scream 7's own server, never the mis-tagged
+        // Scream 6.
+        let expansion = await applier.expandTargets(for: unwrapped)
+        XCTAssertEqual(Set(expansion.targets.map(\.id)), ["plex:s7"], "Scream 6 must not be marked watched")
     }
 }

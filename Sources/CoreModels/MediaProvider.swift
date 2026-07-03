@@ -135,6 +135,20 @@ public protocol MediaProvider: Sendable {
 
     /// Absolute URL for an item's artwork, or `nil` if unavailable.
     func imageURL(itemID: String, kind: ImageKind, maxWidth: Int?) -> URL?
+
+    // MARK: Connection locality
+
+    /// How reachable this provider's *currently active* server connection is
+    /// from the device (same-LAN vs remote/Tailscale). Drives best-source
+    /// selection so a merged title plays from the local copy when one exists.
+    ///
+    /// The default derives locality from the session's `baseURL`. Providers that
+    /// dynamically pick among several advertised connections at runtime (Plex,
+    /// which may fail over LAN → remote → relay) **must** override this to report
+    /// the *resolved* connection, because a Plex server advertises its own LAN
+    /// address even to remote clients — trusting `baseURL` alone would
+    /// mis-classify a Tailscale-reached server as local.
+    var connectionLocality: SourceLocality { get }
 }
 
 // MARK: - Optional subtitle capability defaults
@@ -183,6 +197,13 @@ public extension MediaProvider {
     /// inherits this additive pass-through.
     func playbackInfo(for itemID: String, mediaSourceID: String?, forceTranscode: Bool) async throws -> PlaybackRequest {
         try await playbackInfo(for: itemID, forceTranscode: forceTranscode)
+    }
+
+    /// Default: classify locality from the session's persisted `baseURL` host.
+    /// Correct for single-URL backends (Jellyfin, manually-entered hosts); Plex
+    /// overrides this to classify the connection its resolver actually selected.
+    var connectionLocality: SourceLocality {
+        SourceLocalityClassifier.classify(url: session.server.baseURL)
     }
 }
 

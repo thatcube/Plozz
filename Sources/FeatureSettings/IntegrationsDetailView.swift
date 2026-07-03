@@ -3,6 +3,7 @@ import SwiftUI
 import CoreModels
 import CoreUI
 import TraktService
+import SeerService
 import SimklService
 import AniListService
 import MALService
@@ -11,6 +12,7 @@ import LastFmService
 struct IntegrationsDetailView: View {
     let trakt: TraktService
     let simkl: SimklService
+    let seer: SeerService
     let anilist: AniListService
     let mal: MALService
     let lastfm: LastFmService
@@ -27,7 +29,8 @@ struct IntegrationsDetailView: View {
                 async let a: Void = anilist.refreshStatus()
                 async let m: Void = mal.refreshStatus()
                 async let l: Void = lastfm.refreshStatus()
-                _ = await (t, s, a, m, l)
+                async let se: Void = seer.refreshStatus()
+                _ = await (t, s, a, m, l, se)
             }
     }
 
@@ -149,7 +152,17 @@ struct IntegrationsDetailView: View {
             }
         ])
 
-        return [trackers, watchStatus]
+        let discover = SettingsSplitSection(id: "discover", header: "Discover", rows: [
+            SettingsSplitRow(
+                id: "seerr",
+                title: "Overseerr / Jellyseerr",
+                description: "Connect a Seerr server to surface trending titles in the Home hero and request movies & shows right from your Apple TV.",
+            ) {
+                SeerConfigurationView(seer: seer)
+            }
+        ])
+
+        return [discover, trackers, watchStatus]
     }
 
     /// The status + action controls shown in a tracker's detail pane for every
@@ -691,6 +704,111 @@ private struct LicenseBadge: Identifiable {
     }
     static func api() -> LicenseBadge {
         LicenseBadge(id: "API", label: "API", tint: Color(red: 0.55, green: 0.4, blue: 0.7))
+    }
+}
+
+/// Detail-pane controls for the Seerr integration. Unlike the OAuth trackers
+/// (device-code flows), Seerr is self-hosted, so this collects a server URL and
+/// an admin API key, then drives ``SeerService/connect(baseURL:apiKey:userId:)``
+/// and reflects the resulting ``SeerConnectionPhase``.
+private struct SeerConfigurationView: View {
+    let seer: SeerService
+
+    @State private var urlText: String = ""
+    @State private var apiKeyText: String = ""
+    @State private var didPrefill = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            switch seer.phase {
+            case let .connected(summary):
+                connectedView(summary: summary)
+            default:
+                entryView
+            }
+        }
+        .onAppear {
+            guard !didPrefill else { return }
+            didPrefill = true
+            if let saved = seer.savedBaseURLString { urlText = saved }
+        }
+    }
+
+    @ViewBuilder
+    private var entryView: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            TextField("Server address (e.g. https://requests.example.com)", text: $urlText)
+                .textContentType(.URL)
+                #if os(tvOS) || os(iOS)
+                .keyboardType(.URL)
+                .autocorrectionDisabled(true)
+                .textInputAutocapitalization(.never)
+                #endif
+
+            SecureField("Admin API key", text: $apiKeyText)
+                .textContentType(.password)
+                #if os(tvOS) || os(iOS)
+                .autocorrectionDisabled(true)
+                .textInputAutocapitalization(.never)
+                #endif
+
+            if case .connecting = seer.phase {
+                HStack(spacing: 12) {
+                    ProgressView().controlSize(.small)
+                    Text("Connecting…")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                Button(action: connect) {
+                    Label("Connect", systemImage: "link")
+                }
+                .disabled(!canConnect)
+            }
+
+            if case let .failed(message) = seer.phase {
+                Label(message, systemImage: "exclamationmark.triangle.fill")
+                    .font(.callout)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func connectedView(summary: String) -> some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Label("Connected", systemImage: "checkmark.seal.fill")
+                .font(.headline)
+                .foregroundStyle(.green)
+            if !summary.isEmpty {
+                Text(summary)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+            if let host = seer.savedBaseURLString {
+                Text(host)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            Button(role: .destructive) {
+                seer.disconnect()
+                apiKeyText = ""
+            } label: {
+                Label("Disconnect", systemImage: "xmark.circle")
+            }
+        }
+    }
+
+    private var canConnect: Bool {
+        SeerConfig.normalizedBaseURL(from: urlText) != nil
+            && !apiKeyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private func connect() {
+        guard let url = SeerConfig.normalizedBaseURL(from: urlText) else { return }
+        let key = apiKeyText
+        Task { await seer.connect(baseURL: url, apiKey: key) }
     }
 }
 #endif

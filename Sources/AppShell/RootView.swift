@@ -159,6 +159,7 @@ public struct RootView: View {
                         ratingsProvider: appState.ratingsProvider,
                         trakt: appState.traktService,
                         simkl: appState.simklService,
+                        seer: appState.seerService,
                         anilist: appState.anilistService,
                         mal: appState.malService,
                         lastfm: appState.lastfmService,

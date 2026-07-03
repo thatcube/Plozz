@@ -33,6 +33,13 @@ public struct SettingsView: View {
     /// the profile header). Mirrors the editor flow in ``ProfileDetailView``.
     @State private var editingProfile: Profile?
 
+    /// Focus scope for the Settings root list. Turning profiles off pops the
+    /// stack back here, and we `resetFocus` into this scope so focus lands on
+    /// the "Enable Profiles" row (where the Profiles row the user came from was)
+    /// instead of tvOS picking an arbitrary row like Playback.
+    @Namespace private var rootFocusScope
+    @Environment(\.resetFocus) private var resetFocus
+
     /// Shared sizing for the two identity headers (This Apple TV + the active
     /// profile) so their avatar/icon and title read as the same component. The
     /// circle is sized to sit between the old TV glyph (64) and profile avatar
@@ -235,6 +242,7 @@ public struct SettingsView: View {
                 .frame(maxWidth: .infinity, alignment: .center)
                 .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
                 .padding(.vertical, 48)
+                .focusScope(rootFocusScope)
             }
             .scrollClipDisabled()
             .navigationDestination(for: SettingsRoute.self) { route in
@@ -247,6 +255,22 @@ public struct SettingsView: View {
                     .toolbar(.hidden, for: .tabBar)
             }
             .task { await reloadLibraries() }
+            // Turning profiles off from the Profiles detail page makes that page
+            // meaningless — pop back to the Settings root so the UI reflects the
+            // change instead of stranding the user on a dead screen.
+            .onChange(of: profilesEnabled) { _, enabled in
+                if !enabled {
+                    path.removeAll()
+                    // Popping to root lets tvOS pick an arbitrary default focus
+                    // (it landed on "Playback"). Steer it back to the "Enable
+                    // Profiles" row — the same spot the "Profiles" row the user
+                    // came from occupied — once the root is back on screen.
+                    Task { @MainActor in
+                        try? await Task.sleep(nanoseconds: 350_000_000)
+                        resetFocus(in: rootFocusScope)
+                    }
+                }
+            }
         }
         .alert("Sign out of all accounts?", isPresented: $confirmSignOutAll) {
             Button("Sign Out", role: .destructive, action: onSignOutAll)
@@ -360,9 +384,14 @@ public struct SettingsView: View {
             navRow("Spoilers", icon: "eye.slash",
                    value: nil,
                    route: .spoilers)
-            navRow("Trackers — Trakt, Simkl, AniList, MyAnimeList, Last.fm", icon: "link",
+            navRow("Trackers", icon: "link",
                    value: nil,
-                   route: .integrations)
+                   route: .integrations) {
+                Text("Trakt, Simkl, AniList, MyAnimeList, Last.fm")
+                    .font(.footnote)
+                    .settingsRowSecondary()
+                    .lineLimit(1)
+            }
         }
     }
 
@@ -389,7 +418,7 @@ public struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("This Apple TV")
                         .font(Self.identityTitleFont)
-                    Text("Servers and profiles, shared by everyone here.")
+                    Text("Shared across every profile on this Apple TV.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
@@ -415,6 +444,7 @@ public struct SettingsView: View {
                            route: .profile)
                 } else {
                     enableProfilesRow
+                        .prefersDefaultFocus(in: rootFocusScope)
                 }
             }
             .padding(.horizontal, 28)
@@ -649,13 +679,7 @@ public struct SettingsView: View {
                 .frame(width: Self.identityAvatarSize, height: Self.identityAvatarSize)
                 .background(Circle().fill(Color.primary.opacity(0.06)))
                 .overlay(Circle().strokeBorder(Color.primary.opacity(0.12), lineWidth: 1))
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Settings").font(Self.identityTitleFont)
-                Text("Used across the household. Enable profiles to give each viewer their own.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            Text("Settings").font(Self.identityTitleFont)
             Spacer()
         }
         .padding(28)
@@ -665,12 +689,12 @@ public struct SettingsView: View {
 
     private var enableProfilesRow: some View {
         Button(action: onEnableProfiles) {
-            HStack(spacing: 16) {
-                rowIcon("person.crop.circle.badge.plus")
+            HStack(alignment: .top, spacing: 16) {
+                rowIcon("person.crop.circle")
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Enable Profiles")
                         .font(.callout.weight(.medium))
-                    Text("Add separate household profiles so each person gets their own Home, watch history, and preferences.")
+                    Text("Each profile gets its own settings, watch history, and libraries.")
                         .font(.footnote)
                         .settingsRowSecondary()
                         .fixedSize(horizontal: false, vertical: true)

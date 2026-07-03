@@ -44,7 +44,7 @@ public struct SearchView: View {
             // Before the first search there's nothing to show — keep it clean.
             Color.clear
         case .empty:
-            noResults
+            PlozzEmptyStateView("No results. Try a different search.")
         default:
             ContentStateView(
                 state: viewModel.state,
@@ -54,22 +54,6 @@ public struct SearchView: View {
                 results(sections)
             }
         }
-    }
-
-    private var noResults: some View {
-        VStack(spacing: 24) {
-            Image("PlozzLogoSad")
-                .resizable()
-                .interpolation(.none)
-                .scaledToFit()
-                .frame(width: 80, height: 80)
-            Text("No results. Try a different search.")
-                .font(.title2)
-                .multilineTextAlignment(.center)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: 800)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func results(_ sections: [SearchSection]) -> some View {

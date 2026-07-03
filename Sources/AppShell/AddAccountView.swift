@@ -86,6 +86,11 @@ struct AddAccountView: View {
         }
         .padding(60)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Menu/back should return to wherever the flow was opened from (e.g.
+        // Settings), not fall through and suspend the whole app.
+        .onExitCommand {
+            if canReturnToApp { onCancel() }
+        }
     }
 
     private func providerButton(
@@ -104,7 +109,7 @@ struct AddAccountView: View {
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 320)
             }
-            .frame(width: 420, height: 320)
+            .frame(width: 420, height: 400)
         }
         // Same focus treatment as the Settings About / Report a Problem cards:
         // accent outline + gentle lift, no contrast inversion.

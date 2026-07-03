@@ -68,6 +68,12 @@ struct RealtimePlaybackScrobbler: TraktScrobbling {
 /// Settings exposes account management, the customizable Home-libraries
 /// checklist, and caption/spoiler/theme settings.
 struct MainTabView: View {
+    /// Stable identifiers for the root tabs, used to persist and restore the
+    /// selected tab across MainTabView being rebuilt (see `selectedTab`).
+    private enum MainTab: String {
+        case home, search, music, settings
+    }
+
     let accounts: [ResolvedAccount]
     /// Subtitle behaviour (mode / language / auto-download) and appearance
     /// (`SubtitleStyle`) split out of the retired `CaptionSettings`. Behaviour
@@ -173,6 +179,19 @@ struct MainTabView: View {
     /// per-profile aesthetic (see `NavigationStyle`).
     @AppStorage(NavigationStyle.storageKey) private var navigationStyleRaw = NavigationStyle.default.rawValue
 
+    /// The selected root tab, persisted so it survives MainTabView being torn
+    /// down and rebuilt — e.g. the add-server flow swaps the whole root out for
+    /// the onboarding chooser, and on return we want to land back on the tab the
+    /// user left from (usually Settings), not reset to Home.
+    @SceneStorage("mainTab.selection") private var selectedTabRaw = MainTab.home.rawValue
+
+    private var selectedTab: Binding<MainTab> {
+        Binding(
+            get: { MainTab(rawValue: selectedTabRaw) ?? .home },
+            set: { selectedTabRaw = $0.rawValue }
+        )
+    }
+
     private var navigationStyle: NavigationStyle {
         NavigationStyle(rawValue: navigationStyleRaw) ?? .default
     }
@@ -182,8 +201,8 @@ struct MainTabView: View {
     }
 
     var body: some View {
-        TabView {
-            Tab("Home", systemImage: "house.fill") {
+        TabView(selection: selectedTab) {
+            Tab("Home", systemImage: "house.fill", value: MainTab.home) {
             HomeTab(
                 accounts: accounts,
                 homeVisibility: homeVisibility,
@@ -209,7 +228,7 @@ struct MainTabView: View {
             )
             }
 
-            Tab("Search", systemImage: "magnifyingglass") {
+            Tab("Search", systemImage: "magnifyingglass", value: MainTab.search) {
             SearchTab(
                 accounts: accounts,
                 behavior: subtitleBehaviorModel.settings,
@@ -234,7 +253,7 @@ struct MainTabView: View {
             // account exposes a music library. Video-only users see no tab and no
             // mini-player — the app is byte-for-byte unchanged for them.
             if musicAvailability.hasMusic {
-                Tab("Music", systemImage: "music.note") {
+                Tab("Music", systemImage: "music.note", value: MainTab.music) {
                 MusicTabView(
                     accounts: musicAvailability.detectedAccounts,
                     visibleLibraryIDs: musicAvailability.visibleLibraryIDs,
@@ -246,7 +265,7 @@ struct MainTabView: View {
                 }
             }
 
-            Tab("Settings", systemImage: "gearshape.fill") {
+            Tab("Settings", systemImage: "gearshape.fill", value: MainTab.settings) {
             SettingsView(
                 subtitleBehavior: subtitleBehaviorModel,
                 spoilers: spoilerModel,

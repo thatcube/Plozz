@@ -302,7 +302,6 @@ struct HomeHeroView: View {
         .frame(width: Self.screenWidth, height: height, alignment: .bottom)
         .frame(maxWidth: .infinity, alignment: .center)
         .clipped()
-        .animation(.easeInOut(duration: 0.42), value: current?.id)
     }
 
     /// The directional wipe: the incoming backdrop slides in from the trailing
@@ -808,10 +807,21 @@ struct HomeHeroView: View {
     private func page(to toItem: Int, keepButton: Int, forward isForward: Bool) {
         guard items.indices.contains(toItem), toItem != index else { return }
         beginTransition()
-        // Set direction before index so the transition reads the right edges;
-        // both land in one render pass.
+        // Set direction before index so the transition reads the right edges.
+        // The wipe is now driven by an EXPLICIT animation transaction here rather
+        // than a container-level `.animation(value: current?.id)`: that implicit
+        // value-animation also fired on the async item-set swap and the initial
+        // seed (see `.onChange(of: items.map(\.id))`), and when one of those
+        // coincided with `beginTransition()`'s `disablesAnimations` transaction the
+        // insertion got no animation (new backdrop snapped in) while the removal
+        // still animated (old slid out underneath) — the intermittent wrong-order
+        // wipe. Scoping the animation to a real page makes both the insertion and
+        // removal share one transaction, so they always animate together; set-swaps
+        // and re-seats now change `index` outside any animation and are instant.
         forward = isForward
-        index = toItem
+        withAnimation(.easeInOut(duration: 0.42)) {
+            index = toItem
+        }
         advanceToken &+= 1
 
         // Keep the logical selection on the destination, clamped to its button

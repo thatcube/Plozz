@@ -250,6 +250,11 @@ let package = Package(
                 "CoreModels",
                 "FeaturePlayback",
                 .product(name: "AetherEngine", package: "AetherEngine"),
+                // SMB2/3 byte-source product (AMSMB2 / libsmb2-backed). Lets the
+                // engine wrapper play a media-share file over an `IOReader` custom
+                // source without a server. Second-class transport behind Plex /
+                // Jellyfin; see docs/media-share-proposal.md.
+                .product(name: "AetherEngineSMB", package: "AetherEngine"),
             ]
         ),
 

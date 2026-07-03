@@ -8,6 +8,7 @@ import FeaturePlayback
 import UIKit
 #endif
 @preconcurrency import AetherEngine
+@preconcurrency import AetherEngineSMB
 
 // The module and main class are both named "AetherEngine", so we typealias
 // the class to avoid ambiguity. All other public types (LoadOptions,
@@ -164,11 +165,25 @@ public final class PlozzigenVideoEngine: VideoEngine {
         options.preferredSubtitleLanguages = request.preferredSubtitleLanguages
 
         do {
-            try await engine.load(
-                url: url,
-                startPosition: startPosition > 0 ? startPosition : nil,
-                options: options
-            )
+            if url.scheme?.lowercased() == "smb" {
+                // Media-share transport (second-class, behind Plex/Jellyfin). The
+                // provider mints a per-play `smb://user:password@host/share/path`
+                // URL with in-memory credentials; nothing is persisted here. We
+                // wrap it in an `IOReader` custom source so AetherEngine demuxes
+                // the raw file over SMB with no server-side transcode.
+                let source = try await makeSMBSource(from: url)
+                try await engine.load(
+                    source: source,
+                    startPosition: startPosition > 0 ? startPosition : nil,
+                    options: options
+                )
+            } else {
+                try await engine.load(
+                    url: url,
+                    startPosition: startPosition > 0 ? startPosition : nil,
+                    options: options
+                )
+            }
             // Guard against stop() having run during the await above.
             guard status == .loading else { return }
             engine.play()
@@ -177,6 +192,56 @@ public final class PlozzigenVideoEngine: VideoEngine {
             let err: AppError = .unknown(error.localizedDescription)
             status = .failed(err)
             onFailure?(err)
+        }
+    }
+
+    // MARK: - SMB custom source
+
+    /// Build an SMB `MediaSource` from an `smb://user:password@host[:port]/share/path/file.ext`
+    /// URL. Splits off the server + share, opens an AMSMB2-backed `SMBConnection`
+    /// (NTLMv2 / guest, read-only), and wraps it in an `SMBIOReader` for the engine.
+    private func makeSMBSource(from url: URL) async throws -> MediaSource {
+        guard let comps = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let host = comps.host, !host.isEmpty else {
+            throw AppError.unknown("Malformed SMB URL")
+        }
+        var serverComps = URLComponents()
+        serverComps.scheme = "smb"
+        serverComps.host = host
+        serverComps.port = comps.port
+        guard let server = serverComps.url else {
+            throw AppError.unknown("Malformed SMB server URL")
+        }
+        // /share/dir/file.ext → share = "share", path = "dir/file.ext" (AMSMB2
+        // wants a share-relative forward-slash path with no leading slash).
+        let parts = comps.percentEncodedPath
+            .split(separator: "/", omittingEmptySubsequences: true)
+            .map { $0.removingPercentEncoding ?? String($0) }
+        guard let share = parts.first, parts.count >= 2 else {
+            throw AppError.unknown("SMB URL missing share or file path")
+        }
+        let filePath = parts.dropFirst().joined(separator: "/")
+        let connection = try await SMBConnection.connect(
+            server: server,
+            share: share,
+            path: filePath,
+            user: comps.user ?? "",
+            password: comps.password ?? ""
+        )
+        return .custom(SMBIOReader(source: connection), formatHint: Self.smbFormatHint(for: filePath))
+    }
+
+    /// Optional container short-name hint for the demuxer probe, derived from the
+    /// file extension (there is no server MIME type for a raw share file). nil
+    /// lets AetherEngine probe from content.
+    private static func smbFormatHint(for path: String) -> String? {
+        switch (path as NSString).pathExtension.lowercased() {
+        case "mkv":                 return "matroska"
+        case "webm":                return "webm"
+        case "mp4", "m4v", "mov":   return "mp4"
+        case "ts", "m2ts", "mts":   return "mpegts"
+        case "avi":                 return "avi"
+        default:                    return nil
         }
     }
 

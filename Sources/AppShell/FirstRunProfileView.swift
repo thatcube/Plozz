@@ -76,6 +76,9 @@ struct FirstRunProfileView: View {
         .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .defaultFocus($focus, .confirm)
+        // tvOS's defaultFocus can miss when this screen appears right after the
+        // profile is seeded, so land focus on "Looks good" explicitly too.
+        .onAppear { focus = .confirm }
         // Pressing Menu on this one-time setup screen accepts the seeded profile
         // and continues, so the app never suspends from here.
         .onExitCommand { appState.confirmFirstRunProfile() }
@@ -88,8 +91,12 @@ struct FirstRunProfileView: View {
                 onSave: { draft in
                     appState.saveProfile(draft)
                     editing = false
+                    focus = .confirm
                 },
-                onCancel: { editing = false }
+                onCancel: {
+                    editing = false
+                    focus = .confirm
+                }
             )
         }
     }

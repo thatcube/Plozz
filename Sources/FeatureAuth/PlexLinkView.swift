@@ -53,12 +53,13 @@ public struct PlexLinkView: View {
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            // Sits ~80pt above the page bottom (60pt outer padding + 20pt here),
-            // leaving the content above it centered in the remaining space.
+            // As low as we can sit without entering tvOS's overscan/no-go zone:
+            // ~40pt above the inner edge of the safe area.
             controls
-                .padding(.bottom, 20)
         }
-        .padding(60)
+        .padding(.horizontal, 60)
+        .padding(.top, 60)
+        .padding(.bottom, 40)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .defaultFocus($focused, defaultControl)
         .onExitCommand { requestCancel() }
@@ -152,8 +153,8 @@ public struct PlexLinkView: View {
                 .font(.title2)
 
         case let .selectingServer(servers):
-            ServerList(servers: displayServers(servers), selected: $selectedServerIDs)
-                .onAppear { seedSelectionIfNeeded(displayServers(servers)) }
+            ServerList(servers: servers, selected: $selectedServerIDs)
+                .onAppear { seedSelectionIfNeeded(servers) }
 
         case .success:
             Label("Signed in!", systemImage: "checkmark.circle.fill")
@@ -246,35 +247,6 @@ public struct PlexLinkView: View {
         guard !didSeedSelection else { return }
         didSeedSelection = true
         selectedServerIDs = Set(servers.filter(\.isOwned).map(\.id))
-    }
-
-    /// The list actually rendered on the server-select step. In DEBUG this pads
-    /// the real servers with synthetic "demo" rows so scrolling can be tested
-    /// without owning many Plex servers. The demo rows are never added — Continue
-    /// only ever passes the *real* servers whose ids match — so they're harmless.
-    private func displayServers(_ servers: [PlexServerCandidate]) -> [PlexServerCandidate] {
-        #if DEBUG
-        guard servers.count < 8, let template = servers.first else { return servers }
-        var out = servers
-        let demoNames = [
-            "Demo Alpha", "Demo Bravo", "Demo Charlie", "Demo Delta",
-            "Demo Echo", "Demo Foxtrot", "Demo Golf", "Demo Hotel"
-        ]
-        for (index, name) in demoNames.enumerated() {
-            out.append(
-                PlexServerCandidate(
-                    id: "debug-demo-\(index)",
-                    name: name,
-                    connectionURLs: template.connectionURLs,
-                    accessToken: template.accessToken,
-                    isOwned: false
-                )
-            )
-        }
-        return out
-        #else
-        return servers
-        #endif
     }
 }
 

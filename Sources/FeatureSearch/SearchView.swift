@@ -41,7 +41,10 @@ public struct SearchView: View {
     private var content: some View {
         switch viewModel.state {
         case .idle:
-            hint
+            // Before the first search there's nothing to show — keep it clean.
+            Color.clear
+        case .empty:
+            noResults
         default:
             ContentStateView(
                 state: viewModel.state,
@@ -53,14 +56,18 @@ public struct SearchView: View {
         }
     }
 
-    private var hint: some View {
+    private var noResults: some View {
         VStack(spacing: 24) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 72))
-                .foregroundStyle(.secondary)
-            Text("Search for movies, shows, and episodes")
+            Image("PlozzLogoSad")
+                .resizable()
+                .interpolation(.none)
+                .scaledToFit()
+                .frame(width: 80, height: 80)
+            Text("No results. Try a different search.")
                 .font(.title2)
+                .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
+                .frame(maxWidth: 800)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

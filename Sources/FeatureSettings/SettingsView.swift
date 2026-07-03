@@ -40,6 +40,12 @@ public struct SettingsView: View {
     private static let identityAvatarSize: CGFloat = 84
     private static let identityTitleFont: Font = .system(size: 36, weight: .bold)
 
+    #if DEBUG
+    /// Flip to `true` to show the "Reset to First Run (Debug)" row in Settings
+    /// (handy for re-testing the onboarding/first-run flow without reinstalling).
+    private static let showDebugResetFirstRunRow = false
+    #endif
+
     /// Caps the root "Settings" page content and centers it, so the profile
     /// card and About/Sign Out list don't stretch edge-to-edge on a wide TV.
     /// Tune this single value to make the page wider/narrower.
@@ -456,7 +462,10 @@ public struct SettingsView: View {
             #if DEBUG
             // DEBUG-only: wipe accounts, profiles, recents, and the first-run
             // flag so the next server add reproduces a genuine first run.
-            debugResetFirstRunRow
+            // Hidden by default — flip `showDebugResetFirstRunRow` to re-enable.
+            if Self.showDebugResetFirstRunRow {
+                debugResetFirstRunRow
+            }
             #endif
         }
     }
@@ -635,11 +644,13 @@ public struct SettingsView: View {
     private var soloHeader: some View {
         HStack(spacing: 20) {
             Image(systemName: "gearshape.fill")
-                .font(.largeTitle)
-                .frame(width: 64, height: 64)
-                .background(Circle().fill(Color.primary.opacity(0.10)))
+                .font(.system(size: 40, weight: .regular))
+                .foregroundStyle(.secondary)
+                .frame(width: Self.identityAvatarSize, height: Self.identityAvatarSize)
+                .background(Circle().fill(Color.primary.opacity(0.06)))
+                .overlay(Circle().strokeBorder(Color.primary.opacity(0.12), lineWidth: 1))
             VStack(alignment: .leading, spacing: 4) {
-                Text("Settings").font(.title2.weight(.semibold))
+                Text("Settings").font(Self.identityTitleFont)
                 Text("Used across the household. Enable profiles to give each viewer their own.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)

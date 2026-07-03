@@ -72,3 +72,28 @@ fi
 
 /usr/bin/sed -i '' -E "s/CURRENT_PROJECT_VERSION = [^;]*;/CURRENT_PROJECT_VERSION = ${build};/g" "$proj"
 echo "Baked CFBundleVersion (CURRENT_PROJECT_VERSION) = ${build} (from ${src}) into ${proj}"
+
+# --- Marketing version (CFBundleShortVersionString) bake ---------------------
+# Auto-derive the marketing version so it reflects how often the app ships,
+# with no manual bookkeeping. Precedence:
+#   1. $PLOZZ_MARKETING_VERSION — explicit override for a real, named release
+#      (e.g. "1.0"). Set this when you want a human-chosen version instead of
+#      the date.
+#   2. CalVer date YYYY.M.D (unpadded integers) — auto, monotonically
+#      increasing, and communicates recency. App Store treats each dot-separated
+#      component as an integer, so 2026.7.3 < 2026.7.10 < 2026.8.1 < 2027.1.1 all
+#      order correctly. Same-day rebuilds share a marketing version and are told
+#      apart by the (always-incrementing) build number above.
+# The app and Top Shelf extension share the value (lockstep via the global /g).
+if [ -n "${PLOZZ_MARKETING_VERSION:-}" ]; then
+  marketing="${PLOZZ_MARKETING_VERSION}"
+  msrc="PLOZZ_MARKETING_VERSION override"
+else
+  y=$(date +%Y); m=$(date +%m); d=$(date +%d)
+  # 10# forces base-10 so a leading zero (e.g. "07") isn't parsed as octal.
+  marketing="${y}.$((10#$m)).$((10#$d))"
+  msrc="CalVer build date"
+fi
+
+/usr/bin/sed -i '' -E "s/MARKETING_VERSION = [^;]*;/MARKETING_VERSION = ${marketing};/g" "$proj"
+echo "Baked CFBundleShortVersionString (MARKETING_VERSION) = ${marketing} (from ${msrc}) into ${proj}"

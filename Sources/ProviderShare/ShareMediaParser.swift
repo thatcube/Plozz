@@ -103,16 +103,22 @@ enum ShareMediaParser {
     private static func episodeTitle(from raw: String) -> String? {
         let cleaned = clean(raw)
         guard !cleaned.isEmpty else { return nil }
-        // Drop pure resolution/scene noise so we don't show "1080p Web Dl" as a
-        // title. Require at least one word with 2+ letters that isn't a tag.
+        // Release names put the real episode title first, then scene/quality tags
+        // ("Pilot 720p WEB-DL x264"). Keep words up to the first tag so we show
+        // "Pilot", not "Pilot 720p". Require at least one real (non-numeric) word.
         let tags: Set<String> = [
             "1080p", "720p", "2160p", "480p", "4k", "web", "webdl", "web dl",
             "bluray", "hdtv", "x264", "x265", "hevc", "aac", "ddp", "dd", "amzn",
             "nf", "dsnp", "hmax", "atvp", "repack", "proper", "internal",
         ]
-        let words = cleaned.lowercased().split(separator: " ").map(String.init)
-        let meaningful = words.filter { $0.count >= 2 && !tags.contains($0) && Int($0) == nil }
-        return meaningful.count >= 1 ? cleaned : nil
+        var kept: [String] = []
+        for word in cleaned.split(separator: " ").map(String.init) {
+            if tags.contains(word.lowercased()) { break }
+            kept.append(word)
+        }
+        let meaningful = kept.filter { $0.count >= 2 && Int($0) == nil }
+        guard !meaningful.isEmpty else { return nil }
+        return kept.joined(separator: " ")
     }
 
     // MARK: - Movie
@@ -150,6 +156,9 @@ enum ShareMediaParser {
              .replacingOccurrences(of: "_", with: " ")
         // A dash flanked by spaces is a separator; keep hyphenated words intact.
         s = s.replacingOccurrences(of: " - ", with: " ")
+        // Drop any stray/unbalanced bracket chars a group-strip left behind (e.g.
+        // a title like "Inception (2010)" cut at the year leaves a dangling "(").
+        s = s.replacingOccurrences(of: #"[\[\]\(\)\{\}]"#, with: " ", options: .regularExpression)
         // Collapse whitespace.
         s = s.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
         return s.trimmingCharacters(in: CharacterSet(charactersIn: " -"))

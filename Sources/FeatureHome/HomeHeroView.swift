@@ -905,27 +905,37 @@ struct HomeHeroView: View {
         if slideProgress != 0 { settleSlide() }
         beginTransition()
         let backSlot = 1 - frontSlot
-        // Stage the incoming art into the parked (off-screen) slot. progress is 0
-        // here, so `HeroSlideEffect` places the back slot fully off-screen — this
-        // write is invisible regardless of frame timing.
-        slotItems[backSlot] = items[toItem]
         slideDirection = isForward ? 1 : -1
         slideGeneration &+= 1
         let generation = slideGeneration
-        // ONE transaction for the whole turn: the push, the metadata-hide, the
-        // index/selection. The pill highlight and metadata-hide strip their own
-        // animation locally, so this ambient animation only drives the push.
-        withAnimation(.easeInOut(duration: 0.42)) {
-            slideProgress = 1
-            metadataVisible = false
-            index = toItem
-            advanceToken &+= 1
-            selectedButton = min(keepButton, max(0, buttons(for: items[toItem]).count - 1))
-        } completion: {
-            // The completion fires even when this animation is superseded by a
-            // later page; the generation guard makes only the newest page commit.
+        // FRAME 1 — commit the incoming art into the parked (off-screen) slot with
+        // NO animation and progress still 0. This is the crux of the fix that six
+        // prior attempts missed: the incoming layer's CONTENT must land in its own
+        // render frame, SEPARATE from the push. When the new image was set in the
+        // same transaction as the animation (true of every previous approach —
+        // `.id` swap, `.transition`, offset staging, GeometryEffect), SwiftUI reset
+        // the incoming layer's animatable state, so it snapped to rest while only
+        // the outgoing layer — whose content never changes — animated out. That,
+        // not `.ignoresSafeArea` or transaction attribution, was the wrong-order
+        // wipe. The front slot's content is untouched here, so it stays stable too.
+        slotItems[backSlot] = items[toItem]
+        metadataVisible = false
+        index = toItem
+        advanceToken &+= 1
+        selectedButton = min(keepButton, max(0, buttons(for: items[toItem]).count - 1))
+        // FRAME 2 — one frame later, once the staged art has rendered off-screen,
+        // run the push. ONLY `slideProgress` changes inside this animation, so both
+        // permanently-mounted layers have settled content and interpolate cleanly:
+        // the fronted slot slides out, the parked slot slides in.
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 24_000_000) // ~1.5 frames @ 60fps
             guard generation == slideGeneration else { return }
-            settleSlide()
+            withAnimation(.easeInOut(duration: 0.42)) {
+                slideProgress = 1
+            } completion: {
+                guard generation == slideGeneration else { return }
+                settleSlide()
+            }
         }
         Task { await resolveArtwork(around: toItem) }
     }

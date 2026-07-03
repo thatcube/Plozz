@@ -120,4 +120,39 @@ final class HeroCuratorTests: XCTestCase {
         )
         XCTAssertFalse(featuredCalled)
     }
+
+    // MARK: - Synchronous seed (pop-in avoidance)
+
+    func testCurateSyncUsesOnlyLibrarySourcesInOrder() {
+        let curator = HeroCurator()
+        // Featured + Random are async-only, so the sync seed treats them as empty
+        // and interleaves just Continue Watching + Watchlist in configured order.
+        let result = curator.curateSync(
+            settings: settings(sources: [.featured, .continueWatching, .randomFromLibrary, .watchlist]),
+            continueWatching: [item("c1"), item("c2")],
+            watchlist: [item("w1")]
+        )
+        // Round-robin over the two populated sources: c1, w1, c2.
+        XCTAssertEqual(result.map(\.id), ["c1", "w1", "c2"])
+    }
+
+    func testCurateSyncInactiveYieldsNothing() {
+        let curator = HeroCurator()
+        let result = curator.curateSync(
+            settings: settings(sources: []),
+            continueWatching: [item("c1")],
+            watchlist: [item("w1")]
+        )
+        XCTAssertTrue(result.isEmpty)
+    }
+
+    func testCurateSyncRespectsMaxItems() {
+        let curator = HeroCurator()
+        let result = curator.curateSync(
+            settings: settings(sources: [.continueWatching], maxItems: 2),
+            continueWatching: [item("c1"), item("c2"), item("c3")],
+            watchlist: []
+        )
+        XCTAssertEqual(result.map(\.id), ["c1", "c2"])
+    }
 }

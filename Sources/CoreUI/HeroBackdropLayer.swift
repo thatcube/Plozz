@@ -34,6 +34,13 @@ public struct HeroBackdropLayer<Video: View>: View {
     private let scrimTone: Color
     /// Blurs the still image (used by spoiler-hiding). Never blurs the video slot.
     private let blursImage: Bool
+    /// Fraction of the height at which the bottom dissolve *begins* (the image is
+    /// fully opaque above it and fades to transparent by the bottom edge). The
+    /// item **detail** hero melts into the page early (`0.33`) because content
+    /// scrolls up over it; the **Home** hero fills the screen, so it keeps the
+    /// artwork opaque far lower and only feathers the very bottom into the
+    /// Continue Watching panel.
+    private let dissolveStart: CGFloat
     /// Overlaid on the still image; empty today, hosts a faded-in trailer later.
     private let backgroundVideo: () -> Video
 
@@ -44,6 +51,7 @@ public struct HeroBackdropLayer<Video: View>: View {
         height: CGFloat,
         scrimTone: Color,
         blursImage: Bool = false,
+        dissolveStart: CGFloat = 0.33,
         @ViewBuilder backgroundVideo: @escaping () -> Video
     ) {
         self.urls = urls
@@ -52,6 +60,7 @@ public struct HeroBackdropLayer<Video: View>: View {
         self.height = height
         self.scrimTone = scrimTone
         self.blursImage = blursImage
+        self.dissolveStart = dissolveStart
         self.backgroundVideo = backgroundVideo
     }
 
@@ -112,7 +121,7 @@ public struct HeroBackdropLayer<Video: View>: View {
         LinearGradient(
             stops: [
                 .init(color: .white, location: 0.0),
-                .init(color: .white, location: 0.33),
+                .init(color: .white, location: dissolveStart),
                 .init(color: .clear, location: 1.0)
             ],
             startPoint: .top,
@@ -154,7 +163,8 @@ public extension HeroBackdropLayer where Video == EmptyView {
         placeholderPosterURL: URL? = nil,
         height: CGFloat,
         scrimTone: Color,
-        blursImage: Bool = false
+        blursImage: Bool = false,
+        dissolveStart: CGFloat = 0.33
     ) {
         self.init(
             urls: urls,
@@ -163,6 +173,7 @@ public extension HeroBackdropLayer where Video == EmptyView {
             height: height,
             scrimTone: scrimTone,
             blursImage: blursImage,
+            dissolveStart: dissolveStart,
             backgroundVideo: { EmptyView() }
         )
     }

@@ -61,6 +61,31 @@ public struct HeroCurator: Sendable {
 
         return strategy.compose(perSource, limit: limit)
     }
+
+    /// A **synchronous** seed built only from the already-loaded, non-async
+    /// sources (Continue Watching + Watchlist). Featured (Seerr) and Random are
+    /// treated as empty here because they require an `await` fetch.
+    ///
+    /// Home renders this instantly the moment its content is available so the
+    /// hero appears in the *same frame* as the rest of the page (no pop-in), then
+    /// ``curate(settings:continueWatching:watchlist:featuredProvider:randomProvider:)``
+    /// refines it with the async sources. When no async sources are enabled the
+    /// seed already equals the final result, so nothing visibly changes.
+    public func curateSync(
+        settings: HeroSettings,
+        continueWatching: [MediaItem],
+        watchlist: [MediaItem]
+    ) -> [MediaItem] {
+        guard settings.isActive else { return [] }
+        let perSource: [[MediaItem]] = settings.sources.map { source in
+            switch source {
+            case .featured, .randomFromLibrary: return []
+            case .continueWatching: return continueWatching
+            case .watchlist: return watchlist
+            }
+        }
+        return strategy.compose(perSource, limit: settings.maxItems)
+    }
 }
 
 /// The composition/ranking step of hero curation. Swappable so a future

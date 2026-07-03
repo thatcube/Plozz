@@ -22,9 +22,11 @@ struct HomeHeroView: View {
     let settings: HeroSettings
     let spoilerSettings: SpoilerSettings
     let navigationStyle: NavigationStyle
-    /// Fraction of the screen height the hero occupies. Slightly less than full
-    /// so the Continue Watching row can peek over its lower edge.
-    var heroHeightFraction: CGFloat = 0.82
+    /// Fraction of the screen height the hero occupies. Full-screen, matching the
+    /// Apple TV app: the backdrop fills the display top-to-bottom and the Continue
+    /// Watching row is pulled up to peek just below the paging dots (see
+    /// `HomeView.heroRowOverlap`), rather than the hero being shortened.
+    var heroHeightFraction: CGFloat = 1.0
     let onSelect: (MediaItem) -> Void
     let onPlay: (MediaItem) -> Void
 
@@ -82,6 +84,12 @@ struct HomeHeroView: View {
         return 1080
         #endif
     }
+
+    /// Distance the content column is lifted off the bottom edge of the
+    /// full-screen hero, so the paging dots land in the lower third. Paired with
+    /// `HomeView.heroRowOverlap`: the Continue Watching row is pulled up by
+    /// slightly less than this, so its title peeks ~40px below the dots.
+    private static let contentBottomInset: CGFloat = 132
 
     var body: some View {
         let height = Self.screenHeight * heroHeightFraction
@@ -168,6 +176,10 @@ struct HomeHeroView: View {
         .padding(.top, PlozzTheme.Metrics.screenPadding)
         .padding(.trailing, PlozzTheme.Metrics.screenPadding)
         .padding(.leading, PlozzTheme.Metrics.heroLeadingPadding)
+        // Lift the content column off the very bottom of the full-screen hero so
+        // the logo / metadata / buttons / dots sit near the lower third and the
+        // Continue Watching row can peek in just beneath the dots.
+        .padding(.bottom, Self.contentBottomInset)
     }
 
     @ViewBuilder
@@ -315,7 +327,11 @@ struct HomeHeroView: View {
             asyncFallbackURL: backdropFallback(for: item),
             placeholderPosterURL: item.posterURL,
             height: height,
-            scrimTone: scrimTone
+            scrimTone: scrimTone,
+            // Full-screen hero: keep the artwork opaque far lower than the detail
+            // page (which melts at 0.33) and only feather the very bottom into the
+            // Continue Watching panel.
+            dissolveStart: 0.82
         )
     }
 

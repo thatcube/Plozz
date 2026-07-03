@@ -74,12 +74,24 @@ public struct HomeView: View {
             // kind, order *and* how many cards it actually showed, so the skeleton
             // matches a full row and a sparse one alike.
             let layout = rows.map { HomeRowLayout(kind: $0.kind, count: $0.cardCount) }
-            let heroActive = (heroSettings?.settings.isActive ?? false) && !heroItems.isEmpty
+            // Seed the hero synchronously from the already-loaded sources
+            // (Continue Watching + Watchlist) so it renders in the *same frame* as
+            // the rows — no pop-in. Once `recomputeHero` finishes, `heroItems`
+            // (which also includes the async Featured/Random sources) takes over.
+            let syncHeroItems = heroSettings.map {
+                heroCurator.curateSync(
+                    settings: $0.settings,
+                    continueWatching: content.continueWatching,
+                    watchlist: content.watchlist
+                )
+            } ?? []
+            let displayHeroItems = heroItems.isEmpty ? syncHeroItems : heroItems
+            let heroActive = (heroSettings?.settings.isActive ?? false) && !displayHeroItems.isEmpty
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     if heroActive, let heroSettings {
                         HomeHeroView(
-                            items: heroItems,
+                            items: displayHeroItems,
                             settings: heroSettings.settings,
                             spoilerSettings: spoilerSettings,
                             navigationStyle: navigationStyle,
@@ -138,10 +150,12 @@ public struct HomeView: View {
         }
     }
 
-    /// How far the rows are pulled up so the first row (Continue Watching)
-    /// overlaps the hero's lower edge — roughly the top third of a poster card.
-    /// Tuned on-device; a starting point that leaves the cards clearly peeking.
-    private static let heroRowOverlap: CGFloat = 150
+    /// How far the rows are pulled up so the first row (Continue Watching) peeks
+    /// in just below the hero's paging dots — the Apple TV look. Paired with
+    /// `HomeHeroView.contentBottomInset` (132): pulling up by slightly less than
+    /// that inset lands the Continue Watching title ~40px below the dots, with the
+    /// tops of its cards peeking over the hero's lower edge. Tuned on-device.
+    private static let heroRowOverlap: CGFloat = 92
 
     /// Recomputes the curated hero items for the current Home `content` and the
     /// active hero settings, via the injected curator + content seams. Clears the

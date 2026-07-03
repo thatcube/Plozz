@@ -225,7 +225,12 @@ public final class ItemDetailViewModel {
         self.itemID = itemID
         self.activeProvider = provider
         self.activeItemID = itemID
-        self.activeSourceAccountID = sourceAccountID
+        // Fall back to the library-origin account when a direct source tag is
+        // absent, so a played item is always attributed to the account it was
+        // browsed from (a local media share persists resume/played state keyed by
+        // this id — dropping it silently routes the write to the primary server
+        // instead, which is why a share's resume never survived a relaunch).
+        self.activeSourceAccountID = sourceAccountID ?? originSourceAccountID
         self.ratingsProvider = ratingsProvider
         self.sourceAccountID = sourceAccountID
         self.originSourceAccountID = originSourceAccountID
@@ -480,8 +485,10 @@ public final class ItemDetailViewModel {
     private func runTrailersAndRatings(for item: MediaItem) async {
         async let trailersDone: Void = loadTrailers(for: item)
         async let ratingsDone: Void = enrichRatings(for: item)
+        async let overviewDone: Void = enrichOverview(for: item)
         _ = await trailersDone
         _ = await ratingsDone
+        _ = await overviewDone
     }
 
     /// Cancels ALL off-critical-path enrichment (trailers, ratings, cross-server
@@ -693,6 +700,7 @@ public final class ItemDetailViewModel {
         }
         guard !Task.isCancelled else { return }
         await enrichRatings(for: item)
+        await enrichOverview(for: item)
     }
 
     /// Whether the page can switch to `accountID`'s copy of this title in place —
@@ -1067,6 +1075,27 @@ public final class ItemDetailViewModel {
         guard !external.isEmpty else { return }
         guard case var .loaded(detail) = state, detail.item.id == item.id else { return }
         detail.item.ratings = detail.item.ratings.mergedWithAuthoritative(external)
+        state = .loaded(detail)
+    }
+
+    /// Fills in a missing plot/overview from the keyless ``OverviewRouter`` (TVmaze
+    /// for TV, Wikipedia for film/anime), off the critical path. Only runs when the
+    /// item has NO description of its own — so a real server's overview is never
+    /// overwritten, and in practice this only fires for local media-share items
+    /// (whose provider synthesises no text). Cached in the router, so revisiting a
+    /// page or opening another episode of the same show issues no new request. A
+    /// describable kind is required so folders/collections never trigger a lookup.
+    private func enrichOverview(for item: MediaItem) async {
+        guard item.overview?.isEmpty ?? true else { return }
+        switch item.kind {
+        case .movie, .series, .season, .episode, .video: break
+        case .folder, .collection, .unknown: return
+        }
+        let text = await OverviewRouter.shared.overview(for: item)
+        guard !Task.isCancelled, let text, !text.isEmpty else { return }
+        guard case var .loaded(detail) = state, detail.item.id == item.id else { return }
+        guard detail.item.overview?.isEmpty ?? true else { return }
+        detail.item.overview = text
         state = .loaded(detail)
     }
 

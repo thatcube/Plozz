@@ -811,9 +811,14 @@ public final class FileIdentityIndexStore: IdentityIndexStoring, @unchecked Send
     }
 
     private static func defaultDirectory() -> URL {
-        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+        // tvOS does not persist `Application Support` (the directory doesn't survive
+        // a relaunch on device), so a persisted identity index written there was
+        // silently lost on every restart — the cross-server membership had to be
+        // rebuilt from scratch each launch. `Library/Caches` persists across normal
+        // tvOS launches (matching every other durable store in the app).
+        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory
-        return support.appendingPathComponent("Plozz", isDirectory: true)
+        return caches.appendingPathComponent("Plozz", isDirectory: true)
     }
 
     public func load() -> PersistedIdentityIndex {

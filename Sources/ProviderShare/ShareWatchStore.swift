@@ -1,4 +1,5 @@
 import Foundation
+import CoreNetworking
 
 /// Local, on-device watch state for a media share.
 ///
@@ -33,6 +34,19 @@ public actor ShareWatchStore {
         public var played: Bool
         /// When the play that produced this state happened (ordering + recency).
         public var updatedAt: Date
+        /// Total media duration in seconds, captured during playback, so a
+        /// Continue Watching card can render a progress bar (`position / duration`).
+        /// `nil` for records written before duration was known (a bare resume drain
+        /// with no live player) — the bar is simply omitted until the next play
+        /// re-learns it. Missing in legacy JSON decodes to `nil` automatically.
+        public var duration: TimeInterval?
+
+        public init(position: TimeInterval, played: Bool, updatedAt: Date, duration: TimeInterval? = nil) {
+            self.position = position
+            self.played = played
+            self.updatedAt = updatedAt
+            self.duration = duration
+        }
     }
 
     private let url: URL
@@ -74,12 +88,16 @@ public actor ShareWatchStore {
     /// in-progress (un-plays a previously-finished item that's being re-watched);
     /// a position of `0` clears the resume point without changing played state.
     /// Ignored when an existing record is *newer* than `capturedAt` (stale drain).
-    public func setResume(_ seconds: TimeInterval, itemID: String, capturedAt: Date) {
+    public func setResume(_ seconds: TimeInterval, itemID: String, capturedAt: Date, duration: TimeInterval? = nil) {
         var all = loaded()
         if let existing = all[itemID], capturedAt < existing.updatedAt { return }
         let position = max(0, seconds)
         let played = position > 1 ? false : (all[itemID]?.played ?? false)
-        all[itemID] = Record(position: position, played: played, updatedAt: capturedAt)
+        // Keep a previously-learned duration when this write doesn't carry one (a
+        // resume drained from the outbox has no live player), so the progress bar
+        // survives resume ticks that lack duration.
+        let resolvedDuration = (duration.map { $0 > 0 ? $0 : nil } ?? nil) ?? all[itemID]?.duration
+        all[itemID] = Record(position: position, played: played, updatedAt: capturedAt, duration: resolvedDuration)
         persist(all)
     }
 
@@ -110,14 +128,29 @@ public actor ShareWatchStore {
 
     private func persist(_ all: [String: Record]) {
         records = all
-        guard let data = try? JSONEncoder().encode(all) else { return }
-        try? data.write(to: url, options: .atomic)
+        guard let data = try? JSONEncoder().encode(all) else {
+            PlozzLog.playback.error("share.watchStore encode FAILED url=\(url.lastPathComponent)")
+            return
+        }
+        do {
+            try data.write(to: url, options: .atomic)
+            PlozzLog.playback.info("share.watchStore wrote \(all.count) record(s) bytes=\(data.count) file=\(url.lastPathComponent)")
+        } catch {
+            PlozzLog.playback.error("share.watchStore write FAILED file=\(url.lastPathComponent) err=\(error.localizedDescription)")
+        }
     }
 
     private static func defaultDirectory() -> URL {
-        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+        // tvOS does NOT persist `Application Support` (the directory doesn't even
+        // survive a relaunch on device), so watch state written there silently
+        // vanished on every restart — the item showed in Continue Watching only for
+        // the live session (served from this actor's in-memory cache) and was gone
+        // after a force-quit. Every other durable store in the app uses
+        // `Library/Caches`, which persists across normal launches on tvOS (it's only
+        // purgeable under genuine storage pressure), so match it here.
+        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory
-        return support.appendingPathComponent("Plozz", isDirectory: true)
+        return caches.appendingPathComponent("Plozz", isDirectory: true)
     }
 
     /// Reduce an arbitrary account id to a filesystem-safe file-name fragment.

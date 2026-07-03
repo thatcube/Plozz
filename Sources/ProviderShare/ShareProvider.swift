@@ -1,5 +1,6 @@
 import Foundation
 import CoreModels
+import CoreNetworking
 
 /// Second-class local media-share provider (SMB). Conforms to `MediaProvider`
 /// so Home / browse / search / playback treat a share like any other backend —
@@ -22,6 +23,14 @@ public struct ShareProvider: MediaProvider {
     private let share: String
 
     public init(session: UserSession) {
+        self.init(session: session, watchDirectory: nil)
+    }
+
+    /// Test seam: build a provider whose device-local watch state lives in
+    /// `watchDirectory` instead of Application Support, so the reportPlayback →
+    /// persist → continueWatching path can be exercised end-to-end (including a
+    /// simulated relaunch) without touching the real app container.
+    init(session: UserSession, watchDirectory: URL?) {
         self.session = session
         let parsed = Self.parse(session.server.baseURL)
         self.host = parsed.host
@@ -34,7 +43,7 @@ public struct ShareProvider: MediaProvider {
         self.store = ShareLibraryStore(browser: browser, serverName: session.server.name)
         // Watch state is device-local (a file share has no server), scoped by the
         // share's stable account id so two shares keep separate progress.
-        self.watchStore = ShareWatchStore(accountKey: session.server.id)
+        self.watchStore = ShareWatchStore(accountKey: session.server.id, directory: watchDirectory)
     }
 
     // MARK: Library browsing
@@ -57,6 +66,9 @@ public struct ShareProvider: MediaProvider {
             guard let base = await store.item(id: entry.itemID) else { continue }
             items.append(Self.stamped(base, with: entry.record))
         }
+        // Device-observable (in-app log ring) so a missing Continue Watching row
+        // can be traced to "no resumable state on disk" vs "rebuild dropped it".
+        PlozzLog.playback.info("share.continueWatching account=\(session.server.id) resumable=\(resumable.count) rebuilt=\(items.count)")
         return items
     }
 
@@ -120,14 +132,17 @@ public struct ShareProvider: MediaProvider {
 
     public func reportPlayback(_ progress: PlaybackProgress, event: PlaybackEvent) async throws {
         // No server to report to, but persist live progress locally so a hard app
-        // kill still leaves a usable resume point. The final played-vs-resume
-        // decision (which needs playback *duration*) is owned by the durable watch
-        // outbox, which drains `setPlayed`/`setResumePosition` below — so `.stop`
-        // is deliberately left to that path and not written here.
+        // kill still leaves a usable resume point. A share reports `.stop` with the
+        // final position too (the outbox — which owns the played-vs-resume decision
+        // that needs duration — may not even target a local share), so `.stop`
+        // persists the resume directly here. A later `setPlayed(true)` drained from
+        // the outbox (newer `capturedAt`) still supersedes it and clears the resume,
+        // so a fully-watched title doesn't linger in Continue Watching.
+        PlozzLog.playback.info("share.reportPlayback event=\(String(describing: event)) item=\(progress.itemID) pos=\(Int(progress.positionSeconds)) account=\(session.server.id)")
         switch event {
-        case .progress, .pause:
-            await watchStore.setResume(progress.positionSeconds, itemID: progress.itemID, capturedAt: Date())
-        case .start, .unpause, .stop:
+        case .progress, .pause, .stop:
+            await watchStore.setResume(progress.positionSeconds, itemID: progress.itemID, capturedAt: Date(), duration: progress.durationSeconds)
+        case .start, .unpause:
             break
         }
     }
@@ -155,6 +170,16 @@ public struct ShareProvider: MediaProvider {
         copy.isPlayed = record.played
         copy.resumePosition = (!record.played && record.position > 1) ? record.position : nil
         copy.lastPlayedAt = record.updatedAt
+        // Carry the learned duration onto the item (a share item has no runtime
+        // until it's played once) and derive the played fraction the Continue
+        // Watching / poster progress bar renders. Only in-progress records get a
+        // fraction — a finished (played) or unstarted item shows no bar.
+        if let duration = record.duration, duration > 0 {
+            if copy.runtime == nil { copy.runtime = duration }
+            if !record.played, record.position > 1 {
+                copy.playedPercentage = min(max(record.position / duration, 0), 1)
+            }
+        }
         return copy
     }
 

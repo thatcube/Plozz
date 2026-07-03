@@ -1284,11 +1284,17 @@ public final class PlayerViewModel {
     /// Trakt history.
     private func report(event: PlaybackEvent, isPaused: Bool, positionOverride: TimeInterval? = nil) async {
         guard let request else { return }
+        let position = positionOverride ?? engine.currentTime
+        let engineDuration = engine.duration
+        let knownDuration: TimeInterval? = (engineDuration.isFinite && engineDuration > 0)
+            ? engineDuration
+            : request.item.runtime
         let progress = PlaybackProgress(
             itemID: itemID,
             playSessionID: request.playSessionID,
-            positionSeconds: positionOverride ?? engine.currentTime,
-            isPaused: isPaused
+            positionSeconds: position,
+            isPaused: isPaused,
+            durationSeconds: knownDuration
         )
         do {
             try await provider.reportPlayback(progress, event: event)

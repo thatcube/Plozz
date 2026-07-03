@@ -98,13 +98,9 @@ struct HomeHeroView: View {
     /// never lingers over the new artwork.
     @State private var metadataVisible = true
     /// Bumped on every page so a late metadata fade-in from a *previous* page
-    /// can't fire after a newer page has already started.
+    /// can't fire after a newer page has already started. Also guards the
+    /// two-phase backdrop slide's animate + cleanup steps.
     @State private var slideToken = 0
-    /// The direction of the in-flight page, driving the backdrop wipe: forward
-    /// slides the new artwork in from the trailing edge (old exits leading);
-    /// backward reverses it. Set synchronously just before `index` so the
-    /// declarative `.transition` reads the right edges.
-    @State private var forward = true
     /// Best resolved hero backdrop URL per item id. For episode/season slides
     /// this is the **series-level** hero art (correct show, high-res — matching
     /// the detail page), resolved via ``ArtworkRouter`` and preloaded for the
@@ -117,6 +113,27 @@ struct HomeHeroView: View {
     /// spuriously, scrolling the page while focus never actually moved) and ties
     /// it instead to focus genuinely leaving the hero for the row below.
     @State private var recedeWork: DispatchWorkItem?
+
+    // MARK: Backdrop slide layers
+    //
+    // The wipe is driven by TWO persistent, offset-animated layers instead of a
+    // SwiftUI insertion/removal `.transition` keyed by `.id`. That declarative
+    // transition was the source of the intermittent "wrong-order" wipe: on an
+    // identity swap the incoming layer would sometimes NOT inherit the animated
+    // transaction (competing `disablesAnimations` metadata-hide + `forward`
+    // writes in the same tick), so the new backdrop snapped in at rest while the
+    // old one still animated out underneath — and it fired even after every image
+    // was decoded, proving it was transaction attribution, not image loading.
+    //
+    // These two layers have STABLE identities (no `.id(item.id)`), so paging just
+    // swaps their content and animates their `x` offset — a plain continuous
+    // modifier that always animates deterministically, immune to content changes
+    // and transaction races. `main` is the fronted slide (rests at x=0); `ghost`
+    // is the outgoing slide that slides off during a page and is then cleared.
+    @State private var mainItem: MediaItem?
+    @State private var ghostItem: MediaItem?
+    @State private var mainX: CGFloat = 0
+    @State private var ghostX: CGFloat = 0
 
     @Environment(\.colorScheme) private var colorScheme
 
@@ -234,6 +251,9 @@ struct HomeHeroView: View {
         .frame(maxWidth: .infinity, minHeight: height, alignment: .bottomLeading)
         .opacity(heroVisible ? 1 : 0)
         .onAppear {
+            // Seed the fronted backdrop layer at rest (no slide) so the first
+            // paint shows the correct art immediately.
+            if mainItem == nil { mainItem = current }
             Task { await resolveArtwork(around: index) }
             guard !heroVisible else { return }
             withAnimation(.easeInOut(duration: 0.35)) { heroVisible = true }
@@ -257,6 +277,18 @@ struct HomeHeroView: View {
             let present = Set(newIDs)
             resolvedBackdrop = resolvedBackdrop.filter { present.contains($0.key) }
             metadataVisible = true
+            // Re-seat the fronted backdrop layer at rest (instant, no slide): a
+            // set swap is not a page, so cancel any in-flight slide and front the
+            // (possibly relocated) current item directly.
+            slideToken &+= 1
+            var instant = Transaction()
+            instant.disablesAnimations = true
+            withTransaction(instant) {
+                ghostItem = nil
+                ghostX = 0
+                mainX = 0
+                mainItem = items.indices.contains(index) ? items[index] : nil
+            }
             // Clamp the logical selection to the new slide's button count so it
             // can never point past the last pill after a set swap. Pure `@State`,
             // so this never touches (or drops) focus.
@@ -284,36 +316,29 @@ struct HomeHeroView: View {
         }
     }
 
-    /// The hero backdrop, keyed by the fronted item's id so a page is a real
-    /// identity change: SwiftUI removes the old layer and inserts the new one,
-    /// driving the directional wipe declaratively (no runloop-timed offset dance,
-    /// which CoreAnimation coalesced to a pop-in). Constrained to the screen width
-    /// and clipped so the full-bleed art can't inflate the layout width and the
-    /// sliding layers never bleed horizontally.
+    /// The hero backdrop, rendered as two persistent, offset-animated layers (see
+    /// the `mainItem`/`ghostItem` state doc). A page slides the outgoing `ghost`
+    /// off one edge while the incoming `main` slides in from the opposite edge —
+    /// the Apple TV "push" — with NO identity-swap `.transition`, so the wipe can
+    /// never land out of order. Constrained to the screen width and clipped so the
+    /// full-bleed art can't inflate the layout width and the sliding layers never
+    /// bleed horizontally.
     @ViewBuilder
     private func heroBackdropStack(height: CGFloat) -> some View {
         ZStack(alignment: .bottom) {
-            if let item = current {
-                heroBackdrop(for: item, height: height)
-                    .id(item.id)
-                    .transition(slideTransition)
+            if let ghostItem {
+                heroBackdrop(for: ghostItem, height: height)
+                    .offset(x: ghostX)
+            }
+            if let mainItem {
+                heroBackdrop(for: mainItem, height: height)
+                    .offset(x: mainX)
             }
         }
         .frame(width: Self.screenWidth, height: height, alignment: .bottom)
         .frame(maxWidth: .infinity, alignment: .center)
         .clipped()
     }
-
-    /// The directional wipe: the incoming backdrop slides in from the trailing
-    /// edge (forward) or leading edge (backward) while the outgoing exits the
-    /// opposite side — the Apple TV "push".
-    private var slideTransition: AnyTransition {
-        .asymmetric(
-            insertion: .move(edge: forward ? .trailing : .leading),
-            removal: .move(edge: forward ? .leading : .trailing)
-        )
-    }
-
     /// The dwell key: any change (slide index, focus state, or a manual page
     /// bump) restarts the auto-advance timer from the current slide.
     private var autoAdvanceKey: String {
@@ -786,49 +811,69 @@ struct HomeHeroView: View {
 
     @ViewBuilder
     private func heroPillIdleBackground(shape: Capsule, prominent: Bool) -> some View {
-        if prominent {
-            shape.fill(Color.accentColor)
-        } else if #available(tvOS 26.0, *) {
-            shape.fill(.clear).glassEffect(.regular, in: shape)
+        if #available(tvOS 26.0, *) {
+            // Liquid Glass for every idle pill. The prominent Play/Resume pill was
+            // previously a solid `Color.accentColor` fill, but the app ships an
+            // EMPTY `AccentColor` asset, so inside this package `Color.accentColor`
+            // resolves to white — a white pill with an invisible white label. Use
+            // regular glass and give the prominent pill a slightly brighter white
+            // tint so it reads as "primary" while its white label stays legible.
+            shape.fill(.clear)
+                .glassEffect(prominent ? .regular.tint(.white.opacity(0.18)) : .regular, in: shape)
         } else {
             shape.fill(.ultraThinMaterial)
         }
     }
 
-    /// Fronts `toItem` with a directional wipe, restarts the auto-advance dwell,
-    /// and (only when the hero holds focus) re-pins focus on `keepButton` for the
-    /// destination slide. The wipe itself is declarative: changing `index` swaps
-    /// the id-keyed backdrop, and `heroBackdropStack`'s `.animation(value:)` runs
-    /// the `.move` transition. `forward` selects the wipe edges.
-    /// Fronts `toItem` with a directional wipe and restarts the auto-advance
-    /// dwell. The wipe itself is declarative: changing `index` swaps the id-keyed
-    /// backdrop, and `heroBackdropStack`'s `.animation(value:)` runs the `.move`
-    /// transition. `forward` selects the wipe edges.
+    /// Fronts `toItem` with a directional backdrop wipe, restarts the auto-advance
+    /// dwell, and moves the logical button selection. The wipe is driven by two
+    /// persistent offset layers (see `mainItem`/`ghostItem`): the outgoing art
+    /// drops into the ghost layer and slides off one edge while the incoming art
+    /// is staged off the opposite edge and slides to rest — deterministic and
+    /// immune to the transaction races that made the old `.id`-swap `.transition`
+    /// land out of order.
     private func page(to toItem: Int, keepButton: Int, forward isForward: Bool) {
         guard items.indices.contains(toItem), toItem != index else { return }
+        let outgoing = current
+        let incoming = items[toItem]
         beginTransition()
-        // Set direction before index so the transition reads the right edges.
-        // The wipe is now driven by an EXPLICIT animation transaction here rather
-        // than a container-level `.animation(value: current?.id)`: that implicit
-        // value-animation also fired on the async item-set swap and the initial
-        // seed (see `.onChange(of: items.map(\.id))`), and when one of those
-        // coincided with `beginTransition()`'s `disablesAnimations` transaction the
-        // insertion got no animation (new backdrop snapped in) while the removal
-        // still animated (old slid out underneath) — the intermittent wrong-order
-        // wipe. Scoping the animation to a real page makes both the insertion and
-        // removal share one transaction, so they always animate together; set-swaps
-        // and re-seats now change `index` outside any animation and are instant.
-        forward = isForward
-        withAnimation(.easeInOut(duration: 0.42)) {
-            index = toItem
-        }
-        advanceToken &+= 1
+        let token = slideToken
 
-        // Keep the logical selection on the destination, clamped to its button
-        // count. Pure `@State` on a *stable* focus target (the row's identity
-        // never changes across a page), so focus stays put and only the highlight
-        // moves — no fragile deferred `@FocusState` re-pin, no dropped focus.
-        selectedButton = min(keepButton, max(0, buttons(for: items[toItem]).count - 1))
+        // Front the destination immediately for all *logical* state (paging dots,
+        // content column, auto-advance dwell). The backdrop art is driven
+        // separately by the two offset layers below, so this can't disturb focus.
+        index = toItem
+        advanceToken &+= 1
+        selectedButton = min(keepButton, max(0, buttons(for: incoming).count - 1))
+
+        // Two-phase deterministic slide. Phase 1 (instant): drop the outgoing art
+        // into the ghost layer at rest and stage the incoming art off-screen on
+        // the entering edge. Phase 2 (next runloop tick, so the off-screen
+        // placement has already rendered — invisible, no pop-in): animate both
+        // offsets in a single transaction so main slides to rest while ghost
+        // slides off the opposite edge, then clear the ghost. Both layers persist
+        // (no `.id` swap), so the offset animates every time.
+        let w = Self.screenWidth
+        var instant = Transaction()
+        instant.disablesAnimations = true
+        withTransaction(instant) {
+            ghostItem = outgoing
+            ghostX = 0
+            mainItem = incoming
+            mainX = isForward ? w : -w
+        }
+        DispatchQueue.main.async {
+            guard slideToken == token else { return }
+            withAnimation(.easeInOut(duration: 0.42)) {
+                mainX = 0
+                ghostX = isForward ? -w : w
+            } completion: {
+                guard slideToken == token else { return }
+                ghostItem = nil
+                ghostX = 0
+            }
+        }
+
         Task { await resolveArtwork(around: toItem) }
     }
 

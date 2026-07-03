@@ -59,12 +59,19 @@ struct HomeHeroView: View {
 
     /// The index of the slide currently fronted.
     @State private var index: Int = 0
-    /// The action button holding focus (`0` = Play). Bound to the real buttons so
-    /// the paging reducer knows which edge we're at.
-    @FocusState private var focusedButton: Int?
-    /// Whether the hero currently holds focus — pauses auto-advance so the user
-    /// is never yanked mid-read while interacting.
-    @State private var hasFocus = false
+    /// The logical action-button selection (`0` = Play), **owned by us** rather
+    /// than by the focus engine. The hero's button row is a *single* focus target
+    /// (see `actionRow`), so Left/Right are resolved against this plain `@State` —
+    /// never a `@FocusState` the engine mutates behind our back. Reading it inside
+    /// `onMoveCommand` is therefore always the true PRE-move value, which is what
+    /// makes edge detection deterministic. (The old per-button `@FocusState` +
+    /// container `onMoveCommand` read the *post-move* button on device and paged
+    /// the instant focus merely landed on an edge button — the bug this fixes.)
+    @State private var selectedButton: Int = 0
+    /// Whether the hero's single focus target holds focus — pauses auto-advance so
+    /// the user is never yanked mid-read, drives the button highlight, and tells
+    /// Home to snap the hero back to full-screen when focus returns.
+    @FocusState private var heroFocused: Bool
     /// Bumped on every manual page so the auto-advance `.task` restarts its dwell
     /// from the fresh slide instead of firing early.
     @State private var advanceToken = 0
@@ -233,14 +240,11 @@ struct HomeHeroView: View {
             let present = Set(newIDs)
             resolvedBackdrop = resolvedBackdrop.filter { present.contains($0.key) }
             metadataVisible = true
-            // If the swap dropped the fronted slide onto an item exposing fewer
-            // buttons, clamp any *held* focus to the new button count so a stale
-            // `focusedButton` can't fail to match a `.focused(equals:)` binding
-            // and drop hero focus. Mirror `page(to:)`. Only touch it while held —
-            // never yank focus up from the row below.
-            if focusedButton != nil, items.indices.contains(index) {
-                let count = buttons(for: items[index]).count
-                focusedButton = min(focusedButton ?? 0, max(0, count - 1))
+            // Clamp the logical selection to the new slide's button count so it
+            // can never point past the last pill after a set swap. Pure `@State`,
+            // so this never touches (or drops) focus.
+            if items.indices.contains(index) {
+                selectedButton = min(selectedButton, max(0, buttons(for: items[index]).count - 1))
             }
             Task { await resolveArtwork(around: index) }
         }
@@ -255,11 +259,11 @@ struct HomeHeroView: View {
         // Auto-advance: restart the dwell whenever the slide changes (manual page
         // or a previous auto-advance) and pause while the hero holds focus.
         .task(id: autoAdvanceKey) {
-            guard settings.autoAdvance, items.count > 1, !hasFocus else { return }
+            guard settings.autoAdvance, items.count > 1, !heroFocused else { return }
             let seconds = UInt64(settings.autoAdvanceSeconds)
             try? await Task.sleep(nanoseconds: seconds * 1_000_000_000)
-            guard !Task.isCancelled else { return }
-            page(to: (index + 1) % items.count, keepButton: focusedButton ?? 0, forward: true)
+            guard !Task.isCancelled, !heroFocused else { return }
+            page(to: (index + 1) % items.count, keepButton: selectedButton, forward: true)
         }
     }
 
@@ -297,7 +301,7 @@ struct HomeHeroView: View {
     /// The dwell key: any change (slide index, focus state, or a manual page
     /// bump) restarts the auto-advance timer from the current slide.
     private var autoAdvanceKey: String {
-        "\(index)-\(hasFocus)-\(advanceToken)"
+        "\(index)-\(heroFocused)-\(advanceToken)"
     }
 
     // MARK: - Content column
@@ -307,6 +311,11 @@ struct HomeHeroView: View {
     /// off the top and the overview/buttons/dots settle into the upper region
     /// with the Continue Watching row centered below — the Apple TV "recede".
     static let recedeAnchorID = "home-hero-recede"
+
+    /// Constant identity for the single focusable action row. Never changes — so
+    /// focus is retained across both a page (item id changes) and the
+    /// `ConditionalFocusSection` toggle (sidebar-escape state changes).
+    static let actionRowFocusID = "home-hero-action-row"
 
     @ViewBuilder
     private func content(for item: MediaItem) -> some View {
@@ -395,35 +404,70 @@ struct HomeHeroView: View {
     @ViewBuilder
     private func actionRow(for item: MediaItem) -> some View {
         let itemButtons = buttons(for: item)
+        // Named VoiceOver actions for *every* visible pill (the row is a single
+        // a11y element, so without these only the highlighted action would be
+        // reachable). Order matches the visible pills.
+        let a11yActions: [(String, () -> Void)] = itemButtons.map { button in
+            switch button {
+            case .play: return (item.resumePosition != nil ? "Resume" : "Play", { onPlay(item) })
+            case .moreInfo: return ("More Info", { onSelect(item) })
+            case .watchlist:
+                let fav = watchlistTarget(for: item).isFavorite
+                return (fav ? "Remove from Watchlist" : "Add to Watchlist", { performWatchlist(for: item) })
+            case .next: return ("Next", { advanceForward() })
+            }
+        }
         HStack(spacing: 24) {
             ForEach(Array(itemButtons.enumerated()), id: \.element) { offset, button in
-                actionButton(button, at: offset, for: item)
+                heroButtonVisual(button, for: item, selected: heroFocused && selectedButton == offset)
             }
         }
         .padding(.top, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
-        // Confine directional focus to the button row so the engine can't drift
-        // off the edges — EXCEPT on the first item in Sidebar mode, where Left
-        // must be allowed to escape and open the side navigation (per
-        // `HeroCarouselFocus`). Toggling coincides with a page (which re-pins
-        // focus), so it never strands focus.
-        .modifier(ConditionalFocusSection(active: !allowsSidebarEscape))
-        // Left/Right/Down are decided here. `onMoveCommand` on the *container*
-        // fires with `focusedButton` still holding its PRE-move value (the focus
-        // engine hasn't settled yet), so reading it gives deterministic edge
-        // detection — no sentinels, no `onChange` guesswork. Interior L/R moves
-        // are handled natively by the engine (we no-op); only true edge presses
-        // page. Down recedes to Continue Watching.
-        .onMoveCommand { direction in handleMove(direction, for: item) }
-        .onChange(of: focusedButton) { old, new in
-            hasFocus = new != nil
-            // Focus arriving from *outside* (a row below, the tab bar): snap the
-            // hero back to full-screen. We deliberately do NOT recede on focus
-            // *loss* — focus can drop to nil transiently (a button re-rendering,
-            // opening the side navigation menu) and that must never scroll the
-            // page. Receding is driven only by an intentional Down press.
-            if new != nil, old == nil { onFocusGained() }
+        .contentShape(Rectangle())
+        // ── The entire row is ONE focus target (Apple's WWDC23 single-focusable
+        // pattern; the exact `.focusable + .focused + .focusSection + .onMoveCommand
+        // + .onTapGesture` stack shipped by real tvOS apps). There is NO per-button
+        // `@FocusState`, so the focus engine can never move focus between pills
+        // behind our back: Left/Right are resolved entirely against our own
+        // `selectedButton`, read in `onMoveCommand` as the true pre-move value.
+        // That removes the focus move we used to race with — the hero can only
+        // page on a real edge press, never merely because focus *landed* on an
+        // edge button. ──
+        .focusable(true)
+        .focused($heroFocused)
+        // Initial Home focus lands on the hero (not a Continue Watching card).
+        .prefersDefaultFocus(true, in: focusScope)
+        .onMoveCommand { handleMove($0) }
+        // Remote **Select** on the focused row activates the selected pill.
+        .onTapGesture { activateSelected() }
+        // Play/Pause is a convenient shortcut straight to playback.
+        .onPlayPauseCommand { if let item = current { onPlay(item) } }
+        .onChange(of: heroFocused) { _, focused in
+            // Focus returning to the hero (from a row below / the sidebar): snap
+            // it back to full-screen and re-clamp selection defensively. We
+            // deliberately do NOT recede on focus *loss* — focus can drop
+            // transiently (a re-render, opening the side navigation) and that must
+            // never scroll the page. Receding is driven only by a Down press.
+            guard focused, let item = current else { return }
+            selectedButton = min(selectedButton, max(0, buttons(for: item).count - 1))
+            onFocusGained()
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityLabel(accessibilityLabel(for: item))
+        .accessibilityAction { activateSelected() }
+        .modifier(HeroActionAccessibility(actions: a11yActions))
+        // Pin a *constant* identity so the focusable — and its focus — survives
+        // the `ConditionalFocusSection` structural toggle when `allowsSidebarEscape`
+        // flips between Play and the next pill on the first slide. (Never key this
+        // on the item id: that would drop focus on every page.)
+        .id(Self.actionRowFocusID)
+        // Confine directional focus to the row so the engine can't drift off the
+        // edges — dropped only when Left on the first item's left-most button
+        // should open the side navigation (per `HeroCarouselFocus.escape`).
+        // Outermost, matching the shipping reference stack.
+        .modifier(ConditionalFocusSection(active: !allowsSidebarEscape))
     }
 
     /// Whether Left on the left-most button of the *current* slide should open
@@ -435,17 +479,26 @@ struct HomeHeroView: View {
             direction: .left,
             itemIndex: index,
             itemCount: items.count,
-            focusedButton: 0,
+            focusedButton: selectedButton,
             buttonCount: max(1, current.map { buttons(for: $0).count } ?? 1),
             navigationStyle: navigationStyle
         ) == .escape
     }
 
     /// Applies the tested `HeroCarouselFocus` reducer to a directional press.
-    /// `focusedButton` is read PRE-move (see `onMoveCommand` above). Interior
-    /// moves are left to the native focus engine; only `.advance` pages. `.escape`
-    /// and `.blocked` are no-ops (the engine handles the sidebar / nothing).
-    private func handleMove(_ direction: MoveCommandDirection, for item: MediaItem) {
+    /// Resolves the *live* slide via `current` (never a stale captured `item`)
+    /// and clamps `selectedButton` to the live button count FIRST — so a rapid
+    /// repeat that arrives before SwiftUI reinstalls the row's closures can't
+    /// evaluate the edge against the previous slide's button count and false-page.
+    /// `selectedButton` is our own state, so it is always the true PRE-move value.
+    /// Interior moves update `selectedButton` ourselves (the engine is not
+    /// involved — there is only one focusable); only `.advance` pages. `.escape`
+    /// and `.blocked` are no-ops (the dropped focus-section lets the engine reach
+    /// the sidebar; nothing to do otherwise).
+    private func handleMove(_ direction: MoveCommandDirection) {
+        guard let item = current else { return }
+        let buttonCount = buttons(for: item).count
+        selectedButton = min(selectedButton, max(0, buttonCount - 1))
         switch direction {
         case .down:
             onMoveDown()
@@ -455,13 +508,15 @@ struct HomeHeroView: View {
                 direction: dir,
                 itemIndex: index,
                 itemCount: items.count,
-                focusedButton: focusedButton ?? 0,
-                buttonCount: buttons(for: item).count,
+                focusedButton: selectedButton,
+                buttonCount: buttonCount,
                 navigationStyle: navigationStyle
             )
             switch outcome {
-            case .moveButton:
-                break // native engine move
+            case let .moveButton(newIndex):
+                // We own the selection — move it ourselves. No focus engine round
+                // trip, so this is instantaneous and can never race.
+                selectedButton = newIndex
             case let .advance(toItem, keepButton):
                 page(to: toItem, keepButton: keepButton, forward: dir == .right)
             case .escape, .blocked:
@@ -470,6 +525,47 @@ struct HomeHeroView: View {
         default:
             break
         }
+    }
+
+    /// Fires the currently-selected pill's action (remote Select / Play-Pause).
+    /// Resolves the live slide and clamps the index defensively so a stale
+    /// selection can never dispatch the wrong (or an out-of-range) action.
+    private func activateSelected() {
+        guard let item = current else { return }
+        let itemButtons = buttons(for: item)
+        let idx = min(selectedButton, max(0, itemButtons.count - 1))
+        guard itemButtons.indices.contains(idx) else { return }
+        switch itemButtons[idx] {
+        case .play: onPlay(item)
+        case .moreInfo: onSelect(item)
+        case .watchlist: performWatchlist(for: item)
+        case .next: advanceForward()
+        }
+    }
+
+    /// Toggles the watchlist state for `item`, flipping the pill instantly.
+    private func performWatchlist(for item: MediaItem) {
+        guard let action = watchlistAction(for: item) else { return }
+        let target = watchlistTarget(for: item)
+        actionHandler?.perform(action, on: target, context: actionContext)
+        // Flip the button instantly; the loaded row can lag (an added series from
+        // an episode slide isn't an existing card).
+        let key = Self.watchlistKey(accountID: target.sourceAccountID, itemID: target.id)
+        watchlistOverrides[key] = (action == .addToWatchlist)
+    }
+
+    /// VoiceOver label for the row's currently-selected action.
+    private func accessibilityLabel(for item: MediaItem) -> String {
+        let itemButtons = buttons(for: item)
+        guard itemButtons.indices.contains(selectedButton) else { return item.title }
+        let name: String
+        switch itemButtons[selectedButton] {
+        case .play: name = item.resumePosition != nil ? "Resume" : "Play"
+        case .moreInfo: name = "More Info"
+        case .watchlist: name = watchlistTarget(for: item).isFavorite ? "Remove from Watchlist" : "Add to Watchlist"
+        case .next: name = "Next"
+        }
+        return "\(item.title), \(name)"
     }
 
     /// Conditionally applies `.focusSection()` so the confinement can be dropped
@@ -481,58 +577,92 @@ struct HomeHeroView: View {
         }
     }
 
+    /// Adds a named VoiceOver action per visible pill so every hero action stays
+    /// reachable even though the row is a single accessibility element.
+    private struct HeroActionAccessibility: ViewModifier {
+        let actions: [(String, () -> Void)]
+        func body(content: Content) -> some View {
+            actions.reduce(AnyView(content)) { view, entry in
+                AnyView(view.accessibilityAction(named: Text(entry.0), entry.1))
+            }
+        }
+    }
+
+    /// One hero action rendered as a **non-focusable** glass pill. Selection is
+    /// ours (`selected`), not the focus engine's — the whole row is a single focus
+    /// target — so the bright "focused" treatment rides `selectedButton` with no
+    /// focus-engine round trip. Mirrors the detail hero's Liquid Glass look: a
+    /// translucent glass pill normally; the bright white fill + dark glyph + lift
+    /// when it's the selected pill and the hero holds focus.
     @ViewBuilder
-    private func actionButton(_ button: HeroButton, at offset: Int, for item: MediaItem) -> some View {
+    private func heroButtonVisual(_ button: HeroButton, for item: MediaItem, selected: Bool) -> some View {
         switch button {
         case .play:
-            Button {
-                onPlay(item)
-            } label: {
+            heroPill(selected: selected, prominent: true) {
                 Label(item.resumePosition != nil ? "Resume" : "Play", systemImage: "play.fill")
+                    .font(.system(size: 28, weight: .semibold))
             }
-            .modifier(HeroActionButtonStyle(prominent: true))
-            .focused($focusedButton, equals: offset)
-            // Initial Home focus lands here (not a Continue Watching card).
-            .prefersDefaultFocus(true, in: focusScope)
         case .moreInfo:
-            Button {
-                onSelect(item)
-            } label: {
+            heroPill(selected: selected, prominent: false) {
                 Label("More Info", systemImage: "info.circle")
+                    .font(.system(size: 28, weight: .semibold))
             }
-            .modifier(HeroActionButtonStyle(prominent: false))
-            .focused($focusedButton, equals: offset)
         case .watchlist:
             let target = watchlistTarget(for: item)
-            Button {
-                if let action = watchlistAction(for: item) {
-                    actionHandler?.perform(action, on: target, context: actionContext)
-                    // Flip the button instantly; the loaded row can lag (an added
-                    // series from an episode slide isn't an existing card).
-                    let key = Self.watchlistKey(accountID: target.sourceAccountID, itemID: target.id)
-                    watchlistOverrides[key] = (action == .addToWatchlist)
-                }
-            } label: {
+            heroPill(selected: selected, prominent: false) {
                 Image(systemName: target.isFavorite ? "bookmark.fill" : "bookmark")
-                    .font(.system(size: 30))
-                    .foregroundStyle(target.isFavorite ? Color.accentColor : Color.primary)
+                    .font(.system(size: 28, weight: .semibold))
                     .symbolEffect(.bounce, value: target.isFavorite)
-                    .frame(width: 38, height: 38)
+                    .frame(width: 34, height: 34)
             }
-            .modifier(HeroActionButtonStyle(prominent: false))
-            .focused($focusedButton, equals: offset)
-            .accessibilityLabel(target.isFavorite ? "Remove from Watchlist" : "Add to Watchlist")
         case .next:
-            Button {
-                advanceForward()
-            } label: {
+            heroPill(selected: selected, prominent: false) {
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 30, weight: .semibold))
-                    .frame(width: 38, height: 38)
+                    .font(.system(size: 28, weight: .semibold))
+                    .frame(width: 34, height: 34)
             }
-            .modifier(HeroActionButtonStyle(prominent: false))
-            .focused($focusedButton, equals: offset)
-            .accessibilityLabel("Next")
+        }
+    }
+
+    /// The glass-pill chrome shared by every hero action. Identity-stable (only
+    /// animatable properties vary with `selected`), so nothing here can disturb
+    /// focus. `prominent` tints the idle Play pill with the app accent, matching
+    /// `.glassProminent` on the detail hero. Colour/fill snap instantly (no comet
+    /// trail); only the scale/shadow lift animates as selection moves.
+    @ViewBuilder
+    private func heroPill<Content: View>(
+        selected: Bool,
+        prominent: Bool,
+        @ViewBuilder _ label: () -> Content
+    ) -> some View {
+        let shape = Capsule(style: .continuous)
+        label()
+            .foregroundStyle(selected ? Color.black : Color.white)
+            .transaction { $0.animation = nil }
+            .padding(.horizontal, 30)
+            .padding(.vertical, 18)
+            .background {
+                ZStack {
+                    heroPillIdleBackground(shape: shape, prominent: prominent)
+                        .opacity(selected ? 0 : 1)
+                    shape.fill(.white).opacity(selected ? 1 : 0)
+                }
+                .transaction { $0.animation = nil }
+            }
+            .clipShape(shape)
+            .scaleEffect(selected ? 1.06 : 1.0)
+            .shadow(color: .black.opacity(selected ? 0.30 : 0), radius: selected ? 14 : 0, y: selected ? 8 : 0)
+            .animation(.easeOut(duration: 0.16), value: selected)
+    }
+
+    @ViewBuilder
+    private func heroPillIdleBackground(shape: Capsule, prominent: Bool) -> some View {
+        if prominent {
+            shape.fill(Color.accentColor)
+        } else if #available(tvOS 26.0, *) {
+            shape.fill(.clear).glassEffect(.regular, in: shape)
+        } else {
+            shape.fill(.ultraThinMaterial)
         }
     }
 
@@ -541,6 +671,10 @@ struct HomeHeroView: View {
     /// destination slide. The wipe itself is declarative: changing `index` swaps
     /// the id-keyed backdrop, and `heroBackdropStack`'s `.animation(value:)` runs
     /// the `.move` transition. `forward` selects the wipe edges.
+    /// Fronts `toItem` with a directional wipe and restarts the auto-advance
+    /// dwell. The wipe itself is declarative: changing `index` swaps the id-keyed
+    /// backdrop, and `heroBackdropStack`'s `.animation(value:)` runs the `.move`
+    /// transition. `forward` selects the wipe edges.
     private func page(to toItem: Int, keepButton: Int, forward isForward: Bool) {
         guard items.indices.contains(toItem), toItem != index else { return }
         beginTransition()
@@ -550,21 +684,11 @@ struct HomeHeroView: View {
         index = toItem
         advanceToken &+= 1
 
-        // Re-pin focus only when the hero already holds it (a manual page): the
-        // auto-advance timer pages while focus is on the row below, and assigning
-        // `@FocusState` there would yank focus up to the hero. Deferred across two
-        // runloop ticks so it lands *after* the focus engine settles this press —
-        // a synchronous or `onChange`-driven write here is silently dropped by the
-        // tvOS focus engine (the known "stuck focus" bug).
-        if focusedButton != nil {
-            let destinationButtons = buttons(for: items[toItem]).count
-            let target = min(keepButton, max(0, destinationButtons - 1))
-            Task { @MainActor in
-                await Task.yield()
-                await Task.yield()
-                focusedButton = target
-            }
-        }
+        // Keep the logical selection on the destination, clamped to its button
+        // count. Pure `@State` on a *stable* focus target (the row's identity
+        // never changes across a page), so focus stays put and only the highlight
+        // moves — no fragile deferred `@FocusState` re-pin, no dropped focus.
+        selectedButton = min(keepButton, max(0, buttons(for: items[toItem]).count - 1))
         Task { await resolveArtwork(around: toItem) }
     }
 

@@ -68,10 +68,20 @@ struct HomeHeroView: View {
     /// container `onMoveCommand` read the *post-move* button on device and paged
     /// the instant focus merely landed on an edge button — the bug this fixes.)
     @State private var selectedButton: Int = 0
-    /// Whether the hero's single focus target holds focus — pauses auto-advance so
-    /// the user is never yanked mid-read, drives the button highlight, and tells
-    /// Home to snap the hero back to full-screen when focus returns.
-    @FocusState private var heroFocused: Bool
+    /// Which of the hero's two focus targets holds focus: the pill `row`, or the
+    /// invisible `leftGuard` that sits just left of it. The guard exists so a Left
+    /// press has an *internal* target and is captured by the hero instead of
+    /// escaping to the sidebar (a lone `.focusable()` under `.focusSection()` can't
+    /// trap Left when the sidebar TabView is its left neighbor — the engine jumps
+    /// straight to it and `onMoveCommand` never runs). We resolve the Left against
+    /// our own `selectedButton` and bounce focus straight back to the row, so the
+    /// guard never visibly holds focus. Pauses auto-advance and drives the button
+    /// highlight whenever it is non-`nil` (either target counts as "hero focused").
+    @FocusState private var focus: HeroFocus?
+
+    /// The hero's focus targets. `leftGuard` is an invisible 1×1 sink used purely
+    /// to capture a leftward move (see `focus`).
+    private enum HeroFocus: Hashable { case row, leftGuard }
     /// Bumped on every manual page so the auto-advance `.task` restarts its dwell
     /// from the fresh slide instead of firing early.
     @State private var advanceToken = 0
@@ -259,10 +269,10 @@ struct HomeHeroView: View {
         // Auto-advance: restart the dwell whenever the slide changes (manual page
         // or a previous auto-advance) and pause while the hero holds focus.
         .task(id: autoAdvanceKey) {
-            guard settings.autoAdvance, items.count > 1, !heroFocused else { return }
+            guard settings.autoAdvance, items.count > 1, focus == nil else { return }
             let seconds = UInt64(settings.autoAdvanceSeconds)
             try? await Task.sleep(nanoseconds: seconds * 1_000_000_000)
-            guard !Task.isCancelled, !heroFocused else { return }
+            guard !Task.isCancelled, focus == nil else { return }
             page(to: (index + 1) % items.count, keepButton: selectedButton, forward: true)
         }
     }
@@ -301,7 +311,7 @@ struct HomeHeroView: View {
     /// The dwell key: any change (slide index, focus state, or a manual page
     /// bump) restarts the auto-advance timer from the current slide.
     private var autoAdvanceKey: String {
-        "\(index)-\(heroFocused)-\(advanceToken)"
+        "\(index)-\(focus != nil)-\(advanceToken)"
     }
 
     // MARK: - Content column
@@ -313,8 +323,7 @@ struct HomeHeroView: View {
     static let recedeAnchorID = "home-hero-recede"
 
     /// Constant identity for the single focusable action row. Never changes — so
-    /// focus is retained across both a page (item id changes) and the
-    /// `ConditionalFocusSection` toggle (sidebar-escape state changes).
+    /// focus is retained across a page (item id changes).
     static let actionRowFocusID = "home-hero-action-row"
 
     @ViewBuilder
@@ -418,62 +427,83 @@ struct HomeHeroView: View {
             }
         }
         HStack(spacing: 24) {
-            ForEach(Array(itemButtons.enumerated()), id: \.element) { offset, button in
-                heroButtonVisual(button, for: item, selected: heroFocused && selectedButton == offset)
+            // Invisible focus guard, just left of the pills and inside the same
+            // focus section. It gives the focus engine an *internal* leftward
+            // target so a Left press is captured by the hero (routed through
+            // `.onChange(of: focus)` below) instead of escaping to the sidebar —
+            // which a lone focusable can't prevent. It is focusable everywhere
+            // EXCEPT the one escape spot (first item, left-most button, sidebar
+            // nav): there it steps aside so Left falls through and opens the side
+            // navigation, exactly as on the Apple TV app.
+            Color.clear
+                .frame(width: 1, height: 1)
+                .focusable(!allowsSidebarEscape)
+                .focused($focus, equals: .leftGuard)
+                .accessibilityHidden(true)
+
+            HStack(spacing: 24) {
+                ForEach(Array(itemButtons.enumerated()), id: \.element) { offset, button in
+                    heroButtonVisual(button, for: item, selected: focus != nil && selectedButton == offset)
+                }
             }
+            .contentShape(Rectangle())
+            // ── The pill row is ONE focus target. There is NO per-button
+            // `@FocusState`, so the focus engine can never move focus between pills
+            // behind our back: Right/Down are resolved in `onMoveCommand` against
+            // our own `selectedButton` (always the true pre-move value); Left is
+            // captured by the guard above. The hero pages only on a real edge
+            // press, never merely because focus *landed* on an edge button. ──
+            .focusable(true)
+            .focused($focus, equals: .row)
+            // Initial Home focus lands on the hero (not a Continue Watching card).
+            .prefersDefaultFocus(true, in: focusScope)
+            .onMoveCommand { handleMove($0) }
+            // Remote **Select** on the focused row activates the selected pill.
+            .onTapGesture { activateSelected() }
+            // Play/Pause is a convenient shortcut straight to playback.
+            .onPlayPauseCommand { if let item = current { onPlay(item) } }
+            .accessibilityElement(children: .ignore)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityLabel(accessibilityLabel(for: item))
+            .accessibilityAction { activateSelected() }
+            .modifier(HeroActionAccessibility(actions: a11yActions))
+            // Pin a *constant* identity so focus is retained across a page (item
+            // id changes). Never key this on the item id — that would drop focus.
+            .id(Self.actionRowFocusID)
         }
         .padding(.top, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .contentShape(Rectangle())
-        // ── The entire row is ONE focus target (Apple's WWDC23 single-focusable
-        // pattern; the exact `.focusable + .focused + .focusSection + .onMoveCommand
-        // + .onTapGesture` stack shipped by real tvOS apps). There is NO per-button
-        // `@FocusState`, so the focus engine can never move focus between pills
-        // behind our back: Left/Right are resolved entirely against our own
-        // `selectedButton`, read in `onMoveCommand` as the true pre-move value.
-        // That removes the focus move we used to race with — the hero can only
-        // page on a real edge press, never merely because focus *landed* on an
-        // edge button. ──
-        .focusable(true)
-        .focused($heroFocused)
-        // Initial Home focus lands on the hero (not a Continue Watching card).
-        .prefersDefaultFocus(true, in: focusScope)
-        .onMoveCommand { handleMove($0) }
-        // Remote **Select** on the focused row activates the selected pill.
-        .onTapGesture { activateSelected() }
-        // Play/Pause is a convenient shortcut straight to playback.
-        .onPlayPauseCommand { if let item = current { onPlay(item) } }
-        .onChange(of: heroFocused) { _, focused in
-            // Focus returning to the hero (from a row below / the sidebar): snap
-            // it back to full-screen and re-clamp selection defensively. We
-            // deliberately do NOT recede on focus *loss* — focus can drop
-            // transiently (a re-render, opening the side navigation) and that must
-            // never scroll the page. Receding is driven only by a Down press.
-            guard focused, let item = current else { return }
-            selectedButton = min(selectedButton, max(0, buttons(for: item).count - 1))
-            onFocusGained()
+        // Always-on (never toggled): a lone focusable under a *conditional* focus
+        // section churned structure on every interior move on the first slide,
+        // which jostled the scroll position. Constant confinement keeps Down going
+        // to Continue Watching and Right paging cleanly.
+        .focusSection()
+        .onChange(of: focus) { old, new in
+            switch new {
+            case .leftGuard:
+                // The engine parked focus on the guard because Left was pressed.
+                // Resolve it and bounce straight back to the row.
+                handleLeft()
+            case .row:
+                // Focus arriving into the hero from *outside* (a row below / the
+                // tab bar): snap back to full-screen. We do NOT recede on focus
+                // *loss* — focus can drop transiently and must never scroll.
+                if old == nil {
+                    if let item = current {
+                        selectedButton = min(selectedButton, max(0, buttons(for: item).count - 1))
+                    }
+                    onFocusGained()
+                }
+            case .none:
+                break
+            }
         }
-        .accessibilityElement(children: .ignore)
-        .accessibilityAddTraits(.isButton)
-        .accessibilityLabel(accessibilityLabel(for: item))
-        .accessibilityAction { activateSelected() }
-        .modifier(HeroActionAccessibility(actions: a11yActions))
-        // Pin a *constant* identity so the focusable — and its focus — survives
-        // the `ConditionalFocusSection` structural toggle when `allowsSidebarEscape`
-        // flips between Play and the next pill on the first slide. (Never key this
-        // on the item id: that would drop focus on every page.)
-        .id(Self.actionRowFocusID)
-        // Confine directional focus to the row so the engine can't drift off the
-        // edges — dropped only when Left on the first item's left-most button
-        // should open the side navigation (per `HeroCarouselFocus.escape`).
-        // Outermost, matching the shipping reference stack.
-        .modifier(ConditionalFocusSection(active: !allowsSidebarEscape))
     }
 
     /// Whether Left on the left-most button of the *current* slide should open
     /// the side navigation instead of paging — the one case the reducer resolves
-    /// to `.escape`. Mirrors `HeroCarouselFocus`, and gates the focus-section
-    /// confinement so the escape can actually reach the sidebar.
+    /// to `.escape`. Mirrors `HeroCarouselFocus`, and controls whether the left
+    /// focus guard steps aside so Left can reach the sidebar.
     private var allowsSidebarEscape: Bool {
         HeroCarouselFocus.resolve(
             direction: .left,
@@ -485,16 +515,15 @@ struct HomeHeroView: View {
         ) == .escape
     }
 
-    /// Applies the tested `HeroCarouselFocus` reducer to a directional press.
-    /// Resolves the *live* slide via `current` (never a stale captured `item`)
-    /// and clamps `selectedButton` to the live button count FIRST — so a rapid
-    /// repeat that arrives before SwiftUI reinstalls the row's closures can't
-    /// evaluate the edge against the previous slide's button count and false-page.
-    /// `selectedButton` is our own state, so it is always the true PRE-move value.
-    /// Interior moves update `selectedButton` ourselves (the engine is not
-    /// involved — there is only one focusable); only `.advance` pages. `.escape`
-    /// and `.blocked` are no-ops (the dropped focus-section lets the engine reach
-    /// the sidebar; nothing to do otherwise).
+    /// Applies the tested `HeroCarouselFocus` reducer to a Right/Down press on the
+    /// pill row. (Left is never delivered here — it is captured by the invisible
+    /// left guard and routed through `handleLeft()`.) Resolves the *live* slide
+    /// via `current` and clamps `selectedButton` to the live button count FIRST —
+    /// so a rapid repeat that arrives before SwiftUI reinstalls the row's closures
+    /// can't evaluate the edge against the previous slide's button count and
+    /// false-page. `selectedButton` is our own state, so it is always the true
+    /// PRE-move value. Interior moves update `selectedButton` ourselves (the engine
+    /// is not involved); only `.advance` pages.
     private func handleMove(_ direction: MoveCommandDirection) {
         guard let item = current else { return }
         let buttonCount = buttons(for: item).count
@@ -502,10 +531,9 @@ struct HomeHeroView: View {
         switch direction {
         case .down:
             onMoveDown()
-        case .left, .right:
-            let dir: HeroFocusDirection = direction == .left ? .left : .right
+        case .right:
             let outcome = HeroCarouselFocus.resolve(
-                direction: dir,
+                direction: .right,
                 itemIndex: index,
                 itemCount: items.count,
                 focusedButton: selectedButton,
@@ -518,11 +546,40 @@ struct HomeHeroView: View {
                 // trip, so this is instantaneous and can never race.
                 selectedButton = newIndex
             case let .advance(toItem, keepButton):
-                page(to: toItem, keepButton: keepButton, forward: dir == .right)
+                page(to: toItem, keepButton: keepButton, forward: true)
             case .escape, .blocked:
                 break
             }
         default:
+            // Left is handled by the guard; Up is left to the system.
+            break
+        }
+    }
+
+    /// Resolves a Left press captured by the invisible left guard, then bounces
+    /// focus straight back to the pill row so the guard never visibly holds it.
+    /// Interior moves adjust `selectedButton`; `.advance` pages backward. The one
+    /// `.escape` case (first item, left-most button, sidebar) can't reach here —
+    /// the guard is non-focusable there, so Left falls through to the sidebar.
+    private func handleLeft() {
+        defer { focus = .row }
+        guard let item = current else { return }
+        let buttonCount = buttons(for: item).count
+        selectedButton = min(selectedButton, max(0, buttonCount - 1))
+        let outcome = HeroCarouselFocus.resolve(
+            direction: .left,
+            itemIndex: index,
+            itemCount: items.count,
+            focusedButton: selectedButton,
+            buttonCount: buttonCount,
+            navigationStyle: navigationStyle
+        )
+        switch outcome {
+        case let .moveButton(newIndex):
+            selectedButton = newIndex
+        case let .advance(toItem, keepButton):
+            page(to: toItem, keepButton: keepButton, forward: false)
+        case .escape, .blocked:
             break
         }
     }
@@ -566,15 +623,6 @@ struct HomeHeroView: View {
         case .next: name = "Next"
         }
         return "\(item.title), \(name)"
-    }
-
-    /// Conditionally applies `.focusSection()` so the confinement can be dropped
-    /// exactly when Left should escape to the sidebar.
-    private struct ConditionalFocusSection: ViewModifier {
-        let active: Bool
-        @ViewBuilder func body(content: Content) -> some View {
-            if active { content.focusSection() } else { content }
-        }
     }
 
     /// Adds a named VoiceOver action per visible pill so every hero action stays

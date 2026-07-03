@@ -138,7 +138,12 @@ final class SeerMapperTests: XCTestCase {
 
 final class SeerConfigTests: XCTestCase {
     func testNormalizedBaseURLAddsSchemeAndStripsTrailingSlash() {
-        XCTAssertEqual(SeerConfig.normalizedBaseURL(from: "requests.example.com")?.absoluteString, "https://requests.example.com")
+        // Scheme-less input defaults to **http** (self-hosted LAN servers are
+        // virtually never TLS) plus Overseerr's default port 5055 — matching
+        // `ServerURLNormalizer`'s Jellyfin behavior, just with a different
+        // default port.
+        XCTAssertEqual(SeerConfig.normalizedBaseURL(from: "requests.example.com")?.absoluteString, "http://requests.example.com:5055")
+        XCTAssertEqual(SeerConfig.normalizedBaseURL(from: "192.168.68.71:5055")?.absoluteString, "http://192.168.68.71:5055")
         XCTAssertEqual(SeerConfig.normalizedBaseURL(from: "http://host:5055/")?.absoluteString, "http://host:5055")
         XCTAssertEqual(SeerConfig.normalizedBaseURL(from: "https://host/seerr/")?.absoluteString, "https://host/seerr")
     }

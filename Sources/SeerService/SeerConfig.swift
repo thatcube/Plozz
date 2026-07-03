@@ -1,4 +1,5 @@
 import Foundation
+import CoreNetworking
 
 /// Connection details for a Seerr (Overseerr / Jellyseerr) instance.
 ///
@@ -43,22 +44,15 @@ public struct SeerConfig: Sendable, Equatable {
 
     /// Parses a user-entered server string into a normalized base `URL`.
     ///
-    /// Accepts bare hosts (`requests.example.com`), hosts with a port or path,
-    /// and full URLs. Defaults the scheme to `https` when omitted and strips any
-    /// trailing slash so path joining in the client stays predictable. Returns
-    /// `nil` for input that can't form a host-bearing URL.
+    /// Accepts bare hosts (`192.168.1.5`), hosts with a port or path, and full
+    /// URLs. Delegates to ``ServerURLNormalizer`` (the same helper the Jellyfin
+    /// server-add flow uses) so a scheme-less host defaults to **`http`** —
+    /// self-hosted Overseerr/Jellyseerr instances run plain HTTP on the local
+    /// network almost universally, and defaulting to `https` here silently
+    /// failed the TLS handshake against a bare LAN IP (surfaced as a generic
+    /// "can't reach the server" error). A bare host with no port defaults to
+    /// Overseerr's standard port `5055`.
     public static func normalizedBaseURL(from raw: String) -> URL? {
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
-        let withScheme = trimmed.contains("://") ? trimmed : "https://\(trimmed)"
-        guard var components = URLComponents(string: withScheme),
-              let host = components.host, !host.isEmpty
-        else { return nil }
-        // Drop a trailing slash on the path so `baseURL + "/api/v1/..."` never
-        // doubles up separators.
-        if components.path.hasSuffix("/") {
-            components.path = String(components.path.dropLast())
-        }
-        return components.url
+        ServerURLNormalizer.normalize(raw, defaultPort: 5055)
     }
 }

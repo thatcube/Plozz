@@ -29,6 +29,17 @@ final class ServerURLNormalizerTests: XCTestCase {
     func testEmptyInputReturnsNil() {
         XCTAssertNil(ServerURLNormalizer.normalize("   "))
     }
+
+    func testCustomDefaultPortForNonJellyfinServices() {
+        // Overseerr/Jellyseerr's default port (5055), used by SeerConfig.
+        let url = ServerURLNormalizer.normalize("192.168.68.71", defaultPort: 5055)
+        XCTAssertEqual(url?.absoluteString, "http://192.168.68.71:5055")
+    }
+
+    func testNilDefaultPortLeavesBareHostPortless() {
+        let url = ServerURLNormalizer.normalize("jelly.example.com", defaultPort: nil)
+        XCTAssertEqual(url?.absoluteString, "http://jelly.example.com")
+    }
 }
 
 final class PlozzLogRedactionTests: XCTestCase {

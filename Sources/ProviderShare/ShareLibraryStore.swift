@@ -68,9 +68,26 @@ actor ShareLibraryStore {
                 videos.append(videoItem(relPath: childPath, name: entry.name))
             }
         }
-        folders.sort { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
-        videos.sort { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+        folders.sort { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+        videos.sort(by: Self.videoOrder)
         return folders + videos
+    }
+
+    /// Total ordering for a folder's playable files. Episodes (those the parser
+    /// resolved a season + episode number for) sort by `(season, episode)` so
+    /// "Episode 2" precedes "Episode 10" regardless of title text; everything
+    /// without episode numbers (movies, unparsed files) sorts after episodes and
+    /// among itself by natural, number-aware title order. Using explicit sort keys
+    /// (rather than a branchy comparator) keeps the order strict and total even
+    /// when a folder mixes episodes and non-episodes.
+    private static func videoOrder(_ lhs: MediaItem, _ rhs: MediaItem) -> Bool {
+        let ls = lhs.seasonNumber ?? Int.max
+        let rs = rhs.seasonNumber ?? Int.max
+        if ls != rs { return ls < rs }
+        let le = lhs.episodeNumber ?? Int.max
+        let re = rhs.episodeNumber ?? Int.max
+        if le != re { return le < re }
+        return lhs.title.localizedStandardCompare(rhs.title) == .orderedAscending
     }
 
     // MARK: - Item / path lookup (derived from the id — no network)

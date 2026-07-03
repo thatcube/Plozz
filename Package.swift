@@ -387,6 +387,10 @@ let package = Package(
             name: "FeaturePlaybackTests",
             dependencies: ["FeaturePlayback", "CoreModels"]
         ),
+        .testTarget(
+            name: "ProviderShareTests",
+            dependencies: ["ProviderShare", "CoreModels"]
+        ),
     ],
     // Pin Swift 5 language mode: bumping tools-version to 6.0 (required for the
     // tvOS 18 `.tvOS(.v18)` platform) would otherwise default every module to

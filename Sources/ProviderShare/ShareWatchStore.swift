@@ -1,4 +1,5 @@
 import Foundation
+import CoreNetworking
 
 /// Local, on-device watch state for a media share.
 ///
@@ -110,8 +111,16 @@ public actor ShareWatchStore {
 
     private func persist(_ all: [String: Record]) {
         records = all
-        guard let data = try? JSONEncoder().encode(all) else { return }
-        try? data.write(to: url, options: .atomic)
+        guard let data = try? JSONEncoder().encode(all) else {
+            PlozzLog.playback.error("share.watchStore encode FAILED url=\(url.lastPathComponent)")
+            return
+        }
+        do {
+            try data.write(to: url, options: .atomic)
+            PlozzLog.playback.info("share.watchStore wrote \(all.count) record(s) bytes=\(data.count) file=\(url.lastPathComponent)")
+        } catch {
+            PlozzLog.playback.error("share.watchStore write FAILED file=\(url.lastPathComponent) err=\(error.localizedDescription)")
+        }
     }
 
     private static func defaultDirectory() -> URL {

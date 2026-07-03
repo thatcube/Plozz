@@ -225,7 +225,12 @@ public final class ItemDetailViewModel {
         self.itemID = itemID
         self.activeProvider = provider
         self.activeItemID = itemID
-        self.activeSourceAccountID = sourceAccountID
+        // Fall back to the library-origin account when a direct source tag is
+        // absent, so a played item is always attributed to the account it was
+        // browsed from (a local media share persists resume/played state keyed by
+        // this id — dropping it silently routes the write to the primary server
+        // instead, which is why a share's resume never survived a relaunch).
+        self.activeSourceAccountID = sourceAccountID ?? originSourceAccountID
         self.ratingsProvider = ratingsProvider
         self.sourceAccountID = sourceAccountID
         self.originSourceAccountID = originSourceAccountID

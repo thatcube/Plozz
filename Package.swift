@@ -30,8 +30,8 @@ let package = Package(
         .library(name: "ProviderTrailers", targets: ["ProviderTrailers"]),
         .library(name: "RatingsService", targets: ["RatingsService"]),
         .library(name: "TraktService", targets: ["TraktService"]),
-        .library(name: "SimklService", targets: ["SimklService"]),
-        .library(name: "AniListService", targets: ["AniListService"]),
+        .library(name: "SeerService", targets: ["SeerService"]),
+        .library(name: "SimklService", targets: ["SimklService"]),        .library(name: "AniListService", targets: ["AniListService"]),
         .library(name: "MALService", targets: ["MALService"]),
         .library(name: "LastFmService", targets: ["LastFmService"]),
         .library(name: "FeatureAuth", targets: ["FeatureAuth"]),
@@ -176,6 +176,10 @@ let package = Package(
             dependencies: ["CoreModels", "CoreNetworking"]
         ),
         .target(
+            name: "SeerService",
+            dependencies: ["CoreModels", "CoreNetworking"]
+        ),
+        .target(
             name: "SimklService",
             dependencies: ["CoreModels", "CoreNetworking"]
         ),
@@ -224,7 +228,7 @@ let package = Package(
         ),
         .target(
             name: "FeatureSettings",
-            dependencies: ["CoreModels", "CoreUI", "CoreNetworking", "CrashReporting", "FeatureProfiles", "TraktService", "SimklService", "AniListService", "MALService", "LastFmService"]
+            dependencies: ["CoreModels", "CoreUI", "CoreNetworking", "CrashReporting", "FeatureProfiles", "TraktService", "SeerService", "SimklService", "AniListService", "MALService", "LastFmService"]
         ),
         .target(
             name: "FeatureProfiles",
@@ -311,6 +315,7 @@ let package = Package(
                 "ProviderTrailers",
                 "RatingsService",
                 "TraktService",
+                "SeerService",
                 "SimklService",
                 "AniListService",
                 "MALService",
@@ -370,6 +375,10 @@ let package = Package(
         .testTarget(
             name: "TraktServiceTests",
             dependencies: ["TraktService", "CoreModels", "CoreNetworking"]
+        ),
+        .testTarget(
+            name: "SeerServiceTests",
+            dependencies: ["SeerService", "CoreModels", "CoreNetworking"]
         ),
         .testTarget(
             name: "FeatureAuthTests",

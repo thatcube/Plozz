@@ -12,6 +12,7 @@ import FeatureProfiles
 import ProviderTrailers
 import RatingsService
 import TraktService
+import SeerService
 import SimklService
 import AniListService
 import MALService
@@ -126,6 +127,7 @@ struct MainTabView: View {
     let ratingsProvider: any ExternalRatingsProviding
     let trakt: TraktService
     let simkl: SimklService
+    let seer: SeerService
     let anilist: AniListService
     let mal: MALService
     let lastfm: LastFmService
@@ -217,6 +219,7 @@ struct MainTabView: View {
             Tab("Home", systemImage: "house.fill", value: MainTab.home) {
             HomeTab(
                 accounts: accounts,
+                seer: seer,
                 homeVisibility: homeVisibility,
                 homeLayoutStore: homeLayoutStore,
                 heroSettings: heroSettingsModel,
@@ -298,6 +301,7 @@ struct MainTabView: View {
                 crashReportingConfigured: crashReportingConfigured,
                 trakt: trakt,
                 simkl: simkl,
+                seer: seer,
                 anilist: anilist,
                 mal: mal,
                 lastfm: lastfm,
@@ -462,6 +466,17 @@ private func resolveOptionalProvider(_ accountID: String, in accounts: [Resolved
 /// is resolved from its owning provider's catalog so the typed random query is
 /// issued correctly; libraries whose kind isn't a browsable movie/series list
 /// are skipped.
+/// Builds the Home hero's **featured** provider from the Seerr service: trending
+/// titles (movies + TV) that may live outside the user's library. Returns `[]`
+/// when Seerr is unconfigured or the fetch fails, so the `.featured` hero source
+/// stays inert until a server is connected — exactly the seam `HeroCurator`
+/// expects.
+private func makeHeroFeaturedProvider(seer: SeerService) -> FeaturedContentProviding {
+    { limit in
+        (try? await seer.trending(limit: limit)) ?? []
+    }
+}
+
 private func makeHeroRandomProvider(accounts: [ResolvedAccount]) -> RandomLibraryContentProviding {
     { keys, limit in
         guard !keys.isEmpty, limit > 0 else { return [] }
@@ -1190,6 +1205,8 @@ private struct PlayerPresentation: View {
 /// the tapped item/library's `sourceAccountID`.
 private struct HomeTab: View {
     let accounts: [ResolvedAccount]
+    /// Seerr discovery service backing the hero's featured content seam.
+    let seer: SeerService
     let homeVisibility: HomeLibraryVisibilityModel
     let homeLayoutStore: HomeLayoutStoring
     /// Per-profile hero carousel settings driving the Home featured section.
@@ -1246,6 +1263,7 @@ private struct HomeTab: View {
                 visibility: homeVisibility,
                 spoilerSettings: spoilerSettings,
                 heroSettings: heroSettings,
+                heroFeaturedProvider: makeHeroFeaturedProvider(seer: seer),
                 heroRandomProvider: makeHeroRandomProvider(accounts: accounts),
                 navigationStyle: navigationStyle,
                 onSelectItem: { navigate($0) },

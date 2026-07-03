@@ -109,23 +109,43 @@ struct HomeHeroView: View {
     /// The Home hero backdrop is a **stanza queue** — a `ZStack` of one-or-more
     /// `BackdropStanza` layers, each keyed by its own monotonically-increasing id
     /// (`nextStanzaID`) and stamped with an explicit `.zIndex(Double(id))` so the
-    /// **newest stanza is always, deterministically, on top**. Every page appends
-    /// a new stanza; SwiftUI's `.transition(.opacity)` fades it in from 0→1 over
-    /// the wipe duration while the previous stanza sits, fully opaque, directly
-    /// beneath it. As the top fades in the one beneath is progressively covered,
-    /// so it never "lingers" visibly. When the top reaches full opacity the older
-    /// stanzas are pruned in a `disablesAnimations` transaction — they were
-    /// invisible under the opaque top anyway, so the removal is imperceptible.
+    /// **newest stanza is always, deterministically, on top**, regardless of
+    /// SwiftUI's default transition ordering.
     ///
-    /// This design is immune to the old filmstrip's failure mode. There is no
-    /// ForEach identity churn on a mutating index, no in-flight animatable state
-    /// that a second page has to "land" mid-transition, and no reliance on
-    /// SwiftUI's implicit z-order for transitioning views. Rapid pagination just
-    /// appends more stanzas — each higher-id one lands on top; when each fade
-    /// completes it prunes everything older than itself. The "new appears behind
-    /// the old, then pops on top" artifact is structurally impossible because
-    /// zIndex is strictly monotonic in insertion order and every incoming stanza
-    /// is above every stanza it might have to displace.
+    /// Each stanza carries its own small animatable geometry — `enterProgress`
+    /// and `exitProgress` (see `BackdropStanza`) — instead of the whole stack
+    /// sharing one mutable slide value. A page does two things, in order:
+    ///
+    /// 1. **Insert** the new stanza with animations explicitly *disabled*,
+    ///    parked at its off-screen entrance position (`enterProgress == 0`,
+    ///    which IS where it renders anyway — clipped out of the viewport). Since
+    ///    it is invisible at the instant it's inserted, this is a plain,
+    ///    unanimated ForEach append with nothing to visually "insert".
+    /// 2. **Animate** two plain property mutations on already-existing array
+    ///    elements inside one `withAnimation`: the new stanza's `enterProgress`
+    ///    0→1 (slides it in from the paging direction to center, and drives its
+    ///    "wipe" reveal overlay — see `wipeOverlay`), and the stanza it
+    ///    supersedes gets `exitProgress` 0→1 (a smaller parallax push
+    ///    *continuing* the same direction of travel — see `stanzaOffsetX`).
+    ///
+    /// Because step 1 never touches an active animation and step 2 never
+    /// inserts/removes a ForEach row (only mutates fields on stable, existing
+    /// elements), this sidesteps SwiftUI's ForEach insertion/removal transition
+    /// machinery *entirely* — no `.transition(...)` modifier is used anywhere in
+    /// this stack. That machinery interacting with a still-active outer
+    /// animation across a nested `disablesAnimations` transaction was the exact
+    /// mechanism of the original "new appears behind the old, then pops on top"
+    /// bug (the old filmstrip mutated a shared `centerIndex` mid-flight to "land"
+    /// a running animation before starting the next). There is nothing to land
+    /// here: every stanza's `enterProgress` is set exactly once, ever, and every
+    /// stanza's `exitProgress` is set exactly once, ever (the instant it is
+    /// superseded) — never retargeted, never reset.
+    ///
+    /// On completion, stanzas older than the new one are pruned in a
+    /// `disablesAnimations` transaction. They are **provably** fully covered by
+    /// the newer two by then (see the coverage proof on `stanzaOffsetX`), so the
+    /// removal is imperceptible regardless of whether any transition modifier is
+    /// attached — there is nothing on screen to visually remove.
     @State private var stanzas: [BackdropStanza] = []
     /// Monotonically-increasing stanza id source. Assigned to each new stanza on
     /// page (and on the initial appearance / set-swap seed), and read straight
@@ -334,13 +354,9 @@ struct HomeHeroView: View {
 
     /// The hero backdrop as a **stanza queue**: a `ZStack` of one or more layers
     /// (usually one at rest, two mid-page) each with a monotonic id → explicit
-    /// `zIndex`. The newest stanza is guaranteed on top; `.transition(.opacity)`
-    /// fades it in while older stanzas sit fully opaque directly beneath. Because
-    /// zIndex is strictly monotonic in insertion order there is no way for the
-    /// incoming stanza to render behind the outgoing (the historical bug), and
-    /// because older stanzas are fully covered by the opaque top once its fade
-    /// completes, pruning them in `disablesAnimations` is imperceptible. See the
-    /// ``stanzas`` doc for the full design.
+    /// `zIndex`, so the newest stanza is deterministically always on top. See the
+    /// ``stanzas`` doc for the full lifecycle design and why no `.transition(...)`
+    /// modifier appears anywhere in this stack.
     ///
     /// The overscan breakout is applied once here at the container, not per cell
     /// (the ZStack's clip already keeps every stanza to a single screen).
@@ -355,15 +371,16 @@ struct HomeHeroView: View {
                 heroBackdrop(for: stanza.item, height: height)
                     .frame(width: w, height: height)
                     .clipped()
-                    // Fade the *incoming* stanza in; the *outgoing* (previous top)
-                    // stays fully opaque directly beneath during its successor's
-                    // fade and is pruned in a `disablesAnimations` transaction on
-                    // completion (invisible under the new opaque top, so the
-                    // removal is imperceptible). Asymmetric removes the
-                    // outgoing-fade artifact where SwiftUI would briefly fade the
-                    // old one out at the same time as the new one fades in — a
-                    // classic crossfade that can look milky mid-way.
-                    .transition(.asymmetric(insertion: .opacity, removal: .identity))
+                    // Cosmetic top-to-bottom "wipe" reveal, synced 1:1 with this
+                    // stanza's OWN entrance — see `wipeOverlay`. Never touches
+                    // alpha/coverage, so it cannot affect the gap-free guarantee.
+                    .overlay(wipeOverlay(progress: stanza.enterProgress))
+                    // Real directional motion: the incoming stanza travels the
+                    // full width from the paging direction to center; the stanza
+                    // it supersedes parallax-recedes a fraction of that distance
+                    // continuing the same direction. See `stanzaOffsetX` for the
+                    // no-gap proof.
+                    .offset(x: stanzaOffsetX(stanza, width: w))
                     // Strictly monotonic z-order: newest stanza always on top.
                     .zIndex(Double(stanza.id))
             }
@@ -373,6 +390,72 @@ struct HomeHeroView: View {
         .frame(maxWidth: .infinity, alignment: .center)
         .offset(y: -backdropParallaxLift)
         .ignoresSafeArea(edges: [.top, .horizontal])
+    }
+
+    /// How far the stanza a page supersedes parallax-recedes, as a fraction of
+    /// the full viewport width the incoming stanza travels. `< 1` by
+    /// construction (see `stanzaOffsetX`) so the two can never both vacate the
+    /// same point on screen — the "somewhat different rate" Brandon asked for,
+    /// tuned so the recede reads as a distinct, slower layer rather than a
+    /// synchronized (and gap-risking) lockstep push.
+    private static let exitParallaxFactor: CGFloat = 0.45
+
+    /// The horizontal offset for one stanza, purely a function of its own
+    /// stored, monotonic `enterProgress` / `exitProgress` — no shared/global
+    /// slide value, so there is nothing for a second page to "land" or retarget.
+    ///
+    /// **No-gap proof.** At any instant, the incoming stanza (entering this
+    /// transition) occupies the screen-space span `[W(1-f), W]` (measuring from
+    /// the leading edge it enters from; `f` = its `enterProgress`), and the
+    /// stanza it supersedes occupies `[0, W - D·f]` where `D = exitParallaxFactor
+    /// · W`. These two spans union to the full `[0, W]` for every `f ∈ [0,1]`
+    /// exactly when `D ≤ W` — true for any `exitParallaxFactor ≤ 1` — so there is
+    /// never a point on screen covered by neither layer. (`W(1-f) ≤ W - D·f` ⟺
+    /// `D·f ≤ W·f` ⟺ `D ≤ W` for any `f > 0`.) This holds independently of the
+    /// cosmetic `wipeOverlay`, which never changes either stanza's alpha/extent.
+    private func stanzaOffsetX(_ stanza: BackdropStanza, width: CGFloat) -> CGFloat {
+        let enter = CGFloat(stanza.enterDirection) * width * (1 - stanza.enterProgress)
+        let exit = CGFloat(stanza.exitDirection) * width * Self.exitParallaxFactor * stanza.exitProgress
+        return enter + exit
+    }
+
+    /// Fraction of the stanza's own height the wipe boundary's soft feather
+    /// spans — the transition between "revealed" and "still dark" is a gradient
+    /// this wide, not a hard edge.
+    private static let wipeSoftness: CGFloat = 0.16
+    /// Peak darkness of the not-yet-revealed portion of an entering stanza.
+    private static let wipeDimOpacity: CGFloat = 0.55
+
+    /// A purely COSMETIC dark→clear gradient sweeping top-to-bottom across a
+    /// stanza in lockstep with its own `enterProgress` (`0` = fully dark, `1` =
+    /// fully clear) — present for the entire slide-in, which is what makes the
+    /// motion read as "a wipe over the page as the new one slides in" rather
+    /// than a flat push. This only ever paints a translucent tint *on top* of
+    /// the already-opaque backdrop; it never touches alpha/coverage, so it can't
+    /// affect the gap-free guarantee proved on `stanzaOffsetX` — that guarantee
+    /// depends only on the (fully opaque) backdrop images and their offsets.
+    ///
+    /// `sweep` is the boundary's normalized (0...1) vertical position, mapped so
+    /// it starts a full feather-width *above* the frame (`progress == 0` →
+    /// everything below is dark) and ends a full feather-width *below* it
+    /// (`progress == 1` → everything above is clear) — so both extremes are
+    /// unambiguously all-dark / all-clear with no visible seam at the edges.
+    private func wipeOverlay(progress: CGFloat) -> some View {
+        let softness = Self.wipeSoftness
+        let sweep = -softness + progress * (1 + 2 * softness)
+        let top = min(1, max(0, sweep - softness))
+        let bottom = min(1, max(0, sweep + softness))
+        return LinearGradient(
+            stops: [
+                .init(color: .clear, location: 0),
+                .init(color: .clear, location: top),
+                .init(color: .black.opacity(Self.wipeDimOpacity), location: bottom),
+                .init(color: .black.opacity(Self.wipeDimOpacity), location: 1)
+            ],
+            startPoint: .top,
+            endPoint: .bottom
+        )
+        .allowsHitTesting(false)
     }
 
     /// The dwell key: any change (slide index or a manual page bump) restarts the
@@ -881,15 +964,25 @@ struct HomeHeroView: View {
         }
     }
 
-    /// Fronts `toItem` with a clean opacity-crossfade wipe and restarts the
-    /// auto-advance dwell. Appends a new ``BackdropStanza`` to ``stanzas`` in a
-    /// `withAnimation`; SwiftUI applies the `.transition(.opacity)` insertion so
-    /// the new stanza fades in from 0→1 while the previous (still fully opaque)
-    /// stanza sits directly beneath. On completion the older stanzas are pruned in
-    /// a `disablesAnimations` transaction — they were invisible under the opaque
-    /// top by then, so their removal is imperceptible. Rapid pagination just keeps
-    /// appending; each fade-in prunes everything older than *itself* when it
-    /// completes, so the queue self-drains.
+    /// Fronts `toItem` with a directional parallax wipe and restarts the
+    /// auto-advance dwell. Two steps, always in this order:
+    ///
+    /// 1. Insert the new stanza in a `disablesAnimations` transaction, parked at
+    ///    its off-screen entrance offset (`enterProgress == 0`) — invisible the
+    ///    instant it exists, so there is nothing to visually "insert".
+    /// 2. Inside one `withAnimation`, mutate two plain stored fields on
+    ///    already-existing stanzas: the new one's `enterProgress` 0→1 (slides it
+    ///    in + drives its wipe reveal) and the stanza it supersedes gets
+    ///    `exitProgress` 0→1 (its parallax recede, continuing the same
+    ///    direction). Neither is a ForEach insertion/removal, so there's no
+    ///    transition ambiguity to reason about.
+    ///
+    /// On completion, stanzas older than the new one are pruned in a
+    /// `disablesAnimations` transaction — provably fully covered by the newer
+    /// two by then (see `stanzaOffsetX`), so the removal is imperceptible.
+    /// Rapid pagination just keeps appending; each entrance prunes everything
+    /// older than itself when it completes, so the queue self-drains back to
+    /// one stanza at rest. See the ``stanzas`` doc for the full design.
     private func page(to toItem: Int, keepButton: Int, forward isForward: Bool) {
         guard items.indices.contains(toItem), toItem != index else { return }
         let newItem = items[toItem]
@@ -906,16 +999,39 @@ struct HomeHeroView: View {
         metadataVisible = false
         beginTransition()
 
+        // +1 = entering (and exiting) toward/through the right edge, matching a
+        // forward page (Right); -1 = the left edge, matching a backward page
+        // (Left) — see `stanzaOffsetX`.
+        let direction = isForward ? 1 : -1
         let stanzaID = nextStanzaID
         nextStanzaID += 1
-        let stanza = BackdropStanza(id: stanzaID, itemID: newItem.id, item: newItem)
+
+        var insertTransaction = Transaction()
+        insertTransaction.disablesAnimations = true
+        withTransaction(insertTransaction) {
+            stanzas.append(
+                BackdropStanza(id: stanzaID, itemID: newItem.id, item: newItem, enterDirection: direction)
+            )
+        }
+
         withAnimation(.easeInOut(duration: 0.42)) {
-            stanzas.append(stanza)
+            // The stanza directly beneath the one we just appended is the one
+            // we're superseding — every older stanza already had its own
+            // exitProgress set to 1 by an earlier page and is left untouched.
+            if stanzas.count >= 2 {
+                let previousIndex = stanzas.count - 2
+                stanzas[previousIndex].exitDirection = -direction
+                stanzas[previousIndex].exitProgress = 1
+            }
+            if let newIndex = stanzas.firstIndex(where: { $0.id == stanzaID }) {
+                stanzas[newIndex].enterProgress = 1
+            }
         } completion: {
             // Prune everything older than *this* stanza. If a later page appended
             // stanzas after us they stay (they're on top of us with higher zIndex);
-            // their own completions will prune us in turn. Older stanzas were fully
-            // covered by our now-opaque top, so removal is invisible.
+            // their own completions will prune us in turn. Older stanzas are fully
+            // covered by the current top two by then (see `stanzaOffsetX`), so
+            // removal is invisible.
             var transaction = Transaction()
             transaction.disablesAnimations = true
             withTransaction(transaction) {
@@ -943,7 +1059,11 @@ struct HomeHeroView: View {
         var transaction = Transaction()
         transaction.disablesAnimations = true
         withTransaction(transaction) {
-            stanzas = [BackdropStanza(id: stanzaID, itemID: item.id, item: item)]
+            // `enterDirection: 0` + `enterProgress: 1`: already at rest, dead
+            // center, no wipe overlay — a reseat snaps with no animation.
+            stanzas = [
+                BackdropStanza(id: stanzaID, itemID: item.id, item: item, enterDirection: 0, enterProgress: 1)
+            ]
         }
     }
 
@@ -1121,6 +1241,31 @@ struct HomeHeroView: View {
         let id: Int
         let itemID: String
         let item: MediaItem
+        /// Direction this stanza itself entered from: `+1` slides in from/toward
+        /// the right (a forward page), `-1` from/toward the left (a backward
+        /// page), `0` = reseated with no animated entrance (already at rest).
+        /// Fixed at creation; read by both this stanza's own `enterProgress`
+        /// motion and, by whichever later stanza supersedes it, to derive that
+        /// stanza's own `exitDirection` (always the opposite, so the motion
+        /// continues in one apparent direction rather than reversing).
+        let enterDirection: Int
+        /// `0...1`. Mutated exactly once, from 0 to 1, inside the single
+        /// `withAnimation` in `page()` that appends this stanza — never touched
+        /// again afterward. Drives both the entrance slide (`stanzaOffsetX`) and
+        /// the synced wipe reveal (`wipeOverlay`).
+        var enterProgress: CGFloat = 0
+        /// Direction this stanza recedes toward once superseded — always the
+        /// negation of the superseding stanza's `enterDirection`, so a forward
+        /// page's incoming stanza enters moving left-to-center while the stanza
+        /// it displaces continues moving further left (not back to the right):
+        /// one continuous apparent direction of travel, not a bounce. `0` until
+        /// superseded.
+        var exitDirection: Int = 0
+        /// `0...1`. Mutated exactly once, from 0 to 1, inside the single
+        /// `withAnimation` in `page()` that supersedes this stanza — never
+        /// touched again afterward. Drives the parallax recede in
+        /// `stanzaOffsetX`. Stays `0` for as long as this stanza is topmost.
+        var exitProgress: CGFloat = 0
 
         static func == (lhs: BackdropStanza, rhs: BackdropStanza) -> Bool {
             lhs.id == rhs.id && lhs.itemID == rhs.itemID

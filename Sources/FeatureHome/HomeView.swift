@@ -87,32 +87,44 @@ public struct HomeView: View {
             } ?? []
             let displayHeroItems = heroItems.isEmpty ? syncHeroItems : heroItems
             let heroActive = (heroSettings?.settings.isActive ?? false) && !displayHeroItems.isEmpty
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    if heroActive, let heroSettings {
-                        HomeHeroView(
-                            items: displayHeroItems,
-                            settings: heroSettings.settings,
-                            spoilerSettings: spoilerSettings,
-                            navigationStyle: navigationStyle,
-                            onSelect: onSelectItem,
-                            onPlay: onPlayItem
-                        )
-                    }
-                    VStack(alignment: .leading, spacing: metrics.rowSpacing) {
-                        ForEach(rows) { row in
-                            rowView(row)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        if heroActive, let heroSettings {
+                            HomeHeroView(
+                                items: displayHeroItems,
+                                settings: heroSettings.settings,
+                                spoilerSettings: spoilerSettings,
+                                navigationStyle: navigationStyle,
+                                onSelect: onSelectItem,
+                                onPlay: onPlayItem,
+                                // When focus returns to the hero from a row below,
+                                // snap the scroll back to the top so the hero
+                                // re-expands to full-screen and its transition
+                                // replays — otherwise it stays partially scrolled.
+                                onFocusGained: {
+                                    withAnimation(.easeInOut(duration: 0.4)) {
+                                        proxy.scrollTo(Self.heroTopID, anchor: .top)
+                                    }
+                                }
+                            )
+                            .id(Self.heroTopID)
                         }
+                        VStack(alignment: .leading, spacing: metrics.rowSpacing) {
+                            ForEach(rows) { row in
+                                rowView(row)
+                            }
+                        }
+                        // When the hero is present, pull the rows up so the first row
+                        // (Continue Watching) overlaps the hero's lower edge — the
+                        // Apple TV look. Otherwise keep the classic top padding.
+                        .padding(.top, heroActive ? -Self.heroRowOverlap : PlozzTheme.Metrics.screenVerticalPadding)
+                        .padding(.bottom, PlozzTheme.Metrics.screenVerticalPadding)
                     }
-                    // When the hero is present, pull the rows up so the first row
-                    // (Continue Watching) overlaps the hero's lower edge — the
-                    // Apple TV look. Otherwise keep the classic top padding.
-                    .padding(.top, heroActive ? -Self.heroRowOverlap : PlozzTheme.Metrics.screenVerticalPadding)
-                    .padding(.bottom, PlozzTheme.Metrics.screenVerticalPadding)
                 }
+                // Never clip a focused card's lift, shadow or border.
+                .scrollClipDisabled()
             }
-            // Never clip a focused card's lift, shadow or border.
-            .scrollClipDisabled()
             // Remember the structure we actually rendered (post-visibility), keyed
             // on kinds *and* counts so a changed card count re-persists too.
             .task(id: layout) { viewModel.rememberLayout(layout) }
@@ -156,6 +168,10 @@ public struct HomeView: View {
     /// that inset lands the Continue Watching title ~40px below the dots, with the
     /// tops of its cards peeking over the hero's lower edge. Tuned on-device.
     private static let heroRowOverlap: CGFloat = 92
+
+    /// Scroll anchor for the hero, so focus returning to it can snap the scroll
+    /// back to the top and re-expand the hero to full-screen.
+    private static let heroTopID = "home-hero-top"
 
     /// Recomputes the curated hero items for the current Home `content` and the
     /// active hero settings, via the injected curator + content seams. Clears the

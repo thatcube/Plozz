@@ -29,6 +29,10 @@ struct HomeHeroView: View {
     var heroHeightFraction: CGFloat = 1.0
     let onSelect: (MediaItem) -> Void
     let onPlay: (MediaItem) -> Void
+    /// Fired when the hero *gains* focus (the user moved focus back up onto it),
+    /// so Home can scroll the carousel back to full-screen and replay the
+    /// enter transition. Not fired for interior button-to-button moves.
+    var onFocusGained: () -> Void = {}
 
     /// The app-installed action handler — the SAME one the detail hero and the
     /// long-press context menu use — so the hero's Watchlist button is offered
@@ -172,7 +176,12 @@ struct HomeHeroView: View {
 
             actionRow(for: item)
             pagingDots
+                // Center the page indicators across the full hero width (leading
+                // and trailing padding are equal, so this is true screen-center)
+                // while the logo / metadata / buttons stay left-aligned.
+                .frame(maxWidth: .infinity, alignment: .center)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.top, PlozzTheme.Metrics.screenPadding)
         .padding(.trailing, PlozzTheme.Metrics.screenPadding)
         .padding(.leading, PlozzTheme.Metrics.heroLeadingPadding)
@@ -222,8 +231,11 @@ struct HomeHeroView: View {
         .onMoveCommand { direction in
             handleMove(direction)
         }
-        .onChange(of: focusedButton) { _, new in
+        .onChange(of: focusedButton) { old, new in
             hasFocus = new != nil
+            // Only when focus lands on the hero from *outside* (not an interior
+            // button move) — that's the cue to scroll it back to full-screen.
+            if new != nil, old == nil { onFocusGained() }
         }
     }
 

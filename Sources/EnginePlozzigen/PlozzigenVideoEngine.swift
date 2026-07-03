@@ -8,6 +8,7 @@ import FeaturePlayback
 import UIKit
 #endif
 @preconcurrency import AetherEngine
+@preconcurrency import AetherEngineSMB
 
 // The module and main class are both named "AetherEngine", so we typealias
 // the class to avoid ambiguity. All other public types (LoadOptions,
@@ -164,19 +165,74 @@ public final class PlozzigenVideoEngine: VideoEngine {
         options.preferredSubtitleLanguages = request.preferredSubtitleLanguages
 
         do {
-            try await engine.load(
-                url: url,
-                startPosition: startPosition > 0 ? startPosition : nil,
-                options: options
-            )
+            if url.scheme?.lowercased() == "smb" {
+                // Media-share transport (second-class, behind Plex/Jellyfin). The
+                // provider mints a per-play `smb://user:password@host/share/path`
+                // URL with in-memory credentials; nothing is persisted here. We
+                // wrap it in an `IOReader` custom source so AetherEngine demuxes
+                // the raw file over SMB with no server-side transcode.
+                let source = try await makeSMBSource(from: url)
+                try await engine.load(
+                    source: source,
+                    startPosition: startPosition > 0 ? startPosition : nil,
+                    options: options
+                )
+            } else {
+                try await engine.load(
+                    url: url,
+                    startPosition: startPosition > 0 ? startPosition : nil,
+                    options: options
+                )
+            }
             // Guard against stop() having run during the await above.
             guard status == .loading else { return }
             engine.play()
             syncTracks()
         } catch {
-            let err: AppError = .unknown(error.localizedDescription)
+            // Surface the real reason: AppError / SMBConnection.SMBError don't
+            // conform to LocalizedError, so `localizedDescription` collapses to a
+            // generic "error 0". `String(describing:)` keeps the actual message.
+            let detail = String(describing: error)
+            let err: AppError = .unknown(detail)
             status = .failed(err)
             onFailure?(err)
+        }
+    }
+
+    // MARK: - SMB custom source
+
+    /// Build an SMB `MediaSource` from an `smb://host[:port]/share/path/file.ext`
+    /// URL. Parses it with the engine's `SMBURL`, opens an `SMBConnection`
+    /// (NWConnection-backed SMB2, NTLMv2 / guest, read-only), and wraps it in an
+    /// `SMBIOReader` for the engine's custom-source path.
+    private func makeSMBSource(from url: URL) async throws -> MediaSource {
+        let parsed: SMBURL
+        do {
+            parsed = try SMBURL.parse(url.absoluteString)
+        } catch {
+            throw AppError.unknown("Malformed SMB URL: \(String(describing: error))")
+        }
+        let connection = try await SMBConnection.connect(
+            server: parsed.server,
+            share: parsed.share,
+            path: parsed.path,
+            user: parsed.user,
+            password: parsed.password
+        )
+        return .custom(SMBIOReader(source: connection), formatHint: Self.smbFormatHint(for: parsed.path))
+    }
+
+    /// Optional container short-name hint for the demuxer probe, derived from the
+    /// file extension (there is no server MIME type for a raw share file). nil
+    /// lets AetherEngine probe from content.
+    private static func smbFormatHint(for path: String) -> String? {
+        switch (path as NSString).pathExtension.lowercased() {
+        case "mkv":                 return "matroska"
+        case "webm":                return "webm"
+        case "mp4", "m4v", "mov":   return "mp4"
+        case "ts", "m2ts", "mts":   return "mpegts"
+        case "avi":                 return "avi"
+        default:                    return nil
         }
     }
 

@@ -26,6 +26,7 @@ let package = Package(
         .library(name: "FeatureDiscovery", targets: ["FeatureDiscovery"]),
         .library(name: "ProviderJellyfin", targets: ["ProviderJellyfin"]),
         .library(name: "ProviderPlex", targets: ["ProviderPlex"]),
+        .library(name: "ProviderShare", targets: ["ProviderShare"]),
         .library(name: "ProviderTrailers", targets: ["ProviderTrailers"]),
         .library(name: "RatingsService", targets: ["RatingsService"]),
         .library(name: "TraktService", targets: ["TraktService"]),
@@ -60,17 +61,20 @@ let package = Package(
         // decodes cleanly (#92), software-path seek holds last frame (#90). See
         // AGENTS.local.md › "Playback engine (AetherEngine / Plozzigen)".
         //
-        // Pinned to the upstream merge commit for the backward-seek muxer wedge
-        // fix (PR #94, merged into superuser404notfound/AetherEngine main as
-        // 8e4ed87 — 4.8.0 plus the fix). Under +delay_moov the fMP4 muxer writes
-        // moov lazily on the first flush; for AC-3/E-AC-3/TrueHD the audio sample
-        // entry (dac3/dec3/dmlp) can only be built from a PARSED audio packet, so a
-        // fresh restart muxer whose first moov flush fired video-only errored
-        // "Cannot write moov atom before EAC3 packets parsed" → wedged muxer +
-        // forever-loading on a mid-file backward seek. The fix primes moov with a
-        // parsed audio packet, codec-scoped so AAC keeps the exact stock path. Bump
-        // to the released upstream tag (`from:`) once one past 4.8.0 is cut.
-        .package(url: "https://github.com/superuser404notfound/AetherEngine", revision: "8e4ed87c6a46a1e05164a1a556f942989eb8a7d0"),
+        // Pinned to a fork commit that carries the tvOS SMB transport fix on top
+        // of the backward-seek muxer wedge fix. AetherEngine's stock SMB transport
+        // (`SMBConnection`, AMSMB2/libsmb2) fails POSIX EPERM on tvOS — a known,
+        // unfixed libsmb2-on-iOS/tvOS bug (AMSMB2 #32/#63/#64). The fork swaps that
+        // transport to kishikawakatsumi/SMBClient (pure-Swift, MIT, speaks SMB2
+        // over NWConnection), which completes a full handshake on-device where
+        // libsmb2 does not. Same public surface, so `SMBConnection`/`SMBIOReader`/
+        // `SMBURL` are unchanged. Upstreamed as superuser404notfound/AetherEngine
+        // PR #97; move this pin back to the upstream merge commit once it lands.
+        // (Also includes PR #94: backward-seek muxer wedge fix — under +delay_moov
+        // the fMP4 muxer needs a PARSED audio packet to build the AC-3/E-AC-3/TrueHD
+        // sample entry, else a mid-file backward seek wedged the muxer.) See
+        // docs/media-share-proposal.md § 5.1.
+        .package(url: "https://github.com/thatcube/AetherEngine", revision: "82871715b37f9d3a1076e89b906ec48675cca4a8"),
         // NOTE: FFmpegBuild (FFmpeg n8.1.x decode-only) and LibDovi (Dolby Vision
         // RPU parser) are pulled in TRANSITIVELY by AetherEngine — its own manifest
         // declares and consumes them. Plozz used to declare them directly only for
@@ -84,6 +88,15 @@ let package = Package(
         // Nothing is sent unless the user opts in AND a DSN was baked into the
         // build; see the `CrashReporting` target for the privacy-hardened config.
         .package(url: "https://github.com/getsentry/sentry-cocoa", from: "9.19.0"),
+
+        // SMBClient (kishikawakatsumi/SMBClient) — pure-Swift, MIT SMB2 client
+        // over NWConnection. Declared here for the **ProviderShare** target, which
+        // uses it to *browse/enumerate* a media share (listDirectory/listShares)
+        // and scan it into a library. This is an app concern distinct from
+        // playback: AetherEngine already pulls SMBClient transitively and owns the
+        // playback byte-reads (SMBConnection); SwiftPM unifies both onto one
+        // version. Kept in sync with the version AetherEngine resolves (0.3.1).
+        .package(url: "https://github.com/kishikawakatsumi/SMBClient", from: "0.3.1"),
     ],
     targets: [
         // MARK: Core
@@ -120,6 +133,19 @@ let package = Package(
         .target(
             name: "ProviderPlex",
             dependencies: ["CoreModels", "CoreNetworking"]
+        ),
+        // Second-class local media-share backend (SMB today). Scans a share into
+        // a synthesised library and conforms to `MediaProvider` so the rest of the
+        // app treats it like Plex/Jellyfin. Depends on SMBClient for directory
+        // enumeration; playback still flows through EnginePlozzigen's engine
+        // SMBConnection (this target never plays). See docs/media-share-proposal.md.
+        .target(
+            name: "ProviderShare",
+            dependencies: [
+                "CoreModels",
+                "CoreNetworking",
+                .product(name: "SMBClient", package: "SMBClient"),
+            ]
         ),
         // Synthetic provider for online (TMDb → YouTube) trailers. Conforms to
         // `MediaProvider` so a trailer can be played by the existing player; only
@@ -250,6 +276,13 @@ let package = Package(
                 "CoreModels",
                 "FeaturePlayback",
                 .product(name: "AetherEngine", package: "AetherEngine"),
+                // SMB2/3 byte-source product. Lets the engine wrapper play a
+                // media-share file over an `IOReader` custom source with no server.
+                // Second-class transport behind Plex/Jellyfin; see
+                // docs/media-share-proposal.md. The engine's `SMBConnection` speaks
+                // SMB2 over NWConnection (pinned fork / PR #97), so it works on
+                // tvOS where the stock AMSMB2/libsmb2 transport EPERMs.
+                .product(name: "AetherEngineSMB", package: "AetherEngine"),
             ]
         ),
 
@@ -266,6 +299,7 @@ let package = Package(
                 "MetadataKit",
                 "ProviderJellyfin",
                 "ProviderPlex",
+                "ProviderShare",
                 "ProviderTrailers",
                 "RatingsService",
                 "TraktService",
@@ -280,7 +314,7 @@ let package = Package(
                 "FeatureProfiles",
                 "FeatureMusic",
                 "TopShelfKit",
-                "CrashReporting"
+                "CrashReporting",
             ]
         ),
 

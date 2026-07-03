@@ -8,6 +8,7 @@ import FeatureMusic
 import FeatureProfiles
 import ProviderJellyfin
 import ProviderPlex
+import ProviderShare
 import RatingsService
 import TraktService
 import SimklService
@@ -1006,6 +1007,9 @@ public final class AppState {
                 connectionRefresh: PlexProvider.connectionRefresh(for: session)
             )
         }
+        registry.register(.mediaShare) { session in
+            ShareProvider(session: session)
+        }
         return registry
     }
 
@@ -1451,6 +1455,21 @@ public final class AppState {
     /// through the "Which Plex user are you?" picker first; otherwise we proceed
     /// straight to the "choose your libraries" step.
     private func finishAuthentication(session: UserSession, accountID: String, isFirstRun: Bool) {
+        // A media share exposes exactly one browsable "library" (its root
+        // folder), so the "choose your libraries" opt-out step is pure friction —
+        // there's nothing to choose between. Skip straight past it (the single
+        // library stays visible by default) while still doing the first-run
+        // profile seeding the step would have done.
+        if session.server.provider == .mediaShare {
+            beginLibrarySelection(
+                isFirstRun: isFirstRun,
+                seedName: session.userName,
+                seedAvatar: session.avatarURL?.absoluteString,
+                applyPlexIdentity: false,
+                skipSelectionStep: true
+            )
+            return
+        }
         if session.server.provider == .plex,
            profilesModel.activeProfile.homeUserBinding(forPlexAccount: accountID) == nil {
             Task { [weak self] in
@@ -1488,7 +1507,7 @@ public final class AppState {
     /// confirm screen shows who's watching. `applyPlexIdentity` records whether a
     /// freshly-picked Plex Home user still needs applying once the step completes
     /// (deferred so the PIN prompt doesn't interrupt onboarding).
-    private func beginLibrarySelection(isFirstRun: Bool, seedName: String, seedAvatar: String?, applyPlexIdentity: Bool) {
+    private func beginLibrarySelection(isFirstRun: Bool, seedName: String, seedAvatar: String?, applyPlexIdentity: Bool, skipSelectionStep: Bool = false) {
         if isFirstRun {
             profilesModel.seedDefaultProfileIdentity(name: seedName, avatarImageURL: seedAvatar)
         }
@@ -1496,7 +1515,13 @@ public final class AppState {
             isFirstRun: isFirstRun,
             applyPlexIdentity: applyPlexIdentity
         )
-        apply(.librarySelectionRequired)
+        // Providers with a single implicit library (media shares) skip the
+        // "choose your libraries" screen and go straight to the continuation.
+        if skipSelectionStep {
+            confirmLibrarySelection()
+        } else {
+            apply(.librarySelectionRequired)
+        }
     }
 
     /// Completes the "choose your libraries" step and continues onboarding: a
@@ -1590,6 +1615,53 @@ public final class AppState {
     /// account exactly like any other provider.
     public func didAuthenticatePlex(_ session: UserSession) {
         apply(.serverSelected(session.server))
+        didAuthenticate(session)
+    }
+
+    /// Persist a newly-configured local media share as an account. Builds a
+    /// synthetic `MediaServer` (`smb://host[:port]/share`) + `UserSession` whose
+    /// `accessToken` carries the SMB password (Keychain-backed like any other
+    /// account) and runs it through the normal authenticated-account path, so a
+    /// share joins the multi-account list and the library-selection step exactly
+    /// like Plex/Jellyfin. There's no network round-trip — the share is validated
+    /// lazily when its library is first scanned.
+    public func didConfigureShare(
+        host: String,
+        port: Int?,
+        share: String,
+        username: String,
+        password: String,
+        displayName: String
+    ) {
+        var comps = URLComponents()
+        comps.scheme = "smb"
+        comps.host = host
+        comps.port = port
+        comps.path = "/" + share
+        guard let baseURL = comps.url else {
+            apply(.authenticationFailed(.unknown("Invalid share address")))
+            return
+        }
+        let trimmedName = displayName.trimmingCharacters(in: .whitespaces)
+        let name = trimmedName.isEmpty ? "\(host)/\(share)" : trimmedName
+        let portKey = port.map { ":\($0)" } ?? ""
+        let server = MediaServer(
+            id: "share:\(host)\(portKey)/\(share)",
+            name: name,
+            baseURL: baseURL,
+            provider: .mediaShare
+        )
+        // A guest/anonymous share has no user identity; use "guest" as a stable
+        // per-share user id so the account key is deterministic.
+        let user = username.isEmpty ? "guest" : username
+        let session = UserSession(
+            server: server,
+            userID: user,
+            userName: username,
+            deviceID: accountStore.deviceID(),
+            accessToken: password
+        )
+        apply(.serverSelected(server))
         didAuthenticate(session)
     }
 

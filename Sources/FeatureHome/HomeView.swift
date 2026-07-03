@@ -99,6 +99,28 @@ public struct HomeView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
+                        // Kill the Siri Remote **touch-surface pan** so a light touch
+                        // (or a resting thumb) can't free-scroll the page out from
+                        // under a pinned hero — the "view drifts down even though
+                        // focus never moved" bug. tvOS has no `DragGesture` to absorb,
+                        // and `.scrollDisabled` would also disable the focus-driven
+                        // auto-scroll that reveals lower rows. Instead we reach the
+                        // enclosing `UIScrollView` and disable its pan gesture
+                        // recognizers: touch-swipe scrolling is driven by the pan,
+                        // while focus auto-scroll and `ScrollViewReader.scrollTo` use
+                        // `setContentOffset` directly, so navigation and our hero
+                        // expand/recede animations keep working. The probe is a real
+                        // child of this VStack (not a `.background`) so it is
+                        // unambiguously inside the scroll content and its superview
+                        // walk reaches the UIScrollView. Gated to the hero layout.
+                        #if canImport(UIKit)
+                        if heroActive {
+                            ScrollPanDisabler()
+                                .frame(width: 1, height: 0)
+                                .allowsHitTesting(false)
+                                .accessibilityHidden(true)
+                        }
+                        #endif
                         if heroActive, let heroSettings {
                             HomeHeroView(
                                 items: displayHeroItems,
@@ -134,27 +156,8 @@ public struct HomeView: View {
                                 }
                             )
                             .id(Self.heroTopID)
-                            // Kill the Siri Remote **touch-surface pan** so a light
-                            // touch (or a resting thumb) can't free-scroll the page
-                            // out from under a pinned hero — the "view drifts down
-                            // even though focus never moved" bug. tvOS has no
-                            // `DragGesture` to absorb, and `.scrollDisabled` would
-                            // also disable the focus-driven auto-scroll that reveals
-                            // lower rows. Instead we reach the enclosing
-                            // `UIScrollView` and disable its pan gesture recognizer:
-                            // touch-swipe scrolling is driven by that pan, while
-                            // focus auto-scroll and `ScrollViewReader.scrollTo` use
-                            // `setContentOffset` directly, so navigation and our hero
-                            // expand/recede animations keep working. The probe is a
-                            // background of the hero so it lives INSIDE the scroll
-                            // content (a `.background` on the ScrollView itself is a
-                            // sibling layer whose superview walk never reaches the
-                            // UIScrollView — that was why the first attempt failed).
-                            #if canImport(UIKit)
-                            .background {
-                                ScrollPanDisabler().accessibilityHidden(true)
-                            }
-                            #endif
+                            // (touch-pan disabler lives as a sibling below so it is
+                            //  unambiguously inside the scroll content — see note.)
                         }
                         VStack(alignment: .leading, spacing: metrics.rowSpacing) {
                             ForEach(rows) { row in
@@ -501,40 +504,94 @@ private struct LibraryCardView: View {
 #if canImport(UIKit)
 import UIKit
 
-/// A zero-size probe that walks up to its enclosing `UIScrollView` and disables
-/// the pan gesture recognizer, killing Siri Remote touch-surface (swipe) scrolling
-/// while leaving focus-driven auto-scroll and `ScrollViewReader.scrollTo` intact
-/// (those move content via `setContentOffset`, not the pan). Re-applied on every
-/// layout pass so SwiftUI can't quietly re-enable it.
-private struct ScrollPanDisabler: UIViewRepresentable {
-    final class Coordinator {
-        weak var scrollView: UIScrollView?
+/// A probe view controller that walks up to its enclosing `UIScrollView` and
+/// disables every pan gesture recognizer on it, killing Siri Remote
+/// touch-surface (swipe) scrolling while leaving focus-driven auto-scroll and
+/// `ScrollViewReader.scrollTo` intact (those move content via `setContentOffset`,
+/// not the pan).
+///
+/// Why a `UIViewController` (via `viewDidLayoutSubviews`) rather than a
+/// `UIViewRepresentable`: the representable's `updateUIView` only runs when
+/// SwiftUI state changes, so a single `DispatchQueue.main.async` superview-walk
+/// there can fire *before* the view is attached beneath the scroll view, find
+/// nothing, and never retry. `viewDidLayoutSubviews` runs on every layout pass,
+/// so it reliably finds the scroll view once attached AND re-asserts the disable
+/// if SwiftUI ever re-enables it.
+private struct ScrollPanDisabler: UIViewControllerRepresentable {
+    func makeUIViewController(context: Context) -> ScrollPanDisablerController {
+        ScrollPanDisablerController()
     }
 
-    func makeCoordinator() -> Coordinator { Coordinator() }
+    func updateUIViewController(_ controller: ScrollPanDisablerController, context: Context) {}
+}
 
-    func makeUIView(context: Context) -> UIView {
-        let view = UIView()
+private final class ScrollPanDisablerController: UIViewController {
+    private weak var scrollView: UIScrollView?
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
         view.isUserInteractionEnabled = false
-        return view
+        view.backgroundColor = .clear
     }
 
-    func updateUIView(_ uiView: UIView, context: Context) {
-        // Disable immediately if we already resolved the scroll view, then also
-        // re-resolve on the next runloop tick (the UIView may not be attached to
-        // its final superview yet on the first layout pass).
-        context.coordinator.scrollView?.panGestureRecognizer.isEnabled = false
-        DispatchQueue.main.async {
-            var ancestor = uiView.superview
-            while let current = ancestor {
-                if let scrollView = current as? UIScrollView {
-                    context.coordinator.scrollView = scrollView
-                    scrollView.panGestureRecognizer.isEnabled = false
-                    return
-                }
-                ancestor = current.superview
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        disablePan()
+    }
+
+    override func didMove(toParent parent: UIViewController?) {
+        super.didMove(toParent: parent)
+        disablePan()
+    }
+
+    private func disablePan() {
+        if let scrollView {
+            apply(to: scrollView)
+            return
+        }
+
+        // 1) Preferred: walk up the view hierarchy to the enclosing UIScrollView.
+        var ancestor = view.superview
+        while let current = ancestor {
+            if let found = current as? UIScrollView {
+                scrollView = found
+                apply(to: found)
+                return
+            }
+            ancestor = current.superview
+        }
+
+        // 2) Fallback (in case SwiftUI hosts this probe outside the scroll
+        //    content's superview chain): find the vertical page scroll view under
+        //    our window and disable it. We identify it as a scroll view whose
+        //    content is taller than its bounds and NOT wider (so we never touch
+        //    the horizontal card rows, whose contentSize.width exceeds bounds).
+        guard let window = view.window else { return }
+        if let found = Self.findVerticalScrollView(in: window) {
+            scrollView = found
+            apply(to: found)
+        }
+    }
+
+    private func apply(to scrollView: UIScrollView) {
+        scrollView.panGestureRecognizer.isEnabled = false
+        for recognizer in scrollView.gestureRecognizers ?? [] where recognizer is UIPanGestureRecognizer {
+            recognizer.isEnabled = false
+        }
+    }
+
+    private static func findVerticalScrollView(in root: UIView) -> UIScrollView? {
+        if let scrollView = root as? UIScrollView,
+           scrollView.contentSize.height > scrollView.bounds.height + 1,
+           scrollView.contentSize.width <= scrollView.bounds.width + 1 {
+            return scrollView
+        }
+        for subview in root.subviews {
+            if let match = findVerticalScrollView(in: subview) {
+                return match
             }
         }
+        return nil
     }
 }
 #endif

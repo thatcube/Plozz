@@ -49,9 +49,10 @@
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_jellyfin._tcp</string>
+		<string>_smb._tcp</string>
 	</array>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Plozz uses your local network to discover Jellyfin servers automatically.</string>
+	<string>Plozz uses your local network to discover Jellyfin servers and SMB media shares automatically.</string>
 	<key>OMDBAPIKey</key>
 	<string>$(OMDB_API_KEY)</string>
 	<key>PlozzSentryDSN</key>

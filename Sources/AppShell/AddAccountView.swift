@@ -16,6 +16,7 @@ struct AddAccountView: View {
     let onJellyfinServerSelected: (MediaServer) -> Void
     let onPlexAuthenticated: (UserSession) -> Void
     let onPlexAuthenticatedMany: ([UserSession]) -> Void
+    let onShareConfigured: (ShareDraft) -> Void
     let onCancel: () -> Void
 
     @State private var choice: ProviderKind?
@@ -28,6 +29,7 @@ struct AddAccountView: View {
         onJellyfinServerSelected: @escaping (MediaServer) -> Void,
         onPlexAuthenticated: @escaping (UserSession) -> Void,
         onPlexAuthenticatedMany: @escaping ([UserSession]) -> Void = { _ in },
+        onShareConfigured: @escaping (ShareDraft) -> Void = { _ in },
         onCancel: @escaping () -> Void
     ) {
         self.deviceID = deviceID
@@ -36,6 +38,7 @@ struct AddAccountView: View {
         self.onJellyfinServerSelected = onJellyfinServerSelected
         self.onPlexAuthenticated = onPlexAuthenticated
         self.onPlexAuthenticatedMany = onPlexAuthenticatedMany
+        self.onShareConfigured = onShareConfigured
         self.onCancel = onCancel
         // Seed the flow's starting screen. Cancelling Quick Connect returns here
         // with the provider preserved so we land on its server list, not the
@@ -61,6 +64,11 @@ struct AddAccountView: View {
                 ),
                 onCancel: { choice = nil }
             )
+        case .mediaShare:
+            AddShareView(
+                onBack: { choice = nil },
+                onConfigured: onShareConfigured
+            )
         }
     }
 
@@ -78,11 +86,24 @@ struct AddAccountView: View {
                 ) { choice = .plex }
             }
 
-            if canReturnToApp {
-                Button("Cancel", action: onCancel)
-                    .buttonStyle(.bordered)
-                    .padding(.top, 8)
+            // Media shares are deliberately second-class: a smaller secondary
+            // button under the two first-class backends, not a co-equal card.
+            // Kept side-by-side with Cancel rather than stacked.
+            HStack(spacing: 24) {
+                Button {
+                    choice = .mediaShare
+                } label: {
+                    Label("Add a local media share", systemImage: "externaldrive.connected.to.line.below.fill")
+                        .font(.callout)
+                }
+                .buttonStyle(.bordered)
+
+                if canReturnToApp {
+                    Button("Cancel", action: onCancel)
+                        .buttonStyle(.bordered)
+                }
             }
+            .padding(.top, 8)
         }
         .padding(60)
         .frame(maxWidth: .infinity, maxHeight: .infinity)

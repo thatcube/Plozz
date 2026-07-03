@@ -789,6 +789,19 @@ public final class PlayerViewModel {
                 kind = .plozzigen
             }
 
+            // A raw SMB share stream (the media-share provider) can ONLY be opened
+            // by the on-device engine — AVPlayer/AVFoundation cannot demux or even
+            // open an `smb://` URL. So regardless of container/codec facts (which a
+            // share provider doesn't report), force Plozzigen for any smb:// source.
+            // Without this the router's "no source facts → native" default sends it
+            // to AVPlayer, which silently fails to bring up the stream.
+            let resolvedURL = request.localRemuxSource?.originalURL ?? request.streamURL
+            if kind != .plozzigen, engineFactory.plozzigenAvailable,
+               resolvedURL.scheme?.lowercased() == "smb" {
+                PlozzLog.playback.info("SMB share source; routing to Plozzigen (AVPlayer can't open smb://)")
+                kind = .plozzigen
+            }
+
             try Task.checkCancellation()
             await playResolved(request, engineKind: kind, startPosition: startPosition)
 

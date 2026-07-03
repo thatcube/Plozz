@@ -31,15 +31,19 @@ struct FirstRunProfileView: View {
                     .shadow(color: .black.opacity(0.35), radius: 20, y: 10)
 
                 VStack(spacing: 14) {
-                    Text(greeting)
+                    Text(displayName)
                         .font(.largeTitle.weight(.bold))
                         .multilineTextAlignment(.center)
 
-                    Text("This is your profile — keep it or make it your own.")
-                        .font(.title3)
+                    Text("Profile created automatically")
+                        .font(.title3.weight(.semibold))
+                        .multilineTextAlignment(.center)
+
+                    Text("We created this profile from your \(providerName) account. You can rename it or change the photo here, or anytime in Settings.")
+                        .font(.body)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
-                        .frame(maxWidth: 820)
+                        .frame(maxWidth: 760)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -90,9 +94,15 @@ struct FirstRunProfileView: View {
         }
     }
 
-    private var greeting: String {
+    private var displayName: String {
         let name = profile.name.trimmingCharacters(in: .whitespacesAndNewlines)
-        return name.isEmpty ? "You’re all set" : "You’re all set, \(name)"
+        return name.isEmpty ? "Your Profile" : name
+    }
+
+    /// The provider the seeded identity came from — the first account added on
+    /// this fresh install. Defaults to a neutral word if none is resolvable.
+    private var providerName: String {
+        appState.accounts.first?.server.provider.displayName ?? "media"
     }
 }
 #endif

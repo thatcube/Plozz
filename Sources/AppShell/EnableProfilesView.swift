@@ -22,28 +22,51 @@ struct EnableProfilesView: View {
 
     private enum Field { case setup, notNow }
 
+    private struct Highlight: Identifiable {
+        let id = UUID()
+        let icon: String
+        let text: String
+    }
+
+    private var highlights: [Highlight] {
+        [
+            Highlight(
+                icon: "star.fill",
+                text: "Separate favorites, watch history, and Home layout for each person."
+            ),
+            Highlight(
+                icon: "appletv.fill",
+                text: "Tied to your Apple TV user — switching users switches your Plozz profile too."
+            ),
+            Highlight(
+                icon: "externaldrive.fill",
+                text: "Your servers stay shared, no matter who’s watching."
+            ),
+        ]
+    }
+
     var body: some View {
-        VStack(spacing: 44) {
+        VStack(spacing: 40) {
             Spacer(minLength: 0)
 
-            VStack(spacing: 28) {
+            VStack(spacing: 24) {
                 Image(systemName: "person.2.fill")
-                    .font(.system(size: 90, weight: .semibold))
+                    .font(.system(size: 60, weight: .semibold))
                     .foregroundStyle(palette.accent)
+                    .frame(width: 140, height: 140)
+                    .background(Circle().fill(palette.accent.opacity(0.16)))
 
-                VStack(spacing: 16) {
-                    Text("Set up profiles for this Apple TV?")
-                        .font(.largeTitle.weight(.bold))
-                        .multilineTextAlignment(.center)
+                Text("Set up profiles for this Apple TV?")
+                    .font(.largeTitle.weight(.bold))
+                    .multilineTextAlignment(.center)
+            }
 
-                    Text("Profiles keep separate favorites, watch history, and Home layouts for each person. A profile is tied to an Apple TV user, so switching users on your Apple TV switches your Plozz profile too. Your servers stay shared no matter who’s watching.")
-                        .font(.title3)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .frame(maxWidth: 900)
-                        .fixedSize(horizontal: false, vertical: true)
+            VStack(spacing: 16) {
+                ForEach(highlights) { highlight in
+                    highlightCard(highlight)
                 }
             }
+            .frame(maxWidth: 760)
 
             HStack(spacing: 24) {
                 Button {
@@ -67,6 +90,7 @@ struct EnableProfilesView: View {
                 .buttonStyle(.borderedProminent)
                 .focused($focus, equals: .setup)
             }
+            .padding(.top, 8)
 
             Text("You can turn this on later in Settings.")
                 .font(.footnote)
@@ -75,11 +99,37 @@ struct EnableProfilesView: View {
             Spacer(minLength: 0)
         }
         .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
+        .padding(.vertical, 48)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .defaultFocus($focus, .setup)
         // Pressing Menu here declines profiles and continues, so the app never
         // suspends from this one-time setup screen.
         .onExitCommand { appState.declineProfilesForFirstRun() }
+    }
+
+    private func highlightCard(_ highlight: Highlight) -> some View {
+        HStack(spacing: 24) {
+            Image(systemName: highlight.icon)
+                .font(.system(size: 30, weight: .semibold))
+                .foregroundStyle(palette.accent)
+                .frame(width: 52)
+
+            Text(highlight.text)
+                .font(.title3)
+                .foregroundStyle(.primary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 28)
+        .padding(.vertical, 22)
+        .background(
+            RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
+                .fill(.ultraThinMaterial)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
+        )
     }
 }
 #endif

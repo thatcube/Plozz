@@ -12,17 +12,25 @@ import CoreUI
 /// from the Plozz profile picker ("Who's watching?"), which chooses the local
 /// Plozz profile. A PIN-protected user is allowed here — the PIN is collected
 /// later, when the binding is applied on entering the app.
+///
+/// Rows use the shared `PlexHomeUserRow` + `SettingsFocusButtonStyle`, so this
+/// list is visually identical to the Settings → Plex User picker.
 struct PlexUserSelectionView: View {
     let selection: AppState.PendingPlexUserSelection
     let onSelect: (PlexHomeUser) -> Void
 
-    @Environment(\.themePalette) private var palette
     @FocusState private var focused: String?
 
-    private let columns = [GridItem(.adaptive(minimum: 240, maximum: 300), spacing: 48)]
+    /// Account owner first (flagged), then everyone else — mirrors the Settings
+    /// picker's ordering.
+    private var orderedUsers: [PlexHomeUser] {
+        let admins = selection.users.filter { $0.isAdmin }
+        let others = selection.users.filter { !$0.isAdmin }
+        return admins + others
+    }
 
     var body: some View {
-        VStack(spacing: 40) {
+        VStack(spacing: 32) {
             VStack(spacing: 14) {
                 Text("Which Plex user are you?")
                     .font(.largeTitle.weight(.bold))
@@ -35,16 +43,30 @@ struct PlexUserSelectionView: View {
             }
 
             ScrollView {
-                LazyVGrid(columns: columns, spacing: 48) {
-                    ForEach(selection.users) { user in
-                        userTile(user)
+                // Rows separated by a gap rather than flush dividers so the
+                // focus lift doesn't paint over a divider line — same as the
+                // Settings Plex-user picker.
+                VStack(spacing: 14) {
+                    ForEach(orderedUsers) { user in
+                        Button {
+                            onSelect(user)
+                        } label: {
+                            PlexHomeUserRow(user: user, showsOwnerBadge: user.isAdmin)
+                        }
+                        .buttonStyle(SettingsFocusButtonStyle())
+                        .focused($focused, equals: user.id)
                     }
                 }
-                // Horizontal gutters so the focused tile's ring/scale never
-                // clips against the width-constrained content edges.
                 .padding(.horizontal, 24)
-                .padding(.vertical, 24)
+                .padding(.vertical, 16)
+                .background(
+                    RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
+                        .fill(.ultraThinMaterial)
+                )
+                .padding(.horizontal, 24)
+                .padding(.vertical, 8)
             }
+            .scrollClipDisabled()
 
             Text("You can change this anytime in Settings.")
                 .font(.footnote)
@@ -52,74 +74,9 @@ struct PlexUserSelectionView: View {
         }
         .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
         .padding(.vertical, 48)
-        .frame(maxWidth: 1100)
+        .frame(maxWidth: 900)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .defaultFocus($focused, selection.users.first?.id)
-    }
-
-    private func userTile(_ user: PlexHomeUser) -> some View {
-        let isFocused = focused == user.id
-        return Button {
-            onSelect(user)
-        } label: {
-            VStack(spacing: 18) {
-                ZStack(alignment: .bottomTrailing) {
-                    avatar(for: user)
-                        .frame(width: 200, height: 200)
-                        .clipShape(Circle())
-                        .overlay(
-                            Circle().strokeBorder(
-                                isFocused ? palette.accent : Color.primary.opacity(0.12),
-                                lineWidth: isFocused ? 6 : 2
-                            )
-                        )
-
-                    if user.requiresPIN {
-                        Image(systemName: "lock.fill")
-                            .font(.system(size: 24, weight: .bold))
-                            .foregroundStyle(.white)
-                            .padding(14)
-                            .background(Circle().fill(palette.accent))
-                            .overlay(Circle().strokeBorder(Color.black.opacity(0.25), lineWidth: 2))
-                    }
-                }
-                .scaleEffect(isFocused ? 1.06 : 1)
-                .shadow(color: .black.opacity(isFocused ? 0.3 : 0), radius: isFocused ? 16 : 0, y: isFocused ? 8 : 0)
-
-                Text(user.name)
-                    .font(.title3.weight(isFocused ? .semibold : .regular))
-                    .foregroundStyle(isFocused ? Color.primary : Color.secondary)
-                    .lineLimit(1)
-            }
-            .animation(.easeOut(duration: 0.16), value: isFocused)
-        }
-        .buttonStyle(.plain)
-        .focused($focused, equals: user.id)
-    }
-
-    @ViewBuilder
-    private func avatar(for user: PlexHomeUser) -> some View {
-        if let url = user.avatarURL {
-            FallbackAsyncImage(urls: [url], variant: .posterCard) {
-                avatarPlaceholder(for: user)
-            }
-        } else {
-            avatarPlaceholder(for: user)
-        }
-    }
-
-    private func avatarPlaceholder(for user: PlexHomeUser) -> some View {
-        ZStack {
-            Circle().fill(Color.secondary.opacity(0.25))
-            Text(initial(for: user))
-                .font(.system(size: 88, weight: .semibold))
-                .foregroundStyle(.white)
-        }
-    }
-
-    private func initial(for user: PlexHomeUser) -> String {
-        let trimmed = user.name.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.first.map { String($0).uppercased() } ?? "?"
+        .defaultFocus($focused, orderedUsers.first?.id)
     }
 }
 #endif

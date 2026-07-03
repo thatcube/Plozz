@@ -94,19 +94,20 @@ actor SMBShareBrowser {
             // Wait for the prior op to finish before touching the session. Its
             // failure is irrelevant to ours; we only need the ordering.
             await previous.value
-            let client = try await self.connectedClient()
-            let files = try await Self.withTimeout(self.listTimeout, "listing \(path.isEmpty ? "<root>" : path)") {
-                try await client.listDirectory(path: path)
-            }
-            return files.compactMap { file in
-                guard file.name != ".", file.name != "..",
-                      !file.isHidden, !file.isSystem else { return nil }
-                return Entry(
-                    name: file.name,
-                    isDirectory: file.isDirectory,
-                    size: file.size,
-                    modifiedAt: file.lastWriteTime
-                )
+            do {
+                return try await self.attemptList(path)
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                // The cached session can silently die between calls — a NAS idle
+                // timeout, the Apple TV sleeping/waking, or a TCP reset — while our
+                // `client` stays non-nil, so every later listing reuses the dead
+                // session and fails (whole share = "something went wrong", a
+                // subfolder = swallowed to empty = "no playable media"). Drop the
+                // session and retry ONCE with a fresh login + tree-connect.
+                PlozzLog.boot("share: list \(path.isEmpty ? "<root>" : path) failed (\(error)); reconnecting once")
+                await self.invalidate()
+                return try await self.attemptList(path)
             }
         }
         // Extend the chain so the NEXT caller waits for this op regardless of how
@@ -115,8 +116,34 @@ actor SMBShareBrowser {
         return try await task.value
     }
 
+    /// One connect-on-demand + list pass on the shared session. Factored out of
+    /// ``listDirectory(_:)`` so the reconnect path can re-run it after dropping a
+    /// dead session.
+    private func attemptList(_ path: String) async throws -> [Entry] {
+        let client = try await self.connectedClient()
+        let files = try await Self.withTimeout(self.listTimeout, "listing \(path.isEmpty ? "<root>" : path)") {
+            try await client.listDirectory(path: path)
+        }
+        return files.compactMap { file in
+            guard file.name != ".", file.name != "..",
+                  !file.isHidden, !file.isSystem else { return nil }
+            return Entry(
+                name: file.name,
+                isDirectory: file.isDirectory,
+                size: file.size,
+                modifiedAt: file.lastWriteTime
+            )
+        }
+    }
+
     /// Best-effort teardown. Safe to call more than once.
     func close() async {
+        await invalidate()
+    }
+
+    /// Drop the cached session (best effort logoff). After this the next
+    /// ``listDirectory(_:)`` reconnects from scratch. Safe to call more than once.
+    private func invalidate() async {
         guard let client else { return }
         self.client = nil
         _ = try? await client.disconnectShare()

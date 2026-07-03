@@ -16,10 +16,11 @@ import MetadataKit
 /// first button steps back / escapes to the sidebar).
 ///
 /// The backdrop transition between slides is handled by ``HomeHeroBackdrop``,
-/// which cross-dissolves the image **imperatively in UIKit (Core Animation)**
-/// rather than with any SwiftUI animation — the fix for the long-standing,
-/// intermittent wrong-order wipe. Paging is therefore just a state change here
-/// (`index`); the backdrop reacts to the fronted slide's URLs on its own.
+/// which performs the Apple TV **parallax wipe imperatively in UIKit (Core
+/// Animation)** rather than with any SwiftUI animation — the fix for the
+/// long-standing, intermittent wrong-order wipe. Paging is therefore just a state
+/// change here (`index` + `lastPageForward`); the backdrop reacts to the fronted
+/// slide's id/URLs and entering direction on its own.
 struct HomeHeroView: View {
     let items: [MediaItem]
     let settings: HeroSettings
@@ -68,6 +69,11 @@ struct HomeHeroView: View {
 
     /// The index of the slide currently fronted.
     @State private var index: Int = 0
+    /// Direction of the most recent page, handed to the backdrop so its parallax
+    /// wipe enters from the correct edge (`true` = forward/right, `false` =
+    /// backward/left). Set in `page(to:forward:)` alongside `index` so the backdrop
+    /// receives the new slide id and its entering direction in the same update.
+    @State private var lastPageForward: Bool = true
     /// The logical action-button selection (`0` = Play), **owned by us** rather
     /// than by the focus engine. The hero's button row is a *single* focus target
     /// (see `actionRow`), so Left/Right are resolved against this plain `@State` —
@@ -226,10 +232,10 @@ struct HomeHeroView: View {
         let height = Self.screenHeight * heroHeightFraction
         // The backdrop is a sibling *behind* the content in a real ZStack. Its
         // image transition is driven imperatively in UIKit (see `HomeHeroBackdrop`
-        // / `CrossfadeImageView`) rather than by any SwiftUI animation, so it can
-        // never decompose into the wrong-order wipe. This view just swaps the
-        // fronted slide's candidate URLs; the crossfade happens below the SwiftUI
-        // layer entirely.
+        // / `WipeImageView`) rather than by any SwiftUI animation, so it can never
+        // decompose into the wrong-order wipe. This view just swaps the fronted
+        // slide's id / candidate URLs / direction; the parallax wipe happens below
+        // the SwiftUI layer entirely.
         ZStack(alignment: .bottomLeading) {
             heroBackdrop(height: height)
             Group {
@@ -268,9 +274,9 @@ struct HomeHeroView: View {
             resolvedBackdrop = resolvedBackdrop.filter { present.contains($0.key) }
             // A set swap is not a page: cancel any pending metadata fade-in and
             // show the (possibly relocated) current item. The backdrop tracks
-            // `current`'s URLs, so if the fronted item survived the swap its art is
-            // unchanged (no crossfade); if it was clamped to a different item the
-            // backdrop simply crossfades to it.
+            // `current`'s id, so if the fronted item survived the swap its art is
+            // unchanged (no wipe); if it was clamped to a different item the
+            // backdrop wipes to it (with whatever direction was last recorded).
             slideToken &+= 1
             metadataVisible = true
             // Clamp the logical selection to the new slide's button count so it
@@ -307,13 +313,13 @@ struct HomeHeroView: View {
     }
 
     /// The Home hero backdrop. Renders the fronted slide's art in a UIKit
-    /// `UIImageView` that cross-dissolves **imperatively** via Core Animation (see
-    /// `HomeHeroBackdrop` / `CrossfadeImageView`) — never a SwiftUI animation, so
-    /// it cannot decompose into the intermittent wrong-order wipe. Swapping
-    /// `current`'s candidate URLs (which happens when `index` changes on a page) is
-    /// the only thing that triggers a transition. The scrim, bottom dissolve,
-    /// overscan breakout and scroll parallax are static SwiftUI treatment layered
-    /// over the image and never animate.
+    /// two-layer view that performs the Apple TV **parallax wipe imperatively** via
+    /// Core Animation (see `HomeHeroBackdrop` / `WipeImageView`) — never a SwiftUI
+    /// animation, so it cannot decompose into the intermittent wrong-order wipe.
+    /// Changing `current`'s id (which happens when `index` changes on a page) is
+    /// what triggers a transition; `lastPageForward` gives it the entering edge.
+    /// The scrim, bottom dissolve, overscan breakout and scroll parallax are static
+    /// SwiftUI treatment layered over the image and never animate.
     @ViewBuilder
     private func heroBackdrop(height: CGFloat) -> some View {
         let w = Self.screenWidth
@@ -321,6 +327,8 @@ struct HomeHeroView: View {
             HomeHeroBackdrop(
                 urls: primaryBackdropURLs(for: item),
                 asyncFallbackURL: backdropFallback(for: item),
+                slideID: item.id,
+                forward: lastPageForward,
                 width: w,
                 height: height,
                 scrimTone: scrimTone,
@@ -396,9 +404,9 @@ struct HomeHeroView: View {
                 }
             }
             .opacity(metadataVisible ? 1 : 0)
-            // Snap the metadata *hide* instantly (it now rides `page(...)`'s single
-            // 0.42s wipe animation, which would otherwise fade the old text out
-            // over the incoming art) while still allowing the delayed fade-IN.
+            // Snap the metadata *hide* instantly (so the outgoing text vanishes as
+            // the wipe starts instead of fading out over the incoming art) while
+            // still allowing the delayed fade-IN once the wipe has landed.
             .transaction { if !metadataVisible { $0.animation = nil } }
 
             // Zero-height recede target: sits just above the buttons so a
@@ -843,17 +851,19 @@ struct HomeHeroView: View {
 
     /// Fronts `toItem` and restarts the auto-advance dwell. Callers only ever page
     /// by ±1 (Right/Left/chevron/auto-advance). This is now purely a *state* change:
-    /// updating `index` swaps the fronted slide's candidate URLs, and the backdrop's
-    /// UIKit crossfade (`HomeHeroBackdrop`) picks that up and dissolves to the new
-    /// art on its own. There is no SwiftUI backdrop animation here at all — that is
-    /// the whole point of the redesign. `isForward` is retained for the (unchanged)
-    /// caller contract but the crossfade is direction-agnostic.
+    /// updating `index` swaps the fronted slide's id / candidate URLs, and the
+    /// backdrop's UIKit parallax wipe (`HomeHeroBackdrop`) picks that up and pushes
+    /// to the new art on its own. There is no SwiftUI backdrop animation here at all
+    /// — that is the whole point of the redesign. `isForward` is recorded into
+    /// `lastPageForward` so the wipe enters from the correct edge.
     private func page(to toItem: Int, keepButton: Int, forward isForward: Bool) {
         guard items.indices.contains(toItem), toItem != index else { return }
-        _ = isForward
+        // Record the entering direction so the backdrop wipe pushes from the
+        // correct edge. Batched with `index` below into one SwiftUI update.
+        lastPageForward = isForward
 
         // Restart the metadata fade cycle: hide the outgoing show's text instantly,
-        // fade the new show's text back in once the crossfade has landed.
+        // fade the new show's text back in once the wipe has landed.
         beginTransition()
 
         index = toItem
@@ -878,7 +888,7 @@ struct HomeHeroView: View {
     /// fade back in after a page. The text is hidden **instantly** when the page
     /// starts (see `content(for:)`/`actionRow(for:)`) so the outgoing show's text
     /// never lingers over the incoming art, then fades back in once the backdrop
-    /// crossfade has essentially landed. Guarded by ``slideToken`` so a rapid second
+    /// wipe has essentially landed. Guarded by ``slideToken`` so a rapid second
     /// page cancels the first page's pending fade-in.
     private func beginTransition() {
         slideToken &+= 1

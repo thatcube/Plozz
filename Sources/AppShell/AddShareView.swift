@@ -18,6 +18,11 @@ struct ShareDraft: Equatable {
 /// credentials + display name. Deliberately plain — a media share is a
 /// second-class backend, so this isn't the polished Plex/Jellyfin sign-in, just
 /// enough to point Plozz at a folder of files.
+///
+/// Matches the other onboarding screens: a shared `OnboardingHeader`, the form
+/// inside a bordered `PlozzScrollCard` container (like the Settings sections),
+/// and its two actions side-by-side. The first argument to each field doubles
+/// as the full-screen keyboard title, so it must read as the field's name.
 struct AddShareView: View {
     let onBack: () -> Void
     let onConfigured: (ShareDraft) -> Void
@@ -29,78 +34,96 @@ struct AddShareView: View {
     @State private var password = ""
     @State private var displayName = ""
 
+    @FocusState private var focusedField: Field?
+    private enum Field { case host, port, share, username, password, name }
+
     private var canSubmit: Bool {
         !host.trimmingCharacters(in: .whitespaces).isEmpty
             && !share.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            HStack(spacing: 16) {
-                ProviderBrandMark(provider: .mediaShare, size: 64)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Local Media Share")
-                        .font(.title2).bold()
-                    Text("Point Plozz at an SMB folder of movies and TV. Leave the account blank for a guest/public share.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: 700, alignment: .leading)
+        VStack(spacing: 28) {
+            OnboardingHeader(
+                "Add a Media Share",
+                subtitle: "Point Plozz at an SMB folder of movies and TV. Leave the username and password blank for a guest share."
+            )
+
+            PlozzScrollCard {
+                Form {
+                    TextField("Address", text: $host)
+                        .textContentType(.URL)
+                        .autocorrectionDisabled()
+                        .submitLabel(.next)
+                        .focused($focusedField, equals: .host)
+                        .onSubmit { focusedField = .port }
+
+                    TextField("Port (optional, default 445)", text: $portText)
+                        .submitLabel(.next)
+                        .focused($focusedField, equals: .port)
+                        .onSubmit { focusedField = .share }
+
+                    TextField("Share name (e.g. Media)", text: $share)
+                        .autocorrectionDisabled()
+                        .submitLabel(.next)
+                        .focused($focusedField, equals: .share)
+                        .onSubmit { focusedField = .username }
+
+                    TextField("Username (optional)", text: $username)
+                        .textContentType(.username)
+                        .autocorrectionDisabled()
+                        .submitLabel(.next)
+                        .focused($focusedField, equals: .username)
+                        .onSubmit { focusedField = .password }
+
+                    SecureField("Password (optional)", text: $password)
+                        .textContentType(.password)
+                        .submitLabel(.next)
+                        .focused($focusedField, equals: .password)
+                        .onSubmit { focusedField = .name }
+
+                    TextField("Display name (optional)", text: $displayName)
+                        .autocorrectionDisabled()
+                        .submitLabel(.done)
+                        .focused($focusedField, equals: .name)
+                        .onSubmit { submit() }
                 }
+                .padding(.horizontal, 24)
+                .padding(.vertical, 20)
             }
+            .frame(maxWidth: 720, maxHeight: 560)
 
-            Grid(alignment: .leading, horizontalSpacing: 24, verticalSpacing: 16) {
-                field("Address", text: $host, prompt: "192.168.1.10 or nas.local")
-                field("Port", text: $portText, prompt: "445 (optional)")
-                field("Share", text: $share, prompt: "Media")
-                field("Username", text: $username, prompt: "Optional")
-                secureField("Password", text: $password)
-                field("Name", text: $displayName, prompt: "Optional — shown in the app")
-            }
-            .frame(maxWidth: 900)
-
-            HStack(spacing: 16) {
-                Button("Back", action: onBack)
-                    .buttonStyle(.bordered)
-                Button("Add Share") {
-                    onConfigured(makeDraft())
+            HStack(spacing: 24) {
+                Button(role: .cancel, action: onBack) {
+                    Text("Back").frame(minWidth: 220)
+                }
+                Button(action: submit) {
+                    Text("Add Share").frame(minWidth: 220)
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(!canSubmit)
             }
-            .padding(.top, 8)
         }
-        .padding(60)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
+        .padding(.vertical, 48)
+        .frame(maxWidth: 900)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onExitCommand(perform: onBack)
+        .onAppear { focusedField = .host }
     }
 
-    private func makeDraft() -> ShareDraft {
-        ShareDraft(
-            host: host.trimmingCharacters(in: .whitespaces),
-            port: Int(portText.trimmingCharacters(in: .whitespaces)),
-            share: share.trimmingCharacters(in: .whitespaces),
-            username: username.trimmingCharacters(in: .whitespaces),
-            password: password,
-            displayName: displayName
+    private func submit() {
+        guard canSubmit else { return }
+        onConfigured(
+            ShareDraft(
+                host: host.trimmingCharacters(in: .whitespaces),
+                port: Int(portText.trimmingCharacters(in: .whitespaces)),
+                share: share.trimmingCharacters(in: .whitespaces),
+                username: username.trimmingCharacters(in: .whitespaces),
+                password: password,
+                displayName: displayName.trimmingCharacters(in: .whitespaces)
+            )
         )
-    }
-
-    private func field(_ label: String, text: Binding<String>, prompt: String) -> some View {
-        GridRow {
-            Text(label).font(.headline).gridColumnAlignment(.trailing)
-            TextField(prompt, text: text)
-                .textContentType(.URL)
-                .autocorrectionDisabled()
-                .frame(minWidth: 520)
-        }
-    }
-
-    private func secureField(_ label: String, text: Binding<String>) -> some View {
-        GridRow {
-            Text(label).font(.headline).gridColumnAlignment(.trailing)
-            SecureField("Optional", text: text)
-                .frame(minWidth: 520)
-        }
     }
 }
 

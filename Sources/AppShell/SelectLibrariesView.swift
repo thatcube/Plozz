@@ -51,17 +51,10 @@ struct SelectLibrariesView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            VStack(spacing: 8) {
-                Text("Choose your libraries")
-                    .font(.title.weight(.bold))
-                    .multilineTextAlignment(.center)
-
-                Text("Pick which libraries appear on your Home. You can turn any of these on or off anytime in Settings.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 760)
-            }
+            OnboardingHeader(
+                "Choose your libraries",
+                subtitle: "Pick which libraries appear on your Home. You can turn any of these on or off anytime in Settings."
+            )
             .padding(.bottom, 28)
 
             content

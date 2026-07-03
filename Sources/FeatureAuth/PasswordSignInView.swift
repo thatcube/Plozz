@@ -1,6 +1,7 @@
 #if canImport(SwiftUI)
 import SwiftUI
 import CoreModels
+import CoreUI
 
 /// TV-friendly username/password sign-in screen. The lower-priority sibling of
 /// `QuickConnectView`, reached from its secondary action.
@@ -24,15 +25,10 @@ public struct PasswordSignInView: View {
 
     public var body: some View {
         VStack(spacing: 32) {
-            VStack(spacing: 8) {
-                Text("Sign in to \(serverName)")
-                    .font(.largeTitle).bold()
-                Text("Enter your Jellyfin username and password.")
-                    .font(.title3)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 900)
-            }
+            OnboardingHeader(
+                "Sign in to \(serverName)",
+                subtitle: "Enter your Jellyfin username and password."
+            )
 
             // A Form gives the native tvOS grouped-row appearance and the
             // standard full-screen keyboard when a field is selected.

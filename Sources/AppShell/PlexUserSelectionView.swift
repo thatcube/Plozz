@@ -31,16 +31,10 @@ struct PlexUserSelectionView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            VStack(spacing: 8) {
-                Text("Which Plex user are you?")
-                    .font(.title.weight(.bold))
-                    .multilineTextAlignment(.center)
-
-                Text("Choose your user on \(selection.serverName).")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-            }
+            OnboardingHeader(
+                "Which Plex user are you?",
+                subtitle: "Choose your user on \(selection.serverName)."
+            )
             .padding(.bottom, 28)
 
             // Clipped scroll wrapped in a card (matching Settings). Inner gutters

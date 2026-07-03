@@ -45,15 +45,10 @@ public struct QuickConnectView: View {
 
     public var body: some View {
         VStack(spacing: 32) {
-            VStack(spacing: 8) {
-                Text("Sign in to \(serverName)")
-                    .font(.largeTitle).bold()
-                Text("Open Jellyfin on your phone or computer, go to **Quick Connect**, and enter this code.")
-                    .font(.title3)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 900)
-            }
+            OnboardingHeader(
+                "Sign in to \(serverName)",
+                subtitle: "Open Jellyfin on your phone or computer, go to **Quick Connect**, and enter this code."
+            )
 
             content
 

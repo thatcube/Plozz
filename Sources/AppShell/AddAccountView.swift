@@ -88,20 +88,22 @@ struct AddAccountView: View {
 
             // Media shares are deliberately second-class: a smaller secondary
             // button under the two first-class backends, not a co-equal card.
-            Button {
-                choice = .mediaShare
-            } label: {
-                Label("Add a local media share", systemImage: "externaldrive.connected.to.line.below.fill")
-                    .font(.callout)
-            }
-            .buttonStyle(.bordered)
-            .padding(.top, 8)
+            // Kept side-by-side with Cancel rather than stacked.
+            HStack(spacing: 24) {
+                Button {
+                    choice = .mediaShare
+                } label: {
+                    Label("Add a local media share", systemImage: "externaldrive.connected.to.line.below.fill")
+                        .font(.callout)
+                }
+                .buttonStyle(.bordered)
 
-            if canReturnToApp {
-                Button("Cancel", action: onCancel)
-                    .buttonStyle(.bordered)
-                    .padding(.top, 8)
+                if canReturnToApp {
+                    Button("Cancel", action: onCancel)
+                        .buttonStyle(.bordered)
+                }
             }
+            .padding(.top, 8)
         }
         .padding(60)
         .frame(maxWidth: .infinity, maxHeight: .infinity)

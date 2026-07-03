@@ -36,8 +36,11 @@ public struct ShareProvider: MediaProvider {
     // MARK: Library browsing
 
     public func libraries() async throws -> [MediaLibrary] {
-        do { return try await store.libraries() }
-        catch { throw AppError.unknown("Couldn't read the share: \(String(describing: error))") }
+        // Home aggregation calls this at launch, so it must be instant — no
+        // network. A share exposes exactly one browsable "library": its root
+        // folder. The actual directory listing happens lazily the first time the
+        // user opens the row (see `items(in:)` / `children(of:)`).
+        await store.libraries()
     }
 
     public func continueWatching(limit: Int) async throws -> [MediaItem] {
@@ -46,32 +49,26 @@ public struct ShareProvider: MediaProvider {
     }
 
     public func latest(limit: Int) async throws -> [MediaItem] {
-        // "Recently added" by file mtime: newest movies + shows.
-        let movies = (try? await store.movieItems(sorted: false)) ?? []
-        let series = (try? await store.seriesItems()) ?? []
-        return Array((movies + series).prefix(limit))
+        // Home-path method — must NOT touch the network (would block Home). A
+        // "recently added" row from shares comes in a later phase.
+        []
     }
 
     public func item(id: String) async throws -> MediaItem {
-        guard let item = try await store.item(id: id) else {
+        guard let item = await store.item(id: id) else {
             throw AppError.unknown("Item not found on share: \(id)")
         }
         return item
     }
 
     public func children(of itemID: String) async throws -> [MediaItem] {
-        if itemID.hasPrefix("s:") { return try await store.seasons(ofSeriesID: itemID) }
-        if itemID.hasPrefix("z:") { return try await store.episodes(ofSeasonID: itemID) }
-        return []
+        // A folder's children are just that directory's listing.
+        try await store.entries(forContainerID: itemID)
     }
 
     public func items(in containerID: String, kind: MediaItemKind, page: PageRequest) async throws -> MediaPage {
-        let all: [MediaItem]
-        switch containerID {
-        case ShareLibraryStore.moviesLibraryID: all = try await store.movieItems()
-        case ShareLibraryStore.tvLibraryID:     all = try await store.seriesItems()
-        default:                                all = try await children(of: containerID)
-        }
+        // Browsing the root library (or any folder) lists exactly that directory.
+        let all = try await store.entries(forContainerID: containerID)
         let start = min(page.startIndex, all.count)
         let end = min(start + page.limit, all.count)
         return MediaPage(items: Array(all[start..<end]), startIndex: start, totalCount: all.count)
@@ -87,7 +84,7 @@ public struct ShareProvider: MediaProvider {
 
     public func playbackInfo(for itemID: String) async throws -> PlaybackRequest {
         let item = try await item(id: itemID)
-        guard let relPath = try await store.path(forItemID: itemID) else {
+        guard let relPath = await store.path(forItemID: itemID) else {
             throw AppError.unknown("Item is not directly playable: \(itemID)")
         }
         guard let url = smbURL(forRelativePath: relPath) else {

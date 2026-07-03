@@ -18,14 +18,18 @@ import UIKit
 ///
 /// This version keeps the winning idea — **the transition lives entirely in UIKit
 /// / Core Animation; SwiftUI only hands it a target** — but replaces the dissolve
-/// with the real Apple TV effect: a **two-layer horizontal push with content
-/// parallax**. See ``HeroWipeContainerView``:
+/// with the real Apple TV effect: a **wipe with content parallax**. See
+/// ``HeroWipeContainerView``:
 /// - two page layers with **explicit, fixed `zPosition`** (incoming always on top)
 ///   so the render order is deterministic and immune to SwiftUI/​layout churn;
-/// - both pages slide the full slide width (old exits, new enters);
-/// - the *image content within each page* moves at a slower rate (a clipped,
-///   oversized inner image view translated via its own transform) so the incoming
-///   art "settles" into place — the depth cue that makes it read as parallax.
+/// - the incoming page is *revealed by a clip window that grows from the entering
+///   edge* — the old image stays in place and is progressively covered, rather than
+///   both sliding the full width;
+/// - within that window the incoming art is shifted toward the entering edge and
+///   *settles* to center (and the outgoing art drifts a little, slowly) — the depth
+///   cue that makes it read as parallax. You never see the incoming image's true
+///   left edge until it lands.
+/// - it rides an **ease-out** curve (fast in, gently decelerating to the settle).
 ///
 /// SwiftUI owns only the STATIC treatment (legibility scrim, bottom dissolve mask,
 /// overscan breakout, vertical scroll parallax) — none of which changes between
@@ -135,18 +139,32 @@ private struct WipeImageView: UIViewRepresentable {
     /// Backdrops are landscape; anything wider than 3:1 is junk provider art and
     /// is skipped (matches `HeroBackdropLayer`'s `maxAspectRatio`).
     private static let maxAspectRatio: CGFloat = 3.0
-    private static let duration: TimeInterval = 0.5
-    /// Points the inner image "leads" its page by, then settles — the parallax
-    /// depth cue. Also the horizontal bleed each image view is oversized by, so a
-    /// parallax translation never reveals a blank edge.
-    private static let parallaxBleed: CGFloat = 80
+    /// Slightly longer than a push so the easeOut "settle" tail reads clearly.
+    private static let duration: TimeInterval = 0.55
+    /// Tiny horizontal overscan, purely to avoid a sub-pixel seam shimmer during the
+    /// wipe. It is intentionally small: in the wipe model the incoming content is
+    /// shifted *into* the revealed area and the outgoing only drifts a little, so
+    /// full coverage holds without a large overscan (which would otherwise zoom /
+    /// vertically-crop the resting image).
+    private static let parallaxBleed: CGFloat = 8
+    /// How far the incoming art is shifted toward the entering edge at the start,
+    /// then settles to center — the parallax "glide." Independent of `bleed`; only
+    /// needs to be ≤ the slide width.
+    private static let parallaxIn: CGFloat = 220
+    /// How far the outgoing art drifts (slowly) as it is covered by the wipe. Kept
+    /// small so the old image "slides out way more slowly than the new comes in."
+    private static let driftOut: CGFloat = 80
 
     func makeCoordinator() -> Coordinator {
         Coordinator(maxAspectRatio: Self.maxAspectRatio, duration: Self.duration)
     }
 
     func makeUIView(context: Context) -> HeroWipeContainerView {
-        let view = HeroWipeContainerView(bleed: Self.parallaxBleed)
+        let view = HeroWipeContainerView(
+            bleed: Self.parallaxBleed,
+            parallaxIn: Self.parallaxIn,
+            driftOut: Self.driftOut
+        )
         context.coordinator.container = view
         context.coordinator.configure(width: width, height: height)
         context.coordinator.update(
@@ -300,7 +318,7 @@ private struct WipeImageView: UIViewRepresentable {
 
             let animator = UIViewPropertyAnimator(
                 duration: duration,
-                timingParameters: UICubicTimingParameters(animationCurve: .easeInOut)
+                timingParameters: UICubicTimingParameters(animationCurve: .easeOut)
             )
             animator.addAnimations { container.runWipeAnimations(forward: forward) }
             animator.addCompletion { [weak self, weak container] _ in
@@ -373,18 +391,34 @@ private struct WipeImageView: UIViewRepresentable {
     }
 }
 
-/// The UIKit view that owns the parallax-wipe transition. Hosts two "page" layers,
-/// each a clipping container with an oversized inner `UIImageView`:
-/// - The **page** slides the full slide width (the push).
-/// - The **inner image** translates a smaller amount within its (clipping) page —
-///   the parallax "settle". It is oversized by `bleed` on each side so its
-///   translation never exposes a blank edge.
+/// The UIKit view that owns the Apple TV **parallax wipe**. Hosts two "page"
+/// layers that role-swap (`front` = settled/outgoing, `back` = incoming). Each page
+/// is a clipping window containing an oversized inner `UIImageView`.
 ///
-/// Z-order is set explicitly via `layer.zPosition` at the start of every wipe —
-/// the incoming page is *always* on top — so the render order is deterministic and
-/// cannot be reordered by SwiftUI, `layoutSubviews`, or the animator.
+/// The transition is a *wipe*, not a push:
+/// - The **incoming** page is on top and is *revealed by a clip window that grows
+///   from the entering edge* (right→left when paging forward; mirrored backward).
+///   Its content is also shifted toward that edge at the start and *settles* to
+///   center — so the art glides in (parallax) and you never see its true left edge
+///   until it lands.
+/// - The **outgoing** page sits underneath, essentially in place, drifting only a
+///   little (and slowly) as it is progressively *covered* by the wipe.
+///
+/// Both pages' geometry is driven purely by animating their (and their inner image
+/// views') `frame`s under a single animator, so it can never decompose into the
+/// wrong-order artifact. Z-order is committed synchronously via explicit
+/// `layer.zPosition` before every wipe (incoming always on top), so render order is
+/// deterministic and immune to SwiftUI / `layoutSubviews` / animator churn.
 final class HeroWipeContainerView: UIView {
+    /// Tiny horizontal overscan on each inner image view, purely to avoid a
+    /// sub-pixel seam shimmer during the wipe. Coverage does *not* depend on it in
+    /// the wipe model, so it stays small to avoid zooming the resting image.
     private let bleed: CGFloat
+    /// How far the *incoming* content is shifted toward the entering edge at the
+    /// start of a wipe, settling to 0 — the parallax "glide."
+    private let parallaxIn: CGFloat
+    /// How far the *outgoing* content drifts (slowly) away as it is covered.
+    private let driftOut: CGFloat
 
     private let pageA = SlidePage()
     private let pageB = SlidePage()
@@ -402,8 +436,10 @@ final class HeroWipeContainerView: UIView {
     }
     private var isAnimating = false
 
-    init(bleed: CGFloat) {
+    init(bleed: CGFloat, parallaxIn: CGFloat, driftOut: CGFloat) {
         self.bleed = bleed
+        self.parallaxIn = parallaxIn
+        self.driftOut = driftOut
         self.front = pageA
         super.init(frame: .zero)
         clipsToBounds = true
@@ -430,15 +466,14 @@ final class HeroWipeContainerView: UIView {
     }
 
     /// Rest state: `front` fills the container with its image centered; `back` is
-    /// hidden and parked at center.
+    /// hidden and parked full-screen.
     private func layoutAtRest() {
-        let rect = CGRect(origin: .zero, size: effectiveSize)
-        front.frame = rect
-        front.parallax = 0
+        let size = effectiveSize
+        let full = CGRect(origin: .zero, size: size)
+        front.setWindow(full, contentX: 0, size: size)
         front.isHidden = false
         front.layer.zPosition = 1
-        back.frame = rect
-        back.parallax = 0
+        back.setWindow(full, contentX: 0, size: size)
         back.isHidden = true
         back.layer.zPosition = 0
     }
@@ -457,13 +492,12 @@ final class HeroWipeContainerView: UIView {
 
     // MARK: - Wipe lifecycle
 
-    /// Stage the incoming page off-screen on the entering edge, on top, with its
-    /// image content pre-offset for the parallax settle. Called synchronously,
-    /// before the animation, so the z-order is committed deterministically.
+    /// Stage the incoming page as a *zero-width window* pinned to the entering edge,
+    /// on top, with its content pre-shifted toward that edge for the parallax glide.
+    /// Called synchronously, before the animation, so z-order is deterministic.
     func prepareWipe(incomingImage: UIImage, forward: Bool) {
         isAnimating = true
         let size = effectiveSize
-        let width = size.width
         let incoming = back
         let outgoing = front
 
@@ -471,31 +505,33 @@ final class HeroWipeContainerView: UIView {
         incoming.layer.zPosition = 1
         outgoing.layer.zPosition = 0
 
-        outgoing.frame = CGRect(x: 0, y: 0, width: width, height: size.height)
-        outgoing.parallax = 0
+        // Outgoing: full-screen, content at rest, underneath.
+        outgoing.setWindow(CGRect(origin: .zero, size: size), contentX: 0, size: size)
         outgoing.isHidden = false
 
+        // Incoming: zero-width window on the entering edge (forward → right edge,
+        // opening leftward; backward → left edge, opening rightward). Content is
+        // shifted toward the entering edge so it glides in as the window opens.
         incoming.image = incomingImage
-        incoming.frame = CGRect(x: forward ? width : -width, y: 0, width: width, height: size.height)
-        // Content leads its page from the entering side, then settles to 0.
-        incoming.parallax = forward ? bleed : -bleed
+        let startWindow = forward
+            ? CGRect(x: size.width, y: 0, width: 0, height: size.height)
+            : CGRect(x: 0, y: 0, width: 0, height: size.height)
+        incoming.setWindow(startWindow, contentX: forward ? parallaxIn : -parallaxIn, size: size)
         incoming.isHidden = false
     }
 
-    /// The animatable step: both pages push the full width; the inner image content
-    /// moves at a slower rate (incoming settles to 0; outgoing lags behind its page).
+    /// The animatable step: the incoming window opens to full-screen while its
+    /// content settles to center; the outgoing content drifts slowly the other way
+    /// as it is covered. Only `frame`s change — no transforms — so a single animator
+    /// interpolates everything in lock-step.
     func runWipeAnimations(forward: Bool) {
         let size = effectiveSize
-        let width = size.width
+        let full = CGRect(origin: .zero, size: size)
         let incoming = back
         let outgoing = front
 
-        incoming.frame = CGRect(x: 0, y: 0, width: width, height: size.height)
-        incoming.parallax = 0
-
-        outgoing.frame = CGRect(x: forward ? -width : width, y: 0, width: width, height: size.height)
-        // Outgoing content "holds on": drifts opposite its page at ~half the bleed.
-        outgoing.parallax = forward ? bleed * 0.5 : -bleed * 0.5
+        incoming.setWindow(full, contentX: 0, size: size)
+        outgoing.setWindow(full, contentX: forward ? -driftOut : driftOut, size: size)
     }
 
     /// Promote the incoming page to `front`, reset and hide the outgoing page.
@@ -504,25 +540,25 @@ final class HeroWipeContainerView: UIView {
         let outgoing = front
         front = incoming
 
-        let rect = CGRect(origin: .zero, size: effectiveSize)
-        incoming.frame = rect
-        incoming.parallax = 0
+        let size = effectiveSize
+        let full = CGRect(origin: .zero, size: size)
+        incoming.setWindow(full, contentX: 0, size: size)
         incoming.layer.zPosition = 1
 
         outgoing.isHidden = true
         outgoing.image = nil
-        outgoing.parallax = 0
-        outgoing.frame = rect
+        outgoing.setWindow(full, contentX: 0, size: size)
         outgoing.layer.zPosition = 0
 
         isAnimating = false
     }
 }
 
-/// A single hero "page": a clipping container with an oversized inner image view.
-/// The page frame does the horizontal push; the inner image's own transform does
-/// the parallax, and it is oversized by `bleed` on each side so translating it can
-/// never reveal a blank edge.
+/// A single hero "page": a clipping window containing an inner image view. The
+/// page's own `frame` is the visible clip window (which the wipe grows); the inner
+/// image is positioned so its content maps to a fixed spot in *container* space
+/// regardless of the window. It carries a tiny `bleed` overscan on each side only
+/// to avoid a sub-pixel seam shimmer while the window animates.
 private final class SlidePage: UIView {
     private let imageView = UIImageView()
     var bleed: CGFloat = 0
@@ -544,20 +580,24 @@ private final class SlidePage: UIView {
         set { imageView.image = newValue }
     }
 
-    /// Horizontal parallax translation of the image content within the page.
-    var parallax: CGFloat {
-        get { imageView.transform.tx }
-        set { imageView.transform = CGAffineTransform(translationX: newValue, y: 0) }
-    }
-
-    override func layoutSubviews() {
-        super.layoutSubviews()
-        // Oversize the image view by `bleed` on each side, centered, preserving any
-        // active parallax translation.
-        let translation = imageView.transform
-        imageView.transform = .identity
-        imageView.frame = bounds.insetBy(dx: -bleed, dy: 0)
-        imageView.transform = translation
+    /// Set this page's clip `window` (container coords) and position the image so
+    /// its logical left edge lands at `contentX` in *container* coords. Both the
+    /// page frame and the inner image frame are set here; animating a `setWindow`
+    /// call from one state to another (inside a single animator) interpolates both
+    /// linearly, so the content stays correctly anchored at every frame.
+    ///
+    /// No transform is used — only `frame` — so this is safe to animate and never
+    /// hits the frame/transform corruption gotcha.
+    func setWindow(_ window: CGRect, contentX: CGFloat, size: CGSize) {
+        frame = window
+        // The image spans [contentX - bleed, contentX + size.width + bleed] in
+        // container coords; convert to this page's local coords (subtract origin).
+        imageView.frame = CGRect(
+            x: contentX - bleed - window.origin.x,
+            y: 0,
+            width: size.width + 2 * bleed,
+            height: size.height
+        )
     }
 }
 #endif

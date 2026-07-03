@@ -1267,9 +1267,19 @@ struct HomeHeroView: View {
         /// `stanzaOffsetX`. Stays `0` for as long as this stanza is topmost.
         var exitProgress: CGFloat = 0
 
-        static func == (lhs: BackdropStanza, rhs: BackdropStanza) -> Bool {
-            lhs.id == rhs.id && lhs.itemID == rhs.itemID
-        }
+        // Intentionally NOT hand-written: `@State`'s change-detection compares
+        // old vs. new `stanzas` array using this conformance, and paging only
+        // ever mutates `enterProgress`/`exitDirection`/`exitProgress` on an
+        // existing element (same `id`/`itemID`) — never the array's length —
+        // inside `withAnimation`. A hand-written `==` that ignored those fields
+        // (as an earlier version of this struct did, comparing only `id` and
+        // `itemID`) makes SwiftUI see the mutated array as unchanged and skip
+        // the render entirely: the animation silently no-ops and the *next*
+        // real change (the completion handler's `disablesAnimations` prune)
+        // snaps straight to the end state — i.e. exactly "no animation at all,
+        // instant transition". Synthesizing over every stored property is what
+        // keeps mutation-driven animation working, and keeps working
+        // automatically if a field is ever added.
     }
 }
 #endif

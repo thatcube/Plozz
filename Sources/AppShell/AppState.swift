@@ -263,6 +263,14 @@ public final class AppState {
         await watchReconciler.snapshot().pending
     }
 
+    /// Recently-applied in-progress resume writes (keyed by `"accountID:itemID"`),
+    /// so Home's Continue Watching overlay can clamp a server's drain-time timestamp
+    /// inflation back down to the play's real time — the offline-drained-Plex-resume
+    /// re-float fix. Short-lived (see ``WatchStateReconciler`` `resumeRecencyTTL`).
+    public func appliedWatchRecency() async -> [String: AppliedResumeRecord] {
+        await watchReconciler.snapshot().appliedRecency
+    }
+
     /// Records a watch mutation's intent durably (stale-suppressed + coalesced) and
     /// immediately attempts to drain it. The single entry point the action
     /// coordinator and player use so every watch fans out to all servers + Trakt and

@@ -54,6 +54,16 @@ public final class HomeViewModel {
     /// unaffected. (r8-cw-outbox-patch)
     private let pendingWatchMutations: @Sendable () async -> [WatchMutation]
 
+    /// A snapshot of recently-applied in-progress resume writes (keyed by
+    /// `"accountID:itemID"`), read at load time so the Continue Watching overlay can
+    /// clamp a server's drain-time timestamp inflation back down to the play's real
+    /// time. Plex's `/:/progress` stamps its own server-side view timestamp and can't
+    /// backdate it, so an *offline-queued* resume write that drains late otherwise
+    /// re-floats a stale title to the top of the row on the next reload. Records are
+    /// short-lived, so this never overrides a genuine later play (e.g. on another
+    /// client). Defaults to none so existing callers/tests are unaffected. (h2-cw-clamp)
+    private let recentlyAppliedRecency: @Sendable () async -> [String: AppliedResumeRecord]
+
     /// In-flight content aggregation (run off the main actor) and the fire-and-
     /// forget Top Shelf publish. Tracked so ``deinit`` can cancel them — otherwise
     /// a Home model torn down mid-load (or one that just falls out of scope in a
@@ -92,7 +102,8 @@ public final class HomeViewModel {
         layoutStore: HomeLayoutStoring = HomeLayoutStore(),
         identitySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef] = { _ in [] },
         currentVisibility: @escaping () -> HomeLibraryVisibility = { .default },
-        pendingWatchMutations: @escaping @Sendable () async -> [WatchMutation] = { [] }
+        pendingWatchMutations: @escaping @Sendable () async -> [WatchMutation] = { [] },
+        recentlyAppliedRecency: @escaping @Sendable () async -> [String: AppliedResumeRecord] = { [:] }
     ) {
         self.accounts = accounts
         self.aggregator = aggregator
@@ -100,6 +111,7 @@ public final class HomeViewModel {
         self.identitySources = identitySources
         self.currentVisibility = currentVisibility
         self.pendingWatchMutations = pendingWatchMutations
+        self.recentlyAppliedRecency = recentlyAppliedRecency
         let persisted = layoutStore.load()
         self.skeletonLayout = persisted.isEmpty ? HomeRowKind.defaultSkeletonLayout : persisted
     }
@@ -161,7 +173,8 @@ public final class HomeViewModel {
         // fetched Continue Watching row so a reload doesn't revert it to stale
         // pre-play order while the server catches up (r8-cw-outbox-patch).
         let pending = await pendingWatchMutations()
-        let reconciledCW = Self.reconcileContinueWatching(merged.continueWatching, pending: pending)
+        let appliedRecency = await recentlyAppliedRecency()
+        let reconciledCW = Self.reconcileContinueWatching(merged.continueWatching, pending: pending, appliedRecency: appliedRecency)
         let content = Content(
             continueWatching: reconciledCW,
             latest: merged.latest,
@@ -268,11 +281,25 @@ public final class HomeViewModel {
     ///
     /// The row is then re-sorted with the aggregator's exact recency comparator so
     /// the overlaid stamps take effect. Pure and side-effect-free for testability.
+    ///
+    /// **Drain-time inflation clamp (`appliedRecency`).** Some servers (Plex) stamp
+    /// their own view timestamp on an out-of-band resume write and can't backdate it,
+    /// so an *offline-queued* resume that drains late converges at the drain clock —
+    /// re-floating a stale title to the top on the next reload even though nothing was
+    /// re-watched. For each source we recently applied an in-progress resume to, this
+    /// clamps that source's `lastPlayedAt` back **down** to the play's real
+    /// `capturedAt` (recomputing the card's folded recency), but only while the record
+    /// is fresh, so it can never override a genuine later play (e.g. on another
+    /// client). Clamp-only-downward: worst case a card sits slightly lower, never
+    /// wrongly at the top. (h2-cw-clamp)
     nonisolated static func reconcileContinueWatching(
         _ items: [MediaItem],
-        pending: [WatchMutation]
+        pending: [WatchMutation],
+        appliedRecency: [String: AppliedResumeRecord] = [:],
+        now: Date = Date(),
+        clampFreshness: TimeInterval = 30 * 60
     ) -> [MediaItem] {
-        guard !pending.isEmpty else { return items }
+        guard !pending.isEmpty || !appliedRecency.isEmpty else { return items }
 
         func targetKey(_ accountID: String, _ itemID: String) -> String { accountID + "\u{1}" + itemID }
         let pendingByTarget: [String: [WatchMutation]] = pending.reduce(into: [:]) { acc, m in
@@ -294,7 +321,13 @@ public final class HomeViewModel {
 
         var overlaid: [MediaItem] = []
         overlaid.reserveCapacity(items.count)
-        for item in items {
+        for rawItem in items {
+            // Undo any server drain-time timestamp inflation before the pending
+            // overlay reads the card's recency, so an offline-drained Plex resume
+            // can't leave a stale play floating at the top.
+            let item = appliedRecency.isEmpty
+                ? rawItem
+                : clampInflatedRecency(rawItem, appliedRecency: appliedRecency, now: now, clampFreshness: clampFreshness)
             guard let m = newestMatch(for: item) else { overlaid.append(item); continue }
             // Ignore a pending write the server has already superseded with a newer play.
             guard m.capturedAt >= (item.lastPlayedAt ?? .distantPast) else { overlaid.append(item); continue }
@@ -322,6 +355,54 @@ public final class HomeViewModel {
             overlaid.append(updated)
         }
         return HomeAggregator.sortedByRecency(overlaid)
+    }
+
+    /// Clamps a card's server-reported recency **down** to the real play time for any
+    /// source we recently applied an in-progress resume to, undoing a server's
+    /// drain-time timestamp inflation (see ``reconcileContinueWatching``). Only fires
+    /// while the record is fresh (`now − appliedAt ≤ clampFreshness`, device clock)
+    /// and only when the server shows something newer than the true play — so it can
+    /// never lower a genuine later play made elsewhere. Downward-only.
+    nonisolated private static func clampInflatedRecency(
+        _ item: MediaItem,
+        appliedRecency: [String: AppliedResumeRecord],
+        now: Date,
+        clampFreshness: TimeInterval
+    ) -> MediaItem {
+        func recordKey(_ accountID: String, _ itemID: String) -> String { accountID + ":" + itemID }
+        func freshCapture(_ accountID: String, _ itemID: String) -> Date? {
+            guard let record = appliedRecency[recordKey(accountID, itemID)],
+                  now.timeIntervalSince(record.appliedAt) <= clampFreshness else { return nil }
+            return record.capturedAt
+        }
+
+        var updated = item
+        if !updated.sources.isEmpty {
+            var didClamp = false
+            updated.sources = updated.sources.map { ref in
+                guard let capturedAt = freshCapture(ref.accountID, ref.itemID),
+                      let reported = ref.lastPlayedAt, reported > capturedAt else { return ref }
+                didClamp = true
+                var r = ref
+                r.lastPlayedAt = capturedAt
+                return r
+            }
+            guard didClamp else { return item }
+            // Re-fold the card's recency from the clamped sources (most-recent-wins);
+            // only ever lower it, never raise.
+            if let folded = MediaItemMerger.unifiedWatchState(from: updated.sources).lastPlayedAt,
+               folded < (updated.lastPlayedAt ?? .distantFuture) {
+                updated.lastPlayedAt = folded
+            }
+            return updated
+        }
+        // Un-merged single-source card: no source refs, recency is on the item.
+        if let account = item.sourceAccountID,
+           let capturedAt = freshCapture(account, item.id),
+           let reported = item.lastPlayedAt, reported > capturedAt {
+            updated.lastPlayedAt = capturedAt
+        }
+        return updated
     }
 
     /// Reconciles the Watchlist row with a favorite mutation: removes titles that

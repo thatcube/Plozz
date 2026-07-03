@@ -126,6 +126,10 @@ struct MainTabView: View {
     /// Watching row reflects in-app plays the servers haven't recorded yet
     /// (r8-cw-outbox-patch).
     let pendingWatchMutations: @Sendable () async -> [WatchMutation]
+    /// Recently-applied in-progress resume writes, so Home's Continue Watching row
+    /// can clamp a server's drain-time timestamp inflation back down to the real
+    /// play time (h2-cw-clamp).
+    let appliedWatchRecency: @Sendable () async -> [String: AppliedResumeRecord]
     let displayAccounts: [Account]
     let activeAccountID: String?
     let profiles: [Profile]
@@ -184,6 +188,7 @@ struct MainTabView: View {
                 identitySources: identitySources,
                 pendingPlayItemID: $pendingPlayItemID,
                 pendingWatchMutations: pendingWatchMutations,
+                appliedWatchRecency: appliedWatchRecency,
                 onSubtitleStyleChanged: { subtitleStyleModel.style = $0 }
             )
             .tabItem { Label("Home", systemImage: "house.fill") }
@@ -1039,6 +1044,10 @@ private struct HomeTab: View {
     /// Continue Watching row so a reload reflects in-app plays the servers haven't
     /// recorded yet (r8-cw-outbox-patch).
     let pendingWatchMutations: @Sendable () async -> [WatchMutation]
+    /// Recently-applied in-progress resume writes, folded into the Continue Watching
+    /// row so a server's drain-time timestamp inflation can't re-float a stale play
+    /// (h2-cw-clamp).
+    let appliedWatchRecency: @Sendable () async -> [String: AppliedResumeRecord]
     /// Persist an in-player subtitle-appearance edit to the profile store.
     let onSubtitleStyleChanged: (SubtitleStyle) -> Void
 
@@ -1054,7 +1063,8 @@ private struct HomeTab: View {
                     layoutStore: homeLayoutStore,
                     identitySources: identitySources,
                     currentVisibility: { homeVisibility.visibility },
-                    pendingWatchMutations: pendingWatchMutations
+                    pendingWatchMutations: pendingWatchMutations,
+                    recentlyAppliedRecency: appliedWatchRecency
                 ),
                 visibility: homeVisibility,
                 spoilerSettings: spoilerSettings,

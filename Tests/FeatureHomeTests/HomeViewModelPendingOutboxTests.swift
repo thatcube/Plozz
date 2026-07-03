@@ -144,4 +144,100 @@ final class HomeViewModelPendingOutboxTests: XCTestCase {
         XCTAssertEqual(dune.sources.first { $0.accountID == "jelly" }?.resumePosition, 1200)
         XCTAssertEqual(dune.sources.first { $0.accountID == "plex" }?.lastPlayedAt, t0)
     }
+
+    // MARK: - Drain-time inflation clamp (h2-cw-clamp)
+
+    /// A fresh applied-resume record clamps a Plex source's inflated (drain-time)
+    /// `lastPlayedAt` back down to the real play time, so a stale title that a late
+    /// offline drain re-floated drops back below a genuinely-newer one. Pending is
+    /// empty on purpose: by the reload that shows the bug the write has drained+pruned.
+    func testFreshRecencyClampsInflatedPlexSourceDownAndReorders() {
+        let items = [
+            cwItem(id: "a", account: "plex", lastPlayedAt: t2, resume: 900), // inflated to drain time
+            cwItem(id: "b", account: "plex", lastPlayedAt: t1)               // genuinely newer than real play
+        ]
+        let recency = ["plex:a": AppliedResumeRecord(capturedAt: t0, appliedAt: t2)]
+
+        let result = HomeViewModel.reconcileContinueWatching(
+            items, pending: [], appliedRecency: recency, now: t2, clampFreshness: 60
+        )
+        XCTAssertEqual(result.map(\.id), ["b", "a"], "The re-floated title drops back below the genuinely-newer one")
+        let a = try! XCTUnwrap(result.first { $0.id == "a" })
+        XCTAssertEqual(a.lastPlayedAt, t0, "Recency is clamped down to the real play time")
+        XCTAssertEqual(a.sources.first?.lastPlayedAt, t0, "The source ref is clamped too")
+    }
+
+    /// A stale record (older than the freshness window) must NOT clamp: the server's
+    /// newer timestamp is treated as a genuine later play (e.g. on another client),
+    /// so it stays on top. This is the guard that keeps the clamp from misfiring.
+    func testStaleRecencyDoesNotClampGenuineLaterPlay() {
+        let items = [
+            cwItem(id: "a", account: "plex", lastPlayedAt: t2, resume: 900),
+            cwItem(id: "b", account: "plex", lastPlayedAt: t1)
+        ]
+        // appliedAt = t0; now = t0 + 61 with a 60s window ⇒ record is stale.
+        let recency = ["plex:a": AppliedResumeRecord(capturedAt: t0, appliedAt: t0)]
+
+        let result = HomeViewModel.reconcileContinueWatching(
+            items, pending: [], appliedRecency: recency,
+            now: t0.addingTimeInterval(61), clampFreshness: 60
+        )
+        XCTAssertEqual(result.map(\.id), ["a", "b"], "A stale record leaves a genuine later play on top")
+        let a = try! XCTUnwrap(result.first { $0.id == "a" })
+        XCTAssertEqual(a.lastPlayedAt, t2, "A stale record must not rewind a genuine later play")
+    }
+
+    /// Downward-only: the clamp never *raises* a server's timestamp, even when our
+    /// recorded play is newer than what the server reports.
+    func testClampNeverRaisesRecency() {
+        let items = [cwItem(id: "a", account: "plex", lastPlayedAt: t0, resume: 900)]
+        let recency = ["plex:a": AppliedResumeRecord(capturedAt: t1, appliedAt: t1)] // capturedAt newer than reported
+
+        let result = HomeViewModel.reconcileContinueWatching(
+            items, pending: [], appliedRecency: recency, now: t1, clampFreshness: 60
+        )
+        let a = try! XCTUnwrap(result.first { $0.id == "a" })
+        XCTAssertEqual(a.lastPlayedAt, t0, "The clamp is strictly downward — it never raises recency")
+    }
+
+    /// A Jellyfin-style source (server honored `capturedAt`, so reported == real play)
+    /// is a no-op: nothing to clamp.
+    func testClampIsNoOpWhenServerHonoredCapturedAt() {
+        let items = [
+            cwItem(id: "a", account: "jelly", lastPlayedAt: t0, resume: 900),
+            cwItem(id: "b", account: "jelly", lastPlayedAt: t1)
+        ]
+        let recency = ["jelly:a": AppliedResumeRecord(capturedAt: t0, appliedAt: t1)]
+
+        let result = HomeViewModel.reconcileContinueWatching(
+            items, pending: [], appliedRecency: recency, now: t1, clampFreshness: 60
+        )
+        XCTAssertEqual(result.map(\.id), ["b", "a"], "Order reflects the untouched server recency")
+        let a = try! XCTUnwrap(result.first { $0.id == "a" })
+        XCTAssertEqual(a.lastPlayedAt, t0, "No inflation to undo ⇒ no change")
+    }
+
+    /// On a cross-server merged card, only the inflated (Plex) source is clamped; the
+    /// card's folded recency drops to the remaining source, re-sorting the card down.
+    func testClampOnMergedCardRefoldsAcrossSources() {
+        var merged = MediaItem(id: "primary", title: "Dune", kind: .movie)
+        merged.sourceAccountID = "plex"
+        merged.lastPlayedAt = t2 // folded from the inflated Plex source
+        merged.resumePosition = 900
+        merged.sources = [
+            MediaSourceRef(accountID: "plex", itemID: "primary", resumePosition: 900, lastPlayedAt: t2),
+            MediaSourceRef(accountID: "jelly", itemID: "jf-id", lastPlayedAt: t0)
+        ]
+        let other = cwItem(id: "other", account: "plex", lastPlayedAt: t1)
+        let recency = ["plex:primary": AppliedResumeRecord(capturedAt: t0, appliedAt: t2)]
+
+        let result = HomeViewModel.reconcileContinueWatching(
+            [merged, other], pending: [], appliedRecency: recency, now: t2, clampFreshness: 60
+        )
+        XCTAssertEqual(result.map(\.id), ["other", "primary"], "The de-inflated merged card sorts below the newer one")
+        let dune = try! XCTUnwrap(result.first { $0.id == "primary" })
+        XCTAssertEqual(dune.lastPlayedAt, t0, "Card recency re-folds down to the clamped source")
+        XCTAssertEqual(dune.sources.first { $0.accountID == "plex" }?.lastPlayedAt, t0, "Only the Plex source is clamped")
+        XCTAssertEqual(dune.sources.first { $0.accountID == "jelly" }?.lastPlayedAt, t0, "The Jellyfin source is untouched")
+    }
 }

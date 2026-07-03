@@ -8,6 +8,7 @@ import FeatureMusic
 import FeatureProfiles
 import ProviderJellyfin
 import ProviderPlex
+import ProviderShare
 import RatingsService
 import TraktService
 import SimklService
@@ -1001,6 +1002,9 @@ public final class AppState {
                 connectionRefresh: PlexProvider.connectionRefresh(for: session)
             )
         }
+        registry.register(.mediaShare) { session in
+            ShareProvider(session: session)
+        }
         return registry
     }
 
@@ -1585,6 +1589,53 @@ public final class AppState {
     /// account exactly like any other provider.
     public func didAuthenticatePlex(_ session: UserSession) {
         apply(.serverSelected(session.server))
+        didAuthenticate(session)
+    }
+
+    /// Persist a newly-configured local media share as an account. Builds a
+    /// synthetic `MediaServer` (`smb://host[:port]/share`) + `UserSession` whose
+    /// `accessToken` carries the SMB password (Keychain-backed like any other
+    /// account) and runs it through the normal authenticated-account path, so a
+    /// share joins the multi-account list and the library-selection step exactly
+    /// like Plex/Jellyfin. There's no network round-trip — the share is validated
+    /// lazily when its library is first scanned.
+    public func didConfigureShare(
+        host: String,
+        port: Int?,
+        share: String,
+        username: String,
+        password: String,
+        displayName: String
+    ) {
+        var comps = URLComponents()
+        comps.scheme = "smb"
+        comps.host = host
+        comps.port = port
+        comps.path = "/" + share
+        guard let baseURL = comps.url else {
+            apply(.authenticationFailed(.unknown("Invalid share address")))
+            return
+        }
+        let trimmedName = displayName.trimmingCharacters(in: .whitespaces)
+        let name = trimmedName.isEmpty ? "\(host)/\(share)" : trimmedName
+        let portKey = port.map { ":\($0)" } ?? ""
+        let server = MediaServer(
+            id: "share:\(host)\(portKey)/\(share)",
+            name: name,
+            baseURL: baseURL,
+            provider: .mediaShare
+        )
+        // A guest/anonymous share has no user identity; use "guest" as a stable
+        // per-share user id so the account key is deterministic.
+        let user = username.isEmpty ? "guest" : username
+        let session = UserSession(
+            server: server,
+            userID: user,
+            userName: username,
+            deviceID: accountStore.deviceID(),
+            accessToken: password
+        )
+        apply(.serverSelected(server))
         didAuthenticate(session)
     }
 

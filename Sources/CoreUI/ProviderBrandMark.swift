@@ -36,17 +36,31 @@ public struct ProviderBrandMark: View {
         provider == .plex ? "PlexLogo" : "JellyfinLogo"
     }
 
+    /// A media share has no bundled brand logo (it isn't a product), so it draws
+    /// an SF Symbol instead of a `*Logo` asset. `nil` for the real providers.
+    private var systemSymbolName: String? {
+        provider == .mediaShare ? "externaldrive.connected.to.line.below.fill" : nil
+    }
+
     public var body: some View {
         ZStack {
             if showsBackground {
                 Circle().fill(Self.brandTint(provider).opacity(rowFocused ? 0 : 0.18))
             }
-            Image(assetName)
-                .renderingMode(.template)
-                .resizable()
-                .scaledToFit()
-                .padding(size * 0.12)
-                .foregroundStyle(tint)
+            if let systemSymbolName {
+                Image(systemName: systemSymbolName)
+                    .resizable()
+                    .scaledToFit()
+                    .padding(size * 0.18)
+                    .foregroundStyle(tint)
+            } else {
+                Image(assetName)
+                    .renderingMode(.template)
+                    .resizable()
+                    .scaledToFit()
+                    .padding(size * 0.12)
+                    .foregroundStyle(tint)
+            }
         }
         .frame(width: size, height: size)
     }
@@ -58,6 +72,10 @@ public struct ProviderBrandMark: View {
             return Color(red: 0.53, green: 0.38, blue: 0.95)
         case .plex:
             return Color(red: 0xE5 / 255, green: 0xA0 / 255, blue: 0x0D / 255)
+        case .mediaShare:
+            // Neutral teal — reads as "storage/network", clearly not a Plex/
+            // Jellyfin brand color, matching its second-class standing.
+            return Color(red: 0x2A / 255, green: 0xA8 / 255, blue: 0x9E / 255)
         }
     }
 }

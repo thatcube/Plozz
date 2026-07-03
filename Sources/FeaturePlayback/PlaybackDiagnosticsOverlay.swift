@@ -206,6 +206,7 @@ struct PlaybackDiagnosticsOverlay: View {
         switch provider {
         case .jellyfin: return Color(red: 0.53, green: 0.38, blue: 0.95)
         case .plex: return Color(red: 0xF5 / 255, green: 0xC5 / 255, blue: 0x18 / 255)
+        case .mediaShare: return Color(red: 0x2A / 255, green: 0xA8 / 255, blue: 0x9E / 255)
         }
     }
 }

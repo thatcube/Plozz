@@ -26,6 +26,7 @@ let package = Package(
         .library(name: "FeatureDiscovery", targets: ["FeatureDiscovery"]),
         .library(name: "ProviderJellyfin", targets: ["ProviderJellyfin"]),
         .library(name: "ProviderPlex", targets: ["ProviderPlex"]),
+        .library(name: "ProviderShare", targets: ["ProviderShare"]),
         .library(name: "ProviderTrailers", targets: ["ProviderTrailers"]),
         .library(name: "RatingsService", targets: ["RatingsService"]),
         .library(name: "TraktService", targets: ["TraktService"]),
@@ -87,6 +88,15 @@ let package = Package(
         // Nothing is sent unless the user opts in AND a DSN was baked into the
         // build; see the `CrashReporting` target for the privacy-hardened config.
         .package(url: "https://github.com/getsentry/sentry-cocoa", from: "9.19.0"),
+
+        // SMBClient (kishikawakatsumi/SMBClient) — pure-Swift, MIT SMB2 client
+        // over NWConnection. Declared here for the **ProviderShare** target, which
+        // uses it to *browse/enumerate* a media share (listDirectory/listShares)
+        // and scan it into a library. This is an app concern distinct from
+        // playback: AetherEngine already pulls SMBClient transitively and owns the
+        // playback byte-reads (SMBConnection); SwiftPM unifies both onto one
+        // version. Kept in sync with the version AetherEngine resolves (0.3.1).
+        .package(url: "https://github.com/kishikawakatsumi/SMBClient", from: "0.3.1"),
     ],
     targets: [
         // MARK: Core
@@ -123,6 +133,19 @@ let package = Package(
         .target(
             name: "ProviderPlex",
             dependencies: ["CoreModels", "CoreNetworking"]
+        ),
+        // Second-class local media-share backend (SMB today). Scans a share into
+        // a synthesised library and conforms to `MediaProvider` so the rest of the
+        // app treats it like Plex/Jellyfin. Depends on SMBClient for directory
+        // enumeration; playback still flows through EnginePlozzigen's engine
+        // SMBConnection (this target never plays). See docs/media-share-proposal.md.
+        .target(
+            name: "ProviderShare",
+            dependencies: [
+                "CoreModels",
+                "CoreNetworking",
+                .product(name: "SMBClient", package: "SMBClient"),
+            ]
         ),
         // Synthetic provider for online (TMDb → YouTube) trailers. Conforms to
         // `MediaProvider` so a trailer can be played by the existing player; only
@@ -276,6 +299,7 @@ let package = Package(
                 "MetadataKit",
                 "ProviderJellyfin",
                 "ProviderPlex",
+                "ProviderShare",
                 "ProviderTrailers",
                 "RatingsService",
                 "TraktService",

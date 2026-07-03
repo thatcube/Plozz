@@ -97,6 +97,16 @@ public struct RootView: View {
                     onJellyfinServerSelected: { server in appState.selectServer(server) },
                     onPlexAuthenticated: { session in appState.didAuthenticatePlex(session) },
                     onPlexAuthenticatedMany: { sessions in appState.didAuthenticatePlexMany(sessions) },
+                    onShareConfigured: { draft in
+                        appState.didConfigureShare(
+                            host: draft.host,
+                            port: draft.port,
+                            share: draft.share,
+                            username: draft.username,
+                            password: draft.password,
+                            displayName: draft.displayName
+                        )
+                    },
                     onCancel: { appState.cancelAuthentication() }
                 )
 

@@ -353,6 +353,17 @@ struct HomeHeroView: View {
                             direction: slideDirection,
                             isFront: slot == frontSlot
                         ))
+                        // The INCOMING (parked/back) slot must always draw on top of
+                        // the OUTGOING (front) slot, so the new art slides in over the
+                        // old one — a clean cover/push. Without this the ZStack's
+                        // fixed `ForEach` order (slot 0 under slot 1) fought the
+                        // alternating `frontSlot`: on every other page the incoming
+                        // slot happened to be slot 0, so the new backdrop slid in
+                        // BEHIND the old one, which sat on top until settle then
+                        // "popped" away — the intermittent wrong-order wipe. Keying
+                        // zIndex off `frontSlot` (back = 1, front = 0) guarantees the
+                        // entering layer is always on top regardless of slot parity.
+                        .zIndex(slot == frontSlot ? 0 : 1)
                 }
             }
         }

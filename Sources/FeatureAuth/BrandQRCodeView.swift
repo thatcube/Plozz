@@ -37,32 +37,26 @@ public struct PlexLogoMark: View {
     }
 }
 
-/// A scan-to-sign-in QR code on a white rounded card with a brand logo inset in
-/// the center, mirroring the Twozz sign-in screens so both apps feel consistent.
-///
-/// The modules are tinted to the brand colour and the center logo occludes part
-/// of the code, so the QR is generated at the highest error-correction level
-/// ("H", ~30% recoverable) to stay scannable.
-public struct BrandQRCodeView<Logo: View>: View {
+/// A scan-to-sign-in QR code rendered plainly — brand-tinted (default white)
+/// modules on a transparent background, with no surrounding card and no center
+/// logo. On the dark sign-in screen this reads as white-on-black, which iOS
+/// (and modern scanners) handle as an inverted code.
+public struct BrandQRCodeView: View {
     /// The URL the QR encodes (the activation link to open on a phone).
     let payload: String
     /// Colour applied to the QR modules (the "dark" cells).
     var moduleColor: Color
-    /// Side length of the QR image inside the white card.
+    /// Side length of the QR image.
     var size: CGFloat
-    /// Brand logo inset in the center of the code.
-    @ViewBuilder var logo: () -> Logo
 
     public init(
         payload: String,
-        moduleColor: Color = .black,
-        size: CGFloat = 460,
-        @ViewBuilder logo: @escaping () -> Logo
+        moduleColor: Color = .white,
+        size: CGFloat = 440
     ) {
         self.payload = payload
         self.moduleColor = moduleColor
         self.size = size
-        self.logo = logo
     }
 
     public var body: some View {
@@ -72,23 +66,13 @@ public struct BrandQRCodeView<Logo: View>: View {
                     .interpolation(.none)
                     .resizable()
                     .scaledToFit()
-                    .overlay { logoBadge }
             } else {
                 RoundedRectangle(cornerRadius: 16)
-                    .fill(Color.black.opacity(0.06))
+                    .fill(Color.white.opacity(0.06))
                     .overlay(ProgressView())
             }
         }
         .frame(width: size, height: size)
-        .padding(32)
-        .background(Color.white, in: RoundedRectangle(cornerRadius: 36))
-    }
-
-    private var logoBadge: some View {
-        logo()
-            .padding(size * 0.035)
-            .frame(width: size * 0.22, height: size * 0.22)
-            .background(Color.white, in: RoundedRectangle(cornerRadius: size * 0.045))
     }
 }
 
@@ -99,14 +83,15 @@ enum QRCodeRenderer {
     static func makeQRCode(from string: String, tint: UIColor) -> UIImage? {
         let generator = CIFilter.qrCodeGenerator()
         generator.message = Data(string.utf8)
-        generator.correctionLevel = "H"
+        generator.correctionLevel = "M"
         guard let base = generator.outputImage else { return nil }
 
-        // Map black modules -> brand tint, white background -> white.
+        // Map dark modules -> tint, light background -> transparent, so the code
+        // sits directly on the screen with no white container.
         let colorize = CIFilter.falseColor()
         colorize.inputImage = base
         colorize.color0 = CIColor(color: tint)
-        colorize.color1 = CIColor(color: .white)
+        colorize.color1 = CIColor(red: 0, green: 0, blue: 0, alpha: 0)
         guard let output = colorize.outputImage else { return nil }
 
         let scaled = output.transformed(by: CGAffineTransform(scaleX: 12, y: 12))

@@ -63,13 +63,12 @@ public struct PlexLinkView: View {
                 VStack(spacing: 28) {
                     Text("Scan with your phone")
                         .font(.title2).bold()
+                        .fixedSize(horizontal: true, vertical: false)
                     BrandQRCodeView(
                         payload: Self.linkURL(for: code),
-                        moduleColor: PlexBrand.gold,
+                        moduleColor: .white,
                         size: 440
-                    ) {
-                        PlexLogoMark()
-                    }
+                    )
                 }
 
                 orDivider

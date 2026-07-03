@@ -112,9 +112,21 @@ struct HomeHeroView: View {
     /// There is only ever one thing animating, so the old two-independent-layer
     /// design (where SwiftUI could animate one side and drop the other, producing
     /// the intermittent "new art appears behind/over the old" wrong-order wipe) is
-    /// structurally impossible now. The centered cell's content NEVER changes during
-    /// a slide — the window only re-windows at settle, in a `disablesAnimations`
-    /// transaction — so there is no content mutation mid-animation either.
+    /// structurally impossible now.
+    ///
+    /// The key to the transition's robustness is *when* the window moves. The
+    /// window shift (`centerIndex ± 1`) — the ONLY structural change to the
+    /// `ForEach`, which swaps one far, off-screen cell in and one out — is committed
+    /// **up front, before the visible animation begins**, inside a
+    /// `disablesAnimations` transaction. `slidePosition` is simultaneously
+    /// pre-loaded to the opposite edge (∓1) so the strip still displays the
+    /// *outgoing* slide at that instant (no visible jump). The visible slide is then
+    /// a pure `slidePosition → 0` animation during which the `ForEach` is completely
+    /// static. There is NO completion handler and NO settle re-window, so SwiftUI
+    /// can never decompose the strip's motion into a per-cell fade/move (the old
+    /// wrong-order wipe) — a structural change never coincides with an animation.
+    /// At rest `slidePosition` is always 0 and `centerIndex` is always the fronted
+    /// slide.
     ///
     /// `centerIndex` is an UNBOUNDED contiguous counter (it just keeps incrementing
     /// forward / decrementing backward); the displayed item is `itemAt(centerIndex)`
@@ -125,14 +137,11 @@ struct HomeHeroView: View {
     /// even when the *item* wrapped. The invariant `itemAt(centerIndex) == items[index]`
     /// holds at rest.
     @State private var centerIndex = 0
-    /// The filmstrip offset in screen-width units: 0 at rest (centre cell shown),
-    /// animates to +1 to page forward (next cell slides to centre) or -1 backward.
-    /// Reset to 0 at settle in the same `disablesAnimations` transaction that
-    /// advances `centerIndex`, so the strip re-centres with no visible jump.
+    /// The filmstrip offset in screen-width units. 0 at rest (centre cell shown). A
+    /// page commits `centerIndex` up front and pre-loads this to -1 (forward) or +1
+    /// (backward) — which, with the shifted window, still shows the *outgoing* slide
+    /// — then animates it back to 0, sliding the incoming slide to centre.
     @State private var slidePosition: CGFloat = 0
-    /// Bumped on every page so a superseded animation's completion handler (which
-    /// still fires when interrupted) can't double-commit the settle.
-    @State private var slideGeneration = 0
     /// The last directional move delivered to the hero's action row. Used to gate
     /// the recede: focus can leave the hero UP (to the tab bar) or LEFT (to the
     /// sidebar) as well as DOWN (to the Continue Watching row) — only a genuine
@@ -369,7 +378,10 @@ struct HomeHeroView: View {
             }
             .frame(width: w * 3, height: height, alignment: .leading)
             // Slide the whole 3-wide strip as one unit. Rest offset is -w (centre
-            // cell in the viewport); +1 pages forward (next cell to centre), -1 back.
+            // cell in the viewport). A page pre-loads `slidePosition` to -1 (forward)
+            // or +1 (backward) with the window already shifted — still showing the
+            // outgoing slide — then animates it to 0 to bring the incoming slide to
+            // centre.
             .offset(x: -w * (1 + slidePosition))
             // One-screen viewport that clips the strip to just the centred cell.
             .frame(width: w, height: height, alignment: .leading)
@@ -888,52 +900,60 @@ struct HomeHeroView: View {
 
     /// Fronts `toItem` with a directional filmstrip slide and restarts the
     /// auto-advance dwell. Callers only ever page by ±1 (Right/Left/chevron/
-    /// auto-advance), so `toItem` is always the current slide's neighbour. The
-    /// strip animates a SINGLE offset (`slidePosition`) 0→±1; on completion the
-    /// window advances (`centerIndex += step`) and the offset resets to 0 in one
-    /// `disablesAnimations` transaction, so it re-centres with no visible jump and
-    /// no content change mid-slide. `index` (the logical/wrapped slide) updates
-    /// immediately so rapid presses compute the right next target and the metadata
-    /// resolves the new show, while the strip keeps showing `centerIndex` until
-    /// settle.
+    /// auto-advance), so `toItem` is always the current slide's neighbour.
+    ///
+    /// The transition is deliberately completion-handler-free. The window shift
+    /// (`centerIndex ± step`) — the ONLY structural `ForEach` change — is committed
+    /// **up front**, in a `disablesAnimations` transaction, together with
+    /// pre-loading `slidePosition` to the opposite edge (∓step). With the shifted
+    /// window that edge value still displays the *outgoing* slide, so there is no
+    /// visible jump. We then animate `slidePosition → 0`, a pure offset slide during
+    /// which the `ForEach` is static — so SwiftUI can never split the motion into a
+    /// per-cell fade/move (the wrong-order wipe). `index` (the logical/wrapped
+    /// slide) updates immediately so rapid presses compute the right next target and
+    /// the metadata resolves the new show.
     private func page(to toItem: Int, keepButton: Int, forward isForward: Bool) {
         guard items.indices.contains(toItem), toItem != index else { return }
         let step = isForward ? 1 : -1
-        // Land any in-flight page instantly so the strip is centred on the current
-        // slide before we start the next one (rapid-paging guard). The in-flight
-        // direction is the sign of `slidePosition`; committing `centerIndex` by that
-        // step lands it on the slide `index` already points at.
+
+        // Land any in-flight slide instantly. `centerIndex` is always committed up
+        // front (below), so the in-flight slide's destination cell already *is*
+        // `centerIndex`; snapping `slidePosition` to 0 lands it with no window
+        // change and no structural churn — just the offset settling to rest.
         if slidePosition != 0 {
-            let landStep = slidePosition > 0 ? 1 : -1
             var t = Transaction(); t.disablesAnimations = true
-            withTransaction(t) {
-                centerIndex += landStep
-                slidePosition = 0
-            }
+            withTransaction(t) { slidePosition = 0 }
         }
+
         beginTransition()
-        slideGeneration &+= 1
-        let generation = slideGeneration
-        let targetCenter = centerIndex + step
-        // Logical slide + selection update immediately; the strip stays on
-        // `centerIndex` (its centred art is unchanged) until the settle below.
+
+        // Commit the window shift UP FRONT (never during the visible animation) and
+        // pre-load `slidePosition` to the opposite edge so the strip still shows the
+        // OUTGOING slide at animation start — no jump. This is the sole structural
+        // ForEach change (one far, off-screen cell swaps in/out) and it happens here
+        // inside a `disablesAnimations` transaction, so it can't decompose into a
+        // per-cell fade/move. During the slide below the ForEach is completely
+        // static.
+        var pre = Transaction(); pre.disablesAnimations = true
+        withTransaction(pre) {
+            centerIndex += step
+            slidePosition = CGFloat(-step)
+        }
+
+        // Logical slide + selection update immediately; the strip's centred art is
+        // driven by `centerIndex`, which is already correct.
         index = toItem
         advanceToken &+= 1
         metadataVisible = false
         selectedButton = min(keepButton, max(0, buttons(for: items[toItem]).count - 1))
+
+        // The visible slide: a pure offset animation to rest. No completion handler,
+        // no settle re-window — at rest `slidePosition` is always 0 and
+        // `centerIndex` is always the fronted slide.
         withAnimation(.easeInOut(duration: 0.42)) {
-            slidePosition = CGFloat(step)
-        } completion: {
-            guard generation == slideGeneration else { return }
-            // Re-window and re-centre in one non-animated transaction. The cell that
-            // just slid to centre keeps its identity (the `ForEach` ids overlap by
-            // two), so its art stays put — the swap is invisible.
-            var t = Transaction(); t.disablesAnimations = true
-            withTransaction(t) {
-                centerIndex = targetCenter
-                slidePosition = 0
-            }
+            slidePosition = 0
         }
+
         Task { await resolveArtwork(around: toItem) }
     }
 

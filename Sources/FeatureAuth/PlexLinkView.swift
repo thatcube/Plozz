@@ -29,16 +29,6 @@ public struct PlexLinkView: View {
 
     public var body: some View {
         VStack(spacing: 32) {
-            VStack(spacing: 8) {
-                Text("Sign in to Plex")
-                    .font(.largeTitle).bold()
-                Text("Scan the code with your phone, or enter it manually at **plex.tv/link**.")
-                    .font(.title3)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 1000)
-            }
-
             content
 
             controls
@@ -74,20 +64,6 @@ public struct PlexLinkView: View {
                 orDivider
 
                 VStack(spacing: 24) {
-                    Text("Or enter a code")
-                        .font(.title2).bold()
-
-                    VStack(spacing: 4) {
-                        Text("Go to")
-                            .font(.title3)
-                            .foregroundStyle(.secondary)
-                        Text("plex.tv/link")
-                            .font(.system(size: 52, weight: .heavy, design: .rounded))
-                            .foregroundStyle(PlexBrand.gold)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.5)
-                    }
-
                     Text(code)
                         .font(.plozzCode(size: 84))
                         .tracking(10)
@@ -96,6 +72,10 @@ public struct PlexLinkView: View {
                         .padding(.horizontal, 44)
                         .padding(.vertical, 20)
                         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24))
+
+                    Text("Enter at **plex.tv/link**")
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
 
                     PlexExpiryCountdown(expiresAt: expiresAt, lifetime: viewModel.codeLifetime)
                 }
@@ -180,8 +160,6 @@ private struct ServerList: View {
 
     var body: some View {
         VStack(spacing: 16) {
-            Text("Choose a server")
-                .font(.title2).bold()
             ForEach(servers) { server in
                 Button {
                     onSelect(server)

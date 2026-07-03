@@ -72,7 +72,7 @@ struct EnableProfilesView: View {
                 Button {
                     appState.declineProfilesForFirstRun()
                 } label: {
-                    Text("Not Now — Just Me")
+                    Text("Not now")
                         .frame(minWidth: 300)
                         .padding(.vertical, 8)
                 }
@@ -82,7 +82,7 @@ struct EnableProfilesView: View {
                 Button {
                     appState.enableProfilesForFirstRun()
                 } label: {
-                    Text("Set Up Profiles")
+                    Text("Use Profiles")
                         .fontWeight(.semibold)
                         .frame(minWidth: 300)
                         .padding(.vertical, 8)

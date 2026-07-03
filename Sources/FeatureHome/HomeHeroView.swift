@@ -83,19 +83,11 @@ struct HomeHeroView: View {
     /// Bumped on every page so a late metadata fade-in from a *previous* page
     /// can't fire after a newer page has already started.
     @State private var slideToken = 0
-    /// The slide leaving the screen during a page, held as a second backdrop
-    /// layer so the new artwork can visibly slide *over* it. `nil` when no page
-    /// is in flight. Rendered behind `current` and cleared once the wipe lands.
-    @State private var outgoing: MediaItem?
-    /// Horizontal offset of the incoming (fronted) backdrop: starts one screen
-    /// width off (leading or trailing per direction) and animates to 0 so the
-    /// new artwork slides into place.
-    @State private var incomingOffset: CGFloat = 0
-    /// Horizontal offset of the outgoing backdrop: animates a short distance the
-    /// opposite way (with a fade) so it reads as receding behind the new image.
-    @State private var outgoingOffset: CGFloat = 0
-    /// Opacity of the outgoing backdrop through the wipe.
-    @State private var outgoingOpacity: Double = 1
+    /// The direction of the in-flight page, driving the backdrop wipe: forward
+    /// slides the new artwork in from the trailing edge (old exits leading);
+    /// backward reverses it. Set synchronously just before `index` so the
+    /// declarative `.transition` reads the right edges.
+    @State private var forward = true
     /// Best resolved hero backdrop URL per item id. For episode/season slides
     /// this is the **series-level** hero art (correct show, high-res — matching
     /// the detail page), resolved via ``ArtworkRouter`` and preloaded for the
@@ -199,42 +191,66 @@ struct HomeHeroView: View {
 
     var body: some View {
         let height = Self.screenHeight * heroHeightFraction
-        Group {
-            if let item = current {
-                content(for: item)
-            } else {
-                Color.clear
+        // The backdrop is a sibling *behind* the content in a real ZStack (not a
+        // `.background`): SwiftUI's insertion/removal `.transition` does not fire
+        // reliably inside `.background` on tvOS, which is what forced the old
+        // runloop-timed offset dance. A plain ZStack layer animates the wipe
+        // declaratively.
+        ZStack(alignment: .bottomLeading) {
+            heroBackdropStack(height: height)
+            Group {
+                if let item = current {
+                    content(for: item)
+                } else {
+                    Color.clear
+                }
             }
+            .frame(maxWidth: .infinity, minHeight: height, alignment: .bottomLeading)
         }
         .frame(maxWidth: .infinity, minHeight: height, alignment: .bottomLeading)
-        .background(alignment: .bottom) {
-            // Two backdrop layers so a page slides the new artwork *over* the
-            // old one. Manual `.offset` animation (rather than a `.transition`)
-            // because the hero backdrop must live in a `.background` to avoid the
-            // over-wide full-bleed inflating the layout width — and `.background`
-            // does not animate insertion transitions. The outgoing layer is drawn
-            // first (behind); the incoming (`current`) on top.
-            ZStack(alignment: .bottom) {
-                if let outgoing {
-                    heroBackdrop(for: outgoing, height: height)
-                        .offset(x: outgoingOffset)
-                        .opacity(outgoingOpacity)
-                }
-                if let item = current {
-                    heroBackdrop(for: item, height: height)
-                        .offset(x: incomingOffset)
-                }
-            }
-        }
         .opacity(heroVisible ? 1 : 0)
         .onAppear {
             Task { await resolveArtwork(around: index) }
             guard !heroVisible else { return }
             withAnimation(.easeInOut(duration: 0.35)) { heroVisible = true }
         }
-        // Keep the fronted slide valid if the curated set shrinks under us.
-        .onChange(of: items.count) { _, count in
-            if index >= count { index = max(0, count - 1) }
+        // Re-seat the fronted slide when the curated *set* changes under us — not
+        // just when it shrinks. `HomeView` seeds the hero synchronously (Continue
+        // Watching + Watchlist) and then swaps in the async curated set (which
+        // also includes Featured/Random); the counts often match, so keying on
+        // `count` alone would leave `index` pointing at a *different* show —
+        // fronted with no slide and stale art (the "wrong image / instant appear"
+        // bug). Key on identity: preserve the fronted item if it survived the
+        // swap, else clamp, then prune resolved art and re-resolve.
+        .onChange(of: items.map(\.id)) { oldIDs, newIDs in
+            guard oldIDs != newIDs else { return }
+            let frontedID = oldIDs.indices.contains(index) ? oldIDs[index] : nil
+            if let frontedID, let newIdx = newIDs.firstIndex(of: frontedID) {
+                index = newIdx
+            } else {
+                index = min(index, max(0, newIDs.count - 1))
+            }
+            let present = Set(newIDs)
+            resolvedBackdrop = resolvedBackdrop.filter { present.contains($0.key) }
+            metadataVisible = true
+            // If the swap dropped the fronted slide onto an item exposing fewer
+            // buttons, clamp any *held* focus to the new button count so a stale
+            // `focusedButton` can't fail to match a `.focused(equals:)` binding
+            // and drop hero focus. Mirror `page(to:)`. Only touch it while held —
+            // never yank focus up from the row below.
+            if focusedButton != nil, items.indices.contains(index) {
+                let count = buttons(for: items[index]).count
+                focusedButton = min(focusedButton ?? 0, max(0, count - 1))
+            }
+            Task { await resolveArtwork(around: index) }
+        }
+        // Drop optimistic watchlist overrides once the authoritative loaded set
+        // agrees, so a stale override can't outlive the real data.
+        .onChange(of: watchlistedKeys) { _, keys in
+            guard !watchlistOverrides.isEmpty else { return }
+            watchlistOverrides = watchlistOverrides.filter { key, value in
+                value != keys.contains(key)
+            }
         }
         // Auto-advance: restart the dwell whenever the slide changes (manual page
         // or a previous auto-advance) and pause while the hero holds focus.
@@ -243,8 +259,39 @@ struct HomeHeroView: View {
             let seconds = UInt64(settings.autoAdvanceSeconds)
             try? await Task.sleep(nanoseconds: seconds * 1_000_000_000)
             guard !Task.isCancelled else { return }
-            advance(to: (index + 1) % items.count, keepButton: focusedButton ?? 0, forward: true)
+            page(to: (index + 1) % items.count, keepButton: focusedButton ?? 0, forward: true)
         }
+    }
+
+    /// The hero backdrop, keyed by the fronted item's id so a page is a real
+    /// identity change: SwiftUI removes the old layer and inserts the new one,
+    /// driving the directional wipe declaratively (no runloop-timed offset dance,
+    /// which CoreAnimation coalesced to a pop-in). Constrained to the screen width
+    /// and clipped so the full-bleed art can't inflate the layout width and the
+    /// sliding layers never bleed horizontally.
+    @ViewBuilder
+    private func heroBackdropStack(height: CGFloat) -> some View {
+        ZStack(alignment: .bottom) {
+            if let item = current {
+                heroBackdrop(for: item, height: height)
+                    .id(item.id)
+                    .transition(slideTransition)
+            }
+        }
+        .frame(width: Self.screenWidth, height: height, alignment: .bottom)
+        .frame(maxWidth: .infinity, alignment: .center)
+        .clipped()
+        .animation(.easeInOut(duration: 0.42), value: current?.id)
+    }
+
+    /// The directional wipe: the incoming backdrop slides in from the trailing
+    /// edge (forward) or leading edge (backward) while the outgoing exits the
+    /// opposite side — the Apple TV "push".
+    private var slideTransition: AnyTransition {
+        .asymmetric(
+            insertion: .move(edge: forward ? .trailing : .leading),
+            removal: .move(edge: forward ? .leading : .trailing)
+        )
     }
 
     /// The dwell key: any change (slide index, focus state, or a manual page
@@ -254,13 +301,6 @@ struct HomeHeroView: View {
     }
 
     // MARK: - Content column
-
-    /// Stable scroll anchor on the metadata block. Pressing down scrolls this to
-    /// the top of the viewport: the show's logo/meta/overview/buttons land in the
-    /// upper region with the lower portion of the backdrop behind them, and the
-    /// Continue Watching row sits below — the Apple TV "recede" position. A
-    /// constant id (independent of the slide) keeps it a fixed scroll target.
-    static let metadataAnchorID = "home-hero-metadata"
 
     /// Scroll anchor just above the action row. Pressing **down** off the hero
     /// scrolls this near the top of the viewport, so the show's logo/title lift
@@ -312,7 +352,6 @@ struct HomeHeroView: View {
                 actionRow(for: item)
             }
             .opacity(metadataVisible ? 1 : 0)
-            .id(Self.metadataAnchorID)
 
             pagingDots
                 // Center the page indicators across the full hero width (leading
@@ -356,63 +395,27 @@ struct HomeHeroView: View {
     @ViewBuilder
     private func actionRow(for item: MediaItem) -> some View {
         let itemButtons = buttons(for: item)
-        // A backward-paging sentinel sits just left of Play — EXCEPT on the first
-        // item in Sidebar mode, where Left must instead escape to open the side
-        // navigation (per `HeroCarouselFocus`). Its width+spacing is cancelled by
-        // negative leading padding below so the buttons never visibly shift.
-        let showLeftSentinel = items.count > 1 && !(index == 0 && navigationStyle == .sidebar)
         HStack(spacing: 24) {
-            // Invisible left-edge sentinel (backward). Pressing Left while on Play
-            // moves the focus engine onto this, which pages the carousel *backward*
-            // and returns focus to Play — a deterministic edge signal with no
-            // `.onMoveCommand` timing guesswork. Absent when Left should open the
-            // sidebar, so that case falls through to the native focus engine.
-            if showLeftSentinel {
-                Button {} label: { Color.clear.frame(width: 2, height: 44) }
-                    .buttonStyle(.plain)
-                    .focused($focusedButton, equals: Self.backSentinelOffset)
-                    .accessibilityHidden(true)
-            }
             ForEach(Array(itemButtons.enumerated()), id: \.element) { offset, button in
                 actionButton(button, at: offset, for: item)
             }
-            // Invisible right-edge sentinel (forward). Pressing Right while on the
-            // last real button moves focus onto this, paging forward and returning
-            // focus to the new slide's chevron. Trailing empty space absorbs its
-            // width, so it never shifts the leading-aligned buttons.
-            if items.count > 1 {
-                Button {} label: { Color.clear.frame(width: 2, height: 44) }
-                    .buttonStyle(.plain)
-                    .focused($focusedButton, equals: Self.sentinelOffset)
-                    .accessibilityHidden(true)
-            }
         }
-        // Cancel the left sentinel's width (2) + its HStack spacing (24) so Play
-        // stays put whether or not the sentinel is present — no visible shift.
-        .padding(.leading, showLeftSentinel ? -26 : 0)
         .padding(.top, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .focusSection()
-        // Only Down is intercepted here (recede to Continue Watching); left/right
-        // are left entirely to the native focus engine, and paging is driven by
-        // the invisible edge sentinels via `onChange`. Acting on left/right here
-        // was what made *every* press transition — rebuilding the buttons and
-        // dropping focus to the row.
-        .onMoveCommand { direction in
-            if direction == .down { onMoveDown() }
-        }
+        // Confine directional focus to the button row so the engine can't drift
+        // off the edges — EXCEPT on the first item in Sidebar mode, where Left
+        // must be allowed to escape and open the side navigation (per
+        // `HeroCarouselFocus`). Toggling coincides with a page (which re-pins
+        // focus), so it never strands focus.
+        .modifier(ConditionalFocusSection(active: !allowsSidebarEscape))
+        // Left/Right/Down are decided here. `onMoveCommand` on the *container*
+        // fires with `focusedButton` still holding its PRE-move value (the focus
+        // engine hasn't settled yet), so reading it gives deterministic edge
+        // detection — no sentinels, no `onChange` guesswork. Interior L/R moves
+        // are handled natively by the engine (we no-op); only true edge presses
+        // page. Down recedes to Continue Watching.
+        .onMoveCommand { direction in handleMove(direction, for: item) }
         .onChange(of: focusedButton) { old, new in
-            // Focus landed on an edge sentinel: page. `advanceForward`/`Backward`
-            // re-pin focus onto a real button of the destination slide, so focus
-            // never rests on an (invisible) sentinel.
-            if new == Self.sentinelOffset {
-                advanceForward()
-                return
-            }
-            if new == Self.backSentinelOffset {
-                advanceBackward()
-                return
-            }
             hasFocus = new != nil
             // Focus arriving from *outside* (a row below, the tab bar): snap the
             // hero back to full-screen. We deliberately do NOT recede on focus
@@ -423,10 +426,60 @@ struct HomeHeroView: View {
         }
     }
 
-    /// Focus tags for the invisible edge-paging sentinels — values that can never
-    /// collide with a real button offset.
-    private static let sentinelOffset = 1_000_000
-    private static let backSentinelOffset = 1_000_001
+    /// Whether Left on the left-most button of the *current* slide should open
+    /// the side navigation instead of paging — the one case the reducer resolves
+    /// to `.escape`. Mirrors `HeroCarouselFocus`, and gates the focus-section
+    /// confinement so the escape can actually reach the sidebar.
+    private var allowsSidebarEscape: Bool {
+        HeroCarouselFocus.resolve(
+            direction: .left,
+            itemIndex: index,
+            itemCount: items.count,
+            focusedButton: 0,
+            buttonCount: max(1, current.map { buttons(for: $0).count } ?? 1),
+            navigationStyle: navigationStyle
+        ) == .escape
+    }
+
+    /// Applies the tested `HeroCarouselFocus` reducer to a directional press.
+    /// `focusedButton` is read PRE-move (see `onMoveCommand` above). Interior
+    /// moves are left to the native focus engine; only `.advance` pages. `.escape`
+    /// and `.blocked` are no-ops (the engine handles the sidebar / nothing).
+    private func handleMove(_ direction: MoveCommandDirection, for item: MediaItem) {
+        switch direction {
+        case .down:
+            onMoveDown()
+        case .left, .right:
+            let dir: HeroFocusDirection = direction == .left ? .left : .right
+            let outcome = HeroCarouselFocus.resolve(
+                direction: dir,
+                itemIndex: index,
+                itemCount: items.count,
+                focusedButton: focusedButton ?? 0,
+                buttonCount: buttons(for: item).count,
+                navigationStyle: navigationStyle
+            )
+            switch outcome {
+            case .moveButton:
+                break // native engine move
+            case let .advance(toItem, keepButton):
+                page(to: toItem, keepButton: keepButton, forward: dir == .right)
+            case .escape, .blocked:
+                break
+            }
+        default:
+            break
+        }
+    }
+
+    /// Conditionally applies `.focusSection()` so the confinement can be dropped
+    /// exactly when Left should escape to the sidebar.
+    private struct ConditionalFocusSection: ViewModifier {
+        let active: Bool
+        @ViewBuilder func body(content: Content) -> some View {
+            if active { content.focusSection() } else { content }
+        }
+    }
 
     @ViewBuilder
     private func actionButton(_ button: HeroButton, at offset: Int, for item: MediaItem) -> some View {
@@ -483,93 +536,64 @@ struct HomeHeroView: View {
         }
     }
 
-    /// Fronts `toItem` with a directional slide, restarts the auto-advance dwell,
-    /// and re-asserts focus on `keepButton` (clamped to the destination slide's
-    /// button count). `forward` drives the wipe direction: the new backdrop slides
-    /// in from the trailing edge (forward) or leading edge (backward), while the
-    /// outgoing backdrop recedes a shorter distance and fades behind it.
-    private func advance(to toItem: Int, keepButton: Int, forward: Bool) {
+    /// Fronts `toItem` with a directional wipe, restarts the auto-advance dwell,
+    /// and (only when the hero holds focus) re-pins focus on `keepButton` for the
+    /// destination slide. The wipe itself is declarative: changing `index` swaps
+    /// the id-keyed backdrop, and `heroBackdropStack`'s `.animation(value:)` runs
+    /// the `.move` transition. `forward` selects the wipe edges.
+    private func page(to toItem: Int, keepButton: Int, forward isForward: Bool) {
         guard items.indices.contains(toItem), toItem != index else { return }
-        let old = current
         beginTransition()
-        let token = slideToken
-        let width = Self.screenWidth
-
-        // Phase 1 (synchronous, no animation): front the new slide and place the
-        // two backdrop layers at their start offsets — the incoming one a full
-        // screen off, the outgoing one centered.
-        var instant = Transaction()
-        instant.disablesAnimations = true
-        withTransaction(instant) {
-            outgoing = old
-            index = toItem
-            incomingOffset = forward ? width : -width
-            outgoingOffset = 0
-            outgoingOpacity = 1
-        }
-
+        // Set direction before index so the transition reads the right edges;
+        // both land in one render pass.
+        forward = isForward
+        index = toItem
         advanceToken &+= 1
-        // Only re-assert focus when the hero already holds it (a manual page):
-        // the auto-advance timer runs while focus is on the row below, and
-        // assigning `@FocusState` there would yank focus up to the hero.
+
+        // Re-pin focus only when the hero already holds it (a manual page): the
+        // auto-advance timer pages while focus is on the row below, and assigning
+        // `@FocusState` there would yank focus up to the hero. Deferred across two
+        // runloop ticks so it lands *after* the focus engine settles this press —
+        // a synchronous or `onChange`-driven write here is silently dropped by the
+        // tvOS focus engine (the known "stuck focus" bug).
         if focusedButton != nil {
             let destinationButtons = buttons(for: items[toItem]).count
-            focusedButton = min(keepButton, max(0, destinationButtons - 1))
-        }
-
-        // Phase 2 (next runloop tick): animate the layers to rest. This MUST be a
-        // separate turn — setting the off-screen offset and animating it back in
-        // the same cycle makes SwiftUI coalesce them to a net-zero change, so the
-        // new artwork would just pop in with no slide (the intermittent bug).
-        DispatchQueue.main.async {
-            guard slideToken == token else { return }
-            withAnimation(.easeInOut(duration: 0.42)) {
-                incomingOffset = 0
-                outgoingOffset = forward ? -width * 0.35 : width * 0.35
-                outgoingOpacity = 0
+            let target = min(keepButton, max(0, destinationButtons - 1))
+            Task { @MainActor in
+                await Task.yield()
+                await Task.yield()
+                focusedButton = target
             }
-        }
-
-        // Drop the outgoing layer once the wipe has landed (unless a newer page
-        // has already started), and warm the new neighbours' artwork.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) {
-            guard slideToken == token else { return }
-            outgoing = nil
         }
         Task { await resolveArtwork(around: toItem) }
     }
 
     /// Pages one slide forward (wrapping), keeping focus on the destination's
     /// chevron so repeated chevron presses / right-edge presses walk through the
-    /// carousel. Used by the chevron button, a right-edge press, and auto-advance.
+    /// carousel. Used by the chevron button and the auto-advance timer.
     private func advanceForward() {
         guard items.count > 1 else { return }
         let next = (index + 1) % items.count
         let destinationButtons = buttons(for: items[next]).count
-        advance(to: next, keepButton: destinationButtons - 1, forward: true)
+        page(to: next, keepButton: destinationButtons - 1, forward: true)
     }
 
-    /// Pages one slide backward (wrapping), keeping focus on the left-most button
-    /// (Play) — the only button from which the backward sentinel is reachable.
-    private func advanceBackward() {
-        guard items.count > 1 else { return }
-        let prev = (index - 1 + items.count) % items.count
-        advance(to: prev, keepButton: 0, forward: false)
-    }
-
-    /// Starts a slide change: sets the wipe direction and hides the current
-    /// slide's metadata *immediately* (no animation), then schedules its fade-in
-    /// once the backdrop wipe has landed. Guarded by ``slideToken`` so a rapid
-    /// second page cancels the first page's pending fade-in.
+    /// Starts a slide change: hides the current slide's metadata *immediately*
+    /// (no animation) so the old title/overview/buttons never sit over the
+    /// incoming artwork, then fades it back in once the backdrop wipe has landed.
+    /// The fade-in is delayed past the wipe duration (0.42s) and anchored to the
+    /// same start, and guarded by ``slideToken`` so a rapid second page cancels
+    /// the first page's pending fade-in.
     private func beginTransition() {
         slideToken &+= 1
         let token = slideToken
         var instant = Transaction()
         instant.disablesAnimations = true
         withTransaction(instant) { metadataVisible = false }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.32) {
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 460_000_000)
             guard slideToken == token else { return }
-            withAnimation(.easeInOut(duration: 0.35)) { metadataVisible = true }
+            withAnimation(.easeInOut(duration: 0.3)) { metadataVisible = true }
         }
     }
 
@@ -608,14 +632,24 @@ struct HomeHeroView: View {
         )
     }
 
-    /// The ordered primary backdrop URLs for a slide. Prefers the **resolved**
-    /// series-level hero art (for an episode/season slide, the show's high-res
-    /// backdrop — the same class of art the detail page shows, not the low-res
-    /// episode still) once it's been fetched; until then it uses the item's own
-    /// backdrop so the slide is never blank.
+    /// The ordered primary backdrop URLs for a slide — mirroring `DetailHeroView`:
+    /// the **server's own hero/backdrop art first** (for a Jellyfin episode the
+    /// series backdrop rides on `fallbackArtworkURL`; for Plex it's already in
+    /// `heroBackdropURL`), then the router-resolved art. The router is only a
+    /// *fallback* here (via `backdropFallback`), never the primary — resolving it
+    /// first is what made episode slides show a different, low-res image than the
+    /// detail page. Any resolved art is prepended (it's the server art for whole
+    /// titles, or the router hero only when the server gave none).
     private func primaryBackdropURLs(for item: MediaItem) -> [URL] {
-        if let resolved = resolvedBackdrop[item.id] { return [resolved] }
-        return [item.heroBackdropURL, item.backdropURL].compactMap { $0 }
+        var urls: [URL] = []
+        if let resolved = resolvedBackdrop[item.id] { urls.append(resolved) }
+        urls.append(contentsOf: [
+            item.heroBackdropURL,
+            item.backdropURL,
+            item.fallbackArtworkURL
+        ].compactMap { $0 })
+        var seen = Set<URL>()
+        return urls.filter { seen.insert($0).inserted }
     }
 
     // MARK: - Artwork routing / preload
@@ -633,24 +667,22 @@ struct HomeHeroView: View {
     }
 
     /// Resolves the best hero backdrop URL for one item and warms the decoded
-    /// image cache. For an **episode/season** the router query is series-scoped
-    /// (it uses the parent show's title), so this yields the show's hero art —
-    /// correct and high-res — rather than the episode's own still. Whole titles
-    /// keep their server-provided hero backdrop (already high-res) and only reach
-    /// for the router when the server gave none.
+    /// image cache. Mirrors `DetailHeroView`: prefer the **server's** hero art
+    /// (for an episode/season, the series backdrop carried on `fallbackArtworkURL`
+    /// — the same art the detail page shows), and only reach for the router when
+    /// the server provided none. Resolving the router *first* for episodes was the
+    /// "wrong / low-res image" bug.
     @MainActor
     private func resolveArtwork(for item: MediaItem) async {
         guard resolvedBackdrop[item.id] == nil else { return }
-        var best: URL?
+        var best: URL? = item.heroBackdropURL ?? item.backdropURL ?? item.fallbackArtworkURL
         switch item.kind {
-        case .episode, .season:
-            best = await ArtworkRouter.shared.artworkURL(.hero, for: item)
-            if best == nil { best = item.heroBackdropURL ?? item.backdropURL }
         case .folder, .collection, .unknown:
-            best = item.heroBackdropURL ?? item.backdropURL
+            break // server art only; no external router for containers
         default:
-            best = item.heroBackdropURL ?? item.backdropURL
-            if best == nil { best = await ArtworkRouter.shared.artworkURL(.hero, for: item) }
+            if best == nil {
+                best = await ArtworkRouter.shared.artworkURL(.hero, for: item)
+            }
         }
         guard let url = best else { return }
         resolvedBackdrop[item.id] = url

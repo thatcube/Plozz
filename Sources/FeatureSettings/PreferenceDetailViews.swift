@@ -721,7 +721,7 @@ struct HomeDisplayDetailView: View {
                 SettingsSplitRow(
                     id: "hero-trailers",
                     title: "Background Trailers",
-                    description: "Play a muted trailer behind the hero when one is available. Fades in only once it's actually playing.",
+                    description: "Coming soon — play a muted trailer behind the hero when one is available. Fades in only once it's actually playing. Your choice is saved for when this lands.",
                 ) {
                     Toggle("Play trailers in the background", isOn: $hero.settings.trailersEnabled)
                         .toggleStyle(SettingsSwitchToggleStyle())

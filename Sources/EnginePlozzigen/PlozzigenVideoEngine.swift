@@ -189,7 +189,11 @@ public final class PlozzigenVideoEngine: VideoEngine {
             engine.play()
             syncTracks()
         } catch {
-            let err: AppError = .unknown(error.localizedDescription)
+            // Surface the real reason: AppError / SMBConnection.SMBError don't
+            // conform to LocalizedError, so `localizedDescription` collapses to a
+            // generic "error 0". `String(describing:)` keeps the actual message.
+            let detail = String(describing: error)
+            let err: AppError = .unknown(detail)
             status = .failed(err)
             onFailure?(err)
         }
@@ -197,38 +201,25 @@ public final class PlozzigenVideoEngine: VideoEngine {
 
     // MARK: - SMB custom source
 
-    /// Build an SMB `MediaSource` from an `smb://user:password@host[:port]/share/path/file.ext`
-    /// URL. Splits off the server + share, opens an AMSMB2-backed `SMBConnection`
-    /// (NTLMv2 / guest, read-only), and wraps it in an `SMBIOReader` for the engine.
+    /// Build an SMB `MediaSource` from an `smb://host[:port]/share/path/file.ext`
+    /// URL. Parses it with the engine's `SMBURL`, opens an `SMBConnection`
+    /// (NWConnection-backed SMB2, NTLMv2 / guest, read-only), and wraps it in an
+    /// `SMBIOReader` for the engine's custom-source path.
     private func makeSMBSource(from url: URL) async throws -> MediaSource {
-        guard let comps = URLComponents(url: url, resolvingAgainstBaseURL: false),
-              let host = comps.host, !host.isEmpty else {
-            throw AppError.unknown("Malformed SMB URL")
+        let parsed: SMBURL
+        do {
+            parsed = try SMBURL.parse(url.absoluteString)
+        } catch {
+            throw AppError.unknown("Malformed SMB URL: \(String(describing: error))")
         }
-        var serverComps = URLComponents()
-        serverComps.scheme = "smb"
-        serverComps.host = host
-        serverComps.port = comps.port
-        guard let server = serverComps.url else {
-            throw AppError.unknown("Malformed SMB server URL")
-        }
-        // /share/dir/file.ext → share = "share", path = "dir/file.ext" (AMSMB2
-        // wants a share-relative forward-slash path with no leading slash).
-        let parts = comps.percentEncodedPath
-            .split(separator: "/", omittingEmptySubsequences: true)
-            .map { $0.removingPercentEncoding ?? String($0) }
-        guard let share = parts.first, parts.count >= 2 else {
-            throw AppError.unknown("SMB URL missing share or file path")
-        }
-        let filePath = parts.dropFirst().joined(separator: "/")
         let connection = try await SMBConnection.connect(
-            server: server,
-            share: share,
-            path: filePath,
-            user: comps.user ?? "",
-            password: comps.password ?? ""
+            server: parsed.server,
+            share: parsed.share,
+            path: parsed.path,
+            user: parsed.user,
+            password: parsed.password
         )
-        return .custom(SMBIOReader(source: connection), formatHint: Self.smbFormatHint(for: filePath))
+        return .custom(SMBIOReader(source: connection), formatHint: Self.smbFormatHint(for: parsed.path))
     }
 
     /// Optional container short-name hint for the demuxer probe, derived from the

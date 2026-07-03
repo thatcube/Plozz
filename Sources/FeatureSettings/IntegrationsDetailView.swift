@@ -147,7 +147,7 @@ struct IntegrationsDetailView: View {
                 title: "Sync across all my servers",
                 description: canSyncAcrossServers
                     ? (playback.settings.syncWatchAcrossServers
-                        ? "Marking or resuming a title updates every server that has it."
+                        ? "Watching, resuming, or marking any media as watched updates every server that has it, keeping the same progress everywhere."
                         : "Only the server you watched on is updated.")
                     : "Add another server to sync watch status across servers.",
             ) {

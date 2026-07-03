@@ -330,9 +330,15 @@ struct HomeHeroView: View {
     private func content(for item: MediaItem) -> some View {
         let hideText = spoilerSettings.shouldHideText(for: item)
         VStack(alignment: .leading, spacing: 12) {
-            // Everything that describes *this show*. Hidden instantly on a page and
-            // faded back in once the new backdrop has wiped into place, so the old
-            // title/overview/buttons never sit over the incoming artwork.
+            // The show *description* (logo/title/metadata/overview). ONLY this
+            // fades: hidden instantly on a page and faded back in once the new
+            // backdrop has wiped into place, so the old title/overview never sit
+            // over the incoming artwork. The action row is deliberately NOT inside
+            // this fade — a focusable view at opacity 0 is un-focusable on tvOS, so
+            // fading the buttons dropped focus mid-page and the ScrollView scrolled
+            // down to the next focusable (a Continue Watching card). Keeping the
+            // buttons opaque and focusable throughout the transition pins focus and
+            // the scroll in place.
             VStack(alignment: .leading, spacing: 12) {
                 HeroLogoArtwork(
                     primaryURL: item.logoURL,
@@ -360,16 +366,19 @@ struct HomeHeroView: View {
                         .frame(maxWidth: 960, alignment: .topLeading)
                         .contentTransition(.opacity)
                 }
-
-                // Zero-height recede target: sits just above the buttons so a
-                // down-press lifts the logo/title off the top of the screen.
-                Color.clear
-                    .frame(height: 0)
-                    .id(Self.recedeAnchorID)
-
-                actionRow(for: item)
             }
             .opacity(metadataVisible ? 1 : 0)
+
+            // Zero-height recede target: sits just above the buttons so a
+            // down-press lifts the logo/title off the top of the screen.
+            Color.clear
+                .frame(height: 0)
+                .id(Self.recedeAnchorID)
+
+            // The pills fade with the metadata (see `actionRow`), but their focus
+            // target is an always-opaque overlay — so a page never drops focus or
+            // shifts the scroll even as the buttons disappear and reappear.
+            actionRow(for: item)
 
             pagingDots
                 // Center the page indicators across the full hero width (leading
@@ -441,32 +450,47 @@ struct HomeHeroView: View {
                 .focused($focus, equals: .leftGuard)
                 .accessibilityHidden(true)
 
+            // The VISIBLE pills. Non-focusable and free to fade with the rest of
+            // the metadata on a page — exactly like the Apple TV hero, where the
+            // buttons vanish on press and reappear on landing. Focus is NOT here
+            // (see the overlay), so fading these to opacity 0 can't drop focus or
+            // shift the scroll. `.opacity` keeps their layout, so the focus overlay
+            // below keeps a stable frame throughout the fade.
             HStack(spacing: 24) {
                 ForEach(Array(itemButtons.enumerated()), id: \.element) { offset, button in
                     heroButtonVisual(button, for: item, selected: focus != nil && selectedButton == offset)
                 }
             }
-            .contentShape(Rectangle())
-            // ── The pill row is ONE focus target. There is NO per-button
-            // `@FocusState`, so the focus engine can never move focus between pills
-            // behind our back: Right/Down are resolved in `onMoveCommand` against
-            // our own `selectedButton` (always the true pre-move value); Left is
-            // captured by the guard above. The hero pages only on a real edge
-            // press, never merely because focus *landed* on an edge button. ──
-            .focusable(true)
-            .focused($focus, equals: .row)
-            // Initial Home focus lands on the hero (not a Continue Watching card).
-            .prefersDefaultFocus(true, in: focusScope)
-            .onMoveCommand { handleMove($0) }
-            // Remote **Select** on the focused row activates the selected pill.
-            .onTapGesture { activateSelected() }
-            // Play/Pause is a convenient shortcut straight to playback.
-            .onPlayPauseCommand { if let item = current { onPlay(item) } }
-            .accessibilityElement(children: .ignore)
-            .accessibilityAddTraits(.isButton)
-            .accessibilityLabel(accessibilityLabel(for: item))
-            .accessibilityAction { activateSelected() }
-            .modifier(HeroActionAccessibility(actions: a11yActions))
+            .opacity(metadataVisible ? 1 : 0)
+            .allowsHitTesting(false)
+            // ── The single hero focus target: an always-opaque, invisible leaf
+            // layered *over* the pills. Because `.overlay` is applied after the
+            // pills' `.opacity`, it stays fully opaque and focusable even while the
+            // pills fade to 0 — so focus (and therefore the scroll position) is
+            // pinned throughout a page, while the buttons still disappear and
+            // reappear. There is NO per-button `@FocusState`: Right/Down resolve in
+            // `onMoveCommand` against our own `selectedButton` (always the true
+            // pre-move value); Left is captured by the guard above. The hero pages
+            // only on a real edge press, never because focus merely *landed* on an
+            // edge button. ──
+            .overlay {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .focusable(true)
+                    .focused($focus, equals: .row)
+                    // Initial Home focus lands on the hero (not a CW card).
+                    .prefersDefaultFocus(true, in: focusScope)
+                    .onMoveCommand { handleMove($0) }
+                    // Remote **Select** activates the selected pill.
+                    .onTapGesture { activateSelected() }
+                    // Play/Pause is a shortcut straight to playback.
+                    .onPlayPauseCommand { if let item = current { onPlay(item) } }
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityLabel(accessibilityLabel(for: item))
+                    .accessibilityAction { activateSelected() }
+                    .modifier(HeroActionAccessibility(actions: a11yActions))
+            }
             // Pin a *constant* identity so focus is retained across a page (item
             // id changes). Never key this on the item id — that would drop focus.
             .id(Self.actionRowFocusID)

@@ -106,33 +106,44 @@ struct HomeHeroView: View {
     /// Bumped on every page so a late metadata fade-in from a *previous* page
     /// can't fire after a newer page has already started.
     @State private var slideToken = 0
-    /// The Home hero backdrop is a **single horizontal filmstrip** — an `HStack` of
-    /// three cells `[itemAt(centerIndex-1), itemAt(centerIndex), itemAt(centerIndex+1)]`
-    /// that moves as ONE unit via a single animatable offset (`slidePosition`).
-    /// There is only ever one thing animating, so the old two-independent-layer
-    /// design (where SwiftUI could animate one side and drop the other, producing
-    /// the intermittent "new art appears behind/over the old" wrong-order wipe) is
-    /// structurally impossible now. The centered cell's content NEVER changes during
-    /// a slide — the window only re-windows at settle, in a `disablesAnimations`
-    /// transaction — so there is no content mutation mid-animation either.
+    /// The Home hero backdrop is a **two-slot crossfade**: two permanently-mounted
+    /// `HeroBackdropLayer` instances stacked in a `ZStack`, each driven by its own
+    /// `MediaItem` and its own `Double` opacity. Only ONE thing ever animates on a
+    /// page: each slot's opacity, and only via `.animation(_, value:)` targeted at
+    /// that opacity — never `withAnimation` (which can bleed into the AsyncImage's
+    /// state changes and cause the mid-flight "pop"/"lingering" glitches seen on
+    /// prior slide/filmstrip designs).
     ///
-    /// `centerIndex` is an UNBOUNDED contiguous counter (it just keeps incrementing
-    /// forward / decrementing backward); the displayed item is `itemAt(centerIndex)`
-    /// with wrap-around modulo. Keeping it contiguous (rather than wrapping it to
-    /// 0…count-1) is what preserves cell identity across the end→start wrap: the
-    /// `ForEach` ids `[c-1, c, c+1]` always overlap by two with the next window, so
-    /// the cell sliding to centre is the SAME view instance (art already resolved)
-    /// even when the *item* wrapped. The invariant `itemAt(centerIndex) == items[index]`
-    /// holds at rest.
-    @State private var centerIndex = 0
-    /// The filmstrip offset in screen-width units: 0 at rest (centre cell shown),
-    /// animates to +1 to page forward (next cell slides to centre) or -1 backward.
-    /// Reset to 0 at settle in the same `disablesAnimations` transaction that
-    /// advances `centerIndex`, so the strip re-centres with no visible jump.
-    @State private var slidePosition: CGFloat = 0
-    /// Bumped on every page so a superseded animation's completion handler (which
-    /// still fires when interrupted) can't double-commit the settle.
-    @State private var slideGeneration = 0
+    /// On a page: the incoming item is assigned to whichever slot is currently
+    /// hidden (opacity 0), then both slots' opacities are simply reassigned —
+    /// front → 1, back → 0. SwiftUI animates the opacity change over 0.42s via
+    /// `.animation(_, value:)`. The slot that had the *outgoing* item stays
+    /// mounted and simply fades out; it never re-loads its image, never changes
+    /// identity, and never competes with anything for z-order.
+    ///
+    /// **Rapid paging**: if a new page arrives while the previous crossfade is
+    /// still in flight, we first *snap* both opacities to their in-flight targets
+    /// inside a `disablesAnimations` transaction — so whichever slot was fading in
+    /// jumps to fully opaque and whichever was fading out jumps to fully hidden.
+    /// THEN we assign the newest item to the (now guaranteed hidden) back slot and
+    /// crossfade to it. This means a slot's *item* is only ever swapped while it
+    /// is fully invisible, so the "old image visible at 0.5 opacity suddenly
+    /// swaps to new image at 0.5 opacity" pop is structurally impossible.
+    @State private var backdropSlotA: MediaItem?
+    @State private var backdropSlotB: MediaItem?
+    /// Which slot is currently the fronted one (its target opacity is 1). The
+    /// *other* slot is always the "back" — target opacity 0 and safe to reassign.
+    @State private var frontBackdropSlot: BackdropSlot = .a
+    /// Slot opacities. Written both animated (in `page`) and instantly (in the
+    /// rapid-paging snap). Their `.animation(_, value:)` modifier is what animates
+    /// them; setting inside `withTransaction(disablesAnimations: true)` snaps them.
+    @State private var backdropSlotAOpacity: Double = 1
+    @State private var backdropSlotBOpacity: Double = 0
+
+    private enum BackdropSlot { case a, b }
+    /// Crossfade duration in seconds — kept in one place so `page`, the snap and
+    /// the metadata fade-in schedule stay in lockstep.
+    private static let backdropCrossfadeDuration: Double = 0.42
     /// The last directional move delivered to the hero's action row. Used to gate
     /// the recede: focus can leave the hero UP (to the tab bar) or LEFT (to the
     /// sidebar) as well as DOWN (to the Continue Watching row) — only a genuine
@@ -156,15 +167,6 @@ struct HomeHeroView: View {
     private var current: MediaItem? {
         guard items.indices.contains(index) else { return items.first }
         return items[index]
-    }
-
-    /// The item shown by a filmstrip cell at contiguous position `i`, wrapping
-    /// around the carousel. `centerIndex` is unbounded, so this modulo maps it (and
-    /// its ±1 neighbours) back onto the real item list. Caller guarantees non-empty.
-    private func itemAt(_ i: Int) -> MediaItem {
-        let n = items.count
-        let wrapped = ((i % n) + n) % n
-        return items[wrapped]
     }
 
     /// Legibility scrim tone — dark in dark mode, light in light mode (matching
@@ -334,45 +336,53 @@ struct HomeHeroView: View {
             try? await Task.sleep(nanoseconds: seconds * 1_000_000_000)
             // Don't step on an in-flight manual page; that page bumped
             // `advanceToken`, which restarts this dwell from the new slide.
-            guard !Task.isCancelled, slidePosition == 0 else { return }
+            guard !Task.isCancelled else { return }
             page(to: (index + 1) % items.count, keepButton: selectedButton, forward: true)
         }
     }
 
-    /// The hero backdrop as a **single horizontal filmstrip**: an `HStack` of three
-    /// full-screen-width cells — `itemAt(centerIndex-1)`, `itemAt(centerIndex)`,
-    /// `itemAt(centerIndex+1)` — clipped to a one-screen viewport and slid by ONE
-    /// animatable offset (`slidePosition`). Because the whole strip is a single
-    /// view that moves as a unit, there is never a second, independent animation
-    /// that SwiftUI can drop — the root cause of every prior wrong-order wipe (two
-    /// layers, only one animating). The centred cell's content never changes during
-    /// a slide; the window only re-windows at settle (`disablesAnimations`), and the
-    /// `ForEach` ids overlap by two across windows so the cell sliding to centre is
-    /// the same, already-resolved view instance (even across the end→start wrap).
+    /// The hero backdrop as **two permanently-mounted, crossfading slots** stacked
+    /// in a `ZStack`. Each slot is an ordinary `HeroBackdropLayer` bound to its own
+    /// `MediaItem` and its own animatable `Double` opacity. On a page, the new item
+    /// is assigned to whichever slot is *currently invisible* (target opacity 0),
+    /// then both opacities are toggled — SwiftUI's `.animation(_, value:)` on each
+    /// slot animates the change over 0.42s. Nothing else animates.
     ///
-    /// Cells pass `ignoresOverscan: false` so each stays exactly one screen wide and
-    /// the strip tiles correctly; the overscan breakout is applied once here, to the
-    /// whole viewport. The strip is lifted by `backdropParallaxLift` (the parallax)
-    /// so the artwork rises faster than the content as the page recedes.
+    /// The two slots keep constant `.id`s so their `HeroBackdropLayer` /
+    /// `FallbackAsyncImage` views persist across pages: swapping a slot's item just
+    /// updates the `urls` prop, and the async image seeds synchronously from the
+    /// warmed cache (see `resolveArtwork(around:)` which prefetches ±1 neighbours).
+    /// A slot's item is only ever reassigned while that slot is fully hidden, so
+    /// the old "outgoing lingers / new appears at half-opacity / z-order pop"
+    /// glitches from the sliding designs cannot happen here — there is no visible
+    /// content mutation, only opacity, ever.
     @ViewBuilder
     private func heroBackdropStack(height: CGFloat) -> some View {
         let w = Self.screenWidth
         if items.isEmpty {
             Color.clear.frame(width: w, height: height)
         } else {
-            HStack(spacing: 0) {
-                ForEach([centerIndex - 1, centerIndex, centerIndex + 1], id: \.self) { i in
-                    heroBackdrop(for: itemAt(i), height: height)
-                        .frame(width: w, height: height)
-                        .clipped()
+            ZStack {
+                // Slot A. Only mounted once its item is set (avoids briefly rendering
+                // a placeholder gray behind slot B on the very first appearance).
+                if let itemA = backdropSlotA {
+                    heroBackdrop(for: itemA, height: height)
+                        .opacity(backdropSlotAOpacity)
+                        .animation(
+                            .easeInOut(duration: Self.backdropCrossfadeDuration),
+                            value: backdropSlotAOpacity
+                        )
+                }
+                if let itemB = backdropSlotB {
+                    heroBackdrop(for: itemB, height: height)
+                        .opacity(backdropSlotBOpacity)
+                        .animation(
+                            .easeInOut(duration: Self.backdropCrossfadeDuration),
+                            value: backdropSlotBOpacity
+                        )
                 }
             }
-            .frame(width: w * 3, height: height, alignment: .leading)
-            // Slide the whole 3-wide strip as one unit. Rest offset is -w (centre
-            // cell in the viewport); +1 pages forward (next cell to centre), -1 back.
-            .offset(x: -w * (1 + slidePosition))
-            // One-screen viewport that clips the strip to just the centred cell.
-            .frame(width: w, height: height, alignment: .leading)
+            .frame(width: w, height: height, alignment: .center)
             .clipped()
             .frame(maxWidth: .infinity, alignment: .center)
             .offset(y: -backdropParallaxLift)
@@ -886,68 +896,91 @@ struct HomeHeroView: View {
         }
     }
 
-    /// Fronts `toItem` with a directional filmstrip slide and restarts the
+    /// Fronts `toItem` with a two-slot opacity crossfade and restarts the
     /// auto-advance dwell. Callers only ever page by ±1 (Right/Left/chevron/
-    /// auto-advance), so `toItem` is always the current slide's neighbour. The
-    /// strip animates a SINGLE offset (`slidePosition`) 0→±1; on completion the
-    /// window advances (`centerIndex += step`) and the offset resets to 0 in one
-    /// `disablesAnimations` transaction, so it re-centres with no visible jump and
-    /// no content change mid-slide. `index` (the logical/wrapped slide) updates
-    /// immediately so rapid presses compute the right next target and the metadata
-    /// resolves the new show, while the strip keeps showing `centerIndex` until
-    /// settle.
+    /// auto-advance), so `toItem` is always the current slide's neighbour, but
+    /// this function doesn't actually depend on that — it just crossfades to
+    /// whatever item is asked for.
+    ///
+    /// Rapid-paging safe: if the previous crossfade is still animating when a new
+    /// page arrives, both slot opacities are *snapped* to their in-flight targets
+    /// inside a `disablesAnimations` transaction FIRST (so whichever slot was
+    /// fading in jumps to fully opaque and whichever was fading out jumps to fully
+    /// hidden). Only then is the newest item assigned to the (now guaranteed
+    /// hidden) back slot and its opacity animated back to 1. This means a slot's
+    /// *content* is only ever swapped while it is invisible — the "half-opacity
+    /// slot suddenly showing a new image" pop that plagued the sliding designs is
+    /// structurally impossible.
     private func page(to toItem: Int, keepButton: Int, forward isForward: Bool) {
         guard items.indices.contains(toItem), toItem != index else { return }
-        let step = isForward ? 1 : -1
-        // Land any in-flight page instantly so the strip is centred on the current
-        // slide before we start the next one (rapid-paging guard). The in-flight
-        // direction is the sign of `slidePosition`; committing `centerIndex` by that
-        // step lands it on the slide `index` already points at.
-        if slidePosition != 0 {
-            let landStep = slidePosition > 0 ? 1 : -1
-            var t = Transaction(); t.disablesAnimations = true
-            withTransaction(t) {
-                centerIndex += landStep
-                slidePosition = 0
-            }
-        }
         beginTransition()
-        slideGeneration &+= 1
-        let generation = slideGeneration
-        let targetCenter = centerIndex + step
-        // Logical slide + selection update immediately; the strip stays on
-        // `centerIndex` (its centred art is unchanged) until the settle below.
+        // Logical slide + selection update immediately so metadata / dots / rapid
+        // repeat targeting all reflect the newest slide.
         index = toItem
         advanceToken &+= 1
         metadataVisible = false
         selectedButton = min(keepButton, max(0, buttons(for: items[toItem]).count - 1))
-        withAnimation(.easeInOut(duration: 0.42)) {
-            slidePosition = CGFloat(step)
-        } completion: {
-            guard generation == slideGeneration else { return }
-            // Re-window and re-centre in one non-animated transaction. The cell that
-            // just slid to centre keeps its identity (the `ForEach` ids overlap by
-            // two), so its art stays put — the swap is invisible.
-            var t = Transaction(); t.disablesAnimations = true
-            withTransaction(t) {
-                centerIndex = targetCenter
-                slidePosition = 0
-            }
-        }
+        crossfadeBackdrop(to: items[toItem])
         Task { await resolveArtwork(around: toItem) }
     }
 
-    /// Re-seats the filmstrip on the current logical slide with NO animation, used
-    /// on first appearance and on a curated-set swap. Restores the resting invariant
-    /// `itemAt(centerIndex) == items[index]` and zeroes the offset in one
-    /// `disablesAnimations` transaction, so it's an instant, invisible re-centre.
+    /// Crossfades the backdrop to `newItem` using the two-slot ZStack described on
+    /// the slot state above. Handles the "previous crossfade still in flight" case
+    /// by snapping the previous transition to complete BEFORE swapping the back
+    /// slot's item — so slot content is only reassigned while invisible.
+    private func crossfadeBackdrop(to newItem: MediaItem) {
+        // The "back" slot is the one currently NOT the fronted one — its target
+        // opacity is 0 (either already at rest, or animating there mid-transition).
+        let backSlot: BackdropSlot = (frontBackdropSlot == .a) ? .b : .a
+        // Snap: force both opacities to their target-final values so any in-flight
+        // animation lands instantly. If the previous crossfade hadn't started yet
+        // (both already at target), these assignments are no-ops. Done inside a
+        // `disablesAnimations` transaction so the snap is a hard cut, not itself
+        // animated. Because `.animation(_, value:)` is keyed on the opacity value,
+        // this transaction reliably cancels the in-flight animation.
+        var snap = Transaction()
+        snap.disablesAnimations = true
+        withTransaction(snap) {
+            backdropSlotAOpacity = (frontBackdropSlot == .a) ? 1 : 0
+            backdropSlotBOpacity = (frontBackdropSlot == .b) ? 1 : 0
+        }
+        // Reassign the back slot's item WHILE IT IS FULLY INVISIBLE. Its
+        // `FallbackAsyncImage` will pick up the new URLs via its own `.task(id:)`
+        // and — because `resolveArtwork(around:)` prefetches ±1 neighbours into
+        // `ArtworkImageCache` — the new image seeds synchronously from cache on the
+        // next update, with no gray flash. Any brief placeholder is invisible
+        // anyway because the slot is at opacity 0.
+        switch backSlot {
+        case .a: backdropSlotA = newItem
+        case .b: backdropSlotB = newItem
+        }
+        // Flip the fronted-slot marker. This is bookkeeping, not animated — the
+        // animation is on the opacity values below.
+        frontBackdropSlot = backSlot
+        // Now the animated crossfade: back → 1, previous front → 0. Ordinary
+        // assignments; `.animation(_, value:)` on each slot animates the opacity
+        // change over `backdropCrossfadeDuration`. Nothing else in either slot's
+        // subtree animates.
+        backdropSlotAOpacity = (backSlot == .a) ? 1 : 0
+        backdropSlotBOpacity = (backSlot == .b) ? 1 : 0
+    }
+
+    /// Seats both crossfade slots on the current logical slide with NO animation.
+    /// Used on first appearance and on a curated-set swap. Both slots point at the
+    /// same item, slot A is front (opacity 1), slot B is back (opacity 0). Done in
+    /// a `disablesAnimations` transaction so an unrelated animation context can't
+    /// animate the re-seat.
     private func reseatSlots() {
-        guard !items.isEmpty else { return }
-        var transaction = Transaction()
-        transaction.disablesAnimations = true
-        withTransaction(transaction) {
-            centerIndex = index
-            slidePosition = 0
+        guard !items.isEmpty, items.indices.contains(index) else { return }
+        let item = items[index]
+        var t = Transaction()
+        t.disablesAnimations = true
+        withTransaction(t) {
+            backdropSlotA = item
+            backdropSlotB = item
+            backdropSlotAOpacity = 1
+            backdropSlotBOpacity = 0
+            frontBackdropSlot = .a
         }
     }
 
@@ -962,18 +995,17 @@ struct HomeHeroView: View {
     }
 
     /// Schedules the metadata fade-BACK-IN for a page. The metadata is hidden
-    /// *instantly* inside `page(...)`'s single `withAnimation` (stripped locally so
-    /// it snaps rather than fades — see `content(for:)`/`actionRow(for:)`), NOT via
-    /// a separate `withTransaction(disablesAnimations:)` here: a competing
-    /// transaction in the same turn let the backdrop's insertion skip its
-    /// animation. This only starts the delayed fade-in, past the wipe duration
-    /// (0.42s) and guarded by ``slideToken`` so a rapid second page cancels the
-    /// first page's pending fade-in.
+    /// *instantly* by `page(...)` setting `metadataVisible = false` under the
+    /// snap transactions in `content(for:)`/`actionRow(for:)`. This only starts
+    /// the delayed fade-in, past the backdrop crossfade duration and guarded by
+    /// ``slideToken`` so a rapid second page cancels the first page's pending
+    /// fade-in.
     private func beginTransition() {
         slideToken &+= 1
         let token = slideToken
         Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 460_000_000)
+            let nanos = UInt64((Self.backdropCrossfadeDuration + 0.04) * 1_000_000_000)
+            try? await Task.sleep(nanoseconds: nanos)
             guard slideToken == token else { return }
             withAnimation(.easeInOut(duration: 0.3)) { metadataVisible = true }
         }
@@ -1011,9 +1043,9 @@ struct HomeHeroView: View {
             // page (which melts at 0.33) and only feather the very bottom into the
             // Continue Watching panel.
             dissolveStart: 0.82,
-            // The filmstrip tiles several of these side by side, so each cell must
-            // stay exactly one screen wide; the overscan breakout is applied once at
-            // the strip's viewport (see `heroBackdropStack`), not per cell.
+            // The crossfade slots are stacked (not tiled), and the overscan
+            // breakout is applied once at the outer `heroBackdropStack` container,
+            // so each slot stays within its given frame.
             ignoresOverscan: false
         )
     }

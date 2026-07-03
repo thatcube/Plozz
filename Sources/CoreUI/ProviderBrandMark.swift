@@ -1,0 +1,64 @@
+#if canImport(SwiftUI)
+import SwiftUI
+import CoreModels
+
+/// Shared brand mark for a media provider (Jellyfin / Plex): the real bundled
+/// `JellyfinLogo` / `PlexLogo` assets — the SAME logos Settings uses — instead
+/// of an SF Symbol stand-in. Template-rendered and tinted with the provider's
+/// brand color so it reads on any background, and it flips to the focus
+/// foreground when it sits on a focused Settings-style row.
+///
+/// Lives in CoreUI so every surface (Settings, onboarding chooser, the server
+/// picker) draws provider logos one identical way instead of each re-deriving
+/// the asset name, brand tint, and focus behavior.
+public struct ProviderBrandMark: View {
+    private let provider: ProviderKind
+    private let size: CGFloat
+    private let showsBackground: Bool
+
+    // Reads the unified Settings-row focus state so the mark flips to the focus
+    // foreground on the inverted card (avoids a tinted glyph on a same-color
+    // background). No-ops outside a Settings-style focus row (defaults unfocused).
+    @Environment(\.settingsRowIsFocused) private var rowFocused
+    @Environment(\.settingsRowFocusForeground) private var rowFocusForeground
+
+    public init(provider: ProviderKind, size: CGFloat = 14, showsBackground: Bool = true) {
+        self.provider = provider
+        self.size = size
+        self.showsBackground = showsBackground
+    }
+
+    private var tint: Color {
+        rowFocused ? rowFocusForeground : Self.brandTint(provider)
+    }
+
+    private var assetName: String {
+        provider == .plex ? "PlexLogo" : "JellyfinLogo"
+    }
+
+    public var body: some View {
+        ZStack {
+            if showsBackground {
+                Circle().fill(Self.brandTint(provider).opacity(rowFocused ? 0 : 0.18))
+            }
+            Image(assetName)
+                .renderingMode(.template)
+                .resizable()
+                .scaledToFit()
+                .padding(size * 0.12)
+                .foregroundStyle(tint)
+        }
+        .frame(width: size, height: size)
+    }
+
+    /// Brand accent color used to tint each provider's logo + chip.
+    public static func brandTint(_ provider: ProviderKind) -> Color {
+        switch provider {
+        case .jellyfin:
+            return Color(red: 0.53, green: 0.38, blue: 0.95)
+        case .plex:
+            return Color(red: 0xE5 / 255, green: 0xA0 / 255, blue: 0x0D / 255)
+        }
+    }
+}
+#endif

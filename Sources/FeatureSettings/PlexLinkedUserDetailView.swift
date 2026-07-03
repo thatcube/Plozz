@@ -36,10 +36,11 @@ struct PlexLinkedUserDetailView: View {
                         title: "On \(account.server.name)",
                         footer: "The account owner is the main Plex account holder; the others are managed/family users under it and may need a PIN. Plozz asks for the PIN on playback and never stores it."
                     ) {
-                        VStack(spacing: 0) {
+                        // Rows separated by a gap rather than flush dividers so
+                        // the focus lift doesn't paint over a divider line.
+                        VStack(spacing: 14) {
                             ownerRow(admin: admin, account: account)
                             if loading && users.isEmpty {
-                                Divider()
                                 HStack(spacing: 12) {
                                     ProgressView()
                                     Text("Loading Plex users…")
@@ -47,7 +48,6 @@ struct PlexLinkedUserDetailView: View {
                                 }
                                 .padding(.vertical, 16)
                             } else if managed.isEmpty {
-                                Divider()
                                 Text(users.isEmpty
                                      ? "No Plex Home users found for this account."
                                      : "No managed users on this Plex account.")
@@ -55,7 +55,6 @@ struct PlexLinkedUserDetailView: View {
                                     .padding(.vertical, 12)
                             } else {
                                 ForEach(managed) { user in
-                                    Divider()
                                     userRow(user, account: account)
                                 }
                             }
@@ -97,14 +96,18 @@ struct PlexLinkedUserDetailView: View {
     /// admin entry. Selecting it clears the per-account binding (same as
     /// before: no Home-user switch, admin token, no PIN).
     private func ownerRow(admin: PlexHomeUser?, account: Account) -> some View {
-        let displayName = admin?.name ?? "Account owner"
-        return Button {
+        Button {
             context.onSelectPlexHomeUser(account.id, nil)
         } label: {
-            HStack(spacing: 16) {
-                if let admin {
-                    avatar(for: admin, size: 52)
-                } else {
+            if let admin {
+                // Same shared row as the managed users, flagged as the owner.
+                PlexHomeUserRow(
+                    user: admin,
+                    showsOwnerBadge: true,
+                    accessory: isOwnerSelected ? .selected : .none
+                )
+            } else {
+                HStack(spacing: 16) {
                     ZStack {
                         Circle().fill(ProviderIcon.tint(.plex).opacity(0.18))
                         Image(systemName: "person.crop.circle.fill")
@@ -113,28 +116,28 @@ struct PlexLinkedUserDetailView: View {
                     }
                     .frame(width: 52, height: 52)
                     .overlay(Circle().strokeBorder(ProviderIcon.tint(.plex).opacity(0.45), lineWidth: 1.5))
-                }
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
-                        Text(displayName).font(.headline)
-                        Text("Account owner")
-                            .font(.caption2.weight(.semibold))
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Capsule().fill(ProviderIcon.tint(.plex).opacity(0.18)))
-                            .foregroundStyle(ProviderIcon.tint(.plex))
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 6) {
+                            Text("Account owner").font(.headline)
+                            Text("Account owner")
+                                .font(.caption2.weight(.semibold))
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Capsule().fill(ProviderIcon.tint(.plex).opacity(0.18)))
+                                .foregroundStyle(ProviderIcon.tint(.plex))
+                        }
+                    }
+                    Spacer()
+                    if isOwnerSelected {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.title3)
+                            .settingsRowGreenIndicator()
                     }
                 }
-                Spacer()
-                if isOwnerSelected {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.title3)
-                        .settingsRowGreenIndicator()
-                }
+                .padding(.vertical, 12)
+                .padding(.horizontal, 14)
+                .contentShape(Rectangle())
             }
-            .padding(.vertical, 12)
-            .padding(.horizontal, 14)
-            .contentShape(Rectangle())
         }
         .buttonStyle(SettingsFocusButtonStyle())
     }
@@ -144,75 +147,9 @@ struct PlexLinkedUserDetailView: View {
         return Button {
             context.onSelectPlexHomeUser(account.id, user)
         } label: {
-            HStack(spacing: 16) {
-                avatar(for: user, size: 52)
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 6) {
-                        Text(user.name).font(.headline)
-                        if user.isRestricted {
-                            Text("Restricted")
-                                .font(.caption2.weight(.semibold))
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(Capsule().fill(Color.orange.opacity(0.18)))
-                                .foregroundStyle(.orange)
-                        }
-                        if user.requiresPIN {
-                            // Lock + "PIN" together — the lock alone read as
-                            // unclear; keep it focus-adaptive so it stays
-                            // legible on the inverted card.
-                            HStack(spacing: 3) {
-                                Image(systemName: "lock.fill")
-                                Text("PIN")
-                            }
-                            .font(.caption2.weight(.semibold))
-                            .settingsRowSecondary()
-                            .accessibilityLabel("PIN required")
-                        }
-                    }
-                    if user.isRestricted {
-                        Text("Limited content set by the account owner.")
-                            .font(.footnote)
-                            .settingsRowSecondary()
-                    }
-                }
-                Spacer()
-                if isSelected {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.title3)
-                        .settingsRowGreenIndicator()
-                }
-            }
-            .padding(.vertical, 12)
-            .padding(.horizontal, 14)
-            .contentShape(Rectangle())
+            PlexHomeUserRow(user: user, accessory: isSelected ? .selected : .none)
         }
         .buttonStyle(SettingsFocusButtonStyle())
-    }
-
-    private func avatar(for user: PlexHomeUser, size: CGFloat) -> some View {
-        ZStack {
-            Circle().fill(ProviderIcon.tint(.plex).opacity(0.18))
-            if let url = user.avatarURL {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case let .success(image):
-                        image.resizable().scaledToFill()
-                    default:
-                        Text(String(user.name.prefix(1)).uppercased())
-                            .font(.headline.weight(.semibold))
-                            .foregroundStyle(ProviderIcon.tint(.plex))
-                    }
-                }
-            } else {
-                Text(String(user.name.prefix(1)).uppercased())
-                    .font(.headline.weight(.semibold))
-                    .foregroundStyle(ProviderIcon.tint(.plex))
-            }
-        }
-        .frame(width: size, height: size)
-        .clipShape(Circle())
-        .overlay(Circle().strokeBorder(ProviderIcon.tint(.plex).opacity(0.45), lineWidth: 1.5))
     }
 }
 #endif

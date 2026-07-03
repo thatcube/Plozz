@@ -53,6 +53,19 @@ public protocol ProfilePersisting: Sendable {
     func profilesEnabledOverride() -> Bool?
     /// Persists (or clears with `nil`) the profiles-enabled preference.
     func setProfilesEnabledOverride(_ value: Bool?)
+
+    /// Whether the one-time first-run profile setup (seed the default profile
+    /// from the first sign-in, then confirm it) has completed. Household-wide,
+    /// so signing out of everything and re-adding a server never re-seeds a
+    /// profile the user has since customized.
+    func firstRunProfileSetupComplete() -> Bool
+    /// Persists whether the one-time first-run profile setup has completed.
+    func setFirstRunProfileSetupComplete(_ value: Bool)
+
+    /// Debug-only: wipes all household profile state (profiles, the active
+    /// selection, household preference overrides, and the first-run flag) so
+    /// the next launch behaves like a brand-new install.
+    func resetForDebugging()
 }
 
 extension ProfilePersisting {
@@ -62,6 +75,9 @@ extension ProfilePersisting {
     public func setAskProfileOnStartupOverride(_ value: Bool?) {}
     public func profilesEnabledOverride() -> Bool? { nil }
     public func setProfilesEnabledOverride(_ value: Bool?) {}
+    public func firstRunProfileSetupComplete() -> Bool { false }
+    public func setFirstRunProfileSetupComplete(_ value: Bool) {}
+    public func resetForDebugging() {}
 }
 
 public final class ProfileStore: ProfilePersisting, @unchecked Sendable {
@@ -82,6 +98,7 @@ public final class ProfileStore: ProfilePersisting, @unchecked Sendable {
     private let perProfileActiveAccountsPrefix = "com.plozz.profile.activeAccounts."
     private let askOnStartupKey = "com.plozz.profiles.askOnStartup"
     private let profilesEnabledKey = "com.plozz.profiles.enabled"
+    private let firstRunSetupKey = "com.plozz.profiles.firstRunSetupComplete"
     /// Stable id assigned to the migrated default profile so its identity is the
     /// same across launches and its `isDefault` status is unambiguous.
     public static let defaultProfileID = "com.plozz.profile.default"
@@ -159,6 +176,37 @@ public final class ProfileStore: ProfilePersisting, @unchecked Sendable {
     public func setProfilesEnabledOverride(_ value: Bool?) {
         lock.lock(); defer { lock.unlock() }
         writeSharedBool(value, forKey: profilesEnabledKey)
+    }
+
+    public func firstRunProfileSetupComplete() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return readSharedBool(forKey: firstRunSetupKey) ?? false
+    }
+
+    public func setFirstRunProfileSetupComplete(_ value: Bool) {
+        lock.lock(); defer { lock.unlock() }
+        writeSharedBool(value, forKey: firstRunSetupKey)
+    }
+
+    public func resetForDebugging() {
+        lock.lock(); defer { lock.unlock() }
+        for profile in loadProfilesLocked() {
+            removeShared(forKey: accountsKey(profile.id))
+        }
+        removeShared(forKey: profilesKey)
+        defaults.removeObject(forKey: activeProfileIDKey)
+        writeSharedBool(nil, forKey: askOnStartupKey)
+        writeSharedBool(nil, forKey: profilesEnabledKey)
+        writeSharedBool(nil, forKey: firstRunSetupKey)
+        didMigrateShared = false
+    }
+
+    private func removeShared(forKey key: String) {
+        if let secureStore {
+            try? secureStore.removeValue(for: key)
+        } else {
+            defaults.removeObject(forKey: key)
+        }
     }
 
     private func readSharedBool(forKey key: String) -> Bool? {
@@ -412,6 +460,52 @@ public final class ProfilesModel {
         guard let idx = profiles.firstIndex(where: { $0.id == profile.id }) else { return }
         profiles[idx] = profile
         store.saveProfiles(profiles)
+    }
+
+    // MARK: First-run setup
+
+    /// Whether the one-time first-run profile setup has completed.
+    public var firstRunProfileSetupComplete: Bool {
+        store.firstRunProfileSetupComplete()
+    }
+
+    /// Marks the one-time first-run profile setup as done so it never runs
+    /// again — even if the user later signs out of every server and re-adds one.
+    public func markFirstRunProfileSetupComplete() {
+        store.setFirstRunProfileSetupComplete(true)
+    }
+
+    /// Seeds the default profile's identity (name + optional real photo) from
+    /// the first signed-in account, so a brand-new install's profile looks like
+    /// whoever just signed in. Only the default profile is touched, and empty
+    /// values are ignored. Returns the updated profile (`nil` if none exists).
+    @discardableResult
+    public func seedDefaultProfileIdentity(name: String, avatarImageURL: String?) -> Profile? {
+        guard var profile = profiles.first else { return nil }
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedName.isEmpty { profile.name = trimmedName }
+        if let avatarImageURL,
+           !avatarImageURL.trimmingCharacters(in: .whitespaces).isEmpty {
+            profile.avatarImageURL = avatarImageURL
+        }
+        update(profile)
+        return profile
+    }
+
+    /// Debug-only: collapses back to a single pristine default profile ("Me")
+    /// and clears the first-run flag + household preferences, so the next
+    /// add-server reproduces a genuine first run and the launch picker won't
+    /// interfere.
+    public func resetToPristineDefaultForDebugging() {
+        store.resetForDebugging()
+        let migrated = store.migrateLegacyIfNeeded(defaultName: "Me", defaultActiveAccountIDs: [])
+        profiles = migrated
+        let remembered = store.activeProfileID()
+        hasRememberedSelection = remembered != nil
+        activeProfileID = remembered ?? migrated.first?.id ?? ProfileStore.defaultProfileID
+        let multi = migrated.count > 1
+        profilesEnabled = store.profilesEnabledOverride() ?? multi
+        askProfileOnStartup = store.askProfileOnStartupOverride() ?? multi
     }
 
     /// Removes a profile. The default profile can't be removed; removing the

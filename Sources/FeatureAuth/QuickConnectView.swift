@@ -6,9 +6,9 @@ import CoreUI
 /// TV-friendly Quick Connect screen: shows the big code, a live expiry timer,
 /// and Cancel / Try Again, plus an optional low-emphasis secondary action.
 public struct QuickConnectView: View {
-    /// A low-emphasis alternative action rendered beneath the main controls
-    /// (e.g. "Sign in with username & password"). Kept visually subordinate so
-    /// Quick Connect remains the primary path.
+    /// A low-emphasis alternative action rendered below the code, above the
+    /// Cancel control (e.g. "Sign in with username & password"). Kept visually
+    /// subordinate so Quick Connect remains the primary path.
     public struct SecondaryAction {
         public let title: String
         public let handler: () -> Void
@@ -57,8 +57,6 @@ public struct QuickConnectView: View {
 
             content
 
-            controls
-
             if let secondaryAction {
                 Button {
                     secondaryAction.handler()
@@ -68,8 +66,9 @@ public struct QuickConnectView: View {
                 }
                 .buttonStyle(.bordered)
                 .focused($focused, equals: .secondary)
-                .padding(.top, 4)
             }
+
+            controls
         }
         .padding(60)
         .frame(maxWidth: .infinity, maxHeight: .infinity)

@@ -12,27 +12,52 @@ import FeatureDiscovery
 struct AddAccountView: View {
     let deviceID: String
     let canReturnToApp: Bool
+    let signedInServers: [SignedInServer]
     let onJellyfinServerSelected: (MediaServer) -> Void
     let onPlexAuthenticated: (UserSession) -> Void
+    let onPlexAuthenticatedMany: ([UserSession]) -> Void
     let onCancel: () -> Void
 
     @State private var choice: ProviderKind?
+
+    init(
+        deviceID: String,
+        canReturnToApp: Bool,
+        initialProvider: ProviderKind? = nil,
+        signedInServers: [SignedInServer] = [],
+        onJellyfinServerSelected: @escaping (MediaServer) -> Void,
+        onPlexAuthenticated: @escaping (UserSession) -> Void,
+        onPlexAuthenticatedMany: @escaping ([UserSession]) -> Void = { _ in },
+        onCancel: @escaping () -> Void
+    ) {
+        self.deviceID = deviceID
+        self.canReturnToApp = canReturnToApp
+        self.signedInServers = signedInServers
+        self.onJellyfinServerSelected = onJellyfinServerSelected
+        self.onPlexAuthenticated = onPlexAuthenticated
+        self.onPlexAuthenticatedMany = onPlexAuthenticatedMany
+        self.onCancel = onCancel
+        // Seed the flow's starting screen. Cancelling Quick Connect returns here
+        // with the provider preserved so we land on its server list, not the
+        // chooser. Plex has no intermediate list, so it falls back to the chooser.
+        _choice = State(initialValue: initialProvider == .jellyfin ? initialProvider : nil)
+    }
 
     var body: some View {
         switch choice {
         case .none:
             chooser
         case .jellyfin:
-            ServerPickerView { onJellyfinServerSelected($0) }
-                .overlay(alignment: .topLeading) {
-                    Button("Back") { choice = nil }
-                        .padding()
-                }
+            ServerPickerView(
+                signedInServers: signedInServers.filter { $0.server.provider == .jellyfin },
+                onBack: { choice = nil }
+            ) { onJellyfinServerSelected($0) }
         case .plex:
             PlexLinkView(
                 viewModel: PlexAuthViewModel(
                     service: PlexAuthService(deviceID: deviceID),
-                    onAuthenticated: onPlexAuthenticated
+                    onAuthenticated: onPlexAuthenticated,
+                    onAuthenticatedMany: onPlexAuthenticatedMany
                 ),
                 onCancel: { choice = nil }
             )
@@ -41,24 +66,14 @@ struct AddAccountView: View {
 
     private var chooser: some View {
         VStack(spacing: 40) {
-            VStack(spacing: 8) {
-                Text("Add an account")
-                    .font(.largeTitle).bold()
-                Text("Connect a Jellyfin or Plex server.")
-                    .font(.title3)
-                    .foregroundStyle(.secondary)
-            }
-
             HStack(spacing: 32) {
                 providerButton(
-                    title: ProviderKind.jellyfin.displayName,
-                    systemImage: "play.tv.fill",
+                    provider: .jellyfin,
                     detail: "Find it on your network or enter an address."
                 ) { choice = .jellyfin }
 
                 providerButton(
-                    title: ProviderKind.plex.displayName,
-                    systemImage: "rectangle.stack.fill",
+                    provider: .plex,
                     detail: "Link this device at plex.tv/link."
                 ) { choice = .plex }
             }
@@ -74,16 +89,14 @@ struct AddAccountView: View {
     }
 
     private func providerButton(
-        title: String,
-        systemImage: String,
+        provider: ProviderKind,
         detail: String,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
             VStack(spacing: 16) {
-                Image(systemName: systemImage)
-                    .font(.system(size: 64))
-                Text(title)
+                ProviderBrandMark(provider: provider, size: 100)
+                Text(provider.displayName)
                     .font(.title2).bold()
                 Text(detail)
                     .font(.callout)
@@ -93,6 +106,9 @@ struct AddAccountView: View {
             }
             .frame(width: 420, height: 320)
         }
+        // Same focus treatment as the Settings About / Report a Problem cards:
+        // accent outline + gentle lift, no contrast inversion.
+        .buttonStyle(SettingsCardButtonStyle())
     }
 }
 

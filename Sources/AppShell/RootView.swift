@@ -92,8 +92,11 @@ public struct RootView: View {
                 AddAccountView(
                     deviceID: appState.deviceID,
                     canReturnToApp: canReturnToApp,
+                    initialProvider: appState.pendingOnboardingProvider,
+                    signedInServers: appState.signedInServers,
                     onJellyfinServerSelected: { server in appState.selectServer(server) },
                     onPlexAuthenticated: { session in appState.didAuthenticatePlex(session) },
+                    onPlexAuthenticatedMany: { sessions in appState.didAuthenticatePlexMany(sessions) },
                     onCancel: { appState.cancelAuthentication() }
                 )
 
@@ -104,6 +107,25 @@ public struct RootView: View {
                     onAuthenticated: { session in appState.didAuthenticate(session) },
                     onCancel: { appState.cancelAuthentication() }
                 )
+
+            case .onboarding(.selectPlexUser, _):
+                if let selection = appState.pendingPlexUserSelection {
+                    PlexUserSelectionView(
+                        selection: selection,
+                        onSelect: { user in appState.selectPlexUserDuringOnboarding(user) }
+                    )
+                } else {
+                    LaunchView()
+                }
+
+            case .onboarding(.selectLibraries, _):
+                SelectLibrariesView(appState: appState)
+
+            case .onboarding(.enableProfilesPrompt, _):
+                EnableProfilesView(appState: appState)
+
+            case .onboarding(.confirmProfile, _):
+                FirstRunProfileView(appState: appState)
 
             case .ready:
                 ZStack {
@@ -191,6 +213,7 @@ public struct RootView: View {
                         onRemoveAccount: { appState.removeAccount(id: $0.id) },
                         onSignOutAll: { appState.signOutAll() },
                         onSwitchProfile: { appState.requestProfileSelection() },
+                        onResetToFirstRun: { appState.resetToFirstRunForDebugging() },
                         plexHomeUsersFetcher: { await appState.plexHomeUsers(forAccountID: $0) },
                         onSelectPlexHomeUser: { appState.setPlexHomeUserForActiveProfile(accountID: $0, user: $1) },
                         identitySources: appState.identitySourcesProvider,

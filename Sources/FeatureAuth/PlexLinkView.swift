@@ -12,7 +12,16 @@ public struct PlexLinkView: View {
     private let onCancel: () -> Void
 
     @FocusState private var focused: Control?
-    private enum Control: Hashable { case cancel, retry }
+    private enum Control: Hashable { case cancel, retry, continueServers }
+
+    /// Which servers are checked on the multi-select step. Lifted here (from the
+    /// old `ServerList`) so the Continue button can live beside Cancel in the
+    /// shared footer and share this focus scope.
+    @State private var selectedServerIDs = Set<String>()
+    @State private var didSeedSelection = false
+    /// Drives the "start over?" confirmation before a cancel that would abandon
+    /// the in-progress sign-in.
+    @State private var showCancelConfirm = false
 
     public init(
         viewModel: PlexAuthViewModel,
@@ -27,28 +36,54 @@ public struct PlexLinkView: View {
         onCancel()
     }
 
+    /// Cancel, but confirm first on the server-select step — the user has signed
+    /// in and picked servers there, so a stray Menu press / Cancel shouldn't
+    /// silently throw the sign-in away and start over. Earlier steps (waiting on
+    /// the code, loading) back out immediately.
+    private func requestCancel() {
+        if case .selectingServer = viewModel.phase {
+            showCancelConfirm = true
+        } else {
+            cancel()
+        }
+    }
+
     public var body: some View {
-        VStack(spacing: 32) {
-            VStack(spacing: 8) {
-                Text("Sign in to Plex")
-                    .font(.largeTitle).bold()
-                Text("Scan the code with your phone, or enter it manually at **plex.tv/link**.")
-                    .font(.title3)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 1000)
-            }
-
+        VStack(spacing: 24) {
             content
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
 
+            // Sits ~80pt above the page bottom (60pt outer padding + 20pt here),
+            // leaving the content above it centered in the remaining space.
             controls
+                .padding(.bottom, 20)
         }
         .padding(60)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .defaultFocus($focused, .cancel)
-        .onExitCommand { cancel() }
+        .defaultFocus($focused, defaultControl)
+        .onExitCommand { requestCancel() }
         .onAppear { viewModel.start() }
         .onDisappear { viewModel.cancel() }
+        .onChange(of: viewModel.phase) { _, newPhase in
+            // When the server picker appears, land focus on Continue (not Cancel).
+            if case .selectingServer = newPhase { focused = .continueServers }
+        }
+        .confirmationDialog(
+            "Start over?",
+            isPresented: $showCancelConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Start Over", role: .destructive) { cancel() }
+            Button("Keep Going", role: .cancel) {}
+        } message: {
+            Text("You'll go back to the start and no server will be added.")
+        }
+    }
+
+    /// The button focus should rest on when the screen (or a new phase) appears.
+    private var defaultControl: Control {
+        if case .selectingServer = viewModel.phase { return .continueServers }
+        return .cancel
     }
 
     @ViewBuilder
@@ -62,53 +97,63 @@ public struct PlexLinkView: View {
             HStack(alignment: .top, spacing: 80) {
                 VStack(spacing: 28) {
                     Text("Scan with your phone")
-                        .font(.title2).bold()
+                        .font(.title3).bold()
+                        .fixedSize(horizontal: true, vertical: false)
                     BrandQRCodeView(
                         payload: Self.linkURL(for: code),
-                        moduleColor: PlexBrand.gold,
-                        size: 440
-                    ) {
-                        PlexLogoMark()
-                    }
+                        size: 460
+                    )
                 }
 
                 orDivider
 
-                VStack(spacing: 24) {
+                VStack(spacing: 0) {
                     Text("Or enter a code")
-                        .font(.title2).bold()
+                        .font(.title3).bold()
 
-                    VStack(spacing: 4) {
-                        Text("Go to")
-                            .font(.title3)
-                            .foregroundStyle(.secondary)
-                        Text("plex.tv/link")
-                            .font(.system(size: 52, weight: .heavy, design: .rounded))
-                            .foregroundStyle(PlexBrand.gold)
+                    // Center the link + code + timer in the space below the
+                    // heading so it lines up with the QR on the left.
+                    Spacer(minLength: 0)
+
+                    VStack(spacing: 24) {
+                        VStack(spacing: 4) {
+                            Text("Go to")
+                                .font(.body)
+                                .foregroundStyle(.secondary)
+                            Text("plex.tv/link")
+                                .font(.system(size: 72, weight: .heavy, design: .rounded))
+                                .foregroundStyle(PlexBrand.gold)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.5)
+                        }
+
+                        Text(code)
+                            .font(.plozzCode(size: 96))
+                            .tracking(12)
                             .lineLimit(1)
-                            .minimumScaleFactor(0.5)
+                            .minimumScaleFactor(0.6)
+                            .padding(.horizontal, 48)
+                            .padding(.vertical, 24)
+                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24))
+
+                        PlexExpiryCountdown(expiresAt: expiresAt, lifetime: viewModel.codeLifetime)
                     }
 
-                    Text(code)
-                        .font(.plozzCode(size: 84))
-                        .tracking(10)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.5)
-                        .padding(.horizontal, 44)
-                        .padding(.vertical, 20)
-                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24))
-
-                    PlexExpiryCountdown(expiresAt: expiresAt, lifetime: viewModel.codeLifetime)
+                    Spacer(minLength: 0)
                 }
-                .frame(maxWidth: 560)
+                .frame(maxWidth: 700, maxHeight: .infinity)
             }
+            // Bound the row to the QR column's height so the divider and the
+            // right column fill exactly that (not the whole centered area).
+            .fixedSize(horizontal: false, vertical: true)
 
         case .loadingServers:
             ProgressView("Finding your Plex servers…")
                 .font(.title2)
 
         case let .selectingServer(servers):
-            ServerList(servers: servers) { viewModel.selectServer($0) }
+            ServerList(servers: displayServers(servers), selected: $selectedServerIDs)
+                .onAppear { seedSelectionIfNeeded(displayServers(servers)) }
 
         case .success:
             Label("Signed in!", systemImage: "checkmark.circle.fill")
@@ -142,7 +187,7 @@ public struct PlexLinkView: View {
                 .frame(width: 2)
                 .frame(maxHeight: .infinity)
         }
-        .frame(height: 500)
+        .frame(maxHeight: .infinity)
     }
 
     /// The activation URL the QR encodes: scanning it on a phone opens
@@ -153,50 +198,163 @@ public struct PlexLinkView: View {
 
     @ViewBuilder
     private var controls: some View {
-        HStack(spacing: 24) {
-            Button(role: .cancel) {
-                cancel()
-            } label: {
-                Text("Cancel").frame(minWidth: 200)
-            }
-            .focused($focused, equals: .cancel)
-
-            if case .error = viewModel.phase {
+        if case let .selectingServer(servers) = viewModel.phase {
+            // Continue (default focus) stacked above Cancel, matching the other
+            // onboarding steps. Cancel here abandons the whole add, so confirm.
+            VStack(spacing: 16) {
                 Button {
-                    viewModel.retry()
+                    viewModel.selectServers(servers.filter { selectedServerIDs.contains($0.id) })
                 } label: {
-                    Text("Try Again").frame(minWidth: 200)
+                    Text("Continue").frame(minWidth: 260)
                 }
                 .buttonStyle(.borderedProminent)
-                .focused($focused, equals: .retry)
+                .disabled(selectedServerIDs.isEmpty)
+                .focused($focused, equals: .continueServers)
+
+                Button(role: .cancel) {
+                    requestCancel()
+                } label: {
+                    Text("Cancel").frame(minWidth: 260)
+                }
+                .focused($focused, equals: .cancel)
+            }
+        } else {
+            HStack(spacing: 24) {
+                Button(role: .cancel) {
+                    requestCancel()
+                } label: {
+                    Text("Cancel").frame(minWidth: 200)
+                }
+                .focused($focused, equals: .cancel)
+
+                if case .error = viewModel.phase {
+                    Button {
+                        viewModel.retry()
+                    } label: {
+                        Text("Try Again").frame(minWidth: 200)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .focused($focused, equals: .retry)
+                }
             }
         }
     }
+
+    /// Preselect owned servers (the ones people almost always want) the first
+    /// time the picker is shown.
+    private func seedSelectionIfNeeded(_ servers: [PlexServerCandidate]) {
+        guard !didSeedSelection else { return }
+        didSeedSelection = true
+        selectedServerIDs = Set(servers.filter(\.isOwned).map(\.id))
+    }
+
+    /// The list actually rendered on the server-select step. In DEBUG this pads
+    /// the real servers with synthetic "demo" rows so scrolling can be tested
+    /// without owning many Plex servers. The demo rows are never added — Continue
+    /// only ever passes the *real* servers whose ids match — so they're harmless.
+    private func displayServers(_ servers: [PlexServerCandidate]) -> [PlexServerCandidate] {
+        #if DEBUG
+        guard servers.count < 8, let template = servers.first else { return servers }
+        var out = servers
+        let demoNames = [
+            "Demo Alpha", "Demo Bravo", "Demo Charlie", "Demo Delta",
+            "Demo Echo", "Demo Foxtrot", "Demo Golf", "Demo Hotel"
+        ]
+        for (index, name) in demoNames.enumerated() {
+            out.append(
+                PlexServerCandidate(
+                    id: "debug-demo-\(index)",
+                    name: name,
+                    connectionURLs: template.connectionURLs,
+                    accessToken: template.accessToken,
+                    isOwned: false
+                )
+            )
+        }
+        return out
+        #else
+        return servers
+        #endif
+    }
 }
 
-/// Picker shown when a Plex account can reach more than one server.
+/// Multi-select picker shown when a Plex account can reach more than one server.
+/// Mirrors the Settings checklist affordance: tap a row to toggle its checkmark.
+/// The Continue/Cancel buttons live in the hosting view's footer.
 private struct ServerList: View {
     let servers: [PlexServerCandidate]
-    let onSelect: (PlexServerCandidate) -> Void
+    @Binding var selected: Set<String>
 
     var body: some View {
-        VStack(spacing: 16) {
-            Text("Choose a server")
-                .font(.title2).bold()
-            ForEach(servers) { server in
-                Button {
-                    onSelect(server)
-                } label: {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(server.name).font(.headline)
-                        Text(server.isOwned ? "Owned" : "Shared")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
+        VStack(spacing: 24) {
+            Text("Choose your servers")
+                .font(.title).bold()
+
+            // Clipped scroll wrapped in a card (matching Settings). Inner gutters
+            // give the row focus fill/shadow room so it isn't clipped by the card.
+            PlozzScrollCard {
+                ScrollView {
+                    VStack(spacing: 12) {
+                        ForEach(servers) { server in
+                            Button {
+                                toggle(server.id)
+                            } label: {
+                                ServerCheckRow(
+                                    name: server.name,
+                                    subtitle: server.isOwned ? "Owned" : "Shared",
+                                    isSelected: selected.contains(server.id)
+                                )
+                            }
+                            .buttonStyle(SettingsFocusButtonStyle())
+                        }
                     }
-                    .frame(maxWidth: 700, alignment: .leading)
+                    .padding(.horizontal, 40)
+                    .padding(.vertical, 28)
                 }
             }
+            .frame(maxWidth: 900, maxHeight: .infinity)
         }
+        .frame(maxHeight: .infinity)
+    }
+
+    private func toggle(_ id: String) {
+        if selected.contains(id) { selected.remove(id) } else { selected.insert(id) }
+    }
+}
+
+/// One selectable server row. The checkmark reads the shared row-focus
+/// environment so it inverts on a focused card (black check on the white dark
+/// mode card / white check on the black light mode card) instead of vanishing.
+private struct ServerCheckRow: View {
+    let name: String
+    let subtitle: String
+    let isSelected: Bool
+
+    @Environment(\.settingsRowIsFocused) private var focused
+    @Environment(\.settingsRowFocusForeground) private var focusFg
+
+    private var markColor: Color {
+        if focused { return focusFg }
+        return isSelected ? .accentColor : .secondary
+    }
+
+    var body: some View {
+        HStack(spacing: 16) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(name).font(.headline)
+                Text(subtitle)
+                    .font(.subheadline)
+                    .settingsRowSecondary()
+            }
+            Spacer()
+            Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                .font(.title2)
+                .foregroundStyle(markColor)
+        }
+        .padding(.vertical, 12)
+        .padding(.horizontal, 20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
     }
 }
 

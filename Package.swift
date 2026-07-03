@@ -161,7 +161,7 @@ let package = Package(
         // MARK: Features
         .target(
             name: "FeatureDiscovery",
-            dependencies: ["CoreModels", "CoreNetworking"]
+            dependencies: ["CoreModels", "CoreNetworking", "CoreUI"]
         ),
         .target(
             name: "FeatureAuth",

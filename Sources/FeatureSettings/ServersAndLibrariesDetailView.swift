@@ -22,7 +22,10 @@ struct ServersAndLibrariesDetailView: View {
                     title: "Servers",
                     subtitle: "Sign-ins are shared by everyone on this Apple TV. Choose what each profile sees under Profile › Your Libraries."
                 ) {
-                    VStack(spacing: 0) {
+                    // Rows separated by a gap rather than flush dividers: the
+                    // focus lift bleeds outward and would otherwise paint over a
+                    // divider sitting directly against a row.
+                    VStack(spacing: 16) {
                         if context.accounts.isEmpty {
                             Text("You're not signed in to any servers yet.")
                                 .font(.headline)
@@ -31,12 +34,10 @@ struct ServersAndLibrariesDetailView: View {
                                 .padding(.horizontal, 14)
                         } else {
                             let groups = serverGroups(from: context.accounts)
-                            ForEach(Array(groups.enumerated()), id: \.element.serverKey) { idx, group in
-                                if idx > 0 { Divider() }
+                            ForEach(groups, id: \.serverKey) { group in
                                 serverSummaryRow(group)
                             }
                         }
-                        Divider()
                         Button(action: context.onAddAccount) {
                             Label(context.accounts.isEmpty ? "Sign In to a Server" : "Add Server", systemImage: "plus.circle")
                                 .frame(maxWidth: .infinity, alignment: .leading)

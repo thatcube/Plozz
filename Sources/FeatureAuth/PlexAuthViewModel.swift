@@ -28,15 +28,18 @@ public final class PlexAuthViewModel {
 
     private let service: PlexAuthService
     private let onAuthenticated: (UserSession) -> Void
+    private let onAuthenticatedMany: ([UserSession]) -> Void
     private var flow: Task<Void, Never>?
     private var authToken: String?
 
     public init(
         service: PlexAuthService,
-        onAuthenticated: @escaping (UserSession) -> Void
+        onAuthenticated: @escaping (UserSession) -> Void,
+        onAuthenticatedMany: @escaping ([UserSession]) -> Void = { _ in }
     ) {
         self.service = service
         self.onAuthenticated = onAuthenticated
+        self.onAuthenticatedMany = onAuthenticatedMany
     }
 
     /// Starts (or restarts) the whole PIN-link flow.
@@ -125,13 +128,31 @@ public final class PlexAuthViewModel {
 
     /// Completes sign-in for a server the user picked from the list.
     public func selectServer(_ candidate: PlexServerCandidate) {
-        guard let token = authToken else { return }
+        selectServers([candidate])
+    }
+
+    /// Completes sign-in for every server the user checked, adding one account
+    /// per server. Hands them all back at once so onboarding continues a single
+    /// time after all accounts are persisted.
+    public func selectServers(_ candidates: [PlexServerCandidate]) {
+        guard let token = authToken, !candidates.isEmpty else { return }
         flow?.cancel()
         phase = .loadingServers
         flow = Task { [weak self] in
             guard let self else { return }
             do {
-                try await self.finish(with: candidate, token: token)
+                var sessions: [UserSession] = []
+                for candidate in candidates {
+                    try Task.checkCancellation()
+                    sessions.append(try await self.service.makeSession(for: candidate, authToken: token))
+                }
+                try Task.checkCancellation()
+                self.phase = .success
+                if sessions.count == 1 {
+                    self.onAuthenticated(sessions[0])
+                } else {
+                    self.onAuthenticatedMany(sessions)
+                }
             } catch is CancellationError {
                 // Dismissing.
             } catch let error as AppError {

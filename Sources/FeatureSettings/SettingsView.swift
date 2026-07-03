@@ -83,6 +83,7 @@ public struct SettingsView: View {
     private let onAddAccount: () -> Void
     private let onRemoveAccount: (Account) -> Void
     private let onSignOutAll: () -> Void
+    private let onResetToFirstRun: () -> Void
     private let plexHomeUsersFetcher: (String) async -> [PlexHomeUser]
     private let onSelectPlexHomeUser: (String, PlexHomeUser?) -> Void
 
@@ -125,6 +126,7 @@ public struct SettingsView: View {
         onAddAccount: @escaping () -> Void,
         onRemoveAccount: @escaping (Account) -> Void,
         onSignOutAll: @escaping () -> Void,
+        onResetToFirstRun: @escaping () -> Void,
         plexHomeUsersFetcher: @escaping (String) async -> [PlexHomeUser],
         onSelectPlexHomeUser: @escaping (String, PlexHomeUser?) -> Void
     ) {
@@ -166,6 +168,7 @@ public struct SettingsView: View {
         self.onAddAccount = onAddAccount
         self.onRemoveAccount = onRemoveAccount
         self.onSignOutAll = onSignOutAll
+        self.onResetToFirstRun = onResetToFirstRun
         self.plexHomeUsersFetcher = plexHomeUsersFetcher
         self.onSelectPlexHomeUser = onSelectPlexHomeUser
     }
@@ -449,8 +452,38 @@ public struct SettingsView: View {
             if !accounts.isEmpty {
                 signOutAllRow
             }
+
+            #if DEBUG
+            // DEBUG-only: wipe accounts, profiles, recents, and the first-run
+            // flag so the next server add reproduces a genuine first run.
+            debugResetFirstRunRow
+            #endif
         }
     }
+
+    #if DEBUG
+    /// DEBUG-only "Reset to First Run" row. Collapses profiles to a pristine
+    /// default and clears the first-run flag so the first-run profile screen
+    /// can be re-tested without uninstalling.
+    private var debugResetFirstRunRow: some View {
+        Button {
+            onResetToFirstRun()
+        } label: {
+            HStack(spacing: 16) {
+                Image(systemName: "arrow.counterclockwise.circle")
+                    .font(.system(size: 22, weight: .regular))
+                    .frame(width: 30, height: 30)
+                Text("Reset to First Run (Debug)").font(.callout.weight(.medium))
+                Spacer()
+            }
+            .foregroundStyle(.orange)
+            .padding(.vertical, 12)
+            .padding(.horizontal, 12)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(SettingsFocusButtonStyle())
+    }
+    #endif
 
     /// Destructive "Sign Out of All Accounts" row. Keeps the red tint on both
     /// idle and the inverted focus card (legible on white or black), and arms

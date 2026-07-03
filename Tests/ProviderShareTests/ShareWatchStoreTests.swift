@@ -91,4 +91,35 @@ final class ShareWatchStoreTests: XCTestCase {
         let record = await store.record(for: itemID)
         XCTAssertEqual(record?.position, 900, "a stale write must not overwrite newer state")
     }
+
+    /// A resume written with a known duration persists that duration across a
+    /// relaunch, so the Continue Watching progress bar (position / duration) can be
+    /// rendered without re-playing the item.
+    func testDurationPersistsAcrossRestart() async throws {
+        let dir = makeTempDir()
+        let itemID = "f:Movies/Timed (2022).mkv"
+
+        let live = ShareWatchStore(accountKey: "acct-5", directory: dir)
+        await live.setResume(600, itemID: itemID, capturedAt: Date(), duration: 6000)
+
+        let afterRestart = ShareWatchStore(accountKey: "acct-5", directory: dir)
+        let record = await afterRestart.record(for: itemID)
+        XCTAssertEqual(record?.position, 600)
+        XCTAssertEqual(record?.duration, 6000, "duration must persist so the progress bar survives a relaunch")
+    }
+
+    /// A subsequent resume tick that lacks duration (e.g. an outbox-drained write
+    /// with no live player) must not wipe a previously-learned duration.
+    func testResumeWithoutDurationPreservesLearnedDuration() async throws {
+        let dir = makeTempDir()
+        let itemID = "f:Movies/Kept (2023).mkv"
+        let store = ShareWatchStore(accountKey: "acct-6", directory: dir)
+
+        await store.setResume(100, itemID: itemID, capturedAt: Date(), duration: 5000)
+        await store.setResume(200, itemID: itemID, capturedAt: Date().addingTimeInterval(1)) // no duration
+
+        let record = await store.record(for: itemID)
+        XCTAssertEqual(record?.position, 200)
+        XCTAssertEqual(record?.duration, 5000, "a duration-less resume must keep the previously-learned duration")
+    }
 }

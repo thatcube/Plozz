@@ -72,4 +72,25 @@ final class ShareProviderWatchTests: XCTestCase {
         let cw = try await afterRestart.continueWatching(limit: 20)
         XCTAssertEqual(cw.map(\.id), [itemID], "a paused item must be resumable after relaunch")
     }
+
+    /// A progress tick that carries the player's known duration must surface a
+    /// `playedPercentage` on the Continue Watching card (which drives the progress
+    /// bar) — and it must survive a relaunch.
+    func testProgressWithDurationSurfacesPlayedPercentage() async throws {
+        let dir = makeTempDir()
+        let session = makeSession()
+        let itemID = "f:Movies/Timed Film (2021).mkv"
+
+        let live = ShareProvider(session: session, watchDirectory: dir)
+        try await live.reportPlayback(
+            PlaybackProgress(itemID: itemID, playSessionID: "s3", positionSeconds: 600, isPaused: false, durationSeconds: 6000),
+            event: .progress
+        )
+
+        let afterRestart = ShareProvider(session: session, watchDirectory: dir)
+        let cw = try await afterRestart.continueWatching(limit: 20)
+        XCTAssertEqual(cw.map(\.id), [itemID])
+        let pct = try XCTUnwrap(cw.first?.playedPercentage)
+        XCTAssertEqual(pct, 0.1, accuracy: 0.001, "progress bar fraction must be position / duration after relaunch")
+    }
 }

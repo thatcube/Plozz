@@ -141,7 +141,7 @@ public struct ShareProvider: MediaProvider {
         PlozzLog.playback.info("share.reportPlayback event=\(String(describing: event)) item=\(progress.itemID) pos=\(Int(progress.positionSeconds)) account=\(session.server.id)")
         switch event {
         case .progress, .pause, .stop:
-            await watchStore.setResume(progress.positionSeconds, itemID: progress.itemID, capturedAt: Date())
+            await watchStore.setResume(progress.positionSeconds, itemID: progress.itemID, capturedAt: Date(), duration: progress.durationSeconds)
         case .start, .unpause:
             break
         }
@@ -170,6 +170,16 @@ public struct ShareProvider: MediaProvider {
         copy.isPlayed = record.played
         copy.resumePosition = (!record.played && record.position > 1) ? record.position : nil
         copy.lastPlayedAt = record.updatedAt
+        // Carry the learned duration onto the item (a share item has no runtime
+        // until it's played once) and derive the played fraction the Continue
+        // Watching / poster progress bar renders. Only in-progress records get a
+        // fraction — a finished (played) or unstarted item shows no bar.
+        if let duration = record.duration, duration > 0 {
+            if copy.runtime == nil { copy.runtime = duration }
+            if !record.played, record.position > 1 {
+                copy.playedPercentage = min(max(record.position / duration, 0), 1)
+            }
+        }
         return copy
     }
 

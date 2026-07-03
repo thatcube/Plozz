@@ -440,13 +440,23 @@ struct HomeHeroView: View {
             // focus section. It gives the focus engine an *internal* leftward
             // target so a Left press is captured by the hero (routed through
             // `.onChange(of: focus)` below) instead of escaping to the sidebar —
-            // which a lone focusable can't prevent. It is focusable everywhere
-            // EXCEPT the one escape spot (first item, left-most button, sidebar
-            // nav): there it steps aside so Left falls through and opens the side
-            // navigation, exactly as on the Apple TV app.
+            // which a lone focusable can't prevent. It steps aside (non-focusable)
+            // only at the one escape spot (first item, left-most button, sidebar
+            // nav) *while focus is resting on the row*, so Left there falls through
+            // and opens the side navigation, exactly as on the Apple TV app.
+            //
+            // Crucially the inactivation is gated on `focus == .row`, NOT on
+            // `allowsSidebarEscape` alone: `handleLeft()` moves `selectedButton`
+            // to 0 (or pages back to item 0) which flips `allowsSidebarEscape` to
+            // true in the very transaction that is bouncing focus guard→row. If the
+            // guard's focusability keyed on that flip alone, it would go
+            // non-focusable *while still holding focus*, and the focus engine could
+            // relocate to a Continue Watching card (scroll-down regression) or
+            // strand focus. Requiring `focus == .row` means the guard can only lose
+            // focusability once focus has already left it for the row — no race.
             Color.clear
                 .frame(width: 1, height: 1)
-                .focusable(!allowsSidebarEscape)
+                .focusable(leftGuardActive)
                 .focused($focus, equals: .leftGuard)
                 .accessibilityHidden(true)
 
@@ -537,6 +547,23 @@ struct HomeHeroView: View {
             buttonCount: max(1, current.map { buttons(for: $0).count } ?? 1),
             navigationStyle: navigationStyle
         ) == .escape
+    }
+
+    /// Whether the invisible left guard should be focusable. It captures a Left
+    /// press so the hero handles it internally instead of the engine escaping to
+    /// the sidebar. It steps aside (non-focusable) *only* at the escape spot AND
+    /// while focus is resting on the row — never while the guard itself holds
+    /// focus. Gating on `focus == .row` is what makes the guard→row bounce
+    /// race-free: `handleLeft()` moves `selectedButton`/`index` (flipping
+    /// `allowsSidebarEscape` to true) in the same transaction that re-pins focus to
+    /// `.row`; if focusability keyed on `allowsSidebarEscape` alone, the guard would
+    /// go non-focusable *while focused*, and the engine could relocate focus to a
+    /// Continue Watching card (scroll-down) or strand it. Requiring `focus == .row`
+    /// means the guard can only lose focusability once focus has already moved off
+    /// it, so the escape only fires from a genuine at-rest Left on item 0's
+    /// left-most button.
+    private var leftGuardActive: Bool {
+        !(allowsSidebarEscape && focus == .row)
     }
 
     /// Applies the tested `HeroCarouselFocus` reducer to a Right/Down press on the

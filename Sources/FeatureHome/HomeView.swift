@@ -154,6 +154,24 @@ public struct HomeView: View {
                 }
                 // Never clip a focused card's lift, shadow or border.
                 .scrollClipDisabled()
+                // Kill the Siri Remote **touch-surface pan** so a light touch (or a
+                // resting thumb) can't free-scroll the page out from under a pinned
+                // hero — the "view drifts down even though focus never moved" bug.
+                // tvOS has no `DragGesture` to absorb, and `.scrollDisabled` would
+                // also disable the focus-driven auto-scroll that reveals lower rows.
+                // Instead we reach the underlying `UIScrollView` and disable its pan
+                // gesture recognizer: touch-swipe scrolling is driven by that pan,
+                // while focus auto-scroll and `ScrollViewReader.scrollTo` use
+                // `setContentOffset` directly — so navigation and our hero
+                // expand/recede animations keep working. Gated to the hero layout so
+                // the classic rows scroll exactly as before.
+                .background {
+                    if heroActive {
+                        ScrollPanDisabler()
+                            .frame(width: 0, height: 0)
+                            .accessibilityHidden(true)
+                    }
+                }
                 // When the hero is active, let it bleed into the top overscan
                 // inset instead of the ScrollView reserving it as a blank bar
                 // above the backdrop (the gap that made the hero sit too low).
@@ -476,5 +494,35 @@ private struct LibraryCardView: View {
         }
     }
 }
+
+#if canImport(UIKit)
+import UIKit
+
+/// A zero-size probe that walks up to its enclosing `UIScrollView` and disables
+/// the pan gesture recognizer, killing Siri Remote touch-surface (swipe) scrolling
+/// while leaving focus-driven auto-scroll and `ScrollViewReader.scrollTo` intact
+/// (those move content via `setContentOffset`, not the pan). Re-applied on every
+/// layout pass so SwiftUI can't quietly re-enable it.
+private struct ScrollPanDisabler: UIViewRepresentable {
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView()
+        view.isUserInteractionEnabled = false
+        return view
+    }
+
+    func updateUIView(_ uiView: UIView, context: Context) {
+        DispatchQueue.main.async {
+            var ancestor = uiView.superview
+            while let current = ancestor {
+                if let scrollView = current as? UIScrollView {
+                    scrollView.panGestureRecognizer.isEnabled = false
+                    break
+                }
+                ancestor = current.superview
+            }
+        }
+    }
+}
+#endif
 
 #endif

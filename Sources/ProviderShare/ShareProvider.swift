@@ -16,6 +16,7 @@ public struct ShareProvider: MediaProvider {
     public let session: UserSession
 
     private let store: ShareLibraryStore
+    private let watchStore: ShareWatchStore
     private let host: String
     private let port: Int?
     private let share: String
@@ -31,6 +32,9 @@ public struct ShareProvider: MediaProvider {
             user: session.userName, password: session.accessToken
         )
         self.store = ShareLibraryStore(browser: browser, serverName: session.server.name)
+        // Watch state is device-local (a file share has no server), scoped by the
+        // share's stable account id so two shares keep separate progress.
+        self.watchStore = ShareWatchStore(accountKey: session.server.id)
     }
 
     // MARK: Library browsing
@@ -44,8 +48,16 @@ public struct ShareProvider: MediaProvider {
     }
 
     public func continueWatching(limit: Int) async throws -> [MediaItem] {
-        // No watch state yet (Phase 3). Nothing to resume.
-        []
+        // Resume row is served entirely from local watch state — no network, so
+        // it's safe on the Home hot path. Each resumable id is rebuilt from the
+        // store (id → item, no scan) and stamped with its saved progress.
+        let resumable = await watchStore.resumable(limit: limit)
+        var items: [MediaItem] = []
+        for entry in resumable {
+            guard let base = await store.item(id: entry.itemID) else { continue }
+            items.append(Self.stamped(base, with: entry.record))
+        }
+        return items
     }
 
     public func latest(limit: Int) async throws -> [MediaItem] {
@@ -58,12 +70,13 @@ public struct ShareProvider: MediaProvider {
         guard let item = await store.item(id: id) else {
             throw AppError.unknown("Item not found on share: \(id)")
         }
-        return item
+        return await stampWatchState(item)
     }
 
     public func children(of itemID: String) async throws -> [MediaItem] {
         // A folder's children are just that directory's listing.
-        try await store.entries(forContainerID: itemID)
+        let entries = try await store.entries(forContainerID: itemID)
+        return await stampWatchState(entries)
     }
 
     public func items(in containerID: String, kind: MediaItemKind, page: PageRequest) async throws -> MediaPage {
@@ -71,7 +84,8 @@ public struct ShareProvider: MediaProvider {
         let all = try await store.entries(forContainerID: containerID)
         let start = min(page.startIndex, all.count)
         let end = min(start + page.limit, all.count)
-        return MediaPage(items: Array(all[start..<end]), startIndex: start, totalCount: all.count)
+        let slice = await stampWatchState(Array(all[start..<end]))
+        return MediaPage(items: slice, startIndex: start, totalCount: all.count)
     }
 
     // MARK: Search
@@ -90,17 +104,58 @@ public struct ShareProvider: MediaProvider {
         guard let url = smbURL(forRelativePath: relPath) else {
             throw AppError.unknown("Couldn't build a stream URL for \(relPath)")
         }
+        // Resume where the user left off (0 for a fresh/finished item). The player
+        // treats this as the authoritative seed for both Play-from-detail and
+        // Play-from-Continue-Watching.
+        let record = await watchStore.record(for: itemID)
+        let startPosition = (record?.played == true) ? 0 : (record?.position ?? 0)
         return PlaybackRequest(
             item: item,
             streamURL: url,
-            startPosition: 0,
+            startPosition: startPosition,
             sourceProvider: .mediaShare,
             serverName: session.server.name
         )
     }
 
     public func reportPlayback(_ progress: PlaybackProgress, event: PlaybackEvent) async throws {
-        // No server to report to; local watch state arrives in Phase 3.
+        // No server to report to, but persist live progress locally so a hard app
+        // kill still leaves a usable resume point. The final played-vs-resume
+        // decision (which needs playback *duration*) is owned by the durable watch
+        // outbox, which drains `setPlayed`/`setResumePosition` below — so `.stop`
+        // is deliberately left to that path and not written here.
+        switch event {
+        case .progress, .pause:
+            await watchStore.setResume(progress.positionSeconds, itemID: progress.itemID, capturedAt: Date())
+        case .start, .unpause, .stop:
+            break
+        }
+    }
+
+    // MARK: - Watch-state stamping
+
+    /// Overlay saved resume/played state onto a freshly-built item so the detail
+    /// Play button shows "Resume" and cards show a checkmark / progress.
+    private func stampWatchState(_ item: MediaItem) async -> MediaItem {
+        guard item.kind != .folder, item.kind != .collection else { return item }
+        let record = await watchStore.record(for: item.id)
+        return Self.stamped(item, with: record)
+    }
+
+    private func stampWatchState(_ items: [MediaItem]) async -> [MediaItem] {
+        var result: [MediaItem] = []
+        result.reserveCapacity(items.count)
+        for item in items { result.append(await stampWatchState(item)) }
+        return result
+    }
+
+    private static func stamped(_ item: MediaItem, with record: ShareWatchStore.Record?) -> MediaItem {
+        guard let record else { return item }
+        var copy = item
+        copy.isPlayed = record.played
+        copy.resumePosition = (!record.played && record.position > 1) ? record.position : nil
+        copy.lastPlayedAt = record.updatedAt
+        return copy
     }
 
     // MARK: Images
@@ -167,5 +222,22 @@ extension ShareProvider: ProviderTeardown {
     /// and the registry evicts this provider.
     public func teardown() async {
         await store.close()
+    }
+}
+
+extension ShareProvider: WatchStateProviding {
+    /// Persist played/unplayed locally — the durable watch outbox drains here for
+    /// a title watched *on* the share (and would for a cross-server twin, though a
+    /// bare file share carries no external ids to match on).
+    public func setPlayed(_ played: Bool, itemID: String) async throws {
+        await watchStore.setPlayed(played, itemID: itemID, capturedAt: Date())
+    }
+}
+
+extension ShareProvider: ResumeStateWriting {
+    /// Persist a resume position locally. `capturedAt` orders writes so a late
+    /// draining queued resume can't overwrite a newer state.
+    public func setResumePosition(_ seconds: TimeInterval, itemID: String, capturedAt: Date) async throws {
+        await watchStore.setResume(seconds, itemID: itemID, capturedAt: capturedAt)
     }
 }

@@ -49,10 +49,14 @@ public struct PlexLinkView: View {
     }
 
     public var body: some View {
-        VStack(spacing: 32) {
+        VStack(spacing: 24) {
             content
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
 
+            // Sits ~80pt above the page bottom (60pt outer padding + 20pt here),
+            // leaving the content above it centered in the remaining space.
             controls
+                .padding(.bottom, 20)
         }
         .padding(60)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -103,34 +107,45 @@ public struct PlexLinkView: View {
 
                 orDivider
 
-                VStack(spacing: 20) {
+                VStack(spacing: 0) {
                     Text("Or enter a code")
                         .font(.title3).bold()
 
-                    VStack(spacing: 4) {
-                        Text("Go to")
-                            .font(.body)
-                            .foregroundStyle(.secondary)
-                        Text("plex.tv/link")
-                            .font(.system(size: 72, weight: .heavy, design: .rounded))
-                            .foregroundStyle(PlexBrand.gold)
+                    // Center the link + code + timer in the space below the
+                    // heading so it lines up with the QR on the left.
+                    Spacer(minLength: 0)
+
+                    VStack(spacing: 24) {
+                        VStack(spacing: 4) {
+                            Text("Go to")
+                                .font(.body)
+                                .foregroundStyle(.secondary)
+                            Text("plex.tv/link")
+                                .font(.system(size: 72, weight: .heavy, design: .rounded))
+                                .foregroundStyle(PlexBrand.gold)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.5)
+                        }
+
+                        Text(code)
+                            .font(.plozzCode(size: 96))
+                            .tracking(12)
                             .lineLimit(1)
-                            .minimumScaleFactor(0.5)
+                            .minimumScaleFactor(0.6)
+                            .padding(.horizontal, 48)
+                            .padding(.vertical, 24)
+                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24))
+
+                        PlexExpiryCountdown(expiresAt: expiresAt, lifetime: viewModel.codeLifetime)
                     }
 
-                    Text(code)
-                        .font(.plozzCode(size: 96))
-                        .tracking(12)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.6)
-                        .padding(.horizontal, 48)
-                        .padding(.vertical, 24)
-                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24))
-
-                    PlexExpiryCountdown(expiresAt: expiresAt, lifetime: viewModel.codeLifetime)
+                    Spacer(minLength: 0)
                 }
-                .frame(maxWidth: 700)
+                .frame(maxWidth: 700, maxHeight: .infinity)
             }
+            // Bound the row to the QR column's height so the divider and the
+            // right column fill exactly that (not the whole centered area).
+            .fixedSize(horizontal: false, vertical: true)
 
         case .loadingServers:
             ProgressView("Finding your Plex servers…")
@@ -172,7 +187,7 @@ public struct PlexLinkView: View {
                 .frame(width: 2)
                 .frame(maxHeight: .infinity)
         }
-        .frame(height: 500)
+        .frame(maxHeight: .infinity)
     }
 
     /// The activation URL the QR encodes: scanning it on a phone opens

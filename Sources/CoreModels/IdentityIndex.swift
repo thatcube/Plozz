@@ -323,6 +323,19 @@ public struct IdentityIndexSnapshot: Sendable, Equatable {
            let recovered = bySource["\(accountID):\(item.id)"] {
             identities.append(contentsOf: recovered)
         }
+        // Re-apply rule #1 (see `MediaItemIdentity.identities(for:)`): a strong
+        // external id has a well-defined catalogue identity and *suppresses* the
+        // title/year fallback. `identities(for:)` guarantees this for the row's own
+        // payload, but the recovery above can re-introduce a `.title` alongside a
+        // recovered `.external` for an id-less row. Seeding the walk with both would
+        // let the title key bridge this title to a *different* same-title/same-year
+        // film that is id-less in the index — a false merge (the worst failure mode:
+        // it also mis-targets the watch fan-out at an unrelated title). Drop the
+        // title fallback whenever any strong external id is present so this lookup
+        // upholds the same invariant as `identities(for:)`.
+        if identities.contains(where: { if case .external = $0 { return true } else { return false } }) {
+            identities.removeAll { if case .title = $0 { return true } else { return false } }
+        }
         let normalized = MediaItemIdentity.normalizedTitle(item.title)
         return sources(
             forIdentities: identities,

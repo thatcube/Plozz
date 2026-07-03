@@ -43,6 +43,36 @@ final class IdentityIndexSplitGuardTests: XCTestCase {
         return item
     }
 
+    // MARK: - Recovered external id suppresses the title fallback (rule #1)
+
+    func testRecoveredExternalIDSuppressesTitleFallbackBridge() {
+        // An id-less loaded Plex row ("Crash" 2004, no Guid in the list payload)
+        // whose index entry was enriched to a strong tmdb id. A *different* film
+        // that merely shares the same normalized title + year is id-less in the
+        // index (indexed only under `.title`). Recovering the row's external id must
+        // suppress its title fallback (rule #1) so the walk resolves the row via its
+        // catalogue id ONLY — never bridging through the shared title into the
+        // unrelated same-title/year film (a false merge + mis-targeted watch write).
+        let realID = MediaIdentity.external(source: "tmdb", value: "1640") // real Crash (2004)
+        let rowIndexed = indexedMovie("plexA", "crashA", title: "Crash", year: 2004, provider: .plex)
+        let realTwin = indexedMovie("jf", "crashJF", title: "Crash", year: 2004, provider: .jellyfin)
+        // A genuinely different, id-less film sharing the title/year, on a 3rd server.
+        let impostor = indexedMovie("plexB", "crashB", title: "Crash", year: 2004, provider: .plex)
+        let snapshot = IdentityIndexSnapshot(byIdentity: [
+            realID: [rowIndexed, realTwin],
+            .title(normalizedTitle: MediaItemIdentity.normalizedTitle("Crash"), year: 2004, kind: .movie): [impostor]
+        ])
+
+        // The loaded row carries NO external id in its payload (Plex omitted Guid).
+        var idlessRow = MediaItem(id: "crashA", title: "Crash", kind: .movie, productionYear: 2004)
+        idlessRow.sourceAccountID = "plexA"
+
+        let refs = Set(snapshot.sourceRefs(for: idlessRow).map(\.id))
+        XCTAssertTrue(refs.contains("jf:crashJF"), "The recovered external id must still merge the legit twin")
+        XCTAssertFalse(refs.contains("plexB:crashB"), "The title fallback must not bridge in a different same-title/year film once a strong id is recovered")
+        XCTAssertEqual(refs, ["plexA:crashA", "jf:crashJF"])
+    }
+
     // MARK: - The Scream 6 / Scream 7 false-merge
 
     func testDifferentMoviesSharingBadExternalIDAreSplitAtIndex() {

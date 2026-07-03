@@ -161,7 +161,21 @@ struct MainTabView: View {
 
     @State private var discovery = LibraryDiscoveryModel()
     @State private var musicAvailability = MusicAvailabilityModel()
+    /// Hosts the full-screen Now Playing player as a `fullScreenCover` on the root
+    /// TabView rather than inside the Music tab's navigation stack — the latter
+    /// presents unreliably under the sidebar tab style (the cover only appears
+    /// after a stray Back press). Bound down into `MusicTabView`, which flips it.
+    @State private var showNowPlaying = false
     @Environment(\.colorScheme) private var systemColorScheme
+
+    /// App-wide navigation chrome (top bar vs. sidebar), edited in Settings ▸
+    /// Appearance. Un-namespaced on purpose — it's a global shell choice, not a
+    /// per-profile aesthetic (see `NavigationStyle`).
+    @AppStorage(NavigationStyle.storageKey) private var navigationStyleRaw = NavigationStyle.default.rawValue
+
+    private var navigationStyle: NavigationStyle {
+        NavigationStyle(rawValue: navigationStyleRaw) ?? .default
+    }
 
     private var resolvedPalette: ThemePalette {
         ThemePalette.palette(for: themeModel.theme, systemColorScheme: systemColorScheme)
@@ -169,6 +183,7 @@ struct MainTabView: View {
 
     var body: some View {
         TabView {
+            Tab("Home", systemImage: "house.fill") {
             HomeTab(
                 accounts: accounts,
                 homeVisibility: homeVisibility,
@@ -192,8 +207,9 @@ struct MainTabView: View {
                 appliedWatchRecency: appliedWatchRecency,
                 onSubtitleStyleChanged: { subtitleStyleModel.style = $0 }
             )
-            .tabItem { Label("Home", systemImage: "house.fill") }
+            }
 
+            Tab("Search", systemImage: "magnifyingglass") {
             SearchTab(
                 accounts: accounts,
                 behavior: subtitleBehaviorModel.settings,
@@ -212,22 +228,25 @@ struct MainTabView: View {
                 identitySources: identitySources,
                 onSubtitleStyleChanged: { subtitleStyleModel.style = $0 }
             )
-            .tabItem { Label("Search", systemImage: "magnifyingglass") }
+            }
 
             // Conditional Music tab: present only when at least one signed-in
             // account exposes a music library. Video-only users see no tab and no
             // mini-player — the app is byte-for-byte unchanged for them.
             if musicAvailability.hasMusic {
+                Tab("Music", systemImage: "music.note") {
                 MusicTabView(
                     accounts: musicAvailability.detectedAccounts,
                     visibleLibraryIDs: musicAvailability.visibleLibraryIDs,
                     controller: audioController,
                     appTheme: themeModel.theme,
-                    musicPlayer: musicPlayerModel
+                    musicPlayer: musicPlayerModel,
+                    showNowPlaying: $showNowPlaying
                 )
-                .tabItem { Label("Music", systemImage: "music.note") }
+                }
             }
 
+            Tab("Settings", systemImage: "gearshape.fill") {
             SettingsView(
                 subtitleBehavior: subtitleBehaviorModel,
                 spoilers: spoilerModel,
@@ -271,7 +290,19 @@ struct MainTabView: View {
                 plexHomeUsersFetcher: plexHomeUsersFetcher,
                 onSelectPlexHomeUser: onSelectPlexHomeUser
             )
-            .tabItem { Label("Settings", systemImage: "gearshape.fill") }
+            }
+        }
+        .plozzTabStyle(navigationStyle)
+        // Host the full-screen Now Playing player here, on the root TabView, so it
+        // presents reliably on the first trigger under both tab styles. Hosting it
+        // inside the Music tab's navigation stack made it present a beat late under
+        // the sidebar style (only appearing after a stray Back press).
+        .fullScreenCover(isPresented: $showNowPlaying) {
+            NowPlayingView(
+                controller: audioController,
+                appTheme: themeModel.theme,
+                musicPlayer: musicPlayerModel
+            )
         }
         .environment(musicPlayerModel)
         .environment(uiDensityModel)
@@ -314,6 +345,20 @@ struct MainTabView: View {
         let ids = accounts.map(\.account.id).sorted()
         let excluded = homeVisibility.visibility.excludedKeys.sorted()
         return (ids + ["|"] + excluded).joined(separator: ",")
+    }
+}
+
+private extension View {
+    /// Applies the native tvOS 18 `TabView` presentation matching the user's
+    /// `NavigationStyle`. Kept as a `@ViewBuilder` switch (rather than a ternary)
+    /// because `.sidebarAdaptable` and `.tabBarOnly` are distinct concrete
+    /// `TabViewStyle` types that can't share one expression.
+    @ViewBuilder
+    func plozzTabStyle(_ style: NavigationStyle) -> some View {
+        switch style {
+        case .tabBar: self.tabViewStyle(.tabBarOnly)
+        case .sidebar: self.tabViewStyle(.sidebarAdaptable)
+        }
     }
 }
 

@@ -2,7 +2,7 @@ name: Plozz
 options:
   bundleIdPrefix: com.thatcube
   deploymentTarget:
-    tvOS: "17.0"
+    tvOS: "18.0"
   createIntermediateGroups: true
 
 settings:
@@ -39,7 +39,7 @@ targets:
   Plozz:
     type: application
     platform: tvOS
-    deploymentTarget: "17.0"
+    deploymentTarget: "18.0"
     sources:
       - path: App/Plozz
       - path: App/Resources/Assets.xcassets
@@ -201,7 +201,7 @@ targets:
   PlozzTopShelf:
     type: com.apple.product-type.tv-app-extension
     platform: tvOS
-    deploymentTarget: "17.0"
+    deploymentTarget: "18.0"
     sources:
       - path: TopShelf/ContentProvider.swift
       # The snapshot model + store are compiled into the extension directly so

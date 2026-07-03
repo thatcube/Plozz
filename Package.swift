@@ -1,4 +1,4 @@
-// swift-tools-version:5.9
+// swift-tools-version:6.0
 import PackageDescription
 import Foundation
 
@@ -16,7 +16,7 @@ import Foundation
 let package = Package(
     name: "Plozz",
     platforms: [
-        .tvOS(.v17)
+        .tvOS(.v18)
     ],
     products: [
         .library(name: "CoreModels", targets: ["CoreModels"]),
@@ -353,5 +353,11 @@ let package = Package(
             name: "FeaturePlaybackTests",
             dependencies: ["FeaturePlayback", "CoreModels"]
         ),
-    ]
+    ],
+    // Pin Swift 5 language mode: bumping tools-version to 6.0 (required for the
+    // tvOS 18 `.tvOS(.v18)` platform) would otherwise default every module to
+    // the Swift 6 language mode and its stricter concurrency migration. The app
+    // target (project.yml) still builds SWIFT_VERSION 5.9; keep the SPM modules
+    // in lockstep so behaviour is unchanged.
+    swiftLanguageModes: [.v5]
 )

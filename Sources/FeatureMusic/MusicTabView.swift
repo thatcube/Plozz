@@ -27,10 +27,15 @@ public struct MusicTabView: View {
     private let musicPlayer: MusicPlayerSettingsModel
 
     @State private var path = NavigationPath()
-    @State private var showNowPlaying = false
+    /// Owned by the app shell (`MainTabView`) and bound in, so the full-screen
+    /// Now Playing player is hosted as a `fullScreenCover` on the root `TabView`.
+    /// Under the sidebar tab style a cover attached inside this tab's navigation
+    /// stack presents unreliably (it only appears after a stray Back press); the
+    /// root host presents it on the first trigger in both tab styles.
+    @Binding var showNowPlaying: Bool
     @State private var layoutModel = MusicLandingLayoutModel()
 
-    public init(accounts: [ResolvedAccount], visibleLibraryIDs: [String: [String]] = [:], controller: AudioPlaybackController, appTheme: AppTheme = .system, musicPlayer: MusicPlayerSettingsModel) {
+    public init(accounts: [ResolvedAccount], visibleLibraryIDs: [String: [String]] = [:], controller: AudioPlaybackController, appTheme: AppTheme = .system, musicPlayer: MusicPlayerSettingsModel, showNowPlaying: Binding<Bool>) {
         self.context = MusicContext(
             accounts: accounts,
             visibleLibraryIDs: visibleLibraryIDs.isEmpty ? nil : visibleLibraryIDs
@@ -38,6 +43,7 @@ public struct MusicTabView: View {
         self.controller = controller
         self.appTheme = appTheme
         self.musicPlayer = musicPlayer
+        self._showNowPlaying = showNowPlaying
     }
 
 
@@ -60,9 +66,8 @@ public struct MusicTabView: View {
         // `NowPlayingCard` can trigger it without threading a closure through
         // every screen.
         .environment(\.openNowPlaying) { showNowPlaying = true }
-        .fullScreenCover(isPresented: $showNowPlaying) {
-            NowPlayingView(controller: controller, appTheme: appTheme, musicPlayer: musicPlayer)
-        }
+        // The full-screen player itself is hosted by `MainTabView` on the root
+        // TabView (see `showNowPlaying` above). We only trigger it here.
         // Starting a song jumps straight into the full-screen player, like
         // Apple Music. The card remains for re-opening it after dismissal.
         .onChange(of: controller.playbackStartToken) { _, _ in
@@ -118,6 +123,12 @@ public struct MusicTabView: View {
             }
         }
         .toolbar(.hidden, for: .tabBar)
+        // Re-inject the "open full player" action here too. Custom environment
+        // values set on the NavigationStack (line ~68) are inherited by the root
+        // content but NOT reliably by `navigationDestination`-pushed views, so
+        // without this the NowPlayingCard on album/artist/playlist detail pages
+        // would fall back to its default no-op and silently do nothing.
+        .environment(\.openNowPlaying) { showNowPlaying = true }
     }
 }
 

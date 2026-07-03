@@ -625,14 +625,36 @@ struct MusicDetailLayout<InfoColumn: View>: View {
     let onPlayTrack: (MusicTrack) -> Void
     @ViewBuilder var info: InfoColumn
 
+    /// App-wide navigation chrome. Drives the top-inset compensation below: the
+    /// `-80` only makes sense under the top tab bar (which reserves a top
+    /// safe-area inset). In sidebar mode the chrome sits on the leading edge and
+    /// there's no top inset to cancel, so the compensation is dropped or the
+    /// detail floats too high (mis-centred vertically).
+    @AppStorage(NavigationStyle.storageKey) private var navigationStyleRaw = NavigationStyle.default.rawValue
+
+    private var isSidebar: Bool {
+        NavigationStyle(rawValue: navigationStyleRaw) == .sidebar
+    }
+
     // Pull the whole detail up under tvOS's reserved top safe-area inset so the
     // artwork + track list don't sit too low. With the Now Playing card present
     // this yields even top/bottom padding; without it the column is ~one card
     // shorter, so add roughly half a card's height back to re-centre it.
-    private var topPadding: CGFloat {
+    //
+    // NOTE: these constants are tuned for the *top-bar* tab style, whose reserved
+    // top safe-area inset they cancel. Under the sidebar there is no such inset,
+    // so `body` measures the info column and centres it geometrically instead of
+    // relying on these numbers (see `infoHeight` / `centeredTop`).
+    private var legacyTopPadding: CGFloat {
         let base = PlozzTheme.Metrics.screenPadding - 80
         return hasNowPlaying ? base : base + 54
     }
+
+    /// Measured height of the info column (artwork + metadata + transport). Fed by
+    /// `onGeometryChange` so the sidebar layout can centre the column vertically
+    /// without hardcoding a top inset — the fix for the detail page riding high
+    /// under the sidebar tab style.
+    @State private var infoHeight: CGFloat = 0
 
     var body: some View {
         GeometryReader { geo in
@@ -640,6 +662,12 @@ struct MusicDetailLayout<InfoColumn: View>: View {
             // Play and Shuffle buttons fit comfortably side by side.
             let infoWidth = max(480, geo.size.width * 0.33)
             let bottomInset = PlozzTheme.Metrics.screenPadding
+            // Sidebar: genuinely centre the info column in the available height
+            // (both top and bottom gaps equal), clamped so it never rides above
+            // the top inset. Top bar: keep the original tuned offset so that mode
+            // is unchanged.
+            let centeredTop = max(bottomInset, (geo.size.height - infoHeight) / 2)
+            let topPadding = isSidebar ? centeredTop : legacyTopPadding
             // Side gutters inside the scroll view. The leading one gives the
             // focus scale + shadow room to grow without being clipped by the
             // scroll view's frame. The trailing one does the same AND leaves a
@@ -654,6 +682,10 @@ struct MusicDetailLayout<InfoColumn: View>: View {
             HStack(alignment: .top, spacing: 56 - leftGutter) {
                 info
                     .frame(width: infoWidth, alignment: .leading)
+                    // Measure the column's natural height (before the top/bottom
+                    // padding and the fill-height frame below) so the sidebar can
+                    // centre it. Cheap; only fires when the height actually changes.
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { infoHeight = $0 }
                     // Position the info column with the shared top offset; the
                     // track list uses the same value for its top content margin
                     // so both tops stay aligned. The focus section spans the full

@@ -106,33 +106,32 @@ struct HomeHeroView: View {
     /// Bumped on every page so a late metadata fade-in from a *previous* page
     /// can't fire after a newer page has already started.
     @State private var slideToken = 0
-    /// The Home hero backdrop is a **single horizontal filmstrip** — an `HStack` of
-    /// three cells `[itemAt(centerIndex-1), itemAt(centerIndex), itemAt(centerIndex+1)]`
-    /// that moves as ONE unit via a single animatable offset (`slidePosition`).
-    /// There is only ever one thing animating, so the old two-independent-layer
-    /// design (where SwiftUI could animate one side and drop the other, producing
-    /// the intermittent "new art appears behind/over the old" wrong-order wipe) is
-    /// structurally impossible now. The centered cell's content NEVER changes during
-    /// a slide — the window only re-windows at settle, in a `disablesAnimations`
-    /// transaction — so there is no content mutation mid-animation either.
+    /// The Home hero backdrop is a **stanza queue** — a `ZStack` of one-or-more
+    /// `BackdropStanza` layers, each keyed by its own monotonically-increasing id
+    /// (`nextStanzaID`) and stamped with an explicit `.zIndex(Double(id))` so the
+    /// **newest stanza is always, deterministically, on top**. Every page appends
+    /// a new stanza; SwiftUI's `.transition(.opacity)` fades it in from 0→1 over
+    /// the wipe duration while the previous stanza sits, fully opaque, directly
+    /// beneath it. As the top fades in the one beneath is progressively covered,
+    /// so it never "lingers" visibly. When the top reaches full opacity the older
+    /// stanzas are pruned in a `disablesAnimations` transaction — they were
+    /// invisible under the opaque top anyway, so the removal is imperceptible.
     ///
-    /// `centerIndex` is an UNBOUNDED contiguous counter (it just keeps incrementing
-    /// forward / decrementing backward); the displayed item is `itemAt(centerIndex)`
-    /// with wrap-around modulo. Keeping it contiguous (rather than wrapping it to
-    /// 0…count-1) is what preserves cell identity across the end→start wrap: the
-    /// `ForEach` ids `[c-1, c, c+1]` always overlap by two with the next window, so
-    /// the cell sliding to centre is the SAME view instance (art already resolved)
-    /// even when the *item* wrapped. The invariant `itemAt(centerIndex) == items[index]`
-    /// holds at rest.
-    @State private var centerIndex = 0
-    /// The filmstrip offset in screen-width units: 0 at rest (centre cell shown),
-    /// animates to +1 to page forward (next cell slides to centre) or -1 backward.
-    /// Reset to 0 at settle in the same `disablesAnimations` transaction that
-    /// advances `centerIndex`, so the strip re-centres with no visible jump.
-    @State private var slidePosition: CGFloat = 0
-    /// Bumped on every page so a superseded animation's completion handler (which
-    /// still fires when interrupted) can't double-commit the settle.
-    @State private var slideGeneration = 0
+    /// This design is immune to the old filmstrip's failure mode. There is no
+    /// ForEach identity churn on a mutating index, no in-flight animatable state
+    /// that a second page has to "land" mid-transition, and no reliance on
+    /// SwiftUI's implicit z-order for transitioning views. Rapid pagination just
+    /// appends more stanzas — each higher-id one lands on top; when each fade
+    /// completes it prunes everything older than itself. The "new appears behind
+    /// the old, then pops on top" artifact is structurally impossible because
+    /// zIndex is strictly monotonic in insertion order and every incoming stanza
+    /// is above every stanza it might have to displace.
+    @State private var stanzas: [BackdropStanza] = []
+    /// Monotonically-increasing stanza id source. Assigned to each new stanza on
+    /// page (and on the initial appearance / set-swap seed), and read straight
+    /// through into `.zIndex` — so a newer stanza is ALWAYS above older ones,
+    /// regardless of SwiftUI's default transition ordering.
+    @State private var nextStanzaID: Int = 0
     /// The last directional move delivered to the hero's action row. Used to gate
     /// the recede: focus can leave the hero UP (to the tab bar) or LEFT (to the
     /// sidebar) as well as DOWN (to the Continue Watching row) — only a genuine
@@ -156,15 +155,6 @@ struct HomeHeroView: View {
     private var current: MediaItem? {
         guard items.indices.contains(index) else { return items.first }
         return items[index]
-    }
-
-    /// The item shown by a filmstrip cell at contiguous position `i`, wrapping
-    /// around the carousel. `centerIndex` is unbounded, so this modulo maps it (and
-    /// its ±1 neighbours) back onto the real item list. Caller guarantees non-empty.
-    private func itemAt(_ i: Int) -> MediaItem {
-        let n = items.count
-        let wrapped = ((i % n) + n) % n
-        return items[wrapped]
     }
 
     /// Legibility scrim tone — dark in dark mode, light in light mode (matching
@@ -276,7 +266,7 @@ struct HomeHeroView: View {
         .frame(maxWidth: .infinity, minHeight: height, alignment: .bottomLeading)
         .opacity(heroVisible ? 1 : 0)
         .onAppear {
-            reseatSlots()
+            reseatStanzas()
             Task { await resolveArtwork(around: index) }
             guard !heroVisible else { return }
             withAnimation(.easeInOut(duration: 0.35)) { heroVisible = true }
@@ -300,12 +290,13 @@ struct HomeHeroView: View {
             let present = Set(newIDs)
             resolvedBackdrop = resolvedBackdrop.filter { present.contains($0.key) }
             // A set swap is not a page: front the (possibly relocated) current item
-            // instantly with no wipe. Re-seat both backdrop slots to the current
-            // item (the slots are permanently mounted now, not id-keyed) and bump
-            // the token to cancel any pending fade-in.
+            // instantly with no wipe. Re-seat the stanza queue with a single fresh
+            // stanza for the current item (any transitioning stanzas are wiped in
+            // one `disablesAnimations` transaction inside `reseatStanzas`) and bump
+            // the metadata token to cancel any pending fade-in.
             slideToken &+= 1
             metadataVisible = true
-            reseatSlots()
+            reseatStanzas()
             // Clamp the logical selection to the new slide's button count so it
             // can never point past the last pill after a set swap. Pure `@State`,
             // so this never touches (or drops) focus.
@@ -334,50 +325,54 @@ struct HomeHeroView: View {
             try? await Task.sleep(nanoseconds: seconds * 1_000_000_000)
             // Don't step on an in-flight manual page; that page bumped
             // `advanceToken`, which restarts this dwell from the new slide.
-            guard !Task.isCancelled, slidePosition == 0 else { return }
+            // A single-stanza queue means we're at rest; more than one means a
+            // wipe is in flight and its own completion will restart auto-advance.
+            guard !Task.isCancelled, stanzas.count <= 1 else { return }
             page(to: (index + 1) % items.count, keepButton: selectedButton, forward: true)
         }
     }
 
-    /// The hero backdrop as a **single horizontal filmstrip**: an `HStack` of three
-    /// full-screen-width cells — `itemAt(centerIndex-1)`, `itemAt(centerIndex)`,
-    /// `itemAt(centerIndex+1)` — clipped to a one-screen viewport and slid by ONE
-    /// animatable offset (`slidePosition`). Because the whole strip is a single
-    /// view that moves as a unit, there is never a second, independent animation
-    /// that SwiftUI can drop — the root cause of every prior wrong-order wipe (two
-    /// layers, only one animating). The centred cell's content never changes during
-    /// a slide; the window only re-windows at settle (`disablesAnimations`), and the
-    /// `ForEach` ids overlap by two across windows so the cell sliding to centre is
-    /// the same, already-resolved view instance (even across the end→start wrap).
+    /// The hero backdrop as a **stanza queue**: a `ZStack` of one or more layers
+    /// (usually one at rest, two mid-page) each with a monotonic id → explicit
+    /// `zIndex`. The newest stanza is guaranteed on top; `.transition(.opacity)`
+    /// fades it in while older stanzas sit fully opaque directly beneath. Because
+    /// zIndex is strictly monotonic in insertion order there is no way for the
+    /// incoming stanza to render behind the outgoing (the historical bug), and
+    /// because older stanzas are fully covered by the opaque top once its fade
+    /// completes, pruning them in `disablesAnimations` is imperceptible. See the
+    /// ``stanzas`` doc for the full design.
     ///
-    /// Cells pass `ignoresOverscan: false` so each stays exactly one screen wide and
-    /// the strip tiles correctly; the overscan breakout is applied once here, to the
-    /// whole viewport. The strip is lifted by `backdropParallaxLift` (the parallax)
-    /// so the artwork rises faster than the content as the page recedes.
+    /// The overscan breakout is applied once here at the container, not per cell
+    /// (the ZStack's clip already keeps every stanza to a single screen).
     @ViewBuilder
     private func heroBackdropStack(height: CGFloat) -> some View {
         let w = Self.screenWidth
-        if items.isEmpty {
+        ZStack {
+            // Always-present transparent floor so the ZStack retains its frame
+            // even in the split-second before the first stanza is seeded.
             Color.clear.frame(width: w, height: height)
-        } else {
-            HStack(spacing: 0) {
-                ForEach([centerIndex - 1, centerIndex, centerIndex + 1], id: \.self) { i in
-                    heroBackdrop(for: itemAt(i), height: height)
-                        .frame(width: w, height: height)
-                        .clipped()
-                }
+            ForEach(stanzas) { stanza in
+                heroBackdrop(for: stanza.item, height: height)
+                    .frame(width: w, height: height)
+                    .clipped()
+                    // Fade the *incoming* stanza in; the *outgoing* (previous top)
+                    // stays fully opaque directly beneath during its successor's
+                    // fade and is pruned in a `disablesAnimations` transaction on
+                    // completion (invisible under the new opaque top, so the
+                    // removal is imperceptible). Asymmetric removes the
+                    // outgoing-fade artifact where SwiftUI would briefly fade the
+                    // old one out at the same time as the new one fades in — a
+                    // classic crossfade that can look milky mid-way.
+                    .transition(.asymmetric(insertion: .opacity, removal: .identity))
+                    // Strictly monotonic z-order: newest stanza always on top.
+                    .zIndex(Double(stanza.id))
             }
-            .frame(width: w * 3, height: height, alignment: .leading)
-            // Slide the whole 3-wide strip as one unit. Rest offset is -w (centre
-            // cell in the viewport); +1 pages forward (next cell to centre), -1 back.
-            .offset(x: -w * (1 + slidePosition))
-            // One-screen viewport that clips the strip to just the centred cell.
-            .frame(width: w, height: height, alignment: .leading)
-            .clipped()
-            .frame(maxWidth: .infinity, alignment: .center)
-            .offset(y: -backdropParallaxLift)
-            .ignoresSafeArea(edges: [.top, .horizontal])
         }
+        .frame(width: w, height: height, alignment: .center)
+        .clipped()
+        .frame(maxWidth: .infinity, alignment: .center)
+        .offset(y: -backdropParallaxLift)
+        .ignoresSafeArea(edges: [.top, .horizontal])
     }
 
     /// The dwell key: any change (slide index or a manual page bump) restarts the
@@ -886,68 +881,69 @@ struct HomeHeroView: View {
         }
     }
 
-    /// Fronts `toItem` with a directional filmstrip slide and restarts the
-    /// auto-advance dwell. Callers only ever page by ±1 (Right/Left/chevron/
-    /// auto-advance), so `toItem` is always the current slide's neighbour. The
-    /// strip animates a SINGLE offset (`slidePosition`) 0→±1; on completion the
-    /// window advances (`centerIndex += step`) and the offset resets to 0 in one
-    /// `disablesAnimations` transaction, so it re-centres with no visible jump and
-    /// no content change mid-slide. `index` (the logical/wrapped slide) updates
-    /// immediately so rapid presses compute the right next target and the metadata
-    /// resolves the new show, while the strip keeps showing `centerIndex` until
-    /// settle.
+    /// Fronts `toItem` with a clean opacity-crossfade wipe and restarts the
+    /// auto-advance dwell. Appends a new ``BackdropStanza`` to ``stanzas`` in a
+    /// `withAnimation`; SwiftUI applies the `.transition(.opacity)` insertion so
+    /// the new stanza fades in from 0→1 while the previous (still fully opaque)
+    /// stanza sits directly beneath. On completion the older stanzas are pruned in
+    /// a `disablesAnimations` transaction — they were invisible under the opaque
+    /// top by then, so their removal is imperceptible. Rapid pagination just keeps
+    /// appending; each fade-in prunes everything older than *itself* when it
+    /// completes, so the queue self-drains.
     private func page(to toItem: Int, keepButton: Int, forward isForward: Bool) {
         guard items.indices.contains(toItem), toItem != index else { return }
-        let step = isForward ? 1 : -1
-        // Land any in-flight page instantly so the strip is centred on the current
-        // slide before we start the next one (rapid-paging guard). The in-flight
-        // direction is the sign of `slidePosition`; committing `centerIndex` by that
-        // step lands it on the slide `index` already points at.
-        if slidePosition != 0 {
-            let landStep = slidePosition > 0 ? 1 : -1
-            var t = Transaction(); t.disablesAnimations = true
-            withTransaction(t) {
-                centerIndex += landStep
-                slidePosition = 0
-            }
-        }
-        beginTransition()
-        slideGeneration &+= 1
-        let generation = slideGeneration
-        let targetCenter = centerIndex + step
-        // Logical slide + selection update immediately; the strip stays on
-        // `centerIndex` (its centred art is unchanged) until the settle below.
+        let newItem = items[toItem]
+        // Logical slide + selection + auto-advance dwell all bump immediately so
+        // rapid presses compute their next target off the freshest state.
         index = toItem
         advanceToken &+= 1
+        selectedButton = min(keepButton, max(0, buttons(for: newItem).count - 1))
+        // Hide the metadata instantly (the delayed fade-BACK-IN is scheduled by
+        // `beginTransition()`) so the outgoing show's text can't sit over the
+        // incoming artwork mid-wipe. The `.transaction` override on the content
+        // strips animation from this `false` write; the fade-in is a separate
+        // withAnimation past the wipe duration.
         metadataVisible = false
-        selectedButton = min(keepButton, max(0, buttons(for: items[toItem]).count - 1))
+        beginTransition()
+
+        let stanzaID = nextStanzaID
+        nextStanzaID += 1
+        let stanza = BackdropStanza(id: stanzaID, itemID: newItem.id, item: newItem)
         withAnimation(.easeInOut(duration: 0.42)) {
-            slidePosition = CGFloat(step)
+            stanzas.append(stanza)
         } completion: {
-            guard generation == slideGeneration else { return }
-            // Re-window and re-centre in one non-animated transaction. The cell that
-            // just slid to centre keeps its identity (the `ForEach` ids overlap by
-            // two), so its art stays put — the swap is invisible.
-            var t = Transaction(); t.disablesAnimations = true
-            withTransaction(t) {
-                centerIndex = targetCenter
-                slidePosition = 0
+            // Prune everything older than *this* stanza. If a later page appended
+            // stanzas after us they stay (they're on top of us with higher zIndex);
+            // their own completions will prune us in turn. Older stanzas were fully
+            // covered by our now-opaque top, so removal is invisible.
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                stanzas.removeAll { $0.id < stanzaID }
             }
         }
         Task { await resolveArtwork(around: toItem) }
     }
 
-    /// Re-seats the filmstrip on the current logical slide with NO animation, used
-    /// on first appearance and on a curated-set swap. Restores the resting invariant
-    /// `itemAt(centerIndex) == items[index]` and zeroes the offset in one
-    /// `disablesAnimations` transaction, so it's an instant, invisible re-centre.
-    private func reseatSlots() {
-        guard !items.isEmpty else { return }
+    /// Re-seats the stanza queue on the current logical slide with NO animation,
+    /// used on first appearance and on a curated-set swap. Wipes any transitioning
+    /// stanzas and installs a single fresh one for the current item — the display
+    /// snaps to it with no wipe. All state changes happen in one
+    /// `disablesAnimations` transaction so nothing here can trigger a stray fade.
+    private func reseatStanzas() {
+        guard !items.isEmpty, items.indices.contains(index) else {
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) { stanzas = [] }
+            return
+        }
+        let item = items[index]
+        let stanzaID = nextStanzaID
+        nextStanzaID += 1
         var transaction = Transaction()
         transaction.disablesAnimations = true
         withTransaction(transaction) {
-            centerIndex = index
-            slidePosition = 0
+            stanzas = [BackdropStanza(id: stanzaID, itemID: item.id, item: item)]
         }
     }
 
@@ -1011,9 +1007,11 @@ struct HomeHeroView: View {
             // page (which melts at 0.33) and only feather the very bottom into the
             // Continue Watching panel.
             dissolveStart: 0.82,
-            // The filmstrip tiles several of these side by side, so each cell must
-            // stay exactly one screen wide; the overscan breakout is applied once at
-            // the strip's viewport (see `heroBackdropStack`), not per cell.
+            // Each stanza in the ZStack queue must stay exactly one screen wide
+            // and clipped to its own frame so the container's clipped viewport
+            // (see `heroBackdropStack`) can contain overlapping stanzas without
+            // one bleeding past the screen edge. The overscan breakout is applied
+            // once at the container, not per stanza.
             ignoresOverscan: false
         )
     }
@@ -1114,6 +1112,19 @@ struct HomeHeroView: View {
     /// The hero's action buttons, in visual order.
     private enum HeroButton: Hashable {
         case play, moreInfo, watchlist, next
+    }
+
+    /// One backdrop layer in the ZStack queue. Every page appends a new stanza;
+    /// each stanza's `id` is monotonic and drives its explicit `.zIndex`, so the
+    /// newest is always on top. See ``stanzas`` for the full design.
+    private struct BackdropStanza: Identifiable, Equatable {
+        let id: Int
+        let itemID: String
+        let item: MediaItem
+
+        static func == (lhs: BackdropStanza, rhs: BackdropStanza) -> Bool {
+            lhs.id == rhs.id && lhs.itemID == rhs.itemID
+        }
     }
 }
 #endif

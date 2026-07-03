@@ -128,17 +128,22 @@ struct AddShareView: View {
                     placeholder("Finding shares…", systemImage: "externaldrive.connected.to.line.below")
                 }
             case .needsAuth:
-                credentialsPanel(message: "This server needs a username and password.")
+                credentialsPanel(
+                    title: "Sign in",
+                    message: "This server needs a username and password.",
+                    button: "Connect"
+                )
             case .failed(let message):
                 VStack(alignment: .leading, spacing: 28) {
                     SharePanel(title: "Shares") {
-                        VStack(alignment: .leading, spacing: 16) {
-                            Label(LocalizedStringKey(message), systemImage: "exclamationmark.triangle")
-                                .foregroundStyle(.secondary)
-                            Button("Try again") { viewModel.loadShares() }
-                                .buttonStyle(.bordered)
-                        }
+                        Label(LocalizedStringKey(message), systemImage: "exclamationmark.triangle")
+                            .foregroundStyle(.secondary)
                     }
+                    credentialsPanel(
+                        title: "Sign in",
+                        message: "This server didn't allow browsing its shares as a guest. If it needs a login, enter it and try again.",
+                        button: "Try again"
+                    )
                     manualSharePanel
                 }
             case .loaded:
@@ -202,8 +207,8 @@ struct AddShareView: View {
         }
     }
 
-    private func credentialsPanel(message: LocalizedStringKey) -> some View {
-        SharePanel(title: "Sign in", footer: message) {
+    private func credentialsPanel(title: String, message: LocalizedStringKey, button: LocalizedStringKey) -> some View {
+        SharePanel(title: title, footer: message) {
             VStack(alignment: .leading, spacing: 18) {
                 TextField("Username", text: $viewModel.username)
                     .textContentType(.username)
@@ -216,7 +221,7 @@ struct AddShareView: View {
                     .submitLabel(.go)
                     .focused($focusedField, equals: .password)
                     .onSubmit { viewModel.loadShares() }
-                Button("Connect") { viewModel.loadShares() }
+                Button(button) { viewModel.loadShares() }
                     .buttonStyle(.borderedProminent)
             }
         }

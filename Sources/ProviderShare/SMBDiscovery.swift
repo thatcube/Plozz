@@ -221,6 +221,14 @@ public enum SMBShareEnumerator {
     /// Log in (guest when no credentials given) and return the browsable disk
     /// share names, filtering out hidden/admin/IPC shares (IPC$, ADMIN$, C$,
     /// print/device shares). Empty username/password attempts guest.
+    ///
+    /// Login and enumeration are handled as two distinct failures: a rejected
+    /// login (guest and anonymous, or supplied credentials) surfaces as
+    /// `.authenticationRequired` so the UI can prompt for credentials, whereas a
+    /// login that succeeds but whose share enumeration is denied surfaces as
+    /// `.failed` — many NAS allow a guest *file* session yet deny guest access
+    /// to `IPC$`/`NetShareEnum`, in which case the caller falls back to typing
+    /// the share name (or retrying with credentials).
     public static func listShares(
         host: String,
         port: Int?,
@@ -231,32 +239,58 @@ public enum SMBShareEnumerator {
         let client = port.map { SMBClient(host: host, port: $0) } ?? SMBClient(host: host)
         let account = username.isEmpty ? nil : username
         let secret = password.isEmpty ? nil : password
+        PlozzLog.boot("share-list: connecting \(host)\(port.map { ":\($0)" } ?? "") user=\(account ?? "<guest>")")
 
         do {
             return try await withTimeout(timeout) {
+                // Step 1 — establish a session. Distinguish auth failure from
+                // everything else so the UI can prompt for credentials.
                 do {
                     try await client.login(username: account ?? "guest", password: secret)
+                    PlozzLog.boot("share-list: login ok (\(account ?? "guest"))")
                 } catch {
+                    PlozzLog.boot("share-list: login as \(account ?? "guest") failed: \(error)")
                     if account == nil {
                         // Some servers reject the literal "guest" but accept a
                         // truly anonymous session.
-                        try await client.login(username: nil, password: nil)
+                        do {
+                            try await client.login(username: nil, password: nil)
+                            PlozzLog.boot("share-list: anonymous login ok")
+                        } catch {
+                            PlozzLog.boot("share-list: anonymous login failed: \(error)")
+                            throw ListError.authenticationRequired
+                        }
                     } else {
                         throw ListError.authenticationRequired
                     }
                 }
-                let shares = try await client.listShares()
+
+                // Step 2 — enumerate shares over IPC$/srvsvc. This can be denied
+                // even when the file session is allowed; report it as a plain
+                // failure so the caller offers the manual/credentials fallback.
+                let shares: [Share]
+                do {
+                    shares = try await client.listShares()
+                } catch {
+                    PlozzLog.boot("share-list: enumerate failed: \(error)")
+                    try? await client.logoff()
+                    throw ListError.failed("\(error)")
+                }
                 try? await client.logoff()
-                return shares
+                let names = shares
                     .filter { isBrowsableDiskShare($0) }
                     .map(\.name)
                     .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+                PlozzLog.boot("share-list: \(shares.count) raw, \(names.count) browsable: \(names.joined(separator: ", "))")
+                return names
             }
         } catch let e as ListError {
             throw e
         } catch is TimeoutError {
+            PlozzLog.boot("share-list: timed out")
             throw ListError.timedOut
         } catch {
+            PlozzLog.boot("share-list: error \(error)")
             throw ListError.failed("\(error)")
         }
     }

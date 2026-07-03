@@ -11,7 +11,7 @@ import UIKit
 /// button beside it, and a row of equally-sized Liquid Glass transport buttons
 /// below. Single centered column — no Up Next list. Observes the shared
 /// `AudioPlaybackController`.
-struct NowPlayingView: View {
+public struct NowPlayingView: View {
     @Bindable var controller: AudioPlaybackController
     /// The app's currently selected theme, passed in from the host so the
     /// player's "Match Theme" appearance can distinguish OLED from plain Dark
@@ -20,6 +20,21 @@ struct NowPlayingView: View {
     /// Per-profile player preferences (appearance + "show extra info"), injected
     /// from the host so each profile keeps its own choice.
     let musicPlayer: MusicPlayerSettingsModel
+
+    /// Public so the app shell (`MainTabView`) can host the full-screen player as
+    /// a `fullScreenCover` on the root `TabView` — the stable presentation host —
+    /// rather than deep inside the Music tab's navigation stack, which presents
+    /// unreliably under the sidebar tab style.
+    public init(
+        controller: AudioPlaybackController,
+        appTheme: AppTheme = .system,
+        musicPlayer: MusicPlayerSettingsModel
+    ) {
+        self.controller = controller
+        self.appTheme = appTheme
+        self.musicPlayer = musicPlayer
+    }
+
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var scrubModel = MusicScrubModel()
@@ -218,7 +233,7 @@ struct NowPlayingView: View {
         }
     }
 
-    var body: some View {
+    public var body: some View {
         ZStack {
             background
 

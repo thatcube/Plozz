@@ -47,9 +47,9 @@ public enum NavigationStyle: String, CaseIterable, Identifiable, Codable, Sendab
         }
     }
 
-    /// Preserve the app's historical look by default; the toggle opts into the
-    /// sidebar. Flip this to `.sidebar` to make the sidebar the out-of-box look.
-    public static let `default`: NavigationStyle = .tabBar
+    /// Default to the more immersive sidebar; the top bar remains available as an
+    /// opt-in in Settings ▸ Appearance ▸ Navigation.
+    public static let `default`: NavigationStyle = .sidebar
 
     /// AppStorage key shared by `MainTabView` (reads it to choose the tab style)
     /// and Settings (writes it). App-wide — do not namespace per profile.

@@ -160,6 +160,11 @@ struct MainTabView: View {
 
     @State private var discovery = LibraryDiscoveryModel()
     @State private var musicAvailability = MusicAvailabilityModel()
+    /// Hosts the full-screen Now Playing player as a `fullScreenCover` on the root
+    /// TabView rather than inside the Music tab's navigation stack — the latter
+    /// presents unreliably under the sidebar tab style (the cover only appears
+    /// after a stray Back press). Bound down into `MusicTabView`, which flips it.
+    @State private var showNowPlaying = false
     @Environment(\.colorScheme) private var systemColorScheme
 
     /// App-wide navigation chrome (top bar vs. sidebar), edited in Settings ▸
@@ -234,7 +239,8 @@ struct MainTabView: View {
                     visibleLibraryIDs: musicAvailability.visibleLibraryIDs,
                     controller: audioController,
                     appTheme: themeModel.theme,
-                    musicPlayer: musicPlayerModel
+                    musicPlayer: musicPlayerModel,
+                    showNowPlaying: $showNowPlaying
                 )
                 }
             }
@@ -285,6 +291,17 @@ struct MainTabView: View {
             }
         }
         .plozzTabStyle(navigationStyle)
+        // Host the full-screen Now Playing player here, on the root TabView, so it
+        // presents reliably on the first trigger under both tab styles. Hosting it
+        // inside the Music tab's navigation stack made it present a beat late under
+        // the sidebar style (only appearing after a stray Back press).
+        .fullScreenCover(isPresented: $showNowPlaying) {
+            NowPlayingView(
+                controller: audioController,
+                appTheme: themeModel.theme,
+                musicPlayer: musicPlayerModel
+            )
+        }
         .environment(musicPlayerModel)
         .environment(uiDensityModel)
         .environment(cardStyleModel)

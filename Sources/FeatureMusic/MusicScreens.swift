@@ -625,12 +625,28 @@ struct MusicDetailLayout<InfoColumn: View>: View {
     let onPlayTrack: (MusicTrack) -> Void
     @ViewBuilder var info: InfoColumn
 
+    /// App-wide navigation chrome. Drives the top-inset compensation below: the
+    /// `-80` only makes sense under the top tab bar (which reserves a top
+    /// safe-area inset). In sidebar mode the chrome sits on the leading edge and
+    /// there's no top inset to cancel, so the compensation is dropped or the
+    /// detail floats too high (mis-centred vertically).
+    @AppStorage(NavigationStyle.storageKey) private var navigationStyleRaw = NavigationStyle.default.rawValue
+
+    private var isSidebar: Bool {
+        NavigationStyle(rawValue: navigationStyleRaw) == .sidebar
+    }
+
     // Pull the whole detail up under tvOS's reserved top safe-area inset so the
     // artwork + track list don't sit too low. With the Now Playing card present
     // this yields even top/bottom padding; without it the column is ~one card
     // shorter, so add roughly half a card's height back to re-centre it.
     private var topPadding: CGFloat {
-        let base = PlozzTheme.Metrics.screenPadding - 80
+        // Top-bar mode reserves ~80pt at the top for the tab pill, so we pull the
+        // content up under it. Sidebar mode has no top inset, so keep the full
+        // screen padding — otherwise the page rides too high.
+        let base = isSidebar
+            ? PlozzTheme.Metrics.screenPadding
+            : PlozzTheme.Metrics.screenPadding - 80
         return hasNowPlaying ? base : base + 54
     }
 

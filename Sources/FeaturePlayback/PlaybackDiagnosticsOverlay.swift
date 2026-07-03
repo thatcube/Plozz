@@ -51,12 +51,8 @@ struct PlaybackDiagnosticsOverlay: View {
                 Spacer()
                 if let provider = diagnostics?.sourceProvider {
                     HStack(spacing: 6) {
-                        Image(provider == .plex ? "PlexLogo" : "JellyfinLogo")
-                            .renderingMode(.template)
-                            .resizable()
-                            .scaledToFit()
+                        ProviderBrandMark(provider: provider, size: 16, showsBackground: false)
                             .frame(width: 16, height: 16)
-                            .foregroundStyle(providerTint(provider))
                             .shadow(color: .black.opacity(0.6), radius: 2, y: 1)
                         Text("Playing from \(diagnostics?.serverName ?? provider.displayName)")
                             .font(.system(size: 18, weight: .semibold))
@@ -202,13 +198,6 @@ struct PlaybackDiagnosticsOverlay: View {
 
     // MARK: - Helpers
 
-    private func providerTint(_ provider: ProviderKind) -> Color {
-        switch provider {
-        case .jellyfin: return Color(red: 0.53, green: 0.38, blue: 0.95)
-        case .plex: return Color(red: 0xF5 / 255, green: 0xC5 / 255, blue: 0x18 / 255)
-        case .mediaShare: return Color(red: 0x2A / 255, green: 0xA8 / 255, blue: 0x9E / 255)
-        }
-    }
 }
 
 #Preview("Diagnostics HUD") {

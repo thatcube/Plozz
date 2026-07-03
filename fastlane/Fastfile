@@ -49,6 +49,46 @@ def asc_api_key
   )
 end
 
+# App Store Connect rejects any build made with a BETA Xcode / SDK (altool error
+# 90534 "Unsupported SDK or Xcode version"). This machine keeps the beta as the
+# active `xcode-select` toolchain (/Applications/Xcode-beta.app), so an
+# unqualified fastlane run would build with the beta SDK and the upload would be
+# rejected. Point every fastlane build at a RELEASE Xcode automatically so
+# uploads always succeed — no manual `DEVELOPER_DIR` / `xcode-select` dance.
+#
+# Resolution order:
+#   1. An explicit non-beta DEVELOPER_DIR the caller already exported (respected).
+#   2. The conventional release install at /Applications/Xcode.app.
+#   3. The highest-versioned /Applications/Xcode*.app whose name isn't "beta".
+def select_release_xcode
+  beta = ->(path) { path.downcase.include?("beta") }
+
+  # Respect an explicit, non-beta override.
+  if (dd = ENV["DEVELOPER_DIR"]) && !dd.empty?
+    if beta.call(dd)
+      UI.important("DEVELOPER_DIR points at a beta Xcode (#{dd}); overriding with a release Xcode.")
+    else
+      UI.message("Using caller-provided DEVELOPER_DIR: #{dd}")
+      return
+    end
+  end
+
+  candidates = Dir.glob("/Applications/Xcode*.app").reject { |p| beta.call(p) }
+  # Prefer the canonical release path, then fall back to the newest remaining.
+  chosen = candidates.find { |p| p == "/Applications/Xcode.app" }
+  chosen ||= candidates.sort.last
+
+  unless chosen
+    UI.user_error!("No release Xcode found in /Applications (only a beta is installed). " \
+                   "Install a release Xcode — App Store Connect rejects beta-SDK builds.")
+  end
+
+  developer_dir = File.join(chosen, "Contents", "Developer")
+  ENV["DEVELOPER_DIR"] = developer_dir
+  version = `DEVELOPER_DIR=#{developer_dir.shellescape} xcodebuild -version 2>/dev/null`.strip.gsub("\n", " ")
+  UI.success("Building with release Xcode: #{chosen} (#{version})")
+end
+
 # Next build number = (latest build already on TestFlight for this app+platform)
 # + 1. initial_build_number: 0 makes the very first build a clean 1 when no
 # builds exist yet. Falls back to 1 only if App Store Connect can't be reached.
@@ -74,6 +114,10 @@ end
 
 desc "Archive and export a signed App Store .ipa (no upload)"
 lane :build do |options|
+  # App Store Connect rejects beta-SDK builds, and this machine's active toolchain
+  # is the Xcode beta — force a release Xcode before anything compiles.
+  select_release_xcode
+
   # Build number must strictly increase per upload for a given marketing version.
   # TestFlight is the source of truth, so derive the next build from (latest
   # TestFlight build + 1). Set it BEFORE generating the project so generate-project.sh

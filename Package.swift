@@ -89,14 +89,22 @@ let package = Package(
         // build; see the `CrashReporting` target for the privacy-hardened config.
         .package(url: "https://github.com/getsentry/sentry-cocoa", from: "9.19.0"),
 
-        // SMBClient (kishikawakatsumi/SMBClient) — pure-Swift, MIT SMB2 client
-        // over NWConnection. Declared here for the **ProviderShare** target, which
-        // uses it to *browse/enumerate* a media share (listDirectory/listShares)
-        // and scan it into a library. This is an app concern distinct from
-        // playback: AetherEngine already pulls SMBClient transitively and owns the
-        // playback byte-reads (SMBConnection); SwiftPM unifies both onto one
-        // version. Kept in sync with the version AetherEngine resolves (0.3.1).
-        .package(url: "https://github.com/kishikawakatsumi/SMBClient", from: "0.3.1"),
+        // SMBClient — pure-Swift, MIT SMB client over NWConnection. Declared here
+        // for the **ProviderShare** target, which uses it to *browse/enumerate* a
+        // media share (listDirectory/listShares) and scan it into a library. This
+        // is an app concern distinct from playback: AetherEngine already pulls
+        // SMBClient transitively and owns the playback byte-reads (SMBConnection);
+        // SwiftPM unifies both onto one version.
+        //
+        // Pinned to thatcube/SMBClient@smb3, our fork that adds SMB 3.x + 3.1.1
+        // GCM encryption and Session.isGuestSession (see the guest/credential
+        // handling in ProviderShare/SMBDiscovery). This root-level reference
+        // overrides the same-identity ("smbclient") reference AetherEngine pulls
+        // transitively, so BOTH browse and playback use the SMB3 fork. Proposed
+        // upstream as kishikawakatsumi/SMBClient#234; switch back to
+        //   .package(url: "https://github.com/kishikawakatsumi/SMBClient", from: "0.3.1"),
+        // once that lands.
+        .package(url: "https://github.com/thatcube/SMBClient.git", revision: "d8baadc1a4f1287ebf1e8b4702ca38bd6e237fef"),
     ],
     targets: [
         // MARK: Core
@@ -386,6 +394,10 @@ let package = Package(
         .testTarget(
             name: "FeaturePlaybackTests",
             dependencies: ["FeaturePlayback", "CoreModels"]
+        ),
+        .testTarget(
+            name: "ProviderShareTests",
+            dependencies: ["ProviderShare", "CoreModels"]
         ),
     ],
     // Pin Swift 5 language mode: bumping tools-version to 6.0 (required for the

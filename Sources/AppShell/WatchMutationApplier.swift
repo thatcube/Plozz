@@ -74,9 +74,22 @@ struct AppShellWatchMutationApplier: WatchMutationApplying {
     var searchDeadline: TimeInterval = 4
 
     func setPlayed(_ played: Bool, on target: WatchMutationTarget) async throws {
+        try await setPlayed(played, on: target, capturedAt: Date())
+    }
+
+    func setPlayed(_ played: Bool, on target: WatchMutationTarget, capturedAt: Date) async throws {
         guard let provider = await resolveProvider(target.accountID) else {
             FanoutDiagnostics.emit("write.setPlayed acct=\(target.accountID) item=\(target.itemID) -> provider=nil (unreachable/unresolved, will retry)")
             throw AppError.serverUnreachable
+        }
+        // A locally-stored played state (the SMB share) is ordered last-writer-wins
+        // by the play's real time, so prefer the timestamped write — otherwise a
+        // late-draining stale played write, stamped at drain time, would clobber a
+        // newer resume. A server-backed provider (Plex/Jellyfin) owns recency and
+        // uses the plain write.
+        if let timestamped = provider as? PlayedStateWriting {
+            try await timestamped.setPlayed(played, itemID: target.itemID, capturedAt: capturedAt)
+            return
         }
         guard let watch = provider as? WatchStateProviding else {
             FanoutDiagnostics.emit("write.setPlayed acct=\(target.accountID) item=\(target.itemID) -> provider=\(provider.kind.rawValue) NOT WatchStateProviding (no write, treated success)")

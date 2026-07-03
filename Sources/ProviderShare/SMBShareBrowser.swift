@@ -37,6 +37,14 @@ actor SMBShareBrowser {
 
     private var client: SMBClient?
 
+    /// Serial chain so `listDirectory` calls (which each connect-on-demand and
+    /// then read the one shared session) never overlap across an `await`. Actor
+    /// isolation alone does NOT provide this: two calls can both suspend inside
+    /// `connectedClient()` seeing `client == nil` (double login/leak) or both be
+    /// mid-`listDirectory` on the same session, which SMBClient isn't safe for.
+    /// Every op waits for the previous one to finish before touching the session.
+    private var listTail: Task<Void, Never> = Task {}
+
     init(host: String, port: Int?, share: String, user: String, password: String) {
         self.host = host
         self.port = port
@@ -76,9 +84,44 @@ actor SMBShareBrowser {
 
     /// List one directory, `path` being share-relative (empty string == share
     /// root). Hidden/system entries and the `.`/`..` pseudo-entries are dropped.
+    ///
+    /// Serialised behind `listTail`: the connect (first call) and every listing
+    /// run one-at-a-time on the single shared session, even when the scanner and
+    /// a detail view request different folders concurrently.
     func listDirectory(_ path: String) async throws -> [Entry] {
-        let client = try await connectedClient()
-        let files = try await Self.withTimeout(listTimeout, "listing \(path.isEmpty ? "<root>" : path)") {
+        let previous = listTail
+        let task = Task { () async throws -> [Entry] in
+            // Wait for the prior op to finish before touching the session. Its
+            // failure is irrelevant to ours; we only need the ordering.
+            await previous.value
+            do {
+                return try await self.attemptList(path)
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                // The cached session can silently die between calls — a NAS idle
+                // timeout, the Apple TV sleeping/waking, or a TCP reset — while our
+                // `client` stays non-nil, so every later listing reuses the dead
+                // session and fails (whole share = "something went wrong", a
+                // subfolder = swallowed to empty = "no playable media"). Drop the
+                // session and retry ONCE with a fresh login + tree-connect.
+                PlozzLog.boot("share: list \(path.isEmpty ? "<root>" : path) failed (\(error)); reconnecting once")
+                await self.invalidate()
+                return try await self.attemptList(path)
+            }
+        }
+        // Extend the chain so the NEXT caller waits for this op regardless of how
+        // it ends (and regardless of whether our caller cancels its await).
+        listTail = Task { _ = await task.result }
+        return try await task.value
+    }
+
+    /// One connect-on-demand + list pass on the shared session. Factored out of
+    /// ``listDirectory(_:)`` so the reconnect path can re-run it after dropping a
+    /// dead session.
+    private func attemptList(_ path: String) async throws -> [Entry] {
+        let client = try await self.connectedClient()
+        let files = try await Self.withTimeout(self.listTimeout, "listing \(path.isEmpty ? "<root>" : path)") {
             try await client.listDirectory(path: path)
         }
         return files.compactMap { file in
@@ -95,6 +138,12 @@ actor SMBShareBrowser {
 
     /// Best-effort teardown. Safe to call more than once.
     func close() async {
+        await invalidate()
+    }
+
+    /// Drop the cached session (best effort logoff). After this the next
+    /// ``listDirectory(_:)`` reconnects from scratch. Safe to call more than once.
+    private func invalidate() async {
         guard let client else { return }
         self.client = nil
         _ = try? await client.disconnectShare()

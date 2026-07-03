@@ -22,6 +22,27 @@ public protocol WatchStateProviding: Sendable {
     func setPlayed(_ played: Bool, itemID: String) async throws
 }
 
+/// Refinement of ``WatchStateProviding`` for a provider whose played state is
+/// stored **locally** (no authoritative server), where last-writer ordering must
+/// honor the play's *real* event time rather than the moment the write drains.
+///
+/// The cross-server watch outbox can queue a played write and drain it much later
+/// (server asleep, app offline, or the account still resolving at launch). A
+/// server-backed provider (Plex, Jellyfin) doesn't care — its server owns
+/// recency — so it conforms to ``WatchStateProviding`` alone. A local store (the
+/// SMB share) must stamp the write with `capturedAt` so a late-draining *stale*
+/// played write can't clobber genuinely newer resume / in-progress state.
+///
+/// Detected at runtime via `provider as? PlayedStateWriting` (preferred over the
+/// timestamp-less ``WatchStateProviding/setPlayed(_:itemID:)`` when present).
+public protocol PlayedStateWriting: WatchStateProviding {
+    /// Marks `itemID` played/unplayed, stamped with the play's real time
+    /// (`capturedAt`) for local last-writer-wins ordering — see
+    /// ``ResumeStateWriting/setResumePosition(_:itemID:capturedAt:)`` for the
+    /// same rationale applied to resume writes.
+    func setPlayed(_ played: Bool, itemID: String, capturedAt: Date) async throws
+}
+
 /// Optional capability a `MediaProvider` adopts to write a **resume position**
 /// (seconds) to the server **without an active playback session** — the seam the
 /// cross-server watch-state outbox uses to converge a server that the user did not

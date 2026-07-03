@@ -1638,7 +1638,12 @@ public final class AudioPlaybackController {
     /// route drop reports `.routeDisconnected`; anything else is a different
     /// interruption (phone call analog, mic mute, etc.).
     private func interruptionReasonName(_ info: [AnyHashable: Any]) -> String {
-        guard let raw = info[AVAudioSessionInterruptionReasonKey] as? UInt else { return "none" }
+        // `AVAudioSessionInterruptionReasonKey` is marked API_UNAVAILABLE(tvos) on
+        // the tvOS 26.x SDK (it becomes available on tvOS 27), so referencing the
+        // symbol fails to compile against the release SDK. Read the userInfo entry
+        // by its stable string key instead: this compiles on both SDKs and the
+        // tvOS 27 runtime still populates it (older runtimes just yield "none").
+        guard let raw = info["AVAudioSessionInterruptionReason"] as? UInt else { return "none" }
         switch AVAudioSession.InterruptionReason(rawValue: raw) {
         case .default: return "default"
         case .routeDisconnected: return "routeDisconnected"

@@ -125,3 +125,65 @@ final class URLErrorMappingTests: XCTestCase {
         XCTAssertEqual(URLSessionHTTPClient.map(URLError(.notConnectedToInternet)), .serverUnreachable)
     }
 }
+
+final class LocalSubnetScannerTests: XCTestCase {
+    private func ip(_ a: UInt32, _ b: UInt32, _ c: UInt32, _ d: UInt32) -> UInt32 {
+        (a << 24) | (b << 16) | (c << 8) | d
+    }
+
+    func testSlash24SweepsAllHostsExcludingNetworkAndBroadcast() {
+        let hosts = LocalSubnetScanner.hostAddresses(
+            address: ip(192, 168, 1, 42),
+            netmask: ip(255, 255, 255, 0)
+        )
+        XCTAssertEqual(hosts.count, 254)
+        XCTAssertEqual(hosts.first, "192.168.1.1")
+        XCTAssertEqual(hosts.last, "192.168.1.254")
+        XCTAssertFalse(hosts.contains("192.168.1.0"))
+        XCTAssertFalse(hosts.contains("192.168.1.255"))
+    }
+
+    func testSmallerSubnetSweepsFully() {
+        // /28 = 16 addresses, 14 usable hosts (.17 - .30).
+        let hosts = LocalSubnetScanner.hostAddresses(
+            address: ip(192, 168, 1, 20),
+            netmask: ip(255, 255, 255, 240)
+        )
+        XCTAssertEqual(hosts.count, 14)
+        XCTAssertEqual(hosts.first, "192.168.1.17")
+        XCTAssertEqual(hosts.last, "192.168.1.30")
+    }
+
+    func testLargeSubnetFallsBackToLocalSlash24() {
+        // A /16 is far too large to sweep host-by-host over HTTP; falls back
+        // to just the local /24 around our own address.
+        let hosts = LocalSubnetScanner.hostAddresses(
+            address: ip(10, 20, 30, 40),
+            netmask: ip(255, 255, 0, 0),
+            maxSweepHosts: 256
+        )
+        XCTAssertEqual(hosts.count, 254)
+        XCTAssertEqual(hosts.first, "10.20.30.1")
+        XCTAssertEqual(hosts.last, "10.20.30.254")
+    }
+
+    func testDefaultMaxSweepHostsIncludesExactSlash24() {
+        // span for a /24 is 255 (broadcast - network); the default ceiling
+        // must be >= that so a /24 always gets the full, not fallback, sweep.
+        let hosts = LocalSubnetScanner.hostAddresses(
+            address: ip(172, 16, 5, 5),
+            netmask: ip(255, 255, 255, 0),
+            maxSweepHosts: LocalSubnetScanner.defaultMaxSweepHosts
+        )
+        XCTAssertEqual(hosts.count, 254)
+    }
+
+    func testZeroNetmaskReturnsEmpty() {
+        XCTAssertTrue(LocalSubnetScanner.hostAddresses(address: ip(1, 2, 3, 4), netmask: 0).isEmpty)
+    }
+
+    func testHostOnlyNetmaskReturnsEmpty() {
+        // /32 — a single host, no sweepable range at all.
+        XCTAssertTrue(LocalSubnetScanner.hostAddresses(address: ip(1, 2, 3, 4), netmask: 0xFFFF_FFFF).isEmpty)
+    }
+}

@@ -172,6 +172,14 @@ struct MainTabView: View {
     /// presents unreliably under the sidebar tab style (the cover only appears
     /// after a stray Back press). Bound down into `MusicTabView`, which flips it.
     @State private var showNowPlaying = false
+    /// The video player is hosted here on the root `TabView` (not inside a tab's
+    /// navigation stack) so it presents reliably on the FIRST trigger — the same
+    /// reason `showNowPlaying` lives here. A `fullScreenCover` attached inside a
+    /// NavigationStack presents a beat late (only after a stray Back press), which
+    /// is why playing from deep in a media-share folder tree only fired once the
+    /// user backed all the way out to Home. HomeTab/SearchTab write these bindings.
+    @State private var playRequest: PlayRequest?
+    @State private var resumePrompt: MediaItem?
     @Environment(\.colorScheme) private var systemColorScheme
 
     /// App-wide navigation chrome (top bar vs. sidebar), edited in Settings ▸
@@ -224,7 +232,9 @@ struct MainTabView: View {
                 pendingPlayItemID: $pendingPlayItemID,
                 pendingWatchMutations: pendingWatchMutations,
                 appliedWatchRecency: appliedWatchRecency,
-                onSubtitleStyleChanged: { subtitleStyleModel.style = $0 }
+                onSubtitleStyleChanged: { subtitleStyleModel.style = $0 },
+                playRequest: $playRequest,
+                resumePrompt: $resumePrompt
             )
             }
 
@@ -245,7 +255,9 @@ struct MainTabView: View {
                 enqueueWatchMutation: enqueueWatchMutation,
                 watchBridge: watchBridge,
                 identitySources: identitySources,
-                onSubtitleStyleChanged: { subtitleStyleModel.style = $0 }
+                onSubtitleStyleChanged: { subtitleStyleModel.style = $0 },
+                playRequest: $playRequest,
+                resumePrompt: $resumePrompt
             )
             }
 
@@ -323,6 +335,28 @@ struct MainTabView: View {
                 musicPlayer: musicPlayerModel
             )
         }
+        // The VIDEO player is hosted here on the root TabView too, for the same
+        // first-trigger reliability reason as the music player above. HomeTab and
+        // SearchTab set `playRequest` / `resumePrompt`; this presents over the
+        // whole shell no matter how deep the active tab's navigation stack is.
+        .playerHost(
+            playRequest: $playRequest,
+            resumePrompt: $resumePrompt,
+            accounts: accounts,
+            behavior: subtitleBehaviorModel.settings,
+            style: subtitleStyleModel.style,
+            playbackSettings: playbackModel.settings,
+            spoilerSettings: spoilerModel.settings,
+            subtitlePolicy: subtitlePolicyModel.resolvedPolicy(behavior: subtitleBehaviorModel.settings),
+            audioPolicy: audioPolicyModel.resolvedPolicy(settings: playbackModel.settings),
+            seriesTrackStore: seriesTrackStore,
+            scrobbler: RealtimePlaybackScrobbler(trakt: trakt.scrobbler, simkl: simkl.scrobbler),
+            watchBridge: watchBridge,
+            identitySources: identitySources,
+            showDiagnostics: diagnosticsModel.settings.isEnabled,
+            themePalette: resolvedPalette,
+            onSubtitleStyleChanged: { subtitleStyleModel.style = $0 }
+        )
         .environment(musicPlayerModel)
         .environment(uiDensityModel)
         .environment(cardStyleModel)
@@ -1116,10 +1150,15 @@ private struct HomeTab: View {
     let appliedWatchRecency: @Sendable () async -> [String: AppliedResumeRecord]
     /// Persist an in-player subtitle-appearance edit to the profile store.
     let onSubtitleStyleChanged: (SubtitleStyle) -> Void
+    /// The video player is hosted on the root `TabView` (see `MainTabView`), not
+    /// inside this tab's navigation stack — a `fullScreenCover` attached inside a
+    /// stack presents unreliably (it only appears after a stray Back press, which
+    /// is why "play from a media-share folder" only fired once you backed out to
+    /// Home). These bindings drive that root-level host.
+    @Binding var playRequest: PlayRequest?
+    @Binding var resumePrompt: MediaItem?
 
     @State private var path = NavigationPath()
-    @State private var playRequest: PlayRequest?
-    @State private var resumePrompt: MediaItem?
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -1214,24 +1253,6 @@ private struct HomeTab: View {
                 )
             }
         }
-        .playerHost(
-            playRequest: $playRequest,
-            resumePrompt: $resumePrompt,
-            accounts: accounts,
-            behavior: behavior,
-            style: style,
-            playbackSettings: playbackSettings,
-            spoilerSettings: spoilerSettings,
-            subtitlePolicy: subtitlePolicy,
-            audioPolicy: audioPolicy,
-            seriesTrackStore: seriesTrackStore,
-            scrobbler: scrobbler,
-            watchBridge: watchBridge,
-            identitySources: identitySources,
-            showDiagnostics: showDiagnostics,
-            themePalette: themePalette,
-            onSubtitleStyleChanged: onSubtitleStyleChanged
-        )
         .task(id: pendingPlayItemID) { await handleDeepLink() }
         .mediaItemNavigator { navigate($0) }
     }
@@ -1469,10 +1490,12 @@ private struct SearchTab: View {
     let identitySources: @Sendable (MediaItem) -> [MediaSourceRef]
     /// Persist an in-player subtitle-appearance edit to the profile store.
     let onSubtitleStyleChanged: (SubtitleStyle) -> Void
+    /// Hosted on the root `TabView` (see `MainTabView`) for reliable presentation,
+    /// exactly like `HomeTab` — see the note there.
+    @Binding var playRequest: PlayRequest?
+    @Binding var resumePrompt: MediaItem?
 
     @State private var path = NavigationPath()
-    @State private var playRequest: PlayRequest?
-    @State private var resumePrompt: MediaItem?
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -1556,24 +1579,6 @@ private struct SearchTab: View {
                 path.append(item)
             }
         }
-        .playerHost(
-            playRequest: $playRequest,
-            resumePrompt: $resumePrompt,
-            accounts: accounts,
-            behavior: behavior,
-            style: style,
-            playbackSettings: playbackSettings,
-            spoilerSettings: spoilerSettings,
-            subtitlePolicy: subtitlePolicy,
-            audioPolicy: audioPolicy,
-            seriesTrackStore: seriesTrackStore,
-            scrobbler: scrobbler,
-            watchBridge: watchBridge,
-            identitySources: identitySources,
-            showDiagnostics: showDiagnostics,
-            themePalette: themePalette,
-            onSubtitleStyleChanged: onSubtitleStyleChanged
-        )
     }
 
     /// Selecting a search result always opens its detail page rather than

@@ -26,6 +26,10 @@ public struct HomeView: View {
     /// The curated hero items, recomputed as Home content or settings change.
     @State private var heroItems: [MediaItem] = []
 
+    /// Focus scope spanning the hero + rows; lets the hero's Play button be the
+    /// preferred initial focus (see `.focusScope`/`prefersDefaultFocus`).
+    @Namespace private var heroFocusScope
+
     @Environment(\.plozzMetrics) private var metrics
 
     public init(
@@ -87,6 +91,11 @@ public struct HomeView: View {
             } ?? []
             let displayHeroItems = heroItems.isEmpty ? syncHeroItems : heroItems
             let heroActive = (heroSettings?.settings.isActive ?? false) && !displayHeroItems.isEmpty
+            // Account-scoped ids of every watchlisted title, so the hero can show
+            // the *series'* watchlist state on an episode/season slide.
+            let watchlistedKeys = Set(content.watchlist.map {
+                HomeHeroView.watchlistKey(accountID: $0.sourceAccountID, itemID: $0.id)
+            })
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
@@ -96,6 +105,8 @@ public struct HomeView: View {
                                 settings: heroSettings.settings,
                                 spoilerSettings: spoilerSettings,
                                 navigationStyle: navigationStyle,
+                                watchlistedKeys: watchlistedKeys,
+                                focusScope: heroFocusScope,
                                 onSelect: onSelectItem,
                                 onPlay: onPlayItem,
                                 // When focus returns to the hero from a row below,
@@ -105,6 +116,20 @@ public struct HomeView: View {
                                 onFocusGained: {
                                     withAnimation(.easeInOut(duration: 0.4)) {
                                         proxy.scrollTo(Self.heroTopID, anchor: .top)
+                                    }
+                                },
+                                // Focus leaving the hero downward: recede. Scroll
+                                // the anchor just above the buttons to ~12% down
+                                // the screen, so the logo/title lift off the top,
+                                // the overview/buttons/dots settle into the upper
+                                // region, and the Continue Watching row centers
+                                // below — the Apple TV "recede" move.
+                                onMoveDown: {
+                                    withAnimation(.easeInOut(duration: 0.45)) {
+                                        proxy.scrollTo(
+                                            HomeHeroView.recedeAnchorID,
+                                            anchor: UnitPoint(x: 0.5, y: 0.12)
+                                        )
                                     }
                                 }
                             )
@@ -121,9 +146,20 @@ public struct HomeView: View {
                         .padding(.top, heroActive ? -Self.heroRowOverlap : PlozzTheme.Metrics.screenVerticalPadding)
                         .padding(.bottom, PlozzTheme.Metrics.screenVerticalPadding)
                     }
+                    // Span the hero and rows in one focus scope so the hero's
+                    // Play button can be the scope's preferred default — tvOS
+                    // then lands initial focus on the hero instead of a Continue
+                    // Watching card, with no visible focus steal-back.
+                    .focusScope(heroFocusScope)
                 }
                 // Never clip a focused card's lift, shadow or border.
                 .scrollClipDisabled()
+                // When the hero is active, let it bleed into the top overscan
+                // inset instead of the ScrollView reserving it as a blank bar
+                // above the backdrop (the gap that made the hero sit too low).
+                // An empty edge set is a no-op, so the classic rows layout keeps
+                // its normal top inset under the tab bar.
+                .ignoresSafeArea(.container, edges: heroActive ? .top : [])
             }
             // Remember the structure we actually rendered (post-visibility), keyed
             // on kinds *and* counts so a changed card count re-persists too.

@@ -19,7 +19,10 @@ final class HomeViewModelLayoutTests: XCTestCase {
     }
 
     func testSkeletonLayoutRestoredFromStore() {
-        let persisted: [HomeRowKind] = [.continueWatching, .libraries]
+        let persisted: [HomeRowLayout] = [
+            HomeRowLayout(kind: .continueWatching, count: 3),
+            HomeRowLayout(kind: .libraries, count: 5),
+        ]
         let vm = HomeViewModel(accounts: [makeAccount()], layoutStore: InMemoryHomeLayoutStore(persisted))
         XCTAssertEqual(vm.skeletonLayout, persisted)
     }
@@ -27,19 +30,34 @@ final class HomeViewModelLayoutTests: XCTestCase {
     func testRememberLayoutPersistsAndUpdates() {
         let store = InMemoryHomeLayoutStore()
         let vm = HomeViewModel(accounts: [makeAccount()], layoutStore: store)
-        let rendered: [HomeRowKind] = [.continueWatching, .recentlyAdded]
+        let rendered: [HomeRowLayout] = [
+            HomeRowLayout(kind: .continueWatching, count: 2),
+            HomeRowLayout(kind: .recentlyAdded, count: 24),
+        ]
         vm.rememberLayout(rendered)
         XCTAssertEqual(vm.skeletonLayout, rendered)
         XCTAssertEqual(store.load(), rendered)
     }
 
     func testRememberLayoutIsNoOpWhenUnchanged() {
-        let persisted: [HomeRowKind] = [.continueWatching, .libraries]
+        let persisted: [HomeRowLayout] = [
+            HomeRowLayout(kind: .continueWatching, count: 4),
+            HomeRowLayout(kind: .libraries, count: 6),
+        ]
         let store = InMemoryHomeLayoutStore(persisted)
         let vm = HomeViewModel(accounts: [makeAccount()], layoutStore: store)
         // Saving the same structure should leave it intact (and not throw/clear).
         vm.rememberLayout(persisted)
         XCTAssertEqual(vm.skeletonLayout, persisted)
         XCTAssertEqual(store.load(), persisted)
+    }
+
+    func testRememberLayoutPersistsWhenOnlyCountChanges() {
+        let store = InMemoryHomeLayoutStore([HomeRowLayout(kind: .recentlyAdded, count: 10)])
+        let vm = HomeViewModel(accounts: [makeAccount()], layoutStore: store)
+        let grown: [HomeRowLayout] = [HomeRowLayout(kind: .recentlyAdded, count: 42)]
+        vm.rememberLayout(grown)
+        XCTAssertEqual(vm.skeletonLayout, grown)
+        XCTAssertEqual(store.load(), grown)
     }
 }

@@ -25,9 +25,13 @@ final class HomeLayoutStoreTests: XCTestCase {
         XCTAssertTrue(store.load().isEmpty)
     }
 
-    func testSaveLoadRoundTripPreservesOrder() {
+    func testSaveLoadRoundTripPreservesOrderAndCounts() {
         let store = HomeLayoutStore(defaults: defaults, namespace: nil)
-        let layout: [HomeRowKind] = [.continueWatching, .recentlyAdded, .libraries]
+        let layout: [HomeRowLayout] = [
+            HomeRowLayout(kind: .continueWatching, count: 3),
+            HomeRowLayout(kind: .recentlyAdded, count: 24),
+            HomeRowLayout(kind: .libraries, count: 6),
+        ]
         store.save(layout)
         XCTAssertEqual(store.load(), layout)
     }
@@ -35,23 +39,36 @@ final class HomeLayoutStoreTests: XCTestCase {
     func testNamespacesAreIsolated() {
         let primary = HomeLayoutStore(defaults: defaults, namespace: nil)
         let other = HomeLayoutStore(defaults: defaults, namespace: "profile-2")
-        primary.save([.continueWatching])
-        other.save([.watchlist, .libraries])
-        XCTAssertEqual(primary.load(), [.continueWatching])
-        XCTAssertEqual(other.load(), [.watchlist, .libraries])
+        primary.save([HomeRowLayout(kind: .continueWatching, count: 2)])
+        other.save([HomeRowLayout(kind: .watchlist, count: 8), HomeRowLayout(kind: .libraries, count: 4)])
+        XCTAssertEqual(primary.load(), [HomeRowLayout(kind: .continueWatching, count: 2)])
+        XCTAssertEqual(other.load(), [HomeRowLayout(kind: .watchlist, count: 8), HomeRowLayout(kind: .libraries, count: 4)])
     }
 
     func testUnknownRawValuesAreFilteredOut() {
-        // Simulate an older build that persisted a now-removed row kind.
-        defaults.set(["continueWatching", "bogus", "libraries"], forKey: "com.plozz.homeLayout")
+        // Simulate a persisted value that includes a now-removed row kind.
+        let key = "com.plozz.homeLayout.v2"
+        let json = #"[{"kind":"continueWatching","count":3},{"kind":"bogus","count":9},{"kind":"libraries","count":5}]"#
+        defaults.set(Data(json.utf8), forKey: key)
         let store = HomeLayoutStore(defaults: defaults, namespace: nil)
-        XCTAssertEqual(store.load(), [.continueWatching, .libraries])
+        XCTAssertEqual(store.load(), [
+            HomeRowLayout(kind: .continueWatching, count: 3),
+            HomeRowLayout(kind: .libraries, count: 5),
+        ])
+    }
+
+    func testPreV2ArrayValueIsIgnored() {
+        // A legacy bare `[String]` value under the old key must not crash or
+        // corrupt the v2 read; the store simply falls back to "nothing persisted".
+        defaults.set(["continueWatching", "libraries"], forKey: "com.plozz.homeLayout")
+        let store = HomeLayoutStore(defaults: defaults, namespace: nil)
+        XCTAssertTrue(store.load().isEmpty)
     }
 
     func testInMemoryStoreRoundTrips() {
-        let store = InMemoryHomeLayoutStore([.libraries])
-        XCTAssertEqual(store.load(), [.libraries])
-        store.save([.continueWatching, .watchlist])
-        XCTAssertEqual(store.load(), [.continueWatching, .watchlist])
+        let store = InMemoryHomeLayoutStore([HomeRowLayout(kind: .libraries, count: 4)])
+        XCTAssertEqual(store.load(), [HomeRowLayout(kind: .libraries, count: 4)])
+        store.save([HomeRowLayout(kind: .continueWatching, count: 1), HomeRowLayout(kind: .watchlist, count: 12)])
+        XCTAssertEqual(store.load(), [HomeRowLayout(kind: .continueWatching, count: 1), HomeRowLayout(kind: .watchlist, count: 12)])
     }
 }

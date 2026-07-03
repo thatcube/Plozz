@@ -14,6 +14,10 @@ public final class ItemDetailViewModel {
     public struct Detail: Equatable, Sendable {
         public var item: MediaItem
         public var children: [MediaItem]
+        /// True once the children fetch has completed (so an empty `children` can
+        /// be distinguished from "still loading"). Leaf items — which never have
+        /// children — are considered loaded immediately.
+        public var childrenLoaded: Bool = false
     }
 
     public private(set) var state: LoadState<Detail> = .idle
@@ -357,7 +361,7 @@ public final class ItemDetailViewModel {
                 // in (same item identity ⇒ no hero flicker) when they arrive.
                 let fetchedChildren = (try? await activeProvider.children(of: item.id)) ?? []
                 try Task.checkCancellation()
-                state = .loaded(Detail(item: taggedItem, children: fetchedChildren.map(tagged)))
+                state = .loaded(Detail(item: taggedItem, children: fetchedChildren.map(tagged), childrenLoaded: true))
                 persistSnapshot()
                 // Trailers + ratings ARE awaited: opening a detail deterministically
                 // populates its Trailer button and rating badges. Cancelled with
@@ -367,7 +371,7 @@ public final class ItemDetailViewModel {
                 // Leaf kinds (movie/episode/video): the hero IS the content, so
                 // publish it immediately, then load trailers/ratings off the
                 // critical path of first paint.
-                state = .loaded(Detail(item: taggedItem, children: []))
+                state = .loaded(Detail(item: taggedItem, children: [], childrenLoaded: true))
                 hasPaintedFreshDetail = true
                 seedSources(from: taggedItem)
                 persistSnapshot()
@@ -679,7 +683,7 @@ public final class ItemDetailViewModel {
             children = []
         }
         guard !Task.isCancelled, isCurrent() else { return }
-        state = .loaded(Detail(item: tagged(item), children: children.map(tagged)))
+        state = .loaded(Detail(item: tagged(item), children: children.map(tagged), childrenLoaded: true))
         // Refresh the episode lists that were already loaded for visible seasons.
         let loadedSeasonIDs = Array(seasonEpisodes.keys)
         seasonEpisodes = [:]

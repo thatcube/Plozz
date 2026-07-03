@@ -1450,6 +1450,21 @@ public final class AppState {
     /// through the "Which Plex user are you?" picker first; otherwise we proceed
     /// straight to the "choose your libraries" step.
     private func finishAuthentication(session: UserSession, accountID: String, isFirstRun: Bool) {
+        // A media share exposes exactly one browsable "library" (its root
+        // folder), so the "choose your libraries" opt-out step is pure friction —
+        // there's nothing to choose between. Skip straight past it (the single
+        // library stays visible by default) while still doing the first-run
+        // profile seeding the step would have done.
+        if session.server.provider == .mediaShare {
+            beginLibrarySelection(
+                isFirstRun: isFirstRun,
+                seedName: session.userName,
+                seedAvatar: session.avatarURL?.absoluteString,
+                applyPlexIdentity: false,
+                skipSelectionStep: true
+            )
+            return
+        }
         if session.server.provider == .plex,
            profilesModel.activeProfile.homeUserBinding(forPlexAccount: accountID) == nil {
             Task { [weak self] in
@@ -1487,7 +1502,7 @@ public final class AppState {
     /// confirm screen shows who's watching. `applyPlexIdentity` records whether a
     /// freshly-picked Plex Home user still needs applying once the step completes
     /// (deferred so the PIN prompt doesn't interrupt onboarding).
-    private func beginLibrarySelection(isFirstRun: Bool, seedName: String, seedAvatar: String?, applyPlexIdentity: Bool) {
+    private func beginLibrarySelection(isFirstRun: Bool, seedName: String, seedAvatar: String?, applyPlexIdentity: Bool, skipSelectionStep: Bool = false) {
         if isFirstRun {
             profilesModel.seedDefaultProfileIdentity(name: seedName, avatarImageURL: seedAvatar)
         }
@@ -1495,7 +1510,13 @@ public final class AppState {
             isFirstRun: isFirstRun,
             applyPlexIdentity: applyPlexIdentity
         )
-        apply(.librarySelectionRequired)
+        // Providers with a single implicit library (media shares) skip the
+        // "choose your libraries" screen and go straight to the continuation.
+        if skipSelectionStep {
+            confirmLibrarySelection()
+        } else {
+            apply(.librarySelectionRequired)
+        }
     }
 
     /// Completes the "choose your libraries" step and continues onboarding: a

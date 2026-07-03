@@ -21,6 +21,8 @@ public struct ItemDetailView: View {
     /// pick a bottom-anchored control in the full-screen hero — which would make
     /// it auto-scroll the page down on arrival. Mirrors `SeriesDetailView`.
     @FocusState private var playFocused: Bool
+    @Environment(\.dismiss) private var dismiss
+    @FocusState private var emptyBackFocused: Bool
 
     /// This device's capabilities, used to drive the smart default version and
     /// the per-version Direct Play / Transcode prediction in the picker.
@@ -85,6 +87,8 @@ public struct ItemDetailView: View {
                     initialSeasonID: initialSeasonID ?? viewModel.preselectedSeasonID ?? initialEpisode?.seasonID,
                     initialEpisode: initialEpisode
                 )
+            } else if isEmptyContainer(detail) {
+                emptyFolderState(detail.item)
             } else {
                 container(detail)
             }
@@ -210,6 +214,49 @@ public struct ItemDetailView: View {
         case .movie, .episode, .video: return true
         default: return false
         }
+    }
+
+    /// A folder/collection that finished loading with no playable contents. Only
+    /// these get the empty state — a series/season with no episodes keeps its
+    /// normal hero (its emptiness is a metadata gap, not a browse dead-end).
+    private func isEmptyContainer(_ detail: ItemDetailViewModel.Detail) -> Bool {
+        switch detail.item.kind {
+        case .folder, .collection:
+            return detail.childrenLoaded && detail.children.isEmpty
+        default:
+            return false
+        }
+    }
+
+    /// Shown when the user drills into a folder that holds no sub-folders and no
+    /// playable video (e.g. a folder of `.zip`s). Without this the page would be a
+    /// blank hero with NOTHING focusable — and on tvOS a screen with no focusable
+    /// element makes the Menu button exit the app instead of popping the page,
+    /// trapping the user. The focusable "Go Back" button both explains the empty
+    /// folder and restores a working Back.
+    private func emptyFolderState(_ item: MediaItem) -> some View {
+        VStack(spacing: 24) {
+            Image(systemName: "folder")
+                .font(.system(size: 64))
+                .foregroundStyle(.secondary)
+            Text(item.title)
+                .font(.title2.weight(.semibold))
+            Text("No playable media in this folder.")
+                .font(.title3)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            Button {
+                dismiss()
+            } label: {
+                Label("Go Back", systemImage: "chevron.backward")
+                    .frame(minWidth: 260)
+            }
+            .buttonStyle(.borderedProminent)
+            .focused($emptyBackFocused)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(PlozzTheme.Metrics.screenPadding)
+        .defaultFocus($emptyBackFocused, true)
     }
 
     private func childrenTitle(for item: MediaItem) -> String {

@@ -310,12 +310,18 @@ struct HomeHeroView: View {
             }
         }
         // Auto-advance: restart the dwell whenever the slide changes (manual page
-        // or a previous auto-advance) and pause while the hero holds focus.
+        // or a previous auto-advance). This runs REGARDLESS of focus — focus lands
+        // on the hero action row by default, so gating on `focus == nil` (as we
+        // used to) froze the carousel the entire time the user was looking at it
+        // and only cycled once they'd navigated away. The Apple TV hero keeps
+        // cycling while focused; the buttons/metadata just track the new slide.
         .task(id: autoAdvanceKey) {
-            guard settings.autoAdvance, items.count > 1, focus == nil else { return }
+            guard settings.autoAdvance, items.count > 1 else { return }
             let seconds = UInt64(settings.autoAdvanceSeconds)
             try? await Task.sleep(nanoseconds: seconds * 1_000_000_000)
-            guard !Task.isCancelled, focus == nil else { return }
+            // Don't step on an in-flight manual page; that page bumped
+            // `advanceToken`, which restarts this dwell from the new slide.
+            guard !Task.isCancelled, slideProgress == 0 else { return }
             page(to: (index + 1) % items.count, keepButton: selectedButton, forward: true)
         }
     }
@@ -383,10 +389,11 @@ struct HomeHeroView: View {
             return ProjectionTransform(CGAffineTransform(translationX: x, y: 0))
         }
     }
-    /// The dwell key: any change (slide index, focus state, or a manual page
-    /// bump) restarts the auto-advance timer from the current slide.
+    /// The dwell key: any change (slide index or a manual page bump) restarts the
+    /// auto-advance timer from the current slide. Focus is deliberately NOT part of
+    /// this — the carousel cycles whether or not the hero holds focus.
     private var autoAdvanceKey: String {
-        "\(index)-\(focus != nil)-\(advanceToken)"
+        "\(index)-\(advanceToken)"
     }
 
     // MARK: - Content column

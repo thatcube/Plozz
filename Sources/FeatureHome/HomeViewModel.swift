@@ -27,9 +27,10 @@ public final class HomeViewModel {
     public private(set) var state: LoadState<Content> = .idle
 
     /// The row structure to render as a skeleton while loading: the layout
-    /// persisted from the previous successful load (so the placeholder matches the
-    /// user's real Home), falling back to a default on a first-ever launch.
-    public private(set) var skeletonLayout: [HomeRowKind]
+    /// persisted from the previous successful load (row kinds, order **and** the
+    /// card count each row rendered, so the placeholder matches the user's real
+    /// Home), falling back to a default on a first-ever launch.
+    public private(set) var skeletonLayout: [HomeRowLayout]
 
     private let accounts: [ResolvedAccount]
     private let aggregator: HomeAggregator
@@ -125,15 +126,16 @@ public final class HomeViewModel {
     /// User-facing name for the greeting header — the primary (first) account.
     public var userName: String { accounts.first?.account.userName ?? "" }
 
-    /// Records the row structure the view actually rendered so the next launch's
-    /// skeleton matches it. Driven by the view (not derived here) because true
-    /// visibility — e.g. whether the Libraries row survives the user's
-    /// per-library Home-visibility choices — is only known at render time. Saves
-    /// only on change to avoid redundant `UserDefaults` writes.
-    public func rememberLayout(_ kinds: [HomeRowKind]) {
-        guard kinds != skeletonLayout else { return }
-        skeletonLayout = kinds
-        layoutStore.save(kinds)
+    /// Records the row structure the view actually rendered — each row's kind and
+    /// the number of cards it showed — so the next launch's skeleton matches it.
+    /// Driven by the view (not derived here) because true visibility — e.g.
+    /// whether the Libraries row survives the user's per-library Home-visibility
+    /// choices, and how many items/tiles each row ends up with — is only known at
+    /// render time. Saves only on change to avoid redundant `UserDefaults` writes.
+    public func rememberLayout(_ layout: [HomeRowLayout]) {
+        guard layout != skeletonLayout else { return }
+        skeletonLayout = layout
+        layoutStore.save(layout)
     }
 
     /// Loads on first appearance and re-aggregates only when the hidden-library

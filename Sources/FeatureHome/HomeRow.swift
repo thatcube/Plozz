@@ -23,8 +23,34 @@ public enum HomeRowKind: String, Hashable, Sendable, CaseIterable {
 
     /// Fallback skeleton structure used only on the very first launch (before any
     /// real layout has been persisted). A sensible "most users have these" guess;
-    /// once a real load completes, the persisted layout replaces it.
-    public static let defaultSkeletonLayout: [HomeRowKind] = [.continueWatching, .recentlyAdded, .libraries]
+    /// once a real load completes, the persisted layout replaces it. The `count: 0`
+    /// on each row means "unknown" — the skeleton fills the screen for the current
+    /// density until a real load records how many cards each row actually had.
+    public static let defaultSkeletonLayout: [HomeRowLayout] = [
+        HomeRowLayout(kind: .continueWatching),
+        HomeRowLayout(kind: .recentlyAdded),
+        HomeRowLayout(kind: .libraries),
+    ]
+}
+
+/// One persisted Home row descriptor: its `kind` (identity + order + title +
+/// style) paired with the number of cards it rendered on the last successful
+/// load. The loading skeleton uses `count` to show a *matching* number of
+/// placeholders — clamped to what actually fits at the current display density —
+/// instead of a fixed guess. That keeps a full row (e.g. Recently Added) filling
+/// the screen while a genuinely sparse row (e.g. 3 Continue Watching items) shows
+/// just three, so nothing balloons then collapses when real content swaps in.
+public struct HomeRowLayout: Hashable, Sendable {
+    public let kind: HomeRowKind
+    /// Cards the row rendered last load. `0` means "unknown" (first-ever launch or
+    /// an older persisted value); the skeleton then fills the screen for the
+    /// current density rather than guessing a fixed number.
+    public let count: Int
+
+    public init(kind: HomeRowKind, count: Int = 0) {
+        self.kind = kind
+        self.count = max(count, 0)
+    }
 }
 
 /// The poster aspect a media row renders with. Mirrors `PosterCardView.Style`
@@ -49,6 +75,11 @@ public struct HomeRow: Identifiable, Equatable, Sendable {
     /// Continue Watching shows wide landscape stills (resume artwork); every other
     /// media row shows portrait posters.
     public var style: HomeRowStyle { kind == .continueWatching ? .landscape : .poster }
+
+    /// The number of cards this row renders — its media `items` for a media row,
+    /// or its `libraries` tiles for the Libraries row (exactly one is populated).
+    /// Recorded per row so the next launch's skeleton shows a matching count.
+    public var cardCount: Int { max(items.count, libraries.count) }
 
     init(kind: HomeRowKind, items: [MediaItem] = [], libraries: [AggregatedLibrary] = []) {
         self.kind = kind

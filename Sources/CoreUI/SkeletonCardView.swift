@@ -1,5 +1,6 @@
 #if canImport(SwiftUI)
 import SwiftUI
+import CoreModels
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -8,6 +9,12 @@ import UIKit
 /// exactly (same glass surface, paddings, artwork aspect/corner radii and the
 /// two text lines beneath) but renders soft neutral fills instead of a real
 /// `MediaItem`.
+///
+/// Like `PosterCardView`, it renders in whichever per-profile `CardStyle` is
+/// active (read from `\.plozzCardStyle`): the framed glass card ("Cards") or the
+/// borderless artwork-only look ("Posters"). Matching the active style is what
+/// keeps the loading state from looking off — a borderless profile would
+/// otherwise see framed glass skeletons swap out for borderless artwork.
 ///
 /// Keeping this in lock-step with `PosterCardView` — via the shared
 /// `PlozzTheme.Metrics` and the same layout structure — is what makes a skeleton
@@ -21,15 +28,25 @@ public struct SkeletonCardView: View {
     private let style: Style
 
     @Environment(\.plozzMetrics) private var metrics
+    /// Per-profile card presentation (framed glass card vs borderless artwork),
+    /// mirrored from `PosterCardView` so the placeholder matches whichever look the
+    /// real cards will render in.
+    @Environment(\.plozzCardStyle) private var cardStyle
 
     public init(style: Style = .poster) {
         self.style = style
     }
 
+    @ViewBuilder
     public var body: some View {
-        switch style {
-        case .poster: posterCard
-        case .landscape: landscapeCard
+        switch cardStyle {
+        case .framed:
+            switch style {
+            case .poster: posterCard
+            case .landscape: landscapeCard
+            }
+        case .borderless:
+            borderlessCard
         }
     }
 
@@ -76,6 +93,96 @@ public struct SkeletonCardView: View {
         .padding(metrics.cardInset)
         .plozzGlassCard(cornerRadius: metrics.landscapeCardCornerRadius, isFocused: false)
         .shimmering()
+    }
+
+    // MARK: Borderless ("Posters" style)
+
+    /// Mirrors `PosterCardView.borderlessCard` at rest (skeletons never focus): no
+    /// glass surface, just the full-bleed artwork placeholder rounded at the outer
+    /// radius, with the caption held off the artwork edge and riding up to the
+    /// resting gap. Reserving the *focused* caption spacing (`borderlessCaptionSpacing`)
+    /// and pushing the caption up by `focusCaptionPush` reproduces the real card's
+    /// footprint exactly, so nothing shifts when real content swaps in.
+    private var borderlessCard: some View {
+        VStack(alignment: .leading, spacing: borderlessCaptionSpacing) {
+            borderlessArtwork
+
+            // Match BorderlessCardCaption: VStack(spacing: 2), same fonts, held off
+            // the rounded artwork edge by the shared caption inset.
+            textLines(contentWidth: borderlessCaptionContentWidth, spacing: 2)
+                .padding(.horizontal, borderlessCaptionInset)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                // The real caption rides up to the resting gap when unfocused (a pure
+                // offset, never a layout change); a skeleton is always at rest.
+                .offset(y: -metrics.focusCaptionPush)
+        }
+        .padding(.horizontal, metrics.borderlessCardSideMargin)
+        .shimmering()
+    }
+
+    /// The full-bleed artwork placeholder for a borderless card, clipped to the
+    /// outer radius — mirrors `PosterCardView.borderlessArtwork` minus the focus
+    /// halo (skeletons never focus).
+    private var borderlessArtwork: some View {
+        Color.clear
+            .aspectRatio(borderlessAspectRatio, contentMode: .fit)
+            .frame(maxWidth: .infinity)
+            .overlay {
+                RoundedRectangle(cornerRadius: borderlessCornerRadius, style: .continuous)
+                    .fill(Color.plozzSkeletonFill)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: borderlessCornerRadius, style: .continuous))
+            .plozzMediaEdge(cornerRadius: borderlessCornerRadius)
+    }
+
+    /// Aspect ratio for the borderless full-bleed image (matches `PosterCardView`).
+    private var borderlessAspectRatio: CGFloat {
+        switch style {
+        case .poster: return 2.0 / 3.0
+        case .landscape: return 16.0 / 9.0
+        }
+    }
+
+    /// Outer corner radius reused for a borderless image — the framed card's outer
+    /// (glass) radius, matching `PosterCardView.borderlessCornerRadius`.
+    private var borderlessCornerRadius: CGFloat {
+        switch style {
+        case .poster: return metrics.posterCardCornerRadius
+        case .landscape: return metrics.landscapeCardCornerRadius
+        }
+    }
+
+    /// Horizontal caption clearance for a borderless card, matching
+    /// `PosterCardView.borderlessCaptionInset`.
+    private var borderlessCaptionInset: CGFloat {
+        switch style {
+        case .poster: return metrics.posterCaptionInset
+        case .landscape: return metrics.landscapeCaptionInset
+        }
+    }
+
+    /// Artwork↔caption gap reserved for a borderless card — always the *focused*
+    /// size (base + focus push), matching `PosterCardView.borderlessCaptionSpacing`
+    /// so the footprint never changes with focus.
+    private var borderlessCaptionSpacing: CGFloat {
+        let base: CGFloat
+        switch style {
+        case .poster: base = metrics.posterCaptionTopSpacing
+        case .landscape: base = metrics.landscapeCaptionTopSpacing
+        }
+        return base + metrics.focusCaptionPush
+    }
+
+    /// Approximate width available to the borderless caption pills — the card slot
+    /// minus its side margins and the caption inset. Only drives the cosmetic pill
+    /// lengths, not layout height.
+    private var borderlessCaptionContentWidth: CGFloat {
+        let slot: CGFloat
+        switch style {
+        case .poster: slot = metrics.posterWidth
+        case .landscape: slot = metrics.landscapeCardSlotWidth
+        }
+        return slot - 2 * metrics.borderlessCardSideMargin - 2 * borderlessCaptionInset
     }
 
     /// Two fully-rounded placeholder pills standing in for the card's title and

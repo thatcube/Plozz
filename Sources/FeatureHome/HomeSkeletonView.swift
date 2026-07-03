@@ -16,23 +16,36 @@ import CoreUI
 ///  * **Non-interactive** — the whole tree ignores hit-testing and its cards are
 ///    non-focusable, so the focus engine never anchors on a placeholder.
 struct HomeSkeletonView: View {
-    let layout: [HomeRowKind]
+    let layout: [HomeRowLayout]
     /// How long loading must persist before the skeleton fades in.
     var appearDelay: Duration = .milliseconds(150)
 
     @State private var visible = false
+    /// The rail's measured viewport width, used to render exactly enough
+    /// placeholder cards to fill the screen for the *current* density (see
+    /// `cardCount`). Measured via a background reader so it never perturbs layout.
+    @State private var availableWidth: CGFloat = 0
 
     @Environment(\.plozzMetrics) private var metrics
 
-    private var rows: [HomeRowKind] {
+    /// tvOS full-screen width, used only as a first-frame fallback before the
+    /// real viewport width is measured — so the very first render still shows a
+    /// screen-filling row instead of a single card.
+    private static let fallbackWidth: CGFloat = 1920
+
+    private var rows: [HomeRowLayout] {
         layout.isEmpty ? HomeRowKind.defaultSkeletonLayout : layout
+    }
+
+    private var measuredWidth: CGFloat {
+        availableWidth > 0 ? availableWidth : Self.fallbackWidth
     }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: metrics.rowSpacing) {
-                ForEach(rows, id: \.self) { kind in
-                    skeletonRow(kind)
+                ForEach(rows, id: \.kind) { row in
+                    skeletonRow(row)
                 }
             }
             .padding(.vertical, PlozzTheme.Metrics.screenVerticalPadding)
@@ -40,6 +53,17 @@ struct HomeSkeletonView: View {
         .scrollClipDisabled()
         .scrollDisabled(true)
         .allowsHitTesting(false)
+        .background {
+            // Measure the available width without affecting layout, so the number
+            // of skeleton cards tracks how many actually fit at the current density.
+            GeometryReader { proxy in
+                Color.clear
+                    .onAppear { availableWidth = proxy.size.width }
+                    .onChange(of: proxy.size.width) { _, newWidth in
+                        availableWidth = newWidth
+                    }
+            }
+        }
         .opacity(visible ? 1 : 0)
         .animation(.easeOut(duration: 0.2), value: visible)
         .task {
@@ -49,7 +73,8 @@ struct HomeSkeletonView: View {
     }
 
     @ViewBuilder
-    private func skeletonRow(_ kind: HomeRowKind) -> some View {
+    private func skeletonRow(_ row: HomeRowLayout) -> some View {
+        let kind = row.kind
         // Mirrors MediaRowView's title + horizontal rail layout and paddings so
         // the skeleton occupies the same vertical space as the real row.
         VStack(alignment: .leading, spacing: metrics.sectionTitleSpacing) {
@@ -79,7 +104,7 @@ struct HomeSkeletonView: View {
             // row 1:1.
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: metrics.cardSpacing) {
-                    ForEach(0..<cardCount(for: kind), id: \.self) { _ in
+                    ForEach(0..<cardCount(for: row), id: \.self) { _ in
                         SkeletonCardView(style: cardStyle(for: kind))
                             .frame(width: cardWidth(for: kind))
                     }
@@ -114,9 +139,29 @@ struct HomeSkeletonView: View {
         cardStyle(for: kind) == .landscape ? metrics.landscapeCardSlotWidth : metrics.posterWidth
     }
 
-    /// Enough placeholders to fill the 10-foot screen width for each card size.
-    private func cardCount(for kind: HomeRowKind) -> Int {
-        cardStyle(for: kind) == .landscape ? 4 : 6
+    /// How many placeholder cards to render for a row. We show the count the row
+    /// actually rendered last load (`row.count`) but never more than fit on the
+    /// current screen at this density — so a sparse row (e.g. 3 Continue Watching
+    /// items) shows just three instead of a screen full that then collapses, while
+    /// a full row still fills the viewport. `count == 0` means "unknown" (first
+    /// launch), so we fall back to filling the screen.
+    private func cardCount(for row: HomeRowLayout) -> Int {
+        let fits = fittingCardCount(for: row.kind)
+        return row.count > 0 ? min(row.count, fits) : fits
+    }
+
+    /// The number of cards of `kind`'s size that fill the measured viewport, plus
+    /// one that peeks in from the trailing edge — matching how a real, scrollable
+    /// `MediaRowView` looks at rest. Derived from the card slot pitch
+    /// (`cardWidth + cardSpacing`) and the row's leading screen inset, so it tracks
+    /// the display-density setting automatically instead of hardcoding a count.
+    private func fittingCardCount(for kind: HomeRowKind) -> Int {
+        let slot = cardWidth(for: kind)
+        guard slot > 0 else { return 1 }
+        let pitch = slot + metrics.cardSpacing
+        let usable = max(measuredWidth - PlozzTheme.Metrics.screenPadding, 0)
+        let fit = Int(ceil((usable + metrics.cardSpacing) / pitch))
+        return max(fit + 1, 1)
     }
 }
 

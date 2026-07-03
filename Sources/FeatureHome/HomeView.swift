@@ -46,6 +46,10 @@ public struct HomeView: View {
             // app-wide; passing the reactive `isVisible` here keeps toggles taking
             // effect on the next render even before any re-fetch settles.
             let rows = HomeRow.rows(for: content) { visibility.isVisible($0) }
+            // The descriptor the next launch's skeleton renders from: each row's
+            // kind, order *and* how many cards it actually showed, so the skeleton
+            // matches a full row and a sparse one alike.
+            let layout = rows.map { HomeRowLayout(kind: $0.kind, count: $0.cardCount) }
             ScrollView {
                 VStack(alignment: .leading, spacing: metrics.rowSpacing) {
                     ForEach(rows) { row in
@@ -56,9 +60,9 @@ public struct HomeView: View {
             }
             // Never clip a focused card's lift, shadow or border.
             .scrollClipDisabled()
-            // Remember the structure we actually rendered (post-visibility) so the
-            // next launch's skeleton matches this exact set of rows.
-            .task(id: rows.map(\.kind)) { viewModel.rememberLayout(rows.map(\.kind)) }
+            // Remember the structure we actually rendered (post-visibility), keyed
+            // on kinds *and* counts so a changed card count re-persists too.
+            .task(id: layout) { viewModel.rememberLayout(layout) }
         }
         .task(id: visibility.visibility.excludedKeys) {
             // First appearance loads; thereafter a change to the hidden-library set

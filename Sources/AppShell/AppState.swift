@@ -142,6 +142,25 @@ public final class AppState {
         public let isFirstRun: Bool
     }
 
+    /// Accounts just added in the current add flow whose libraries the
+    /// "choose your libraries" step should offer. `RootView` renders that step
+    /// from this; empty when none is pending.
+    public private(set) var pendingLibrarySelectionAccountIDs: [String] = []
+
+    /// How to continue onboarding once the library step is confirmed. Carries the
+    /// first-run decision (profile-setup detour vs. straight to the app) and
+    /// whether a freshly-picked Plex identity still needs applying afterward.
+    private struct PendingOnboardingContinuation {
+        var isFirstRun: Bool
+        var applyPlexIdentity: Bool
+    }
+    private var pendingOnboardingContinuation: PendingOnboardingContinuation?
+
+    /// When a multi-server Plex sign-in needs a Home-user pick, the chosen
+    /// binding is applied to every one of these newly-added Plex accounts (they
+    /// share the same Home users). Empty for single-account / Jellyfin adds.
+    private var pendingPlexUserApplyToAccountIDs: [String] = []
+
     /// A profile activation waiting on a Plex Home user's PIN.
     public struct PlexPINRequest: Identifiable, Equatable, Sendable {
         /// The id of the profile being activated.
@@ -857,6 +876,19 @@ public final class AppState {
         }
     }
 
+    /// Resolves specific account ids into `ResolvedAccount`s for the onboarding
+    /// "choose your libraries" step (which fans a library-listing call out over
+    /// the just-added accounts). Tokens are resolved on demand.
+    public func resolvedAccounts(withIDs ids: [String]) -> [ResolvedAccount] {
+        ids.compactMap { id in
+            guard let account = accounts.first(where: { $0.id == id }),
+                  let token = resolvedToken(for: id),
+                  let provider = try? registry.provider(for: account.session(token: token))
+            else { return nil }
+            return ResolvedAccount(account: account, provider: provider)
+        }
+    }
+
     /// The accounts the unified Home/Search fan out over. Normally the active
     /// set; falls back to the primary account so the signed-in UI is never empty
     /// even if the active-id set is somehow empty.
@@ -1174,13 +1206,47 @@ public final class AppState {
         reloadAccounts()
         // Flow finished — next add-account starts at the chooser.
         pendingOnboardingProvider = nil
+        pendingLibrarySelectionAccountIDs = [account.id]
+        pendingPlexUserApplyToAccountIDs = session.server.provider == .plex ? [account.id] : []
         finishAuthentication(session: session, accountID: account.id, isFirstRun: isFirstRun)
+    }
+
+    /// Batch sibling of `didAuthenticate` for a multi-server Plex sign-in: adds
+    /// one account per selected server, then runs the onboarding continuation a
+    /// single time so the library step / profile setup happen once for the whole
+    /// batch. The first server drives the identity used downstream.
+    public func didAuthenticatePlexMany(_ sessions: [UserSession]) {
+        guard let first = sessions.first else { return }
+        // Drive `.serverSelected` first so the later library/auth transitions are
+        // legal (mirrors `didAuthenticatePlex`).
+        apply(.serverSelected(first.server))
+
+        let isFirstRun = accounts.isEmpty && !profilesModel.firstRunProfileSetupComplete
+        var addedIDs: [String] = []
+        for session in sessions {
+            let account = Account(from: session)
+            do {
+                try accountStore.add(account, token: session.accessToken)
+                addedIDs.append(account.id)
+            } catch {
+                continue // Skip a failed add; keep the rest of the batch.
+            }
+        }
+        reloadAccounts()
+        pendingOnboardingProvider = nil
+        guard !addedIDs.isEmpty else {
+            apply(.authenticationFailed(.unknown("")))
+            return
+        }
+        pendingLibrarySelectionAccountIDs = addedIDs
+        pendingPlexUserApplyToAccountIDs = addedIDs
+        finishAuthentication(session: first, accountID: addedIDs[0], isFirstRun: isFirstRun)
     }
 
     /// After an account is persisted, decides the next onboarding step. A Plex
     /// account with 2+ Home users that this profile hasn't bound yet detours
     /// through the "Which Plex user are you?" picker first; otherwise we proceed
-    /// straight to the profile-setup sub-flow (first run) or the app.
+    /// straight to the "choose your libraries" step.
     private func finishAuthentication(session: UserSession, accountID: String, isFirstRun: Bool) {
         if session.server.provider == .plex,
            profilesModel.activeProfile.homeUserBinding(forPlexAccount: accountID) == nil {
@@ -1196,31 +1262,55 @@ public final class AppState {
                     )
                     self.apply(.plexUserSelectionRequired)
                 } else {
-                    self.proceedAfterAuth(
+                    self.beginLibrarySelection(
                         isFirstRun: isFirstRun,
                         seedName: session.userName,
-                        seedAvatar: session.avatarURL?.absoluteString
+                        seedAvatar: session.avatarURL?.absoluteString,
+                        applyPlexIdentity: false
                     )
                 }
             }
         } else {
-            proceedAfterAuth(
+            beginLibrarySelection(
                 isFirstRun: isFirstRun,
                 seedName: session.userName,
-                seedAvatar: session.avatarURL?.absoluteString
+                seedAvatar: session.avatarURL?.absoluteString,
+                applyPlexIdentity: false
             )
         }
     }
 
-    /// Enters the first-run profile-setup sub-flow (seeding the default profile
-    /// from the signed-in identity) or, for a later add, drops straight into the
-    /// app.
-    private func proceedAfterAuth(isFirstRun: Bool, seedName: String, seedAvatar: String?) {
+    /// Enters the "choose your libraries" step. On first run this also seeds the
+    /// always-present default profile from the signed-in identity so the later
+    /// confirm screen shows who's watching. `applyPlexIdentity` records whether a
+    /// freshly-picked Plex Home user still needs applying once the step completes
+    /// (deferred so the PIN prompt doesn't interrupt onboarding).
+    private func beginLibrarySelection(isFirstRun: Bool, seedName: String, seedAvatar: String?, applyPlexIdentity: Bool) {
         if isFirstRun {
             profilesModel.seedDefaultProfileIdentity(name: seedName, avatarImageURL: seedAvatar)
+        }
+        pendingOnboardingContinuation = PendingOnboardingContinuation(
+            isFirstRun: isFirstRun,
+            applyPlexIdentity: applyPlexIdentity
+        )
+        apply(.librarySelectionRequired)
+    }
+
+    /// Completes the "choose your libraries" step and continues onboarding: a
+    /// first-ever account detours through the profile-setup sub-flow, a later add
+    /// drops straight into the app (applying any freshly-picked Plex identity).
+    public func confirmLibrarySelection() {
+        let continuation = pendingOnboardingContinuation
+        pendingOnboardingContinuation = nil
+        pendingLibrarySelectionAccountIDs = []
+        pendingPlexUserApplyToAccountIDs = []
+        if continuation?.isFirstRun == true {
             apply(.accountAuthenticatedNeedsProfile)
         } else {
             apply(.accountAuthenticated)
+            if continuation?.applyPlexIdentity == true {
+                ensurePlexIdentityForActiveProfile()
+            }
         }
     }
 
@@ -1238,23 +1328,28 @@ public final class AppState {
                 avatarURL: user.avatarURL?.absoluteString,
                 requiresPIN: user.requiresPIN
             )
-            let updated = profilesModel.activeProfile
-                .settingHomeUserBinding(binding, forPlexAccount: pending.accountID)
+            // Apply the chosen Home user to every newly-added Plex account in the
+            // batch (they belong to the same Plex account and share Home users),
+            // falling back to just the one that triggered the pick.
+            let targets = pendingPlexUserApplyToAccountIDs.isEmpty
+                ? [pending.accountID]
+                : pendingPlexUserApplyToAccountIDs
+            var updated = profilesModel.activeProfile
+            for accountID in targets {
+                updated = updated.settingHomeUserBinding(binding, forPlexAccount: accountID)
+            }
             profilesModel.update(updated)
         }
         pendingPlexUserSelection = nil
-        if pending.isFirstRun {
-            profilesModel.seedDefaultProfileIdentity(
-                name: user?.name ?? "",
-                avatarImageURL: user?.avatarURL?.absoluteString
-            )
-            apply(.accountAuthenticatedNeedsProfile)
-        } else {
-            apply(.accountAuthenticated)
-            // Apply the freshly-picked binding now (a protected user raises the
-            // PIN prompt); first run applies it once onboarding completes.
-            ensurePlexIdentityForActiveProfile()
-        }
+        // Continue to the "choose your libraries" step. First run seeds the
+        // profile identity from the picked user; a later add applies the Plex
+        // identity once the library step completes.
+        beginLibrarySelection(
+            isFirstRun: pending.isFirstRun,
+            seedName: user?.name ?? "",
+            seedAvatar: user?.avatarURL?.absoluteString,
+            applyPlexIdentity: !pending.isFirstRun
+        )
     }
 
     /// First-run "Set Up Profiles": turns on the profiles feature (making it
@@ -1315,6 +1410,9 @@ public final class AppState {
         if !wasAuthenticating {
             pendingOnboardingProvider = nil
         }
+        pendingLibrarySelectionAccountIDs = []
+        pendingOnboardingContinuation = nil
+        pendingPlexUserApplyToAccountIDs = []
     }
 
     /// Removes one account; drops to onboarding if it was the last.
@@ -1357,6 +1455,9 @@ public final class AppState {
         var recents = lastServerStore
         recents.recentServers = []
         pendingPlexUserSelection = nil
+        pendingLibrarySelectionAccountIDs = []
+        pendingOnboardingContinuation = nil
+        pendingPlexUserApplyToAccountIDs = []
         isChoosingProfile = false
         reloadAccounts()
         rebuildSettingsModels()

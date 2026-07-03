@@ -96,6 +96,7 @@ public struct RootView: View {
                     signedInServers: appState.signedInServers,
                     onJellyfinServerSelected: { server in appState.selectServer(server) },
                     onPlexAuthenticated: { session in appState.didAuthenticatePlex(session) },
+                    onPlexAuthenticatedMany: { sessions in appState.didAuthenticatePlexMany(sessions) },
                     onCancel: { appState.cancelAuthentication() }
                 )
 
@@ -116,6 +117,9 @@ public struct RootView: View {
                 } else {
                     LaunchView()
                 }
+
+            case .onboarding(.selectLibraries, _):
+                SelectLibrariesView(appState: appState)
 
             case .onboarding(.enableProfilesPrompt, _):
                 EnableProfilesView(appState: appState)

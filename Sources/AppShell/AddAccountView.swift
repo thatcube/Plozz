@@ -15,6 +15,7 @@ struct AddAccountView: View {
     let signedInServers: [SignedInServer]
     let onJellyfinServerSelected: (MediaServer) -> Void
     let onPlexAuthenticated: (UserSession) -> Void
+    let onPlexAuthenticatedMany: ([UserSession]) -> Void
     let onCancel: () -> Void
 
     @State private var choice: ProviderKind?
@@ -26,6 +27,7 @@ struct AddAccountView: View {
         signedInServers: [SignedInServer] = [],
         onJellyfinServerSelected: @escaping (MediaServer) -> Void,
         onPlexAuthenticated: @escaping (UserSession) -> Void,
+        onPlexAuthenticatedMany: @escaping ([UserSession]) -> Void = { _ in },
         onCancel: @escaping () -> Void
     ) {
         self.deviceID = deviceID
@@ -33,6 +35,7 @@ struct AddAccountView: View {
         self.signedInServers = signedInServers
         self.onJellyfinServerSelected = onJellyfinServerSelected
         self.onPlexAuthenticated = onPlexAuthenticated
+        self.onPlexAuthenticatedMany = onPlexAuthenticatedMany
         self.onCancel = onCancel
         // Seed the flow's starting screen. Cancelling Quick Connect returns here
         // with the provider preserved so we land on its server list, not the
@@ -53,7 +56,8 @@ struct AddAccountView: View {
             PlexLinkView(
                 viewModel: PlexAuthViewModel(
                     service: PlexAuthService(deviceID: deviceID),
-                    onAuthenticated: onPlexAuthenticated
+                    onAuthenticated: onPlexAuthenticated,
+                    onAuthenticatedMany: onPlexAuthenticatedMany
                 ),
                 onCancel: { choice = nil }
             )

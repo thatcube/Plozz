@@ -27,6 +27,10 @@ public enum OnboardingStep: Equatable, Sendable {
     case selectingServer
     /// Server chosen, running Quick Connect / password sign-in.
     case authenticating(MediaServer)
+    /// One or more accounts were just added — pick which of each new server's
+    /// libraries appear on Home. Shown on every add (first run and later),
+    /// after any Plex-user pick, before profile setup / entering the app.
+    case selectLibraries
     /// Plex account with 2+ Home users just signed in — pick which Home user
     /// this profile watches as ("Which Plex user are you?"). Shown the first
     /// time a profile encounters a given Plex account (both first run and later
@@ -71,6 +75,9 @@ public enum SessionEvent: Sendable {
     /// A signed-in Plex account has 2+ Home users and this profile hasn't bound
     /// one yet — show the "Which Plex user are you?" picker.
     case plexUserSelectionRequired
+    /// One or more accounts were persisted — show the per-server "choose your
+    /// libraries" step before continuing onboarding.
+    case librarySelectionRequired
     /// The user chose to set up profiles on the first-run prompt.
     case profilesEnabled
     /// The user declined profiles on the first-run prompt ("Not Now — Just Me").
@@ -126,6 +133,19 @@ public struct SessionStateMachine: Sendable {
         // step. There is now ≥1 account behind it, so `canReturnToApp` is true.
         case (.onboarding(.authenticating, _), .plexUserSelectionRequired):
             return .onboarding(.selectPlexUser, canReturnToApp: true)
+        // One or more accounts were persisted — show the "choose your libraries"
+        // step. Reachable straight from auth (Jellyfin, or Plex with <2 Home
+        // users) or after the Plex-user pick. There is now ≥1 account behind it.
+        case (.onboarding(.authenticating, _), .librarySelectionRequired),
+             (.onboarding(.selectPlexUser, _), .librarySelectionRequired):
+            return .onboarding(.selectLibraries, canReturnToApp: true)
+        // Leaving the library step: first-ever account on a fresh install detours
+        // through the one-time profile-setup sub-flow; a later add drops straight
+        // into the app.
+        case (.onboarding(.selectLibraries, _), .accountAuthenticatedNeedsProfile):
+            return .onboarding(.enableProfilesPrompt, canReturnToApp: true)
+        case (.onboarding(.selectLibraries, _), .accountAuthenticated):
+            return .ready
         // First-ever account on a fresh install: detour through the one-time
         // profile-setup sub-flow before entering the app. There is now ≥1 account
         // behind it, so `canReturnToApp` is true. Reachable straight from auth

@@ -64,6 +64,20 @@ public struct PlexLinkView: View {
                 orDivider
 
                 VStack(spacing: 24) {
+                    Text("Or enter a code")
+                        .font(.title2).bold()
+
+                    VStack(spacing: 4) {
+                        Text("Go to")
+                            .font(.title3)
+                            .foregroundStyle(.secondary)
+                        Text("plex.tv/link")
+                            .font(.system(size: 52, weight: .heavy, design: .rounded))
+                            .foregroundStyle(PlexBrand.gold)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.5)
+                    }
+
                     Text(code)
                         .font(.plozzCode(size: 84))
                         .tracking(10)
@@ -72,10 +86,6 @@ public struct PlexLinkView: View {
                         .padding(.horizontal, 44)
                         .padding(.vertical, 20)
                         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24))
-
-                    Text("Enter at **plex.tv/link**")
-                        .font(.title3)
-                        .foregroundStyle(.secondary)
 
                     PlexExpiryCountdown(expiresAt: expiresAt, lifetime: viewModel.codeLifetime)
                 }
@@ -87,7 +97,7 @@ public struct PlexLinkView: View {
                 .font(.title2)
 
         case let .selectingServer(servers):
-            ServerList(servers: servers) { viewModel.selectServer($0) }
+            ServerList(servers: servers) { viewModel.selectServers($0) }
 
         case .success:
             Label("Signed in!", systemImage: "checkmark.circle.fill")
@@ -153,27 +163,79 @@ public struct PlexLinkView: View {
     }
 }
 
-/// Picker shown when a Plex account can reach more than one server.
+/// Multi-select picker shown when a Plex account can reach more than one server.
+/// Mirrors the Settings checklist affordance: tap a row to toggle its checkmark,
+/// then Continue to add every checked server at once.
 private struct ServerList: View {
     let servers: [PlexServerCandidate]
-    let onSelect: (PlexServerCandidate) -> Void
+    let onContinue: ([PlexServerCandidate]) -> Void
+
+    @State private var selected: Set<String>
+    @FocusState private var focusedContinue: Bool
+
+    init(servers: [PlexServerCandidate], onContinue: @escaping ([PlexServerCandidate]) -> Void) {
+        self.servers = servers
+        self.onContinue = onContinue
+        // Preselect owned servers — the ones people almost always want.
+        _selected = State(initialValue: Set(servers.filter(\.isOwned).map(\.id)))
+    }
 
     var body: some View {
-        VStack(spacing: 16) {
-            ForEach(servers) { server in
-                Button {
-                    onSelect(server)
-                } label: {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(server.name).font(.headline)
-                        Text(server.isOwned ? "Owned" : "Shared")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-                    .frame(maxWidth: 700, alignment: .leading)
-                }
+        VStack(spacing: 24) {
+            VStack(spacing: 8) {
+                Text("Choose your servers")
+                    .font(.largeTitle).bold()
+                Text("Select the Plex servers you'd like to add. You can add or remove servers anytime in Settings.")
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 900)
             }
+
+            ScrollView {
+                VStack(spacing: 12) {
+                    ForEach(servers) { server in
+                        Button {
+                            toggle(server.id)
+                        } label: {
+                            HStack(spacing: 16) {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(server.name).font(.headline)
+                                    Text(server.isOwned ? "Owned" : "Shared")
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Image(systemName: selected.contains(server.id) ? "checkmark.circle.fill" : "circle")
+                                    .font(.title2)
+                                    .foregroundStyle(selected.contains(server.id) ? Color.accentColor : .secondary)
+                            }
+                            .padding(.vertical, 12)
+                            .padding(.horizontal, 20)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(SettingsFocusButtonStyle())
+                    }
+                }
+                .padding(.horizontal, 24)
+                .padding(.vertical, 8)
+            }
+            .frame(maxWidth: 900)
+
+            Button {
+                onContinue(servers.filter { selected.contains($0.id) })
+            } label: {
+                Text("Continue").frame(minWidth: 260)
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(selected.isEmpty)
+            .focused($focusedContinue)
         }
+    }
+
+    private func toggle(_ id: String) {
+        if selected.contains(id) { selected.remove(id) } else { selected.insert(id) }
     }
 }
 

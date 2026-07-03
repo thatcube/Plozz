@@ -138,15 +138,34 @@ public struct ShareProvider: MediaProvider {
         return "[\(host)]"
     }
 
+    /// The inverse: `URLComponents.host` returns an IPv6 literal *bracketed*
+    /// (`"[fe80::1]"`) on Apple Foundation, but the SMB layer (`NWEndpoint.Host`)
+    /// needs the bare literal — a bracketed string is treated as an unresolvable
+    /// DNS name. Strip a matching surrounding `[...]` so the browser/engine get
+    /// `fe80::1`. `smbURL` re-brackets it for URL construction via
+    /// `bracketedHostIfIPv6`.
+    public static func unbracketedHost(_ host: String) -> String {
+        guard host.hasPrefix("["), host.hasSuffix("]"), host.count >= 2 else { return host }
+        return String(host.dropFirst().dropLast())
+    }
+
     // MARK: - Parse baseURL
 
     private static func parse(_ baseURL: URL) -> (host: String, port: Int?, share: String) {
         let comps = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)
-        let host = comps?.host ?? ""
+        let host = unbracketedHost(comps?.host ?? "")
         let port = comps?.port
         let share = (comps?.path ?? "")
             .split(separator: "/", omittingEmptySubsequences: true)
             .first.map(String.init) ?? ""
         return (host, port, share)
+    }
+}
+
+extension ShareProvider: ProviderTeardown {
+    /// Release the SMB session when the account is removed / the token refreshes
+    /// and the registry evicts this provider.
+    public func teardown() async {
+        await store.close()
     }
 }

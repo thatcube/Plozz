@@ -32,17 +32,23 @@ enum ShareMediaParser {
         var year: Int?
     }
 
-    // SxxEyy / SxxExyy, 1x02, and "Season 1 Episode 2" style markers.
+    // SxxEyy / SxxExyy, 1x02, and "Season 1 Episode 2" style markers. The `NxM`
+    // form is digit-boundary-anchored (`(?<![0-9])…(?![0-9])`) so a raw resolution
+    // like `1920x1080` in a home-video filename can't backtrack into a bogus
+    // "S20·E108" match — only a genuine `1x02`-style token qualifies.
     private static let episodePatterns: [NSRegularExpression] = {
         let raw = [
             #"[sS](\d{1,2})[\s._-]*[eE](\d{1,3})"#,
-            #"(\d{1,2})x(\d{1,3})"#,
+            #"(?<![0-9])(\d{1,2})x(\d{1,3})(?![0-9])"#,
             #"[sS]eason[\s._-]*(\d{1,2})[\s._-]*[eE]pisode[\s._-]*(\d{1,3})"#,
         ]
         return raw.compactMap { try? NSRegularExpression(pattern: $0) }
     }()
 
-    private static let yearPattern = try! NSRegularExpression(pattern: #"(19|20)\d{2}"#)
+    // A 4-digit year, not embedded in a longer number and not the width of a
+    // `1920x1080`/`2048x…` resolution or a `2160p`-style tag (trailing
+    // `[0-9xXpiPI]` excluded), so a resolution can't be misread as the year.
+    private static let yearPattern = try! NSRegularExpression(pattern: #"(?<![0-9])(19|20)\d{2}(?![0-9xXpiPI])"#)
 
     /// Classify a video file (given its name and the immediate parent folder
     /// name, which helps recover a series title the filename abbreviates).
@@ -107,13 +113,17 @@ enum ShareMediaParser {
         // ("Pilot 720p WEB-DL x264"). Keep words up to the first tag so we show
         // "Pilot", not "Pilot 720p". Require at least one real (non-numeric) word.
         let tags: Set<String> = [
-            "1080p", "720p", "2160p", "480p", "4k", "web", "webdl", "web dl",
+            "1080p", "720p", "2160p", "480p", "4k", "web", "webdl",
             "bluray", "hdtv", "x264", "x265", "hevc", "aac", "ddp", "dd", "amzn",
             "nf", "dsnp", "hmax", "atvp", "repack", "proper", "internal",
         ]
         var kept: [String] = []
         for word in cleaned.split(separator: " ").map(String.init) {
-            if tags.contains(word.lowercased()) { break }
+            // Match hyphen-insensitively so tight scene spellings like "WEB-DL"
+            // (which `clean` leaves intact — it only splits space-flanked dashes)
+            // still cut the title, not just the space-separated forms.
+            let normalized = word.lowercased().replacingOccurrences(of: "-", with: "")
+            if tags.contains(word.lowercased()) || tags.contains(normalized) { break }
             kept.append(word)
         }
         let meaningful = kept.filter { $0.count >= 2 && Int($0) == nil }
@@ -151,6 +161,10 @@ enum ShareMediaParser {
         var s = raw
         // Strip [...] and (...) groups (release group tags, quality in parens).
         s = s.replacingOccurrences(of: #"[\[\(\{][^\]\)\}]*[\]\)\}]"#, with: " ", options: .regularExpression)
+        // Strip resolution tokens (1920x1080, 1280x720, 1080p, 480i, …) so they
+        // never survive into a displayed title.
+        s = s.replacingOccurrences(of: #"\b\d{3,4}\s*[xX]\s*\d{3,4}\b"#, with: " ", options: .regularExpression)
+        s = s.replacingOccurrences(of: #"\b\d{3,4}[piPI]\b"#, with: " ", options: .regularExpression)
         // Common separators to spaces.
         s = s.replacingOccurrences(of: ".", with: " ")
              .replacingOccurrences(of: "_", with: " ")

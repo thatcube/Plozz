@@ -184,14 +184,18 @@ final class AddShareViewModel {
         // Drop any path component; the share is chosen separately.
         if let slash = s.firstIndex(of: "/") { s = String(s[..<slash]) }
         var host = s
-        var port = Int(portText.trimmingCharacters(in: .whitespaces))
+        let explicitPort = Int(portText.trimmingCharacters(in: .whitespaces))
+        var inlinePort: Int?
         // Inline host:port (skip IPv6 literals, which contain multiple colons).
-        if port == nil, s.filter({ $0 == ":" }).count == 1,
-           let colon = s.firstIndex(of: ":") {
+        // Always strip the `:port` suffix off the host — even when the separate
+        // Port field is also filled — so a pasted `192.168.1.5:9999` never leaks
+        // its port into the host and produces an unresolvable address.
+        if s.filter({ $0 == ":" }).count == 1, let colon = s.firstIndex(of: ":") {
             host = String(s[..<colon])
-            port = Int(s[s.index(after: colon)...])
+            inlinePort = Int(s[s.index(after: colon)...])
         }
-        return (host.trimmingCharacters(in: .whitespaces), port)
+        // The explicit Port field wins when both are supplied.
+        return (host.trimmingCharacters(in: .whitespaces), explicitPort ?? inlinePort)
     }
 
     private static func friendlyError(_ error: Error) -> String {

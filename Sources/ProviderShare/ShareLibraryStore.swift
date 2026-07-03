@@ -34,6 +34,12 @@ actor ShareLibraryStore {
 
     // MARK: - Libraries
 
+    /// Best-effort release of the underlying SMB session when the provider is
+    /// evicted from the registry (account removed / token refreshed).
+    func close() async {
+        await browser.close()
+    }
+
     /// A share presents exactly one browsable "library": its root folder. Kept as
     /// `.folder` so the browse UI treats every entry as navigable/​playable by its
     /// own kind rather than forcing a movie/series split.

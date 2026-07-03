@@ -44,8 +44,8 @@ public struct PlexHomeUserAvatar: View {
 }
 
 /// The label content for a single Plex Home user row — a 52pt avatar, the
-/// user's name, and inline badges (Account owner / Restricted / PIN required),
-/// plus an optional trailing selection checkmark. Designed to sit inside a
+/// user's name, and inline badges (Account owner / PIN required), plus an
+/// optional trailing selection checkmark. Designed to sit inside a
 /// `Button { } .buttonStyle(SettingsFocusButtonStyle())`, so the Settings Plex-
 /// user picker and the first-run onboarding picker render identically.
 public struct PlexHomeUserRow: View {
@@ -74,46 +74,29 @@ public struct PlexHomeUserRow: View {
         HStack(spacing: 16) {
             PlexHomeUserAvatar(user: user, size: 52)
 
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    Text(user.name).font(.headline)
+            HStack(spacing: 6) {
+                Text(user.name).font(.headline)
 
-                    if showsOwnerBadge {
-                        Text("Account owner")
-                            .font(.caption2.weight(.semibold))
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Capsule().fill(ProviderBrandMark.brandTint(.plex).opacity(0.18)))
-                            .foregroundStyle(ProviderBrandMark.brandTint(.plex))
-                    }
-
-                    if user.isRestricted {
-                        Text("Restricted")
-                            .font(.caption2.weight(.semibold))
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Capsule().fill(Color.orange.opacity(0.18)))
-                            .foregroundStyle(.orange)
-                    }
-
-                    if user.requiresPIN {
-                        // Lock + "PIN" together — the lock alone read as
-                        // unclear; keep it focus-adaptive so it stays legible
-                        // on the inverted (focused) card.
-                        HStack(spacing: 3) {
-                            Image(systemName: "lock.fill")
-                            Text("PIN")
-                        }
+                if showsOwnerBadge {
+                    Text("Account owner")
                         .font(.caption2.weight(.semibold))
-                        .settingsRowSecondary()
-                        .accessibilityLabel("PIN required")
-                    }
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(ProviderBrandMark.brandTint(.plex).opacity(0.18)))
+                        .foregroundStyle(ProviderBrandMark.brandTint(.plex))
                 }
 
-                if user.isRestricted {
-                    Text("Limited content set by the account owner.")
-                        .font(.footnote)
-                        .settingsRowSecondary()
+                if user.requiresPIN {
+                    // Lock + "PIN" together — the lock alone read as unclear;
+                    // keep it focus-adaptive so it stays legible on the
+                    // inverted (focused) card.
+                    HStack(spacing: 3) {
+                        Image(systemName: "lock.fill")
+                        Text("PIN")
+                    }
+                    .font(.caption2.weight(.semibold))
+                    .settingsRowSecondary()
+                    .accessibilityLabel("PIN required")
                 }
             }
 

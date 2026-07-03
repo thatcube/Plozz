@@ -40,7 +40,7 @@ struct EnableProfilesView: View {
             ),
             Highlight(
                 icon: "externaldrive.fill",
-                text: "Your servers stay shared, no matter who’s watching."
+                text: "Servers are still available to all profiles on the Apple TV."
             ),
         ]
     }
@@ -66,7 +66,7 @@ struct EnableProfilesView: View {
                     highlightCard(highlight)
                 }
             }
-            .frame(maxWidth: 760)
+            .frame(maxWidth: 1040)
 
             HStack(spacing: 24) {
                 Button {
@@ -110,18 +110,18 @@ struct EnableProfilesView: View {
     private func highlightCard(_ highlight: Highlight) -> some View {
         HStack(spacing: 24) {
             Image(systemName: highlight.icon)
-                .font(.system(size: 30, weight: .semibold))
+                .font(.system(size: 28, weight: .semibold))
                 .foregroundStyle(palette.accent)
-                .frame(width: 52)
+                .frame(width: 48)
 
             Text(highlight.text)
-                .font(.title3)
+                .font(.body)
                 .foregroundStyle(.primary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.horizontal, 28)
-        .padding(.vertical, 22)
+        .padding(.vertical, 20)
         .background(
             RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
                 .fill(.ultraThinMaterial)

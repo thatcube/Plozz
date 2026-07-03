@@ -30,7 +30,7 @@ struct PlexUserSelectionView: View {
     }
 
     var body: some View {
-        VStack(spacing: 32) {
+        VStack(spacing: 0) {
             VStack(spacing: 14) {
                 Text("Which Plex user are you?")
                     .font(.largeTitle.weight(.bold))
@@ -41,11 +41,12 @@ struct PlexUserSelectionView: View {
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
             }
+            .padding(.bottom, 28)
 
+            // Clipped scroll (no scrollClipDisabled) so rows never draw over the
+            // pinned header/footer. Inner padding gives the focus fill (which
+            // extends ~16pt H / 4pt V outward) and its shadow room at the edges.
             ScrollView {
-                // Rows separated by a gap rather than flush dividers so the
-                // focus lift doesn't paint over a divider line — same as the
-                // Settings Plex-user picker.
                 VStack(spacing: 14) {
                     ForEach(orderedUsers) { user in
                         Button {
@@ -58,19 +59,13 @@ struct PlexUserSelectionView: View {
                     }
                 }
                 .padding(.horizontal, 24)
-                .padding(.vertical, 16)
-                .background(
-                    RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
-                        .fill(.ultraThinMaterial)
-                )
-                .padding(.horizontal, 24)
-                .padding(.vertical, 8)
+                .padding(.vertical, 20)
             }
-            .scrollClipDisabled()
 
             Text("You can change this anytime in Settings.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
+                .padding(.top, 20)
         }
         .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
         .padding(.vertical, 48)

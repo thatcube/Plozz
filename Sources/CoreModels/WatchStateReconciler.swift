@@ -12,6 +12,11 @@ import Foundation
 public protocol WatchMutationApplying: Sendable {
     /// Marks `target` played/unplayed on its server (addressed by `target.itemID`).
     func setPlayed(_ played: Bool, on target: WatchMutationTarget) async throws
+    /// Marks `target` played/unplayed with the play's real `capturedAt`, for a
+    /// provider whose played state is stored **locally** and ordered
+    /// last-writer-wins (the SMB share). Defaults to the timestamp-less
+    /// ``setPlayed(_:on:)`` for a server-backed provider that ignores capture time.
+    func setPlayed(_ played: Bool, on target: WatchMutationTarget, capturedAt: Date) async throws
     /// Writes a resume position (seconds) to `target`'s server, session-lessly.
     /// `capturedAt` is the play's real timestamp (see ``ResumeStateWriting``), used
     /// for the server's recency stamp so an offline-drained write doesn't falsely
@@ -31,6 +36,9 @@ public protocol WatchMutationApplying: Sendable {
 }
 
 public extension WatchMutationApplying {
+    func setPlayed(_ played: Bool, on target: WatchMutationTarget, capturedAt: Date) async throws {
+        try await setPlayed(played, on: target)
+    }
     func expandTargets(for mutation: WatchMutation) async -> WatchTargetExpansion { .none }
     func scrobbleSimkl(_ intent: TraktScrobbleIntent) async throws {}
     func scrobbleAniList(_ intent: TraktScrobbleIntent) async throws {}
@@ -309,7 +317,7 @@ public actor WatchStateReconciler {
             var outcome = ""
             do {
                 if let played = mutation.played {
-                    try await applier.setPlayed(played, on: target)
+                    try await applier.setPlayed(played, on: target, capturedAt: mutation.capturedAt)
                     outcome += "setPlayed(\(played))=OK "
                 }
                 if let resume = mutation.resumePosition {

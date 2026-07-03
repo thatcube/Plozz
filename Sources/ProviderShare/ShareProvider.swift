@@ -226,11 +226,21 @@ extension ShareProvider: ProviderTeardown {
 }
 
 extension ShareProvider: WatchStateProviding {
-    /// Persist played/unplayed locally — the durable watch outbox drains here for
-    /// a title watched *on* the share (and would for a cross-server twin, though a
-    /// bare file share carries no external ids to match on).
+    /// Live UI toggle (mark watched / unwatched): the action happens *now*, so
+    /// stamp with the current time. The outbox-drained path uses the timestamped
+    /// ``PlayedStateWriting`` overload below with the play's real capture time.
     public func setPlayed(_ played: Bool, itemID: String) async throws {
         await watchStore.setPlayed(played, itemID: itemID, capturedAt: Date())
+    }
+}
+
+extension ShareProvider: PlayedStateWriting {
+    /// Outbox-drained played write: use the play's real `capturedAt` (not the
+    /// drain time) so a stale played write that drains after a newer re-watch
+    /// can't overwrite the newer resume state — the local store orders writes by
+    /// `capturedAt`.
+    public func setPlayed(_ played: Bool, itemID: String, capturedAt: Date) async throws {
+        await watchStore.setPlayed(played, itemID: itemID, capturedAt: capturedAt)
     }
 }
 

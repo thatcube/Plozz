@@ -50,6 +50,12 @@ struct HomeHeroView: View {
     /// focus engine still moves focus down to the row itself.
     var onMoveDown: () -> Void = {}
 
+    /// How far (in points) the backdrop is lifted UP relative to the content as the
+    /// page scrolls down toward the Continue Watching row — the parallax. `HomeView`
+    /// drives this from the scroll offset (clamped 0…~80). Only the backdrop layer
+    /// receives it; the logo/overview/buttons scroll 1:1 with the page as normal.
+    var backdropParallaxLift: CGFloat = 0
+
     /// The app-installed action handler — the SAME one the detail hero and the
     /// long-press context menu use — so the hero's Watchlist button is offered
     /// only when the item's provider supports it and its mutation fans out
@@ -100,12 +106,34 @@ struct HomeHeroView: View {
     /// Bumped on every page so a late metadata fade-in from a *previous* page
     /// can't fire after a newer page has already started.
     @State private var slideToken = 0
-    /// The direction of the in-flight page, driving the backdrop wipe: forward
-    /// slides the new artwork in from the trailing edge (old exits leading);
-    /// backward reverses it. Set INSIDE the page's single `withAnimation` (same
-    /// transaction as `index`) so the `.transition` reads the right edges and both
-    /// the insertion and removal share one animation.
-    @State private var forward = true
+    /// The two **permanently-mounted** backdrop slots. Each slot renders a
+    /// `HeroBackdropLayer`; one is fronted (on-screen), the other is parked
+    /// off-screen holding the previous (or soon-to-enter) art. The wipe is a plain
+    /// animatable `.offset`/`GeometryEffect` push on these ALWAYS-present layers —
+    /// never a `.transition`-driven identity swap — so there is no insertion event
+    /// whose animation SwiftUI can drop, and `HeroBackdropLayer`'s internal
+    /// `.ignoresSafeArea` (a layout-time fixup) can no longer race and win against
+    /// the insertion offset. That race was the intermittent "new art appears
+    /// instantly while the old slides out" wrong-order wipe.
+    @State private var slotItems: [MediaItem?] = [nil, nil]
+    /// Which slot (0 or 1) is currently fronted at rest.
+    @State private var frontSlot = 0
+    /// The wipe progress: 0 at rest, animates 0→1 across a page. The fronted slot
+    /// slides out and the parked slot slides in as this goes 0→1; on completion we
+    /// flip `frontSlot` and snap this back to 0 (no animation), leaving the new art
+    /// centered and the old slot re-parked off-screen for the next page.
+    @State private var slideProgress: CGFloat = 0
+    /// The in-flight page direction: `+1` forward (new art enters from the trailing
+    /// edge, old exits leading), `-1` backward.
+    @State private var slideDirection: CGFloat = 1
+    /// Bumped on every page so a superseded animation's completion handler (which
+    /// still fires when interrupted) can't double-commit the slot flip.
+    @State private var slideGeneration = 0
+    /// The last directional move delivered to the hero's action row. Used to gate
+    /// the recede: focus can leave the hero UP (to the tab bar) or LEFT (to the
+    /// sidebar) as well as DOWN (to the Continue Watching row) — only a genuine
+    /// DOWN should scroll the page. Recorded in `handleMove` before focus relocates.
+    @State private var lastMoveDirection: MoveCommandDirection?
     /// Best resolved hero backdrop URL per item id. For episode/season slides
     /// this is the **series-level** hero art (correct show, high-res — matching
     /// the detail page), resolved via ``ArtworkRouter`` and preloaded for the
@@ -235,6 +263,7 @@ struct HomeHeroView: View {
         .frame(maxWidth: .infinity, minHeight: height, alignment: .bottomLeading)
         .opacity(heroVisible ? 1 : 0)
         .onAppear {
+            reseatSlots()
             Task { await resolveArtwork(around: index) }
             guard !heroVisible else { return }
             withAnimation(.easeInOut(duration: 0.35)) { heroVisible = true }
@@ -257,12 +286,13 @@ struct HomeHeroView: View {
             }
             let present = Set(newIDs)
             resolvedBackdrop = resolvedBackdrop.filter { present.contains($0.key) }
-            // A set swap is not a page: front the (possibly relocated) current
-            // item instantly with no wipe by bumping the token (cancels any
-            // pending fade-in) and leaving `index` as re-seated above. The
-            // backdrop is keyed on `current`'s id, so it just swaps in place.
+            // A set swap is not a page: front the (possibly relocated) current item
+            // instantly with no wipe. Re-seat both backdrop slots to the current
+            // item (the slots are permanently mounted now, not id-keyed) and bump
+            // the token to cancel any pending fade-in.
             slideToken &+= 1
             metadataVisible = true
+            reseatSlots()
             // Clamp the logical selection to the new slide's button count so it
             // can never point past the last pill after a set swap. Pure `@State`,
             // so this never touches (or drops) focus.
@@ -290,42 +320,68 @@ struct HomeHeroView: View {
         }
     }
 
-    /// The hero backdrop, keyed by the fronted item's id so a page is a real
-    /// identity change: SwiftUI removes the old layer and inserts the new one,
-    /// natively staging the incoming layer off-screen and animating it in — no
-    /// manual "place then animate" two-tick dance (which collapsed the incoming
-    /// offset to instant when the staging frame wasn't committed on its own).
-    /// Constrained to the screen width and clipped so the full-bleed art can't
-    /// inflate the layout width and the sliding layers never bleed horizontally.
+    /// The hero backdrop as **two permanently-mounted slots** driven by a plain
+    /// animatable push (`HeroSlideEffect`), NOT a `.transition`-driven identity
+    /// swap. Both layers exist for the life of the hero (no `.id`, no `.transition`,
+    /// no conditional insertion during a page), so SwiftUI never has an insertion
+    /// event whose animation it could drop, and the `GeometryEffect` translation is
+    /// applied at RENDER time — after layout — so `HeroBackdropLayer`'s internal
+    /// `.ignoresSafeArea` can no longer race and win against the offset. Together
+    /// these eliminate the intermittent wrong-order wipe (new art snapping in at
+    /// rest while the old slid out) that survived five `.transition`-based attempts.
     ///
-    /// The wipe animates because `page(...)` changes `index` (→ `current` →
-    /// `item.id`) inside a SINGLE `withAnimation` with NO competing transaction in
-    /// the same runloop turn: the metadata-hide is folded into that same animation
-    /// and stripped locally (see `content(for:)`), so the incoming layer always
-    /// inherits the animation instead of intermittently snapping to rest while the
-    /// outgoing layer slid out underneath — the old wrong-order wipe.
+    /// `page(...)` stages the incoming art into the parked (off-screen) slot, then
+    /// animates `slideProgress` 0→1 in a single `withAnimation`; on completion it
+    /// flips `frontSlot` and snaps progress back to 0 without animation.
+    ///
+    /// The whole stack is lifted by `backdropParallaxLift` (the parallax) so the
+    /// artwork rises faster than the content as the page recedes.
     @ViewBuilder
     private func heroBackdropStack(height: CGFloat) -> some View {
         ZStack(alignment: .bottom) {
-            if let item = current {
-                heroBackdrop(for: item, height: height)
-                    .id(item.id)
-                    .transition(slideTransition)
+            ForEach(0..<2, id: \.self) { slot in
+                if let item = slotItems[slot] {
+                    heroBackdrop(for: item, height: height)
+                        .modifier(HeroSlideEffect(
+                            progress: slideProgress,
+                            direction: slideDirection,
+                            isFront: slot == frontSlot
+                        ))
+                }
             }
         }
         .frame(width: Self.screenWidth, height: height, alignment: .bottom)
         .frame(maxWidth: .infinity, alignment: .center)
         .clipped()
+        .offset(y: -backdropParallaxLift)
     }
 
-    /// The directional wipe: the incoming backdrop slides in from the trailing
-    /// edge (forward) or leading edge (backward) while the outgoing exits the
-    /// opposite side — the Apple TV "push".
-    private var slideTransition: AnyTransition {
-        .asymmetric(
-            insertion: .move(edge: forward ? .trailing : .leading),
-            removal: .move(edge: forward ? .leading : .trailing)
-        )
+    /// The directional push, expressed as a render-time `ProjectionTransform` on a
+    /// plain animatable value. Because it's a `GeometryEffect` on a permanently
+    /// mounted layer, `animatableData` always has a stable "from" value, so the
+    /// wipe can never collapse to instant the way a freshly-inserted
+    /// `.transition`/offset layer did.
+    private struct HeroSlideEffect: GeometryEffect {
+        /// 0 = at rest, 1 = page complete.
+        var progress: CGFloat
+        /// `+1` forward, `-1` backward.
+        let direction: CGFloat
+        /// Whether this slot is the fronted (exiting) layer or the parked
+        /// (entering) layer.
+        let isFront: Bool
+
+        var animatableData: CGFloat {
+            get { progress }
+            set { progress = newValue }
+        }
+
+        func effectValue(size: CGSize) -> ProjectionTransform {
+            // Front: rest at 0, exit to ∓width. Back: enter from ±width, rest at 0.
+            let x = isFront
+                ? -progress * direction * size.width
+                : (1 - progress) * direction * size.width
+            return ProjectionTransform(CGAffineTransform(translationX: x, y: 0))
+        }
     }
     /// The dwell key: any change (slide index, focus state, or a manual page
     /// bump) restarts the auto-advance timer from the current slide.
@@ -549,6 +605,9 @@ struct HomeHeroView: View {
                 // transient focus blip must never scroll the page.
                 recedeWork?.cancel()
                 recedeWork = nil
+                // At rest on the row, clear the recorded move so a stale direction
+                // from an earlier press can't leak into the next focus-loss gate.
+                lastMoveDirection = nil
                 // Focus arriving into the hero from *outside* (a row below / the
                 // tab bar): snap back to full-screen. We do NOT recede on focus
                 // *loss* — focus can drop transiently and must never scroll.
@@ -559,14 +618,17 @@ struct HomeHeroView: View {
                     onFocusGained()
                 }
             case .none:
-                // Hero lost focus. This is EITHER a genuine downward move (focus
-                // relocated to a Continue Watching card) OR a transient blip
-                // (page transition / re-render). Confirm on the next runloop: only
-                // recede if focus is still gone. A real Down keeps focus off the
-                // hero, so this fires; a transient drop returns to `.row` and
-                // cancels the pending work above. A light graze never changes
-                // focus at all, so this case does not even run for a graze.
+                // Hero lost focus. Only a genuine DOWN move (to the Continue
+                // Watching row) should recede/scroll the page. Focus can also leave
+                // UP (to the tab bar) or LEFT (to the sidebar) — those must NOT
+                // scroll (the reported bug: landing in the top/side nav still
+                // shifted the page down). A light graze never changes focus at all,
+                // so this case does not even run for a graze. Gate on the last move.
                 recedeWork?.cancel()
+                recedeWork = nil
+                guard lastMoveDirection == .down else { break }
+                // Confirm on the next runloop: a transient blip returns to `.row`
+                // and cancels this; a real Down keeps focus gone, so it fires.
                 let work = DispatchWorkItem {
                     if focus == nil { onMoveDown() }
                 }
@@ -618,6 +680,12 @@ struct HomeHeroView: View {
     /// PRE-move value. Interior moves update `selectedButton` ourselves (the engine
     /// is not involved); only `.advance` pages.
     private func handleMove(_ direction: MoveCommandDirection) {
+        // Record the direction BEFORE focus can relocate, so the recede (driven by
+        // focus leaving the hero) can tell a genuine DOWN-to-row move from an UP
+        // (to the tab bar) or LEFT (to the sidebar) escape — only DOWN should
+        // scroll the page. A light trackpad graze fires a phantom `.down` here but
+        // never actually moves focus, so it still can't recede (see `.none` below).
+        lastMoveDirection = direction
         guard let item = current else { return }
         let buttonCount = buttons(for: item).count
         selectedButton = min(selectedButton, max(0, buttonCount - 1))
@@ -820,36 +888,75 @@ struct HomeHeroView: View {
         }
     }
 
-    /// Fronts `toItem` with a directional backdrop wipe and restarts the
-    /// auto-advance dwell. The wipe is declarative: changing `index` swaps the
-    /// id-keyed backdrop and SwiftUI runs the `.move` transition. Everything that
-    /// drives the wipe — `forward` (edges), `metadataVisible` (hide the old text),
-    /// and `index` (the identity swap) — is set inside ONE `withAnimation` so they
-    /// share a single transaction. There is deliberately NO separate
-    /// `withTransaction(disablesAnimations:)` in this turn: a competing transaction
-    /// let the incoming layer skip its insertion animation (snap in at rest) while
-    /// the outgoing layer still animated out — the intermittent wrong-order wipe.
-    /// The instant metadata-hide is achieved locally instead (see `content(for:)`
-    /// and `actionRow(for:)`, which strip animation while hiding).
+    /// Fronts `toItem` with a directional backdrop push and restarts the
+    /// auto-advance dwell. The wipe drives two permanently-mounted slots (see
+    /// `heroBackdropStack`): the incoming art is staged into the parked slot
+    /// (off-screen, invisible, a plain content swap — never a re-mount), then a
+    /// single `withAnimation` slides `slideProgress` 0→1 so the fronted slot exits
+    /// and the parked slot enters. On completion `settleSlide()` flips `frontSlot`
+    /// and snaps progress back to 0 without animation — the on-screen art doesn't
+    /// move, the spent slot re-parks off-screen. Nothing here relies on SwiftUI's
+    /// insertion/removal `.transition` machinery, so the incoming layer can never
+    /// snap to rest while the outgoing one slides (the old wrong-order wipe).
     private func page(to toItem: Int, keepButton: Int, forward isForward: Bool) {
         guard items.indices.contains(toItem), toItem != index else { return }
+        // If a previous page is still mid-flight, land it instantly so the slots
+        // are at rest before we stage the next one (rapid-paging guard).
+        if slideProgress != 0 { settleSlide() }
         beginTransition()
-        // ONE transaction for the whole turn. `selectedButton` and `advanceToken`
-        // ride it too so NOTHING mutates state in a second (default) transaction
-        // this turn — the pill highlight has its own `.animation(value: selected)`
-        // that overrides this ambient one, so it still snaps at its own pace.
+        let backSlot = 1 - frontSlot
+        // Stage the incoming art into the parked (off-screen) slot. progress is 0
+        // here, so `HeroSlideEffect` places the back slot fully off-screen — this
+        // write is invisible regardless of frame timing.
+        slotItems[backSlot] = items[toItem]
+        slideDirection = isForward ? 1 : -1
+        slideGeneration &+= 1
+        let generation = slideGeneration
+        // ONE transaction for the whole turn: the push, the metadata-hide, the
+        // index/selection. The pill highlight and metadata-hide strip their own
+        // animation locally, so this ambient animation only drives the push.
         withAnimation(.easeInOut(duration: 0.42)) {
-            forward = isForward
+            slideProgress = 1
             metadataVisible = false
             index = toItem
             advanceToken &+= 1
-            // Keep the logical selection on the destination, clamped to its button
-            // count. Pure `@State` on a *stable* focus target (the row's identity
-            // never changes across a page), so focus stays put — only the
-            // highlight moves.
             selectedButton = min(keepButton, max(0, buttons(for: items[toItem]).count - 1))
+        } completion: {
+            // The completion fires even when this animation is superseded by a
+            // later page; the generation guard makes only the newest page commit.
+            guard generation == slideGeneration else { return }
+            settleSlide()
         }
         Task { await resolveArtwork(around: toItem) }
+    }
+
+    /// Commits a finished (or interrupted) push: the parked slot becomes the front
+    /// and `slideProgress` resets to 0 — both WITHOUT animation, in one
+    /// transaction. The newly-fronted art is already centered (progress was 1), so
+    /// flipping `frontSlot` and zeroing progress leaves it exactly in place while
+    /// the spent slot silently re-parks off-screen (it's clipped, so its jump from
+    /// one off-screen edge to the other is never seen).
+    private func settleSlide() {
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            frontSlot = 1 - frontSlot
+            slideProgress = 0
+        }
+    }
+
+    /// Seeds/re-seats both backdrop slots to the fronted item with NO wipe, used on
+    /// first appearance and on a curated-set swap. Both slots hold the same item:
+    /// the front shows it centered, the back sits parked off-screen ready for the
+    /// next page. Runs outside any animation so it's an instant, invisible re-seat.
+    private func reseatSlots() {
+        guard let item = current else { return }
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            slideProgress = 0
+            slotItems = [item, item]
+        }
     }
 
     /// Pages one slide forward (wrapping), keeping focus on the destination's

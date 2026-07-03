@@ -13,12 +13,14 @@ import Foundation
 /// the individual pages are byte-for-byte identical regardless of choice, so
 /// switching only swaps the surrounding chrome.
 public enum NavigationStyle: String, CaseIterable, Identifiable, Codable, Sendable {
+    // Case order drives the segmented picker order in Settings, so the default
+    // sidebar option is listed first (left-most).
+    /// The native collapsible left sidebar (`.sidebarAdaptable`): tabs collapse
+    /// to a rail and expand on left-focus, matching the system TV app. Default.
+    case sidebar
     /// The classic top tab bar (`.tabBarOnly`): tabs sit in a pill across the
     /// top of every page. This is the app's historical look.
     case tabBar
-    /// The native collapsible left sidebar (`.sidebarAdaptable`): tabs collapse
-    /// to a rail and expand on left-focus, matching the system TV app.
-    case sidebar
 
     public var id: String { rawValue }
 

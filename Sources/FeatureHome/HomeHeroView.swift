@@ -106,33 +106,38 @@ struct HomeHeroView: View {
     /// Bumped on every page so a late metadata fade-in from a *previous* page
     /// can't fire after a newer page has already started.
     @State private var slideToken = 0
-    /// The Home hero backdrop is a **single horizontal filmstrip** — an `HStack` of
-    /// three cells `[itemAt(centerIndex-1), itemAt(centerIndex), itemAt(centerIndex+1)]`
-    /// that moves as ONE unit via a single animatable offset (`slidePosition`).
-    /// There is only ever one thing animating, so the old two-independent-layer
-    /// design (where SwiftUI could animate one side and drop the other, producing
-    /// the intermittent "new art appears behind/over the old" wrong-order wipe) is
-    /// structurally impossible now. The centered cell's content NEVER changes during
-    /// a slide — the window only re-windows at settle, in a `disablesAnimations`
-    /// transaction — so there is no content mutation mid-animation either.
+    /// The Home hero backdrop is an **infinite horizontal strip** driven by a
+    /// single, continuous, animatable position (`stripPosition`) — the item-space
+    /// coordinate of the cell currently fronted in the viewport. Paging just
+    /// animates this ONE value by ±1; the strip's offset (`-stripPosition *
+    /// screenWidth`) is the only thing that ever moves. There is never a second
+    /// layer, a z-order to get wrong, or a completion-driven re-centre to race —
+    /// so the historical "new art appears behind / pops over the old / old lingers"
+    /// wrong-order wipe is structurally impossible.
     ///
-    /// `centerIndex` is an UNBOUNDED contiguous counter (it just keeps incrementing
-    /// forward / decrementing backward); the displayed item is `itemAt(centerIndex)`
-    /// with wrap-around modulo. Keeping it contiguous (rather than wrapping it to
-    /// 0…count-1) is what preserves cell identity across the end→start wrap: the
-    /// `ForEach` ids `[c-1, c, c+1]` always overlap by two with the next window, so
-    /// the cell sliding to centre is the SAME view instance (art already resolved)
-    /// even when the *item* wrapped. The invariant `itemAt(centerIndex) == items[index]`
-    /// holds at rest.
-    @State private var centerIndex = 0
-    /// The filmstrip offset in screen-width units: 0 at rest (centre cell shown),
-    /// animates to +1 to page forward (next cell slides to centre) or -1 backward.
-    /// Reset to 0 at settle in the same `disablesAnimations` transaction that
-    /// advances `centerIndex`, so the strip re-centres with no visible jump.
-    @State private var slidePosition: CGFloat = 0
-    /// Bumped on every page so a superseded animation's completion handler (which
-    /// still fires when interrupted) can't double-commit the settle.
-    @State private var slideGeneration = 0
+    /// `stripPosition`'s *state* value is always an exact integer (each page sets
+    /// it to the neighbouring integer); SwiftUI interpolates the presentation, so
+    /// the body always reads the settled target while the `.offset` animates
+    /// smoothly. A rapid second press just retargets the same animated value —
+    /// no coalescing, no completion race. Because it is UNBOUNDED (it keeps
+    /// counting up/down), the displayed item is `itemAt(Int(stripPosition))` with
+    /// wrap-around modulo, and the end→start wrap is merely "position + 1" like any
+    /// other page. Invariant at rest: `itemAt(Int(stripPosition)) == items[index]`.
+    @State private var stripPosition: CGFloat = 0
+    /// The contiguous (unbounded) integer cell indices currently mounted in the
+    /// strip. At rest this is the 3 cells around the fronted slide
+    /// (`center-1…center+1`). While paging it GROWS — via a union — to also cover
+    /// the destination (and every cell in between across a rapid burst), so a cell
+    /// that is mid-slide (even partly on screen) is NEVER pulled out from under the
+    /// animation (the cause of a "pop"). It is pruned back to the 3-cell rest
+    /// window only once the LATEST slide settles, and even then only ever removes
+    /// far off-screen cells, so the prune is invisible.
+    @State private var mountedRange: ClosedRange<Int> = -1...1
+    /// Bumped on every page. The `withAnimation` completion that prunes
+    /// `mountedRange` back to the rest window runs only if it still matches — so a
+    /// superseded (interrupted) slide's completion, which still fires, can't prune
+    /// cells the newer, still-running slide is relying on.
+    @State private var pruneToken = 0
     /// The last directional move delivered to the hero's action row. Used to gate
     /// the recede: focus can leave the hero UP (to the tab bar) or LEFT (to the
     /// sidebar) as well as DOWN (to the Continue Watching row) — only a genuine
@@ -158,13 +163,22 @@ struct HomeHeroView: View {
         return items[index]
     }
 
-    /// The item shown by a filmstrip cell at contiguous position `i`, wrapping
-    /// around the carousel. `centerIndex` is unbounded, so this modulo maps it (and
-    /// its ±1 neighbours) back onto the real item list. Caller guarantees non-empty.
+    /// The item shown by a strip cell at contiguous position `i`, wrapping around
+    /// the carousel. `stripPosition` is unbounded, so this modulo maps a cell index
+    /// (and its neighbours) back onto the real item list. Caller guarantees a
+    /// non-empty carousel.
     private func itemAt(_ i: Int) -> MediaItem {
         let n = items.count
         let wrapped = ((i % n) + n) % n
         return items[wrapped]
+    }
+
+    /// Maps an unbounded contiguous cell index back onto the real `items` index it
+    /// displays (wrap-around modulo). Caller guarantees a non-empty carousel.
+    private func wrappedIndex(_ i: Int) -> Int {
+        let n = items.count
+        guard n > 0 else { return 0 }
+        return ((i % n) + n) % n
     }
 
     /// Legibility scrim tone — dark in dark mode, light in light mode (matching
@@ -333,45 +347,55 @@ struct HomeHeroView: View {
             let seconds = UInt64(settings.autoAdvanceSeconds)
             try? await Task.sleep(nanoseconds: seconds * 1_000_000_000)
             // Don't step on an in-flight manual page; that page bumped
-            // `advanceToken`, which restarts this dwell from the new slide.
-            guard !Task.isCancelled, slidePosition == 0 else { return }
+            // `advanceToken`, which restarts (cancels) this dwell from the new
+            // slide. Even if a slide is mid-animation, `page(...)` simply retargets
+            // the same continuous position, so an auto-advance can never glitch it.
+            guard !Task.isCancelled else { return }
             page(to: (index + 1) % items.count, keepButton: selectedButton, forward: true)
         }
     }
 
-    /// The hero backdrop as a **single horizontal filmstrip**: an `HStack` of three
-    /// full-screen-width cells — `itemAt(centerIndex-1)`, `itemAt(centerIndex)`,
-    /// `itemAt(centerIndex+1)` — clipped to a one-screen viewport and slid by ONE
-    /// animatable offset (`slidePosition`). Because the whole strip is a single
-    /// view that moves as a unit, there is never a second, independent animation
-    /// that SwiftUI can drop — the root cause of every prior wrong-order wipe (two
-    /// layers, only one animating). The centred cell's content never changes during
-    /// a slide; the window only re-windows at settle (`disablesAnimations`), and the
-    /// `ForEach` ids overlap by two across windows so the cell sliding to centre is
-    /// the same, already-resolved view instance (even across the end→start wrap).
+    /// The hero backdrop as an **infinite horizontal strip**: each mounted cell is
+    /// pinned at its absolute item-space position (`k * screenWidth`) inside a
+    /// `ZStack`, and the whole strip is translated by ONE continuous, animatable
+    /// offset (`-stripPosition * screenWidth`). Because every cell has a fixed
+    /// position and the only animating quantity is that single offset, there is
+    /// never a second independent layer for SwiftUI to drop, reorder, or leave
+    /// behind — the root cause of every prior wrong-order wipe. Cells are keyed by
+    /// their unbounded integer index, so a page (and the end→start wrap) keeps the
+    /// exact same, already-resolved view instances; only far off-screen cells are
+    /// ever added or removed (see `mountedRange`), so structural churn is invisible.
     ///
-    /// Cells pass `ignoresOverscan: false` so each stays exactly one screen wide and
-    /// the strip tiles correctly; the overscan breakout is applied once here, to the
-    /// whole viewport. The strip is lifted by `backdropParallaxLift` (the parallax)
-    /// so the artwork rises faster than the content as the page recedes.
+    /// Cells pass `ignoresOverscan: false` so each stays exactly one screen wide;
+    /// the overscan breakout is applied once here, to the whole viewport. The strip
+    /// is lifted by `backdropParallaxLift` (the parallax) so the artwork rises
+    /// faster than the content as the page recedes.
     @ViewBuilder
     private func heroBackdropStack(height: CGFloat) -> some View {
         let w = Self.screenWidth
         if items.isEmpty {
             Color.clear.frame(width: w, height: height)
         } else {
-            HStack(spacing: 0) {
-                ForEach([centerIndex - 1, centerIndex, centerIndex + 1], id: \.self) { i in
-                    heroBackdrop(for: itemAt(i), height: height)
+            ZStack(alignment: .topLeading) {
+                ForEach(Array(mountedRange), id: \.self) { k in
+                    heroBackdrop(for: itemAt(k), height: height)
                         .frame(width: w, height: height)
                         .clipped()
+                        // Pin each cell at its absolute item-space slot; the single
+                        // strip offset below is the only thing that moves. Cells are
+                        // only ever inserted/removed far off screen, so no
+                        // transition is wanted — `.identity` keeps it instant even
+                        // if some ambient animation is in flight.
+                        .offset(x: CGFloat(k) * w)
+                        .transition(.identity)
                 }
             }
-            .frame(width: w * 3, height: height, alignment: .leading)
-            // Slide the whole 3-wide strip as one unit. Rest offset is -w (centre
-            // cell in the viewport); +1 pages forward (next cell to centre), -1 back.
-            .offset(x: -w * (1 + slidePosition))
-            // One-screen viewport that clips the strip to just the centred cell.
+            .frame(width: w, height: height, alignment: .topLeading)
+            // Slide the whole strip as one unit via a single continuous offset. At
+            // rest (`stripPosition` is an integer) the fronted cell sits exactly in
+            // the viewport; a page animates this to the neighbouring integer.
+            .offset(x: -stripPosition * w)
+            // One-screen viewport that clips the strip to just the fronted cell.
             .frame(width: w, height: height, alignment: .leading)
             .clipped()
             .frame(maxWidth: .infinity, alignment: .center)
@@ -886,68 +910,72 @@ struct HomeHeroView: View {
         }
     }
 
-    /// Fronts `toItem` with a directional filmstrip slide and restarts the
-    /// auto-advance dwell. Callers only ever page by ±1 (Right/Left/chevron/
-    /// auto-advance), so `toItem` is always the current slide's neighbour. The
-    /// strip animates a SINGLE offset (`slidePosition`) 0→±1; on completion the
-    /// window advances (`centerIndex += step`) and the offset resets to 0 in one
-    /// `disablesAnimations` transaction, so it re-centres with no visible jump and
-    /// no content change mid-slide. `index` (the logical/wrapped slide) updates
-    /// immediately so rapid presses compute the right next target and the metadata
-    /// resolves the new show, while the strip keeps showing `centerIndex` until
-    /// settle.
+    /// Fronts `toItem` with a directional slide and restarts the auto-advance
+    /// dwell. Callers only ever page by ±1 (Right/Left/chevron/auto-advance), so
+    /// `toItem` is always the current slide's neighbour — the strip simply animates
+    /// its single continuous position ONE integer in `forward`'s direction. `index`
+    /// (the logical/wrapped slide) and the selection update immediately; the strip
+    /// catches up smoothly. A rapid second press reads the already-advanced target
+    /// and just retargets the same animated position — there is no coalescing, no
+    /// completion race, and no re-centre, so a slide can never be interrupted into
+    /// a wrong-order/pop/linger artifact.
     private func page(to toItem: Int, keepButton: Int, forward isForward: Bool) {
         guard items.indices.contains(toItem), toItem != index else { return }
         let step = isForward ? 1 : -1
-        // Land any in-flight page instantly so the strip is centred on the current
-        // slide before we start the next one (rapid-paging guard). The in-flight
-        // direction is the sign of `slidePosition`; committing `centerIndex` by that
-        // step lands it on the slide `index` already points at.
-        if slidePosition != 0 {
-            let landStep = slidePosition > 0 ? 1 : -1
-            var t = Transaction(); t.disablesAnimations = true
-            withTransaction(t) {
-                centerIndex += landStep
-                slidePosition = 0
-            }
-        }
+        // The strip's *state* position is always an exact integer; step to the
+        // neighbouring one. A rapid press reads the target the previous press
+        // already set here, so successive presses accumulate and the offset just
+        // keeps sliding without ever snapping back.
+        let currentCenter = Int(stripPosition.rounded())
+        let targetCenter = currentCenter + step
+        // Grow the mounted window (union with what's already mounted) so it always
+        // covers the destination and everything between the current position and
+        // it — a mid-slide cell is thus never removed under the running animation
+        // (which is what caused a "pop"). Pruned back to the rest window on settle.
+        mountedRange = min(mountedRange.lowerBound, targetCenter - 1)...max(mountedRange.upperBound, targetCenter + 1)
         beginTransition()
-        slideGeneration &+= 1
-        let generation = slideGeneration
-        let targetCenter = centerIndex + step
-        // Logical slide + selection update immediately; the strip stays on
-        // `centerIndex` (its centred art is unchanged) until the settle below.
+        pruneToken &+= 1
+        let token = pruneToken
+        // Logical slide + selection update immediately (metadata resolves the new
+        // show and the buttons track it); the strip animates to the new centre.
+        // Metadata is hidden instantly and faded back in by `beginTransition()`
+        // once the wipe has landed.
         index = toItem
         advanceToken &+= 1
         metadataVisible = false
         selectedButton = min(keepButton, max(0, buttons(for: items[toItem]).count - 1))
         withAnimation(.easeInOut(duration: 0.42)) {
-            slidePosition = CGFloat(step)
+            stripPosition = CGFloat(targetCenter)
         } completion: {
-            guard generation == slideGeneration else { return }
-            // Re-window and re-centre in one non-animated transaction. The cell that
-            // just slid to centre keeps its identity (the `ForEach` ids overlap by
-            // two), so its art stays put — the swap is invisible.
-            var t = Transaction(); t.disablesAnimations = true
-            withTransaction(t) {
-                centerIndex = targetCenter
-                slidePosition = 0
-            }
+            // Only the LATEST slide prunes: an interrupted slide's completion still
+            // fires, but a newer page bumped `pruneToken`, so it leaves the grown
+            // window (still in use by the running slide) untouched. When it does
+            // run, the strip is settled, so it only trims far off-screen cells.
+            guard token == pruneToken else { return }
+            let c = Int(stripPosition.rounded())
+            mountedRange = (c - 1)...(c + 1)
         }
         Task { await resolveArtwork(around: toItem) }
     }
 
-    /// Re-seats the filmstrip on the current logical slide with NO animation, used
-    /// on first appearance and on a curated-set swap. Restores the resting invariant
-    /// `itemAt(centerIndex) == items[index]` and zeroes the offset in one
-    /// `disablesAnimations` transaction, so it's an instant, invisible re-centre.
+    /// Re-seats the strip on the current logical slide with NO animation, used on
+    /// first appearance and on a curated-set swap. Restores the resting invariant
+    /// `itemAt(Int(stripPosition)) == items[index]` and the 3-cell rest window in
+    /// one `disablesAnimations` transaction — an instant, invisible re-centre. When
+    /// the fronted item survived a set swap unchanged it keeps the SAME cell slot
+    /// (and so its already-loaded art), rather than jumping and reloading.
     private func reseatSlots() {
         guard !items.isEmpty else { return }
         var transaction = Transaction()
         transaction.disablesAnimations = true
         withTransaction(transaction) {
-            centerIndex = index
-            slidePosition = 0
+            // Pick the strip position congruent to `index` (mod count) that is
+            // nearest where we already are, so an unchanged fronted item keeps its
+            // exact slot and its resolved backdrop instead of reloading.
+            let currentCenter = Int(stripPosition.rounded())
+            let center = currentCenter + (index - wrappedIndex(currentCenter))
+            stripPosition = CGFloat(center)
+            mountedRange = (center - 1)...(center + 1)
         }
     }
 

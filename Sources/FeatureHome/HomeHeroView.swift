@@ -109,17 +109,19 @@ struct HomeHeroView: View {
     /// The Home hero backdrop is an **infinite horizontal strip** driven by a
     /// single, continuous, animatable position (`stripPosition`) — the item-space
     /// coordinate of the cell currently fronted in the viewport. Paging just
-    /// animates this ONE value by ±1; the strip's offset (`-stripPosition *
-    /// screenWidth`) is the only thing that ever moves. There is never a second
-    /// layer, a z-order to get wrong, or a completion-driven re-centre to race —
-    /// so the historical "new art appears behind / pops over the old / old lingers"
+    /// animates this ONE value by ±1; every cell's parallax offset and reveal-wipe
+    /// mask is a pure function of it (see `heroBackdropStack` /
+    /// `cellContentOffset` / `revealMask`), so this is the *only* animated
+    /// quantity. The cells' reveal slices are complementary, so there is never a
+    /// z-order to get wrong, nor a completion-driven re-centre to race — the
+    /// historical "new art appears behind / pops over the old / old lingers"
     /// wrong-order wipe is structurally impossible.
     ///
     /// `stripPosition`'s *state* value is always an exact integer (each page sets
     /// it to the neighbouring integer); SwiftUI interpolates the presentation, so
-    /// the body always reads the settled target while the `.offset` animates
-    /// smoothly. A rapid second press just retargets the same animated value —
-    /// no coalescing, no completion race. Because it is UNBOUNDED (it keeps
+    /// the body always reads the settled target while the derived offsets/masks
+    /// animate smoothly. A rapid second press just retargets the same animated
+    /// value — no coalescing, no completion race. Because it is UNBOUNDED (it keeps
     /// counting up/down), the displayed item is `itemAt(Int(stripPosition))` with
     /// wrap-around modulo, and the end→start wrap is merely "position + 1" like any
     /// other page. Invariant at rest: `itemAt(Int(stripPosition)) == items[index]`.
@@ -269,6 +271,25 @@ struct HomeHeroView: View {
     /// slightly less than this, so its title peeks ~40px below the dots.
     private static let contentBottomInset: CGFloat = 132
 
+    // MARK: - Backdrop transition tuning
+
+    /// Depth of the page parallax, as a fraction of the screen width. During a
+    /// page the outgoing artwork drifts LEFT by at most this much and the
+    /// incoming artwork sits this far to the RIGHT of its final spot — so
+    /// **neither travels a full screen width.** The old image lingers, still
+    /// mostly framed, instead of swiping fully off, and the new one is *revealed*
+    /// (by the sweeping wipe below) rather than swiped in. `0` = a flat swipe.
+    private static let parallaxDepth: CGFloat = 0.32
+
+    /// Soft feather on the reveal seam (as a fraction of the screen width), so
+    /// the wipe edge between the outgoing and incoming artwork is a smooth
+    /// gradient rather than a hard line.
+    private static let revealFeather: CGFloat = 0.06
+
+    /// Duration of the backdrop wipe/parallax when a page is committed. The
+    /// metadata fade-in (`beginTransition`) is timed to land just after this.
+    private static let pageDuration: CGFloat = 0.5
+
     var body: some View {
         let height = Self.screenHeight * heroHeightFraction
         // The backdrop is a sibling *behind* the content in a real ZStack (not a
@@ -355,21 +376,38 @@ struct HomeHeroView: View {
         }
     }
 
-    /// The hero backdrop as an **infinite horizontal strip**: each mounted cell is
-    /// pinned at its absolute item-space position (`k * screenWidth`) inside a
-    /// `ZStack`, and the whole strip is translated by ONE continuous, animatable
-    /// offset (`-stripPosition * screenWidth`). Because every cell has a fixed
-    /// position and the only animating quantity is that single offset, there is
-    /// never a second independent layer for SwiftUI to drop, reorder, or leave
-    /// behind — the root cause of every prior wrong-order wipe. Cells are keyed by
-    /// their unbounded integer index, so a page (and the end→start wrap) keeps the
-    /// exact same, already-resolved view instances; only far off-screen cells are
-    /// ever added or removed (see `mountedRange`), so structural churn is invisible.
+    /// The hero backdrop as an **infinite horizontal strip** of full-screen cells,
+    /// rendered as an Apple-style *parallax reveal*. Every mounted cell is drawn at
+    /// the viewport origin and positioned purely by a function of the single,
+    /// continuous, animatable `stripPosition` — its signed distance from the
+    /// fronted slot, `d = stripPosition - k`:
+    ///
+    /// - **Parallax offset** (`cellContentOffset`): an odd function of `d`, so the
+    ///   outgoing image drifts LEFT and the incoming image sits to the RIGHT, each
+    ///   by only a *fraction* of a screen width (`parallaxDepth`) — neither swipes
+    ///   the full width. The old artwork lingers, still framed, rather than sliding
+    ///   fully off; the new artwork barely shifts (it's *revealed*, not swiped in).
+    /// - **Reveal wipe** (`revealMask`): each cell is masked to the slice of the
+    ///   viewport nearest centre — the leading `(1 - d)` while it is the front /
+    ///   outgoing (`d ≥ 0`), the trailing `(1 + d)` while it is upcoming (`d ≤ 0`).
+    ///   These slices are exactly **complementary** (they meet at one feathered
+    ///   seam that sweeps across), so the two images never overlap or gap and
+    ///   **z-order is irrelevant** — the historical wrong-order / linger / pop wipe
+    ///   is structurally impossible. At an integer `stripPosition` the fronted cell
+    ///   (`d = 0`) owns the whole viewport and its neighbours own nothing, so the
+    ///   rest state is always a single clean image.
+    ///
+    /// Because both the offset and the mask are pure functions of `stripPosition`,
+    /// the entire transition is still driven by that ONE monotonic value: a page
+    /// just animates it by ±1 and every cell follows. Cells are keyed by their
+    /// unbounded integer index, so a page (and the end→start wrap) keeps the exact
+    /// same, already-resolved view instances; only far off-screen cells are ever
+    /// added or removed (see `mountedRange`), so structural churn is invisible.
     ///
     /// Cells pass `ignoresOverscan: false` so each stays exactly one screen wide;
     /// the overscan breakout is applied once here, to the whole viewport. The strip
-    /// is lifted by `backdropParallaxLift` (the parallax) so the artwork rises
-    /// faster than the content as the page recedes.
+    /// is lifted by `backdropParallaxLift` (the vertical parallax) so the artwork
+    /// rises faster than the content as the page recedes.
     @ViewBuilder
     private func heroBackdropStack(height: CGFloat) -> some View {
         let w = Self.screenWidth
@@ -378,29 +416,91 @@ struct HomeHeroView: View {
         } else {
             ZStack(alignment: .topLeading) {
                 ForEach(Array(mountedRange), id: \.self) { k in
+                    let d = stripPosition - CGFloat(k)
                     heroBackdrop(for: itemAt(k), height: height)
                         .frame(width: w, height: height)
                         .clipped()
-                        // Pin each cell at its absolute item-space slot; the single
-                        // strip offset below is the only thing that moves. Cells are
-                        // only ever inserted/removed far off screen, so no
-                        // transition is wanted — `.identity` keeps it instant even
-                        // if some ambient animation is in flight.
-                        .offset(x: CGFloat(k) * w)
+                        // Parallax: shift the artwork content (a pure fn of `d`);
+                        // `.offset` is render-only, so the mask below stays anchored
+                        // to the viewport while the image slides underneath it.
+                        .offset(x: cellContentOffset(d, width: w))
+                        // Reveal wipe: mask to this cell's complementary slice of
+                        // the viewport. Cells partition the screen exactly, so no
+                        // overlap, no gap, and no z-order to get wrong.
+                        .mask {
+                            revealMask(d, width: w)
+                                .frame(width: w, height: height)
+                        }
+                        // Cells are only ever inserted/removed while they own no
+                        // visible slice (far off screen), so no transition is
+                        // wanted — `.identity` keeps it instant under any ambient
+                        // animation.
                         .transition(.identity)
                 }
             }
-            .frame(width: w, height: height, alignment: .topLeading)
-            // Slide the whole strip as one unit via a single continuous offset. At
-            // rest (`stripPosition` is an integer) the fronted cell sits exactly in
-            // the viewport; a page animates this to the neighbouring integer.
-            .offset(x: -stripPosition * w)
             // One-screen viewport that clips the strip to just the fronted cell.
             .frame(width: w, height: height, alignment: .leading)
             .clipped()
             .frame(maxWidth: .infinity, alignment: .center)
             .offset(y: -backdropParallaxLift)
             .ignoresSafeArea(edges: [.top, .horizontal])
+        }
+    }
+
+    /// Horizontal parallax offset (screen points) for a backdrop cell whose signed
+    /// distance from the fronted slot is `d = stripPosition - k`. An **odd**
+    /// function of `d`: the fronted cell (`d = 0`) is centred; a cell being left
+    /// behind (`d > 0`) drifts LEFT and an upcoming cell (`d < 0`) sits to the
+    /// RIGHT, each by at most `parallaxDepth` of a screen width while `|d| ≤ 1`,
+    /// then continues off screen for `|d| > 1` (continuous at the boundary). Pure
+    /// function of the single monotonic `stripPosition`, so it never introduces a
+    /// second independent animated quantity.
+    private func cellContentOffset(_ d: CGFloat, width w: CGFloat) -> CGFloat {
+        let depth = Self.parallaxDepth
+        if abs(d) <= 1 {
+            return -depth * w * d
+        }
+        let sign: CGFloat = d > 0 ? 1 : -1
+        return -sign * (depth * w + (abs(d) - 1) * w)
+    }
+
+    /// The reveal mask for a backdrop cell at distance `d = stripPosition - k`: the
+    /// slice of the viewport (screen space) this cell "owns" during a page. A cell
+    /// on the front / outgoing side (`d ≥ 0`) owns the **leading** `(1 - d)` of the
+    /// viewport; an upcoming cell (`d ≤ 0`) owns the **trailing** `(1 + d)`. The two
+    /// participating cells' slices are complementary — they meet at a single
+    /// feathered seam that sweeps across as `stripPosition` animates — so the wipe
+    /// has no overlap, no gap, and needs no z-order. At an integer position the
+    /// fronted cell (`d = 0`) owns everything and its neighbours own nothing.
+    @ViewBuilder
+    private func revealMask(_ d: CGFloat, width w: CGFloat) -> some View {
+        let feather = Self.revealFeather
+        if d >= 0 {
+            // Owns the LEADING (1 - d); seam runs down its trailing edge.
+            let seam = max(0, min(1, 1 - d))
+            LinearGradient(
+                stops: [
+                    .init(color: .white, location: 0),
+                    .init(color: .white, location: max(0, seam - feather)),
+                    .init(color: .clear, location: seam),
+                    .init(color: .clear, location: 1)
+                ],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+        } else {
+            // Owns the TRAILING (1 + d); seam is at `-d` from the leading edge.
+            let boundary = max(0, min(1, -d))
+            LinearGradient(
+                stops: [
+                    .init(color: .clear, location: 0),
+                    .init(color: .clear, location: boundary),
+                    .init(color: .white, location: min(1, boundary + feather)),
+                    .init(color: .white, location: 1)
+                ],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
         }
     }
 
@@ -944,7 +1044,7 @@ struct HomeHeroView: View {
         advanceToken &+= 1
         metadataVisible = false
         selectedButton = min(keepButton, max(0, buttons(for: items[toItem]).count - 1))
-        withAnimation(.easeInOut(duration: 0.42)) {
+        withAnimation(.easeInOut(duration: Self.pageDuration)) {
             stripPosition = CGFloat(targetCenter)
         } completion: {
             // Only the LATEST slide prunes: an interrupted slide's completion still
@@ -994,14 +1094,17 @@ struct HomeHeroView: View {
     /// it snaps rather than fades — see `content(for:)`/`actionRow(for:)`), NOT via
     /// a separate `withTransaction(disablesAnimations:)` here: a competing
     /// transaction in the same turn let the backdrop's insertion skip its
-    /// animation. This only starts the delayed fade-in, past the wipe duration
-    /// (0.42s) and guarded by ``slideToken`` so a rapid second page cancels the
-    /// first page's pending fade-in.
+    /// animation. This only starts the delayed fade-in, just past the wipe
+    /// duration (`pageDuration`) and guarded by ``slideToken`` so a rapid second
+    /// page cancels the first page's pending fade-in.
     private func beginTransition() {
         slideToken &+= 1
         let token = slideToken
+        // Hold the metadata out until the wipe has essentially landed, then fade
+        // the new slide's text in so it never reads over the mid-wipe artwork.
+        let delay = UInt64(Double(Self.pageDuration) * 0.92 * 1_000_000_000)
         Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 460_000_000)
+            try? await Task.sleep(nanoseconds: delay)
             guard slideToken == token else { return }
             withAnimation(.easeInOut(duration: 0.3)) { metadataVisible = true }
         }

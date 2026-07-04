@@ -1265,6 +1265,8 @@ private struct HomeTab: View {
                 heroSettings: heroSettings,
                 heroFeaturedProvider: makeHeroFeaturedProvider(seer: seer),
                 heroRandomProvider: makeHeroRandomProvider(accounts: accounts),
+                seerConnected: seer.isConfigured,
+                onRequestItem: { try? await seer.request($0) },
                 navigationStyle: navigationStyle,
                 onSelectItem: { navigate($0) },
                 onPlayItem: { requestPlay($0) },

@@ -51,7 +51,12 @@ enum SeerMapper {
               !title.isEmpty
         else { return nil }
 
-        let status = result.mediaInfo?.status.flatMap(MediaAvailabilityStatus.init(rawValue:))
+        // An untracked discovery title (no `mediaInfo`) isn't in the library and
+        // hasn't been requested — for a **featured** item that means "requestable"
+        // (`.unknown`), NOT `nil`. `nil` is reserved for ordinary library items and
+        // would make the hero show a dead "Play" for something you don't have. A
+        // present-but-unrecognized status also falls back to `.unknown`.
+        let status = result.mediaInfo?.status.flatMap(MediaAvailabilityStatus.init(rawValue:)) ?? .unknown
 
         return MediaItem(
             id: itemID(tmdbID: result.id),
@@ -64,8 +69,33 @@ enum SeerMapper {
             backdropURL: imageURL(path: result.backdropPath, size: backdropSize),
             heroBackdropURL: imageURL(path: result.backdropPath, size: heroBackdropSize),
             providerIDs: ["Tmdb": String(result.id)],
-            availability: status
+            availability: status,
+            downloadProgress: downloadProgress(from: result.mediaInfo?.downloadStatus)
         )
+    }
+
+    /// Aggregate fetched fraction across a title's active download queue items:
+    /// `Σ(size - sizeLeft) / Σ size`. Returns `nil` when nothing is downloading,
+    /// no usable sizes are reported (queued but size unknown), OR the fetched
+    /// fraction wouldn't yet display as at least 1% — a just-grabbed item reports
+    /// `sizeLeft ≈ size` (≈0%), which should read as "Requested" rather than a
+    /// stuck "Downloading 0%". Never returns `1` (a fully-fetched title reports as
+    /// available, not downloading), so a non-nil result is always a live `1...99%`.
+    static func downloadProgress(from items: [SeerDownloadingItem]?) -> Double? {
+        guard let items, !items.isEmpty else { return nil }
+        var totalSize = 0.0
+        var totalLeft = 0.0
+        for item in items {
+            guard let size = item.size, size > 0 else { continue }
+            let left = max(0, min(size, item.sizeLeft ?? size))
+            totalSize += size
+            totalLeft += left
+        }
+        guard totalSize > 0 else { return nil }
+        let fraction = (totalSize - totalLeft) / totalSize
+        // Below ~0.5% rounds to "0%" — treat that as not-yet-downloading.
+        guard fraction >= 0.005 else { return nil }
+        return min(0.999, fraction)
     }
 
     /// Maps a page of results to `MediaItem`s, dropping people/unmappable

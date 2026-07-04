@@ -63,9 +63,12 @@ final class SeerMapperTests: XCTestCase {
         XCTAssertNil(SeerMapper.mediaItem(from: result))
     }
 
-    func testMissingMediaInfoMapsToNilAvailability() {
+    func testMissingMediaInfoMapsToUnknownAvailability() {
+        // An untracked featured title (no mediaInfo) isn't owned and hasn't been
+        // requested — the hero must offer Request, so availability defaults to
+        // `.unknown` (requestable), never `nil` (which would read as a library item).
         let result = SeerDiscoverResult(id: 3, mediaType: "movie", title: "Untracked")
-        XCTAssertNil(SeerMapper.mediaItem(from: result)?.availability)
+        XCTAssertEqual(SeerMapper.mediaItem(from: result)?.availability, .unknown)
     }
 
     func testAllStatusRawValuesMap() {

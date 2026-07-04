@@ -12,13 +12,15 @@ import SwiftUI
 public struct PlozzGlassCardModifier: ViewModifier {
     private let cornerRadius: CGFloat
     private let isFocused: Bool
+    private let glassAtRest: Bool
 
     @Environment(\.plozzReduceTransparency) private var reduceTransparency
     @Environment(\.themePalette) private var palette
 
-    public init(cornerRadius: CGFloat, isFocused: Bool) {
+    public init(cornerRadius: CGFloat, isFocused: Bool, glassAtRest: Bool = true) {
         self.cornerRadius = cornerRadius
         self.isFocused = isFocused
+        self.glassAtRest = glassAtRest
     }
 
     public func body(content: Content) -> some View {
@@ -43,22 +45,29 @@ public struct PlozzGlassCardModifier: ViewModifier {
             // Native Liquid Glass, matching Twozz 1:1: focus picks up a faint
             // theme-aware tint (dark/OLED brighten, light darkens) blended into
             // the live glass, never a flat opacity fill.
-            content
-                .glassEffect(
-                    isFocused ? .regular.tint(palette.focusedCardGlassTint) : .regular,
-                    in: .rect(cornerRadius: cornerRadius)
-                )
-                .background {
-                    // A focused card casts a drop shadow. In Light mode the
-                    // translucent glass lets that shadow bleed *through*, reading
-                    // as a muddy haze inside the card. Give the focused Light card
-                    // an opaque backing so the shadow stays behind it. Dark/OLED
-                    // don't show this, so they keep pure translucent glass.
-                    if isFocused && palette.isLight {
-                        shape.fill(palette.cardOpaqueSurface)
+            if isFocused {
+                content
+                    .glassEffect(.regular.tint(palette.focusedCardGlassTint), in: .rect(cornerRadius: cornerRadius))
+                    .background {
+                        // In Light mode the translucent glass lets the focus drop
+                        // shadow bleed *through*, reading as a muddy haze inside the
+                        // card. An opaque backing keeps the shadow behind it. Dark/OLED
+                        // don't show this, so they keep pure translucent glass.
+                        if palette.isLight { shape.fill(palette.cardOpaqueSurface) }
                     }
-                }
-                .clipShape(shape)
+                    .clipShape(shape)
+            } else if glassAtRest {
+                content
+                    .glassEffect(.regular, in: .rect(cornerRadius: cornerRadius))
+                    .clipShape(shape)
+            } else {
+                // Glass-free resting surface. A live `.glassEffect` samples and
+                // blurs the backdrop *every frame*, so with dozens of cards on
+                // screen it's the dominant scroll cost. Cards that opt out (dense
+                // poster grids) draw no glass at rest and lean on their artwork,
+                // media edge, and drop shadow for definition — silky to scroll past.
+                content.clipShape(shape)
+            }
         } else {
             // Pre-Liquid-Glass fallback: opaque lift on focus, light translucent
             // wash at rest.
@@ -134,8 +143,12 @@ public struct PlozzCardButtonStyle: ButtonStyle {
 
 public extension View {
     /// Wraps the view in the shared Plozz liquid-glass browsing-card surface.
-    func plozzGlassCard(cornerRadius: CGFloat, isFocused: Bool) -> some View {
-        modifier(PlozzGlassCardModifier(cornerRadius: cornerRadius, isFocused: isFocused))
+    /// Pass `glassAtRest: false` for cards shown en masse (dense poster grids) so
+    /// resting cards skip the per-frame backdrop blur a live `.glassEffect` costs —
+    /// the focused card still gets full glass. Defaults to `true` so every existing
+    /// caller keeps its resting glass.
+    func plozzGlassCard(cornerRadius: CGFloat, isFocused: Bool, glassAtRest: Bool = true) -> some View {
+        modifier(PlozzGlassCardModifier(cornerRadius: cornerRadius, isFocused: isFocused, glassAtRest: glassAtRest))
     }
 
     /// Draws Twozz's hairline "inner glass" rim around a clipped media thumbnail:

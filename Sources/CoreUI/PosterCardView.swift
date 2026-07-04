@@ -112,9 +112,13 @@ public struct PosterCardView: View {
             .padding([.horizontal, .bottom], metrics.posterCaptionInset)
         }
         .padding(metrics.cardInset)
-        .plozzGlassCard(cornerRadius: metrics.posterCardCornerRadius, isFocused: isFocused)
+        .plozzGlassCard(cornerRadius: metrics.posterCardCornerRadius, isFocused: isFocused, glassAtRest: false)
         .focusableCard(isFocused: $isFocused, cornerRadius: metrics.posterCardCornerRadius, action: action)
         .plozzCardRasterize(reduceTransparency: reduceTransparency)
+        // Resting posters carry a soft drop shadow so they read as raised cards
+        // (essential in Light mode against a white background); the focused card
+        // deepens it. The real scroll cost was the live glass behind every resting
+        // card (dropped via `glassAtRest: false` above), not this shadow.
         .shadow(color: .black.opacity(isFocused ? 0.36 : 0.15), radius: isFocused ? 20 : 8, y: isFocused ? 10 : 4)
         .scaleEffect(isFocused ? PlozzTheme.Metrics.focusedCardScale : 1)
         .zIndex(isFocused ? 2 : 0)

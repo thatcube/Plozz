@@ -213,6 +213,39 @@ public struct PlexProvider: MediaProvider {
         }
     }
 
+    /// The alphabet fast-scroll index for a name-sorted section. Plex's
+    /// `firstCharacter` facet already returns one entry per present letter (in
+    /// ascending `titleSort` order) with its item `size`, so a single request
+    /// yields every letter's count; cumulating them gives the grid offsets. Non-
+    /// name sorts have no letter to jump to → empty (rail hidden).
+    public func letterIndex(
+        in containerID: String,
+        kind: MediaItemKind,
+        sort: CoreModels.SortDescriptor
+    ) async throws -> [LibraryLetterIndexEntry] {
+        guard sort.field == .name else { return [] }
+        let type = Self.sectionType(forContainerKind: kind)
+        let directories = try await client.firstCharacter(sectionID: containerID, type: type)
+        // Fold the facet onto the canonical "#"/A–Z rail buckets, preserving the
+        // server's ascending order and summing any that collapse (e.g. "1-9" and
+        // "#" both fall into "#").
+        var counts: [String: Int] = [:]
+        var order: [String] = []
+        for directory in directories {
+            let bucket = LibraryLetterIndex.bucket(forPrefix: directory.titleSort ?? directory.title ?? "#")
+            if counts[bucket] == nil { order.append(bucket) }
+            counts[bucket, default: 0] += max(0, directory.size ?? 0)
+        }
+        let bucketCounts = order.map { (letter: $0, count: counts[$0] ?? 0) }
+        let entries = LibraryLetterIndex.entries(
+            bucketCountsAscending: bucketCounts, direction: sort.direction
+        )
+        PlozzLog.networking.info(
+            "Plex letter index: section=\(containerID) letters=\(entries.count) dir=\(sort.direction.rawValue)"
+        )
+        return entries
+    }
+
     // MARK: Search
 
     public func search(query: String, limit: Int) async throws -> [MediaItem] {

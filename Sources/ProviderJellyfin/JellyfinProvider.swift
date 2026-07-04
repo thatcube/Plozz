@@ -324,6 +324,61 @@ public struct JellyfinProvider: MediaProvider {
         }
     }
 
+    /// The alphabet fast-scroll index for a name-sorted library. For each of
+    /// A…Z it asks the server how many items sort before that letter
+    /// (`NameLessThan=L`, matched against `SortName` — the same key the browse
+    /// sorts by), which is exactly that letter's grid offset. The `"#"` bucket
+    /// (digits/symbols) is the count before "A". Non-name sorts have no letter
+    /// to jump to, so return empty and the rail stays hidden.
+    ///
+    /// The A…Z counts fan out concurrently (bounded) and run once per browse
+    /// session — the view model caches the result until the sort changes.
+    public func letterIndex(
+        in containerID: String,
+        kind: MediaItemKind,
+        sort: CoreModels.SortDescriptor
+    ) async throws -> [LibraryLetterIndexEntry] {
+        guard sort.field == .name else { return [] }
+        let (recursive, includeItemTypes) = Self.query(forContainerKind: kind)
+        let letters = LibraryLetterIndex.railLetters.filter { $0 != "#" }
+        let userID = session.userID
+        let client = client
+        let limiter = ConcurrencyLimiter(limit: 6)
+
+        async let totalTask: Int = limiter.run {
+            try await client.itemCount(
+                userID: userID, parentID: containerID,
+                includeItemTypes: includeItemTypes, recursive: recursive
+            )
+        }
+
+        var offsets: [String: Int] = [:]
+        try await withThrowingTaskGroup(of: (String, Int).self) { group in
+            for letter in letters {
+                group.addTask {
+                    let count = try await limiter.run {
+                        try await client.itemCount(
+                            userID: userID, parentID: containerID,
+                            includeItemTypes: includeItemTypes, recursive: recursive,
+                            nameLessThan: letter
+                        )
+                    }
+                    return (letter, count)
+                }
+            }
+            for try await (letter, count) in group { offsets[letter] = count }
+        }
+        let total = try await totalTask
+
+        let entries = LibraryLetterIndex.entries(
+            lessThanOffsetsByLetter: offsets, totalCount: total, direction: sort.direction
+        )
+        PlozzLog.networking.info(
+            "Library letter index: container=\(containerID) total=\(total) letters=\(entries.count) dir=\(sort.direction.rawValue)"
+        )
+        return entries
+    }
+
     /// Picks the Jellyfin query strategy for a container kind. Typed libraries
     /// use the fast recursive/indexed path; folders/collections list direct
     /// children.

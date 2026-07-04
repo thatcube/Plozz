@@ -35,6 +35,12 @@ struct PlexDirectory: Decodable {
     let thumb: String?
     let art: String?
     let composite: String?
+    /// Number of items in this grouping — present on facet listings such as
+    /// `/library/sections/{id}/firstCharacter` (count of titles under a letter).
+    let size: Int?
+    /// The grouping's sort value — the first character (`"A"`…`"Z"`, `"#"`,
+    /// `"1-9"`, …) on the `firstCharacter` facet.
+    let titleSort: String?
 }
 
 /// A media item: movie, show, season, episode, …

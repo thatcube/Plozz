@@ -117,6 +117,34 @@ final class LibraryBrowseViewModelTests: XCTestCase {
         XCTAssertTrue(starts.contains(40))
     }
 
+    func testPrepareJumpLoadsTargetAndNextPageAhead() async {
+        let (vm, provider) = makeVM(itemCount: 200, pageSize: 10)
+        await vm.loadFirstPage()
+
+        // A rail jump to a deep letter should proactively load the landing page
+        // (index 100 -> startIndex 100) plus the following page (110), which
+        // covers the rest of the viewport, without waiting for cells to appear.
+        vm.prepareJump(toIndex: 100)
+
+        await waitUntil("Expected jump target + next page to load ahead of cell appearance") {
+            let starts = Set(provider.requestedPages.map(\.startIndex))
+            return starts.contains(100) && starts.contains(110)
+        }
+        XCTAssertNotNil(vm.item(at: 100))
+        XCTAssertNotNil(vm.item(at: 110))
+    }
+
+    func testPrepareJumpOutOfBoundsIsIgnored() async {
+        let (vm, provider) = makeVM(itemCount: 100, pageSize: 10)
+        await vm.loadFirstPage()
+        let before = provider.requestedPages.count
+
+        vm.prepareJump(toIndex: -1)
+        vm.prepareJump(toIndex: 1_000)
+
+        XCTAssertEqual(provider.requestedPages.count, before, "Out-of-range jumps request nothing")
+    }
+
     func testScrolledAwayPageCancelsInFlightLoad() async {
         let (vm, provider) = makeVM(itemCount: 100, pageSize: 10)
         provider.pageHooks[20] = { try await Task.sleep(nanoseconds: 5_000_000_000) }

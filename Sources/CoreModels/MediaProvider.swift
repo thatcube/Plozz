@@ -76,6 +76,18 @@ public protocol MediaProvider: Sendable {
     /// the sort means restarting paging from `startIndex` 0.
     func items(in containerID: String, kind: MediaItemKind, page: PageRequest) async throws -> MediaPage
 
+    /// The alphabet fast-scroll index for a container browsed by **name**: for
+    /// each present letter, the 0-based index of its first item in the current
+    /// sort. Powers the trailing A–Z rail on the library grid.
+    ///
+    /// Only meaningful for `sort.field == .name`; providers return an empty
+    /// array for every other sort (there is no letter to jump to) and callers
+    /// hide the rail when it's empty. The default is empty, so the rail is a
+    /// purely additive capability — test doubles and providers that can't
+    /// cheaply compute it (e.g. the cross-server aggregate, whose merged order
+    /// has no stable per-letter offset) simply never show it.
+    func letterIndex(in containerID: String, kind: MediaItemKind, sort: SortDescriptor) async throws -> [LibraryLetterIndexEntry]
+
     // MARK: Search
 
     /// Search the user's libraries for items matching a free-text query.
@@ -157,6 +169,13 @@ public protocol MediaProvider: Sendable {
 // doubles) inherit safe no-ops, so adding the capability never forces every
 // conformer to implement it.
 public extension MediaProvider {
+    /// Default: no alphabet index (the A–Z rail stays hidden). Providers that
+    /// can cheaply resolve per-letter offsets for a name-sorted library
+    /// (Jellyfin via `NameLessThan` counts, Plex via the `firstCharacter`
+    /// facet) override this; test doubles and the cross-server aggregate inherit
+    /// the safe empty result.
+    func letterIndex(in containerID: String, kind: MediaItemKind, sort: SortDescriptor) async throws -> [LibraryLetterIndexEntry] { [] }
+
     func remoteSubtitleSearch(itemID: String, language: String) async throws -> [RemoteSubtitle] { [] }
     func downloadRemoteSubtitle(itemID: String, subtitleID: String) async throws {}
 

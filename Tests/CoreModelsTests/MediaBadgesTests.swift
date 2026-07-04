@@ -334,6 +334,61 @@ final class MediaBadgesTests: XCTestCase {
         XCTAssertNil(item.cardRuntimeText)
     }
 
+    // MARK: Resume affordance (drives hero + detail Play/Resume button)
+
+    func testResumeProgressFractionSetForPartialResumePosition() {
+        let item = MediaItem(
+            id: "1",
+            title: "Movie",
+            kind: .movie,
+            runtime: 7200,
+            resumePosition: 1800
+        )
+        XCTAssertEqual(item.resumeProgressFraction ?? 0, 0.25, accuracy: 0.0001)
+    }
+
+    func testResumeProgressFractionSetForPartialPercentageOnly() {
+        let item = MediaItem(
+            id: "1",
+            title: "Episode",
+            kind: .episode,
+            runtime: 1800,
+            playedPercentage: 0.5
+        )
+        XCTAssertEqual(item.resumeProgressFraction ?? 0, 0.5, accuracy: 0.0001)
+    }
+
+    func testResumeProgressFractionNilWhenResumePositionIsZero() {
+        // Providers (e.g. Jellyfin PlaybackPositionTicks: 0, Plex viewOffset: 0)
+        // report a non-nil but zero resume position for unwatched items — the hero
+        // Play button must read "Play", not "Resume".
+        let item = MediaItem(
+            id: "1",
+            title: "Movie",
+            kind: .movie,
+            runtime: 7200,
+            resumePosition: 0
+        )
+        XCTAssertNil(item.resumeProgressFraction)
+    }
+
+    func testResumeProgressFractionNilWhenNotStarted() {
+        let item = MediaItem(id: "1", title: "Movie", kind: .movie, runtime: 7200)
+        XCTAssertNil(item.resumeProgressFraction)
+    }
+
+    func testResumeProgressFractionNilWhenMarkedPlayed() {
+        let item = MediaItem(
+            id: "1",
+            title: "Movie",
+            kind: .movie,
+            runtime: 7200,
+            resumePosition: 1800,
+            isPlayed: true
+        )
+        XCTAssertNil(item.resumeProgressFraction)
+    }
+
     // MARK: Dolby format word
 
     func testDolbyFormatWordStripsBrand() {

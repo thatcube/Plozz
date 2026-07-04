@@ -555,7 +555,7 @@ struct HomeHeroView: View {
         // reachable). Order matches the visible pills.
         let a11yActions: [(String, () -> Void)] = itemButtons.map { button in
             switch button {
-            case .play: return (item.resumePosition != nil ? "Resume" : "Play", { onPlay(item) })
+            case .play: return (item.resumeProgressFraction != nil ? "Resume" : "Play", { onPlay(item) })
             case .moreInfo: return ("More Info", { onSelect(item) })
             case .watchlist:
                 let fav = watchlistTarget(for: item).isFavorite
@@ -856,7 +856,7 @@ struct HomeHeroView: View {
         guard itemButtons.indices.contains(selectedButton) else { return item.title }
         let name: String
         switch itemButtons[selectedButton] {
-        case .play: name = item.resumePosition != nil ? "Resume" : "Play"
+        case .play: name = item.resumeProgressFraction != nil ? "Resume" : "Play"
         case .moreInfo: name = "More Info"
         case .watchlist: name = watchlistTarget(for: item).isFavorite ? "Remove from Watchlist" : "Add to Watchlist"
         case .next: name = "Next"
@@ -886,7 +886,7 @@ struct HomeHeroView: View {
         switch button {
         case .play:
             heroPill(selected: selected) {
-                Label(item.resumePosition != nil ? "Resume" : "Play", systemImage: "play.fill")
+                Label(item.resumeProgressFraction != nil ? "Resume" : "Play", systemImage: "play.fill")
                     .font(.system(size: 28, weight: .semibold))
             }
         case .moreInfo:

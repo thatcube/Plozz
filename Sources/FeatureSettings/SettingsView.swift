@@ -76,7 +76,7 @@ public struct SettingsView: View {
     private let anilist: AniListService
     private let mal: MALService
     private let lastfm: LastFmService
-    private let discoveredLibraries: LoadState<[AggregatedLibrary]>
+    private let librariesStore: DiscoveredLibrariesStore
     private let reloadLibraries: () async -> Void
     private let accounts: [Account]
     private let activeAccountID: String?
@@ -120,7 +120,7 @@ public struct SettingsView: View {
         anilist: AniListService,
         mal: MALService,
         lastfm: LastFmService,
-        discoveredLibraries: LoadState<[AggregatedLibrary]>,
+        librariesStore: DiscoveredLibrariesStore,
         reloadLibraries: @escaping () async -> Void,
         accounts: [Account],
         activeAccountID: String?,
@@ -163,7 +163,7 @@ public struct SettingsView: View {
         self.anilist = anilist
         self.mal = mal
         self.lastfm = lastfm
-        self.discoveredLibraries = discoveredLibraries
+        self.librariesStore = librariesStore
         self.reloadLibraries = reloadLibraries
         self.accounts = accounts
         self.activeAccountID = activeAccountID
@@ -196,7 +196,7 @@ public struct SettingsView: View {
             playback: playback,
             theme: theme,
             homeVisibility: homeVisibility,
-            discoveredLibraries: discoveredLibraries,
+            discoveredLibraries: librariesStore.state,
             reloadLibraries: reloadLibraries,
             accounts: accounts,
             activeAccountID: activeAccountID,
@@ -227,19 +227,13 @@ public struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 36) {
                     // Device-shared settings come FIRST: servers + profile
                     // management belong to the whole Apple TV, not to you.
-                    // Leading with the compact card makes the global scope
-                    // obvious and keeps it visible without scrolling past the
-                    // taller profile card.
                     thisAppleTVSection
 
                     // Then the active profile's own container: switching
-                    // profiles swaps everything inside it at once, and its
-                    // header makes clear these settings save on THIS profile.
+                    // profiles swaps everything inside it at once.
                     profileContainer
 
-                    // About + Attributions + Sign Out render INLINE at the
-                    // bottom of the main page (no drill-down for About). Only
-                    // Attributions & Licensing pushes one level deeper.
+                    // About + Attributions + Sign Out render INLINE at the bottom.
                     aboutAndSignOut
                 }
                 .frame(maxWidth: Self.contentMaxWidth, alignment: .leading)
@@ -576,7 +570,7 @@ public struct SettingsView: View {
             AppearanceDetailView(theme: theme)
         case .homeDisplay:
             HomeDisplayDetailView(
-                discoveredLibraries: discoveredLibraries,
+                discoveredLibraries: librariesStore.state,
                 homeVisibility: homeVisibility
             )
         case .nightShift:

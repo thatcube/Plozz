@@ -157,8 +157,11 @@ struct SettingsSplitLayout: View {
     private func masterRow(_ row: SettingsSplitRow) -> some View {
         Button {
             // Tapping a row just pins it as the live selection; press right to
-            // drill focus into its control in the detail pane.
-            selectedRowID = row.id
+            // drill focus into its control in the detail pane. A tap is NOT a
+            // focus-section flip, so animating the detail cross-fade here is safe
+            // (unlike the focus-driven path, which must stay instant — see the
+            // detail pane's note on the removed `.animation(value: selectedRowID)`).
+            withAnimation(.easeInOut(duration: 0.18)) { selectedRowID = row.id }
         } label: {
             SettingsMasterRowLabel(row: row, isSelected: selectedRowID == row.id)
         }
@@ -207,9 +210,15 @@ struct SettingsSplitLayout: View {
             RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
                 .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
         )
-        // Cross-fade the control as the live selection changes while the user
-        // scrolls the list, so the pane updates smoothly rather than snapping.
-        .animation(.easeInOut(duration: 0.18), value: selectedRowID)
+        // The detail pane's Text/description views are REPLACED whenever
+        // `selectedRowID` changes — and that changes as focus moves in the master
+        // list (see `onChange(of: focusedRow)`). Animating that hierarchy swap on
+        // a focus-driven change is the tvOS focus-flip crash pattern
+        // (`-[…LocalizedTextStorage setToViewXFlippedScreenShot:]`): the focus
+        // engine snapshots views for its flip while SwiftUI is tearing down/re-
+        // inserting the animated Text, freeing a view UIKit still references.
+        // So the detail pane updates INSTANTLY as focus moves (no `.animation`
+        // here). A tap that pins a row still animates via its `withAnimation`.
         .focusSection()
     }
 }

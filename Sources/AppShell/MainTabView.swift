@@ -172,6 +172,12 @@ struct MainTabView: View {
     let onWarmIdentityIndex: () -> Void
 
     @State private var discovery = LibraryDiscoveryModel()
+    /// Owns the Settings library-discovery result as an `@Observable` reference so
+    /// that a reload (which fires on Settings appearance, DURING the tab focus-flip)
+    /// only re-renders the library detail pages that read it — never the Settings
+    /// ROOT list. Threading the raw `LoadState` value through `SettingsView`
+    /// instead rebuilt the root rows mid-flip → `setToViewXFlippedScreenShot:` UAF.
+    @State private var librariesStore = DiscoveredLibrariesStore()
     @State private var musicAvailability = MusicAvailabilityModel()
     /// Hosts the full-screen Now Playing player as a `fullScreenCover` on the root
     /// TabView rather than inside the Music tab's navigation stack — the latter
@@ -305,8 +311,17 @@ struct MainTabView: View {
                 anilist: anilist,
                 mal: mal,
                 lastfm: lastfm,
-                discoveredLibraries: discovery.state,
-                reloadLibraries: { await discovery.load(from: accounts) },
+                librariesStore: librariesStore,
+                reloadLibraries: {
+                    // Load OFF the model's own published state (used elsewhere by
+                    // SelectLibrariesView) and write results into the store the
+                    // Settings detail pages observe. MainTabView never READS
+                    // `librariesStore.state`, so this reload can't re-render the
+                    // Settings root list during the tab focus-flip.
+                    librariesStore.state = .loading
+                    let libraries = await discovery.libraries(from: accounts)
+                    librariesStore.state = libraries.isEmpty ? .empty : .loaded(libraries)
+                },
                 accounts: displayAccounts,
                 activeAccountID: activeAccountID,
                 profiles: profiles,

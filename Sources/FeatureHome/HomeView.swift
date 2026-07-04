@@ -269,6 +269,17 @@ public struct HomeView: View {
             .task(id: HeroRecomputeKey(content: content, settings: heroSettings?.settings)) {
                 await recomputeHero(content: content)
             }
+            // Live-refresh ONLY the status of featured (Seerr) hero items — their
+            // `availability` + `downloadProgress` — folding fresh values onto the
+            // existing items in place. Keeps each item's id and the carousel order,
+            // so a title flipping Request → Downloading % → Play never resets the
+            // hero's current slide, backdrop, paging, dwell, or focus (HomeHeroView
+            // only reacts to a change in the items' *ids* — see its id-keyed
+            // onChange). Restarts with the recompute baseline; idles when Featured
+            // is off or absent.
+            .task(id: HeroRecomputeKey(content: content, settings: heroSettings?.settings)) {
+                await refreshFeaturedStatusLoop()
+            }
         }
         .task(id: visibility.visibility.excludedKeys) {
             // First appearance loads; thereafter a change to the hidden-library set
@@ -345,6 +356,54 @@ public struct HomeView: View {
             randomProvider: heroRandomProvider
         )
         heroItems = items
+    }
+
+    /// Interval between in-place featured-status refreshes while Home is visible.
+    /// Matches the cadence order of Overseerr's own download-sync (~1 min); 30s
+    /// keeps the CTA responsive without hammering the server.
+    private static let featuredRefreshInterval: Duration = .seconds(30)
+
+    /// Periodically re-fetches featured (Seerr) content and folds each fresh
+    /// title's `availability` + `downloadProgress` back onto the matching on-screen
+    /// hero item **in place**, so the featured CTA tracks the server
+    /// (Request → "Downloading n%" → Play) as downloads start and finish.
+    ///
+    /// Deliberately surgical: it mutates only those two fields on items whose id
+    /// still matches a fresh featured result, never changing the array's contents
+    /// order or any item's id. That's what guarantees the hero carousel doesn't
+    /// re-seat, re-wipe its backdrop, restart its dwell, or move focus — only the
+    /// primary button re-derives. Reassigns `heroItems` only when something
+    /// actually changed. Idles (re-checking each interval) while the Featured
+    /// source is disabled or no featured item is present, so nothing is fetched
+    /// needlessly; cancelled automatically when the task is torn down.
+    @MainActor
+    private func refreshFeaturedStatusLoop() async {
+        while !Task.isCancelled {
+            try? await Task.sleep(for: Self.featuredRefreshInterval)
+            if Task.isCancelled { return }
+            guard let settings = heroSettings?.settings, settings.isActive,
+                  settings.isEnabled(.featured),
+                  heroItems.contains(where: { $0.availability != nil })
+            else { continue }
+
+            let fresh = await heroFeaturedProvider(settings.maxItems)
+            guard !fresh.isEmpty else { continue }
+            var statusByID: [String: (availability: MediaAvailabilityStatus?, progress: Double?)] = [:]
+            for item in fresh { statusByID[item.id] = (item.availability, item.downloadProgress) }
+
+            var updated = heroItems
+            var changed = false
+            for index in updated.indices {
+                guard let status = statusByID[updated[index].id] else { continue }
+                if updated[index].availability != status.availability
+                    || updated[index].downloadProgress != status.progress {
+                    updated[index].availability = status.availability
+                    updated[index].downloadProgress = status.progress
+                    changed = true
+                }
+            }
+            if changed { heroItems = updated }
+        }
     }
 
     /// Renders one resolved `HomeRow`. The per-kind wiring (card style, and

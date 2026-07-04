@@ -394,6 +394,20 @@ struct HomeHeroView: View {
                 value != keys.contains(key)
             }
         }
+        // Drop optimistic request overrides once Home's in-place featured refresh
+        // reports an authoritative status that reflects the landed request (the
+        // server now tracks it: pending/processing/partially/available). Otherwise
+        // a just-tapped "Requested" override would mask the real "Downloading n%"
+        // /Play the refresh brings in. Keyed on the items' (id, availability) so it
+        // only fires when a real status actually changes.
+        .onChange(of: items.map { RequestStatusSignature(id: $0.id, availability: $0.availability) }) { _, _ in
+            guard !requestOverrides.isEmpty else { return }
+            for item in items {
+                if let real = item.availability, real != .unknown, real != .deleted {
+                    requestOverrides[item.id] = nil
+                }
+            }
+        }
         // Auto-advance: the fire is rescheduled whenever `autoAdvanceKey` changes
         // (slide change, manual page, pause/resume, or the item count settling).
         // It runs REGARDLESS of focus — focus lands on the hero action row by
@@ -1344,6 +1358,14 @@ struct HomeHeroView: View {
     /// The hero's action buttons, in visual order.
     private enum HeroButton: Hashable {
         case play, request, downloadStatus, moreInfo, watchlist, next
+    }
+
+    /// A cheap `Equatable` fingerprint of a featured item's request state, so the
+    /// override-reconciliation `onChange` fires only when a real status changes
+    /// (not on unrelated re-renders or download-progress ticks).
+    private struct RequestStatusSignature: Equatable {
+        let id: String
+        let availability: MediaAvailabilityStatus?
     }
 }
 #endif

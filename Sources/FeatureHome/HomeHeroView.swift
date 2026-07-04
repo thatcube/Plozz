@@ -357,6 +357,14 @@ struct HomeHeroView: View {
             // The set swap re-seats the fronted slide, so start a fresh dwell for
             // it (gauge from empty, no lingering pause).
             restartDwell()
+            // ...but if the hero is currently RECEDED (focus is down on Continue
+            // Watching), re-assert the pause that `restartDwell()` just cleared.
+            // Otherwise a background hero recompute (e.g. a Random re-roll or a
+            // Continue Watching change) landing while the user browses below would
+            // silently resume the carousel and page behind them — defeating the
+            // recede pause. Kept coupled to `pausedAt` (not a bare `!receded` task
+            // guard) so `resumeFromRecede()` still resumes cleanly on focus return.
+            if receded { pauseWhileReceded() }
             // Clamp the logical selection to the new slide's button count so it
             // can never point past the last pill after a set swap. Pure `@State`,
             // so this never touches (or drops) focus.

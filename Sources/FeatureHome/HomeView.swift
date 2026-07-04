@@ -96,7 +96,7 @@ public struct HomeView: View {
             state: viewModel.state,
             emptyMessage: "Your libraries are empty. Add media on your media server to see it here.",
             onRetry: { Task { await viewModel.load() } },
-            loadingContent: { HomeSkeletonView(layout: viewModel.skeletonLayout) }
+            loadingContent: { HomeSkeletonView(layout: viewModel.skeletonLayout, heroActive: heroSettings?.settings.isActive ?? false) }
         ) { content in
             // The screen is a data-driven list of rows. Both this loaded view and
             // the skeleton render from the same ordered `HomeRow`/`HomeRowKind`
@@ -313,8 +313,9 @@ public struct HomeView: View {
     /// in just below the hero's paging dots — the Apple TV look. Paired with
     /// `HomeHeroView.contentBottomInset` (132): pulling up by slightly less than
     /// that inset lands the Continue Watching title ~40px below the dots, with the
-    /// tops of its cards peeking over the hero's lower edge. Tuned on-device.
-    private static let heroRowOverlap: CGFloat = 132
+    /// tops of its cards peeking over the hero's lower edge. Tuned on-device. Shared
+    /// via ``HomeHeroLayout`` so the loading skeleton pulls its rows up identically.
+    private static let heroRowOverlap: CGFloat = HomeHeroLayout.rowOverlap
 
     /// Extra upward lift (points) applied to the rows (Continue Watching et al.)
     /// when the hero is receded, so the row rises a little higher on screen toward

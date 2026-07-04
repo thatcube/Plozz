@@ -283,27 +283,16 @@ struct HomeHeroView: View {
             .first { $0 == .addToWatchlist || $0 == .removeFromWatchlist }
     }
 
-    private static var screenHeight: CGFloat {
-        #if canImport(UIKit)
-        return UIScreen.main.bounds.height
-        #else
-        return 1080
-        #endif
-    }
+    private static var screenHeight: CGFloat { HomeHeroLayout.screenHeight }
 
-    private static var screenWidth: CGFloat {
-        #if canImport(UIKit)
-        return UIScreen.main.bounds.width
-        #else
-        return 1920
-        #endif
-    }
+    private static var screenWidth: CGFloat { HomeHeroLayout.screenWidth }
 
     /// Distance the content column is lifted off the bottom edge of the
     /// full-screen hero, so the paging dots land in the lower third. Paired with
     /// `HomeView.heroRowOverlap`: the Continue Watching row is pulled up by
-    /// slightly less than this, so its title peeks ~40px below the dots.
-    private static let contentBottomInset: CGFloat = 252
+    /// slightly less than this, so its title peeks ~40px below the dots. Shared via
+    /// ``HomeHeroLayout`` so the loading skeleton lines up 1:1.
+    private static let contentBottomInset: CGFloat = HomeHeroLayout.contentBottomInset
     // Pushes the paging dots back down relative to the lifted content column.
     // (Column was lifted 120pt; this holds the dots ~60pt above their original spot.)
     private static let pagingDotsDrop: CGFloat = 60

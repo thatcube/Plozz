@@ -174,6 +174,7 @@ public struct RootView: View {
                         audioController: appState.audioController,
                         homeVisibility: appState.homeLibraryVisibilityModel,
                         homeLayoutStore: HomeLayoutStore(namespace: appState.profilesModel.activeNamespace),
+                        homeContentStore: HomeContentStore(namespace: appState.profilesModel.activeNamespace),
                         ratingsProvider: appState.ratingsProvider,
                         trakt: appState.traktService,
                         simkl: appState.simklService,

@@ -11,7 +11,7 @@ import TopShelfKit
 @MainActor
 @Observable
 public final class HomeViewModel {
-    public struct Content: Equatable, Sendable {
+    public struct Content: Equatable, Sendable, Codable {
         public var continueWatching: [MediaItem]
         public var latest: [MediaItem]
         /// The unified Watchlist row, merged across `WatchlistProviding` accounts.
@@ -19,12 +19,44 @@ public final class HomeViewModel {
         /// Every discovered library (unfiltered), tagged with its owning account.
         public var libraries: [AggregatedLibrary]
 
+        public init(
+            continueWatching: [MediaItem] = [],
+            latest: [MediaItem] = [],
+            watchlist: [MediaItem] = [],
+            libraries: [AggregatedLibrary] = []
+        ) {
+            self.continueWatching = continueWatching
+            self.latest = latest
+            self.watchlist = watchlist
+            self.libraries = libraries
+        }
+
         public var isEmpty: Bool {
             continueWatching.isEmpty && latest.isEmpty && watchlist.isEmpty && libraries.isEmpty
+        }
+
+        /// A copy bounded to at most `perRow` items in each media row (libraries
+        /// kept whole — they're few and cheap). Used before persisting a snapshot so
+        /// the on-disk cache stays small; the first launch paint only needs enough
+        /// to fill the hero + the top of each row anyway.
+        func bounded(perRow: Int) -> Content {
+            Content(
+                continueWatching: Array(continueWatching.prefix(perRow)),
+                latest: Array(latest.prefix(perRow)),
+                watchlist: Array(watchlist.prefix(perRow)),
+                libraries: libraries
+            )
         }
     }
 
     public private(set) var state: LoadState<Content> = .idle
+
+    /// `true` while `state` holds a snapshot hydrated from `contentStore` on launch
+    /// that has NOT yet been refreshed from the network this session. The first
+    /// appearance then refreshes **silently** (no `.loading`/skeleton) so the
+    /// instant cached hero + rows stay on screen until fresh content swaps in.
+    /// Cleared the moment that first refresh starts.
+    private var isShowingCachedSnapshot = false
 
     /// The row structure to render as a skeleton while loading: the layout
     /// persisted from the previous successful load (row kinds, order **and** the
@@ -35,6 +67,11 @@ public final class HomeViewModel {
     private let accounts: [ResolvedAccount]
     private let aggregator: HomeAggregator
     private let layoutStore: HomeLayoutStoring
+    /// Persists a bounded snapshot of the last successful `Content` so the next
+    /// launch can paint the hero + rows instantly from disk (artwork bytes already
+    /// persist in `ArtworkImageCache`/`URLCache`) and then silently refresh. See
+    /// `HomeContentStore`.
+    private let contentStore: HomeContentStoring
     /// The shared identity-index lookup folded into every merged row so a card
     /// surfaced by one server still carries its full cross-server source set.
     private let identitySources: @Sendable (MediaItem) -> [MediaSourceRef]
@@ -101,6 +138,7 @@ public final class HomeViewModel {
         accounts: [ResolvedAccount],
         aggregator: HomeAggregator = HomeAggregator(),
         layoutStore: HomeLayoutStoring = HomeLayoutStore(),
+        contentStore: HomeContentStoring = NoOpHomeContentStore(),
         identitySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef] = { _ in [] },
         currentVisibility: @escaping () -> HomeLibraryVisibility = { .default },
         pendingWatchMutations: @escaping @Sendable () async -> [WatchMutation] = { [] },
@@ -109,12 +147,22 @@ public final class HomeViewModel {
         self.accounts = accounts
         self.aggregator = aggregator
         self.layoutStore = layoutStore
+        self.contentStore = contentStore
         self.identitySources = identitySources
         self.currentVisibility = currentVisibility
         self.pendingWatchMutations = pendingWatchMutations
         self.recentlyAppliedRecency = recentlyAppliedRecency
         let persisted = layoutStore.load()
         self.skeletonLayout = persisted.isEmpty ? HomeRowKind.defaultSkeletonLayout : persisted
+        // Hydrate the last-known Home from disk so the hero + Continue Watching (and
+        // the rest of the rows) paint INSTANTLY on launch — no skeleton, no network
+        // in the critical path. The first appearance then refreshes silently (see
+        // `loadIfNeeded`). Only a non-empty snapshot is used; anything else leaves
+        // `state == .idle` so a genuine first launch shows the normal loading state.
+        if let cached = contentStore.load() {
+            self.state = .loaded(cached)
+            self.isShowingCachedSnapshot = true
+        }
     }
 
     deinit {
@@ -146,6 +194,15 @@ public final class HomeViewModel {
     /// This guard makes the reappearance a no-op while still reacting to a genuine
     /// visibility change.
     public func loadIfNeeded(excludedKeys: Set<String>) async {
+        // Showing a cached snapshot from launch: refresh SILENTLY so the instant
+        // hero + rows never flash to a skeleton — the cached content stays until
+        // the fresh aggregate swaps in. Clear the flag first so a re-entrant call
+        // (tvOS restarts this `.task` on reappearance) can't loop back here.
+        if isShowingCachedSnapshot {
+            isShowingCachedSnapshot = false
+            await load(showLoadingState: false)
+            return
+        }
         switch state {
         case .loaded, .empty:
             if lastLoadedExcludedKeys == excludedKeys {
@@ -191,11 +248,26 @@ public final class HomeViewModel {
             watchlist: merged.watchlist,
             libraries: merged.libraries
         )
+        // A SILENT background refresh that came back empty must not blank out good
+        // content already on screen — e.g. the cached snapshot painted at launch,
+        // or the rows after playback, when the server is momentarily unreachable.
+        // Keep what's showing and bail (also skipping the Top Shelf republish that
+        // would otherwise clear it); `lastLoadedExcludedKeys` stays put so the next
+        // appearance retries. A *loud* load still surfaces the genuine empty state.
+        if content.isEmpty, !showLoadingState, case .loaded = state {
+            PlozzLog.boot("HomeVM.load KEEP-CACHED silent-empty vm=\(UInt(bitPattern: ObjectIdentifier(self).hashValue))")
+            return
+        }
         state = content.isEmpty ? .empty : .loaded(content)
         // Record what this content was aggregated for so a later reappearance with
         // an unchanged hidden-library set is recognised as a no-op (see
         // `loadIfNeeded(excludedKeys:)`).
         lastLoadedExcludedKeys = visibility.excludedKeys
+        // Persist a bounded snapshot of the fresh content so the next launch paints
+        // Home instantly (see `HomeContentStore`). Only meaningful, non-empty
+        // content is cached — a transient empty aggregate (e.g. server briefly
+        // unreachable) must not overwrite a good snapshot with nothing.
+        if !content.isEmpty { contentStore.save(content) }
         PlozzLog.boot("HomeVM.load DONE vm=\(UInt(bitPattern: ObjectIdentifier(self).hashValue)) empty=\(content.isEmpty) cw=\(content.continueWatching.count) latest=\(content.latest.count) libs=\(content.libraries.count)")
         guard !Task.isCancelled else { return }
 

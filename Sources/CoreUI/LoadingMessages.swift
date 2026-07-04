@@ -470,12 +470,59 @@ public struct LoadingMessageSequencer: Sendable, Equatable {
     }
 }
 
+/// Persists the "shuffle bag" (a shuffled deck of message IDs plus a cursor)
+/// across app launches so every playful message is shown once before any
+/// repeats — even though each individual load only shows a message or two.
+///
+/// The deck is keyed by a `signature` of the current message set, so changing
+/// the message list (adding/removing entries) naturally starts a fresh deck
+/// rather than dealing stale or missing IDs.
+public protocol LoadingMessageDeckStore: Sendable {
+    /// Returns the saved deck order and cursor for `signature`, or `nil` if
+    /// none exists yet (or it belongs to a different message set).
+    func loadDeck(signature: String) -> (order: [String], cursor: Int)?
+    /// Saves the deck order and cursor for `signature`.
+    func saveDeck(signature: String, order: [String], cursor: Int)
+}
+
+/// `UserDefaults`-backed deck store used in production. Stores the deck order
+/// and cursor under keys derived from the message-set signature so distinct
+/// message sets never clobber one another.
+public struct UserDefaultsLoadingMessageDeckStore: LoadingMessageDeckStore, @unchecked Sendable {
+    private let defaults: UserDefaults
+    private let keyPrefix: String
+
+    public init(defaults: UserDefaults = .standard, keyPrefix: String = "CoreUI.LoadingMessageDeck") {
+        self.defaults = defaults
+        self.keyPrefix = keyPrefix
+    }
+
+    private func orderKey(_ signature: String) -> String { "\(keyPrefix).\(signature).order" }
+    private func cursorKey(_ signature: String) -> String { "\(keyPrefix).\(signature).cursor" }
+
+    public func loadDeck(signature: String) -> (order: [String], cursor: Int)? {
+        guard let order = defaults.array(forKey: orderKey(signature)) as? [String],
+              !order.isEmpty else { return nil }
+        return (order, defaults.integer(forKey: cursorKey(signature)))
+    }
+
+    public func saveDeck(signature: String, order: [String], cursor: Int) {
+        defaults.set(order, forKey: orderKey(signature))
+        defaults.set(cursor, forKey: cursorKey(signature))
+    }
+}
+
 /// Observable driver for the loading-message UI.
 ///
 /// Starts a spinner-only phase, then (if loading is still going after
 /// `initialDelay`) begins cycling playful messages on a timer. The actual sleep
 /// is injected so tests can drive it deterministically; production uses
 /// `Task.sleep`. Cancellation-safe: `stop()` tears down the loop.
+///
+/// When `shufflesMessages` is `true` (the default), message selection is driven
+/// by a persistent shuffle bag (see `LoadingMessageDeckStore`) so users see the
+/// whole set before repeats, with no bias toward the start of the list. When
+/// `false`, messages are walked in their given order (used by tests).
 @MainActor
 @Observable
 public final class LoadingMessageModel {
@@ -491,17 +538,23 @@ public final class LoadingMessageModel {
     private var sequencer: LoadingMessageSequencer
     private let shufflesMessages: Bool
     private let sleep: @Sendable (TimeInterval) async throws -> Void
+    private let deckStore: LoadingMessageDeckStore
+    private let shuffle: @Sendable ([String]) -> [String]
     private var loop: Task<Void, Never>?
 
     public init(
         sequencer: LoadingMessageSequencer = LoadingMessageSequencer(),
         shufflesMessages: Bool = true,
+        deckStore: LoadingMessageDeckStore = UserDefaultsLoadingMessageDeckStore(),
+        shuffle: @escaping @Sendable ([String]) -> [String] = { $0.shuffled() },
         sleep: @escaping @Sendable (TimeInterval) async throws -> Void = { seconds in
             try await Task.sleep(nanoseconds: UInt64(max(0, seconds) * 1_000_000_000))
         }
     ) {
         self.sequencer = sequencer
         self.shufflesMessages = shufflesMessages
+        self.deckStore = deckStore
+        self.shuffle = shuffle
         self.sleep = sleep
     }
 
@@ -509,27 +562,94 @@ public final class LoadingMessageModel {
     /// loop from the beginning each time.
     public func start() {
         stop()
-        var resolved = sequencer
-        if shufflesMessages { resolved.messages.shuffle() }
-        let seq = resolved
+        let seq = sequencer
+        guard !seq.messages.isEmpty else { phase = .spinnerOnly; return }
         let sleep = self.sleep
         phase = .spinnerOnly
         // A non-positive cycle interval has no time axis to advance along, so the
         // first message simply holds — never spin a zero-sleep loop that would
         // peg the main actor.
         let cycles = seq.cycleInterval > 0
+
+        guard shufflesMessages else {
+            // Deterministic in-order walk (used by tests): show messages in the
+            // exact order they were provided, wrapping around indefinitely.
+            loop = Task { @MainActor [weak self] in
+                do { try await sleep(seq.initialDelay) } catch { return }
+                var step = 0
+                while !Task.isCancelled {
+                    guard let self else { return }
+                    let elapsed = seq.initialDelay + Double(step) * seq.cycleInterval
+                    self.phase = seq.phase(atElapsed: elapsed)
+                    guard cycles else { return }
+                    do { try await sleep(seq.cycleInterval) } catch { return }
+                    step += 1
+                }
+            }
+            return
+        }
+
+        // Persistent shuffle-bag path: deal one message per cycle from a shuffled
+        // deck saved across launches, so every message is shown once before any
+        // repeat and there is no bias toward the front of the list.
+        let messages = seq.messages
+        let ids = messages.map(\.id)
+        let byID = Dictionary(messages.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let signature = Self.signature(of: ids)
+        let store = self.deckStore
+        let shuffle = self.shuffle
         loop = Task { @MainActor [weak self] in
             do { try await sleep(seq.initialDelay) } catch { return }
+            // Resume the saved deck only if it matches the current message set;
+            // otherwise start a fresh shuffle.
+            var order: [String]
+            var cursor: Int
+            if let saved = store.loadDeck(signature: signature),
+               Set(saved.order) == Set(ids) {
+                order = saved.order
+                cursor = min(max(saved.cursor, 0), order.count)
+            } else {
+                order = shuffle(ids)
+                cursor = 0
+            }
+            var lastID: String?
             var step = 0
             while !Task.isCancelled {
                 guard let self else { return }
-                let elapsed = seq.initialDelay + Double(step) * seq.cycleInterval
-                self.phase = seq.phase(atElapsed: elapsed)
+                if cursor >= order.count {
+                    // Deck exhausted: reshuffle. Avoid showing the same message
+                    // twice in a row across the deck boundary.
+                    var fresh = shuffle(ids)
+                    if ids.count > 1, fresh.first == lastID { fresh.swapAt(0, 1) }
+                    order = fresh
+                    cursor = 0
+                }
+                let id = order[cursor]
+                cursor += 1
+                if let message = byID[id] { self.phase = .message(message, index: step) }
+                lastID = id
+                // Persist after showing so a mid-cycle cancellation never skips a
+                // message (at worst it re-shows the last one next time).
+                store.saveDeck(signature: signature, order: order, cursor: cursor)
                 guard cycles else { return }
                 do { try await sleep(seq.cycleInterval) } catch { return }
                 step += 1
             }
         }
+    }
+
+    /// A stable, launch-independent signature of the message-ID set, used to key
+    /// the persisted deck. Order-independent (sorted) so only membership matters.
+    static func signature(of ids: [String]) -> String {
+        // FNV-1a (64-bit) over the sorted, joined IDs — deterministic across
+        // launches, unlike Swift's per-process-randomized `Hashable`.
+        var hash: UInt64 = 0xcbf29ce484222325
+        let prime: UInt64 = 0x100000001b3
+        for byte in ids.sorted().joined(separator: "\u{1}").utf8 {
+            hash ^= UInt64(byte)
+            hash = hash &* prime
+        }
+        return "\(ids.count)-" + String(hash, radix: 16)
     }
 
     /// Stops cycling and returns to spinner-only.

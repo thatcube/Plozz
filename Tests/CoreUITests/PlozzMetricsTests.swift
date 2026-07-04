@@ -39,7 +39,7 @@ final class PlozzMetricsTests: XCTestCase {
 
     func testLandscapeSlotIncludesBothInsets() {
         let m = PlozzMetrics(density: .standard)
-        XCTAssertEqual(m.landscapeCardSlotWidth, m.landscapeWidth + m.mediumCardInset * 2)
+        XCTAssertEqual(m.landscapeCardSlotWidth, m.landscapeWidth + m.cardInset * 2)
     }
 }
 #endif

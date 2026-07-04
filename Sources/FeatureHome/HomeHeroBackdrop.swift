@@ -140,7 +140,7 @@ private struct WipeImageView: UIViewRepresentable {
     /// is skipped (matches `HeroBackdropLayer`'s `maxAspectRatio`).
     private static let maxAspectRatio: CGFloat = 3.0
     /// Slightly longer than a push so the easeOut "settle" tail reads clearly.
-    private static let duration: TimeInterval = 0.55
+    private static let duration: TimeInterval = 0.85
     /// Tiny horizontal overscan, purely to avoid a sub-pixel seam shimmer during the
     /// wipe. It is intentionally small: in the wipe model the incoming content is
     /// shifted *into* the revealed area and the outgoing only drifts a little, so
@@ -150,10 +150,10 @@ private struct WipeImageView: UIViewRepresentable {
     /// How far the incoming art is shifted toward the entering edge at the start,
     /// then settles to center — the parallax "glide." Independent of `bleed`; only
     /// needs to be ≤ the slide width.
-    private static let parallaxIn: CGFloat = 220
+    private static let parallaxIn: CGFloat = 1200
     /// How far the outgoing art drifts (slowly) as it is covered by the wipe. Kept
     /// small so the old image "slides out way more slowly than the new comes in."
-    private static let driftOut: CGFloat = 80
+    private static let driftOut: CGFloat = 320
 
     func makeCoordinator() -> Coordinator {
         Coordinator(maxAspectRatio: Self.maxAspectRatio, duration: Self.duration)
@@ -202,7 +202,14 @@ private struct WipeImageView: UIViewRepresentable {
         /// Monotonic load token; only the newest requested art may apply.
         private var loadToken = 0
         private var isAnimating = false
+        /// Drives the incoming page (window reveal + content glide) on an ease-*out*
+        /// curve; also owns the wipe's completion.
         private var animator: UIViewPropertyAnimator?
+        /// Drives the outgoing page's drift on an ease-*in* curve — a deliberately
+        /// different motion character. Retained so it isn't torn down mid-flight.
+        /// Its curve stays ≤ the incoming curve at every instant, so the outgoing art
+        /// can never retreat past the growing reveal window (no background sliver).
+        private var outgoingAnimator: UIViewPropertyAnimator?
         /// Newest fully-resolved target that arrived while a wipe was in flight,
         /// applied on completion. Always the most recent — never a queue.
         private var pending: (image: UIImage, url: URL, id: String, forward: Bool)?
@@ -316,22 +323,41 @@ private struct WipeImageView: UIViewRepresentable {
             isAnimating = true
             container.prepareWipe(incomingImage: image, forward: forward)
 
-            let animator = UIViewPropertyAnimator(
+            // Incoming page: a strong ease-OUT (starts fast, then eases softly into
+            // the landing) via a custom "expo-out" cubic. Owns completion. Its curve
+            // stays well above the diagonal, hence >= the outgoing ease-in at every
+            // instant, so the reveal window always stays ahead of the drifting art.
+            let incomingAnimator = UIViewPropertyAnimator(
                 duration: duration,
-                timingParameters: UICubicTimingParameters(animationCurve: .easeOut)
+                timingParameters: UICubicTimingParameters(
+                    controlPoint1: CGPoint(x: 0.16, y: 1.0),
+                    controlPoint2: CGPoint(x: 0.3, y: 1.0)
+                )
             )
-            animator.addAnimations { container.runWipeAnimations(forward: forward) }
-            animator.addCompletion { [weak self, weak container] _ in
+            incomingAnimator.addAnimations { container.animateIncoming(forward: forward) }
+            incomingAnimator.addCompletion { [weak self, weak container] _ in
                 guard let self, let container else { return }
                 container.finishWipe()
                 self.displayedID = id
                 self.displayedURL = url
                 self.isAnimating = false
                 self.animator = nil
+                self.outgoingAnimator = nil
                 self.drainPending()
             }
-            self.animator = animator
-            animator.startAnimation()
+
+            // Outgoing page: ease-IN (lingers, then accelerates away) — a distinct
+            // motion character from the incoming page. No completion of its own.
+            let outgoingAnimator = UIViewPropertyAnimator(
+                duration: duration,
+                timingParameters: UICubicTimingParameters(animationCurve: .easeIn)
+            )
+            outgoingAnimator.addAnimations { container.animateOutgoing(forward: forward) }
+
+            self.animator = incomingAnimator
+            self.outgoingAnimator = outgoingAnimator
+            incomingAnimator.startAnimation()
+            outgoingAnimator.startAnimation()
         }
 
         /// After a wipe completes, reconcile with the newest requested target: if
@@ -405,10 +431,14 @@ private struct WipeImageView: UIViewRepresentable {
 ///   little (and slowly) as it is progressively *covered* by the wipe.
 ///
 /// Both pages' geometry is driven purely by animating their (and their inner image
-/// views') `frame`s under a single animator, so it can never decompose into the
-/// wrong-order artifact. Z-order is committed synchronously via explicit
-/// `layer.zPosition` before every wipe (incoming always on top), so render order is
-/// deterministic and immune to SwiftUI / `layoutSubviews` / animator churn.
+/// views') `frame`s — no transforms — so it can never decompose into the wrong-order
+/// artifact. The incoming and outgoing pages ride *separate* animators with distinct
+/// curves (incoming ease-out, outgoing ease-in), chosen so the outgoing progress is
+/// always ≤ the incoming progress and the reveal window can never fall behind the
+/// drifting outgoing art (no background sliver). Z-order is committed synchronously
+/// via explicit `layer.zPosition` before every wipe (incoming always on top), so
+/// render order is deterministic and immune to SwiftUI / `layoutSubviews` / animator
+/// churn.
 final class HeroWipeContainerView: UIView {
     /// Tiny horizontal overscan on each inner image view, purely to avoid a
     /// sub-pixel seam shimmer during the wipe. Coverage does *not* depend on it in
@@ -520,18 +550,24 @@ final class HeroWipeContainerView: UIView {
         incoming.isHidden = false
     }
 
-    /// The animatable step: the incoming window opens to full-screen while its
-    /// content settles to center; the outgoing content drifts slowly the other way
-    /// as it is covered. Only `frame`s change — no transforms — so a single animator
-    /// interpolates everything in lock-step.
-    func runWipeAnimations(forward: Bool) {
+    /// The animatable step, split so each page can ride its own timing curve.
+    /// `animateIncoming` opens the reveal window to full-screen while the incoming
+    /// content settles to center (driven ease-out); `animateOutgoing` drifts the
+    /// outgoing content slowly the other way as it is covered (driven ease-in).
+    /// Only `frame`s change — no transforms. The two curves are chosen so the
+    /// outgoing progress never exceeds the incoming, keeping coverage gap-free.
+    func animateIncoming(forward: Bool) {
         let size = effectiveSize
-        let full = CGRect(origin: .zero, size: size)
-        let incoming = back
-        let outgoing = front
+        back.setWindow(CGRect(origin: .zero, size: size), contentX: 0, size: size)
+    }
 
-        incoming.setWindow(full, contentX: 0, size: size)
-        outgoing.setWindow(full, contentX: forward ? -driftOut : driftOut, size: size)
+    func animateOutgoing(forward: Bool) {
+        let size = effectiveSize
+        front.setWindow(
+            CGRect(origin: .zero, size: size),
+            contentX: forward ? -driftOut : driftOut,
+            size: size
+        )
     }
 
     /// Promote the incoming page to `front`, reset and hide the outgoing page.
@@ -583,8 +619,8 @@ private final class SlidePage: UIView {
     /// Set this page's clip `window` (container coords) and position the image so
     /// its logical left edge lands at `contentX` in *container* coords. Both the
     /// page frame and the inner image frame are set here; animating a `setWindow`
-    /// call from one state to another (inside a single animator) interpolates both
-    /// linearly, so the content stays correctly anchored at every frame.
+    /// call from one state to another (within one animator's curve) interpolates
+    /// both together, so the content stays correctly anchored at every frame.
     ///
     /// No transform is used — only `frame` — so this is safe to animate and never
     /// hits the frame/transform corruption gotcha.

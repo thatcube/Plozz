@@ -247,7 +247,7 @@ public struct HomeView: View {
     /// `HomeHeroView.contentBottomInset` (132): pulling up by slightly less than
     /// that inset lands the Continue Watching title ~40px below the dots, with the
     /// tops of its cards peeking over the hero's lower edge. Tuned on-device.
-    private static let heroRowOverlap: CGFloat = 92
+    private static let heroRowOverlap: CGFloat = 132
 
     /// Scroll anchor for the hero, so focus returning to it can snap the scroll
     /// back to the top and re-expand the hero to full-screen.

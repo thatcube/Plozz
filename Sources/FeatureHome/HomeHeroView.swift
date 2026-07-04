@@ -100,6 +100,21 @@ struct HomeHeroView: View {
     /// Bumped on every manual page so the auto-advance `.task` restarts its dwell
     /// from the fresh slide instead of firing early.
     @State private var advanceToken = 0
+    /// Timestamp marking when the current auto-advance dwell began. Reset every
+    /// time the dwell (re)starts (slide change or manual page) so the active
+    /// paging dot can render a live progress fill counting down to the next page.
+    /// On resume from a pause it is shifted forward by the paused duration, so the
+    /// countdown continues from where it froze rather than restarting.
+    @State private var dwellStart = Date()
+    /// Non-`nil` while the auto-advance is paused because the user is interacting
+    /// with the remote. Holds the instant the pause began so the progress gauge
+    /// freezes there and the resume can compute how long it was held.
+    @State private var pausedAt: Date?
+    /// Bumped whenever the auto-advance pauses or resumes so the fire `.task`
+    /// re-keys: a pause restarts it into its no-op (paused) branch, a resume
+    /// restarts it to sleep for the remaining dwell. Slide changes / manual pages
+    /// go through `advanceToken`; this is purely the pause/resume lifecycle.
+    @State private var runEpoch = 0
     /// Drives the first-appearance fade-in, matching the detail hero's polish.
     @State private var heroVisible = false
     /// Optimistic watchlist state the user just toggled from the hero, keyed by
@@ -132,6 +147,14 @@ struct HomeHeroView: View {
     /// spuriously, scrolling the page while focus never actually moved) and ties
     /// it instead to focus genuinely leaving the hero for the row below.
     @State private var recedeWork: DispatchWorkItem?
+
+    /// Pending "resume auto-advance" work, scheduled after each remote input and
+    /// cancelled/rescheduled by the next one, so the carousel only starts counting
+    /// down again once the user has been idle for ``resumeAfterIdle`` seconds.
+    @State private var resumeWork: DispatchWorkItem?
+    /// How long the user must be idle after their last remote input before the
+    /// auto-advance resumes counting down toward the next page.
+    private static let resumeAfterIdle: Double = 2.5
 
     @Environment(\.colorScheme) private var colorScheme
 
@@ -226,31 +249,44 @@ struct HomeHeroView: View {
     /// full-screen hero, so the paging dots land in the lower third. Paired with
     /// `HomeView.heroRowOverlap`: the Continue Watching row is pulled up by
     /// slightly less than this, so its title peeks ~40px below the dots.
-    private static let contentBottomInset: CGFloat = 132
+    private static let contentBottomInset: CGFloat = 252
+    // Pushes the paging dots back down relative to the lifted content column.
+    // (Column was lifted 120pt; this holds the dots ~60pt above their original spot.)
+    private static let pagingDotsDrop: CGFloat = 60
 
     var body: some View {
         let height = Self.screenHeight * heroHeightFraction
-        // The backdrop is a sibling *behind* the content in a real ZStack. Its
-        // image transition is driven imperatively in UIKit (see `HomeHeroBackdrop`
-        // / `WipeImageView`) rather than by any SwiftUI animation, so it can never
-        // decompose into the wrong-order wipe. This view just swaps the fronted
-        // slide's id / candidate URLs / direction; the parallax wipe happens below
-        // the SwiftUI layer entirely.
-        ZStack(alignment: .bottomLeading) {
-            heroBackdrop(height: height)
-            Group {
-                if let item = current {
-                    content(for: item)
-                } else {
-                    Color.clear
-                }
+        // The backdrop is a full-bleed *background* of the hero content, not a
+        // sibling layer in a ZStack. As a background it still bleeds edge-to-edge
+        // (it ignores the horizontal safe area) but it no longer contributes to the
+        // shared scroll column's width — so it can't drag the hero's own logo/
+        // buttons or the rows below off the safe-area gutter (the "content sits too
+        // close to the left edge once the hero mounts" bug). Its image transition is
+        // still driven imperatively in UIKit (see `HomeHeroBackdrop` / `WipeImageView`)
+        // rather than any SwiftUI animation, so it can never decompose into the
+        // wrong-order wipe; and because we don't rely on SwiftUI insertion/removal
+        // `.transition` for it, hosting it in a background is safe on tvOS. The
+        // background is `.bottom`-aligned (horizontally centered): the content column
+        // spans the symmetric safe area, so centering the full-screen-width backdrop
+        // on it lands it edge-to-edge across the whole screen, while the bottom pin
+        // keeps its dissolve lined up with the Continue Watching overlap.
+        Group {
+            if let item = current {
+                content(for: item)
+            } else {
+                Color.clear
             }
-            .frame(maxWidth: .infinity, minHeight: height, alignment: .bottomLeading)
         }
         .frame(maxWidth: .infinity, minHeight: height, alignment: .bottomLeading)
+        .background(alignment: .bottom) {
+            heroBackdrop(height: height)
+        }
         .opacity(heroVisible ? 1 : 0)
         .onAppear {
             Task { await resolveArtwork(around: index) }
+            // Start the first dwell from appearance so the initial slide's gauge
+            // and auto-advance are anchored to now, not to view construction.
+            restartDwell()
             guard !heroVisible else { return }
             withAnimation(.easeInOut(duration: 0.35)) { heroVisible = true }
         }
@@ -279,6 +315,9 @@ struct HomeHeroView: View {
             // backdrop wipes to it (with whatever direction was last recorded).
             slideToken &+= 1
             metadataVisible = true
+            // The set swap re-seats the fronted slide, so start a fresh dwell for
+            // it (gauge from empty, no lingering pause).
+            restartDwell()
             // Clamp the logical selection to the new slide's button count so it
             // can never point past the last pill after a set swap. Pure `@State`,
             // so this never touches (or drops) focus.
@@ -295,18 +334,22 @@ struct HomeHeroView: View {
                 value != keys.contains(key)
             }
         }
-        // Auto-advance: restart the dwell whenever the slide changes (manual page
-        // or a previous auto-advance). This runs REGARDLESS of focus — focus lands
-        // on the hero action row by default, so gating on `focus == nil` (as we
-        // used to) froze the carousel the entire time the user was looking at it
-        // and only cycled once they'd navigated away. The Apple TV hero keeps
-        // cycling while focused; the buttons/metadata just track the new slide.
+        // Auto-advance: the fire is rescheduled whenever `autoAdvanceKey` changes
+        // (slide change, manual page, pause/resume, or the item count settling).
+        // It runs REGARDLESS of focus — focus lands on the hero action row by
+        // default, so gating on `focus == nil` froze the carousel the entire time
+        // the user was looking at it. Instead, real remote input pauses it (see
+        // `noteInteraction`), so it never pages out from under an interacting user.
         .task(id: autoAdvanceKey) {
             guard settings.autoAdvance, items.count > 1 else { return }
-            let seconds = UInt64(settings.autoAdvanceSeconds)
-            try? await Task.sleep(nanoseconds: seconds * 1_000_000_000)
-            // A manual page bumps `advanceToken` (part of `autoAdvanceKey`), which
-            // cancels + restarts this dwell, so we never step on a fresh manual page.
+            // Paused (user is interacting): schedule no fire at all. The gauge is
+            // frozen at `pausedAt`; resuming bumps `runEpoch` to reschedule here.
+            guard pausedAt == nil else { return }
+            // Fire after the *remaining* dwell so that resuming after a pause
+            // finishes the countdown from where it froze instead of restarting it.
+            let duration = Double(settings.autoAdvanceSeconds)
+            let remaining = max(0, duration - Date().timeIntervalSince(dwellStart))
+            try? await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000))
             guard !Task.isCancelled else { return }
             page(to: (index + 1) % items.count, keepButton: selectedButton, forward: true)
         }
@@ -343,11 +386,16 @@ struct HomeHeroView: View {
         }
     }
 
-    /// The dwell key: any change (slide index or a manual page bump) restarts the
-    /// auto-advance timer from the current slide. Focus is deliberately NOT part of
-    /// this — the carousel cycles whether or not the hero holds focus.
+    /// The dwell key: any change restarts the auto-advance fire `.task`. Slide
+    /// index and a manual page bump (`advanceToken`) start a fresh dwell; the
+    /// pause/resume lifecycle (`runEpoch`) restarts it into its paused no-op or to
+    /// sleep the remaining time; `slideToken` covers set-swaps / the seed→curated
+    /// grow (it is bumped whenever the fronted slide is re-seated) so the fire and
+    /// the gauge stay in sync. Focus is deliberately NOT part of this — the
+    /// carousel cycles whether or not the hero holds focus; only real remote input
+    /// pauses it.
     private var autoAdvanceKey: String {
-        "\(index)-\(advanceToken)"
+        "\(index)-\(advanceToken)-\(runEpoch)-\(slideToken)"
     }
 
     // MARK: - Content column
@@ -426,6 +474,10 @@ struct HomeHeroView: View {
                 // while the logo / metadata / buttons stay left-aligned. Kept
                 // visible through the wipe so paging stays legible.
                 .frame(maxWidth: .infinity, alignment: .center)
+                // The whole column was lifted 120pt (contentBottomInset 132→252) to
+                // raise the logo / metadata / buttons. The dots should stay at their
+                // original screen position, so push them back down by the same 120pt.
+                .offset(y: Self.pagingDotsDrop)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.top, PlozzTheme.Metrics.screenPadding)
@@ -475,7 +527,10 @@ struct HomeHeroView: View {
             case .next: return ("Next", { advanceForward() })
             }
         }
-        HStack(spacing: 24) {
+        // spacing: 0 so the 1pt invisible focus guard below adds no gap ahead of the
+        // pills — otherwise the guard + gap pushed the whole button row right of the
+        // logo/metadata. The pills keep their own 24pt spacing in the inner HStack.
+        HStack(spacing: 0) {
             // Invisible focus guard, just left of the pills and inside the same
             // focus section. It gives the focus engine an *internal* leftward
             // target so a Left press is captured by the hero (routed through
@@ -537,7 +592,7 @@ struct HomeHeroView: View {
                     // Remote **Select** activates the selected pill.
                     .onTapGesture { activateSelected() }
                     // Play/Pause is a shortcut straight to playback.
-                    .onPlayPauseCommand { if let item = current { onPlay(item) } }
+                    .onPlayPauseCommand { noteInteraction(); if let item = current { onPlay(item) } }
                     .accessibilityElement(children: .ignore)
                     .accessibilityAddTraits(.isButton)
                     .accessibilityLabel(accessibilityLabel(for: item))
@@ -641,6 +696,10 @@ struct HomeHeroView: View {
     /// PRE-move value. Interior moves update `selectedButton` ourselves (the engine
     /// is not involved); only `.advance` pages.
     private func handleMove(_ direction: MoveCommandDirection) {
+        // Any directional input pauses the auto-advance so it can't page out from
+        // under the user; this only observes (never consumes) the move, so edge
+        // Left/Right presses still page normally.
+        noteInteraction()
         // Record the direction BEFORE focus can relocate, so the recede (driven by
         // focus leaving the hero) can tell a genuine DOWN-to-row move from an UP
         // (to the tab bar) or LEFT (to the sidebar) escape — only DOWN should
@@ -692,6 +751,7 @@ struct HomeHeroView: View {
     /// `.escape` case (first item, left-most button, sidebar) can't reach here —
     /// the guard is non-focusable there, so Left falls through to the sidebar.
     private func handleLeft() {
+        noteInteraction()
         defer { focus = .row }
         guard let item = current else { return }
         let buttonCount = buttons(for: item).count
@@ -718,6 +778,7 @@ struct HomeHeroView: View {
     /// Resolves the live slide and clamps the index defensively so a stale
     /// selection can never dispatch the wrong (or an out-of-range) action.
     private func activateSelected() {
+        noteInteraction()
         guard let item = current else { return }
         let itemButtons = buttons(for: item)
         let idx = min(selectedButton, max(0, itemButtons.count - 1))
@@ -868,10 +929,58 @@ struct HomeHeroView: View {
 
         index = toItem
         advanceToken &+= 1
+        // A page is a fresh dwell: reset the progress gauge (so the newly-active
+        // dot opens from empty instead of flashing the outgoing dot's progress)
+        // and clear any pause so the new slide counts down normally.
+        restartDwell()
         metadataVisible = false
         selectedButton = min(keepButton, max(0, buttons(for: items[toItem]).count - 1))
 
         Task { await resolveArtwork(around: toItem) }
+    }
+
+    /// Begins a fresh auto-advance dwell from now: the progress gauge fills from
+    /// empty and any interaction pause is cleared. Called on a page, on first
+    /// appearance, and when the curated set re-seats the fronted slide.
+    private func restartDwell() {
+        dwellStart = .now
+        pausedAt = nil
+        resumeWork?.cancel()
+        resumeWork = nil
+    }
+
+    /// Records a remote interaction: freezes the auto-advance so it can't page out
+    /// from under the user mid-navigation, and (re)arms the idle timer that will
+    /// resume the countdown once they stop. Purely a side effect — it never
+    /// consumes the input, so edge Left/Right presses still page as normal.
+    private func noteInteraction() {
+        guard settings.autoAdvance, items.count > 1 else { return }
+        if pausedAt == nil {
+            // Freeze the gauge at this instant and cancel the pending auto-page.
+            pausedAt = Date()
+            runEpoch &+= 1
+        }
+        scheduleResume()
+    }
+
+    /// (Re)schedules the resume so it fires only after ``resumeAfterIdle`` seconds
+    /// with no further input. Each interaction cancels the previous one.
+    private func scheduleResume() {
+        resumeWork?.cancel()
+        let work = DispatchWorkItem { resumeAutoAdvance() }
+        resumeWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.resumeAfterIdle, execute: work)
+    }
+
+    /// Resumes a paused auto-advance: shifts `dwellStart` forward by however long
+    /// the pause was held so the gauge continues from where it froze, then re-keys
+    /// the fire `.task` to sleep the remaining time.
+    private func resumeAutoAdvance() {
+        guard let pausedAt else { return }
+        dwellStart = dwellStart.addingTimeInterval(Date().timeIntervalSince(pausedAt))
+        self.pausedAt = nil
+        resumeWork = nil
+        runEpoch &+= 1
     }
 
     /// Pages one slide forward (wrapping), keeping focus on the destination's
@@ -887,14 +996,16 @@ struct HomeHeroView: View {
     /// Schedules the fronted show's metadata (logo/title/meta/overview/buttons) to
     /// fade back in after a page. The text is hidden **instantly** when the page
     /// starts (see `content(for:)`/`actionRow(for:)`) so the outgoing show's text
-    /// never lingers over the incoming art, then fades back in once the backdrop
-    /// wipe has essentially landed. Guarded by ``slideToken`` so a rapid second
-    /// page cancels the first page's pending fade-in.
+    /// never lingers over the incoming art. All of it (metadata, overview, and the
+    /// action buttons) shares the single `metadataVisible` flag, so it fades in
+    /// together, part-way through the backdrop wipe rather than waiting for it to
+    /// fully land. Guarded by ``slideToken`` so a rapid second page cancels the
+    /// first page's pending fade-in.
     private func beginTransition() {
         slideToken &+= 1
         let token = slideToken
         Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 500_000_000)
+            try? await Task.sleep(nanoseconds: 280_000_000)
             guard slideToken == token else { return }
             withAnimation(.easeInOut(duration: 0.3)) { metadataVisible = true }
         }
@@ -905,16 +1016,85 @@ struct HomeHeroView: View {
     @ViewBuilder
     private var pagingDots: some View {
         if items.count > 1 {
-            HStack(spacing: 10) {
+            HStack(spacing: Self.dotSpacing) {
                 ForEach(items.indices, id: \.self) { i in
-                    Circle()
-                        .fill(i == index ? Color.primary : Color.primary.opacity(0.28))
-                        .frame(width: 8, height: 8)
-                        .animation(.easeInOut(duration: 0.2), value: index)
+                    pagingIndicator(active: i == index)
                 }
             }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 9)
+            // Liquid Glass rounded container so the indicators stay legible over
+            // any backdrop (matches the hero action pills' glass treatment).
+            .background { pagingDotsGlass(shape: Capsule()) }
             .padding(.top, 10)
             .accessibilityHidden(true)
+        }
+    }
+
+    private static let dotSize: CGFloat = 8
+    private static let dotSpacing: CGFloat = 8
+    private static let activeDotWidth: CGFloat = 30
+    /// Duration of the simultaneous dot→pill / pill→dot open/close on a page.
+    private static let dotMorph: Double = 0.3
+
+    /// A single page indicator. It is always the same `Capsule` so its width can
+    /// smoothly animate between a dot (inactive) and a pill (active) — the active
+    /// one opening exactly as the outgoing one closes, keeping the container width
+    /// constant. The active pill fills left→right as the auto-advance dwell elapses
+    /// (a live "time until next page" gauge).
+    private func pagingIndicator(active: Bool) -> some View {
+        Capsule()
+            .fill(Color.white.opacity(0.28))
+            .overlay(alignment: .leading) {
+                activeDotFill(active: active, trackWidth: Self.activeDotWidth, height: Self.dotSize)
+            }
+            .frame(width: active ? Self.activeDotWidth : Self.dotSize, height: Self.dotSize)
+            .clipShape(Capsule())
+            .animation(.easeInOut(duration: Self.dotMorph), value: active)
+    }
+
+    /// The bright progress fill inside an indicator. Kept in a `TimelineView` for
+    /// every dot (stable identity) so the active one grows from a dot to the full
+    /// pill across the dwell; when a dot goes inactive its fill closes back down
+    /// (animated by the `active` flip), and when auto-advance is off the active
+    /// pill just sits fully lit.
+    private func activeDotFill(active: Bool, trackWidth: CGFloat, height: CGFloat) -> some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !settings.autoAdvance || pausedAt != nil)) { timeline in
+            Capsule()
+                .fill(Color.white)
+                .frame(
+                    width: brightFillWidth(active: active, trackWidth: trackWidth, height: height, now: timeline.date),
+                    height: height
+                )
+                // Animate only the open/close that a page (active flip) triggers;
+                // the per-frame progress growth is driven by the timeline itself.
+                .animation(.easeInOut(duration: Self.dotMorph), value: active)
+        }
+    }
+
+    /// Width of an indicator's bright fill: `0` when inactive, the full pill when
+    /// auto-advance is off, otherwise a dot growing to the full pill across the
+    /// dwell. Interpolating from `height` (a dot) up to `trackWidth` — rather than
+    /// `max(height, trackWidth * progress)` — means the fill starts moving the
+    /// instant the dwell begins instead of sitting pinned at a dot until progress
+    /// passes `height / trackWidth`. While paused it freezes at `pausedAt`.
+    private func brightFillWidth(active: Bool, trackWidth: CGFloat, height: CGFloat, now: Date) -> CGFloat {
+        guard active else { return 0 }
+        guard settings.autoAdvance else { return trackWidth }
+        let duration = max(1, Double(settings.autoAdvanceSeconds))
+        let reference = pausedAt ?? now
+        let progress = min(1, max(0, reference.timeIntervalSince(dwellStart) / duration))
+        return height + (trackWidth - height) * progress
+    }
+
+    /// Liquid Glass background for the paging-dot container: real glass on
+    /// tvOS 26+, `.ultraThinMaterial` below (mirrors `heroPillIdleBackground`).
+    @ViewBuilder
+    private func pagingDotsGlass(shape: Capsule) -> some View {
+        if #available(tvOS 26.0, *) {
+            shape.fill(.clear).glassEffect(.regular, in: shape)
+        } else {
+            shape.fill(.ultraThinMaterial)
         }
     }
 

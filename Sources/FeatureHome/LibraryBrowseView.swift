@@ -57,20 +57,6 @@ public struct LibraryBrowseView: View {
             ScrollViewReader { proxy in
                 ScrollView(.vertical) {
                     LazyVStack(alignment: .leading, spacing: metrics.sectionTitleSpacing) {
-                        #if canImport(UIKit)
-                        // `.scrollIndicators(.never)` does NOT stick on tvOS for
-                        // this grid — the system still flashes the dotted indicator
-                        // on top of the alphabet rail. So we reach the enclosing
-                        // UIScrollView directly and toggle its vertical indicator,
-                        // hiding it only while the rail is up (name sort) and
-                        // restoring it for every other sort. The probe is a real
-                        // child of the scroll content so its superview walk lands
-                        // on the UIScrollView (mirrors HomeView's ScrollPanDisabler).
-                        ScrollIndicatorHider(hidden: isRailVisible)
-                            .frame(width: 0, height: 0)
-                            .allowsHitTesting(false)
-                            .accessibilityHidden(true)
-                        #endif
                         header
                         LazyVGrid(columns: columns, spacing: metrics.gridSpacing) {
                             ForEach(0..<total, id: \.self) { index in
@@ -85,6 +71,20 @@ public struct LibraryBrowseView: View {
                         .focusSection()
                     }
                     .padding(.top, PlozzTheme.Spacing.large)
+                    #if canImport(UIKit)
+                    // Suppress the native scroll indicator while the alphabet rail
+                    // is up (it can't be reliably killed by `.scrollIndicators`, and
+                    // it drifts out of sync with the letters). Attached as a
+                    // NON-LAZY `.background` on the scroll *content* so it (a) lives
+                    // inside the UIScrollView — its superview walk finds it — and
+                    // (b) is never culled the way a lazy `LazyVStack` child is the
+                    // moment it scrolls off, which is exactly when we need it alive.
+                    .background(
+                        ScrollIndicatorHider(hidden: isRailVisible)
+                            .allowsHitTesting(false)
+                            .accessibilityHidden(true)
+                    )
+                    #endif
                 }
                 // Never clip a focused card's lift, shadow or border.
                 .scrollClipDisabled()
@@ -480,6 +480,15 @@ private final class ScrollIndicatorHiderController: UIViewController {
         for scrollView in scrollViews {
             if scrollView.showsVerticalScrollIndicator == shouldHide {
                 scrollView.showsVerticalScrollIndicator = !shouldHide
+            }
+            // Render it off the page: push the indicator track past the right edge
+            // (into overscan / off-screen) so even if a fresh indicator draws before
+            // our per-frame subview sweep catches it, it lands where it can't be
+            // seen. Restored to `.zero` when the rail is down.
+            let offRight: CGFloat = shouldHide ? -(scrollView.bounds.width + 60) : 0
+            let insets = UIEdgeInsets(top: 0, left: 0, bottom: 0, right: offRight)
+            if scrollView.verticalScrollIndicatorInsets != insets {
+                scrollView.verticalScrollIndicatorInsets = insets
             }
             for subview in scrollView.subviews {
                 let name = String(describing: type(of: subview))

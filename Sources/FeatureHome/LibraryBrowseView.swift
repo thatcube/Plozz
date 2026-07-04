@@ -19,6 +19,12 @@ public struct LibraryBrowseView: View {
     /// The rail letter that currently holds focus, or `nil` when focus is in the
     /// grid. Drives the fly-through highlight + the transient jumbo letter bubble.
     @State private var railFocusedLetter: String?
+    /// Latches `true` once the grid has been scrolled a few rows into a name-sorted
+    /// library, then stays up. Keeps the rail out of the way on first entry (when
+    /// you're just landing on the top of the list) and only brings it in once
+    /// you're actually flying through content. Reset when the rail's eligibility
+    /// goes away (a non-name sort) so re-entering name sort re-arms the reveal.
+    @State private var railHasRevealed = false
     private let title: String
     private let spoilerSettings: SpoilerSettings
     private let onSelect: (MediaItem) -> Void
@@ -60,7 +66,7 @@ public struct LibraryBrowseView: View {
                         // restoring it for every other sort. The probe is a real
                         // child of the scroll content so its superview walk lands
                         // on the UIScrollView (mirrors HomeView's ScrollPanDisabler).
-                        ScrollIndicatorHider(hidden: viewModel.showsLetterRail)
+                        ScrollIndicatorHider(hidden: isRailVisible)
                             .frame(width: 0, height: 0)
                             .allowsHitTesting(false)
                             .accessibilityHidden(true)
@@ -83,7 +89,7 @@ public struct LibraryBrowseView: View {
                 // Never clip a focused card's lift, shadow or border.
                 .scrollClipDisabled()
                 .overlay(alignment: .trailing) {
-                    if viewModel.showsLetterRail {
+                    if isRailVisible {
                         LibraryLetterRail(
                             entries: viewModel.letterEntries,
                             currentLetter: currentLetter,
@@ -110,6 +116,21 @@ public struct LibraryBrowseView: View {
                     }
                 }
                 .animation(.easeOut(duration: 0.15), value: railFocusedLetter)
+                // Arm the rail only after the user has flown a few rows past the
+                // top of a name-sorted library, then latch it on. `topVisibleIndex`
+                // is the smallest visible grid index, so it crosses the row
+                // threshold once a couple of rows have scrolled off the top.
+                .onChange(of: viewModel.topVisibleIndex) { _, newValue in
+                    guard viewModel.showsLetterRail, !railHasRevealed,
+                          let index = newValue,
+                          index >= railRevealThreshold else { return }
+                    withAnimation(.easeOut(duration: 0.25)) { railHasRevealed = true }
+                }
+                // Re-arm the reveal whenever the rail stops being eligible (e.g. a
+                // switch to a non-name sort), so the next name sort starts hidden.
+                .onChange(of: viewModel.showsLetterRail) { _, shows in
+                    if !shows { railHasRevealed = false }
+                }
             }
         }
         // Browse is a full-screen sub-page: hide the top tab bar so it reads as a
@@ -117,6 +138,16 @@ public struct LibraryBrowseView: View {
         .toolbar(.hidden, for: .tabBar)
         .task { if viewModel.state.value == nil { await viewModel.loadFirstPage() } }
     }
+
+    /// Whether the alphabet rail should currently be on screen: it must be
+    /// eligible (name sort with a resolved index) *and* the user must have scrolled
+    /// past the reveal threshold at least once this sort.
+    private var isRailVisible: Bool { viewModel.showsLetterRail && railHasRevealed }
+
+    /// How far down (in grid indices) the top of the list must scroll before the
+    /// rail reveals — a couple of poster rows, so it only shows up once you're
+    /// actually flying through the library rather than sitting at the top.
+    private var railRevealThreshold: Int { max(1, metrics.posterColumns.count) * 2 }
 
     /// The letter to highlight as "current": the focused rail letter while flying
     /// the rail, otherwise the letter owning the top-most visible grid row.
@@ -258,7 +289,7 @@ private struct LibraryLetterRail: View {
     @FocusState private var focus: String?
 
     var body: some View {
-        VStack(spacing: 2) {
+        VStack(spacing: 1) {
             ForEach(entries, id: \.letter) { entry in
                 Button {
                     onScrollToLetter(entry)
@@ -272,10 +303,10 @@ private struct LibraryLetterRail: View {
                 .focused($focus, equals: entry.letter)
             }
         }
-        .padding(.vertical, PlozzTheme.Spacing.medium)
+        .padding(.vertical, PlozzTheme.Spacing.small)
         // Sit in the grid's trailing gutter (it hugs the safe-area edge, which is
         // already inset from the bezel by overscan) rather than pushing content.
-        .frame(width: 40)
+        .frame(width: 52)
         .focusSection()
         // Publish which letter is focused up to the parent (drives the jumbo
         // bubble + highlight), and fly the grid to it as focus arrives.
@@ -312,15 +343,15 @@ private struct LetterRailButtonStyle: ButtonStyle {
 
         var body: some View {
             configuration.label
-                .font(.system(size: 20, weight: isFocused || isCurrent ? .bold : .semibold, design: .rounded))
+                .font(.system(size: 26, weight: isFocused || isCurrent ? .heavy : .bold, design: .rounded))
                 .foregroundStyle(foreground)
-                .frame(width: 34, height: 30)
+                .frame(width: 46, height: 33)
                 .background(
                     Circle()
                         .fill(.white)
                         .opacity(isFocused ? 1 : 0)
                 )
-                .scaleEffect(isFocused ? 1.2 : 1.0)
+                .scaleEffect(isFocused ? 1.25 : 1.0)
                 .animation(.easeOut(duration: 0.14), value: isFocused)
                 .animation(.easeOut(duration: 0.14), value: isCurrent)
         }
@@ -346,14 +377,21 @@ private struct LetterJumpBubble: View {
 }
 
 #if canImport(UIKit)
-/// Probe that reaches its enclosing `UIScrollView` and toggles the vertical
-/// scroll indicator directly. SwiftUI's `.scrollIndicators(.never)` proved
-/// unreliable on tvOS for the browse grid (the system kept flashing the dotted
-/// indicator on top of the alphabet rail), so we set
-/// `showsVerticalScrollIndicator` ourselves. Modeled on `HomeView`'s
-/// `ScrollPanDisabler`: a `UIViewController` re-asserts on every layout pass so
-/// SwiftUI can't quietly re-enable the indicator, and it flips back on when the
-/// rail is hidden (non-name sorts) so those keep the default indicator.
+/// Probe that reaches its enclosing `UIScrollView` and keeps the vertical scroll
+/// indicator hidden. `.scrollIndicators(.never)` and a one-shot
+/// `showsVerticalScrollIndicator = false` both proved unreliable on tvOS for this
+/// grid: SwiftUI re-asserts the indicator after every layout pass, and tvOS
+/// re-flashes it on focus-driven scrolls, so it kept drawing on top of the
+/// alphabet rail. (Confirmed via research against swiftui-introspect's source —
+/// tvOS `ScrollView` is a real `UIScrollView` — and issue #123, where SwiftUI is
+/// shown to override introspected indicator properties.)
+///
+/// Reliable fix, modeled on `HomeView`'s `ScrollPanDisabler` superview walk:
+/// observe the scroll view's `contentOffset` via KVO (fires on every scroll tick,
+/// including focus-driven ones — the exact moment the indicator flashes back) and
+/// re-hide it each time, both by toggling `showsVerticalScrollIndicator` and by
+/// zeroing the private indicator subview(s) (`_UIScrollViewScrollIndicator` and
+/// tvOS's `_TVScrollBarView`). Flips everything back on when the rail is hidden.
 private struct ScrollIndicatorHider: UIViewControllerRepresentable {
     var hidden: Bool
 
@@ -370,8 +408,11 @@ private struct ScrollIndicatorHider: UIViewControllerRepresentable {
 }
 
 private final class ScrollIndicatorHiderController: UIViewController {
-    var hidden: Bool = false
+    var hidden: Bool = false {
+        didSet { if hidden != oldValue { reapply() } }
+    }
     private weak var scrollView: UIScrollView?
+    private var offsetObservation: NSKeyValueObservation?
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -389,21 +430,49 @@ private final class ScrollIndicatorHiderController: UIViewController {
         reapply()
     }
 
+    /// Locate (once, then cache) the enclosing scroll view, start observing its
+    /// content offset so we can re-hide on every scroll/focus tick, and enforce
+    /// the current hidden state now.
     func reapply() {
-        if let scrollView {
-            scrollView.showsVerticalScrollIndicator = !hidden
-            return
-        }
-        var ancestor = view.superview
-        while let current = ancestor {
-            if let found = current as? UIScrollView {
-                scrollView = found
-                found.showsVerticalScrollIndicator = !hidden
-                return
+        if scrollView == nil {
+            var ancestor = view.superview
+            while let current = ancestor {
+                if let found = current as? UIScrollView {
+                    scrollView = found
+                    // Re-hide on every content-offset change: this is when tvOS
+                    // re-flashes the indicator and when SwiftUI has typically just
+                    // re-asserted `showsVerticalScrollIndicator`.
+                    offsetObservation = found.observe(\.contentOffset, options: [.new]) { [weak self] scrollView, _ in
+                        self?.enforce(on: scrollView)
+                    }
+                    break
+                }
+                ancestor = current.superview
             }
-            ancestor = current.superview
+        }
+        guard let scrollView else { return }
+        enforce(on: scrollView)
+    }
+
+    private func enforce(on scrollView: UIScrollView) {
+        let shouldHide = hidden
+        if scrollView.showsVerticalScrollIndicator == shouldHide {
+            scrollView.showsVerticalScrollIndicator = !shouldHide
+        }
+        // Belt-and-suspenders: the standard indicator subview and tvOS's separate
+        // focus/swipe scroll bar aren't always killed by the property alone, so
+        // hide them directly. Matched by class-name substring (no private symbols
+        // referenced at compile time) so it degrades gracefully if Apple renames
+        // the private view — the indicator would just reappear, never crash.
+        for subview in scrollView.subviews {
+            let name = String(describing: type(of: subview))
+            guard name.contains("ScrollIndicator") || name.contains("TVScrollBar") else { continue }
+            subview.alpha = shouldHide ? 0 : 1
+            subview.isHidden = shouldHide
         }
     }
+
+    deinit { offsetObservation?.invalidate() }
 }
 #endif
 

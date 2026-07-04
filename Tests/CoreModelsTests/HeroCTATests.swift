@@ -33,9 +33,12 @@ final class HeroCTATests: XCTestCase {
         XCTAssertEqual(item(.pending).heroCTA(seerConnected: false), .unavailable)
     }
 
-    func testProcessingShowsDownloadingWithProgress() {
+    func testProcessingShowsDownloadingOnlyWithActiveProgress() {
+        // Actively downloading (a real queue item reports progress) → Downloading %.
         XCTAssertEqual(item(.processing, download: 0.42).heroCTA(seerConnected: true), .downloading(progress: 0.42))
-        XCTAssertEqual(item(.processing, download: nil).heroCTA(seerConnected: true), .downloading(progress: nil))
+        // Approved but not downloading yet (no queue item / size) → still Requested,
+        // NOT "Downloading".
+        XCTAssertEqual(item(.processing, download: nil).heroCTA(seerConnected: true), .requested)
         XCTAssertEqual(item(.processing, download: 0.42).heroCTA(seerConnected: false), .unavailable)
     }
 }

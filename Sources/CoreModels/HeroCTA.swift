@@ -14,11 +14,14 @@ public enum HeroCTA: Equatable, Sendable {
     /// A one-tap "Request" — a featured title that isn't in the library yet and
     /// can be requested, shown only while Seerr is connected.
     case request
-    /// The title has an approved request that's downloading. `progress` is the
-    /// aggregate fetched fraction (`0..<1`) when the backend reports sizes, else
-    /// `nil` (queued / size not yet known) so the UI shows a plain "Downloading".
-    case downloading(progress: Double?)
-    /// A request exists but is still awaiting approval — a "Requested" status.
+    /// The title has an approved request that's **actively downloading** — there's
+    /// a real item in the Radarr/Sonarr queue. `progress` is the aggregate fetched
+    /// fraction (`0..<1`). Approved-but-not-yet-downloading (no queue item, e.g.
+    /// still searching for a release) is reported as ``requested``, not this.
+    case downloading(progress: Double)
+    /// A request exists but nothing is downloading yet — either awaiting approval
+    /// (`pending`) or approved and still searching (`processing` with no active
+    /// queue item). Shown as a "Requested" status.
     case requested
     /// No Play/Request button: a featured title that isn't owned and can't be
     /// requested because Seerr isn't connected. The slide still shows in the
@@ -55,9 +58,15 @@ public extension MediaItem {
         case .pending, .processing, .unknown, .deleted:
             guard seerConnected else { return .unavailable }
             switch availability {
-            case .pending: return .requested
-            case .processing: return .downloading(progress: downloadProgress)
-            default: return .request // .unknown / .deleted are requestable
+            case .pending:
+                return .requested
+            case .processing:
+                // Approved: only "Downloading" when a real queue item reports
+                // progress; otherwise it's still just requested (searching).
+                if let downloadProgress { return .downloading(progress: downloadProgress) }
+                return .requested
+            default:
+                return .request // .unknown / .deleted are requestable
             }
         }
     }

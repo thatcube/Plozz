@@ -912,34 +912,26 @@ struct HomeHeroView: View {
     /// Spoken/label text for a request/download status pill.
     private func downloadStatusText(for item: MediaItem) -> String {
         switch heroCTA(for: item) {
-        case let .downloading(progress):
-            if let progress { return "Downloading \(Int((progress * 100).rounded()))%" }
-            return "Downloading"
-        default:
-            return "Requested"
+        case let .downloading(progress): return "Downloading \(Int((progress * 100).rounded()))%"
+        default: return "Requested"
         }
     }
 
     /// Inner label of the request/download status pill: a download glyph plus a
-    /// live progress bar + percentage while fetching (reusing the shared resume
-    /// capsule so it matches the Play button's bar), or a plain
-    /// "Requested"/"Downloading" status otherwise.
+    /// live progress bar + percentage while actually fetching (reusing the shared
+    /// resume capsule so it matches the Play button's bar), or a plain "Requested"
+    /// status for a request that isn't downloading yet.
     @ViewBuilder
     private func downloadStatusLabel(for item: MediaItem, selected: Bool) -> some View {
         switch heroCTA(for: item) {
         case let .downloading(progress):
-            if let progress {
-                HStack(spacing: 16) {
-                    Image(systemName: "arrow.down.circle")
-                    ResumeProgressCapsule(progress: progress, onLight: selected || colorScheme == .light)
-                    Text("\(Int((progress * 100).rounded()))%")
-                        .lineLimit(1)
-                }
-                .font(.system(size: 28, weight: .semibold))
-            } else {
-                Label("Downloading", systemImage: "arrow.down.circle")
-                    .font(.system(size: 28, weight: .semibold))
+            HStack(spacing: 16) {
+                Image(systemName: "arrow.down.circle")
+                ResumeProgressCapsule(progress: progress, onLight: selected || colorScheme == .light)
+                Text("\(Int((progress * 100).rounded()))%")
+                    .lineLimit(1)
             }
+            .font(.system(size: 28, weight: .semibold))
         default:
             Label("Requested", systemImage: "clock")
                 .font(.system(size: 28, weight: .semibold))

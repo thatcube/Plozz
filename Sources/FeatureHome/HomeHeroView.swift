@@ -183,6 +183,20 @@ struct HomeHeroView: View {
         return result
     }
 
+    /// The hero's action buttons in fixed visual order. The pill row renders over
+    /// this CONSTANT slot set (absent buttons → a zero-size placeholder) so its
+    /// `ForEach` stays structurally stable across a page. Device tracing
+    /// (`PLZHFOCUS`) proved the intermittent focus loss came from the button
+    /// *count* changing on a page: paging to a slide with a different number of
+    /// buttons made the old (variable-length) `ForEach` insert/remove a pill,
+    /// relaying out the HStack the `.row` focus overlay sits on — in the very
+    /// transaction that re-pins `focus = .row` — and the focus engine couldn't
+    /// resolve the re-pin mid-rebuild, so focus dropped to nil and returned on the
+    /// wrong control. Same-count pages never dropped (even with differing button
+    /// widths/labels), so keeping the slot STRUCTURE constant is the fix. Keep this
+    /// in the same order `buttons(for:)` produces so `selectedButton` still maps.
+    private static let buttonSlots: [HeroButton] = [.play, .moreInfo, .watchlist, .next]
+
     /// The item the hero's Watchlist button acts on. Whole titles
     /// (movie / series / video) act on themselves; an **episode or season** acts
     /// on its parent **series** so a mid-show Continue Watching slide still offers
@@ -600,9 +614,26 @@ struct HomeHeroView: View {
             // (see the overlay), so fading these to opacity 0 can't drop focus or
             // shift the scroll. `.opacity` keeps their layout, so the focus overlay
             // below keeps a stable frame throughout the fade.
-            HStack(spacing: 24) {
-                ForEach(Array(itemButtons.enumerated()), id: \.element) { offset, button in
-                    heroButtonVisual(button, for: item, selected: focus != nil && selectedButton == offset)
+            //
+            // Rendered over the CONSTANT `Self.buttonSlots` set (NOT the
+            // variable-length `itemButtons`) so the `ForEach` NEVER structurally
+            // inserts/removes a pill when paging to a slide with a different button
+            // count — the proven cause of the intermittent focus drop (see
+            // `buttonSlots`). Absent buttons render as a zero-size placeholder;
+            // `spacing: 0` + a per-pill leading inset reproduces the exact 24pt
+            // gap with no visible hole. `selectedButton` still indexes the logical
+            // `itemButtons`, so the highlight maps via each slot's logical offset.
+            HStack(spacing: 0) {
+                ForEach(Self.buttonSlots, id: \.self) { slot in
+                    if let offset = itemButtons.firstIndex(of: slot) {
+                        heroButtonVisual(slot, for: item, selected: focus != nil && selectedButton == offset)
+                            .padding(.leading, offset == 0 ? 0 : 24)
+                    } else {
+                        // Stable placeholder: keeps this slot present in the
+                        // `ForEach` so the row never structurally changes its
+                        // child count (only the harmless total width varies).
+                        Color.clear.frame(width: 0, height: 0)
+                    }
                 }
             }
             .opacity(metadataVisible ? 1 : 0)

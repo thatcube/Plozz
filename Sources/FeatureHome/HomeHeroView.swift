@@ -1305,9 +1305,14 @@ struct HomeHeroView: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 9)
-            // Liquid Glass rounded container so the indicators stay legible over
-            // any backdrop (matches the hero action pills' glass treatment).
-            .background { pagingDotsGlass(shape: Capsule()) }
+            // A STABLE pill background. The dots sit right at the backdrop's
+            // dissolve boundary, where the artwork is still faintly visible AND
+            // slides on every parallax page-wipe. A glass/material background
+            // sample-blurs whatever is behind it, so that moving artwork refracted
+            // at the pill's edges — reading as the indicator "shifting a few px" per
+            // page. A solid translucent fill never samples the backdrop, so there is
+            // nothing to refract: the pill stays put and legible over any artwork.
+            .background { pagingDotsBackground(shape: Capsule()) }
             .padding(.top, 10)
             .accessibilityHidden(true)
         }
@@ -1369,15 +1374,16 @@ struct HomeHeroView: View {
         return height + (trackWidth - height) * progress
     }
 
-    /// Liquid Glass background for the paging-dot container: real glass on
-    /// tvOS 26+, `.ultraThinMaterial` below (mirrors `heroPillIdleBackground`).
-    @ViewBuilder
-    private func pagingDotsGlass(shape: Capsule) -> some View {
-        if #available(tvOS 26.0, *) {
-            shape.fill(.clear).glassEffect(.regular, in: shape)
-        } else {
-            shape.fill(.ultraThinMaterial)
-        }
+    /// Stable background for the paging-dot container: a solid translucent capsule
+    /// (NOT a material/glass blur) with a hairline edge. Because it is a flat fill
+    /// it never samples or refracts the backdrop that wipes past this height on
+    /// every page, so the indicator can't shimmer — unlike `.ultraThinMaterial` /
+    /// Liquid Glass, which blur-sample the moving artwork behind them. Kept dark +
+    /// semi-opaque so the white dots stay legible over any artwork.
+    private func pagingDotsBackground(shape: Capsule) -> some View {
+        shape
+            .fill(Color.black.opacity(0.5))
+            .overlay(shape.strokeBorder(Color.white.opacity(0.12), lineWidth: 1))
     }
 
     // MARK: - Backdrop

@@ -44,6 +44,15 @@ struct HomeHeroView: View {
     var focusScope: Namespace.ID
     let onSelect: (MediaItem) -> Void
     let onPlay: (MediaItem) -> Void
+    /// Whether Seerr is currently connected. Gates the featured **Request** CTA:
+    /// a not-owned featured title only offers Request (or a request/download
+    /// status) when this is `true`; otherwise the slide shows with no primary
+    /// button (Play/Resume for ordinary library items is unaffected).
+    var seerConnected: Bool = false
+    /// One-tap request for a not-owned featured title. Returns the title's new
+    /// availability so the pill can flip to Requested/Downloading immediately, or
+    /// `nil` if the request failed. `nil` closure disables requesting entirely.
+    var onRequest: ((MediaItem) async -> MediaAvailabilityStatus?)? = nil
     /// Fired when the hero *gains* focus (the user moved focus back up onto it),
     /// so Home can restore the full-screen hero and replay the enter transition.
     /// Not fired for interior button-to-button moves.
@@ -96,6 +105,11 @@ struct HomeHeroView: View {
     /// container `onMoveCommand` read the *post-move* button on device and paged
     /// the instant focus merely landed on an edge button — the bug this fixes.)
     @State private var selectedButton: Int = 0
+    /// Optimistic per-item availability overrides applied the instant the user
+    /// taps Request, so the pill flips to Requested/Downloading without waiting
+    /// for the next trending refresh. Keyed by `MediaItem.id`; reconciled with the
+    /// server's returned status when the request completes.
+    @State private var requestOverrides: [String: MediaAvailabilityStatus] = [:]
     /// Which of the hero's two focus targets holds focus: the pill `row`, or the
     /// invisible `leftGuard` that sits just left of it. The guard exists so a Left
     /// press has an *internal* target and is captured by the hero instead of
@@ -169,18 +183,42 @@ struct HomeHeroView: View {
     private var scrimTone: Color { colorScheme == .dark ? .black : .white }
 
     /// The action buttons the current slide offers, in visual (left-to-right)
-    /// order. `.play` and `.moreInfo` are always present; `.watchlist` whenever a
-    /// watchlist toggle applies to the slide's watchlist *target* (see
-    /// ``watchlistTarget(for:)``) — which, for an episode/season, is its parent
-    /// series, so a mid-show Continue Watching slide still gets the button.
+    /// order. The leading button is the CTA that fits the slide's state — Play,
+    /// Request, or a request/download **status** pill — or nothing for a
+    /// not-owned featured title while Seerr is disconnected (the slide still
+    /// shows, just without a primary button). `.moreInfo` is always present;
+    /// `.watchlist` whenever a watchlist toggle applies to the slide's target.
     private func buttons(for item: MediaItem) -> [HeroButton] {
-        var result: [HeroButton] = [.play, .moreInfo]
+        var result: [HeroButton] = []
+        if let primary = primaryButton(for: item) { result.append(primary) }
+        result.append(.moreInfo)
         if watchlistAction(for: item) != nil { result.append(.watchlist) }
         // A right-hand chevron on a multi-slide carousel — an affordance that
         // there's more to page through (matching the Apple TV app) and the
         // stable right-most button, so Right only pages the carousel here.
         if items.count > 1 { result.append(.next) }
         return result
+    }
+
+    /// The effective hero CTA for `item`, applying any optimistic post-tap
+    /// availability override so the pill reflects a just-sent request instantly.
+    private func heroCTA(for item: MediaItem) -> HeroCTA {
+        MediaItem.heroCTA(
+            availability: requestOverrides[item.id] ?? item.availability,
+            downloadProgress: item.downloadProgress,
+            seerConnected: seerConnected
+        )
+    }
+
+    /// The leading primary button for `item`, or `nil` when the slide offers no
+    /// primary action (a not-owned featured title with Seerr disconnected).
+    private func primaryButton(for item: MediaItem) -> HeroButton? {
+        switch heroCTA(for: item) {
+        case .play: return .play
+        case .request: return .request
+        case .downloading, .requested: return .downloadStatus
+        case .unavailable: return nil
+        }
     }
 
     /// The item the hero's Watchlist button acts on. Whole titles
@@ -556,6 +594,8 @@ struct HomeHeroView: View {
         let a11yActions: [(String, () -> Void)] = itemButtons.map { button in
             switch button {
             case .play: return (item.resumeProgressFraction != nil ? "Resume" : "Play", { onPlay(item) })
+            case .request: return ("Request", { performRequest(for: item) })
+            case .downloadStatus: return (downloadStatusText(for: item), {})
             case .moreInfo: return ("More Info", { onSelect(item) })
             case .watchlist:
                 let fav = watchlistTarget(for: item).isFavorite
@@ -833,6 +873,8 @@ struct HomeHeroView: View {
         guard itemButtons.indices.contains(idx) else { return }
         switch itemButtons[idx] {
         case .play: onPlay(item)
+        case .request: performRequest(for: item)
+        case .downloadStatus: break // informational status pill — no action
         case .moreInfo: onSelect(item)
         case .watchlist: performWatchlist(for: item)
         case .next: advanceForward()
@@ -850,6 +892,60 @@ struct HomeHeroView: View {
         watchlistOverrides[key] = (action == .addToWatchlist)
     }
 
+    /// Sends a one-tap Seerr request for a not-owned featured title, flipping the
+    /// pill to a Requested/Downloading status immediately (optimistic) and then
+    /// reconciling with the server's returned availability. A failed request
+    /// clears the override so the Request button returns for a retry.
+    private func performRequest(for item: MediaItem) {
+        guard let onRequest else { return }
+        noteInteraction()
+        requestOverrides[item.id] = .pending
+        Task {
+            if let status = await onRequest(item) {
+                requestOverrides[item.id] = status
+            } else {
+                requestOverrides[item.id] = nil
+            }
+        }
+    }
+
+    /// Spoken/label text for a request/download status pill.
+    private func downloadStatusText(for item: MediaItem) -> String {
+        switch heroCTA(for: item) {
+        case let .downloading(progress):
+            if let progress { return "Downloading \(Int((progress * 100).rounded()))%" }
+            return "Downloading"
+        default:
+            return "Requested"
+        }
+    }
+
+    /// Inner label of the request/download status pill: a download glyph plus a
+    /// live progress bar + percentage while fetching (reusing the shared resume
+    /// capsule so it matches the Play button's bar), or a plain
+    /// "Requested"/"Downloading" status otherwise.
+    @ViewBuilder
+    private func downloadStatusLabel(for item: MediaItem, selected: Bool) -> some View {
+        switch heroCTA(for: item) {
+        case let .downloading(progress):
+            if let progress {
+                HStack(spacing: 16) {
+                    Image(systemName: "arrow.down.circle")
+                    ResumeProgressCapsule(progress: progress, onLight: selected || colorScheme == .light)
+                    Text("\(Int((progress * 100).rounded()))%")
+                        .lineLimit(1)
+                }
+                .font(.system(size: 28, weight: .semibold))
+            } else {
+                Label("Downloading", systemImage: "arrow.down.circle")
+                    .font(.system(size: 28, weight: .semibold))
+            }
+        default:
+            Label("Requested", systemImage: "clock")
+                .font(.system(size: 28, weight: .semibold))
+        }
+    }
+
     /// VoiceOver label for the row's currently-selected action.
     private func accessibilityLabel(for item: MediaItem) -> String {
         let itemButtons = buttons(for: item)
@@ -857,6 +953,8 @@ struct HomeHeroView: View {
         let name: String
         switch itemButtons[selectedButton] {
         case .play: name = item.resumeProgressFraction != nil ? "Resume" : "Play"
+        case .request: name = "Request"
+        case .downloadStatus: name = downloadStatusText(for: item)
         case .moreInfo: name = "More Info"
         case .watchlist: name = watchlistTarget(for: item).isFavorite ? "Remove from Watchlist" : "Add to Watchlist"
         case .next: name = "Next"
@@ -893,6 +991,15 @@ struct HomeHeroView: View {
                     onLight: selected || colorScheme == .light
                 )
                 .font(.system(size: 28, weight: .semibold))
+            }
+        case .request:
+            heroPill(selected: selected) {
+                Label("Request", systemImage: "plus.circle")
+                    .font(.system(size: 28, weight: .semibold))
+            }
+        case .downloadStatus:
+            heroPill(selected: selected) {
+                downloadStatusLabel(for: item, selected: selected)
             }
         case .moreInfo:
             heroPill(selected: selected) {
@@ -1244,7 +1351,7 @@ struct HomeHeroView: View {
 
     /// The hero's action buttons, in visual order.
     private enum HeroButton: Hashable {
-        case play, moreInfo, watchlist, next
+        case play, request, downloadStatus, moreInfo, watchlist, next
     }
 }
 #endif

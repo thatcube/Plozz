@@ -64,8 +64,29 @@ enum SeerMapper {
             backdropURL: imageURL(path: result.backdropPath, size: backdropSize),
             heroBackdropURL: imageURL(path: result.backdropPath, size: heroBackdropSize),
             providerIDs: ["Tmdb": String(result.id)],
-            availability: status
+            availability: status,
+            downloadProgress: downloadProgress(from: result.mediaInfo?.downloadStatus)
         )
+    }
+
+    /// Aggregate fetched fraction (`0..<1`) across a title's active download
+    /// queue items: `Σ(size - sizeLeft) / Σ size`. Returns `nil` when nothing is
+    /// downloading or no usable sizes are reported (queued but size unknown), so
+    /// the hero shows a plain "Downloading" rather than a 0%/stuck bar. Never
+    /// returns `1` (a fully-fetched title reports as available, not downloading).
+    static func downloadProgress(from items: [SeerDownloadingItem]?) -> Double? {
+        guard let items, !items.isEmpty else { return nil }
+        var totalSize = 0.0
+        var totalLeft = 0.0
+        for item in items {
+            guard let size = item.size, size > 0 else { continue }
+            let left = max(0, min(size, item.sizeLeft ?? size))
+            totalSize += size
+            totalLeft += left
+        }
+        guard totalSize > 0 else { return nil }
+        let fraction = (totalSize - totalLeft) / totalSize
+        return min(0.999, max(0, fraction))
     }
 
     /// Maps a page of results to `MediaItem`s, dropping people/unmappable

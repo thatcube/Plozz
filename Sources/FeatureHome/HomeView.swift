@@ -19,6 +19,12 @@ public struct HomeView: View {
     private let heroCurator: HeroCurator
     private let heroFeaturedProvider: FeaturedContentProviding
     private let heroRandomProvider: RandomLibraryContentProviding
+    /// Whether Seerr is currently connected — threaded to the hero so a not-owned
+    /// featured title only offers a Request CTA when a server is reachable.
+    private let heroSeerConnected: Bool
+    /// One-tap request for a not-owned featured title (Seerr), threaded to the
+    /// hero's Request button. Returns the new availability for an optimistic flip.
+    private let onRequestItem: ((MediaItem) async -> MediaAvailabilityStatus?)?
     /// The app-wide navigation style, so the carousel's left-edge behaviour
     /// (escape to sidebar vs. wrap) matches the surrounding chrome.
     private let navigationStyle: NavigationStyle
@@ -63,6 +69,8 @@ public struct HomeView: View {
         heroCurator: HeroCurator = HeroCurator(),
         heroFeaturedProvider: @escaping FeaturedContentProviding = HeroFeaturedProvider.none,
         heroRandomProvider: @escaping RandomLibraryContentProviding = HeroRandomProvider.none,
+        seerConnected: Bool = false,
+        onRequestItem: ((MediaItem) async -> MediaAvailabilityStatus?)? = nil,
         navigationStyle: NavigationStyle = .default,
         onSelectItem: @escaping (MediaItem) -> Void,
         onPlayItem: @escaping (MediaItem) -> Void,
@@ -75,6 +83,8 @@ public struct HomeView: View {
         self.heroCurator = heroCurator
         self.heroFeaturedProvider = heroFeaturedProvider
         self.heroRandomProvider = heroRandomProvider
+        self.heroSeerConnected = seerConnected
+        self.onRequestItem = onRequestItem
         self.navigationStyle = navigationStyle
         self.onSelectItem = onSelectItem
         self.onPlayItem = onPlayItem
@@ -162,6 +172,8 @@ public struct HomeView: View {
                                 focusScope: heroFocusScope,
                                 onSelect: onSelectItem,
                                 onPlay: onPlayItem,
+                                seerConnected: heroSeerConnected,
+                                onRequest: onRequestItem,
                                 // When focus returns to the hero from a row below,
                                 // un-recede: the content expands back to full-screen
                                 // and the backdrop settles back down. A SINGLE flag

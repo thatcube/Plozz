@@ -54,6 +54,14 @@ public final class SeerService {
     /// Whether a server URL + API key are saved (feature is set up).
     public var isConfigured: Bool { config.isConfigured }
 
+    /// Whether the last status probe found the server reachable. The hero gates
+    /// its one-tap "Request" button on this so Request is only ever offered when
+    /// Seerr is actually connected.
+    public var isConnected: Bool {
+        if case .connected = phase { return true }
+        return false
+    }
+
     /// The saved server URL, for pre-filling the Settings field on re-entry.
     public var savedBaseURLString: String? { config.baseURL?.absoluteString }
 

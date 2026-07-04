@@ -51,16 +51,13 @@ public final class SeerService {
         self.config = Self.loadConfig(from: credentialStore)
     }
 
-    /// Whether a server URL + API key are saved (feature is set up).
+    /// Whether a server URL + API key are saved (feature is set up). The hero
+    /// gates its featured Request affordances on this: since featured content is
+    /// only fetched (via `trending`) when a server is configured and reachable,
+    /// this is the reliable, immediately-correct-at-launch signal for "there is a
+    /// Seerr to request from" — and it flips to hide Request if the user
+    /// disconnects Seerr while stale featured items are still on screen.
     public var isConfigured: Bool { config.isConfigured }
-
-    /// Whether the last status probe found the server reachable. The hero gates
-    /// its one-tap "Request" button on this so Request is only ever offered when
-    /// Seerr is actually connected.
-    public var isConnected: Bool {
-        if case .connected = phase { return true }
-        return false
-    }
 
     /// The saved server URL, for pre-filling the Settings field on re-entry.
     public var savedBaseURLString: String? { config.baseURL?.absoluteString }

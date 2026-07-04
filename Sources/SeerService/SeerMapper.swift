@@ -51,7 +51,12 @@ enum SeerMapper {
               !title.isEmpty
         else { return nil }
 
-        let status = result.mediaInfo?.status.flatMap(MediaAvailabilityStatus.init(rawValue:))
+        // An untracked discovery title (no `mediaInfo`) isn't in the library and
+        // hasn't been requested — for a **featured** item that means "requestable"
+        // (`.unknown`), NOT `nil`. `nil` is reserved for ordinary library items and
+        // would make the hero show a dead "Play" for something you don't have. A
+        // present-but-unrecognized status also falls back to `.unknown`.
+        let status = result.mediaInfo?.status.flatMap(MediaAvailabilityStatus.init(rawValue:)) ?? .unknown
 
         return MediaItem(
             id: itemID(tmdbID: result.id),

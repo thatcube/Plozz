@@ -1316,15 +1316,24 @@ struct HomeHeroView: View {
     private var pagingDots: some View {
         if items.count > 1 {
             HStack(spacing: Self.dotSpacing) {
-                ForEach(items.indices, id: \.self) { i in
-                    pagingIndicator(active: i == index)
+                // Windowed: at most `maxVisibleDots` are shown. When there are more
+                // slides than fit, the row scrolls and the dots nearest a hidden
+                // edge shrink to signal "more this way" (see `HeroPagingDots`). Keyed
+                // by the slide's real index so a scroll SLIDES the shared dots (and
+                // fades the one leaving / entering) rather than snapping.
+                ForEach(HeroPagingDots.layout(count: items.count, index: index, maxVisible: Self.maxVisibleDots, edgeShrink: Self.edgeShrinkCount)) { dot in
+                    pagingIndicator(active: dot.index == index, scale: Self.dotScale(for: dot.size))
                 }
             }
             // Pin the row to the dot height so its vertical centering can NEVER
             // change. Without this, the active dot's animating frame let the HStack
             // recompute a sub-pixel-different vertical center mid-morph, drifting the
-            // dots down a few px on every page (the reported jitter).
-            .frame(height: Self.dotSize)
+            // dots down a few px on every page (the reported jitter). When windowed,
+            // also pin the WIDTH: a scroll momentarily renders a 9th (entering/leaving)
+            // dot, which would otherwise widen the row and make the glass pill breathe
+            // — the fixed width holds the pill steady while the extra dot fades at the
+            // edge.
+            .frame(width: windowedRowWidth, height: Self.dotSize)
             .padding(.horizontal, 14)
             .padding(.vertical, 9)
             // Liquid Glass rounded container so the indicators stay legible over any
@@ -1335,9 +1344,9 @@ struct HomeHeroView: View {
             // Both the outgoing and incoming dot (and their fills) animate in a
             // single transaction, so there are no dueling per-dot `.animation`s whose
             // independent interpolations nudged each dot's origin on both axes. The
-            // row width is constant (exactly one dot is wide), so nothing here
-            // changes size — only which dot is the wide one — and the glass pill
-            // stays put.
+            // row width is constant while windowed (always `maxVisibleDots` fixed-pitch
+            // slots, exactly one of which is the wide pill), so the glass pill never
+            // resizes; the shrunk edge dots scale WITHIN their fixed slots.
             .animation(.easeInOut(duration: Self.dotMorph), value: index)
             .accessibilityHidden(true)
         }
@@ -1349,6 +1358,35 @@ struct HomeHeroView: View {
     /// Duration of the simultaneous dot→pill / pill→dot open/close on a page.
     private static let dotMorph: Double = 0.3
 
+    /// Maximum page indicators shown at once. Beyond this the row becomes a scrolling
+    /// window with shrinking edge dots — a fixed UX cap independent of how many
+    /// titles the user lets the hero rotate through (`HeroSettings.maxItems`).
+    private static let maxVisibleDots = 8
+    /// How many dots shrink on each edge that has hidden content (outermost first).
+    private static let edgeShrinkCount = 2
+
+    /// Fixed width of the windowed dot row (nil when not windowed, so the classic
+    /// row sizes naturally to its dots). Exactly `maxVisibleDots` slots: one active
+    /// pill plus the rest full-size dots, with uniform spacing. Holding this constant
+    /// keeps the glass pill from resizing when a scroll transiently renders an extra
+    /// entering/leaving dot.
+    private var windowedRowWidth: CGFloat? {
+        guard items.count > Self.maxVisibleDots else { return nil }
+        let others = CGFloat(Self.maxVisibleDots - 1)
+        return others * Self.dotSize + Self.activeDotWidth + others * Self.dotSpacing
+    }
+
+    /// One rendered page indicator: the slide it represents and how large to draw it
+    /// (1 = full dot/pill, <1 = a shrunk edge dot signalling more content that way).
+    /// Maps `HeroPagingDots.Size` (the pure windowing result) to a render scale.
+    private static func dotScale(for size: HeroPagingDots.Size) -> CGFloat {
+        switch size {
+        case .full: return 1.0
+        case .medium: return 0.58   // second-from-edge — medium
+        case .small: return 0.30    // outermost edge — smallest
+        }
+    }
+
     /// A single page indicator. It is always the same `Capsule` so its width can
     /// smoothly animate between a dot (inactive) and a pill (active) — the active
     /// one opening exactly as the outgoing one closes, keeping the container width
@@ -1356,14 +1394,21 @@ struct HomeHeroView: View {
     /// (a live "time until next page" gauge). The width morph is animated once, by
     /// the container's `value: index` animation — NOT per-dot here — so the outgoing
     /// and incoming dots interpolate in the same transaction and never drift.
-    private func pagingIndicator(active: Bool) -> some View {
+    ///
+    /// `scale` shrinks a non-active edge dot toward the hidden-content side. The
+    /// shrunk circle is rendered INSIDE a full-size (`dotSize`) slot so the row's
+    /// pitch and total width stay constant as dots shrink/grow — the glass pill
+    /// never resizes, and there's no per-page width jitter.
+    private func pagingIndicator(active: Bool, scale: CGFloat) -> some View {
         Capsule()
             .fill(Color.white.opacity(0.28))
             .overlay(alignment: .leading) {
                 activeDotFill(active: active, trackWidth: Self.activeDotWidth, height: Self.dotSize)
             }
-            .frame(width: active ? Self.activeDotWidth : Self.dotSize, height: Self.dotSize)
+            .frame(width: active ? Self.activeDotWidth : Self.dotSize * scale, height: Self.dotSize * scale)
             .clipShape(Capsule())
+            // Reserve a full-size slot so the pitch is uniform regardless of `scale`.
+            .frame(width: active ? Self.activeDotWidth : Self.dotSize, height: Self.dotSize)
     }
 
     /// The bright progress fill inside an indicator. Kept in a `TimelineView` for

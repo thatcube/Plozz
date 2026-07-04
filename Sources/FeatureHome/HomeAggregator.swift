@@ -106,7 +106,12 @@ public struct HomeAggregator: Sendable {
             // the detail server picker. Order is first account first, then each
             // account's own library order — matching the Settings checklist
             // (`libraries(from:)`).
-            libraries: perAccount.flatMap(\.libraries)
+            //
+            // **Music libraries are excluded from Home entirely** — they have their
+            // own dedicated Music tab, so they never appear as a Home tile (merged)
+            // or a per-library section (unmerged). They remain in `libraries(from:)`
+            // for the Settings list so the user can still enable/disable them.
+            libraries: perAccount.flatMap(\.libraries).filter { !$0.library.isMusic }
         )
     }
 
@@ -425,8 +430,8 @@ public struct HomeAggregator: Sendable {
             // and rely on the row-level filter.
             rawLibs = (await libs) ?? []
             let visibleLibraryIDs = rawLibs
+                .filter { !$0.isMusic && visibility.isVisibleOnHome("\(accountID):\($0.id)") }
                 .map(\.id)
-                .filter { visibility.isVisible("\(accountID):\($0)") }
             async let resume = try? provider.continueWatching(limit: continueWatchingLimit, inLibraries: visibleLibraryIDs)
             async let recent = try? provider.latest(limit: latestLimit, inLibraries: visibleLibraryIDs)
             cw = (await resume) ?? []
@@ -441,13 +446,24 @@ public struct HomeAggregator: Sendable {
 
         let wl = await saved
 
-        if cw.isEmpty && lt.isEmpty && rawLibs.isEmpty {
+        // Keep **music** out of the video Home rows. Music has its own tab, so a
+        // music album that a provider surfaces in Recently Added / on-deck must not
+        // land in Continue Watching or Recently Added. `rawLibs` is already resolved
+        // here, so this is a free in-memory filter (no extra request). Items tagged
+        // with a music `libraryID` (Plex always tags; Jellyfin tags on the scoped
+        // path) are dropped; untagged items stay (fail-open) — the Jellyfin scoped
+        // path above additionally excludes music at the source.
+        let musicLibraryIDs = Set(rawLibs.filter(\.isMusic).map(\.id))
+        let cwFiltered = musicLibraryIDs.isEmpty ? cw : cw.filter { $0.libraryID.map { !musicLibraryIDs.contains($0) } ?? true }
+        let ltFiltered = musicLibraryIDs.isEmpty ? lt : lt.filter { $0.libraryID.map { !musicLibraryIDs.contains($0) } ?? true }
+
+        if cwFiltered.isEmpty && ltFiltered.isEmpty && rawLibs.isEmpty {
             PlozzLog.app.error("Aggregation: no content from account \(accountID)")
         }
 
         return AccountContent(
-            continueWatching: cw.map { $0.taggingSource(accountID) },
-            latest: lt.map { $0.taggingSource(accountID) },
+            continueWatching: cwFiltered.map { $0.taggingSource(accountID) },
+            latest: ltFiltered.map { $0.taggingSource(accountID) },
             watchlist: wl.map { $0.taggingSource(accountID) },
             libraries: rawLibs.map { aggregated($0, from: resolved) }
         )

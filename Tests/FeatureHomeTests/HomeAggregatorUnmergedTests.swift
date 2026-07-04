@@ -136,6 +136,40 @@ final class HomeAggregatorUnmergedTests: XCTestCase {
         XCTAssertEqual(result.sections.first?.sections.map(\.id), ["continueWatching", "recentlyAdded"])
     }
 
+    // MARK: - Music exclusion
+
+    func testMusicLibraryGetsNoUnmergedSection() async {
+        let stub = UnmergedStub(
+            libraries: [lib("L1", "Movies", .movie),
+                        MediaLibrary(id: "M1", title: "Music", kind: .folder, isMusic: true)],
+            continueWatching: [cw("cw1", library: "L1")],
+            itemsByContainer: ["L1": [item("m1")], "M1": [item("album1")]]
+        )
+        let accounts = [resolved("acct", provider: stub)]
+
+        let content = await HomeAggregator().unmergedContent(from: accounts, visibility: .default)
+
+        XCTAssertEqual(content.librarySections.map(\.library.key), ["acct:L1"],
+                       "A music library must not get a Home section — it lives in the Music tab")
+    }
+
+    func testMergedContentExcludesMusicLibraryTilesAndItems() async {
+        let stub = UnmergedStub(
+            libraries: [lib("L1", "Movies", .movie),
+                        MediaLibrary(id: "M1", title: "Music", kind: .folder, isMusic: true)],
+            continueWatching: [cw("cw1", library: "L1")],
+            latest: [cw("newMovie", library: "L1"), cw("newAlbum", library: "M1")]
+        )
+        let accounts = [resolved("acct", provider: stub)]
+
+        let content = await HomeAggregator().content(from: accounts, visibility: .default)
+
+        XCTAssertEqual(content.libraries.map(\.library.id), ["L1"],
+                       "Music library tiles are excluded from Home")
+        XCTAssertEqual(content.latest.map(\.id), ["newMovie"],
+                       "A music item must not leak into the Recently Added row")
+    }
+
     // MARK: - Helpers
 
     private func aggLib(_ account: String, _ id: String) -> AggregatedLibrary {
@@ -169,6 +203,7 @@ private final class UnmergedStub: MediaProvider, @unchecked Sendable {
     private let stubbedLibraries: [MediaLibrary]
     private let stubbedContinueWatching: [MediaItem]
     private let continueWatchingByLibrary: [String: [MediaItem]]
+    private let stubbedLatest: [MediaItem]
     private let itemsByContainer: [String: [MediaItem]]
     private let hubsByLibrary: [String: [LibrarySection]]
     private(set) var scopedContinueWatchingCalled = false
@@ -177,12 +212,14 @@ private final class UnmergedStub: MediaProvider, @unchecked Sendable {
         libraries: [MediaLibrary] = [],
         continueWatching: [MediaItem] = [],
         continueWatchingByLibrary: [String: [MediaItem]] = [:],
+        latest: [MediaItem] = [],
         itemsByContainer: [String: [MediaItem]] = [:],
         hubsByLibrary: [String: [LibrarySection]] = [:]
     ) {
         self.stubbedLibraries = libraries
         self.stubbedContinueWatching = continueWatching
         self.continueWatchingByLibrary = continueWatchingByLibrary
+        self.stubbedLatest = latest
         self.itemsByContainer = itemsByContainer
         self.hubsByLibrary = hubsByLibrary
         self.session = UserSession(
@@ -206,7 +243,7 @@ private final class UnmergedStub: MediaProvider, @unchecked Sendable {
             return libraryIDs.contains(lib)
         }
     }
-    func latest(limit: Int) async throws -> [MediaItem] { [] }
+    func latest(limit: Int) async throws -> [MediaItem] { stubbedLatest }
     func item(id: String) async throws -> MediaItem { throw AppError.notFound }
     func children(of itemID: String) async throws -> [MediaItem] { [] }
     func items(in containerID: String, kind: MediaItemKind, page: PageRequest) async throws -> MediaPage {

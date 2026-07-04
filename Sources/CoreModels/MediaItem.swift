@@ -680,6 +680,13 @@ public struct MediaLibrary: Codable, Hashable, Identifiable, Sendable {
     public var kind: MediaItemKind
     public var imageURL: URL?
 
+    /// Whether this library holds **music** (Plex "artist" sections, Jellyfin
+    /// "music" collections). Music has its own dedicated tab, so a music library
+    /// never appears on Home — the Home aggregator excludes it — but it is still a
+    /// real library the user can enable/disable (disabling also removes it from the
+    /// Music tab). Defaults to `false`; each provider sets it when mapping.
+    public var isMusic: Bool
+
     /// The `Account.id` this library was fetched from, stamped by the aggregator
     /// so a tapped library can be browsed against its owning provider. `nil` when
     /// returned directly by a single provider.
@@ -702,6 +709,7 @@ public struct MediaLibrary: Codable, Hashable, Identifiable, Sendable {
         title: String,
         kind: MediaItemKind,
         imageURL: URL? = nil,
+        isMusic: Bool = false,
         sourceAccountID: String? = nil,
         additionalSourceAccountIDs: [String] = [],
         sourceContainerIDByAccount: [String: String] = [:]
@@ -710,6 +718,7 @@ public struct MediaLibrary: Codable, Hashable, Identifiable, Sendable {
         self.title = title
         self.kind = kind
         self.imageURL = imageURL
+        self.isMusic = isMusic
         self.sourceAccountID = sourceAccountID
         self.additionalSourceAccountIDs = additionalSourceAccountIDs
         self.sourceContainerIDByAccount = sourceContainerIDByAccount
@@ -751,7 +760,7 @@ public struct MediaLibrary: Codable, Hashable, Identifiable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, title, kind, imageURL, sourceAccountID
+        case id, title, kind, imageURL, isMusic, sourceAccountID
         case additionalSourceAccountIDs, sourceContainerIDByAccount
     }
 
@@ -763,6 +772,7 @@ public struct MediaLibrary: Codable, Hashable, Identifiable, Sendable {
         title = try container.decode(String.self, forKey: .title)
         kind = try container.decode(MediaItemKind.self, forKey: .kind)
         imageURL = try container.decodeIfPresent(URL.self, forKey: .imageURL)
+        isMusic = try container.decodeIfPresent(Bool.self, forKey: .isMusic) ?? false
         sourceAccountID = try container.decodeIfPresent(String.self, forKey: .sourceAccountID)
         additionalSourceAccountIDs = try container.decodeIfPresent([String].self, forKey: .additionalSourceAccountIDs) ?? []
         sourceContainerIDByAccount = try container.decodeIfPresent([String: String].self, forKey: .sourceContainerIDByAccount) ?? [:]

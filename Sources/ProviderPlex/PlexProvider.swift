@@ -98,7 +98,8 @@ public struct PlexProvider: MediaProvider {
                 id: id,
                 title: dir.title ?? "Library",
                 kind: Self.kind(forSectionType: dir.type),
-                imageURL: client.imageURL(path: dir.thumb ?? dir.composite, maxWidth: 400)
+                imageURL: client.imageURL(path: dir.thumb ?? dir.composite, maxWidth: 400),
+                isMusic: dir.type == "artist"
             )
         }
     }

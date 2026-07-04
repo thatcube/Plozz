@@ -49,7 +49,8 @@ public struct JellyfinProvider: MediaProvider {
                 id: dto.Id,
                 title: dto.Name ?? "Library",
                 kind: Self.kind(forCollectionType: dto.CollectionType),
-                imageURL: Self.imageURL(for: dto, kind: .primary, maxWidth: 400, client: client)
+                imageURL: Self.imageURL(for: dto, kind: .primary, maxWidth: 400, client: client),
+                isMusic: dto.CollectionType == "music"
             )
         }
     }

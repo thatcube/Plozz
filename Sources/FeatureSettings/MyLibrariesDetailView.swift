@@ -313,9 +313,14 @@ struct MyLibrariesDetailView: View {
     /// everywhere: Home, Search, Music, browse) and, when enabled, an indented
     /// **Show on Home** switch (the Home-only choice, preserved across enable/disable
     /// so re-enabling restores it).
+    ///
+    /// **Music libraries** are special: they never appear on Home (they have their
+    /// own Music tab), so the Show-on-Home switch is replaced with a caption — the
+    /// Enabled switch alone governs whether the library shows in the Music tab.
     @ViewBuilder
     private func libraryRow(_ aggregated: AggregatedLibrary) -> some View {
         let key = aggregated.key
+        let isMusic = aggregated.library.isMusic
         VStack(alignment: .leading, spacing: 2) {
             Toggle(isOn: Binding(
                 get: { context.homeVisibility.isEnabled(key) },
@@ -325,7 +330,23 @@ struct MyLibrariesDetailView: View {
             }
             .toggleStyle(SettingsSwitchToggleStyle())
 
-            if context.homeVisibility.isEnabled(key) {
+            if !context.homeVisibility.isEnabled(key) {
+                Text(isMusic
+                     ? "Hidden everywhere, including the Music tab."
+                     : "Hidden everywhere, including Search and Music.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 12)
+                    .padding(.bottom, 6)
+            } else if isMusic {
+                // Music never shows on Home — it lives in the Music tab — so there's
+                // no Show-on-Home choice for it.
+                Text("Shown in the Music tab, not on Home.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 12)
+                    .padding(.bottom, 6)
+            } else {
                 Toggle(isOn: Binding(
                     get: { context.homeVisibility.isShownOnHome(key) },
                     set: { context.homeVisibility.setShownOnHome($0, for: key) }
@@ -336,12 +357,6 @@ struct MyLibrariesDetailView: View {
                 }
                 .toggleStyle(SettingsSwitchToggleStyle())
                 .padding(.leading, 28)
-            } else {
-                Text("Hidden everywhere, including Search and Music.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .padding(.leading, 12)
-                    .padding(.bottom, 6)
             }
         }
     }

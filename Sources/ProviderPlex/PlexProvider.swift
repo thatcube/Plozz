@@ -149,6 +149,46 @@ public struct PlexProvider: MediaProvider {
         try await client.recentlyAdded(limit: limit).map(map(metadata:))
     }
 
+    /// Plex-native discovery hubs for one library (`/hubs/sections/{id}`), surfaced
+    /// as a library's extra rows in unmerged Home mode. Hubs whose content the
+    /// uniform base rows already cover (Recently Added, On Deck / Continue
+    /// Watching) are dropped, as are hubs with no playable items, so what remains
+    /// is genuinely additive: "More in <Genre>", "Because you watched…", "Top
+    /// Rated", "Start Watching", …
+    public func libraryHubs(libraryID: String, kind: MediaItemKind, limit: Int) async throws -> [LibrarySection] {
+        let hubs = try await client.sectionHubs(sectionID: libraryID, count: limit)
+        return hubs.compactMap { hub in
+            guard !Self.isBaseDuplicateHub(identifier: hub.hubIdentifier, context: hub.context) else { return nil }
+            let items = (hub.Metadata ?? []).map(map(metadata:))
+            guard !items.isEmpty else { return nil }
+            let title = hub.title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard !title.isEmpty else { return nil }
+            let id = hub.hubIdentifier ?? hub.context ?? title
+            return LibrarySection(
+                id: id,
+                title: title,
+                style: .poster,
+                items: Array(items.prefix(max(1, limit)))
+            )
+        }
+    }
+
+    /// Whether a hub duplicates one of the uniform base rows the Home aggregator
+    /// builds for every provider (Recently Added, On Deck / Continue Watching), so
+    /// it should be dropped from the *additive* Plex discovery rows.
+    ///
+    /// Matched as lowercased substrings against the hub's **stable**
+    /// `hubIdentifier` / `context` — never the localised `title` — so it survives
+    /// server locale/version differences. "Start Watching" (unplayed suggestions)
+    /// and genre/similar hubs deliberately do NOT match any token and are kept.
+    static func isBaseDuplicateHub(identifier: String?, context: String?) -> Bool {
+        let haystack = [identifier ?? "", context ?? ""].joined(separator: " ").lowercased()
+        // "recentlyadded" → base Recently Added; "ondeck"/"continue" → base
+        // Continue Watching. ("startwatching" contains neither, so it's kept.)
+        let duplicateTokens = ["recentlyadded", "ondeck", "continue"]
+        return duplicateTokens.contains { haystack.contains($0) }
+    }
+
     public func item(id: String) async throws -> MediaItem {
         map(metadata: try await client.metadata(ratingKey: id))
     }
@@ -254,6 +294,20 @@ public struct PlexProvider: MediaProvider {
         return try await client.search(query: trimmed, limit: limit)
             .map(map(metadata:))
             .filter { $0.kind == .movie || $0.kind == .series || $0.kind == .episode }
+    }
+
+    /// Plex search is global, but each result carries its owning `librarySectionID`
+    /// (mapped to `libraryID`), so app-wide disabled libraries are enforced by a
+    /// cheap post-filter. Results with no resolvable library stay visible
+    /// (fail-open) — no extra requests.
+    public func search(query: String, limit: Int, excludingLibraries disabledLibraryIDs: [String]) async throws -> [MediaItem] {
+        let hits = try await search(query: query, limit: limit)
+        guard !disabledLibraryIDs.isEmpty else { return hits }
+        let disabled = Set(disabledLibraryIDs)
+        return hits.filter { item in
+            guard let libraryID = item.libraryID else { return true } // fail-open
+            return !disabled.contains(libraryID)
+        }
     }
 
     // MARK: Playback

@@ -277,6 +277,25 @@ public struct PlexClient: Sendable {
         ).MediaContainer
     }
 
+    /// `GET /hubs/sections/{id}` — the library's promoted "hubs" (Recently Added,
+    /// On Deck, "More in <Genre>", "Because you watched…", Top Rated, …).
+    ///
+    /// `count` caps items **per hub** (Plex's `count` param). Uses the
+    /// stream-enriched path so hub cards can show DoVi/HDR badges, with the same
+    /// transparent lean retry as the other list endpoints. Returns the raw hubs in
+    /// server order; the provider filters + maps them.
+    func sectionHubs(sectionID: String, count: Int) async throws -> [PlexHub] {
+        let query = [
+            URLQueryItem(name: "count", value: String(max(1, count))),
+            URLQueryItem(name: "includeGuids", value: "1")
+        ]
+        return try await decodeStreamEnriched(
+            PlexMediaContainerResponse.self,
+            path: "/hubs/sections/\(sectionID)",
+            query: query
+        ).MediaContainer.Hub ?? []
+    }
+
     /// `GET /library/sections/{id}/firstCharacter` — the section's title
     /// first-character facet: one `Directory` per present letter (in ascending
     /// `titleSort` order) carrying its `titleSort` (`"A"`, `"1-9"`, `"#"`, …)

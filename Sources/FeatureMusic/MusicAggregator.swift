@@ -137,10 +137,12 @@ public final class MusicAvailabilityModel {
     }
 
     /// Applies visibility to a raw `accountID → libraryIDs` map, yielding the
-    /// detected accounts (those with ≥1 visible library, in `accounts` order) and
-    /// the per-account visible library IDs. The key scheme `"<accountID>:<libraryID>"`
-    /// matches `AggregatedLibrary.key`, so the Music tab honors the very same
-    /// per-profile toggles the Settings library checklist drives.
+    /// detected accounts (those with ≥1 enabled library, in `accounts` order) and
+    /// the per-account enabled library IDs. The key scheme `"<accountID>:<libraryID>"`
+    /// matches `AggregatedLibrary.key`. The Music tab keys off the **app-wide
+    /// enabled** state (`disabledKeys`), NOT the Home-only "Show on Home" bit — a
+    /// library hidden from Home still appears in Music; only disabling it app-wide
+    /// removes it here, matching the two-level visibility model.
     private static func resolve(
         accounts: [ResolvedAccount],
         rawLibraries: [String: [String]],
@@ -150,7 +152,7 @@ public final class MusicAvailabilityModel {
         var visible: [String: [String]] = [:]
         for account in accounts where account.provider is MusicProvider {
             guard let raw = rawLibraries[account.account.id], !raw.isEmpty else { continue }
-            let visibleLibs = raw.filter { visibility.isVisible("\(account.account.id):\($0)") }
+            let visibleLibs = raw.filter { visibility.isEnabled("\(account.account.id):\($0)") }
             guard !visibleLibs.isEmpty else { continue }
             detected.append(account)
             visible[account.account.id] = visibleLibs

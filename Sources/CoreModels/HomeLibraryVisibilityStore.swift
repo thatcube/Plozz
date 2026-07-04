@@ -35,8 +35,9 @@ public final class HomeLibraryVisibilityStore: HomeLibraryVisibilityStoring, @un
     }
 }
 
-/// Observable wrapper so the Settings checklist can two-way bind a per-library
-/// toggle and have the choice persisted + broadcast to Home.
+/// Observable wrapper so the Settings checklist can two-way bind the per-library
+/// toggles (enabled + show-on-home) and the merge switch, and have each choice
+/// persisted immediately + broadcast to Home / Search / Music.
 @MainActor
 @Observable
 public final class HomeLibraryVisibilityModel {
@@ -49,14 +50,59 @@ public final class HomeLibraryVisibilityModel {
         self.visibility = store.load()
     }
 
-    /// Whether the library with `key` is shown on Home (opt-out default).
+    // MARK: - Merge
+
+    /// Whether Home merges every library into unified cross-server rows.
+    public var mergeLibrariesOnHome: Bool {
+        visibility.mergeLibrariesOnHome
+    }
+
+    /// Sets the all-or-nothing "merge libraries on Home" switch and persists.
+    public func setMergeLibrariesOnHome(_ merge: Bool) {
+        guard visibility.mergeLibrariesOnHome != merge else { return }
+        visibility.mergeLibrariesOnHome = merge
+        store.save(visibility)
+    }
+
+    // MARK: - Per-library predicates
+
+    /// Whether the library is available **app-wide** (not disabled).
+    public func isEnabled(_ key: String) -> Bool {
+        visibility.isEnabled(key)
+    }
+
+    /// The Home-only bit (what the "Show on Home" toggle reflects), independent of
+    /// whether the library is enabled.
+    public func isShownOnHome(_ key: String) -> Bool {
+        visibility.isShownOnHome(key)
+    }
+
+    /// Whether the library actually appears on Home (enabled **and** shown).
+    public func isVisibleOnHome(_ key: String) -> Bool {
+        visibility.isVisibleOnHome(key)
+    }
+
+    /// Compatibility alias for ``isVisibleOnHome(_:)``.
     public func isVisible(_ key: String) -> Bool {
         visibility.isVisible(key)
     }
 
-    /// Toggles a library's Home visibility and persists immediately.
-    public func setVisible(_ visible: Bool, for key: String) {
-        visibility.setVisible(visible, for: key)
+    // MARK: - Per-library mutation
+
+    /// Turns a library on/off app-wide and persists immediately.
+    public func setEnabled(_ enabled: Bool, for key: String) {
+        visibility.setEnabled(enabled, for: key)
         store.save(visibility)
+    }
+
+    /// Toggles a library's Home-only visibility and persists immediately.
+    public func setShownOnHome(_ shown: Bool, for key: String) {
+        visibility.setShownOnHome(shown, for: key)
+        store.save(visibility)
+    }
+
+    /// Compatibility alias for ``setShownOnHome(_:for:)``.
+    public func setVisible(_ visible: Bool, for key: String) {
+        setShownOnHome(visible, for: key)
     }
 }

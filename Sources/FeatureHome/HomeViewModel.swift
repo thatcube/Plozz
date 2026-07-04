@@ -18,9 +18,18 @@ public final class HomeViewModel {
         public var watchlist: [MediaItem]
         /// Every discovered library (unfiltered), tagged with its owning account.
         public var libraries: [AggregatedLibrary]
+        /// Whether Home is in merged mode. `true` (default) uses the classic
+        /// cross-server rows (`latest`/`libraries`); `false` means the profile
+        /// turned off "Merge libraries on Home" and `librarySections` carries the
+        /// per-library blocks instead.
+        public var mergeLibraries: Bool = true
+        /// Per-library section blocks — populated only in unmerged mode. Each
+        /// library's own Continue Watching / Recently Added / discovery-hub rows.
+        public var librarySections: [HomeLibrarySectionGroup] = []
 
         public var isEmpty: Bool {
-            continueWatching.isEmpty && latest.isEmpty && watchlist.isEmpty && libraries.isEmpty
+            continueWatching.isEmpty && latest.isEmpty && watchlist.isEmpty
+                && libraries.isEmpty && librarySections.isEmpty
         }
     }
 
@@ -73,6 +82,9 @@ public final class HomeViewModel {
     // `nonisolated(unsafe)` so the nonisolated `deinit` can cancel these. Mutated
     // only on the main actor; `deinit` runs after the last reference is gone.
     private nonisolated(unsafe) var aggregationTask: Task<HomeAggregator.Content, Never>?
+    /// The unmerged counterpart of `aggregationTask` (populated when the profile
+    /// has turned off "Merge libraries on Home"). Tracked so `deinit` can cancel it.
+    private nonisolated(unsafe) var unmergedTask: Task<HomeAggregator.UnmergedContent, Never>?
     private nonisolated(unsafe) var topShelfPublishTask: Task<Void, Never>?
 
     /// Coalesces the burst of `identityIndexDidUpdate` notifications posted while
@@ -89,13 +101,17 @@ public final class HomeViewModel {
     /// enough to feel immediate, long enough to swallow a multi-server burst.
     private static let reenrichDebounce: Duration = .milliseconds(200)
 
-    /// The hidden-library set the currently-loaded content was aggregated for.
-    /// `nil` until the first successful load. Used by ``loadIfNeeded(excludedKeys:)``
-    /// to tell a genuine input change (hide/show a library) apart from a mere view
-    /// reappearance — tvOS restarts a `.task(id:)` every time Home returns from a
-    /// pushed detail, so an unguarded reload would re-fetch (flashing the skeleton)
-    /// and rebuild the rows (yanking focus to the top) on every back-navigation.
-    private var lastLoadedExcludedKeys: Set<String>?
+    /// The full visibility snapshot the currently-loaded content was aggregated
+    /// for — Home-hidden **and** app-wide-disabled sets **and** the merge switch.
+    /// `nil` until the first successful load. Used by ``loadIfNeeded(for:)`` to tell
+    /// a genuine input change (hide/show/disable a library, or flip merge) apart
+    /// from a mere view reappearance — tvOS restarts a `.task(id:)` every time Home
+    /// returns from a pushed detail, so an unguarded reload would re-fetch (flashing
+    /// the skeleton) and rebuild the rows (yanking focus to the top) on every
+    /// back-navigation. Comparing the whole value (not just `excludedKeys`) means a
+    /// disable/enable or a merged↔unmerged flip correctly forces a re-aggregation,
+    /// since both change what Home fetches and renders.
+    private var lastLoadedVisibility: HomeLibraryVisibility?
 
     public init(
         accounts: [ResolvedAccount],
@@ -119,6 +135,7 @@ public final class HomeViewModel {
 
     deinit {
         aggregationTask?.cancel()
+        unmergedTask?.cancel()
         topShelfPublishTask?.cancel()
         reenrichTask?.cancel()
     }
@@ -138,17 +155,17 @@ public final class HomeViewModel {
         layoutStore.save(layout)
     }
 
-    /// Loads on first appearance and re-aggregates only when the hidden-library
-    /// set actually changed since the last successful load. tvOS cancels and
+    /// Loads on first appearance and re-aggregates only when the visibility
+    /// snapshot actually changed since the last successful load. tvOS cancels and
     /// restarts a `.task(id:)` every time Home reappears (returning from a pushed
     /// detail), so binding `load()` directly to the task would reload on every
     /// back-navigation — flashing the skeleton and resetting focus to the top.
     /// This guard makes the reappearance a no-op while still reacting to a genuine
-    /// visibility change.
-    public func loadIfNeeded(excludedKeys: Set<String>) async {
+    /// change: hiding/showing/disabling a library, or flipping the merge switch.
+    public func loadIfNeeded(for visibility: HomeLibraryVisibility) async {
         switch state {
         case .loaded, .empty:
-            if lastLoadedExcludedKeys == excludedKeys {
+            if lastLoadedVisibility == visibility {
                 return
             }
         default:
@@ -173,39 +190,82 @@ public final class HomeViewModel {
         let accounts = self.accounts
         let identitySources = self.identitySources
         let visibility = currentVisibility()
-        let aggregationTask = Task.detached(priority: .userInitiated) {
-            await aggregator.content(from: accounts, visibility: visibility, identitySources: identitySources)
+
+        // Watchlist policy: an explicit user save is exempt from *Home-hidden*
+        // (`excludedKeys`) — hiding a library from Home never drops a title the user
+        // watchlisted. But an **app-wide disabled** library is hidden everywhere, so
+        // a watchlisted title whose libraries are ALL disabled is dropped. Items
+        // with no resolvable library stay (fail-open). Applied here so it also
+        // governs the hero (which seeds from the watchlist), not just the row.
+        let keepWatchlisted: (MediaItem) -> Bool = { item in
+            item.isVisibleOnHome(isLibraryVisible: { visibility.isEnabled($0) })
         }
-        self.aggregationTask = aggregationTask
-        let merged = await aggregationTask.value
-        guard !Task.isCancelled else { return }
+
         // Overlay the durable outbox's not-yet-confirmed plays onto the freshly
         // fetched Continue Watching row so a reload doesn't revert it to stale
         // pre-play order while the server catches up (r8-cw-outbox-patch).
-        let pending = await pendingWatchMutations()
-        let appliedRecency = await recentlyAppliedRecency()
-        let reconciledCW = Self.reconcileContinueWatching(merged.continueWatching, pending: pending, appliedRecency: appliedRecency)
-        let content = Content(
-            continueWatching: reconciledCW,
-            latest: merged.latest,
-            watchlist: merged.watchlist,
-            libraries: merged.libraries
-        )
+        let content: Content
+        if visibility.mergeLibrariesOnHome {
+            let aggregationTask = Task.detached(priority: .userInitiated) {
+                await aggregator.content(from: accounts, visibility: visibility, identitySources: identitySources)
+            }
+            self.aggregationTask = aggregationTask
+            let merged = await aggregationTask.value
+            guard !Task.isCancelled else { return }
+            let pending = await pendingWatchMutations()
+            let appliedRecency = await recentlyAppliedRecency()
+            let reconciledCW = Self.reconcileContinueWatching(merged.continueWatching, pending: pending, appliedRecency: appliedRecency)
+            content = Content(
+                continueWatching: reconciledCW,
+                latest: merged.latest,
+                watchlist: merged.watchlist.filter(keepWatchlisted),
+                libraries: merged.libraries
+            )
+        } else {
+            // Unmerged: global Continue Watching + Watchlist stay at the top, then
+            // each visible library gets its own block of rows.
+            let unmergedTask = Task.detached(priority: .userInitiated) {
+                await aggregator.unmergedContent(from: accounts, visibility: visibility, identitySources: identitySources)
+            }
+            self.unmergedTask = unmergedTask
+            let unmerged = await unmergedTask.value
+            guard !Task.isCancelled else { return }
+            let pending = await pendingWatchMutations()
+            let appliedRecency = await recentlyAppliedRecency()
+            let reconciledCW = Self.reconcileContinueWatching(unmerged.continueWatching, pending: pending, appliedRecency: appliedRecency)
+            content = Content(
+                continueWatching: reconciledCW,
+                latest: [],
+                watchlist: unmerged.watchlist.filter(keepWatchlisted),
+                libraries: [],
+                mergeLibraries: false,
+                librarySections: Self.reslicingLibraryContinueWatching(unmerged.librarySections, reconciledCW: reconciledCW)
+            )
+        }
         state = content.isEmpty ? .empty : .loaded(content)
         // Record what this content was aggregated for so a later reappearance with
-        // an unchanged hidden-library set is recognised as a no-op (see
-        // `loadIfNeeded(excludedKeys:)`).
-        lastLoadedExcludedKeys = visibility.excludedKeys
-        PlozzLog.boot("HomeVM.load DONE vm=\(UInt(bitPattern: ObjectIdentifier(self).hashValue)) empty=\(content.isEmpty) cw=\(content.continueWatching.count) latest=\(content.latest.count) libs=\(content.libraries.count)")
+        // an unchanged visibility snapshot is recognised as a no-op (see
+        // `loadIfNeeded(for:)`).
+        lastLoadedVisibility = visibility
+        PlozzLog.boot("HomeVM.load DONE vm=\(UInt(bitPattern: ObjectIdentifier(self).hashValue)) empty=\(content.isEmpty) merged=\(content.mergeLibraries) cw=\(content.continueWatching.count) latest=\(content.latest.count) libs=\(content.libraries.count) sections=\(content.librarySections.count)")
         guard !Task.isCancelled else { return }
 
         // Publish the playable rows to the App Group so the Top Shelf extension
         // can render them while the app is closed. Tracked so teardown cancels it.
         // Apply the same Home-visibility filter so a hidden library's items don't
-        // leak into Top Shelf.
+        // leak into Top Shelf. In unmerged mode there is no global Latest row, so
+        // Top Shelf's "recently added" is the per-library Recently Added rows
+        // flattened (already scoped to visible libraries + tagged).
         let isLibraryVisible: (String) -> Bool = { visibility.isVisible($0) }
         let continueWatching = content.continueWatching.filter { $0.isVisibleOnHome(isLibraryVisible: isLibraryVisible) }
-        let latest = content.latest.filter { $0.isVisibleOnHome(isLibraryVisible: isLibraryVisible) }
+        let latest: [MediaItem]
+        if content.mergeLibraries {
+            latest = content.latest.filter { $0.isVisibleOnHome(isLibraryVisible: isLibraryVisible) }
+        } else {
+            latest = content.librarySections.flatMap { group in
+                group.sections.first { $0.id == "recentlyAdded" }?.items ?? []
+            }
+        }
         topShelfPublishTask = Task.detached(priority: .utility) {
             TopShelfPublisher.publish(continueWatching: continueWatching, latest: latest)
         }
@@ -335,6 +395,31 @@ public final class HomeViewModel {
     /// is fresh, so it can never override a genuine later play (e.g. on another
     /// client). Clamp-only-downward: worst case a card sits slightly lower, never
     /// wrongly at the top. (h2-cw-clamp)
+    /// Re-derives each unmerged library block's **Continue Watching** row from the
+    /// *reconciled* global feed, so a just-played title's optimistic reorder /
+    /// progress (the durable-outbox overlay) shows in the per-library row too — not
+    /// only the global one. The aggregator seeds these rows from the un-reconciled
+    /// feed (to decide block inclusion); this overlays the reconciled slice. A block
+    /// whose Continue Watching empties after reconciliation drops that row, and a
+    /// block left with no rows is removed.
+    nonisolated static func reslicingLibraryContinueWatching(
+        _ groups: [HomeLibrarySectionGroup],
+        reconciledCW: [MediaItem]
+    ) -> [HomeLibrarySectionGroup] {
+        groups.compactMap { group in
+            let key = group.library.key
+            let cw = reconciledCW.filter { $0.homeVisibilityLibraryKeys.contains(key) }
+            var sections = group.sections
+            let cwSection = LibrarySection(id: "continueWatching", title: "Continue Watching", style: .landscape, items: cw)
+            if let idx = sections.firstIndex(where: { $0.id == "continueWatching" }) {
+                if cw.isEmpty { sections.remove(at: idx) } else { sections[idx] = cwSection }
+            } else if !cw.isEmpty {
+                sections.insert(cwSection, at: 0)
+            }
+            return sections.isEmpty ? nil : HomeLibrarySectionGroup(library: group.library, sections: sections)
+        }
+    }
+
     nonisolated static func reconcileContinueWatching(
         _ items: [MediaItem],
         pending: [WatchMutation],

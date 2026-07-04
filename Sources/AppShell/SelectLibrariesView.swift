@@ -128,8 +128,8 @@ struct SelectLibrariesView: View {
 
                                 ForEach(group.libraries) { library in
                                     Toggle(isOn: Binding(
-                                        get: { appState.homeLibraryVisibilityModel.isVisible(library.key) },
-                                        set: { appState.homeLibraryVisibilityModel.setVisible($0, for: library.key) }
+                                        get: { appState.homeLibraryVisibilityModel.isShownOnHome(library.key) },
+                                        set: { appState.homeLibraryVisibilityModel.setShownOnHome($0, for: library.key) }
                                     )) {
                                         Text(library.library.title)
                                     }

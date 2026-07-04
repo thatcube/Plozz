@@ -403,6 +403,59 @@ public struct JellyfinProvider: MediaProvider {
         ).map(map(item:))
     }
 
+    /// Jellyfin search can't exclude a library and its results carry no library
+    /// root, so app-wide disabled libraries are honoured by scoping the search to
+    /// the *remaining enabled* libraries (`ParentId`) and tagging each hit. Only
+    /// invoked when the account actually has a disabled library, so the common path
+    /// stays a single unscoped query. Per-library requests are bounded and the
+    /// merged result is deduped + capped.
+    public func search(query: String, limit: Int, excludingLibraries disabledLibraryIDs: [String]) async throws -> [MediaItem] {
+        guard !disabledLibraryIDs.isEmpty else { return try await search(query: query, limit: limit) }
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+
+        let disabled = Set(disabledLibraryIDs)
+        let enabled = (try await libraries().map(\.id)).filter { !disabled.contains($0) }
+        guard !enabled.isEmpty else { return [] }
+
+        let userID = session.userID
+        let client = self.client
+        let limiter = ConcurrencyLimiter(limit: 4)
+        let perLibrary: [[BaseItemDto]] = await withTaskGroup(of: (Int, [BaseItemDto]).self) { group in
+            for (index, libraryID) in enabled.enumerated() {
+                group.addTask {
+                    await limiter.run {
+                        let hits = (try? await client.searchItems(
+                            userID: userID,
+                            searchTerm: trimmed,
+                            includeItemTypes: ["Movie", "Series", "Episode"],
+                            limit: limit,
+                            parentID: libraryID
+                        )) ?? []
+                        return (index, hits)
+                    }
+                }
+            }
+            var byIndex: [Int: [BaseItemDto]] = [:]
+            for await (index, items) in group { byIndex[index] = items }
+            return enabled.indices.compactMap { byIndex[$0] }
+        }
+
+        // Round-robin interleave across libraries for fair representation, dedup by
+        // id, tag each hit with its owning library, then cap.
+        var seen = Set<String>()
+        var result: [MediaItem] = []
+        let maxCount = perLibrary.map(\.count).max() ?? 0
+        for offset in 0..<maxCount {
+            for (libIndex, dtos) in perLibrary.enumerated() where offset < dtos.count {
+                let dto = dtos[offset]
+                guard seen.insert(dto.Id).inserted else { continue }
+                result.append(map(item: dto).taggingLibrary(enabled[libIndex]))
+            }
+        }
+        return Array(result.prefix(limit))
+    }
+
     // MARK: Playback
 
     public func playbackInfo(for itemID: String) async throws -> PlaybackRequest {

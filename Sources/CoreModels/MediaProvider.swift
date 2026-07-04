@@ -88,6 +88,21 @@ public protocol MediaProvider: Sendable {
     /// has no stable per-letter offset) simply never show it.
     func letterIndex(in containerID: String, kind: MediaItemKind, sort: SortDescriptor) async throws -> [LibraryLetterIndexEntry]
 
+    /// Provider-native "hubs" for a single library — the promoted discovery rows a
+    /// backend defines at the library level (Plex `/hubs/sections/{id}`: "More in
+    /// Drama", "Because you watched…", "Top Rated", …).
+    ///
+    /// These are surfaced **in unmerged Home mode only**, and are *additional* to
+    /// the uniform base rows (Recently Added / Continue Watching) the Home
+    /// aggregator synthesises for every provider from the existing scoped feeds. So
+    /// a conformer must return ONLY its extra discovery rows and omit any hub that
+    /// duplicates the base (a recently-added or on-deck/continue-watching hub), plus
+    /// drop empty hubs. `limit` caps the cards per returned row.
+    ///
+    /// Default: none — Jellyfin and other backends without a native hub concept
+    /// inherit this and show just the uniform base rows.
+    func libraryHubs(libraryID: String, kind: MediaItemKind, limit: Int) async throws -> [LibrarySection]
+
     // MARK: Search
 
     /// Search the user's libraries for items matching a free-text query.
@@ -96,6 +111,18 @@ public protocol MediaProvider: Sendable {
     /// episodes) and return at most `limit` items. Callers debounce input and
     /// guard against stale responses, so this need only perform a single query.
     func search(query: String, limit: Int) async throws -> [MediaItem]
+
+    /// Search, **excluding** the given libraries — used to keep **app-wide
+    /// disabled** libraries out of Search results. `disabledLibraryIDs` are the
+    /// provider-local library ids the user turned off app-wide; an empty array
+    /// means "no exclusions" (identical to ``search(query:limit:)``).
+    ///
+    /// Callers pass this only when an account actually has a disabled library, so
+    /// the common path stays a single unscoped query. Providers that can attribute
+    /// a result to its library (Plex via `librarySectionID`) post-filter; providers
+    /// that can't (Jellyfin) scope the query to the *remaining enabled* libraries
+    /// and tag results. The default ignores the exclusions (safe fail-open).
+    func search(query: String, limit: Int, excludingLibraries disabledLibraryIDs: [String]) async throws -> [MediaItem]
 
     // MARK: Playback
 
@@ -175,6 +202,20 @@ public extension MediaProvider {
     /// facet) override this; test doubles and the cross-server aggregate inherit
     /// the safe empty result.
     func letterIndex(in containerID: String, kind: MediaItemKind, sort: SortDescriptor) async throws -> [LibraryLetterIndexEntry] { [] }
+
+    /// Default: no native hubs. Only Plex (via `/hubs/sections/{id}`) overrides
+    /// this; Jellyfin and test doubles inherit the safe empty result, so unmerged
+    /// Home falls back to the uniform base rows for them.
+    func libraryHubs(libraryID: String, kind: MediaItemKind, limit: Int) async throws -> [LibrarySection] { [] }
+
+    /// Default: ignore the exclusions and run the unscoped search. Providers that
+    /// can attribute results to a library (Plex `librarySectionID`) or scope the
+    /// query (Jellyfin `ParentId`) override this; everyone else inherits this
+    /// pass-through, so enabling app-wide "disable" only affects Search where the
+    /// provider can actually honour it.
+    func search(query: String, limit: Int, excludingLibraries disabledLibraryIDs: [String]) async throws -> [MediaItem] {
+        try await search(query: query, limit: limit)
+    }
 
     func remoteSubtitleSearch(itemID: String, language: String) async throws -> [RemoteSubtitle] { [] }
     func downloadRemoteSubtitle(itemID: String, subtitleID: String) async throws {}

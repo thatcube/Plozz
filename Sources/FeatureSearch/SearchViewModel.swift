@@ -21,17 +21,25 @@ public final class SearchViewModel {
     /// Shared identity-index lookup folded into dedup so each result card carries
     /// its full cross-server source set even before the detail picker probes.
     private let identitySources: @Sendable (MediaItem) -> [MediaSourceRef]
+    /// The profile's app-wide **disabled** library keys (`"accountID:libraryID"`),
+    /// read fresh per search so a disabled library is kept out of results. Empty
+    /// (the default) means every library is searchable — the zero-cost common path.
+    /// Called only on the main actor (its `Set` result — `Sendable` — is what the
+    /// per-account search tasks capture), so it needn't be `@Sendable` itself.
+    private let disabledLibraryKeys: () -> Set<String>
 
     public init(
         accounts: [ResolvedAccount],
         limit: Int = 40,
         debounceMilliseconds: Int = 350,
-        identitySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef] = { _ in [] }
+        identitySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef] = { _ in [] },
+        disabledLibraryKeys: @escaping () -> Set<String> = { [] }
     ) {
         self.accounts = accounts
         self.limit = limit
         self.debounce = .milliseconds(debounceMilliseconds)
         self.identitySources = identitySources
+        self.disabledLibraryKeys = disabledLibraryKeys
     }
 
     /// Runs a debounced search for the current `query`. Safe to call on every
@@ -94,12 +102,20 @@ public final class SearchViewModel {
     /// surfaced, so a single server being down still shows results from the rest.
     private func aggregatedSearch(query: String) async throws -> [MediaItem] {
         let perAccountLimit = limit
+        // Snapshot the disabled-library keys once for this search so results from a
+        // library the user turned off app-wide are excluded. Only accounts that
+        // actually have a disabled library take the scoped path (see providers).
+        let disabledKeys = disabledLibraryKeys()
         let results = await withTaskGroup(of: (Int, Result<[MediaItem], AppError>).self) { group in
             for (index, resolved) in accounts.enumerated() {
                 group.addTask {
                     let accountID = resolved.account.id
+                    let disabledForAccount: [String] = disabledKeys.compactMap { key in
+                        let prefix = "\(accountID):"
+                        return key.hasPrefix(prefix) ? String(key.dropFirst(prefix.count)) : nil
+                    }
                     do {
-                        let hits = try await resolved.provider.search(query: query, limit: perAccountLimit)
+                        let hits = try await resolved.provider.search(query: query, limit: perAccountLimit, excludingLibraries: disabledForAccount)
                         return (index, .success(hits.map { $0.taggingSource(accountID) }))
                     } catch let error as AppError {
                         return (index, .failure(error))

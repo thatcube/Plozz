@@ -50,6 +50,7 @@ public struct HomeAggregator: Sendable {
         latestLimit: Int = 20,
         watchlistLimit: Int = 20,
         visibility: HomeLibraryVisibility = .default,
+        forceLibraryScoping: Bool = false,
         identitySources: @Sendable (MediaItem) -> [MediaSourceRef] = { _ in [] }
     ) async -> Content {
         let clock = ContinuousClock()
@@ -60,7 +61,8 @@ public struct HomeAggregator: Sendable {
                 from: resolved,
                 continueWatchingLimit: continueWatchingLimit,
                 latestLimit: latestLimit,
-                visibility: visibility
+                visibility: visibility,
+                forceLibraryScoping: forceLibraryScoping
             )
             PlozzLog.boot("HomeAgg.account id=\(resolved.account.id) provider=\(resolved.account.server.provider) ms=\(Self.elapsedMS(from: accountStarted, to: clock.now)) cw=\(result.continueWatching.count) latest=\(result.latest.count) libs=\(result.libraries.count)")
             return result
@@ -117,6 +119,183 @@ public struct HomeAggregator: Sendable {
         return perAccount.flatMap { $0 }
     }
 
+    // MARK: - Unmerged (per-library) content
+
+    /// The Home content when the profile has turned **off** "Merge libraries on
+    /// Home": the global Continue Watching + Watchlist rows stay cross-server merged
+    /// at the top (built by the merged ``content(from:)`` path so they behave
+    /// identically), then every *visible-on-home* library gets its own ordered
+    /// block of rows below.
+    public struct UnmergedContent: Equatable, Sendable {
+        /// Global, cross-server merged Continue Watching (unfiltered; the view
+        /// applies Home-visibility just like the merged layout).
+        public var continueWatching: [MediaItem]
+        /// Global, cross-server merged Watchlist.
+        public var watchlist: [MediaItem]
+        /// Per-library section blocks, in the same order the Settings checklist
+        /// shows libraries. Empty blocks (no non-empty rows) are dropped upstream.
+        public var librarySections: [HomeLibrarySectionGroup]
+
+        public init(
+            continueWatching: [MediaItem] = [],
+            watchlist: [MediaItem] = [],
+            librarySections: [HomeLibrarySectionGroup] = []
+        ) {
+            self.continueWatching = continueWatching
+            self.watchlist = watchlist
+            self.librarySections = librarySections
+        }
+
+        public var isEmpty: Bool {
+            continueWatching.isEmpty && watchlist.isEmpty && librarySections.isEmpty
+        }
+    }
+
+    /// Builds the unmerged Home content. Reuses ``content(from:)`` for the global
+    /// rows + full library inventory, then fans out (bounded) over the
+    /// visible-on-home libraries to assemble each one's rows:
+    ///  1. **Continue Watching** — this library's slice of the already-merged global
+    ///     Continue Watching feed (no extra request; includes Next-Up items, which
+    ///     each provider already folds into that feed).
+    ///  2. **Recently Added** — the library's newest items (`items(in:)` sorted by
+    ///     date added), uniform across providers.
+    ///  3. **Provider-native discovery hubs** (`libraryHubs(...)`) — Plex only:
+    ///     "More in Drama", "Because you watched…", "Top Rated", "Start Watching".
+    public func unmergedContent(
+        from accounts: [ResolvedAccount],
+        continueWatchingLimit: Int = 20,
+        latestLimit: Int = 20,
+        watchlistLimit: Int = 20,
+        perLibraryLimit: Int = 20,
+        visibility: HomeLibraryVisibility = .default,
+        identitySources: @Sendable (MediaItem) -> [MediaSourceRef] = { _ in [] }
+    ) async -> UnmergedContent {
+        // Global rows + full (tagged) library inventory come from the merged path,
+        // so Continue Watching / Watchlist stay identical to merged mode.
+        // `forceLibraryScoping` guarantees the Continue Watching feed is
+        // library-attributed for every provider (so Jellyfin resumes can be sliced
+        // into their per-library rows, not just when a library is hidden).
+        let merged = await content(
+            from: accounts,
+            continueWatchingLimit: continueWatchingLimit,
+            latestLimit: latestLimit,
+            watchlistLimit: watchlistLimit,
+            visibility: visibility,
+            forceLibraryScoping: true,
+            identitySources: identitySources
+        )
+
+        // Only visible-on-home libraries (enabled AND shown), in inventory order.
+        let visibleLibraries = merged.libraries.filter { visibility.isVisibleOnHome($0.key) }
+        guard !visibleLibraries.isEmpty else {
+            return UnmergedContent(
+                continueWatching: merged.continueWatching,
+                watchlist: merged.watchlist,
+                librarySections: []
+            )
+        }
+
+        let providerByAccount = Dictionary(
+            accounts.map { ($0.account.id, $0.provider) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let globalContinueWatching = merged.continueWatching
+
+        // Bounded per-library fan-out (reuses the account limiter's cap) so many
+        // libraries don't storm the network / decode pipeline at once. Order is
+        // preserved; a library whose fetches all fail contributes no block.
+        let groups = await Self.loadBounded(visibleLibraries) { aggregated -> HomeLibrarySectionGroup? in
+            guard let provider = providerByAccount[aggregated.accountID] else { return nil }
+            let sections = await Self.librarySections(
+                for: aggregated,
+                provider: provider,
+                perLibraryLimit: perLibraryLimit,
+                globalContinueWatching: globalContinueWatching
+            )
+            guard !sections.isEmpty else { return nil }
+            return HomeLibrarySectionGroup(library: aggregated, sections: sections)
+        }
+
+        return UnmergedContent(
+            continueWatching: merged.continueWatching,
+            watchlist: merged.watchlist,
+            librarySections: groups.compactMap { $0 }
+        )
+    }
+
+    /// Assembles one library's ordered rows: Continue Watching (sliced from the
+    /// global feed) → Recently Added (`items(in:)`) → provider discovery hubs.
+    /// Every row's items are tagged with the owning account so selection routes
+    /// back to the right provider; empty rows are dropped so the view never draws a
+    /// headed-but-blank row.
+    private static func librarySections(
+        for aggregated: AggregatedLibrary,
+        provider: any MediaProvider,
+        perLibraryLimit: Int,
+        globalContinueWatching: [MediaItem]
+    ) async -> [LibrarySection] {
+        let accountID = aggregated.accountID
+        let libraryID = aggregated.library.id
+        let libraryKey = aggregated.key
+        let kind = aggregated.library.kind
+
+        // 1. Continue Watching for this library: the global merged feed filtered to
+        //    items that resolve to this library (strict — fail-open/global-only
+        //    cards are not attributed to a specific library here).
+        let continueWatching = globalContinueWatching.filter {
+            $0.homeVisibilityLibraryKeys.contains(libraryKey)
+        }
+
+        // 2. Recently Added: the library's newest items, uniform across providers.
+        async let recentTask = try? provider.items(
+            in: libraryID,
+            kind: kind,
+            page: PageRequest(
+                startIndex: 0,
+                limit: perLibraryLimit,
+                sort: SortDescriptor(field: .dateAdded, direction: .descending)
+            )
+        )
+        // 3. Provider-native discovery hubs (Plex only; [] elsewhere).
+        async let hubsTask = try? provider.libraryHubs(libraryID: libraryID, kind: kind, limit: perLibraryLimit)
+
+        let recent = (await recentTask)?.items ?? []
+        let hubs = (await hubsTask) ?? []
+
+        func tag(_ items: [MediaItem]) -> [MediaItem] {
+            items.map { $0.taggingSource(accountID).taggingLibrary(libraryID) }
+        }
+
+        var sections: [LibrarySection] = []
+        if !continueWatching.isEmpty {
+            sections.append(LibrarySection(
+                id: "continueWatching",
+                title: "Continue Watching",
+                style: .landscape,
+                items: Array(continueWatching.prefix(perLibraryLimit))
+            ))
+        }
+        let recentTagged = tag(recent)
+        if !recentTagged.isEmpty {
+            sections.append(LibrarySection(
+                id: "recentlyAdded",
+                title: "Recently Added",
+                style: .poster,
+                items: recentTagged
+            ))
+        }
+        // Plex hubs already carry their own titles/ids; tag their items for routing.
+        for hub in hubs where !hub.items.isEmpty {
+            sections.append(LibrarySection(
+                id: hub.id,
+                title: hub.title,
+                style: hub.style,
+                items: tag(hub.items)
+            ))
+        }
+        return sections
+    }
+
     // MARK: - Per-account loading
 
     private struct AccountContent: Sendable {
@@ -169,19 +348,64 @@ public struct HomeAggregator: Sendable {
         }
     }
 
+    /// Generic bounded, order-preserving fan-out over any element list — used by
+    /// the unmerged per-library builder so many libraries don't storm the network
+    /// at once. Mirrors ``loadPerAccount(_:maxConcurrentAccounts:operation:)`` but
+    /// over arbitrary `Element`s, and stops queueing once cancelled.
+    private static func loadBounded<Element: Sendable, T: Sendable>(
+        _ elements: [Element],
+        maxConcurrent: Int = accountFanoutLimit,
+        operation: @escaping @Sendable (Element) async -> T
+    ) async -> [T] {
+        guard !elements.isEmpty else { return [] }
+        let concurrency = max(1, min(maxConcurrent, elements.count))
+        return await withTaskGroup(of: (Int, T).self) { group in
+            var nextIndex = 0
+            for _ in 0..<concurrency {
+                let index = nextIndex
+                nextIndex += 1
+                let element = elements[index]
+                group.addTask { (index, await operation(element)) }
+            }
+
+            var byIndex: [Int: T] = [:]
+            while let (index, value) = await group.next() {
+                byIndex[index] = value
+                if nextIndex < elements.count, !Task.isCancelled {
+                    let queuedIndex = nextIndex
+                    nextIndex += 1
+                    let element = elements[queuedIndex]
+                    group.addTask { (queuedIndex, await operation(element)) }
+                }
+            }
+            return elements.indices.compactMap { byIndex[$0] }
+        }
+    }
+
     private static func load(
         from resolved: ResolvedAccount,
         continueWatchingLimit: Int,
         latestLimit: Int,
-        visibility: HomeLibraryVisibility
+        visibility: HomeLibraryVisibility,
+        forceLibraryScoping: Bool = false
     ) async -> AccountContent {
         let accountID = resolved.account.id
         let provider = resolved.provider
 
-        // Only accounts with at least one hidden library pay for the
-        // library-scoped fetch path. When nothing is hidden we keep the original
-        // single-shot, fully-concurrent fetch — zero behaviour/performance change.
-        let accountHasHidden = visibility.excludedKeys.contains { $0.hasPrefix("\(accountID):") }
+        // Take the library-scoped fetch path when either:
+        //  - the account has a library that is NOT visible on Home (hidden OR
+        //    disabled) — scoping excludes it at the source and stamps `libraryID`
+        //    so an unscoped Jellyfin feed can't leak it via the fail-open filter; or
+        //  - `forceLibraryScoping` is set (unmerged Home), so EVERY provider's feed
+        //    is library-attributed even when nothing is hidden — otherwise Jellyfin
+        //    Continue Watching items (no `libraryID` on the unscoped feed) couldn't
+        //    be sliced into their per-library rows.
+        // When nothing is hidden and scoping isn't forced we keep the original
+        // single-shot, fully-concurrent fetch (zero behaviour/performance change).
+        let accountHasHidden = visibility.excludedKeys
+            .union(visibility.disabledKeys)
+            .contains { $0.hasPrefix("\(accountID):") }
+        let scopeToVisibleLibraries = forceLibraryScoping || accountHasHidden
 
         // Libraries and watchlist load independently of the row strategy.
         async let libs = try? provider.libraries()
@@ -191,7 +415,7 @@ public struct HomeAggregator: Sendable {
         let lt: [MediaItem]
         let rawLibs: [MediaLibrary]
 
-        if accountHasHidden {
+        if scopeToVisibleLibraries {
             // Resolve the library list first so the row fetches can be scoped to
             // the *visible* libraries. For providers that can only learn an item's
             // owning library by scoping the fetch (Jellyfin — an episode's

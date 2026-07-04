@@ -459,19 +459,27 @@ public struct JellyfinClient: Sendable {
         userID: String,
         searchTerm: String,
         includeItemTypes: [String],
-        limit: Int
+        limit: Int,
+        parentID: String? = nil
     ) async throws -> [BaseItemDto] {
+        var queryItems = [
+            URLQueryItem(name: "searchTerm", value: searchTerm),
+            URLQueryItem(name: "Recursive", value: "true"),
+            URLQueryItem(name: "IncludeItemTypes", value: includeItemTypes.joined(separator: ",")),
+            URLQueryItem(name: "Limit", value: String(limit)),
+            URLQueryItem(name: "Fields", value: "Overview,OriginalTitle,ProviderIds"),
+            URLQueryItem(name: "EnableTotalRecordCount", value: "false"),
+            URLQueryItem(name: "ImageTypeLimit", value: "1")
+        ]
+        // Scope the recursive search to a single library root when given, so
+        // app-wide disabled libraries can be excluded by only searching the
+        // enabled ones.
+        if let parentID {
+            queryItems.append(URLQueryItem(name: "ParentId", value: parentID))
+        }
         let endpoint = Endpoint(
             path: "/Users/\(userID)/Items",
-            queryItems: [
-                URLQueryItem(name: "searchTerm", value: searchTerm),
-                URLQueryItem(name: "Recursive", value: "true"),
-                URLQueryItem(name: "IncludeItemTypes", value: includeItemTypes.joined(separator: ",")),
-                URLQueryItem(name: "Limit", value: String(limit)),
-                URLQueryItem(name: "Fields", value: "Overview,OriginalTitle,ProviderIds"),
-                URLQueryItem(name: "EnableTotalRecordCount", value: "false"),
-                URLQueryItem(name: "ImageTypeLimit", value: "1")
-            ],
+            queryItems: queryItems,
             headers: authHeaders
         )
         return try await http.decode(ItemsResponse.self, from: endpoint, baseURL: baseURL).Items

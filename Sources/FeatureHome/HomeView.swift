@@ -208,8 +208,19 @@ public struct HomeView: View {
                             //  unambiguously inside the scroll content — see note.)
                         }
                         VStack(alignment: .leading, spacing: metrics.rowSpacing) {
+                            // Global rows (Continue Watching + Watchlist in unmerged
+                            // mode; all four in merged mode — `latest`/`libraries` are
+                            // empty when unmerged, so `HomeRow.rows` yields just the
+                            // global rows here).
                             ForEach(rows) { row in
                                 rowView(row)
+                            }
+                            // Unmerged: each visible library's own block below the
+                            // global rows.
+                            if !content.mergeLibraries {
+                                ForEach(content.librarySections) { group in
+                                    libraryGroupView(group)
+                                }
                             }
                         }
                         // When the hero is present, pull the rows up so the first row
@@ -262,8 +273,11 @@ public struct HomeView: View {
                 .ignoresSafeArea(.container, edges: heroActive ? .top : [])
             }
             // Remember the structure we actually rendered (post-visibility), keyed
-            // on kinds *and* counts so a changed card count re-persists too.
-            .task(id: layout) { viewModel.rememberLayout(layout) }
+            // on kinds *and* counts so a changed card count re-persists too. Only in
+            // merged mode — unmerged rows are dynamic/per-library and must not
+            // overwrite the persisted merged skeleton (the loading placeholder stays
+            // a sensible generic set; see plan).
+            .task(id: layout) { if content.mergeLibraries { viewModel.rememberLayout(layout) } }
             // Recompute the curated hero set whenever Home content or the hero
             // config changes. Off the main actor via the curator's async sources.
             .task(id: HeroRecomputeKey(content: content, settings: heroSettings?.settings)) {
@@ -281,15 +295,17 @@ public struct HomeView: View {
                 await refreshFeaturedStatusLoop()
             }
         }
-        .task(id: visibility.visibility.excludedKeys) {
-            // First appearance loads; thereafter a change to the hidden-library set
+        .task(id: visibility.visibility) {
+            // First appearance loads; thereafter any change to the visibility
+            // snapshot — a hidden/disabled library, or the merged↔unmerged flip —
             // re-aggregates so library-scoped providers (Jellyfin) re-fetch with the
-            // new visible set. `loadIfNeeded` skips the reload on a bare reappearance
-            // (tvOS restarts this `.task` every time Home returns from a pushed
-            // detail), so back-navigation no longer flashes the skeleton or resets
-            // focus. Providers that tag items inline (Plex) are also filtered live
-            // above, so their toggles feel instant even before the reload settles.
-            await viewModel.loadIfNeeded(excludedKeys: visibility.visibility.excludedKeys)
+            // new visible set and the merged/unmerged layout rebuilds. `loadIfNeeded`
+            // skips the reload on a bare reappearance (tvOS restarts this `.task`
+            // every time Home returns from a pushed detail), so back-navigation no
+            // longer flashes the skeleton or resets focus. Providers that tag items
+            // inline (Plex) are also filtered live above, so their toggles feel
+            // instant even before the reload settles.
+            await viewModel.loadIfNeeded(for: visibility.visibility)
         }
         .onReceive(NotificationCenter.default.publisher(for: .mediaItemDidMutate)) { note in
             if let mutation = MediaItemMutation.from(note) {
@@ -430,6 +446,38 @@ public struct HomeView: View {
         }
     }
 
+    /// Maps a `LibrarySection.Style` (CoreModels) to the concrete card style.
+    private func cardStyle(_ style: LibrarySection.Style) -> PosterCardView.Style {
+        switch style {
+        case .poster: return .poster
+        case .landscape: return .landscape
+        }
+    }
+
+    /// One unmerged library's block: a tappable heading (opens full browse) with
+    /// its rows below (Continue Watching / Recently Added / provider hubs). A
+    /// landscape row (Continue Watching) plays on select; poster rows open detail —
+    /// matching the merged rows' behaviour.
+    @ViewBuilder
+    private func libraryGroupView(_ group: HomeLibrarySectionGroup) -> some View {
+        VStack(alignment: .leading, spacing: metrics.rowSpacing) {
+            LibrarySectionHeader(
+                library: group.library,
+                fontSize: metrics.sectionHeaderFontSize,
+                action: { onSelectLibrary(group.library.library) }
+            )
+            ForEach(group.sections) { section in
+                MediaRowView(
+                    title: section.title,
+                    items: section.items,
+                    style: cardStyle(section.style),
+                    spoilerSettings: spoilerSettings,
+                    onSelect: section.style == .landscape ? onPlayItem : onSelectItem
+                )
+            }
+        }
+    }
+
     private func librariesRow(_ libraries: [AggregatedLibrary]) -> some View {
         VStack(alignment: .leading, spacing: metrics.sectionTitleSpacing) {
             Text("Libraries")
@@ -505,6 +553,42 @@ private struct HeroRecomputeKey: Equatable {
         self.watchlistIDs = content.watchlist.map(\.id)
         self.libraryKeys = content.libraries.map(\.key)
         self.settings = settings
+    }
+}
+
+/// A tappable heading above an unmerged library's block. Selecting it opens the
+/// full library browse grid. Focusable (10-foot UI) with a soft accent/scale
+/// treatment rather than the default button bezel, so it reads as a heading and
+/// the focus engine can move down from it into the library's first row.
+private struct LibrarySectionHeader: View {
+    let library: AggregatedLibrary
+    let fontSize: CGFloat
+    let action: () -> Void
+
+    @FocusState private var isFocused: Bool
+    @Environment(\.themePalette) private var palette
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                ProviderBrandMark(provider: library.providerKind, size: fontSize * 0.9, showsBackground: false)
+                Text(library.library.title)
+                    .font(.system(size: fontSize, weight: .bold))
+                    .lineLimit(1)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: fontSize * 0.55, weight: .bold))
+                    .opacity(isFocused ? 1 : 0.4)
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(isFocused ? palette.accent : .primary)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .focused($isFocused)
+        .scaleEffect(isFocused ? 1.03 : 1, anchor: .leading)
+        .animation(.easeOut(duration: 0.15), value: isFocused)
+        .padding(.leading, PlozzTheme.Metrics.screenPadding)
+        .accessibilityHint("Opens the \(library.library.title) library")
     }
 }
 

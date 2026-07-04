@@ -43,6 +43,7 @@ struct MyLibrariesDetailView: View {
                     if watchedGroups.isEmpty {
                         notWatchingState
                     } else {
+                        mergeTogglePanel
                         ForEach(watchedGroups, id: \.serverKey) { serverCard($0) }
                     }
                     addServerSection
@@ -75,6 +76,26 @@ struct MyLibrariesDetailView: View {
         }
     }
 
+    // MARK: - Merge libraries toggle (prominent, top of page)
+
+    /// The all-or-nothing "Merge libraries on Home" switch. When on, Home combines
+    /// every library into unified cross-server rows (today's behaviour); when off,
+    /// each visible library gets its own section — including a Plex server's own
+    /// rows like "More in Drama". Per-profile, using the shared switch control.
+    private var mergeTogglePanel: some View {
+        SettingsPanel(
+            footer: "On: every library's content is combined into unified rows (Continue Watching, Recently Added, and one Libraries row). Off: each library shown on Home gets its own section — including your server's own rows like “More in Drama”. Either way you still choose which libraries appear. Affects only \(context.activeProfile.name)'s Home."
+        ) {
+            Toggle(isOn: Binding(
+                get: { context.homeVisibility.mergeLibrariesOnHome },
+                set: { context.homeVisibility.setMergeLibrariesOnHome($0) }
+            )) {
+                Text("Merge libraries on Home")
+            }
+            .toggleStyle(SettingsSwitchToggleStyle())
+        }
+    }
+
     // MARK: - Per-server card
 
     private func serverCard(_ group: ServerAccountGroup) -> some View {
@@ -91,7 +112,7 @@ struct MyLibrariesDetailView: View {
                 Divider()
 
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("Show on Home")
+                    Text("Libraries")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
                     librarySection(for: group)
@@ -260,14 +281,45 @@ struct MyLibrariesDetailView: View {
                 Text("No libraries found on this server.").font(.footnote).foregroundStyle(.secondary)
             } else {
                 ForEach(libs) { aggregated in
-                    Toggle(isOn: Binding(
-                        get: { context.homeVisibility.isVisible(aggregated.key) },
-                        set: { context.homeVisibility.setVisible($0, for: aggregated.key) }
-                    )) {
-                        Text(aggregated.library.title)
-                    }
-                    .toggleStyle(SettingsSwitchToggleStyle())
+                    libraryRow(aggregated)
                 }
+            }
+        }
+    }
+
+    /// One library's two-level control: a master **Enabled** switch (off ⇒ hidden
+    /// everywhere: Home, Search, Music, browse) and, when enabled, an indented
+    /// **Show on Home** switch (the Home-only choice, preserved across enable/disable
+    /// so re-enabling restores it).
+    @ViewBuilder
+    private func libraryRow(_ aggregated: AggregatedLibrary) -> some View {
+        let key = aggregated.key
+        VStack(alignment: .leading, spacing: 2) {
+            Toggle(isOn: Binding(
+                get: { context.homeVisibility.isEnabled(key) },
+                set: { context.homeVisibility.setEnabled($0, for: key) }
+            )) {
+                Text(aggregated.library.title)
+            }
+            .toggleStyle(SettingsSwitchToggleStyle())
+
+            if context.homeVisibility.isEnabled(key) {
+                Toggle(isOn: Binding(
+                    get: { context.homeVisibility.isShownOnHome(key) },
+                    set: { context.homeVisibility.setShownOnHome($0, for: key) }
+                )) {
+                    Text("Show on Home")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+                .toggleStyle(SettingsSwitchToggleStyle())
+                .padding(.leading, 28)
+            } else {
+                Text("Hidden everywhere, including Search and Music.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 12)
+                    .padding(.bottom, 6)
             }
         }
     }

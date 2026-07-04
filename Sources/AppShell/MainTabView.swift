@@ -256,6 +256,7 @@ struct MainTabView: View {
             Tab("Search", systemImage: "magnifyingglass", value: MainTab.search) {
             SearchTab(
                 accounts: accounts,
+                homeVisibility: homeVisibility,
                 behavior: subtitleBehaviorModel.settings,
                 style: subtitleStyleModel.style,
                 playbackSettings: playbackModel.settings,
@@ -419,11 +420,13 @@ struct MainTabView: View {
     }
 
     /// Restarts the music probe whenever the signed-in accounts or the per-profile
-    /// library-visibility toggles change.
+    /// **app-wide disabled** libraries change. Music availability keys off the
+    /// enabled (disabled) state, not the Home-only "Show on Home" bit, so hiding a
+    /// library from Home no longer re-probes Music while disabling it does.
     private var musicProbeKey: String {
         let ids = accounts.map(\.account.id).sorted()
-        let excluded = homeVisibility.visibility.excludedKeys.sorted()
-        return (ids + ["|"] + excluded).joined(separator: ",")
+        let disabled = homeVisibility.visibility.disabledKeys.sorted()
+        return (ids + ["|"] + disabled).joined(separator: ",")
     }
 }
 
@@ -1584,6 +1587,7 @@ private extension View {
 /// across every active account; results route to their owning provider.
 private struct SearchTab: View {
     let accounts: [ResolvedAccount]
+    let homeVisibility: HomeLibraryVisibilityModel
     let behavior: SubtitleBehavior
     let style: SubtitleStyle
     let playbackSettings: PlaybackSettings
@@ -1610,7 +1614,11 @@ private struct SearchTab: View {
     var body: some View {
         NavigationStack(path: $path) {
             SearchView(
-                viewModel: SearchViewModel(accounts: accounts, identitySources: identitySources),
+                viewModel: SearchViewModel(
+                    accounts: accounts,
+                    identitySources: identitySources,
+                    disabledLibraryKeys: { homeVisibility.visibility.disabledKeys }
+                ),
                 spoilerSettings: spoilerSettings,
                 onSelect: { open($0) }
             )

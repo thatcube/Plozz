@@ -25,6 +25,38 @@ struct PlexMediaContainer: Decodable {
     let offset: Int?
     let Metadata: [PlexMetadata]?
     let Directory: [PlexDirectory]?
+    /// Per-library promoted "hubs" (`/hubs/sections/{id}`): Recently Added, On
+    /// Deck, "More in <Genre>", "Because you watched…", Top Rated, … Present only
+    /// on hub responses; nil elsewhere.
+    let Hub: [PlexHub]?
+}
+
+/// One promoted row from `/hubs/sections/{sectionID}` (or the global `/hubs`).
+///
+/// Plozz surfaces these as a library's *discovery* rows in unmerged Home mode.
+/// Only the fields needed to build a `LibrarySection` and to identify/deduplicate
+/// a hub against the uniform base rows are modelled; unknown fields are ignored.
+struct PlexHub: Decodable {
+    /// Stable, machine identifier for the hub, e.g. `"movie.recentlyadded.1"`,
+    /// `"movie.genre.<id>"`, `"movie.similar.<id>"`, `"tv.startWatching"`. Used
+    /// both as the `LibrarySection.id` and to filter out hubs that duplicate the
+    /// base rows — matched on this stable value, never the localised `title`.
+    let hubIdentifier: String?
+    /// The hub's rendering context, e.g. `"hub.movie.recentlyadded"`,
+    /// `"hub.movie.genre"`. A secondary, equally-stable signal for deduplication.
+    let context: String?
+    /// Display heading, already humanised by Plex ("Recently Added Movies",
+    /// "More in Drama", "Because you watched Inception").
+    let title: String?
+    /// The hub's item type ("movie", "show", "episode", "clip", "mixed", …).
+    let type: String?
+    /// Whether more items exist beyond those inlined here.
+    let more: Bool?
+    /// The hub's items. Some hubs return `Directory` entries (e.g. genre folders)
+    /// instead of playable `Metadata`; those are ignored (we only surface playable
+    /// content rows).
+    let Metadata: [PlexMetadata]?
+    let Directory: [PlexDirectory]?
 }
 
 /// A library section (`/library/sections`).

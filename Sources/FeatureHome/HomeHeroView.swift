@@ -180,18 +180,23 @@ struct HomeHeroView: View {
         // there's more to page through (matching the Apple TV app) and the
         // stable right-most button, so Right only pages the carousel here.
         if items.count > 1 { result.append(.next) }
+
+        // DEBUG (env-gated by PLZHFOCUS_ALTBUTTONS): force the button COUNT to
+        // vary between slides so the count-changing page transitions that trigger
+        // the focus drop can be reproduced on demand even when every slide would
+        // otherwise be 4 buttons. Deterministic per item id (a stable byte-sum
+        // parity), so a given slide always has the same count and `selectedButton`
+        // clamping stays consistent as you page back and forth. Only removes the
+        // Watchlist button (never fabricates one), so `activateSelected()` can
+        // never dispatch a bogus action. No effect unless the flag is set.
+        if HeroFocusDiagnostics.forceAlternatingButtonCounts {
+            let dropWatchlist = item.id.utf8.reduce(0) { $0 &+ Int($1) } % 2 == 0
+            if dropWatchlist, let wl = result.firstIndex(of: .watchlist) {
+                result.remove(at: wl)
+            }
+        }
         return result
     }
-
-    /// The hero's action buttons in fixed visual order. The visible pill row
-    /// renders over this CONSTANT slot set (absent buttons → a zero-size
-    /// placeholder) so its `ForEach` stays structurally stable and gap-free across
-    /// a page. Note this alone does NOT stop the focus drop — the row's *width*
-    /// still changed with the button count, which is what moved the focus target
-    /// mid re-pin; ``actionRowWidthReserver`` pins the width constant to fix that.
-    /// Keep this in the same order `buttons(for:)` produces so `selectedButton`
-    /// still maps.
-    private static let buttonSlots: [HeroButton] = [.play, .moreInfo, .watchlist, .next]
 
     /// The item the hero's Watchlist button acts on. Whole titles
     /// (movie / series / video) act on themselves; an **episode or season** acts
@@ -604,46 +609,29 @@ struct HomeHeroView: View {
                 .focused($focus, equals: .leftGuard)
                 .accessibilityHidden(true)
 
-            // The VISIBLE pills, wrapped in a ZStack behind a hidden width
-            // reserver (``actionRowWidthReserver``) so the action row — and thus
-            // the focus overlay and the trailing right guard — has a CONSTANT width
-            // for EVERY slide. This is the real fix for the intermittent focus
-            // drop: device tracing (PLZHFOCUS) proved focus was lost on exactly the
-            // pages where the button *count* changed (e.g. paging onto a Continue
-            // Watching slide with no Watchlist action, 4↔3 buttons). Keeping the
-            // `ForEach` structurally stable alone did NOT fix it, because the row's
-            // WIDTH still changed — which moved the `.row` focus target (and the
-            // right guard) in the very transaction that re-pins `focus = .row`, and
-            // the tvOS focus engine couldn't resolve the re-pin against a moving
-            // target, so it dropped focus to nil (stranded ~1–2s, returning on the
-            // wrong control). Pinning the width constant removes that motion.
+            // The VISIBLE pills. Non-focusable and free to fade with the rest of
+            // the metadata on a page — exactly like the Apple TV hero, where the
+            // buttons vanish on press and reappear on landing. Focus is NOT here
+            // (it lives on the overlay below), so fading these to opacity 0 can't
+            // drop focus or shift the scroll.
             //
-            // The visible pills stay non-focusable and fade with the rest of the
-            // metadata on a page (focus lives on the overlay, so fading to opacity
-            // 0 can't drop it). They render over the CONSTANT `Self.buttonSlots`
-            // set (absent buttons → zero-size placeholder), leading-aligned in
-            // front of the wider reserver; the extra reserved width is invisible
-            // trailing space, so there is no visible gap. `selectedButton` still
-            // indexes the logical `itemButtons`, so the highlight maps via each
-            // slot's logical offset.
-            ZStack(alignment: .leading) {
-                actionRowWidthReserver
-                HStack(spacing: 0) {
-                    ForEach(Self.buttonSlots, id: \.self) { slot in
-                        if let offset = itemButtons.firstIndex(of: slot) {
-                            heroButtonVisual(slot, for: item, selected: focus != nil && selectedButton == offset)
-                                .padding(.leading, offset == 0 ? 0 : 24)
-                        } else {
-                            Color.clear.frame(width: 0, height: 0)
-                        }
-                    }
+            // The button COUNT can differ per slide (e.g. a Continue Watching slide
+            // has no Watchlist action), which once caused an intermittent focus
+            // drop when paging between different-count slides. That is fixed by
+            // `restoreFocusAfterPage()` (a next-tick focus reassert), NOT by
+            // stabilising this row — and the pills are hidden (opacity 0, snapped)
+            // during the ~280ms page window anyway, so a one-tick focus/highlight
+            // blip here is invisible. So this stays the simple, direct row.
+            HStack(spacing: 24) {
+                ForEach(Array(itemButtons.enumerated()), id: \.element) { offset, button in
+                    heroButtonVisual(button, for: item, selected: focus != nil && selectedButton == offset)
                 }
-                .opacity(metadataVisible ? 1 : 0)
-                // Snap the pills' hide instantly (matches the metadata above); the
-                // delayed fade-IN still animates.
-                .transaction { if !metadataVisible { $0.animation = nil } }
-                .allowsHitTesting(false)
             }
+            .opacity(metadataVisible ? 1 : 0)
+            // Snap the pills' hide instantly (matches the metadata above); the
+            // delayed fade-IN still animates.
+            .transaction { if !metadataVisible { $0.animation = nil } }
+            .allowsHitTesting(false)
             // ── The single hero focus target: an always-opaque, invisible focusable
             // leaf layered *over* the pills. Because `.overlay` is applied after the
             // pills' `.opacity`, it stays fully opaque and focusable even while the
@@ -740,25 +728,30 @@ struct HomeHeroView: View {
                 handleRight()
             case .row:
                 // Focus arriving into the hero from *outside* (a row below / the
-                // tab bar): snap back to full-screen and scroll the page to the top.
-                // We do NOT act on focus *loss* — focus can drop transiently, and
-                // the recede is driven by the page scroll (see `HomeView`), not here.
+                // tab bar): snap back to full-screen, scroll the page to the top,
+                // and resume the auto-advance we paused while focus was away.
+                // We do NOT act on focus *loss* here for the recede — that's driven
+                // by the page scroll (see `HomeView`) — but we DO resume paging.
                 if old == nil {
                     HeroFocusDiagnostics.emit("focus ENTER hero (row, from outside) | \(hfState())")
                     if let item = current {
                         selectedButton = min(selectedButton, max(0, buttons(for: item).count - 1))
                     }
+                    resumeFromFocusAway()
                     onFocusGained()
                 }
             case .none:
-                // Focus left the hero entirely (down to a row, up to the tab bar, or
-                // left to the sidebar). Nothing to do: the recede is driven purely
-                // by the page scroll offset in `HomeView`. When this fires *during*
-                // a page (not a deliberate exit) it IS the reported bug — the paired
-                // `nil->X` line below shows where it lands and the `t+ms` gap shows
-                // how long it was stranded.
-                HeroFocusDiagnostics.emit("focus LOST (->nil) from \(oldName) | \(hfState())")
-                break
+                // Focus left the hero entirely (down to Continue Watching, up to the
+                // tab bar, or left to the sidebar). Pause the auto-advance so the
+                // carousel doesn't silently page while the user is browsing away from
+                // it — and keep it paused until focus RETURNS (see the `.row`
+                // from-outside branch), not on the 2.5s idle timer that button
+                // fiddling uses. (The recede itself is still driven by the page
+                // scroll offset in `HomeView`.) If this fires transiently mid-page
+                // it's harmless: the paired reassert brings focus back to `.row`,
+                // which resumes.
+                HeroFocusDiagnostics.emit("focus LEFT hero (->nil) from \(oldName) | \(hfState())")
+                pauseForFocusAway()
             }
         }
     }
@@ -1003,46 +996,6 @@ struct HomeHeroView: View {
         }
     }
 
-    /// A hidden, layout-only copy of the MAXIMAL action row (all four pills, with
-    /// the widest "Resume" play label). Placed behind the visible pills in a
-    /// leading-aligned ZStack purely to pin the action row — and therefore the
-    /// `.row` focus overlay and the trailing right guard — to a CONSTANT width for
-    /// every slide. Without it, paging to a slide with a different visible button
-    /// count changed the row's width, moving the focus target (and guard) in the
-    /// same transaction as the `defer { focus = .row }` re-pin, which the tvOS
-    /// focus engine couldn't resolve against a moving target → focus dropped to
-    /// nil (proven on device via PLZHFOCUS). Invisible, non-interactive, never
-    /// selected; mirrors ``heroButtonVisual`` so its width matches a real row.
-    private var actionRowWidthReserver: some View {
-        HStack(spacing: 0) {
-            heroPill(selected: false) {
-                Label("Resume", systemImage: "play.fill")
-                    .font(.system(size: 28, weight: .semibold))
-            }
-            heroPill(selected: false) {
-                Image(systemName: "info.circle")
-                    .font(.system(size: 28, weight: .semibold))
-                    .frame(width: 34, height: 34)
-            }
-            .padding(.leading, 24)
-            heroPill(selected: false) {
-                Image(systemName: "bookmark")
-                    .font(.system(size: 28, weight: .semibold))
-                    .frame(width: 34, height: 34)
-            }
-            .padding(.leading, 24)
-            heroPill(selected: false) {
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 28, weight: .semibold))
-                    .frame(width: 34, height: 34)
-            }
-            .padding(.leading, 24)
-        }
-        .opacity(0)
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
-    }
-
     /// The glass-pill chrome shared by every hero action. Identity-stable (only
     /// animatable properties vary with `selected`), so nothing here can disturb
     /// focus. Every idle pill is the same translucent glass; the selected pill (when
@@ -1140,6 +1093,34 @@ struct HomeHeroView: View {
             runEpoch &+= 1
         }
         scheduleResume()
+    }
+
+    /// Pauses the auto-advance because focus has LEFT the hero (moved down to
+    /// Continue Watching, up to the tab bar, or out to the sidebar). Unlike
+    /// ``noteInteraction()`` this does NOT arm the idle-resume timer — it cancels
+    /// any pending one — so the carousel stays paused for as long as focus is away
+    /// and never pages while the user is browsing elsewhere. It resumes only when
+    /// focus returns to the hero (see ``resumeFromFocusAway()``). Bumping
+    /// `runEpoch` re-keys the fire `.task` into its paused (no-op) branch.
+    private func pauseForFocusAway() {
+        guard settings.autoAdvance, items.count > 1 else { return }
+        resumeWork?.cancel()
+        resumeWork = nil
+        if pausedAt == nil {
+            pausedAt = Date()
+            runEpoch &+= 1
+        }
+    }
+
+    /// Resumes the auto-advance when focus RETURNS to the hero after having been
+    /// away (the mirror of ``pauseForFocusAway()``). Gives the slide the user
+    /// lands back on a fresh full dwell (rather than continuing a countdown that
+    /// may have nearly elapsed before they left) and re-keys the fire `.task`.
+    /// No-op if the carousel wasn't paused.
+    private func resumeFromFocusAway() {
+        guard settings.autoAdvance, items.count > 1, pausedAt != nil else { return }
+        restartDwell()
+        runEpoch &+= 1
     }
 
     /// (Re)schedules the resume so it fires only after ``resumeAfterIdle`` seconds

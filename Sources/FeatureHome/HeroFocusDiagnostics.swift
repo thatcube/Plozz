@@ -45,6 +45,18 @@ public enum HeroFocusDiagnostics {
     /// Enables/disables emission at runtime (e.g. mirrors a diagnostics setting).
     public static func setEnabled(_ enabled: Bool) { gate.setEnabled(enabled) }
 
+    /// DEBUG-only test lever. When the process is launched with
+    /// `PLZHFOCUS_ALTBUTTONS=1`, the hero forces its action-button COUNT to
+    /// alternate across slides (see `HomeHeroView.buttons(for:)`) so the
+    /// count-changing page transitions — the exact trigger of the intermittent
+    /// focus drop — can be reproduced ON DEMAND, regardless of what's in the
+    /// user's library (e.g. once every hero item has a Watchlist action and every
+    /// slide is 4 buttons, the bug can't otherwise be provoked). Off by default;
+    /// read once at startup. Purely a reproduction aid — has no effect on shipped
+    /// runs and does not change which action fires (it only hides a button).
+    public static let forceAlternatingButtonCounts: Bool =
+        ProcessInfo.processInfo.environment["PLZHFOCUS_ALTBUTTONS"] == "1"
+
     #if canImport(OSLog)
     private static let logger = Logger(subsystem: "com.plozz.app", category: "herofocus")
     #endif

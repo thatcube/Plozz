@@ -17,13 +17,14 @@ final class PlexHubsTests: XCTestCase {
     /// A representative `/hubs/sections/1` payload:
     ///  - Recently Added  → dropped (base row duplicate)
     ///  - On Deck         → dropped (base row duplicate)
-    ///  - More in Drama   → kept (genre discovery hub)
-    ///  - Because You Watched → kept (similar hub)
-    ///  - Top Rated       → kept
+    ///  - More in Drama   → kept (genre discovery hub, 3 items)
+    ///  - Because You Watched → kept (similar hub, 3 items)
+    ///  - Top Rated       → kept (3 items)
+    ///  - Top Movies with an Actor → dropped (person hub with a single title)
     ///  - Genres          → dropped (Directory-only, no playable items)
     ///  - Recently Released (empty) → dropped (no items)
     private let hubsJSON = """
-    {"MediaContainer":{"size":7,"Hub":[
+    {"MediaContainer":{"size":8,"Hub":[
       {"hubIdentifier":"movie.recentlyadded.1","context":"hub.movie.recentlyadded","title":"Recently Added Movies","type":"movie","more":true,
        "Metadata":[{"ratingKey":"1","type":"movie","title":"New Arrival","librarySectionID":1}]},
       {"hubIdentifier":"movie.ondeck.1","context":"hub.movie.ondeck","title":"On Deck","type":"movie","more":false,
@@ -35,9 +36,19 @@ final class PlexHubsTests: XCTestCase {
          {"ratingKey":"12","type":"movie","title":"Drama C","librarySectionID":1}
        ]},
       {"hubIdentifier":"movie.similar.10","context":"hub.movie.similar","title":"Because You Watched Drama A","type":"movie","more":true,
-       "Metadata":[{"ratingKey":"20","type":"movie","title":"Similar One","librarySectionID":1}]},
+       "Metadata":[
+         {"ratingKey":"20","type":"movie","title":"Similar One","librarySectionID":1},
+         {"ratingKey":"21","type":"movie","title":"Similar Two","librarySectionID":1},
+         {"ratingKey":"22","type":"movie","title":"Similar Three","librarySectionID":1}
+       ]},
       {"hubIdentifier":"movie.toprated","context":"hub.movie.toprated","title":"Top Rated","type":"movie","more":true,
-       "Metadata":[{"ratingKey":"30","type":"movie","title":"Acclaimed","librarySectionID":1}]},
+       "Metadata":[
+         {"ratingKey":"30","type":"movie","title":"Acclaimed","librarySectionID":1},
+         {"ratingKey":"31","type":"movie","title":"Acclaimed Two","librarySectionID":1},
+         {"ratingKey":"32","type":"movie","title":"Acclaimed Three","librarySectionID":1}
+       ]},
+      {"hubIdentifier":"movie.by.actor.99","context":"hub.movie.byactor","title":"Top Movies with Misa Koide","type":"movie","more":false,
+       "Metadata":[{"ratingKey":"40","type":"movie","title":"Her Only Film","librarySectionID":1}]},
       {"hubIdentifier":"movie.genres","context":"hub.movie.genres","title":"Genres","type":"movie","more":false,
        "Directory":[{"key":"/library/sections/1/genre/1","title":"Drama"}]},
       {"hubIdentifier":"movie.recentlyReleased","context":"hub.movie.recentlyReleased","title":"Recently Released","type":"movie","more":false,
@@ -45,22 +56,23 @@ final class PlexHubsTests: XCTestCase {
     ]}}
     """
 
-    func testFiltersDuplicateAndEmptyHubsAndMapsTheRest() async throws {
+    func testFiltersDuplicateSparseAndEmptyHubsAndMapsTheRest() async throws {
         let stub = StubHTTPClient()
         stub.stub(pathSuffix: "/hubs/sections/1", json: hubsJSON)
         let provider = PlexProvider(session: makeSession(), http: stub)
 
         let sections = try await provider.libraryHubs(libraryID: "1", kind: .movie, limit: 20)
 
-        // Only the three additive discovery hubs survive, in server order.
+        // The three populated discovery hubs survive, in server order. The
+        // duplicate (recently added / on deck), the single-title person hub, the
+        // Directory-only, and the empty hub are all dropped.
         XCTAssertEqual(sections.map(\.title), ["More in Drama", "Because You Watched Drama A", "Top Rated"])
         XCTAssertEqual(sections.map(\.id), ["movie.genre.drama", "movie.similar.10", "movie.toprated"])
-        // The genre hub kept all three of its items, mapped to MediaItems.
+        XCTAssertFalse(sections.contains { $0.title.contains("Misa Koide") },
+                       "A single-title person hub must not become a whole row")
         XCTAssertEqual(sections.first?.items.map(\.title), ["Drama A", "Drama B", "Drama C"])
-        // Hub items carry their library attribution (librarySectionID → libraryID).
         XCTAssertEqual(sections.first?.items.first?.libraryID, "1")
-        // Every kept section is a poster row and non-empty.
-        XCTAssertTrue(sections.allSatisfy { $0.style == .poster && !$0.items.isEmpty })
+        XCTAssertTrue(sections.allSatisfy { $0.style == .poster && $0.items.count >= 3 })
     }
 
     func testCapsItemsPerHubToLimit() async throws {

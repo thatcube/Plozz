@@ -152,15 +152,18 @@ public struct PlexProvider: MediaProvider {
     /// Plex-native discovery hubs for one library (`/hubs/sections/{id}`), surfaced
     /// as a library's extra rows in unmerged Home mode. Hubs whose content the
     /// uniform base rows already cover (Recently Added, On Deck / Continue
-    /// Watching) are dropped, as are hubs with no playable items, so what remains
-    /// is genuinely additive: "More in <Genre>", "Because you watched…", "Top
-    /// Rated", "Start Watching", …
+    /// Watching) are dropped, as are hubs with fewer than ``minimumHubItems`` items
+    /// (a single-item "Top Movies with <actor>" row isn't worth a full-width shelf),
+    /// so what remains is genuinely additive AND populated: "More in <Genre>",
+    /// "Because you watched…", "Top Rated", "Start Watching", …
     public func libraryHubs(libraryID: String, kind: MediaItemKind, limit: Int) async throws -> [LibrarySection] {
         let hubs = try await client.sectionHubs(sectionID: libraryID, count: limit)
         return hubs.compactMap { hub in
             guard !Self.isBaseDuplicateHub(identifier: hub.hubIdentifier, context: hub.context) else { return nil }
             let items = (hub.Metadata ?? []).map(map(metadata:))
-            guard !items.isEmpty else { return nil }
+            // Require enough items to justify a whole row — Plex emits person/cast
+            // hubs ("Top Movies with <actor>") that can contain a single title.
+            guard items.count >= Self.minimumHubItems else { return nil }
             let title = hub.title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             guard !title.isEmpty else { return nil }
             let id = hub.hubIdentifier ?? hub.context ?? title
@@ -172,6 +175,11 @@ public struct PlexProvider: MediaProvider {
             )
         }
     }
+
+    /// Minimum items a Plex discovery hub must have to render as its own row. Below
+    /// this a hub reads as a broken, near-empty shelf (e.g. a "Top Movies with
+    /// <actor>" hub where the actor appears in just one library title).
+    static let minimumHubItems = 3
 
     /// Whether a hub duplicates one of the uniform base rows the Home aggregator
     /// builds for every provider (Recently Added, On Deck / Continue Watching), so

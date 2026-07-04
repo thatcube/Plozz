@@ -53,6 +53,13 @@ targets:
         # MARKETING_VERSION build setting so the app and Top Shelf extension match.
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        # Export-compliance (encryption) declaration. Plozz only uses standard
+        # HTTPS/TLS provided by the OS (Jellyfin API, OAuth, artwork providers) —
+        # that encryption is EXEMPT from U.S. export-compliance documentation.
+        # Declaring this false pre-answers the question so App Store Connect stops
+        # flagging every uploaded build as "Missing Compliance" (no per-build
+        # Manage → "None of the algorithms mentioned above" click needed).
+        ITSAppUsesNonExemptEncryption: false
         # Opt-in crash-reporting DSN, read at runtime by CrashReporting. Resolves
         # from the PLOZZ_SENTRY_DSN build setting (empty unless baked in), so
         # builds without a DSN never send anything.

@@ -88,6 +88,18 @@ struct ServerDetailView: View {
         serverGroups(from: context.accounts).first { $0.serverKey == serverKey }
     }
 
+    /// Provider-appropriate explanation of how sign-in works for this server.
+    private func accountsFooter(for provider: ProviderKind) -> String {
+        switch provider {
+        case .plex:
+            return "Plex shares one sign-in across the household. Each profile picks its own Plex user and libraries under Profile › Your Libraries."
+        case .jellyfin:
+            return "Jellyfin signs in per profile, each with its own credentials. Choose what shows on your Home under Profile › Your Libraries."
+        case .mediaShare:
+            return "A media share connects with the credentials you entered (or as a guest). Choose what shows on your Home under Profile › Your Libraries."
+        }
+    }
+
     // MARK: - Header
 
     private func header(_ group: ServerAccountGroup) -> some View {
@@ -108,9 +120,7 @@ struct ServerDetailView: View {
 
     private func accountsPanel(_ group: ServerAccountGroup) -> some View {
         SettingsPanel(
-            footer: group.providerKind == .plex
-                ? "Plex shares one sign-in across the household. Each profile picks its own Plex user and libraries under Profile › Your Libraries."
-                : "Jellyfin signs in per profile, each with its own credentials. Choose what shows on your Home under Profile › Your Libraries."
+            footer: accountsFooter(for: group.providerKind)
         ) {
             VStack(alignment: .leading, spacing: 16) {
                 Text("Signed in as")

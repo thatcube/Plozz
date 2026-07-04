@@ -1247,9 +1247,16 @@ public final class PlayerViewModel {
         //    re-using the same raw stream (no re-resolve needed). Skipped for an
         //    adaptive source (separate audio track): only the hybrid engine can
         //    mux it, so swapping to native would play silent video — go straight
-        //    to the re-resolved safe (muxed) fallback below instead.
+        //    to the re-resolved safe (muxed) fallback below instead. Also skipped
+        //    when the only alternate is native AVPlayer and the source is an
+        //    `smb://` share: AVPlayer can't open an SMB URL at all, so a swap is a
+        //    guaranteed-fail wasted attempt — fall through to the (re-resolving)
+        //    transcode step, which re-routes back to Plozzigen for the share.
+        let resolvedURL = request.localRemuxSource?.originalURL ?? request.streamURL
+        let isSMBSource = resolvedURL.scheme?.lowercased() == "smb"
         if !request.isTranscoding, !hasTriedAlternateEngine, request.externalAudioURL == nil,
-           let alternate = alternateEngineKind {
+           let alternate = alternateEngineKind,
+           !(alternate == .native && isSMBSource) {
             hasTriedAlternateEngine = true
             PlozzLog.playback.info("Engine failed; swapping to the alternate engine")
             await playResolved(request, engineKind: alternate, startPosition: resume)
@@ -1277,11 +1284,17 @@ public final class PlayerViewModel {
     /// Trakt history.
     private func report(event: PlaybackEvent, isPaused: Bool, positionOverride: TimeInterval? = nil) async {
         guard let request else { return }
+        let position = positionOverride ?? engine.currentTime
+        let engineDuration = engine.duration
+        let knownDuration: TimeInterval? = (engineDuration.isFinite && engineDuration > 0)
+            ? engineDuration
+            : request.item.runtime
         let progress = PlaybackProgress(
             itemID: itemID,
             playSessionID: request.playSessionID,
-            positionSeconds: positionOverride ?? engine.currentTime,
-            isPaused: isPaused
+            positionSeconds: position,
+            isPaused: isPaused,
+            durationSeconds: knownDuration
         )
         do {
             try await provider.reportPlayback(progress, event: event)

@@ -114,14 +114,18 @@ struct MyLibrariesDetailView: View {
 
     @ViewBuilder
     private func watchingAs(_ group: ServerAccountGroup) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Watching as")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-            if group.providerKind == .plex {
-                ForEach(group.accounts) { plexIdentityLink($0) }
-            } else {
-                jellyfinIdentity(group)
+        // A media share has no watcher identity (no per-user login / Home users),
+        // so the "Watching as" row would show a meaningless "guest" avatar. Skip it.
+        if group.providerKind != .mediaShare {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Watching as")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                if group.providerKind == .plex {
+                    ForEach(group.accounts) { plexIdentityLink($0) }
+                } else {
+                    jellyfinIdentity(group)
+                }
             }
         }
     }

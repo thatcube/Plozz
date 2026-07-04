@@ -128,20 +128,41 @@ struct AddShareView: View {
                     placeholder("Finding shares…", systemImage: "externaldrive.connected.to.line.below")
                 }
             case .needsAuth:
-                credentialsPanel(
-                    title: "Sign in",
-                    message: "This server needs a username and password.",
-                    button: "Connect"
+                VStack(alignment: .leading, spacing: 28) {
+                    credentialsPanel(
+                        title: "Sign in",
+                        message: "This server requires a username and password.",
+                        button: "Connect"
+                    )
+                    manualSharePanel
+                }
+            case .badCredentials:
+                VStack(alignment: .leading, spacing: 28) {
+                    credentialsPanel(
+                        title: "Sign in",
+                        error: "That username or password was incorrect. Please try again.",
+                        button: "Try again"
+                    )
+                    manualSharePanel
+                }
+            case .unreachable:
+                messagePanel(
+                    title: "Can't connect",
+                    message: "Couldn't connect to the server. Check the address and that it's on the same network, then try again.",
+                    systemImage: "wifi.exclamationmark",
+                    retry: { viewModel.loadShares() }
                 )
             case .failed(let message):
                 VStack(alignment: .leading, spacing: 28) {
-                    SharePanel(title: "Shares") {
-                        Label(LocalizedStringKey(message), systemImage: "exclamationmark.triangle")
-                            .foregroundStyle(.secondary)
-                    }
+                    messagePanel(
+                        title: "Something went wrong",
+                        message: LocalizedStringKey(message),
+                        systemImage: "exclamationmark.triangle",
+                        retry: { viewModel.loadShares() }
+                    )
                     credentialsPanel(
                         title: "Sign in",
-                        message: "This server didn't allow browsing its shares as a guest. If it needs a login, enter it and try again.",
+                        message: "If this share needs a different account, enter a username and password and try again.",
                         button: "Try again"
                     )
                     manualSharePanel
@@ -189,6 +210,26 @@ struct AddShareView: View {
         }
     }
 
+    /// A neutral message card (not the "Shares" box) used for connection/other
+    /// failures, with an optional Retry button. Deliberately avoids implying a
+    /// share list ever loaded.
+    private func messagePanel(
+        title: String,
+        message: LocalizedStringKey,
+        systemImage: String,
+        retry: (() -> Void)? = nil
+    ) -> some View {
+        SharePanel(title: title) {
+            VStack(alignment: .leading, spacing: 18) {
+                InlineErrorMessage(message, systemImage: systemImage)
+                if let retry {
+                    Button("Try again", action: retry)
+                        .buttonStyle(.borderedProminent)
+                }
+            }
+        }
+    }
+
     private var manualSharePanel: some View {
         SharePanel(
             title: "Enter share name",
@@ -207,7 +248,12 @@ struct AddShareView: View {
         }
     }
 
-    private func credentialsPanel(title: String, message: LocalizedStringKey, button: LocalizedStringKey) -> some View {
+    private func credentialsPanel(
+        title: String,
+        message: LocalizedStringKey? = nil,
+        error: LocalizedStringKey? = nil,
+        button: LocalizedStringKey
+    ) -> some View {
         SharePanel(title: title, footer: message) {
             VStack(alignment: .leading, spacing: 18) {
                 TextField("Username", text: $viewModel.username)
@@ -223,6 +269,9 @@ struct AddShareView: View {
                     .onSubmit { viewModel.loadShares() }
                 Button(button) { viewModel.loadShares() }
                     .buttonStyle(.borderedProminent)
+                if let error {
+                    InlineErrorMessage(error)
+                }
             }
         }
     }

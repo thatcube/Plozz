@@ -11,6 +11,7 @@ import ProviderPlex
 import ProviderShare
 import RatingsService
 import TraktService
+import SeerService
 import SimklService
 import LastFmService
 import AniListService
@@ -205,6 +206,11 @@ public final class AppState {
 
     /// Simkl sync: device-code OAuth + history scrobble. Mirrors Trakt's pattern.
     public let simklService: SimklService
+
+    /// Seerr (Overseerr / Jellyseerr) discovery: backs the Home hero's featured
+    /// seam (`trending`) and the Settings connect flow. Inert until the user
+    /// saves a server URL + API key.
+    public let seerService: SeerService
 
     /// AniList sync: token-entry OAuth + GraphQL list update (anime only).
     public let anilistService: AniListService
@@ -891,6 +897,7 @@ public final class AppState {
         ratingsProvider: (any ExternalRatingsProviding)? = nil,
         traktService: TraktService? = nil,
         simklService: SimklService? = nil,
+        seerService: SeerService? = nil,
         anilistService: AniListService? = nil,
         malService: MALService? = nil,
         lastfmService: LastFmService? = nil
@@ -920,6 +927,8 @@ public final class AppState {
         self.traktService = traktService ?? TraktServiceFactory.make(namespace: ns)
         // Seed other trackers with the same profile namespace.
         self.simklService = simklService ?? SimklServiceFactory.make(namespace: ns)
+        // Seerr discovery is per-profile too (each profile links its own server).
+        self.seerService = seerService ?? SeerServiceFactory.make(namespace: ns)
         self.anilistService = anilistService ?? AniListServiceFactory.make(namespace: ns)
         self.malService = malService ?? MALServiceFactory.make(namespace: ns)
         // Last.fm is user-scoped like the trackers; seed it with the active
@@ -1635,7 +1644,7 @@ public final class AppState {
     ) {
         var comps = URLComponents()
         comps.scheme = "smb"
-        comps.host = host
+        comps.host = ShareProvider.bracketedHostIfIPv6(host)
         comps.port = port
         comps.path = "/" + share
         guard let baseURL = comps.url else {
@@ -1929,6 +1938,7 @@ public final class AppState {
         Task {
             await traktService.setActiveProfile(namespace: ns)
             await simklService.setActiveProfile(namespace: ns)
+            await seerService.setActiveProfile(namespace: ns)
             await anilistService.setActiveProfile(namespace: ns)
             await malService.setActiveProfile(namespace: ns)
             await lastfmService.setActiveProfile(namespace: ns)

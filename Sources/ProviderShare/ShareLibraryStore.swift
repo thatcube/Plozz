@@ -34,6 +34,12 @@ actor ShareLibraryStore {
 
     // MARK: - Libraries
 
+    /// Best-effort release of the underlying SMB session when the provider is
+    /// evicted from the registry (account removed / token refreshed).
+    func close() async {
+        await browser.close()
+    }
+
     /// A share presents exactly one browsable "library": its root folder. Kept as
     /// `.folder` so the browse UI treats every entry as navigable/​playable by its
     /// own kind rather than forcing a movie/series split.
@@ -62,9 +68,26 @@ actor ShareLibraryStore {
                 videos.append(videoItem(relPath: childPath, name: entry.name))
             }
         }
-        folders.sort { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
-        videos.sort { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+        folders.sort { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+        videos.sort(by: Self.videoOrder)
         return folders + videos
+    }
+
+    /// Total ordering for a folder's playable files. Episodes (those the parser
+    /// resolved a season + episode number for) sort by `(season, episode)` so
+    /// "Episode 2" precedes "Episode 10" regardless of title text; everything
+    /// without episode numbers (movies, unparsed files) sorts after episodes and
+    /// among itself by natural, number-aware title order. Using explicit sort keys
+    /// (rather than a branchy comparator) keeps the order strict and total even
+    /// when a folder mixes episodes and non-episodes.
+    private static func videoOrder(_ lhs: MediaItem, _ rhs: MediaItem) -> Bool {
+        let ls = lhs.seasonNumber ?? Int.max
+        let rs = rhs.seasonNumber ?? Int.max
+        if ls != rs { return ls < rs }
+        let le = lhs.episodeNumber ?? Int.max
+        let re = rhs.episodeNumber ?? Int.max
+        if le != re { return le < re }
+        return lhs.title.localizedStandardCompare(rhs.title) == .orderedAscending
     }
 
     // MARK: - Item / path lookup (derived from the id — no network)
@@ -109,7 +132,33 @@ actor ShareLibraryStore {
     }
 
     private func videoItem(relPath: String, name: String) -> MediaItem {
-        MediaItem(id: "f:\(relPath)", title: Self.displayTitle(forFileName: name), kind: .video)
+        // Enrich the bare file into a movie/episode so the generic MetadataKit
+        // artwork pipeline (ArtworkRouter → TMDb/TVmaze/AniList) can resolve a
+        // poster/backdrop and the detail page can look up an overview. Nothing
+        // here is a *match* yet — it's a best-effort parse of the filename (and
+        // its folder) into a clean title + year + season/episode; a wrong guess
+        // just falls back to the clean title on a neutral card.
+        let id = "f:\(relPath)"
+        let parentHint = Self.seriesHintFolder(forRelPath: relPath)
+        switch ShareMediaParser.classify(fileName: name, parentFolder: parentHint) {
+        case .movie(let movie):
+            return MediaItem(
+                id: id,
+                title: movie.title.isEmpty ? Self.displayTitle(forFileName: name) : movie.title,
+                kind: .movie,
+                productionYear: movie.year
+            )
+        case .episode(let episode):
+            let fallbackTitle = "S\(episode.season)·E\(String(format: "%02d", episode.episode))"
+            return MediaItem(
+                id: id,
+                title: episode.title ?? fallbackTitle,
+                kind: .episode,
+                parentTitle: episode.series,
+                seasonNumber: episode.season,
+                episodeNumber: episode.episode
+            )
+        }
     }
 
     // MARK: - Helpers
@@ -123,6 +172,27 @@ actor ShareLibraryStore {
 
     private static func lastComponent(_ relPath: String) -> String {
         relPath.split(separator: "/").last.map(String.init) ?? relPath
+    }
+
+    /// The folder name that best hints at a *series* title for an episode file:
+    /// normally the file's immediate parent, but when that parent is a "Season N"
+    /// / "S03" folder we hop up to its parent (the show) instead — so an episode
+    /// in `TV Shows/Breaking Bad/Season 1/ep.mkv` recovers "Breaking Bad", not
+    /// "Season 1". `nil` when the file sits at the share root.
+    private static func seriesHintFolder(forRelPath relPath: String) -> String? {
+        var dirs = relPath.split(separator: "/").map(String.init)
+        guard dirs.count >= 2 else { return nil } // just "<file>" → no parent dir
+        dirs.removeLast() // drop the filename
+        guard let parent = dirs.last else { return nil }
+        if isSeasonFolder(parent), dirs.count >= 2 {
+            return dirs[dirs.count - 2]
+        }
+        return parent
+    }
+
+    private static func isSeasonFolder(_ name: String) -> Bool {
+        name.range(of: #"^[Ss]eason\s*\d+$"#, options: .regularExpression) != nil
+            || name.range(of: #"^[Ss]\d{1,2}$"#, options: .regularExpression) != nil
     }
 
     /// Drop the file extension for a cleaner on-screen title while still showing

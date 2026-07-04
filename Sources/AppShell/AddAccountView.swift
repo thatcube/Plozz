@@ -93,7 +93,7 @@ struct AddAccountView: View {
                 Button {
                     choice = .mediaShare
                 } label: {
-                    Label("Add a local media share", systemImage: "externaldrive.connected.to.line.below.fill")
+                    Label("Add a local media share (SMB)", systemImage: "externaldrive.connected.to.line.below.fill")
                         .font(.callout)
                 }
                 .buttonStyle(.bordered)

@@ -28,6 +28,7 @@ DEFAULT_SCHEMES=(
   ProviderTrailersTests
   RatingsServiceTests
   TraktServiceTests
+  SeerServiceTests
   FeatureAuthTests
   FeatureHomeTests
   FeatureSearchTests

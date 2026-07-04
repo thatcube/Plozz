@@ -73,11 +73,22 @@ public final class LibraryBrowseViewModel {
     /// while allowing off-screen page loads to be cancelled.
     private var visibleCellCountsByPage: [Int: Int] = [:]
     /// Tracks the currently visible indices so repeated `.task(id:)` restarts for
-    /// the same cell don't inflate `visibleCellCountsByPage`.
-    private var visibleIndices: Set<Int> = []
+    /// the same cell don't inflate `visibleCellCountsByPage`. Kept out of
+    /// observation: it mutates on every cell appear/disappear (dozens of times a
+    /// second while scrolling), and the only thing the UI cares about — the
+    /// top-most visible index — is published separately via `topVisibleIndex`, so
+    /// observing this raw set would needlessly churn the alphabet rail.
+    @ObservationIgnored private var visibleIndices: Set<Int> = []
     /// Last index whose cell appeared. Large jumps imply a fast scroll and trigger
     /// deeper look-ahead prefetching.
     private var lastAppearedIndex: Int?
+    /// Monotonic token bumped on every `loadFirstPage`. A rapid sort toggle (or a
+    /// container change) can leave two first-page loads in flight on a slow/large
+    /// library; each runs as its own unstructured `Task`, so neither cancels the
+    /// other. Capturing the generation at request time and re-checking it after the
+    /// network round-trip guarantees only the newest load applies its results —
+    /// otherwise an older response could paint stale-sorted items over the grid.
+    @ObservationIgnored private var loadGeneration = 0
 
     public init(
         provider: any MediaProvider,
@@ -113,6 +124,7 @@ public final class LibraryBrowseViewModel {
         guard index >= 0 else { return }
         let page = pageForIndex(index)
         guard visibleIndices.remove(index) != nil else { return }
+        updateTopVisibleIndex()
         let remaining = max(0, (visibleCellCountsByPage[page] ?? 0) - 1)
         if remaining == 0 {
             visibleCellCountsByPage[page] = nil
@@ -128,6 +140,8 @@ public final class LibraryBrowseViewModel {
 
     /// Loads (or reloads) the first page and sizes the grid to the full library.
     public func loadFirstPage() async {
+        loadGeneration += 1
+        let generation = loadGeneration
         state = .loading
         loaded = []
         totalCount = 0
@@ -137,6 +151,7 @@ public final class LibraryBrowseViewModel {
         pagesLoaded = []
         visibleCellCountsByPage = [:]
         visibleIndices = []
+        topVisibleIndex = nil
         lastAppearedIndex = nil
         letterIndexTask?.cancel()
         letterEntries = []
@@ -151,7 +166,7 @@ public final class LibraryBrowseViewModel {
                 request: pageRequest(forPage: 0),
                 priority: .userInitiated
             )
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, generation == loadGeneration else { return }
             totalCount = page.totalCount
             loaded = Array(repeating: nil, count: page.totalCount)
             fill(page)
@@ -162,9 +177,11 @@ public final class LibraryBrowseViewModel {
             return
         } catch let error as AppError {
             PlozzLog.app.error("LibraryBrowse: first page failed for \(containerID): \(String(describing: error))")
+            guard generation == loadGeneration else { return }
             state = .failed(error)
         } catch {
             PlozzLog.app.error("LibraryBrowse: first page failed for \(containerID): \(String(describing: error))")
+            guard generation == loadGeneration else { return }
             state = .failed(.unknown(""))
         }
     }
@@ -206,7 +223,21 @@ public final class LibraryBrowseViewModel {
 
     /// The top-most currently-visible grid index (smallest visible index), used
     /// to keep the rail's current-letter highlight in sync with a manual scroll.
-    public var topVisibleIndex: Int? { visibleIndices.min() }
+    /// Stored — not computed off `visibleIndices` — so the alphabet rail (its only
+    /// observer) re-renders solely when the top row crosses into a new index, not
+    /// on every one of the dozens of cell appear/disappear ticks a scroll fires.
+    /// Retains its last non-nil value while the grid momentarily recycles every
+    /// visible cell, so the highlight doesn't flash back to the first letter
+    /// mid-library.
+    public private(set) var topVisibleIndex: Int?
+
+    /// Recompute `topVisibleIndex` from the live visible set, publishing only a
+    /// genuine change and never nil-ing out during a transient empty frame, so the
+    /// rail highlight stays put and observers aren't churned needlessly.
+    private func updateTopVisibleIndex() {
+        guard let newTop = visibleIndices.min() else { return }
+        if topVisibleIndex != newTop { topVisibleIndex = newTop }
+    }
 
     /// Called when the cell at `index` appears. Loads the page that owns `index`
     /// (and prefetches the next page when `index` is in the back half of its
@@ -216,6 +247,7 @@ public final class LibraryBrowseViewModel {
         let page = pageForIndex(index)
         if visibleIndices.insert(index).inserted {
             visibleCellCountsByPage[page, default: 0] += 1
+            updateTopVisibleIndex()
         }
         await ensurePageLoaded(page)
         let lookAhead = prefetchLookAheadPages(for: index, inPage: page)
@@ -235,6 +267,22 @@ public final class LibraryBrowseViewModel {
 
     private func schedulePageLoad(_ page: Int) {
         _ = startPageLoadIfNeeded(page)
+    }
+
+    /// Kicks off loading for the page a rail jump is about to land on — plus the
+    /// following page, which covers the rest of the on-screen viewport after a
+    /// `.top`-anchored jump — at interactive priority, *before* the scroll
+    /// completes. Without this, a deep jump into a large library lands on
+    /// non-focusable placeholder cells (pages only load once their cells appear),
+    /// so moving focus into the grid can feel stuck until the round-trip finishes.
+    /// The target's cells will re-await this same in-flight task when they appear,
+    /// so there is no duplicate request; small libraries jump within the first
+    /// (already-loaded) page, so this is effectively a no-op for them.
+    public func prepareJump(toIndex index: Int) {
+        guard index >= 0, index < totalCount else { return }
+        let page = pageForIndex(index)
+        _ = startPageLoadIfNeeded(page, priority: .userInitiated)
+        _ = startPageLoadIfNeeded(page + 1, priority: .userInitiated)
     }
 
     /// Applies a new sort order: persists the choice and, if it actually changed,
@@ -319,7 +367,7 @@ public final class LibraryBrowseViewModel {
         return min(lookAhead, maxLookAheadPages(fromPage: page))
     }
 
-    private func startPageLoadIfNeeded(_ page: Int) -> Task<Void, Never>? {
+    private func startPageLoadIfNeeded(_ page: Int, priority forcedPriority: TaskPriority? = nil) -> Task<Void, Never>? {
         guard page >= 0 else { return nil }
         let start = startIndex(forPage: page)
         guard start < totalCount else { return nil }
@@ -328,7 +376,7 @@ public final class LibraryBrowseViewModel {
 
         pagesInFlight.insert(page)
         let request = pageRequest(forPage: page)
-        let priority: TaskPriority = (visibleCellCountsByPage[page] ?? 0) > 0 ? .userInitiated : .utility
+        let priority: TaskPriority = forcedPriority ?? ((visibleCellCountsByPage[page] ?? 0) > 0 ? .userInitiated : .utility)
         let task = Task { [weak self] in
             guard let self else { return }
             await self.performPageLoad(page: page, request: request, priority: priority)
@@ -352,6 +400,11 @@ public final class LibraryBrowseViewModel {
                 totalCount = response.totalCount
                 resize(to: response.totalCount)
                 pagesLoaded = Set(pagesLoaded.filter { startIndex(forPage: $0) < response.totalCount })
+                // Keep `state` (which drives the grid's rendered `0..<total` range)
+                // in step with the corrected count — otherwise the grid keeps
+                // rendering the old total, leaving new items unreachable or stale
+                // placeholder slots behind.
+                state = response.totalCount == 0 ? .empty : .loaded(response.totalCount)
             }
             fill(response)
             pagesLoaded.insert(page)

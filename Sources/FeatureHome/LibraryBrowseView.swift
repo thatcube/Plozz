@@ -49,7 +49,7 @@ public struct LibraryBrowseView: View {
             onRetry: { Task { await viewModel.loadFirstPage() } }
         ) { total in
             ScrollViewReader { proxy in
-                ScrollView(.vertical, showsIndicators: false) {
+                ScrollView(.vertical) {
                     LazyVStack(alignment: .leading, spacing: metrics.sectionTitleSpacing) {
                         header
                         LazyVGrid(columns: columns, spacing: metrics.gridSpacing) {
@@ -68,9 +68,12 @@ public struct LibraryBrowseView: View {
                 }
                 // Never clip a focused card's lift, shadow or border.
                 .scrollClipDisabled()
-                // Hide the native scroll indicator: it otherwise draws right on
-                // top of the alphabet rail, which reads as jank.
-                .scrollIndicators(.hidden)
+                // Hide the native scroll indicator ONLY when the alphabet rail is
+                // up (name sort): it otherwise draws right on top of the rail,
+                // which reads as janky. `.never` (not `.hidden`, which the system
+                // may still flash transiently) fully suppresses it; every other
+                // sort keeps the default indicator.
+                .scrollIndicators(viewModel.showsLetterRail ? .never : .automatic)
                 .overlay(alignment: .trailing) {
                     if viewModel.showsLetterRail {
                         LibraryLetterRail(

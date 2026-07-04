@@ -471,33 +471,43 @@ private final class ScrollIndicatorHiderController: UIViewController {
         enforce()
     }
 
-    /// Re-hide (or restore) the indicator on every tracked scroll view. Indicator
-    /// subviews are matched by class-name substring (no private symbols referenced
-    /// at compile time), so it degrades gracefully if Apple renames the view — the
-    /// indicator would just reappear, never crash.
+    /// Show or hide the tvOS fast-scrolling index bar. This is the private
+    /// `_UIFocusFastScrollingIndexBarView` — a trailing-edge bar tvOS auto-adds to
+    /// long focusable scroll views, rendered as a column of collapsed section-index
+    /// marks (the "dots") plus a `_UIFocusFastScrollingIndexBarIndicatorView`
+    /// circular thumb. It is NOT the ordinary scroll indicator, so
+    /// `showsVerticalScrollIndicator` / indicator-inset tricks never touched it.
+    ///
+    /// Crucially we must NOT hide the bar container itself: on tvOS the bar
+    /// participates in the fast-scroll interaction, so hiding the container
+    /// mid-scroll cancels the gesture and stalls scrolling. Instead we blank only
+    /// its visible leaf subviews (the dot labels + the thumb) via alpha, leaving the
+    /// container fully present and interactive. tvOS recreates/repositions these
+    /// during scrolling, so we re-assert every frame via the display link while our
+    /// own A–Z rail is on screen. Matched by class-name substring so there are no
+    /// private symbols at compile time and it degrades gracefully.
     private func enforce() {
         let shouldHide = hidden
-        for scrollView in scrollViews {
-            if scrollView.showsVerticalScrollIndicator == shouldHide {
-                scrollView.showsVerticalScrollIndicator = !shouldHide
+        for scrollView in scrollViews where scrollView.showsVerticalScrollIndicator == shouldHide {
+            scrollView.showsVerticalScrollIndicator = !shouldHide
+        }
+        // The index bar isn't necessarily a child of the scroll view we located, so
+        // sweep the whole window for it.
+        if let root = view.window ?? scrollViews.first {
+            applyToIndexBarViews(in: root, hide: shouldHide)
+        }
+    }
+
+    private func applyToIndexBarViews(in view: UIView, hide: Bool) {
+        for subview in view.subviews {
+            if String(describing: type(of: subview)).contains("FastScrollingIndexBarView") {
+                // Blank the bar's visible content without touching the container's
+                // alpha/isHidden, so the fast-scroll interaction keeps working.
+                for element in subview.subviews {
+                    element.alpha = hide ? 0 : 1
+                }
             }
-            // Render it off the page: push the indicator track past the right edge
-            // (into overscan / off-screen) so even if a fresh indicator draws before
-            // our per-frame subview sweep catches it, it lands where it can't be
-            // seen. Restored to `.zero` when the rail is down.
-            let offRight: CGFloat = shouldHide ? -(scrollView.bounds.width + 60) : 0
-            let insets = UIEdgeInsets(top: 0, left: 0, bottom: 0, right: offRight)
-            if scrollView.verticalScrollIndicatorInsets != insets {
-                scrollView.verticalScrollIndicatorInsets = insets
-            }
-            for subview in scrollView.subviews {
-                let name = String(describing: type(of: subview))
-                guard name.contains("ScrollIndicator")
-                    || name.contains("TVScrollBar")
-                    || name.contains("ScrollBar") else { continue }
-                subview.alpha = shouldHide ? 0 : 1
-                subview.isHidden = shouldHide
-            }
+            applyToIndexBarViews(in: subview, hide: hide)
         }
     }
 

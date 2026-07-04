@@ -17,6 +17,13 @@ final class SeerDownloadProgressTests: XCTestCase {
         XCTAssertNil(SeerMapper.downloadProgress(from: [SeerDownloadingItem(size: 0, sizeLeft: 0)]))
     }
 
+    func testNilWhenGrabbedButNoBytesYet() {
+        // A just-grabbed item reports sizeLeft ≈ size (≈0%): reads as "Requested",
+        // not a stuck "Downloading 0%".
+        XCTAssertNil(SeerMapper.downloadProgress(from: [SeerDownloadingItem(size: 100, sizeLeft: 100)]))
+        XCTAssertNil(SeerMapper.downloadProgress(from: [SeerDownloadingItem(size: 1000, sizeLeft: 999)]))
+    }
+
     func testSingleItemFraction() {
         let p = SeerMapper.downloadProgress(from: [SeerDownloadingItem(size: 100, sizeLeft: 25)])
         XCTAssertEqual(p ?? -1, 0.75, accuracy: 0.0001)

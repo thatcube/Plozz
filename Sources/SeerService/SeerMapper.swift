@@ -74,11 +74,13 @@ enum SeerMapper {
         )
     }
 
-    /// Aggregate fetched fraction (`0..<1`) across a title's active download
-    /// queue items: `Σ(size - sizeLeft) / Σ size`. Returns `nil` when nothing is
-    /// downloading or no usable sizes are reported (queued but size unknown), so
-    /// the hero shows a plain "Downloading" rather than a 0%/stuck bar. Never
-    /// returns `1` (a fully-fetched title reports as available, not downloading).
+    /// Aggregate fetched fraction across a title's active download queue items:
+    /// `Σ(size - sizeLeft) / Σ size`. Returns `nil` when nothing is downloading,
+    /// no usable sizes are reported (queued but size unknown), OR the fetched
+    /// fraction wouldn't yet display as at least 1% — a just-grabbed item reports
+    /// `sizeLeft ≈ size` (≈0%), which should read as "Requested" rather than a
+    /// stuck "Downloading 0%". Never returns `1` (a fully-fetched title reports as
+    /// available, not downloading), so a non-nil result is always a live `1...99%`.
     static func downloadProgress(from items: [SeerDownloadingItem]?) -> Double? {
         guard let items, !items.isEmpty else { return nil }
         var totalSize = 0.0
@@ -91,7 +93,9 @@ enum SeerMapper {
         }
         guard totalSize > 0 else { return nil }
         let fraction = (totalSize - totalLeft) / totalSize
-        return min(0.999, max(0, fraction))
+        // Below ~0.5% rounds to "0%" — treat that as not-yet-downloading.
+        guard fraction >= 0.005 else { return nil }
+        return min(0.999, fraction)
     }
 
     /// Maps a page of results to `MediaItem`s, dropping people/unmappable

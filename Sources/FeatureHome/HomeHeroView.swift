@@ -991,7 +991,7 @@ struct HomeHeroView: View {
         case .play:
             heroPill(selected: selected) {
                 PlayResumeButtonLabel(
-                    title: "Play",
+                    title: item.resumeProgressFraction != nil ? "Resume" : "Play",
                     progress: item.resumeProgressFraction,
                     remainingText: item.resumeRemainingText,
                     onLight: selected || colorScheme == .light

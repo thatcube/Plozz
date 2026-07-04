@@ -387,6 +387,7 @@ public struct HomeView: View {
             else { continue }
 
             let fresh = await heroFeaturedProvider(settings.maxItems)
+            if Task.isCancelled { return }
             guard !fresh.isEmpty else { continue }
             var statusByID: [String: (availability: MediaAvailabilityStatus?, progress: Double?)] = [:]
             for item in fresh { statusByID[item.id] = (item.availability, item.downloadProgress) }

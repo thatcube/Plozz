@@ -897,13 +897,7 @@ struct HomeHeroView: View {
         HeroFocusDiagnostics.emit("handleLeft outcome=\(outcome) | \(hfState())")
         switch outcome {
         case let .moveButton(newIndex):
-            // Animate ONLY interior selection moves (never focus-driven changes):
-            // an explicit withAnimation here glides the pill highlight on L/R,
-            // while `heroPill` carries no `.animation(value: selected)` modifier so
-            // focus enter/leave changes the pills INSTANTLY. Animating pill
-            // scale/glass as focus leaves the hero collided with tvOS's focus-flip
-            // snapshot and crashed (`setToViewXFlippedScreenShot:`); see heroPill.
-            withAnimation(.easeOut(duration: 0.16)) { selectedButton = newIndex }
+            selectedButton = newIndex
         case let .advance(toItem, keepButton):
             page(to: toItem, keepButton: keepButton, forward: false)
             restoreFocusAfterPage()
@@ -968,7 +962,7 @@ struct HomeHeroView: View {
         HeroFocusDiagnostics.emit("handleRight outcome=\(outcome) | \(hfState())")
         switch outcome {
         case let .moveButton(newIndex):
-            withAnimation(.easeOut(duration: 0.16)) { selectedButton = newIndex }
+            selectedButton = newIndex
         case let .advance(toItem, keepButton):
             page(to: toItem, keepButton: keepButton, forward: true)
             restoreFocusAfterPage()
@@ -1131,18 +1125,12 @@ struct HomeHeroView: View {
         }
     }
 
-    /// The glass-pill chrome shared by every hero action. Selection styling
-    /// (bright fill + scale + shadow) rides `selected`, but this carries **no**
-    /// `.animation(value: selected)` modifier ON PURPOSE: `selected` depends on
-    /// `focus`, so animating it fired a pill scale/glass animation the instant
-    /// focus entered/left the hero — which raced tvOS's focus-flip view snapshot
-    /// and crashed with `-[… setToViewXFlippedScreenShot:]` (an animated
-    /// view-hierarchy change during a focus transition; a known tvOS pitfall).
-    /// Focus-driven changes therefore snap INSTANTLY (safe). The interior L/R
-    /// highlight glide is preserved by wrapping only those `selectedButton`
-    /// mutations in `withAnimation` (see `handleLeft`/`handleRight`), which never
-    /// coincide with a focus-section transition. Colour/fill also snap instantly
-    /// (the inner `.transaction` nils their animation).
+    /// The glass-pill chrome shared by every hero action. Identity-stable (only
+    /// animatable properties vary with `selected`), so nothing here can disturb
+    /// focus. Every idle pill is the same translucent glass; the selected pill (when
+    /// the hero holds focus) gets the bright white fill + dark glyph + lift.
+    /// Colour/fill snap instantly (no comet trail); only the scale/shadow lift
+    /// animates as selection moves.
     @ViewBuilder
     private func heroPill<Content: View>(
         selected: Bool,
@@ -1165,6 +1153,7 @@ struct HomeHeroView: View {
             .clipShape(shape)
             .scaleEffect(selected ? 1.06 : 1.0)
             .shadow(color: .black.opacity(selected ? 0.30 : 0), radius: selected ? 14 : 0, y: selected ? 8 : 0)
+            .animation(.easeOut(duration: 0.16), value: selected)
     }
 
     @ViewBuilder

@@ -397,6 +397,40 @@ public struct JellyfinClient: Sendable {
         return try await http.decode(ItemsResponse.self, from: endpoint, baseURL: baseURL)
     }
 
+    /// Count of items in a container, matching the same recursive/type filters
+    /// `items(...)` uses, optionally restricted to those whose **sort name** is
+    /// alphabetically less than `nameLessThan`. `Limit=0` fetches no rows — only
+    /// `TotalRecordCount` — so this is a cheap server-side count. Jellyfin's
+    /// `NameLessThan` compares against `SortName` (the same key the browse sorts
+    /// by), so `count(SortName < "L")` is exactly the grid offset of the first
+    /// item under letter "L", which is what the A–Z fast-scroll rail needs.
+    func itemCount(
+        userID: String,
+        parentID: String,
+        includeItemTypes: [String],
+        recursive: Bool,
+        nameLessThan: String? = nil
+    ) async throws -> Int {
+        var queryItems = [
+            URLQueryItem(name: "ParentId", value: parentID),
+            URLQueryItem(name: "StartIndex", value: "0"),
+            URLQueryItem(name: "Limit", value: "0"),
+            URLQueryItem(name: "EnableImages", value: "false"),
+            URLQueryItem(name: "EnableTotalRecordCount", value: "true")
+        ]
+        if let nameLessThan, !nameLessThan.isEmpty {
+            queryItems.append(URLQueryItem(name: "NameLessThan", value: nameLessThan))
+        }
+        if recursive {
+            queryItems.append(URLQueryItem(name: "Recursive", value: "true"))
+        }
+        if !includeItemTypes.isEmpty {
+            queryItems.append(URLQueryItem(name: "IncludeItemTypes", value: includeItemTypes.joined(separator: ",")))
+        }
+        let endpoint = Endpoint(path: "/Users/\(userID)/Items", queryItems: queryItems, headers: authHeaders)
+        return try await http.decode(ItemsResponse.self, from: endpoint, baseURL: baseURL).TotalRecordCount ?? 0
+    }
+
     /// Maps a provider-agnostic `SortField` onto Jellyfin's `SortBy` key.
     static func sortBy(for field: SortField) -> String {
         switch field {

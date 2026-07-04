@@ -43,6 +43,24 @@ public final class LibraryBrowseViewModel {
     /// kind so it is restored next time a library of that kind is opened.
     public private(set) var sort: CoreModels.SortDescriptor
 
+    /// The A–Z fast-scroll rail's jump targets: for each present letter, the
+    /// grid index of its first item in the current sort. Populated (once, off the
+    /// first page) only when sorting by **name** and the library is big enough to
+    /// be worth an index; empty for every other sort, so the rail simply hides.
+    public private(set) var letterEntries: [LibraryLetterIndexEntry] = []
+
+    /// Whether the trailing alphabet rail should be shown — true only when a
+    /// name-sort letter index resolved with at least a couple of letters.
+    public var showsLetterRail: Bool { letterEntries.count > 1 }
+
+    /// Below this library size the alphabet rail isn't worth showing (a short
+    /// list scrolls fine on its own) or the round-trips to build it.
+    private static let minItemsForLetterRail = 30
+
+    /// In-flight letter-index build, cancelled when the sort changes or the grid
+    /// reloads so a stale index never lands over a new sort.
+    private var letterIndexTask: Task<Void, Never>?
+
     /// Page indices whose load is in flight — guards against duplicate requests
     /// for the same page when several of its cells appear at once.
     private var pagesInFlight: Set<Int> = []
@@ -120,6 +138,8 @@ public final class LibraryBrowseViewModel {
         visibleCellCountsByPage = [:]
         visibleIndices = []
         lastAppearedIndex = nil
+        letterIndexTask?.cancel()
+        letterEntries = []
         PlozzLog.app.info(
             "LibraryBrowse: loading first page for \(containerID) (\(containerKind.rawValue)) firstPage=\(firstPageSize) steadyPage=\(subsequentPageSize)"
         )
@@ -137,6 +157,7 @@ public final class LibraryBrowseViewModel {
             fill(page)
             pagesLoaded.insert(0)
             state = page.totalCount == 0 ? .empty : .loaded(page.totalCount)
+            loadLetterIndexIfNeeded()
         } catch is CancellationError {
             return
         } catch let error as AppError {
@@ -147,6 +168,45 @@ public final class LibraryBrowseViewModel {
             state = .failed(.unknown(""))
         }
     }
+
+    /// Builds the alphabet fast-scroll index in the background when the grid is
+    /// sorted by name and large enough to warrant it. The provider returns an
+    /// empty index for any other sort (or when it can't compute one), so the
+    /// rail stays hidden. Runs once per browse session — cheap for Plex (one
+    /// facet request), a bounded concurrent count fan-out for Jellyfin — and is
+    /// cancelled if the sort changes before it lands.
+    private func loadLetterIndexIfNeeded() {
+        letterIndexTask?.cancel()
+        guard sort.field == .name, totalCount >= Self.minItemsForLetterRail else {
+            letterEntries = []
+            return
+        }
+        let sortAtRequest = sort
+        letterIndexTask = Task { [weak self] in
+            guard let self else { return }
+            let entries = (try? await self.provider.letterIndex(
+                in: self.containerID, kind: self.containerKind, sort: sortAtRequest
+            )) ?? []
+            guard !Task.isCancelled, sortAtRequest == self.sort else { return }
+            self.letterEntries = entries
+        }
+    }
+
+    /// The rail letter whose range currently contains `index` — the last entry
+    /// whose `startIndex` is `<= index`. Drives the "you are here" highlight as
+    /// the grid scrolls. `nil` when there is no index or `index` precedes the
+    /// first entry.
+    public func letter(forIndex index: Int) -> String? {
+        var match: String?
+        for entry in letterEntries {
+            if entry.startIndex <= index { match = entry.letter } else { break }
+        }
+        return match
+    }
+
+    /// The top-most currently-visible grid index (smallest visible index), used
+    /// to keep the rail's current-letter highlight in sync with a manual scroll.
+    public var topVisibleIndex: Int? { visibleIndices.min() }
 
     /// Called when the cell at `index` appears. Loads the page that owns `index`
     /// (and prefetches the next page when `index` is in the back half of its

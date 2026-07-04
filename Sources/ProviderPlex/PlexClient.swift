@@ -277,6 +277,27 @@ public struct PlexClient: Sendable {
         ).MediaContainer
     }
 
+    /// `GET /library/sections/{id}/firstCharacter` — the section's title
+    /// first-character facet: one `Directory` per present letter (in ascending
+    /// `titleSort` order) carrying its `titleSort` (`"A"`, `"1-9"`, `"#"`, …)
+    /// and `size` (how many titles fall under it). Cumulating the sizes gives
+    /// each letter's grid offset for the name-sorted browse, which drives the
+    /// A–Z fast-scroll rail. `type` scopes the counts to the browsed content
+    /// type so they match `sectionItems` in a mixed section.
+    func firstCharacter(sectionID: String, type: Int?) async throws -> [PlexDirectory] {
+        var query: [URLQueryItem] = []
+        if let type {
+            query.append(URLQueryItem(name: "type", value: String(type)))
+        }
+        let endpoint = Endpoint(
+            path: "/library/sections/\(sectionID)/firstCharacter",
+            queryItems: query,
+            headers: headers
+        )
+        return try await decode(PlexMediaContainerResponse.self, endpoint)
+            .MediaContainer.Directory ?? []
+    }
+
     /// `GET /search?query=…` — global server search across libraries. Returns a
     /// flat `Metadata` list of matching movies/shows/episodes.
     func search(query: String, limit: Int) async throws -> [PlexMetadata] {

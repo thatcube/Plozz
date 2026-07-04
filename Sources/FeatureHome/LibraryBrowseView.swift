@@ -16,6 +16,9 @@ import CoreUI
 public struct LibraryBrowseView: View {
     @State private var viewModel: LibraryBrowseViewModel
     @State private var prefetchedArtworkItemIDs: Set<String> = []
+    /// The rail letter that currently holds focus, or `nil` when focus is in the
+    /// grid. Drives the fly-through highlight + the transient jumbo letter bubble.
+    @State private var railFocusedLetter: String?
     private let title: String
     private let spoilerSettings: SpoilerSettings
     private let onSelect: (MediaItem) -> Void
@@ -45,28 +48,69 @@ public struct LibraryBrowseView: View {
             emptyMessage: "This library is empty.",
             onRetry: { Task { await viewModel.loadFirstPage() } }
         ) { total in
-            ScrollView(.vertical, showsIndicators: false) {
-                LazyVStack(alignment: .leading, spacing: metrics.sectionTitleSpacing) {
-                    header
-                    LazyVGrid(columns: columns, spacing: metrics.gridSpacing) {
-                        ForEach(0..<total, id: \.self) { index in
-                            cell(at: index)
+            ScrollViewReader { proxy in
+                ScrollView(.vertical, showsIndicators: false) {
+                    LazyVStack(alignment: .leading, spacing: metrics.sectionTitleSpacing) {
+                        header
+                        LazyVGrid(columns: columns, spacing: metrics.gridSpacing) {
+                            ForEach(0..<total, id: \.self) { index in
+                                cell(at: index)
+                                    // Explicit scroll identity so the rail's
+                                    // `scrollTo(startIndex)` lands on the right row.
+                                    .id(index)
+                            }
                         }
+                        .padding(.horizontal, HomeLayout.horizontalPadding)
+                        // Reserve a lane for the rail so no card sits under it.
+                        .padding(.trailing, viewModel.showsLetterRail ? Self.letterRailLane : 0)
+                        .padding(.bottom, PlozzTheme.Metrics.screenVerticalPadding)
+                        .focusSection()
                     }
-                    .padding(.horizontal, HomeLayout.horizontalPadding)
-                    .padding(.bottom, PlozzTheme.Metrics.screenVerticalPadding)
-                    .focusSection()
+                    .padding(.top, PlozzTheme.Spacing.large)
                 }
-                .padding(.top, PlozzTheme.Spacing.large)
+                // Never clip a focused card's lift, shadow or border.
+                .scrollClipDisabled()
+                .overlay(alignment: .trailing) {
+                    if viewModel.showsLetterRail {
+                        LibraryLetterRail(
+                            entries: viewModel.letterEntries,
+                            currentLetter: currentLetter,
+                            focusedLetter: $railFocusedLetter,
+                            onScrollToLetter: { entry in
+                                withAnimation(.easeOut(duration: 0.2)) {
+                                    proxy.scrollTo(entry.startIndex, anchor: .top)
+                                }
+                            }
+                        )
+                    }
+                }
+                // A transient jumbo letter that appears while flying the rail so
+                // the current jump target is legible from across the room.
+                .overlay(alignment: .center) {
+                    if let letter = railFocusedLetter {
+                        LetterJumpBubble(letter: letter)
+                            .transition(.scale.combined(with: .opacity))
+                            .allowsHitTesting(false)
+                    }
+                }
+                .animation(.easeOut(duration: 0.15), value: railFocusedLetter)
             }
-            // Never clip a focused card's lift, shadow or border.
-            .scrollClipDisabled()
         }
         // Browse is a full-screen sub-page: hide the top tab bar so it reads as a
         // dedicated destination with no navigation chrome pinned at the top.
         .toolbar(.hidden, for: .tabBar)
         .task { if viewModel.state.value == nil { await viewModel.loadFirstPage() } }
     }
+
+    /// The letter to highlight as "current": the focused rail letter while flying
+    /// the rail, otherwise the letter owning the top-most visible grid row.
+    private var currentLetter: String? {
+        if let railFocusedLetter { return railFocusedLetter }
+        return viewModel.letter(forIndex: viewModel.topVisibleIndex ?? 0)
+    }
+
+    /// Width reserved on the trailing edge of the grid for the alphabet rail.
+    private static let letterRailLane: CGFloat = 64
 
     /// The library title and Sort control. It scrolls *with* the grid (it is the
     /// first row of the scroll content), so nothing is pinned to the top of the
@@ -180,6 +224,110 @@ private struct PosterPlaceholderView: View {
             .redacted(reason: .placeholder)
         }
         .padding(10)
+    }
+}
+
+/// The Infuse-style vertical A–Z fast-scroll rail pinned to the trailing edge of
+/// the browse grid. Each present letter is a focusable button; moving focus onto
+/// a letter scrolls the grid to that letter's first item (fly-through), and
+/// pressing it jumps there too. The letter whose range currently sits at the top
+/// of the grid is highlighted so it doubles as a position indicator.
+///
+/// Only shown when the grid is name-sorted (the view model supplies the per-letter
+/// offsets), so it never appears for date/rating/etc. sorts where letters are
+/// meaningless.
+private struct LibraryLetterRail: View {
+    let entries: [LibraryLetterIndexEntry]
+    let currentLetter: String?
+    @Binding var focusedLetter: String?
+    let onScrollToLetter: (LibraryLetterIndexEntry) -> Void
+
+    @FocusState private var focus: String?
+
+    var body: some View {
+        VStack(spacing: 2) {
+            ForEach(entries, id: \.letter) { entry in
+                Button {
+                    onScrollToLetter(entry)
+                } label: {
+                    Text(entry.letter)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(
+                    LetterRailButtonStyle(isCurrent: entry.letter == currentLetter)
+                )
+                .focused($focus, equals: entry.letter)
+            }
+        }
+        .padding(.vertical, PlozzTheme.Spacing.medium)
+        .padding(.trailing, PlozzTheme.Spacing.small)
+        .frame(width: 52)
+        .focusSection()
+        // Publish which letter is focused up to the parent (drives the jumbo
+        // bubble + highlight), and fly the grid to it as focus arrives.
+        .onChange(of: focus) { _, newValue in
+            focusedLetter = newValue
+            guard let newValue,
+                  let entry = entries.first(where: { $0.letter == newValue }) else { return }
+            onScrollToLetter(entry)
+        }
+    }
+}
+
+/// Focus/selection styling for a single rail letter: a compact glyph that lifts
+/// into the standard bright tvOS focus pill when focused, and tints to the brand
+/// accent (without a pill) when it is merely the current position marker.
+private struct LetterRailButtonStyle: ButtonStyle {
+    let isCurrent: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        RailLetterBody(configuration: configuration, isCurrent: isCurrent)
+    }
+
+    private struct RailLetterBody: View {
+        let configuration: ButtonStyle.Configuration
+        let isCurrent: Bool
+        @Environment(\.isFocused) private var isFocused
+        @Environment(\.themePalette) private var palette
+
+        private var foreground: Color {
+            if isFocused { return .black }
+            if isCurrent { return palette.accent }
+            return palette.secondaryText
+        }
+
+        var body: some View {
+            configuration.label
+                .font(.system(size: 22, weight: isFocused || isCurrent ? .bold : .semibold, design: .rounded))
+                .foregroundStyle(foreground)
+                .frame(width: 40, height: 34)
+                .background(
+                    Circle()
+                        .fill(.white)
+                        .opacity(isFocused ? 1 : 0)
+                )
+                .scaleEffect(isFocused ? 1.25 : 1.0)
+                .animation(.easeOut(duration: 0.14), value: isFocused)
+                .animation(.easeOut(duration: 0.14), value: isCurrent)
+        }
+    }
+}
+
+/// The large, centered letter shown briefly while the rail is focused, echoing
+/// Infuse's jumbo jump indicator so the target letter is readable at a glance.
+private struct LetterJumpBubble: View {
+    let letter: String
+
+    var body: some View {
+        Text(letter)
+            .font(.system(size: 140, weight: .heavy, design: .rounded))
+            .foregroundStyle(.white)
+            .frame(width: 220, height: 220)
+            .background(
+                RoundedRectangle(cornerRadius: 36, style: .continuous)
+                    .fill(.black.opacity(0.55))
+            )
+            .shadow(color: .black.opacity(0.4), radius: 24, x: 0, y: 12)
     }
 }
 

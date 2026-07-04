@@ -20,11 +20,12 @@ final class PlexHubsTests: XCTestCase {
     ///  - More in Drama   → kept (genre discovery hub, 3 items)
     ///  - Because You Watched → kept (similar hub, 3 items)
     ///  - Top Rated       → kept (3 items)
+    ///  - Top Movies by Kyle Balda → dropped (director/person hub, even with 3 items)
     ///  - Top Movies with an Actor → dropped (person hub with a single title)
     ///  - Genres          → dropped (Directory-only, no playable items)
     ///  - Recently Released (empty) → dropped (no items)
     private let hubsJSON = """
-    {"MediaContainer":{"size":8,"Hub":[
+    {"MediaContainer":{"size":9,"Hub":[
       {"hubIdentifier":"movie.recentlyadded.1","context":"hub.movie.recentlyadded","title":"Recently Added Movies","type":"movie","more":true,
        "Metadata":[{"ratingKey":"1","type":"movie","title":"New Arrival","librarySectionID":1}]},
       {"hubIdentifier":"movie.ondeck.1","context":"hub.movie.ondeck","title":"On Deck","type":"movie","more":false,
@@ -47,6 +48,12 @@ final class PlexHubsTests: XCTestCase {
          {"ratingKey":"31","type":"movie","title":"Acclaimed Two","librarySectionID":1},
          {"ratingKey":"32","type":"movie","title":"Acclaimed Three","librarySectionID":1}
        ]},
+      {"hubIdentifier":"movie.by.director.7","context":"hub.movie.director","title":"Top Movies by Kyle Balda","type":"movie","more":true,
+       "Metadata":[
+         {"ratingKey":"50","type":"movie","title":"Minions","librarySectionID":1},
+         {"ratingKey":"51","type":"movie","title":"Despicable Me 3","librarySectionID":1},
+         {"ratingKey":"52","type":"movie","title":"Minions: The Rise of Gru","librarySectionID":1}
+       ]},
       {"hubIdentifier":"movie.by.actor.99","context":"hub.movie.byactor","title":"Top Movies with Misa Koide","type":"movie","more":false,
        "Metadata":[{"ratingKey":"40","type":"movie","title":"Her Only Film","librarySectionID":1}]},
       {"hubIdentifier":"movie.genres","context":"hub.movie.genres","title":"Genres","type":"movie","more":false,
@@ -56,20 +63,20 @@ final class PlexHubsTests: XCTestCase {
     ]}}
     """
 
-    func testFiltersDuplicateSparseAndEmptyHubsAndMapsTheRest() async throws {
+    func testFiltersDuplicatePersonSparseAndEmptyHubsAndMapsTheRest() async throws {
         let stub = StubHTTPClient()
         stub.stub(pathSuffix: "/hubs/sections/1", json: hubsJSON)
         let provider = PlexProvider(session: makeSession(), http: stub)
 
         let sections = try await provider.libraryHubs(libraryID: "1", kind: .movie, limit: 20)
 
-        // The three populated discovery hubs survive, in server order. The
-        // duplicate (recently added / on deck), the single-title person hub, the
-        // Directory-only, and the empty hub are all dropped.
+        // The three populated NON-person discovery hubs survive, in server order.
+        // Dropped: base duplicates (recently added / on deck), both person hubs
+        // (director w/ 3 items AND single-title actor), Directory-only, empty.
         XCTAssertEqual(sections.map(\.title), ["More in Drama", "Because You Watched Drama A", "Top Rated"])
         XCTAssertEqual(sections.map(\.id), ["movie.genre.drama", "movie.similar.10", "movie.toprated"])
-        XCTAssertFalse(sections.contains { $0.title.contains("Misa Koide") },
-                       "A single-title person hub must not become a whole row")
+        XCTAssertFalse(sections.contains { $0.title.contains("Kyle Balda") || $0.title.contains("Misa Koide") },
+                       "Auto-generated person hubs must never become rows")
         XCTAssertEqual(sections.first?.items.map(\.title), ["Drama A", "Drama B", "Drama C"])
         XCTAssertEqual(sections.first?.items.first?.libraryID, "1")
         XCTAssertTrue(sections.allSatisfy { $0.style == .poster && $0.items.count >= 3 })
@@ -98,6 +105,21 @@ final class PlexHubsTests: XCTestCase {
         XCTAssertFalse(PlexProvider.isBaseDuplicateHub(identifier: "movie.genre.drama", context: "hub.movie.genre"))
         XCTAssertFalse(PlexProvider.isBaseDuplicateHub(identifier: "movie.similar.10", context: "hub.movie.similar", title: "Because You Watched X"))
         XCTAssertFalse(PlexProvider.isBaseDuplicateHub(identifier: "tv.startWatching", context: "hub.tv.startWatching", title: "Start Watching"))
+    }
+
+    func testIsPersonHubDetectsActorAndDirectorHubs() {
+        // Role tokens in identifier/context…
+        XCTAssertTrue(PlexProvider.isPersonHub(identifier: "movie.by.director.7", context: "hub.movie.director"))
+        XCTAssertTrue(PlexProvider.isPersonHub(identifier: "movie.by.actor.99", context: "hub.movie.byactor"))
+        XCTAssertTrue(PlexProvider.isPersonHub(identifier: nil, context: "hub.movie.writer"))
+        // …and the "Top <Movies|Shows> with/by <person>" title fallback when the
+        // identifier is missing.
+        XCTAssertTrue(PlexProvider.isPersonHub(identifier: nil, context: nil, title: "Top Movies by Kyle Balda"))
+        XCTAssertTrue(PlexProvider.isPersonHub(identifier: "", context: "", title: "Top Shows with Misa Koide"))
+        // Non-person discovery hubs are NOT person hubs.
+        XCTAssertFalse(PlexProvider.isPersonHub(identifier: "movie.genre.drama", context: "hub.movie.genre", title: "More in Drama"))
+        XCTAssertFalse(PlexProvider.isPersonHub(identifier: "movie.similar.1", context: "hub.movie.similar", title: "Because You Watched X"))
+        XCTAssertFalse(PlexProvider.isPersonHub(identifier: "movie.toprated", context: "hub.movie.toprated", title: "Top Rated"))
     }
 
     func testDropsContinueWatchingHubToAvoidDuplicateRow() async throws {

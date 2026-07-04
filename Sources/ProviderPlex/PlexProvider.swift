@@ -160,9 +160,14 @@ public struct PlexProvider: MediaProvider {
         let hubs = try await client.sectionHubs(sectionID: libraryID, count: limit)
         return hubs.compactMap { hub in
             guard !Self.isBaseDuplicateHub(identifier: hub.hubIdentifier, context: hub.context, title: hub.title) else { return nil }
+            // Drop Plex's auto-generated person hubs ("Top Movies with <actor>",
+            // "Top Movies by <director>"). Plex's own Home screen doesn't promote
+            // these — they only live in the per-section "full menu" — and they read
+            // as noise (an actor/director the user has never heard of).
+            guard !Self.isPersonHub(identifier: hub.hubIdentifier, context: hub.context, title: hub.title) else { return nil }
             let items = (hub.Metadata ?? []).map(map(metadata:))
-            // Require enough items to justify a whole row — Plex emits person/cast
-            // hubs ("Top Movies with <actor>") that can contain a single title.
+            // Require enough items to justify a whole row — a near-empty shelf reads
+            // as broken.
             guard items.count >= Self.minimumHubItems else { return nil }
             let title = hub.title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             guard !title.isEmpty else { return nil }
@@ -177,9 +182,25 @@ public struct PlexProvider: MediaProvider {
     }
 
     /// Minimum items a Plex discovery hub must have to render as its own row. Below
-    /// this a hub reads as a broken, near-empty shelf (e.g. a "Top Movies with
-    /// <actor>" hub where the actor appears in just one library title).
+    /// this a hub reads as a broken, near-empty shelf.
     static let minimumHubItems = 3
+
+    /// Whether a hub is one of Plex's auto-generated **person** hubs — "Top Movies
+    /// with <actor>", "Top Movies by <director>", writer/producer variants, etc.
+    /// These are excluded because Plex itself doesn't surface them on Home (they
+    /// only exist in the per-section full menu) and they're low-signal noise.
+    ///
+    /// Matched on stable `hubIdentifier` / `context` role tokens, with a narrow
+    /// title fallback for identifier-less person hubs: the very recognizable
+    /// "Top <Movies|Shows> with/by <person>" phrasing. Genre / similar / top-rated
+    /// / recently-released hubs match none of these.
+    static func isPersonHub(identifier: String?, context: String?, title: String? = nil) -> Bool {
+        let haystack = [identifier ?? "", context ?? ""].joined(separator: " ").lowercased()
+        let roleTokens = ["actor", "director", "writer", "producer", "cast", "crew"]
+        if roleTokens.contains(where: { haystack.contains($0) }) { return true }
+        let t = (title ?? "").lowercased()
+        return t.hasPrefix("top ") && (t.contains(" with ") || t.contains(" by "))
+    }
 
     /// Whether a hub duplicates one of the rows Plozz renders itself for a library
     /// (Recently Added, Continue Watching / On Deck), so it should be dropped from

@@ -885,25 +885,26 @@ struct HomeHeroView: View {
     private func heroButtonVisual(_ button: HeroButton, for item: MediaItem, selected: Bool) -> some View {
         switch button {
         case .play:
-            heroPill(selected: selected, prominent: true) {
+            heroPill(selected: selected) {
                 Label(item.resumePosition != nil ? "Resume" : "Play", systemImage: "play.fill")
                     .font(.system(size: 28, weight: .semibold))
             }
         case .moreInfo:
-            heroPill(selected: selected, prominent: false) {
-                Label("More Info", systemImage: "info.circle")
+            heroPill(selected: selected) {
+                Image(systemName: "info.circle")
                     .font(.system(size: 28, weight: .semibold))
+                    .frame(width: 34, height: 34)
             }
         case .watchlist:
             let target = watchlistTarget(for: item)
-            heroPill(selected: selected, prominent: false) {
+            heroPill(selected: selected) {
                 Image(systemName: target.isFavorite ? "bookmark.fill" : "bookmark")
                     .font(.system(size: 28, weight: .semibold))
                     .symbolEffect(.bounce, value: target.isFavorite)
                     .frame(width: 34, height: 34)
             }
         case .next:
-            heroPill(selected: selected, prominent: false) {
+            heroPill(selected: selected) {
                 Image(systemName: "chevron.right")
                     .font(.system(size: 28, weight: .semibold))
                     .frame(width: 34, height: 34)
@@ -913,13 +914,13 @@ struct HomeHeroView: View {
 
     /// The glass-pill chrome shared by every hero action. Identity-stable (only
     /// animatable properties vary with `selected`), so nothing here can disturb
-    /// focus. `prominent` tints the idle Play pill with the app accent, matching
-    /// `.glassProminent` on the detail hero. Colour/fill snap instantly (no comet
-    /// trail); only the scale/shadow lift animates as selection moves.
+    /// focus. Every idle pill is the same translucent glass; the selected pill (when
+    /// the hero holds focus) gets the bright white fill + dark glyph + lift.
+    /// Colour/fill snap instantly (no comet trail); only the scale/shadow lift
+    /// animates as selection moves.
     @ViewBuilder
     private func heroPill<Content: View>(
         selected: Bool,
-        prominent: Bool,
         @ViewBuilder _ label: () -> Content
     ) -> some View {
         let shape = Capsule(style: .continuous)
@@ -930,7 +931,7 @@ struct HomeHeroView: View {
             .padding(.vertical, 18)
             .background {
                 ZStack {
-                    heroPillIdleBackground(shape: shape, prominent: prominent)
+                    heroPillIdleBackground(shape: shape)
                         .opacity(selected ? 0 : 1)
                     shape.fill(.white).opacity(selected ? 1 : 0)
                 }
@@ -943,16 +944,11 @@ struct HomeHeroView: View {
     }
 
     @ViewBuilder
-    private func heroPillIdleBackground(shape: Capsule, prominent: Bool) -> some View {
+    private func heroPillIdleBackground(shape: Capsule) -> some View {
         if #available(tvOS 26.0, *) {
-            // Liquid Glass for every idle pill. The prominent Play/Resume pill was
-            // previously a solid `Color.accentColor` fill, but the app ships an
-            // EMPTY `AccentColor` asset, so inside this package `Color.accentColor`
-            // resolves to white — a white pill with an invisible white label. Use
-            // regular glass and give the prominent pill a slightly brighter white
-            // tint so it reads as "primary" while its white label stays legible.
+            // Liquid Glass for every idle pill.
             shape.fill(.clear)
-                .glassEffect(prominent ? .regular.tint(.white.opacity(0.18)) : .regular, in: shape)
+                .glassEffect(.regular, in: shape)
         } else {
             shape.fill(.ultraThinMaterial)
         }

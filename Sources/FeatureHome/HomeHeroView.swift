@@ -860,9 +860,16 @@ struct HomeHeroView: View {
     /// tick — after SwiftUI has committed the paged layout — lands reliably because
     /// it no longer races the content change. It only fires if focus was actually
     /// dropped (`== nil`) AND no newer page has happened since (`advanceToken`
-    /// unchanged), so it can never steal focus the user moved away deliberately.
-    /// A no-op on the ~80% of pages where the synchronous re-pin already worked, so
-    /// it adds no flicker there.
+    /// unchanged), and is a no-op on the ~80% of pages where the synchronous re-pin
+    /// already worked (so it adds no flicker there). Note the `advanceToken` guard
+    /// rules out a *newer page* superseding this reassert; it does NOT by itself
+    /// distinguish an engine-dropped re-pin from a deliberate non-paging exit (Down
+    /// to a row / Up to the tab bar / Left to the sidebar all also leave
+    /// `focus == nil`). We rely on timing instead: this block drains on the very
+    /// next main-runloop turn — well before a second physical remote press can
+    /// arrive (~100ms+) — so a deliberate exit that happens *after* the restore
+    /// still wins normally. (A multi-frame main-thread stall could theoretically
+    /// let a second press land first; not observed on device.)
     private func restoreFocusAfterPage() {
         let token = advanceToken
         DispatchQueue.main.async {

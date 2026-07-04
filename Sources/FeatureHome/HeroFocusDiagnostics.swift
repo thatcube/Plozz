@@ -68,10 +68,14 @@ public enum HeroFocusDiagnostics {
     }
 
     /// Emits one already-formatted telemetry line (the `PLZHFOCUS ` prefix and the
-    /// `t+<ms>` stamp are added). No-op when disabled.
-    public static func emit(_ line: String) {
+    /// Emits one already-formatted telemetry line (the `PLZHFOCUS ` prefix and the
+    /// `t+<ms>` stamp are added). No-op when disabled. The line is an
+    /// `@autoclosure` so the (sometimes non-trivial) string building at the call
+    /// sites — e.g. `hfState()` on every focus move — is skipped entirely unless
+    /// telemetry is enabled, keeping shipped runs truly free.
+    public static func emit(_ line: @autoclosure () -> String) {
         guard gate.isEnabled else { return }
-        let stamped = "\(stamp()) \(line)"
+        let stamped = "\(stamp()) \(line())"
         #if canImport(OSLog)
         // `.notice` (OSLogType.default) so Console.app shows these WITHOUT the
         // "Include Info Messages" toggle and `log stream` shows them by default.

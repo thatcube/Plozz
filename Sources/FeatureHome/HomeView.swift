@@ -481,13 +481,31 @@ public struct HomeView: View {
     }
 }
 
-/// The `.task(id:)` key that drives hero recomputation: any change to the loaded
-/// Home content (Continue Watching / Watchlist feed the curator directly) or the
-/// hero settings re-runs the curator. `Equatable` so SwiftUI restarts the task
-/// only on a real change.
+/// The `.task(id:)` key that drives hero recomputation. It intentionally depends
+/// ONLY on the inputs the hero actually consumes — Continue Watching + Watchlist
+/// (the content-backed sources), the visible library keys (Random's scope), and
+/// the hero settings — keyed by item **id**, not full value. This is deliberate:
+/// keying on the whole `Content` re-ran the recompute on every unrelated content
+/// republish (e.g. `latest`/artwork enrichment updating every ~second), and each
+/// re-run re-fetched the Random + Featured sources fresh, churning the hero's item
+/// ids. That id churn tore down and rebuilt the hero's focusable views — and when
+/// a rebuild landed during a tvOS focus transition (e.g. moving up to the tab bar)
+/// the focus engine crashed sending `setToViewXFlippedScreenShot:` to the freed
+/// view (`NSInvalidArgumentException`). Scoping the key to the real hero inputs
+/// stops the needless re-rolls, so the set only changes on genuine, infrequent
+/// updates. `Equatable` so SwiftUI restarts the task only on a real change.
 private struct HeroRecomputeKey: Equatable {
-    let content: HomeViewModel.Content
+    let continueWatchingIDs: [String]
+    let watchlistIDs: [String]
+    let libraryKeys: [String]
     let settings: HeroSettings?
+
+    init(content: HomeViewModel.Content, settings: HeroSettings?) {
+        self.continueWatchingIDs = content.continueWatching.map(\.id)
+        self.watchlistIDs = content.watchlist.map(\.id)
+        self.libraryKeys = content.libraries.map(\.key)
+        self.settings = settings
+    }
 }
 
 /// A Home "Libraries" tile. Mirrors `PosterCardView`'s landscape (medium-card)

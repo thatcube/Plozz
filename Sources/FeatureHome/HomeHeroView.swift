@@ -509,6 +509,17 @@ struct HomeHeroView: View {
     private func content(for item: MediaItem) -> some View {
         let hideText = spoilerSettings.shouldHideText(for: item)
         VStack(alignment: .leading, spacing: 12) {
+            // Absorbs the vertical slack at the TOP of the (fixed-height) column so
+            // the bottom block — logo/metadata/overview + buttons + dots — is pinned
+            // to an integer offset from the frame's bottom edge. Previously the whole
+            // column was bottom-anchored as one unit, so the metadata block's
+            // *fractional*, per-slide-varying height (different overviews / metadata)
+            // nudged the column's rounded origin by 1–2pt every page — the reported
+            // paging jitter where the buttons and dots crept up/down. With this
+            // Spacer taking the fractional slack, a taller/shorter metadata block
+            // only changes the Spacer's height; the buttons and dots stay put.
+            Spacer(minLength: 0)
+
             // The show *description* (logo/title/metadata/overview). ONLY this
             // fades: hidden instantly on a page and faded back in once the new
             // backdrop has wiped into place, so the old title/overview never sit
@@ -574,8 +585,14 @@ struct HomeHeroView: View {
                 // original screen position, so push them back down by the same 120pt.
                 .offset(y: Self.pagingDotsDrop)
         }
+        // Fixed, INTEGER height for the column so its origin never rounds to a
+        // different pixel per slide (the paging-jitter root cause). The height is
+        // the full hero height minus the bottom inset; the top Spacer inside then
+        // absorbs the fractional slack, and the bottom block (buttons + dots) sits
+        // at an integer offset from this frame's bottom. `screenHeight` and
+        // `contentBottomInset` are whole numbers, so the frame bottom is integral.
+        .frame(height: HomeHeroLayout.screenHeight - Self.contentBottomInset)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.top, PlozzTheme.Metrics.screenPadding)
         .padding(.trailing, PlozzTheme.Metrics.screenPadding)
         .padding(.leading, PlozzTheme.Metrics.heroLeadingPadding)
         // Lift the content column off the very bottom of the full-screen hero so

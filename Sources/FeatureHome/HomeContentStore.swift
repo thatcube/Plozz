@@ -23,10 +23,14 @@ import CoreModels
 public protocol HomeContentStoring: Sendable {
     /// The last persisted snapshot, or `nil` on a miss (no file / stale / decode
     /// failure / empty). Read **synchronously** so `HomeViewModel` can hydrate its
-    /// initial state at construction; the file is bounded (small) so this is cheap.
+    /// initial state at construction. `HomeContentStore` memoizes the first decode,
+    /// so the repeated `load()` calls SwiftUI triggers by re-evaluating the inline
+    /// `HomeViewModel(...)` on each `HomeTab.body` pass stay O(1) after the first.
     func load() -> HomeViewModel.Content?
-    /// Persists `content` (bounded) as the newest snapshot. Fire-and-forget: the
-    /// write runs off the caller's thread so it never blocks a load or the UI.
+    /// Persists `content` (bounded) as the newest snapshot. Synchronous (like
+    /// `HomeLayoutStore`): bounded payload, called only a handful of times per
+    /// session (never on a scroll/animation hot path), so the atomic write is a
+    /// negligible one-off cost and a subsequent `load()` reads it back reliably.
     func save(_ content: HomeViewModel.Content)
 }
 
@@ -52,6 +56,19 @@ public final class HomeContentStore: HomeContentStoring, @unchecked Sendable {
     private static let schemaDirName = "plozz-home-content-v1"
     private static let schemaDirPrefix = "plozz-home-content"
 
+    /// Process-wide guards. `HomeContentStore` is (re)constructed inline in
+    /// `RootView.body` and its `load()` re-run on every `HomeTab.body` pass (the
+    /// inline `HomeViewModel(...)` argument is re-evaluated even though `@State`
+    /// keeps only the first instance). To stop that from repeatedly hitting the
+    /// main-thread filesystem, we (a) run the one-time superseded-schema cleanup
+    /// only once per process, and (b) memoize the decoded snapshot per file path —
+    /// the first `load()` reads disk, the rest are O(1). Serving the first decode on
+    /// repeat calls is correct: only the very first `load()` (first VM construction)
+    /// is ever used; later ones are discarded by `@State`.
+    private static let lock = NSLock()
+    private static var didCleanup = false
+    private static var memo: [String: HomeViewModel.Content?] = [:]
+
     public init(
         namespace: String? = nil,
         directory: URL? = HomeContentStore.defaultDirectory(),
@@ -65,8 +82,11 @@ public final class HomeContentStore: HomeContentStoring, @unchecked Sendable {
             return
         }
         let dir = directory.appendingPathComponent(Self.schemaDirName, isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        Self.removeSupersededCaches(besideSchemaDirIn: directory)
+        // Run the superseded-schema cleanup at most once per process (it's a global
+        // one-time cleanup, not per-instance), so repeated construction never
+        // re-enumerates the Caches directory on the main thread. The live directory
+        // is created lazily in `save()` (a `load()` on a missing dir just misses).
+        Self.cleanupSupersededCachesOnce(besideSchemaDirIn: directory)
         // Per-profile filename: default profile keeps the un-suffixed base.
         let name = SettingsKey.scoped("home-content", namespace: namespace)
         let safe = Data(name.utf8).base64EncodedString()
@@ -77,8 +97,30 @@ public final class HomeContentStore: HomeContentStoring, @unchecked Sendable {
     }
 
     public func load() -> HomeViewModel.Content? {
-        guard let fileURL,
-              let data = try? Data(contentsOf: fileURL),
+        guard let fileURL else { return nil }
+        let key = fileURL.path
+        Self.lock.lock()
+        if let cached = Self.memo[key] {
+            Self.lock.unlock()
+            return cached
+        }
+        Self.lock.unlock()
+
+        let result = readSnapshot(at: fileURL)
+        Self.lock.lock()
+        // `updateValue` (not `memo[key] = result`) so a MISS is stored as a present
+        // entry with a nil value — a bare `memo[key] = nil` would instead remove the
+        // key and re-miss forever. Distinguishing "cached miss" from "never loaded"
+        // is what makes repeated misses O(1) too.
+        Self.memo.updateValue(result, forKey: key)
+        Self.lock.unlock()
+        return result
+    }
+
+    /// The one genuine disk read+decode for `load()`. Honors `maxAge` (deleting a
+    /// stale file) and treats an empty snapshot as a miss.
+    private func readSnapshot(at fileURL: URL) -> HomeViewModel.Content? {
+        guard let data = try? Data(contentsOf: fileURL),
               let stored = try? JSONDecoder().decode(Stored.self, from: data)
         else { return nil }
         guard Date().timeIntervalSince(stored.savedAt) < maxAge else {
@@ -90,18 +132,29 @@ public final class HomeContentStore: HomeContentStoring, @unchecked Sendable {
 
     public func save(_ content: HomeViewModel.Content) {
         guard let fileURL else { return }
-        // Written synchronously (like `HomeLayoutStore`): the payload is bounded
-        // (small) and `save` is only called once per successful load — never on a
-        // scroll/animation hot path — so the atomic write is a negligible, one-off
-        // cost, and keeping it synchronous makes the store trivially testable.
         let stored = Stored(content: content.bounded(perRow: maxItemsPerRow), savedAt: Date())
         guard let data = try? JSONEncoder().encode(stored) else { return }
+        // Create the schema dir lazily here (not per-init), then write atomically.
+        try? FileManager.default.createDirectory(
+            at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true
+        )
         try? data.write(to: fileURL, options: .atomic)
+        // Invalidate the memo so the next `load()` re-reads the fresh snapshot from
+        // disk (rather than serving a stale cached decode). Repeated loads WITHOUT
+        // an intervening save still hit the memo — that's the hot path we optimize.
+        Self.lock.lock()
+        Self.memo.removeValue(forKey: fileURL.path)
+        Self.lock.unlock()
     }
 
     /// Drops sibling schema dirs left by earlier versions so a bump reclaims their
-    /// files instead of leaking them (mirrors `DetailSnapshotCache`).
-    private static func removeSupersededCaches(besideSchemaDirIn parent: URL) {
+    /// files instead of leaking them (mirrors `DetailSnapshotCache`). Runs at most
+    /// once per process.
+    private static func cleanupSupersededCachesOnce(besideSchemaDirIn parent: URL) {
+        lock.lock()
+        if didCleanup { lock.unlock(); return }
+        didCleanup = true
+        lock.unlock()
         guard let dirs = try? FileManager.default.contentsOfDirectory(
             at: parent, includingPropertiesForKeys: nil
         ) else { return }

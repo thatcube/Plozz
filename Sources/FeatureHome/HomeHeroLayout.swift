@@ -34,7 +34,7 @@ enum HomeHeroLayout {
     /// dots) is lifted off the bottom edge of the full-screen hero, so it sits in
     /// the lower third — paired with ``rowOverlap`` to land Continue Watching just
     /// beneath the paging dots.
-    static let contentBottomInset: CGFloat = 252
+    static let contentBottomInset: CGFloat = 222
 
     /// Vertical spacing between the hero content column's stacked elements.
     static let contentColumnSpacing: CGFloat = 12

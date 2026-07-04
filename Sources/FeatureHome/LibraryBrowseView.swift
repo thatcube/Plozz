@@ -343,9 +343,9 @@ private struct LetterRailButtonStyle: ButtonStyle {
 
         var body: some View {
             configuration.label
-                .font(.system(size: 26, weight: isFocused || isCurrent ? .heavy : .bold, design: .rounded))
+                .font(.system(size: 26, weight: isFocused || isCurrent ? .heavy : .bold))
                 .foregroundStyle(foreground)
-                .frame(width: 46, height: 33)
+                .frame(width: 48, height: 37)
                 .background(
                     Circle()
                         .fill(.white)
@@ -377,21 +377,23 @@ private struct LetterJumpBubble: View {
 }
 
 #if canImport(UIKit)
-/// Probe that reaches its enclosing `UIScrollView` and keeps the vertical scroll
-/// indicator hidden. `.scrollIndicators(.never)` and a one-shot
+/// Probe that reaches its enclosing `UIScrollView`(s) and keeps the vertical
+/// scroll indicator hidden. `.scrollIndicators(.never)` and a one-shot
 /// `showsVerticalScrollIndicator = false` both proved unreliable on tvOS for this
-/// grid: SwiftUI re-asserts the indicator after every layout pass, and tvOS
-/// re-flashes it on focus-driven scrolls, so it kept drawing on top of the
-/// alphabet rail. (Confirmed via research against swiftui-introspect's source —
-/// tvOS `ScrollView` is a real `UIScrollView` — and issue #123, where SwiftUI is
-/// shown to override introspected indicator properties.)
+/// grid: SwiftUI re-asserts the indicator after every layout pass, and — crucially
+/// — tvOS's focus scroll bar (`_TVScrollBarView`) is a *dynamically re-created*
+/// subview that reappears on focus-driven scrolls, so hiding it once (or only on a
+/// `contentOffset` tick) misses the freshly-spawned instance. (Confirmed via
+/// research: tvOS `ScrollView` is a real `UIScrollView`; SwiftUI overrides
+/// introspected indicator properties; the tvOS bar is recreated on demand.)
 ///
-/// Reliable fix, modeled on `HomeView`'s `ScrollPanDisabler` superview walk:
-/// observe the scroll view's `contentOffset` via KVO (fires on every scroll tick,
-/// including focus-driven ones — the exact moment the indicator flashes back) and
-/// re-hide it each time, both by toggling `showsVerticalScrollIndicator` and by
-/// zeroing the private indicator subview(s) (`_UIScrollViewScrollIndicator` and
-/// tvOS's `_TVScrollBarView`). Flips everything back on when the rail is hidden.
+/// Reliable fix: while hidden, drive a `CADisplayLink` that every frame walks the
+/// enclosing scroll view(s) and re-hides both the property and any indicator
+/// subview (`_UIScrollViewScrollIndicator` / `_TVScrollBarView`), catching the
+/// re-created bar the instant it appears. The link runs only while the rail is up;
+/// when the rail hides (non-name sort / scrolled to top) it stops and restores the
+/// default indicator. Applies to every scroll view in the ancestor chain in case
+/// the indicator lives on an outer `_UIHostingScrollView` rather than an inner one.
 private struct ScrollIndicatorHider: UIViewControllerRepresentable {
     var hidden: Bool
 
@@ -403,16 +405,15 @@ private struct ScrollIndicatorHider: UIViewControllerRepresentable {
 
     func updateUIViewController(_ controller: ScrollIndicatorHiderController, context: Context) {
         controller.hidden = hidden
-        controller.reapply()
     }
 }
 
 private final class ScrollIndicatorHiderController: UIViewController {
     var hidden: Bool = false {
-        didSet { if hidden != oldValue { reapply() } }
+        didSet { if hidden != oldValue { syncDisplayLink() } }
     }
-    private weak var scrollView: UIScrollView?
-    private var offsetObservation: NSKeyValueObservation?
+    private var scrollViews: [UIScrollView] = []
+    private var displayLink: CADisplayLink?
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -420,59 +421,78 @@ private final class ScrollIndicatorHiderController: UIViewController {
         view.backgroundColor = .clear
     }
 
-    override func viewDidLayoutSubviews() {
-        super.viewDidLayoutSubviews()
-        reapply()
-    }
-
     override func didMove(toParent parent: UIViewController?) {
         super.didMove(toParent: parent)
-        reapply()
+        if parent == nil { stopDisplayLink() } else { syncDisplayLink() }
     }
 
-    /// Locate (once, then cache) the enclosing scroll view, start observing its
-    /// content offset so we can re-hide on every scroll/focus tick, and enforce
-    /// the current hidden state now.
-    func reapply() {
-        if scrollView == nil {
-            var ancestor = view.superview
-            while let current = ancestor {
-                if let found = current as? UIScrollView {
-                    scrollView = found
-                    // Re-hide on every content-offset change: this is when tvOS
-                    // re-flashes the indicator and when SwiftUI has typically just
-                    // re-asserted `showsVerticalScrollIndicator`.
-                    offsetObservation = found.observe(\.contentOffset, options: [.new]) { [weak self] scrollView, _ in
-                        self?.enforce(on: scrollView)
-                    }
-                    break
-                }
-                ancestor = current.superview
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        syncDisplayLink()
+    }
+
+    /// Collect every `UIScrollView` in the ancestor chain (the tvOS bar can live on
+    /// an outer hosting scroll view, not just the innermost one the walk first
+    /// hits), so we can enforce on all of them.
+    private func locateScrollViewsIfNeeded() {
+        guard scrollViews.isEmpty else { return }
+        var found: [UIScrollView] = []
+        var ancestor = view.superview
+        while let current = ancestor {
+            if let scrollView = current as? UIScrollView { found.append(scrollView) }
+            ancestor = current.superview
+        }
+        scrollViews = found
+    }
+
+    private func syncDisplayLink() {
+        guard isViewLoaded, view.window != nil || parent != nil else { return }
+        if hidden {
+            locateScrollViewsIfNeeded()
+            enforce()
+            if displayLink == nil {
+                let link = CADisplayLink(target: self, selector: #selector(tick))
+                link.add(to: .main, forMode: .common)
+                displayLink = link
+            }
+        } else {
+            stopDisplayLink()
+            enforce()
+        }
+    }
+
+    private func stopDisplayLink() {
+        displayLink?.invalidate()
+        displayLink = nil
+    }
+
+    @objc private func tick() {
+        if scrollViews.isEmpty { locateScrollViewsIfNeeded() }
+        enforce()
+    }
+
+    /// Re-hide (or restore) the indicator on every tracked scroll view. Indicator
+    /// subviews are matched by class-name substring (no private symbols referenced
+    /// at compile time), so it degrades gracefully if Apple renames the view — the
+    /// indicator would just reappear, never crash.
+    private func enforce() {
+        let shouldHide = hidden
+        for scrollView in scrollViews {
+            if scrollView.showsVerticalScrollIndicator == shouldHide {
+                scrollView.showsVerticalScrollIndicator = !shouldHide
+            }
+            for subview in scrollView.subviews {
+                let name = String(describing: type(of: subview))
+                guard name.contains("ScrollIndicator")
+                    || name.contains("TVScrollBar")
+                    || name.contains("ScrollBar") else { continue }
+                subview.alpha = shouldHide ? 0 : 1
+                subview.isHidden = shouldHide
             }
         }
-        guard let scrollView else { return }
-        enforce(on: scrollView)
     }
 
-    private func enforce(on scrollView: UIScrollView) {
-        let shouldHide = hidden
-        if scrollView.showsVerticalScrollIndicator == shouldHide {
-            scrollView.showsVerticalScrollIndicator = !shouldHide
-        }
-        // Belt-and-suspenders: the standard indicator subview and tvOS's separate
-        // focus/swipe scroll bar aren't always killed by the property alone, so
-        // hide them directly. Matched by class-name substring (no private symbols
-        // referenced at compile time) so it degrades gracefully if Apple renames
-        // the private view — the indicator would just reappear, never crash.
-        for subview in scrollView.subviews {
-            let name = String(describing: type(of: subview))
-            guard name.contains("ScrollIndicator") || name.contains("TVScrollBar") else { continue }
-            subview.alpha = shouldHide ? 0 : 1
-            subview.isHidden = shouldHide
-        }
-    }
-
-    deinit { offsetObservation?.invalidate() }
+    deinit { stopDisplayLink() }
 }
 #endif
 

@@ -37,6 +37,13 @@ public struct HomeLibraryVisibility: Codable, Equatable, Sendable {
     /// section (`false`).
     public var mergeLibrariesOnHome: Bool
 
+    /// Whether, in **unmerged** mode, Continue Watching is shown as a single global
+    /// row at the top (`true`, the default) or as a per-library row inside each
+    /// library's section (`false`). The two are mutually exclusive — the same
+    /// resumes are never shown twice. No effect in merged mode (there are no
+    /// per-library rows). Per-profile.
+    public var mergeContinueWatchingOnHome: Bool
+
     /// Keys of libraries the user has turned off **app-wide** — hidden from Home,
     /// Search, Music and browse alike.
     public var disabledKeys: Set<String>
@@ -47,10 +54,12 @@ public struct HomeLibraryVisibility: Codable, Equatable, Sendable {
 
     public init(
         mergeLibrariesOnHome: Bool = true,
+        mergeContinueWatchingOnHome: Bool = true,
         disabledKeys: Set<String> = [],
         excludedKeys: Set<String> = []
     ) {
         self.mergeLibrariesOnHome = mergeLibrariesOnHome
+        self.mergeContinueWatchingOnHome = mergeContinueWatchingOnHome
         self.disabledKeys = disabledKeys
         self.excludedKeys = excludedKeys
     }
@@ -120,17 +129,20 @@ public struct HomeLibraryVisibility: Codable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case mergeLibrariesOnHome
+        case mergeContinueWatchingOnHome
         case disabledKeys
         case excludedKeys
     }
 
     /// Decodes leniently so a pre-existing blob written when this type held only
-    /// `excludedKeys` still loads: the missing `mergeLibrariesOnHome` falls back to
-    /// `true` (classic merged Home) and `disabledKeys` to empty, so an upgrading
-    /// install sees zero Home behaviour change until it opts in.
+    /// `excludedKeys` still loads: the missing `mergeLibrariesOnHome` /
+    /// `mergeContinueWatchingOnHome` fall back to `true` (classic merged Home) and
+    /// `disabledKeys` to empty, so an upgrading install sees zero Home behaviour
+    /// change until it opts in.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.mergeLibrariesOnHome = try container.decodeIfPresent(Bool.self, forKey: .mergeLibrariesOnHome) ?? true
+        self.mergeContinueWatchingOnHome = try container.decodeIfPresent(Bool.self, forKey: .mergeContinueWatchingOnHome) ?? true
         self.disabledKeys = try container.decodeIfPresent(Set<String>.self, forKey: .disabledKeys) ?? []
         self.excludedKeys = try container.decodeIfPresent(Set<String>.self, forKey: .excludedKeys) ?? []
     }
@@ -138,6 +150,7 @@ public struct HomeLibraryVisibility: Codable, Equatable, Sendable {
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(mergeLibrariesOnHome, forKey: .mergeLibrariesOnHome)
+        try container.encode(mergeContinueWatchingOnHome, forKey: .mergeContinueWatchingOnHome)
         try container.encode(disabledKeys, forKey: .disabledKeys)
         try container.encode(excludedKeys, forKey: .excludedKeys)
     }

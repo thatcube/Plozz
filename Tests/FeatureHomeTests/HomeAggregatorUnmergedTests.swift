@@ -99,7 +99,49 @@ final class HomeAggregatorUnmergedTests: XCTestCase {
                        "The scoped, attributed resume must populate the library's Continue Watching row")
     }
 
+    // MARK: - Merge Continue Watching
+
+    func testMergeContinueWatchingOnKeepsGlobalStripsPerLibrary() {
+        let groups = [
+            HomeLibrarySectionGroup(library: aggLib("acct", "L1"), sections: [
+                LibrarySection(id: "continueWatching", title: "Continue Watching", style: .landscape, items: [item("cw1")]),
+                LibrarySection(id: "recentlyAdded", title: "Recently Added", style: .poster, items: [item("r1")])
+            ]),
+            HomeLibrarySectionGroup(library: aggLib("acct", "L2"), sections: [
+                LibrarySection(id: "continueWatching", title: "Continue Watching", style: .landscape, items: [item("cw2")])
+            ])
+        ]
+        let result = HomeViewModel.applyingContinueWatchingMerge(
+            global: [item("g1")], sections: groups, mergeContinueWatching: true
+        )
+        // Global row kept.
+        XCTAssertEqual(result.global.map(\.id), ["g1"])
+        // L1 keeps only Recently Added; L2 (CW-only) is dropped entirely.
+        XCTAssertEqual(result.sections.map(\.library.key), ["acct:L1"])
+        XCTAssertEqual(result.sections.first?.sections.map(\.id), ["recentlyAdded"])
+    }
+
+    func testMergeContinueWatchingOffHidesGlobalKeepsPerLibrary() {
+        let groups = [
+            HomeLibrarySectionGroup(library: aggLib("acct", "L1"), sections: [
+                LibrarySection(id: "continueWatching", title: "Continue Watching", style: .landscape, items: [item("cw1")]),
+                LibrarySection(id: "recentlyAdded", title: "Recently Added", style: .poster, items: [item("r1")])
+            ])
+        ]
+        let result = HomeViewModel.applyingContinueWatchingMerge(
+            global: [item("g1")], sections: groups, mergeContinueWatching: false
+        )
+        // Global row hidden; per-library CW preserved.
+        XCTAssertTrue(result.global.isEmpty)
+        XCTAssertEqual(result.sections.first?.sections.map(\.id), ["continueWatching", "recentlyAdded"])
+    }
+
     // MARK: - Helpers
+
+    private func aggLib(_ account: String, _ id: String) -> AggregatedLibrary {
+        AggregatedLibrary(accountID: account, accountName: "U", serverName: "S", providerKind: .jellyfin,
+                          library: MediaLibrary(id: id, title: id, kind: .movie))
+    }
 
     private func item(_ id: String) -> MediaItem { MediaItem(id: id, title: id, kind: .movie) }
     private func cw(_ id: String, library: String) -> MediaItem {

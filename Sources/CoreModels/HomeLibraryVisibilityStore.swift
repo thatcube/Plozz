@@ -64,6 +64,19 @@ public final class HomeLibraryVisibilityModel {
         store.save(visibility)
     }
 
+    /// Whether Continue Watching is a single global row (`true`) or per-library
+    /// rows (`false`) in unmerged mode.
+    public var mergeContinueWatchingOnHome: Bool {
+        visibility.mergeContinueWatchingOnHome
+    }
+
+    /// Sets the "merge Continue Watching" switch and persists.
+    public func setMergeContinueWatchingOnHome(_ merge: Bool) {
+        guard visibility.mergeContinueWatchingOnHome != merge else { return }
+        visibility.mergeContinueWatchingOnHome = merge
+        store.save(visibility)
+    }
+
     // MARK: - Per-library predicates
 
     /// Whether the library is available **app-wide** (not disabled).

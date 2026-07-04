@@ -82,17 +82,39 @@ struct MyLibrariesDetailView: View {
     /// every library into unified cross-server rows (today's behaviour); when off,
     /// each visible library gets its own section — including a Plex server's own
     /// rows like "More in Drama". Per-profile, using the shared switch control.
+    /// When unmerged, a nested "Merge Continue Watching" switch controls whether
+    /// resumes show as one global row or per-library.
     private var mergeTogglePanel: some View {
         SettingsPanel(
             footer: "On: every library's content is combined into unified rows (Continue Watching, Recently Added, and one Libraries row). Off: each library shown on Home gets its own section — including your server's own rows like “More in Drama”. Either way you still choose which libraries appear. Affects only \(context.activeProfile.name)'s Home."
         ) {
-            Toggle(isOn: Binding(
-                get: { context.homeVisibility.mergeLibrariesOnHome },
-                set: { context.homeVisibility.setMergeLibrariesOnHome($0) }
-            )) {
-                Text("Merge libraries on Home")
+            VStack(alignment: .leading, spacing: 8) {
+                Toggle(isOn: Binding(
+                    get: { context.homeVisibility.mergeLibrariesOnHome },
+                    set: { context.homeVisibility.setMergeLibrariesOnHome($0) }
+                )) {
+                    Text("Merge libraries on Home")
+                }
+                .toggleStyle(SettingsSwitchToggleStyle())
+
+                // Only meaningful when libraries are unmerged (there are no
+                // per-library rows to reconcile in merged mode).
+                if !context.homeVisibility.mergeLibrariesOnHome {
+                    Divider()
+                    Toggle(isOn: Binding(
+                        get: { context.homeVisibility.mergeContinueWatchingOnHome },
+                        set: { context.homeVisibility.setMergeContinueWatchingOnHome($0) }
+                    )) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Merge Continue Watching")
+                            Text("On: one Continue Watching row at the top. Off: a Continue Watching row inside each library instead.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .toggleStyle(SettingsSwitchToggleStyle())
+                }
             }
-            .toggleStyle(SettingsSwitchToggleStyle())
         }
     }
 

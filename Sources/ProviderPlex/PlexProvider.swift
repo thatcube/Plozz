@@ -159,7 +159,7 @@ public struct PlexProvider: MediaProvider {
     public func libraryHubs(libraryID: String, kind: MediaItemKind, limit: Int) async throws -> [LibrarySection] {
         let hubs = try await client.sectionHubs(sectionID: libraryID, count: limit)
         return hubs.compactMap { hub in
-            guard !Self.isBaseDuplicateHub(identifier: hub.hubIdentifier, context: hub.context) else { return nil }
+            guard !Self.isBaseDuplicateHub(identifier: hub.hubIdentifier, context: hub.context, title: hub.title) else { return nil }
             let items = (hub.Metadata ?? []).map(map(metadata:))
             // Require enough items to justify a whole row — Plex emits person/cast
             // hubs ("Top Movies with <actor>") that can contain a single title.
@@ -181,20 +181,29 @@ public struct PlexProvider: MediaProvider {
     /// <actor>" hub where the actor appears in just one library title).
     static let minimumHubItems = 3
 
-    /// Whether a hub duplicates one of the uniform base rows the Home aggregator
-    /// builds for every provider (Recently Added, On Deck / Continue Watching), so
-    /// it should be dropped from the *additive* Plex discovery rows.
+    /// Whether a hub duplicates one of the rows Plozz renders itself for a library
+    /// (Recently Added, Continue Watching / On Deck), so it should be dropped from
+    /// the *additive* Plex discovery rows — those two are always built from Plozz's
+    /// own canonical feeds (the recency-sorted, cross-server-merged, reconciled
+    /// Continue Watching slice, and the `items(in:)` Recently Added), never the raw
+    /// Plex hub.
     ///
-    /// Matched as lowercased substrings against the hub's **stable**
-    /// `hubIdentifier` / `context` — never the localised `title` — so it survives
-    /// server locale/version differences. "Start Watching" (unplayed suggestions)
-    /// and genre/similar hubs deliberately do NOT match any token and are kept.
-    static func isBaseDuplicateHub(identifier: String?, context: String?) -> Bool {
+    /// Matched primarily on the hub's **stable** `hubIdentifier` / `context` (so it
+    /// survives locale differences), with a localized-`title` fallback because some
+    /// Plex servers emit these hubs with a nil/empty identifier — and since these
+    /// are rows we always own, a title match here can only ever drop a duplicate,
+    /// never a legitimate discovery hub (genre / similar / top-rated / person hubs
+    /// don't contain these phrases). "Start Watching" (top *unwatched*) is a genuine
+    /// discovery hub and deliberately matches none of the tokens below.
+    static func isBaseDuplicateHub(identifier: String?, context: String?, title: String? = nil) -> Bool {
         let haystack = [identifier ?? "", context ?? ""].joined(separator: " ").lowercased()
-        // "recentlyadded" → base Recently Added; "ondeck"/"continue" → base
-        // Continue Watching. ("startwatching" contains neither, so it's kept.)
-        let duplicateTokens = ["recentlyadded", "ondeck", "continue"]
-        return duplicateTokens.contains { haystack.contains($0) }
+        // Structural identifier/context tokens for the rows we render ourselves.
+        let idTokens = ["recentlyadded", "ondeck", "continue", "inprogress", "resume", "keepwatching"]
+        if idTokens.contains(where: { haystack.contains($0) }) { return true }
+        // Locale-fragile title fallback for identifier-less hubs (see note above).
+        let t = (title ?? "").lowercased()
+        let titlePhrases = ["continue watching", "keep watching", "on deck", "recently added"]
+        return titlePhrases.contains { t.contains($0) }
     }
 
     public func item(id: String) async throws -> MediaItem {

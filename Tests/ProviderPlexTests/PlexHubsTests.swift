@@ -90,9 +90,41 @@ final class PlexHubsTests: XCTestCase {
         XCTAssertTrue(PlexProvider.isBaseDuplicateHub(identifier: "movie.recentlyadded.1", context: "hub.movie.recentlyadded"))
         XCTAssertTrue(PlexProvider.isBaseDuplicateHub(identifier: "movie.ondeck.1", context: "hub.movie.ondeck"))
         XCTAssertTrue(PlexProvider.isBaseDuplicateHub(identifier: nil, context: "hub.continueWatching"))
+        XCTAssertTrue(PlexProvider.isBaseDuplicateHub(identifier: "movie.inprogress", context: nil))
+        // …including an identifier-less Continue Watching hub caught by title…
+        XCTAssertTrue(PlexProvider.isBaseDuplicateHub(identifier: nil, context: nil, title: "Continue Watching"))
+        XCTAssertTrue(PlexProvider.isBaseDuplicateHub(identifier: "", context: "", title: "On Deck"))
         // …while genre / similar / "start watching" discovery hubs are kept.
         XCTAssertFalse(PlexProvider.isBaseDuplicateHub(identifier: "movie.genre.drama", context: "hub.movie.genre"))
-        XCTAssertFalse(PlexProvider.isBaseDuplicateHub(identifier: "movie.similar.10", context: "hub.movie.similar"))
-        XCTAssertFalse(PlexProvider.isBaseDuplicateHub(identifier: "tv.startWatching", context: "hub.tv.startWatching"))
+        XCTAssertFalse(PlexProvider.isBaseDuplicateHub(identifier: "movie.similar.10", context: "hub.movie.similar", title: "Because You Watched X"))
+        XCTAssertFalse(PlexProvider.isBaseDuplicateHub(identifier: "tv.startWatching", context: "hub.tv.startWatching", title: "Start Watching"))
+    }
+
+    func testDropsContinueWatchingHubToAvoidDuplicateRow() async throws {
+        // A Plex "Continue Watching" hub (identifier-less, title only) must not
+        // become a second CW row alongside Plozz's own per-library CW slice.
+        let json = """
+        {"MediaContainer":{"size":2,"Hub":[
+          {"title":"Continue Watching","type":"show","more":true,
+           "Metadata":[
+             {"ratingKey":"1","type":"episode","title":"Ep1","librarySectionID":2},
+             {"ratingKey":"2","type":"episode","title":"Ep2","librarySectionID":2},
+             {"ratingKey":"3","type":"episode","title":"Ep3","librarySectionID":2}
+           ]},
+          {"hubIdentifier":"show.genre.comedy","context":"hub.show.genre","title":"More in Comedy","type":"show","more":true,
+           "Metadata":[
+             {"ratingKey":"10","type":"show","title":"Com A","librarySectionID":2},
+             {"ratingKey":"11","type":"show","title":"Com B","librarySectionID":2},
+             {"ratingKey":"12","type":"show","title":"Com C","librarySectionID":2}
+           ]}
+        ]}}
+        """
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/hubs/sections/2", json: json)
+        let provider = PlexProvider(session: makeSession(), http: stub)
+
+        let sections = try await provider.libraryHubs(libraryID: "2", kind: .series, limit: 20)
+        XCTAssertEqual(sections.map(\.title), ["More in Comedy"],
+                       "The Continue Watching hub must be dropped; only the genre discovery hub remains")
     }
 }

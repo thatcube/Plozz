@@ -233,13 +233,22 @@ public final class HomeViewModel {
             let pending = await pendingWatchMutations()
             let appliedRecency = await recentlyAppliedRecency()
             let reconciledCW = Self.reconcileContinueWatching(unmerged.continueWatching, pending: pending, appliedRecency: appliedRecency)
+            // Re-slice each library's Continue Watching from the reconciled feed,
+            // then apply the "merge Continue Watching" choice so resumes appear in
+            // exactly one place (global row OR per-library rows, never both).
+            let reslicedSections = Self.reslicingLibraryContinueWatching(unmerged.librarySections, reconciledCW: reconciledCW)
+            let cwMerge = Self.applyingContinueWatchingMerge(
+                global: reconciledCW,
+                sections: reslicedSections,
+                mergeContinueWatching: visibility.mergeContinueWatchingOnHome
+            )
             content = Content(
-                continueWatching: reconciledCW,
+                continueWatching: cwMerge.global,
                 latest: [],
                 watchlist: unmerged.watchlist.filter(keepWatchlisted),
                 libraries: [],
                 mergeLibraries: false,
-                librarySections: Self.reslicingLibraryContinueWatching(unmerged.librarySections, reconciledCW: reconciledCW)
+                librarySections: cwMerge.sections
             )
         }
         state = content.isEmpty ? .empty : .loaded(content)
@@ -395,6 +404,30 @@ public final class HomeViewModel {
     /// is fresh, so it can never override a genuine later play (e.g. on another
     /// client). Clamp-only-downward: worst case a card sits slightly lower, never
     /// wrongly at the top. (h2-cw-clamp)
+    /// Applies the "merge Continue Watching" choice to the unmerged content.
+    ///
+    /// Continue Watching is shown in exactly ONE place — never both globally and
+    /// per-library:
+    /// - `merge == true` (default): keep the global Continue Watching row and strip
+    ///   the per-library `"continueWatching"` section from every library block
+    ///   (dropping a block left with no rows).
+    /// - `merge == false`: hide the global row and keep the per-library rows.
+    nonisolated static func applyingContinueWatchingMerge(
+        global: [MediaItem],
+        sections: [HomeLibrarySectionGroup],
+        mergeContinueWatching: Bool
+    ) -> (global: [MediaItem], sections: [HomeLibrarySectionGroup]) {
+        guard mergeContinueWatching else {
+            // Per-library Continue Watching is canonical; hide the global row.
+            return ([], sections)
+        }
+        let stripped = sections.compactMap { group -> HomeLibrarySectionGroup? in
+            let kept = group.sections.filter { $0.id != "continueWatching" }
+            return kept.isEmpty ? nil : HomeLibrarySectionGroup(library: group.library, sections: kept)
+        }
+        return (global, stripped)
+    }
+
     /// Re-derives each unmerged library block's **Continue Watching** row from the
     /// *reconciled* global feed, so a just-played title's optimistic reorder /
     /// progress (the durable-outbox overlay) shows in the per-library row too — not

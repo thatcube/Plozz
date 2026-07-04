@@ -183,18 +183,14 @@ struct HomeHeroView: View {
         return result
     }
 
-    /// The hero's action buttons in fixed visual order. The pill row renders over
-    /// this CONSTANT slot set (absent buttons → a zero-size placeholder) so its
-    /// `ForEach` stays structurally stable across a page. Device tracing
-    /// (`PLZHFOCUS`) proved the intermittent focus loss came from the button
-    /// *count* changing on a page: paging to a slide with a different number of
-    /// buttons made the old (variable-length) `ForEach` insert/remove a pill,
-    /// relaying out the HStack the `.row` focus overlay sits on — in the very
-    /// transaction that re-pins `focus = .row` — and the focus engine couldn't
-    /// resolve the re-pin mid-rebuild, so focus dropped to nil and returned on the
-    /// wrong control. Same-count pages never dropped (even with differing button
-    /// widths/labels), so keeping the slot STRUCTURE constant is the fix. Keep this
-    /// in the same order `buttons(for:)` produces so `selectedButton` still maps.
+    /// The hero's action buttons in fixed visual order. The visible pill row
+    /// renders over this CONSTANT slot set (absent buttons → a zero-size
+    /// placeholder) so its `ForEach` stays structurally stable and gap-free across
+    /// a page. Note this alone does NOT stop the focus drop — the row's *width*
+    /// still changed with the button count, which is what moved the focus target
+    /// mid re-pin; ``actionRowWidthReserver`` pins the width constant to fix that.
+    /// Keep this in the same order `buttons(for:)` produces so `selectedButton`
+    /// still maps.
     private static let buttonSlots: [HeroButton] = [.play, .moreInfo, .watchlist, .next]
 
     /// The item the hero's Watchlist button acts on. Whole titles
@@ -608,39 +604,46 @@ struct HomeHeroView: View {
                 .focused($focus, equals: .leftGuard)
                 .accessibilityHidden(true)
 
-            // The VISIBLE pills. Non-focusable and free to fade with the rest of
-            // the metadata on a page — exactly like the Apple TV hero, where the
-            // buttons vanish on press and reappear on landing. Focus is NOT here
-            // (see the overlay), so fading these to opacity 0 can't drop focus or
-            // shift the scroll. `.opacity` keeps their layout, so the focus overlay
-            // below keeps a stable frame throughout the fade.
+            // The VISIBLE pills, wrapped in a ZStack behind a hidden width
+            // reserver (``actionRowWidthReserver``) so the action row — and thus
+            // the focus overlay and the trailing right guard — has a CONSTANT width
+            // for EVERY slide. This is the real fix for the intermittent focus
+            // drop: device tracing (PLZHFOCUS) proved focus was lost on exactly the
+            // pages where the button *count* changed (e.g. paging onto a Continue
+            // Watching slide with no Watchlist action, 4↔3 buttons). Keeping the
+            // `ForEach` structurally stable alone did NOT fix it, because the row's
+            // WIDTH still changed — which moved the `.row` focus target (and the
+            // right guard) in the very transaction that re-pins `focus = .row`, and
+            // the tvOS focus engine couldn't resolve the re-pin against a moving
+            // target, so it dropped focus to nil (stranded ~1–2s, returning on the
+            // wrong control). Pinning the width constant removes that motion.
             //
-            // Rendered over the CONSTANT `Self.buttonSlots` set (NOT the
-            // variable-length `itemButtons`) so the `ForEach` NEVER structurally
-            // inserts/removes a pill when paging to a slide with a different button
-            // count — the proven cause of the intermittent focus drop (see
-            // `buttonSlots`). Absent buttons render as a zero-size placeholder;
-            // `spacing: 0` + a per-pill leading inset reproduces the exact 24pt
-            // gap with no visible hole. `selectedButton` still indexes the logical
-            // `itemButtons`, so the highlight maps via each slot's logical offset.
-            HStack(spacing: 0) {
-                ForEach(Self.buttonSlots, id: \.self) { slot in
-                    if let offset = itemButtons.firstIndex(of: slot) {
-                        heroButtonVisual(slot, for: item, selected: focus != nil && selectedButton == offset)
-                            .padding(.leading, offset == 0 ? 0 : 24)
-                    } else {
-                        // Stable placeholder: keeps this slot present in the
-                        // `ForEach` so the row never structurally changes its
-                        // child count (only the harmless total width varies).
-                        Color.clear.frame(width: 0, height: 0)
+            // The visible pills stay non-focusable and fade with the rest of the
+            // metadata on a page (focus lives on the overlay, so fading to opacity
+            // 0 can't drop it). They render over the CONSTANT `Self.buttonSlots`
+            // set (absent buttons → zero-size placeholder), leading-aligned in
+            // front of the wider reserver; the extra reserved width is invisible
+            // trailing space, so there is no visible gap. `selectedButton` still
+            // indexes the logical `itemButtons`, so the highlight maps via each
+            // slot's logical offset.
+            ZStack(alignment: .leading) {
+                actionRowWidthReserver
+                HStack(spacing: 0) {
+                    ForEach(Self.buttonSlots, id: \.self) { slot in
+                        if let offset = itemButtons.firstIndex(of: slot) {
+                            heroButtonVisual(slot, for: item, selected: focus != nil && selectedButton == offset)
+                                .padding(.leading, offset == 0 ? 0 : 24)
+                        } else {
+                            Color.clear.frame(width: 0, height: 0)
+                        }
                     }
                 }
+                .opacity(metadataVisible ? 1 : 0)
+                // Snap the pills' hide instantly (matches the metadata above); the
+                // delayed fade-IN still animates.
+                .transaction { if !metadataVisible { $0.animation = nil } }
+                .allowsHitTesting(false)
             }
-            .opacity(metadataVisible ? 1 : 0)
-            // Snap the pills' hide instantly (matches the metadata above); the
-            // delayed fade-IN still animates.
-            .transaction { if !metadataVisible { $0.animation = nil } }
-            .allowsHitTesting(false)
             // ── The single hero focus target: an always-opaque, invisible focusable
             // leaf layered *over* the pills. Because `.overlay` is applied after the
             // pills' `.opacity`, it stays fully opaque and focusable even while the
@@ -965,6 +968,46 @@ struct HomeHeroView: View {
                     .frame(width: 34, height: 34)
             }
         }
+    }
+
+    /// A hidden, layout-only copy of the MAXIMAL action row (all four pills, with
+    /// the widest "Resume" play label). Placed behind the visible pills in a
+    /// leading-aligned ZStack purely to pin the action row — and therefore the
+    /// `.row` focus overlay and the trailing right guard — to a CONSTANT width for
+    /// every slide. Without it, paging to a slide with a different visible button
+    /// count changed the row's width, moving the focus target (and guard) in the
+    /// same transaction as the `defer { focus = .row }` re-pin, which the tvOS
+    /// focus engine couldn't resolve against a moving target → focus dropped to
+    /// nil (proven on device via PLZHFOCUS). Invisible, non-interactive, never
+    /// selected; mirrors ``heroButtonVisual`` so its width matches a real row.
+    private var actionRowWidthReserver: some View {
+        HStack(spacing: 0) {
+            heroPill(selected: false) {
+                Label("Resume", systemImage: "play.fill")
+                    .font(.system(size: 28, weight: .semibold))
+            }
+            heroPill(selected: false) {
+                Image(systemName: "info.circle")
+                    .font(.system(size: 28, weight: .semibold))
+                    .frame(width: 34, height: 34)
+            }
+            .padding(.leading, 24)
+            heroPill(selected: false) {
+                Image(systemName: "bookmark")
+                    .font(.system(size: 28, weight: .semibold))
+                    .frame(width: 34, height: 34)
+            }
+            .padding(.leading, 24)
+            heroPill(selected: false) {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 28, weight: .semibold))
+                    .frame(width: 34, height: 34)
+            }
+            .padding(.leading, 24)
+        }
+        .opacity(0)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 
     /// The glass-pill chrome shared by every hero action. Identity-stable (only

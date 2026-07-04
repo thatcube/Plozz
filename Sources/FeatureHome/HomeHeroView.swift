@@ -322,12 +322,14 @@ struct HomeHeroView: View {
         // swap, else clamp, then prune resolved art and re-resolve.
         .onChange(of: items.map(\.id)) { oldIDs, newIDs in
             guard oldIDs != newIDs else { return }
+            let oldIdx = index
             let frontedID = oldIDs.indices.contains(index) ? oldIDs[index] : nil
             if let frontedID, let newIdx = newIDs.firstIndex(of: frontedID) {
                 index = newIdx
             } else {
                 index = min(index, max(0, newIDs.count - 1))
             }
+            HeroFocusDiagnostics.emit("items SET-SWAP count \(oldIDs.count)->\(newIDs.count) index \(oldIdx)->\(index) frontedSurvived=\(frontedID.map { newIDs.contains($0) } ?? false) | \(hfState())")
             let present = Set(newIDs)
             resolvedBackdrop = resolvedBackdrop.filter { present.contains($0.key) }
             // A set swap is not a page: cancel any pending metadata fade-in and
@@ -373,6 +375,7 @@ struct HomeHeroView: View {
             let remaining = max(0, duration - Date().timeIntervalSince(dwellStart))
             try? await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000))
             guard !Task.isCancelled else { return }
+            HeroFocusDiagnostics.emit("auto-advance FIRE (from idx=\(index)) | \(hfState())")
             page(to: (index + 1) % items.count, keepButton: selectedButton, forward: true)
         }
     }
@@ -689,6 +692,9 @@ struct HomeHeroView: View {
         // scroll in `HomeView` — not by this handler.
         .onMoveCommand { _ in handleMove() }
         .onChange(of: focus) { old, new in
+            let oldName = old.map { "\($0)" } ?? "nil"
+            let newName = new.map { "\($0)" } ?? "nil"
+            HeroFocusDiagnostics.emit("focus \(oldName)->\(newName) | \(hfState())")
             switch new {
             case .leftGuard:
                 // The engine parked focus on the guard because Left was pressed.
@@ -704,6 +710,7 @@ struct HomeHeroView: View {
                 // We do NOT act on focus *loss* — focus can drop transiently, and
                 // the recede is driven by the page scroll (see `HomeView`), not here.
                 if old == nil {
+                    HeroFocusDiagnostics.emit("focus ENTER hero (row, from outside) | \(hfState())")
                     if let item = current {
                         selectedButton = min(selectedButton, max(0, buttons(for: item).count - 1))
                     }
@@ -712,7 +719,11 @@ struct HomeHeroView: View {
             case .none:
                 // Focus left the hero entirely (down to a row, up to the tab bar, or
                 // left to the sidebar). Nothing to do: the recede is driven purely
-                // by the page scroll offset in `HomeView`.
+                // by the page scroll offset in `HomeView`. When this fires *during*
+                // a page (not a deliberate exit) it IS the reported bug — the paired
+                // `nil->X` line below shows where it lands and the `t+ms` gap shows
+                // how long it was stranded.
+                HeroFocusDiagnostics.emit("focus LOST (->nil) from \(oldName) | \(hfState())")
                 break
             }
         }
@@ -761,6 +772,17 @@ struct HomeHeroView: View {
         noteInteraction()
     }
 
+    /// One-line snapshot of the hero's focus/paging state for
+    /// ``HeroFocusDiagnostics``. Reads only view state (no mutation), so it is
+    /// safe to call from any focus/paging site. Temporary debugging aid.
+    private func hfState() -> String {
+        let btnCount = current.map { buttons(for: $0).count } ?? 0
+        let focusName = focus.map { "\($0)" } ?? "nil"
+        return "idx=\(index)/\(items.count) selBtn=\(selectedButton)/\(btnCount) "
+            + "focus=\(focusName) leftGuardActive=\(leftGuardActive) "
+            + "sidebarEscape=\(allowsSidebarEscape) metaVisible=\(metadataVisible)"
+    }
+
     /// Resolves a Left press captured by the invisible left guard, then bounces
     /// focus straight back to the pill row so the guard never visibly holds it.
     /// Interior moves adjust `selectedButton`; `.advance` pages backward. The one
@@ -780,6 +802,7 @@ struct HomeHeroView: View {
             buttonCount: buttonCount,
             navigationStyle: navigationStyle
         )
+        HeroFocusDiagnostics.emit("handleLeft outcome=\(outcome) | \(hfState())")
         switch outcome {
         case let .moveButton(newIndex):
             selectedButton = newIndex
@@ -812,6 +835,7 @@ struct HomeHeroView: View {
             buttonCount: buttonCount,
             navigationStyle: navigationStyle
         )
+        HeroFocusDiagnostics.emit("handleRight outcome=\(outcome) | \(hfState())")
         switch outcome {
         case let .moveButton(newIndex):
             selectedButton = newIndex
@@ -962,7 +986,11 @@ struct HomeHeroView: View {
     /// — that is the whole point of the redesign. `isForward` is recorded into
     /// `lastPageForward` so the wipe enters from the correct edge.
     private func page(to toItem: Int, keepButton: Int, forward isForward: Bool) {
-        guard items.indices.contains(toItem), toItem != index else { return }
+        guard items.indices.contains(toItem), toItem != index else {
+            HeroFocusDiagnostics.emit("page IGNORED to=\(toItem) keepButton=\(keepButton) forward=\(isForward) | \(hfState())")
+            return
+        }
+        HeroFocusDiagnostics.emit("page BEGIN from=\(index) to=\(toItem) keepButton=\(keepButton) forward=\(isForward) | \(hfState())")
         // Record the entering direction so the backdrop wipe pushes from the
         // correct edge. Batched with `index` below into one SwiftUI update.
         lastPageForward = isForward
@@ -1052,6 +1080,7 @@ struct HomeHeroView: View {
             try? await Task.sleep(nanoseconds: 280_000_000)
             guard slideToken == token else { return }
             withAnimation(.easeInOut(duration: 0.3)) { metadataVisible = true }
+            HeroFocusDiagnostics.emit("metadata fade-in (token=\(token)) | \(hfState())")
         }
     }
 

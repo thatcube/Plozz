@@ -886,8 +886,13 @@ struct HomeHeroView: View {
         switch button {
         case .play:
             heroPill(selected: selected) {
-                Label(item.resumeProgressFraction != nil ? "Resume" : "Play", systemImage: "play.fill")
-                    .font(.system(size: 28, weight: .semibold))
+                PlayResumeButtonLabel(
+                    title: "Play",
+                    progress: item.resumeProgressFraction,
+                    remainingText: item.resumeRemainingText,
+                    onLight: selected || colorScheme == .light
+                )
+                .font(.system(size: 28, weight: .semibold))
             }
         case .moreInfo:
             heroPill(selected: selected) {

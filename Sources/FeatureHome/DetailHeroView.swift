@@ -494,14 +494,18 @@ struct DetailHeroView: View {
         // unwatched title) there's nothing to reserve and Play takes its natural,
         // tight default width.
         let liveResumeText = resumeText
-        let showProgress = liveResumeText != nil && !item.isPlayed
         let sizingText = reservedResumeText ?? liveResumeText
         let button = Button(action: action) {
             ZStack {
                 if let sizingText {
                     playResumeSizer(remaining: sizingText).hidden()
                 }
-                playButtonLabel(showProgress: showProgress, title: title)
+                PlayResumeButtonLabel(
+                    title: title,
+                    progress: playProgress,
+                    remainingText: playRemainingText,
+                    onLight: playButtonHasFocus || colorScheme == .light
+                )
             }
         }
         .modifier(HeroActionButtonStyle(prominent: true))
@@ -530,30 +534,13 @@ struct DetailHeroView: View {
         return playRemainingText
     }
 
-    /// The Play button's inner label: either `▶  [progress bar]  … left` (resume
-    /// form) or the plain `▶  Play/Resume` title.
-    @ViewBuilder
-    private func playButtonLabel(showProgress: Bool, title: String) -> some View {
-        HStack(spacing: 16) {
-            Image(systemName: "play.fill")
-            if showProgress, let playRemainingText, let playProgress {
-                resumeProgressCapsule(progress: playProgress)
-                Text(playRemainingText)
-                    .lineLimit(1)
-            } else {
-                Text(title)
-                    .lineLimit(1)
-            }
-        }
-    }
-
     /// An invisible copy of the resume form used purely to reserve the Play
     /// button's width. The progress capsule is a fixed width, so any progress
     /// value sizes identically; only the variable "… left" text matters.
     private func playResumeSizer(remaining: String) -> some View {
         HStack(spacing: 16) {
             Image(systemName: "play.fill")
-            resumeProgressCapsule(progress: 1)
+            ResumeProgressCapsule(progress: 1, onLight: playButtonHasFocus || colorScheme == .light)
             Text(remaining)
                 .lineLimit(1)
         }
@@ -740,24 +727,6 @@ struct DetailHeroView: View {
         .id(refreshPhase)
         .transition(.scale(scale: 0.4).combined(with: .opacity))
         .frame(width: heroIconSize, height: heroIconSize)
-    }
-    /// play icon and the "… left" line. Its colours flip with the button's focus
-    /// state — light fill on the dark unfocused button, dark fill on the white
-    /// focused button — so it stays clearly visible either way.
-    private func resumeProgressCapsule(progress: Double) -> some View {
-        let onLight = playButtonHasFocus || colorScheme == .light
-        let track = onLight ? Color.black.opacity(0.22) : Color.white.opacity(0.32)
-        let fill = onLight ? Color.black.opacity(0.85) : Color.white
-        let width: CGFloat = 150
-        return Capsule()
-            .fill(track)
-            .frame(width: width, height: 6)
-            .overlay(alignment: .leading) {
-                Capsule()
-                    .fill(fill)
-                    .frame(width: max(8, width * progress), height: 6)
-            }
-            .animation(.easeInOut(duration: 0.2), value: onLight)
     }
 
     /// The plain text title, used both under spoilers and as the fallback when no

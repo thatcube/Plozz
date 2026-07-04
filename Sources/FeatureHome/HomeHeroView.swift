@@ -1303,17 +1303,25 @@ struct HomeHeroView: View {
                     pagingIndicator(active: i == index)
                 }
             }
+            // Pin the row to the dot height so its vertical centering can NEVER
+            // change. Without this, the active dot's animating frame let the HStack
+            // recompute a sub-pixel-different vertical center mid-morph, drifting the
+            // dots down a few px on every page (the reported jitter).
+            .frame(height: Self.dotSize)
             .padding(.horizontal, 14)
             .padding(.vertical, 9)
-            // A STABLE pill background. The dots sit right at the backdrop's
-            // dissolve boundary, where the artwork is still faintly visible AND
-            // slides on every parallax page-wipe. A glass/material background
-            // sample-blurs whatever is behind it, so that moving artwork refracted
-            // at the pill's edges — reading as the indicator "shifting a few px" per
-            // page. A solid translucent fill never samples the backdrop, so there is
-            // nothing to refract: the pill stays put and legible over any artwork.
-            .background { pagingDotsBackground(shape: Capsule()) }
+            // Liquid Glass rounded container so the indicators stay legible over any
+            // backdrop (matches the hero action pills' glass treatment).
+            .background { pagingDotsGlass(shape: Capsule()) }
             .padding(.top, 10)
+            // ONE coordinated morph for the whole row, keyed on the fronted slide.
+            // Both the outgoing and incoming dot (and their fills) animate in a
+            // single transaction, so there are no dueling per-dot `.animation`s whose
+            // independent interpolations nudged each dot's origin on both axes. The
+            // row width is constant (exactly one dot is wide), so nothing here
+            // changes size — only which dot is the wide one — and the glass pill
+            // stays put.
+            .animation(.easeInOut(duration: Self.dotMorph), value: index)
             .accessibilityHidden(true)
         }
     }
@@ -1328,7 +1336,9 @@ struct HomeHeroView: View {
     /// smoothly animate between a dot (inactive) and a pill (active) — the active
     /// one opening exactly as the outgoing one closes, keeping the container width
     /// constant. The active pill fills left→right as the auto-advance dwell elapses
-    /// (a live "time until next page" gauge).
+    /// (a live "time until next page" gauge). The width morph is animated once, by
+    /// the container's `value: index` animation — NOT per-dot here — so the outgoing
+    /// and incoming dots interpolate in the same transaction and never drift.
     private func pagingIndicator(active: Bool) -> some View {
         Capsule()
             .fill(Color.white.opacity(0.28))
@@ -1337,13 +1347,12 @@ struct HomeHeroView: View {
             }
             .frame(width: active ? Self.activeDotWidth : Self.dotSize, height: Self.dotSize)
             .clipShape(Capsule())
-            .animation(.easeInOut(duration: Self.dotMorph), value: active)
     }
 
     /// The bright progress fill inside an indicator. Kept in a `TimelineView` for
     /// every dot (stable identity) so the active one grows from a dot to the full
     /// pill across the dwell; when a dot goes inactive its fill closes back down
-    /// (animated by the `active` flip), and when auto-advance is off the active
+    /// (via the container's page animation), and when auto-advance is off the active
     /// pill just sits fully lit.
     private func activeDotFill(active: Bool, trackWidth: CGFloat, height: CGFloat) -> some View {
         TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !settings.autoAdvance || pausedAt != nil)) { timeline in
@@ -1353,9 +1362,6 @@ struct HomeHeroView: View {
                     width: brightFillWidth(active: active, trackWidth: trackWidth, height: height, now: timeline.date),
                     height: height
                 )
-                // Animate only the open/close that a page (active flip) triggers;
-                // the per-frame progress growth is driven by the timeline itself.
-                .animation(.easeInOut(duration: Self.dotMorph), value: active)
         }
     }
 
@@ -1374,16 +1380,17 @@ struct HomeHeroView: View {
         return height + (trackWidth - height) * progress
     }
 
-    /// Stable background for the paging-dot container: a solid translucent capsule
-    /// (NOT a material/glass blur) with a hairline edge. Because it is a flat fill
-    /// it never samples or refracts the backdrop that wipes past this height on
-    /// every page, so the indicator can't shimmer — unlike `.ultraThinMaterial` /
-    /// Liquid Glass, which blur-sample the moving artwork behind them. Kept dark +
-    /// semi-opaque so the white dots stay legible over any artwork.
-    private func pagingDotsBackground(shape: Capsule) -> some View {
-        shape
-            .fill(Color.black.opacity(0.5))
-            .overlay(shape.strokeBorder(Color.white.opacity(0.12), lineWidth: 1))
+    /// Liquid Glass background for the paging-dot container: real glass on
+    /// tvOS 26+, `.ultraThinMaterial` below (mirrors `heroPillIdleBackground`). The
+    /// container width is constant across pages, so this pill never resizes — the
+    /// paging jitter was the dots' animation, not this background.
+    @ViewBuilder
+    private func pagingDotsGlass(shape: Capsule) -> some View {
+        if #available(tvOS 26.0, *) {
+            shape.fill(.clear).glassEffect(.regular, in: shape)
+        } else {
+            shape.fill(.ultraThinMaterial)
+        }
     }
 
     // MARK: - Backdrop

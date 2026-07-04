@@ -5,7 +5,7 @@
 <h1 align="center">Plozz</h1>
 
 <p align="center">
-  A free and open source native Apple TV app for Jellyfin or Plex servers.
+  A free forever, open source, native Apple TV app for Jellyfin, Plex, and local shares.
 </p>
 
 <p align="center">
@@ -22,37 +22,24 @@
 
 Plozz is in **public beta** on TestFlight. [**Join the beta →**](https://testflight.apple.com/join/EKfReNMu) to install it on your Apple TV (tvOS 17 or later) and stream from your own Jellyfin or Plex server.
 
-## Features
+## Unique Features
 
-Servers & sign-in:
+- **Multiple servers, one library.** Merge all of your content into one library across plex, jellyfin and local share (SMB only) servers.
+- **Sync watch history across all servers** - Optionally sync your watch history across every server that's connected. Watch it on Plex, it will sync that same watch status to Jellyfin (if Jellyfin has the same title).
+- **Mark as watched** - Mark an entire season as watched or "up to here" to quickly update watch history.
+- **Trakt, AniDB, MyAnimeList, Simkl, and Last.fm** - Full support for every tracker across your movies, tv, anime, and music.
+- **Seerr integration** - Connect a seerr account and request media from directly within the search or hero of the app.
+- **Highly customizable interface** - Change the theme of the entire app (light, dark, OLED). Change the density of media, optionally show hero content, change the navigation style. 
+- **Jellyfin, Plex, and local shares (SMB)**
+- **Circadian mode** - Automatically warm and dim the display at set times to help you sleep (only at the app level)
+- **Subtitle customization** — Vastly customize the subtitles directly in the player. Change font, size, color, opacity, background, font weight, HDR brightness, shadow, position.
+- **Dual subtitle support** - Turn on 2 different subtitle tracks at the same
 
-- **Jellyfin and Plex** — one experience over either backend; Home, detail, and playback work the same.
-- **Multiple servers, one library** — Together or separate - you can connect multiple Jellyfin and Plex servers; Everything optionally merges together.
-- **Auto-discovery** — finds Jellyfin servers on your LAN (UDP) automatically, with manual URL entry as a fallback.
-- **Remote-free sign-in** — Jellyfin **Quick Connect** and Plex **Link**: enter a code, no password typing.
-- **Persistent session** — relaunch restores your login. Tokens live in the Keychain and are never logged.
+- **Auto-discovery** — Automatically detect jellyfin servers, seerr servers
+- **Remote-free sign-in** — Jellyfin **Quick Connect** and Plex **Link** supported
 
-Browse & detail:
-
-- **Home** — Continue Watching plus Latest / Recently Added.
-- **Detail pages** — full-bleed backdrop, logo, overview, ratings, and a Play/Resume button.
-- **Series** — focus-driven season tabs and an episode rail, with per-episode watched badges and "mark watched up to here."
-- **Trailers** — plays library trailers, with a TMDb → YouTube fallback when the server has none.
-- **Music** — browse artists and albums with a mini-player, queue, and background audio.
-
-Playback:
-
-- **Direct play first** — `AVPlayer` plays what it can; tricky formats (AV1, some HEVC/10-bit, image-based PGS/VOBSUB subtitles) route to an on-device engine automatically.
-- **Resume** — position is restored and reported back to the server.
-- **Skip intros & credits** — skip buttons appear automatically from your server's media segments.
-- **Track selection** — audio and subtitles when available.
-- **Caption customization** — font, size, color, opacity, background, and edge style.
-
-Appearance:
-
-- **Themes & display size** — System, Dark, OLED, and Light, plus adjustable interface sizing.
-- **Night mode** — highly adjustable settings to warm and dim the display automatically to protect your circadian rhythm
-- **Profiles** — all settings are per-profile, allowing you to customize the experience to your own preferences while grandma can do as she pleases
+- **Profiles** — Native Apple TV profile support - all settings are per-profile and your profile selection is remembered based on the Apple TV profile that was last used
+- **(Almost) All video formats supported** - Powered by [AetherEngine](https://github.com/superuser404notfound/AetherEngine), an open source engine that fully supports HDR, Dolby Vision, AV1, virtually everything.[View the full list](https://github.com/superuser404notfound/AetherEngine/blob/main/docs/formats.md).
 
 ## Architecture
 
@@ -140,15 +127,14 @@ tvOS **Brand Assets** (app icon + Top Shelf images) live under
 current art is a placeholder — replace it before a public App Store release.
 
 ## Roadmap
-
-- **Overseerr** integration (request media).
-- iOS and/or iPadOS app depending on demand
+- Dedicated iOS music app (Mozz)
+- iOS and/or iPadOS Plozz app depending on demand
 
 ## Donate
 
-Plozz is free and open source, with no paywall, ads, or obligation. If it's
+Plozz will always be free and open source, with no paywall, ads, or obligation. If it's
 useful to you, donations toward upkeep
-are welcome — and not donating is completely fine.
+are welcome — and not donating is completely okay.
 
 **[Donate via GitHub Sponsors](https://github.com/sponsors/thatcube)** — one-time or recurring.
 

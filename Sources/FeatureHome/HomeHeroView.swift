@@ -842,8 +842,33 @@ struct HomeHeroView: View {
             selectedButton = newIndex
         case let .advance(toItem, keepButton):
             page(to: toItem, keepButton: keepButton, forward: false)
+            restoreFocusAfterPage()
         case .escape, .blocked:
             break
+        }
+    }
+
+    /// Backstop for the intermittent focus drop on a page that changes the hero's
+    /// action-button count. `handleLeft()`/`handleRight()` re-pin focus with the
+    /// synchronous `defer { focus = .row }` above — but that runs from INSIDE
+    /// `focus`'s own `onChange` (we're handling the guard bounce) and in the SAME
+    /// transaction that `page()` swaps `index` (new pill content). Device tracing
+    /// (`PLZHFOCUS`) proved that on a page where the button count changes the extra
+    /// layout work makes the tvOS focus engine DROP that reassignment: focus lands
+    /// on `nil` and is stranded ~1–2s until the next press, then returns on the
+    /// wrong control (the reported bug). Reasserting `.row` on the NEXT runloop
+    /// tick — after SwiftUI has committed the paged layout — lands reliably because
+    /// it no longer races the content change. It only fires if focus was actually
+    /// dropped (`== nil`) AND no newer page has happened since (`advanceToken`
+    /// unchanged), so it can never steal focus the user moved away deliberately.
+    /// A no-op on the ~80% of pages where the synchronous re-pin already worked, so
+    /// it adds no flicker there.
+    private func restoreFocusAfterPage() {
+        let token = advanceToken
+        DispatchQueue.main.async {
+            guard focus == nil, token == advanceToken else { return }
+            HeroFocusDiagnostics.emit("restoreFocusAfterPage: focus was dropped, reasserting .row | \(hfState())")
+            focus = .row
         }
     }
 
@@ -875,6 +900,7 @@ struct HomeHeroView: View {
             selectedButton = newIndex
         case let .advance(toItem, keepButton):
             page(to: toItem, keepButton: keepButton, forward: true)
+            restoreFocusAfterPage()
         case .escape, .blocked:
             break
         }

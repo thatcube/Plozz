@@ -61,8 +61,6 @@ public struct LibraryBrowseView: View {
                             }
                         }
                         .padding(.horizontal, HomeLayout.horizontalPadding)
-                        // Reserve a lane for the rail so no card sits under it.
-                        .padding(.trailing, viewModel.showsLetterRail ? Self.letterRailLane : 0)
                         .padding(.bottom, PlozzTheme.Metrics.screenVerticalPadding)
                         .focusSection()
                     }
@@ -70,6 +68,9 @@ public struct LibraryBrowseView: View {
                 }
                 // Never clip a focused card's lift, shadow or border.
                 .scrollClipDisabled()
+                // Hide the native scroll indicator: it otherwise draws right on
+                // top of the alphabet rail, which reads as jank.
+                .scrollIndicators(.hidden)
                 .overlay(alignment: .trailing) {
                     if viewModel.showsLetterRail {
                         LibraryLetterRail(
@@ -108,9 +109,6 @@ public struct LibraryBrowseView: View {
         if let railFocusedLetter { return railFocusedLetter }
         return viewModel.letter(forIndex: viewModel.topVisibleIndex ?? 0)
     }
-
-    /// Width reserved on the trailing edge of the grid for the alphabet rail.
-    private static let letterRailLane: CGFloat = 64
 
     /// The library title and Sort control. It scrolls *with* the grid (it is the
     /// first row of the scroll content), so nothing is pinned to the top of the
@@ -260,8 +258,9 @@ private struct LibraryLetterRail: View {
             }
         }
         .padding(.vertical, PlozzTheme.Spacing.medium)
-        .padding(.trailing, PlozzTheme.Spacing.small)
-        .frame(width: 52)
+        // Sit in the grid's trailing gutter (it hugs the safe-area edge, which is
+        // already inset from the bezel by overscan) rather than pushing content.
+        .frame(width: 40)
         .focusSection()
         // Publish which letter is focused up to the parent (drives the jumbo
         // bubble + highlight), and fly the grid to it as focus arrives.
@@ -298,15 +297,15 @@ private struct LetterRailButtonStyle: ButtonStyle {
 
         var body: some View {
             configuration.label
-                .font(.system(size: 22, weight: isFocused || isCurrent ? .bold : .semibold, design: .rounded))
+                .font(.system(size: 20, weight: isFocused || isCurrent ? .bold : .semibold, design: .rounded))
                 .foregroundStyle(foreground)
-                .frame(width: 40, height: 34)
+                .frame(width: 34, height: 30)
                 .background(
                     Circle()
                         .fill(.white)
                         .opacity(isFocused ? 1 : 0)
                 )
-                .scaleEffect(isFocused ? 1.25 : 1.0)
+                .scaleEffect(isFocused ? 1.2 : 1.0)
                 .animation(.easeOut(duration: 0.14), value: isFocused)
                 .animation(.easeOut(duration: 0.14), value: isCurrent)
         }

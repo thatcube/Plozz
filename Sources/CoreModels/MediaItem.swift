@@ -179,6 +179,13 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
     /// Available for a **featured** item without importing the Seerr module.
     public var availability: MediaAvailabilityStatus?
 
+    /// Aggregate download progress (`0..<1`) for a not-yet-available **featured**
+    /// title currently being fetched by the discovery backend's downloaders
+    /// (Seerr → Radarr/Sonarr queue), or `nil` when nothing is downloading. Lets
+    /// the hero draw a live progress bar for a requested title without importing
+    /// the Seerr module. Transient/live — not part of a title's identity.
+    public var downloadProgress: Double?
+
     /// Source-of-truth technical facts about the underlying file (resolution,
     /// HDR/Dolby Vision range, audio codec/channels, …) when the provider reports
     /// them on the detail fetch. Powers the "4K · Dolby Vision · Dolby Atmos"
@@ -320,6 +327,7 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         ratings: [ExternalRating] = [],
         providerIDs: [String: String] = [:],
         availability: MediaAvailabilityStatus? = nil,
+        downloadProgress: Double? = nil,
         mediaInfo: MediaSourceMetadata? = nil,
         sourceAccountID: String? = nil,
         additionalSourceAccountIDs: [String] = [],
@@ -362,6 +370,7 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         self.ratings = ratings
         self.providerIDs = providerIDs
         self.availability = availability
+        self.downloadProgress = downloadProgress
         self.mediaInfo = mediaInfo
         self.sourceAccountID = sourceAccountID
         self.additionalSourceAccountIDs = additionalSourceAccountIDs
@@ -387,6 +396,7 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         case posterURL, seriesPosterURL, backdropURL, heroBackdropURL
         case fallbackArtworkURL, logoURL, ratings, providerIDs, mediaInfo
         case availability
+        case downloadProgress
         case sourceAccountID, additionalSourceAccountIDs, versions, isFavorite
         case sources, lastPlayedAt, libraryID
     }
@@ -426,6 +436,7 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         ratings = try container.decodeIfPresent([ExternalRating].self, forKey: .ratings) ?? []
         providerIDs = try container.decodeIfPresent([String: String].self, forKey: .providerIDs) ?? [:]
         availability = try container.decodeIfPresent(MediaAvailabilityStatus.self, forKey: .availability)
+        downloadProgress = try container.decodeIfPresent(Double.self, forKey: .downloadProgress)
         mediaInfo = try container.decodeIfPresent(MediaSourceMetadata.self, forKey: .mediaInfo)
         sourceAccountID = try container.decodeIfPresent(String.self, forKey: .sourceAccountID)
         additionalSourceAccountIDs = try container.decodeIfPresent([String].self, forKey: .additionalSourceAccountIDs) ?? []

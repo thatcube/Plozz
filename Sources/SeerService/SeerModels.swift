@@ -84,16 +84,59 @@ struct SeerDiscoverResult: Decodable {
 
 /// Seerr's per-title tracking record. `status` is the `MediaStatus` enum
 /// (1=UNKNOWN … 6=DELETED). Absent `mediaInfo` on a result means the title is
-/// untracked (treat as UNKNOWN).
+/// untracked (treat as UNKNOWN). `downloadStatus` carries the live Radarr/Sonarr
+/// queue items (present on discover/search results too — Overseerr populates it
+/// via an `@AfterLoad` hook), letting us surface real download progress.
 struct SeerMediaInfo: Decodable {
     var id: Int?
     var tmdbId: Int?
     var status: Int?
+    var downloadStatus: [SeerDownloadingItem]?
 
-    init(id: Int? = nil, tmdbId: Int? = nil, status: Int? = nil) {
+    init(id: Int? = nil, tmdbId: Int? = nil, status: Int? = nil, downloadStatus: [SeerDownloadingItem]? = nil) {
         self.id = id
         self.tmdbId = tmdbId
         self.status = status
+        self.downloadStatus = downloadStatus
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, tmdbId, status, downloadStatus
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(Int.self, forKey: .id)
+        tmdbId = try c.decodeIfPresent(Int.self, forKey: .tmdbId)
+        status = try c.decodeIfPresent(Int.self, forKey: .status)
+        downloadStatus = try c.decodeIfPresent([SeerDownloadingItem].self, forKey: .downloadStatus)
+    }
+}
+
+/// One in-flight download from the Radarr/Sonarr queue, as surfaced by Seerr on a
+/// title's `mediaInfo.downloadStatus`. `size`/`sizeLeft` are bytes; the fetched
+/// fraction is `(size - sizeLeft) / size`. Everything is optional/lenient so a
+/// partial or evolving Seerr payload never fails the whole discover decode.
+struct SeerDownloadingItem: Decodable {
+    var size: Double?
+    var sizeLeft: Double?
+    var status: String?
+
+    init(size: Double? = nil, sizeLeft: Double? = nil, status: String? = nil) {
+        self.size = size
+        self.sizeLeft = sizeLeft
+        self.status = status
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case size, sizeLeft, status
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        size = try c.decodeIfPresent(Double.self, forKey: .size)
+        sizeLeft = try c.decodeIfPresent(Double.self, forKey: .sizeLeft)
+        status = try c.decodeIfPresent(String.self, forKey: .status)
     }
 }
 

@@ -28,6 +28,10 @@ public struct ThemePalette: Equatable, Sendable {
     public let secondaryText: Color
     /// Accent / tint colour (Plozz's `AccentColor`).
     public let accent: Color
+    /// Text colour for inline error / failure messaging (wrong credentials,
+    /// unreachable server, etc). Theme-aware so it reads as a clear "danger" red
+    /// against each background — brighter on dark/OLED, deeper on light.
+    public let errorText: Color
     /// Optional accent glow bloomed from the top-centre of the background.
     /// `nil` keeps a theme flat (e.g. OLED stays pure black).
     public let topGlow: Color?
@@ -62,6 +66,7 @@ public struct ThemePalette: Equatable, Sendable {
         primaryText: Color,
         secondaryText: Color,
         accent: Color,
+        errorText: Color,
         topGlow: Color?,
         focusedCardGlassTint: Color,
         liftSurface: Color,
@@ -76,6 +81,7 @@ public struct ThemePalette: Equatable, Sendable {
         self.primaryText = primaryText
         self.secondaryText = secondaryText
         self.accent = accent
+        self.errorText = errorText
         self.topGlow = topGlow
         self.focusedCardGlassTint = focusedCardGlassTint
         self.liftSurface = liftSurface
@@ -132,6 +138,7 @@ public extension ThemePalette {
         primaryText: .white,
         secondaryText: Color.white.opacity(0.62),
         accent: ThemePalette.brandAccent,
+        errorText: Color(red: 1.0, green: 0.42, blue: 0.40),
         topGlow: ThemePalette.brandBlue.opacity(0.075),
         focusedCardGlassTint: Color.white.opacity(0.13),
         liftSurface: .white,
@@ -150,6 +157,7 @@ public extension ThemePalette {
         primaryText: .white,
         secondaryText: Color.white.opacity(0.62),
         accent: ThemePalette.brandAccent,
+        errorText: Color(red: 1.0, green: 0.42, blue: 0.40),
         topGlow: nil,
         focusedCardGlassTint: Color.white.opacity(0.10),
         liftSurface: .white,
@@ -169,6 +177,7 @@ public extension ThemePalette {
         primaryText: Color.black.opacity(0.90),
         secondaryText: Color.black.opacity(0.60),
         accent: ThemePalette.brandAccent,
+        errorText: Color(red: 0.78, green: 0.11, blue: 0.09),
         topGlow: ThemePalette.brandBlue.opacity(0.14),
         focusedCardGlassTint: Color.black.opacity(0.05),
         liftSurface: .white,

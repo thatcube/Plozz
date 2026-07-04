@@ -99,9 +99,12 @@ final class UserSessionRedactionTests: XCTestCase {
 
 final class ProviderKindTests: XCTestCase {
     func testJellyfinAndPlexAreBothFirstClassProviders() {
-        XCTAssertEqual(Set(ProviderKind.allCases), [.jellyfin, .plex])
+        // Jellyfin and Plex are the first-class, co-equal backends; mediaShare is
+        // a deliberately second-class local-file backend (see ProviderKind docs).
+        XCTAssertEqual(Set(ProviderKind.allCases), [.jellyfin, .plex, .mediaShare])
         XCTAssertEqual(ProviderKind.jellyfin.displayName, "Jellyfin")
         XCTAssertEqual(ProviderKind.plex.displayName, "Plex")
+        XCTAssertEqual(ProviderKind.mediaShare.displayName, "Media Share")
     }
 }
 

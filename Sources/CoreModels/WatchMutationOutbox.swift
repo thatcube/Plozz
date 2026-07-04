@@ -141,9 +141,14 @@ public final class FileWatchMutationStore: WatchMutationStoring, @unchecked Send
     }
 
     private static func defaultDirectory() -> URL {
-        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+        // tvOS does not persist `Application Support` (the directory doesn't survive
+        // a relaunch on device), so an outbox written there silently vanished on
+        // every restart — pending watch mutations that hadn't drained in-session
+        // were lost. `Library/Caches` persists across normal tvOS launches (matching
+        // every other durable store in the app), so use it here.
+        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory
-        return support.appendingPathComponent("Plozz", isDirectory: true)
+        return caches.appendingPathComponent("Plozz", isDirectory: true)
     }
 
     public func load() -> WatchOutboxState {

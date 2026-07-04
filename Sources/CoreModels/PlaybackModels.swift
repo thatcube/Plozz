@@ -346,16 +346,24 @@ public struct PlaybackProgress: Hashable, Sendable {
     public var playSessionID: String?
     public var positionSeconds: TimeInterval
     public var isPaused: Bool
+    /// Total media duration in seconds when the player knows it, else `nil`.
+    /// Plex/Jellyfin ignore this (their servers own progress percentages), but a
+    /// local media share has no server, so it persists this alongside the resume
+    /// position to render a Continue Watching progress bar (`position / duration`)
+    /// — a bare position can't be turned into a percentage without it.
+    public var durationSeconds: TimeInterval?
 
     public init(
         itemID: String,
         playSessionID: String?,
         positionSeconds: TimeInterval,
-        isPaused: Bool
+        isPaused: Bool,
+        durationSeconds: TimeInterval? = nil
     ) {
         self.itemID = itemID
         self.playSessionID = playSessionID
         self.positionSeconds = positionSeconds
         self.isPaused = isPaused
+        self.durationSeconds = durationSeconds
     }
 }

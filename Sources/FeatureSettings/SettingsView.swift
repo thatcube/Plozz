@@ -4,6 +4,7 @@ import CoreModels
 import CoreUI
 import FeatureProfiles
 import TraktService
+import SeerService
 import SimklService
 import AniListService
 import MALService
@@ -71,6 +72,7 @@ public struct SettingsView: View {
     private let crashReportingConfigured: Bool
     private let trakt: TraktService
     private let simkl: SimklService
+    private let seer: SeerService
     private let anilist: AniListService
     private let mal: MALService
     private let lastfm: LastFmService
@@ -114,6 +116,7 @@ public struct SettingsView: View {
         crashReportingConfigured: Bool,
         trakt: TraktService,
         simkl: SimklService,
+        seer: SeerService,
         anilist: AniListService,
         mal: MALService,
         lastfm: LastFmService,
@@ -156,6 +159,7 @@ public struct SettingsView: View {
         self.crashReportingConfigured = crashReportingConfigured
         self.trakt = trakt
         self.simkl = simkl
+        self.seer = seer
         self.anilist = anilist
         self.mal = mal
         self.lastfm = lastfm
@@ -370,6 +374,14 @@ public struct SettingsView: View {
             navRow("Appearance", icon: "paintpalette",
                    value: nil,
                    route: .appearance)
+            navRow("Home Display", icon: "rectangle.on.rectangle.angled",
+                   value: nil,
+                   route: .homeDisplay) {
+                Text("Display size, card style & the featured hero")
+                    .font(.footnote)
+                    .settingsRowSecondary()
+                    .lineLimit(2)
+            }
             navRow("Circadian Mode", icon: "moon.stars",
                    value: nil,
                    route: .nightShift) {
@@ -562,6 +574,11 @@ public struct SettingsView: View {
             MyLibrariesDetailView(context: context)
         case .appearance:
             AppearanceDetailView(theme: theme)
+        case .homeDisplay:
+            HomeDisplayDetailView(
+                discoveredLibraries: discoveredLibraries,
+                homeVisibility: homeVisibility
+            )
         case .nightShift:
             NightShiftDetailView(model: nightShift)
         case .playback:
@@ -569,7 +586,7 @@ public struct SettingsView: View {
         case .spoilers:
             SpoilersDetailView(spoilers: spoilers)
         case .integrations:
-            IntegrationsDetailView(trakt: trakt, simkl: simkl, anilist: anilist, mal: mal, lastfm: lastfm, playback: playback, serverCount: activeProfileServerCount)
+            IntegrationsDetailView(trakt: trakt, simkl: simkl, seer: seer, anilist: anilist, mal: mal, lastfm: lastfm, playback: playback, serverCount: activeProfileServerCount, knownServerHosts: knownServerHosts)
         case .attributions:
             AttributionsDetailView()
         case .help:
@@ -729,6 +746,20 @@ public struct SettingsView: View {
             ? accounts.filter { isAccountIncludedInActiveProfile($0.id) }
             : accounts
         return Set(relevant.map { $0.server.id }).count
+    }
+
+    /// Hosts of already-configured media servers, deduplicated. Seerr auto-
+    /// discovery probes these first — Overseerr/Jellyseerr is very commonly
+    /// co-hosted on the same box as the Jellyfin/Plex server it manages, so
+    /// this often finds it instantly without waiting on a subnet sweep.
+    private var knownServerHosts: [String] {
+        var seen = Set<String>()
+        var hosts: [String] = []
+        for account in accounts {
+            guard let host = account.server.baseURL.host, seen.insert(host).inserted else { continue }
+            hosts.append(host)
+        }
+        return hosts
     }
 
     /// Shared leading icon for every Settings row. Explicit point size +

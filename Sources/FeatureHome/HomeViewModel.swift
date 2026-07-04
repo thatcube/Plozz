@@ -158,8 +158,16 @@ public final class HomeViewModel {
     }
 
     public func load() async {
-        PlozzLog.boot("HomeVM.load START vm=\(UInt(bitPattern: ObjectIdentifier(self).hashValue)) accounts=\(accounts.count) state=\(String(describing: state))")
-        state = .loading
+        await load(showLoadingState: true)
+    }
+
+    /// Re-aggregates Home content. `showLoadingState` is `false` for a *silent*
+    /// refresh (e.g. surfacing a brand-new resume after playback) — the currently
+    /// loaded rows stay on screen until the fresh content swaps in, so there's no
+    /// skeleton flash or focus reset for a background update.
+    public func load(showLoadingState: Bool) async {
+        PlozzLog.boot("HomeVM.load START vm=\(UInt(bitPattern: ObjectIdentifier(self).hashValue)) accounts=\(accounts.count) state=\(String(describing: state)) silent=\(!showLoadingState)")
+        if showLoadingState { state = .loading }
 
         let aggregator = self.aggregator
         let accounts = self.accounts
@@ -222,6 +230,21 @@ public final class HomeViewModel {
         // next full reload removed it).
         let reflectsPlayback = (mutation.resumePosition ?? 0) > 0
             || (mutation.playedPercentage.map { $0 > 0 } ?? false)
+        // A brand-new *in-progress* resume for a title that isn't on any Home row
+        // yet can't be updated in place — the mutation carries only ids + state, not
+        // a full card to synthesise. In-place mapping (below) would leave Continue
+        // Watching unchanged, so the just-started title never appears until the next
+        // full reload (relaunch). Detect that case here and trigger a *silent*
+        // re-aggregation so the new card is fetched from its provider (a media
+        // share reads its freshly-persisted local resume off disk) and slots in —
+        // no skeleton flash, no focus reset. Gated to an in-progress resume (not a
+        // finish, which *leaves* Continue Watching) that matches nothing already
+        // loaded, so a normal re-watch or mark-watched never forces a reload.
+        let isInProgressResume = (mutation.resumePosition ?? 0) > 0 && !(mutation.played ?? false)
+        let alreadyOnHome = content.continueWatching.contains { mutation.targets($0) }
+        if isInProgressResume && !alreadyOnHome {
+            scheduleNewResumeReload()
+        }
         if reflectsPlayback {
             let now = Date()
             let stamped = content.continueWatching.map { item -> MediaItem in
@@ -259,6 +282,24 @@ public final class HomeViewModel {
         content.latest = content.latest.map { apply(mutation, to: $0) }
         content.watchlist = updatedWatchlist(content.watchlist, mutation: mutation, in: content)
         state = .loaded(content)
+    }
+
+    /// In-flight guard so a burst of resume ticks for a not-yet-loaded title
+    /// coalesces into a single silent re-aggregation instead of stacking reloads.
+    private var newResumeReloadInFlight = false
+
+    /// Silently re-aggregates Home to surface a brand-new resume that couldn't be
+    /// updated in place (see ``applyWatchedState(_:)``). No-op while a reload is
+    /// already running, and only ever runs against currently-loaded content so it
+    /// can't fight the initial load or a visibility-driven reload.
+    private func scheduleNewResumeReload() {
+        guard !newResumeReloadInFlight, case .loaded = state else { return }
+        newResumeReloadInFlight = true
+        Task { [weak self] in
+            guard let self else { return }
+            await self.load(showLoadingState: false)
+            self.newResumeReloadInFlight = false
+        }
     }
 
     /// Overlays the durable watch-outbox's **not-yet-confirmed** mutations onto a

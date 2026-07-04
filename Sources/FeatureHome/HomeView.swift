@@ -3,7 +3,8 @@ import SwiftUI
 import CoreModels
 import CoreUI
 
-/// The Home screen: Continue Watching, Latest, and library shortcuts.
+/// The Home screen: an optional cinematic **hero** carousel followed by
+/// Continue Watching, Latest, and library shortcuts.
 public struct HomeView: View {
     @State private var viewModel: HomeViewModel
     private var visibility: HomeLibraryVisibilityModel
@@ -12,12 +13,43 @@ public struct HomeView: View {
     private let onPlayItem: (MediaItem) -> Void
     private let onSelectLibrary: (MediaLibrary) -> Void
 
+    /// Per-profile hero configuration. `nil` (or an inactive config) leaves Home
+    /// rendering its classic rows unchanged.
+    private var heroSettings: HeroSettingsModel?
+    private let heroCurator: HeroCurator
+    private let heroFeaturedProvider: FeaturedContentProviding
+    private let heroRandomProvider: RandomLibraryContentProviding
+    /// The app-wide navigation style, so the carousel's left-edge behaviour
+    /// (escape to sidebar vs. wrap) matches the surrounding chrome.
+    private let navigationStyle: NavigationStyle
+
+    /// The curated hero items, recomputed as Home content or settings change.
+    @State private var heroItems: [MediaItem] = []
+
+    /// The clamped upward parallax lift (0…`heroParallaxMaxLift`) applied to the
+    /// hero backdrop as the page scrolls down toward Continue Watching. Driven off
+    /// the ScrollView's live content offset so it ramps in lockstep with the recede.
+    @State private var heroParallaxLift: CGFloat = 0
+
+    /// Maximum backdrop parallax lift, in points — the artwork rises this far
+    /// faster than the content by the time the recede settles.
+    private static let heroParallaxMaxLift: CGFloat = 80
+
+    /// Focus scope spanning the hero + rows; lets the hero's Play button be the
+    /// preferred initial focus (see `.focusScope`/`prefersDefaultFocus`).
+    @Namespace private var heroFocusScope
+
     @Environment(\.plozzMetrics) private var metrics
 
     public init(
         viewModel: HomeViewModel,
         visibility: HomeLibraryVisibilityModel,
         spoilerSettings: SpoilerSettings = .default,
+        heroSettings: HeroSettingsModel? = nil,
+        heroCurator: HeroCurator = HeroCurator(),
+        heroFeaturedProvider: @escaping FeaturedContentProviding = HeroFeaturedProvider.none,
+        heroRandomProvider: @escaping RandomLibraryContentProviding = HeroRandomProvider.none,
+        navigationStyle: NavigationStyle = .default,
         onSelectItem: @escaping (MediaItem) -> Void,
         onPlayItem: @escaping (MediaItem) -> Void,
         onSelectLibrary: @escaping (MediaLibrary) -> Void
@@ -25,6 +57,11 @@ public struct HomeView: View {
         _viewModel = State(initialValue: viewModel)
         self.visibility = visibility
         self.spoilerSettings = spoilerSettings
+        self.heroSettings = heroSettings
+        self.heroCurator = heroCurator
+        self.heroFeaturedProvider = heroFeaturedProvider
+        self.heroRandomProvider = heroRandomProvider
+        self.navigationStyle = navigationStyle
         self.onSelectItem = onSelectItem
         self.onPlayItem = onPlayItem
         self.onSelectLibrary = onSelectLibrary
@@ -50,19 +87,132 @@ public struct HomeView: View {
             // kind, order *and* how many cards it actually showed, so the skeleton
             // matches a full row and a sparse one alike.
             let layout = rows.map { HomeRowLayout(kind: $0.kind, count: $0.cardCount) }
-            ScrollView {
-                VStack(alignment: .leading, spacing: metrics.rowSpacing) {
-                    ForEach(rows) { row in
-                        rowView(row)
+            // Seed the hero synchronously from the already-loaded sources
+            // (Continue Watching + Watchlist) so it renders in the *same frame* as
+            // the rows — no pop-in. Once `recomputeHero` finishes, `heroItems`
+            // (which also includes the async Featured/Random sources) takes over.
+            let syncHeroItems = heroSettings.map {
+                heroCurator.curateSync(
+                    settings: $0.settings,
+                    continueWatching: content.continueWatching,
+                    watchlist: content.watchlist
+                )
+            } ?? []
+            let displayHeroItems = heroItems.isEmpty ? syncHeroItems : heroItems
+            let heroActive = (heroSettings?.settings.isActive ?? false) && !displayHeroItems.isEmpty
+            // Account-scoped ids of every watchlisted title, so the hero can show
+            // the *series'* watchlist state on an episode/season slide.
+            let watchlistedKeys = Set(content.watchlist.map {
+                HomeHeroView.watchlistKey(accountID: $0.sourceAccountID, itemID: $0.id)
+            })
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        // Kill the Siri Remote **touch-surface pan** so a light touch
+                        // (or a resting thumb) can't free-scroll the page out from
+                        // under a pinned hero — the "view drifts down even though
+                        // focus never moved" bug. tvOS has no `DragGesture` to absorb,
+                        // and `.scrollDisabled` would also disable the focus-driven
+                        // auto-scroll that reveals lower rows. Instead we reach the
+                        // enclosing `UIScrollView` and disable its pan gesture
+                        // recognizers: touch-swipe scrolling is driven by the pan,
+                        // while focus auto-scroll and `ScrollViewReader.scrollTo` use
+                        // `setContentOffset` directly, so navigation and our hero
+                        // expand/recede animations keep working. The probe is a real
+                        // child of this VStack (not a `.background`) so it is
+                        // unambiguously inside the scroll content and its superview
+                        // walk reaches the UIScrollView. Gated to the hero layout.
+                        #if canImport(UIKit)
+                        if heroActive {
+                            ScrollPanDisabler()
+                                .frame(width: 1, height: 0)
+                                .allowsHitTesting(false)
+                                .accessibilityHidden(true)
+                        }
+                        #endif
+                        if heroActive, let heroSettings {
+                            HomeHeroView(
+                                items: displayHeroItems,
+                                settings: heroSettings.settings,
+                                spoilerSettings: spoilerSettings,
+                                navigationStyle: navigationStyle,
+                                watchlistedKeys: watchlistedKeys,
+                                focusScope: heroFocusScope,
+                                onSelect: onSelectItem,
+                                onPlay: onPlayItem,
+                                // When focus returns to the hero from a row below,
+                                // snap the scroll back to the top so the hero
+                                // re-expands to full-screen and its transition
+                                // replays — otherwise it stays partially scrolled.
+                                onFocusGained: {
+                                    withAnimation(.easeInOut(duration: 0.4)) {
+                                        proxy.scrollTo(Self.heroTopID, anchor: .top)
+                                    }
+                                },
+                                // Focus leaving the hero downward: recede. Scroll
+                                // the anchor just above the buttons to ~12% down
+                                // the screen, so the logo/title lift off the top,
+                                // the overview/buttons/dots settle into the upper
+                                // region, and the Continue Watching row centers
+                                // below — the Apple TV "recede" move.
+                                onMoveDown: {
+                                    withAnimation(.easeInOut(duration: 0.45)) {
+                                        proxy.scrollTo(
+                                            HomeHeroView.recedeAnchorID,
+                                            anchor: UnitPoint(x: 0.5, y: 0.12)
+                                        )
+                                    }
+                                },
+                                backdropParallaxLift: heroParallaxLift
+                            )
+                            .id(Self.heroTopID)
+                            // (touch-pan disabler lives as a sibling below so it is
+                            //  unambiguously inside the scroll content — see note.)
+                        }
+                        VStack(alignment: .leading, spacing: metrics.rowSpacing) {
+                            ForEach(rows) { row in
+                                rowView(row)
+                            }
+                        }
+                        // When the hero is present, pull the rows up so the first row
+                        // (Continue Watching) overlaps the hero's lower edge — the
+                        // Apple TV look. Otherwise keep the classic top padding.
+                        .padding(.top, heroActive ? -Self.heroRowOverlap : PlozzTheme.Metrics.screenVerticalPadding)
+                        .padding(.bottom, PlozzTheme.Metrics.screenVerticalPadding)
                     }
+                    // Span the hero and rows in one focus scope so the hero's
+                    // Play button can be the scope's preferred default — tvOS
+                    // then lands initial focus on the hero instead of a Continue
+                    // Watching card, with no visible focus steal-back.
+                    .focusScope(heroFocusScope)
                 }
-                .padding(.vertical, PlozzTheme.Metrics.screenVerticalPadding)
+                // Never clip a focused card's lift, shadow or border.
+                .scrollClipDisabled()
+                // Drive the hero backdrop parallax off the live scroll offset:
+                // as the page scrolls down toward Continue Watching, lift the
+                // backdrop up (clamped 0…max) so the artwork rises faster than the
+                // content. Fires every frame of the recede's scroll animation, so
+                // the lift ramps in lockstep with no separate animation trigger.
+                .onScrollGeometryChange(for: CGFloat.self) { geometry in
+                    min(max(geometry.contentOffset.y, 0), Self.heroParallaxMaxLift)
+                } action: { _, lift in
+                    heroParallaxLift = heroActive ? lift : 0
+                }
+                // When the hero is active, let it bleed into the top overscan
+                // inset instead of the ScrollView reserving it as a blank bar
+                // above the backdrop (the gap that made the hero sit too low).
+                // An empty edge set is a no-op, so the classic rows layout keeps
+                // its normal top inset under the tab bar.
+                .ignoresSafeArea(.container, edges: heroActive ? .top : [])
             }
-            // Never clip a focused card's lift, shadow or border.
-            .scrollClipDisabled()
             // Remember the structure we actually rendered (post-visibility), keyed
             // on kinds *and* counts so a changed card count re-persists too.
             .task(id: layout) { viewModel.rememberLayout(layout) }
+            // Recompute the curated hero set whenever Home content or the hero
+            // config changes. Off the main actor via the curator's async sources.
+            .task(id: HeroRecomputeKey(content: content, settings: heroSettings?.settings)) {
+                await recomputeHero(content: content)
+            }
         }
         .task(id: visibility.visibility.excludedKeys) {
             // First appearance loads; thereafter a change to the hidden-library set
@@ -90,6 +240,47 @@ public struct HomeView: View {
             // burst on a multi-server boot — debounce to a single fold.
             viewModel.scheduleReenrich()
         }
+    }
+
+    /// How far the rows are pulled up so the first row (Continue Watching) peeks
+    /// in just below the hero's paging dots — the Apple TV look. Paired with
+    /// `HomeHeroView.contentBottomInset` (132): pulling up by slightly less than
+    /// that inset lands the Continue Watching title ~40px below the dots, with the
+    /// tops of its cards peeking over the hero's lower edge. Tuned on-device.
+    private static let heroRowOverlap: CGFloat = 92
+
+    /// Scroll anchor for the hero, so focus returning to it can snap the scroll
+    /// back to the top and re-expand the hero to full-screen.
+    private static let heroTopID = "home-hero-top"
+
+    /// Recomputes the curated hero items for the current Home `content` and the
+    /// active hero settings, via the injected curator + content seams. Clears the
+    /// set when the hero is disabled so Home falls back to its classic layout.
+    @MainActor
+    private func recomputeHero(content: HomeViewModel.Content) async {
+        guard let settings = heroSettings?.settings, settings.isActive else {
+            heroItems = []
+            return
+        }
+        // Resolve the Random source's library scope: an empty set means "all
+        // currently-visible libraries", so expand it to concrete keys from the
+        // loaded, visibility-filtered library set before handing off to the
+        // provider (which then just fetches from the keys it's given).
+        var effective = settings
+        if settings.isEnabled(.randomFromLibrary) && settings.randomLibraryKeys.isEmpty {
+            let visibleKeys = content.libraries
+                .filter { visibility.isVisible($0.key) }
+                .map(\.key)
+            effective.randomLibraryKeys = Set(visibleKeys)
+        }
+        let items = await heroCurator.curate(
+            settings: effective,
+            continueWatching: content.continueWatching,
+            watchlist: content.watchlist,
+            featuredProvider: heroFeaturedProvider,
+            randomProvider: heroRandomProvider
+        )
+        heroItems = items
     }
 
     /// Renders one resolved `HomeRow`. The per-kind wiring (card style, and
@@ -164,6 +355,15 @@ public struct HomeView: View {
         }
         return server
     }
+}
+
+/// The `.task(id:)` key that drives hero recomputation: any change to the loaded
+/// Home content (Continue Watching / Watchlist feed the curator directly) or the
+/// hero settings re-runs the curator. `Equatable` so SwiftUI restarts the task
+/// only on a real change.
+private struct HeroRecomputeKey: Equatable {
+    let content: HomeViewModel.Content
+    let settings: HeroSettings?
 }
 
 /// A Home "Libraries" tile. Mirrors `PosterCardView`'s landscape (medium-card)
@@ -320,5 +520,100 @@ private struct LibraryCardView: View {
         }
     }
 }
+
+#if canImport(UIKit)
+import UIKit
+
+/// A probe view controller that walks up to its enclosing `UIScrollView` and
+/// disables every pan gesture recognizer on it, killing Siri Remote
+/// touch-surface (swipe) scrolling while leaving focus-driven auto-scroll and
+/// `ScrollViewReader.scrollTo` intact (those move content via `setContentOffset`,
+/// not the pan).
+///
+/// Why a `UIViewController` (via `viewDidLayoutSubviews`) rather than a
+/// `UIViewRepresentable`: the representable's `updateUIView` only runs when
+/// SwiftUI state changes, so a single `DispatchQueue.main.async` superview-walk
+/// there can fire *before* the view is attached beneath the scroll view, find
+/// nothing, and never retry. `viewDidLayoutSubviews` runs on every layout pass,
+/// so it reliably finds the scroll view once attached AND re-asserts the disable
+/// if SwiftUI ever re-enables it.
+private struct ScrollPanDisabler: UIViewControllerRepresentable {
+    func makeUIViewController(context: Context) -> ScrollPanDisablerController {
+        ScrollPanDisablerController()
+    }
+
+    func updateUIViewController(_ controller: ScrollPanDisablerController, context: Context) {}
+}
+
+private final class ScrollPanDisablerController: UIViewController {
+    private weak var scrollView: UIScrollView?
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.isUserInteractionEnabled = false
+        view.backgroundColor = .clear
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        disablePan()
+    }
+
+    override func didMove(toParent parent: UIViewController?) {
+        super.didMove(toParent: parent)
+        disablePan()
+    }
+
+    private func disablePan() {
+        if let scrollView {
+            apply(to: scrollView)
+            return
+        }
+
+        // 1) Preferred: walk up the view hierarchy to the enclosing UIScrollView.
+        var ancestor = view.superview
+        while let current = ancestor {
+            if let found = current as? UIScrollView {
+                scrollView = found
+                apply(to: found)
+                return
+            }
+            ancestor = current.superview
+        }
+
+        // 2) Fallback (in case SwiftUI hosts this probe outside the scroll
+        //    content's superview chain): find the vertical page scroll view under
+        //    our window and disable it. We identify it as a scroll view whose
+        //    content is taller than its bounds and NOT wider (so we never touch
+        //    the horizontal card rows, whose contentSize.width exceeds bounds).
+        guard let window = view.window else { return }
+        if let found = Self.findVerticalScrollView(in: window) {
+            scrollView = found
+            apply(to: found)
+        }
+    }
+
+    private func apply(to scrollView: UIScrollView) {
+        scrollView.panGestureRecognizer.isEnabled = false
+        for recognizer in scrollView.gestureRecognizers ?? [] where recognizer is UIPanGestureRecognizer {
+            recognizer.isEnabled = false
+        }
+    }
+
+    private static func findVerticalScrollView(in root: UIView) -> UIScrollView? {
+        if let scrollView = root as? UIScrollView,
+           scrollView.contentSize.height > scrollView.bounds.height + 1,
+           scrollView.contentSize.width <= scrollView.bounds.width + 1 {
+            return scrollView
+        }
+        for subview in root.subviews {
+            if let match = findVerticalScrollView(in: subview) {
+                return match
+            }
+        }
+        return nil
+    }
+}
+#endif
 
 #endif

@@ -12,6 +12,38 @@ public enum MediaItemKind: String, Codable, Sendable {
     case unknown
 }
 
+/// Library-availability of a title, independent of any single provider.
+///
+/// Mirrors Overseerr/Jellyseerr's `MediaStatus` enum (raw values are wire-stable
+/// with that API) so a Seerr-sourced **featured** item can carry whether it's
+/// already in the library, in-flight, or requestable. `nil` on a `MediaItem`
+/// means "not applicable / unknown" (e.g. an ordinary library item that never
+/// came from Seerr). Used to pick the right hero CTA — Request vs. Pending vs.
+/// Available — without the UI importing the Seerr module.
+public enum MediaAvailabilityStatus: Int, Codable, Sendable, Equatable, CaseIterable {
+    /// Never requested / not tracked by the discovery backend.
+    case unknown = 1
+    /// A request exists and is awaiting approval.
+    case pending = 2
+    /// Approved and handed to Radarr/Sonarr (downloading).
+    case processing = 3
+    /// Some seasons (TV) or parts are available.
+    case partiallyAvailable = 4
+    /// Fully available to stream in the library.
+    case available = 5
+    /// Was available, since removed.
+    case deleted = 6
+
+    /// Whether a one-tap "Request" makes sense for this state (nothing is in
+    /// flight or already available).
+    public var isRequestable: Bool {
+        switch self {
+        case .unknown, .deleted: return true
+        case .pending, .processing, .partiallyAvailable, .available: return false
+        }
+    }
+}
+
 /// A provider-agnostic cast/crew member shown on a detail page. For anime the
 /// `Actor` entries are the voice cast, with `role` holding the voiced character.
 public struct MediaPerson: Codable, Hashable, Identifiable, Sendable {
@@ -140,6 +172,12 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
     /// External database identifiers (e.g. `["Imdb": "tt0111161", "Tmdb": "278"]`),
     /// used by enrichment services to look up additional ratings/metadata.
     public var providerIDs: [String: String]
+
+    /// Library-availability of this title as reported by a discovery backend
+    /// (Seerr/Overseerr's `mediaInfo.status`). `nil` for ordinary library items
+    /// that never came from discovery. Lets the hero pick Request vs. Pending vs.
+    /// Available for a **featured** item without importing the Seerr module.
+    public var availability: MediaAvailabilityStatus?
 
     /// Source-of-truth technical facts about the underlying file (resolution,
     /// HDR/Dolby Vision range, audio codec/channels, …) when the provider reports
@@ -281,6 +319,7 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         logoURL: URL? = nil,
         ratings: [ExternalRating] = [],
         providerIDs: [String: String] = [:],
+        availability: MediaAvailabilityStatus? = nil,
         mediaInfo: MediaSourceMetadata? = nil,
         sourceAccountID: String? = nil,
         additionalSourceAccountIDs: [String] = [],
@@ -322,6 +361,7 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         self.logoURL = logoURL
         self.ratings = ratings
         self.providerIDs = providerIDs
+        self.availability = availability
         self.mediaInfo = mediaInfo
         self.sourceAccountID = sourceAccountID
         self.additionalSourceAccountIDs = additionalSourceAccountIDs
@@ -346,6 +386,7 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         case seriesID, seasonID, runtime, resumePosition, playedPercentage, isPlayed
         case posterURL, seriesPosterURL, backdropURL, heroBackdropURL
         case fallbackArtworkURL, logoURL, ratings, providerIDs, mediaInfo
+        case availability
         case sourceAccountID, additionalSourceAccountIDs, versions, isFavorite
         case sources, lastPlayedAt, libraryID
     }
@@ -384,6 +425,7 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         logoURL = try container.decodeIfPresent(URL.self, forKey: .logoURL)
         ratings = try container.decodeIfPresent([ExternalRating].self, forKey: .ratings) ?? []
         providerIDs = try container.decodeIfPresent([String: String].self, forKey: .providerIDs) ?? [:]
+        availability = try container.decodeIfPresent(MediaAvailabilityStatus.self, forKey: .availability)
         mediaInfo = try container.decodeIfPresent(MediaSourceMetadata.self, forKey: .mediaInfo)
         sourceAccountID = try container.decodeIfPresent(String.self, forKey: .sourceAccountID)
         additionalSourceAccountIDs = try container.decodeIfPresent([String].self, forKey: .additionalSourceAccountIDs) ?? []

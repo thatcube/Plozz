@@ -203,19 +203,50 @@ public final class SMBServiceDiscovery: @unchecked Sendable {
 /// name instead of typing/guessing it.
 public enum SMBShareEnumerator {
     public enum ListError: Error, CustomStringConvertible {
-        /// The server rejected the credentials (guest and any supplied login).
-        /// The UI uses this to prompt for a username/password and retry.
+        /// A login/enumeration as guest (no credentials supplied) didn't get us
+        /// the share list: either the anonymous session was refused, or it
+        /// connected but the server won't enumerate shares anonymously. The UI
+        /// uses this to explain that a username/password is required and prompt
+        /// for one.
         case authenticationRequired
+        /// The user *supplied* a username/password and the server rejected them
+        /// (bad username or wrong password). Distinct from
+        /// `authenticationRequired` so the UI can say "incorrect username or
+        /// password" instead of silently re-showing the generic prompt.
+        case credentialsRejected
+        /// Couldn't establish a TCP/SMB connection at all — the server is off,
+        /// the address/port is wrong, it's on another network, or something in
+        /// between refused/reset the connection. Distinct from `timedOut` (which
+        /// means we reached the point of waiting and gave up) and from the auth
+        /// cases (which mean we *did* connect and talk SMB).
+        case unreachable
         case timedOut
         case failed(String)
 
         public var description: String {
             switch self {
             case .authenticationRequired: return "authentication required"
+            case .credentialsRejected: return "incorrect username or password"
+            case .unreachable: return "couldn't connect to the server"
             case .timedOut: return "timed out"
             case .failed(let m): return m
             }
         }
+    }
+
+    /// True when `error` represents a transport/connection-level failure (the
+    /// socket never carried a valid SMB conversation) rather than a protocol
+    /// response from the server. Auth rejections arrive as `ErrorResponse`
+    /// (they carry an NTStatus), so those are explicitly *not* transport errors.
+    private static func isTransportError(_ error: Error) -> Bool {
+        if error is ErrorResponse { return false }
+        if error is NWError { return true }
+        if error is ConnectionError { return true }
+        if error is POSIXError { return true }
+        let ns = error as NSError
+        if ns.domain == NSPOSIXErrorDomain || ns.domain == NSURLErrorDomain { return true }
+        if ns.domain == (kCFErrorDomainCFNetwork as String) { return true }
+        return false
     }
 
     /// Log in (guest when no credentials given) and return the browsable disk
@@ -250,6 +281,12 @@ public enum SMBShareEnumerator {
                     PlozzLog.boot("share-list: login ok (\(account ?? "guest"))")
                 } catch {
                     PlozzLog.boot("share-list: login as \(account ?? "guest") failed: \(error)")
+                    if isTransportError(error) {
+                        // Never reached SMB at all (server off, wrong address,
+                        // refused/reset). Not an auth problem — asking for a
+                        // password wouldn't help, so say we couldn't connect.
+                        throw ListError.unreachable
+                    }
                     if account == nil {
                         // Some servers reject the literal "guest" but accept a
                         // truly anonymous session.
@@ -258,11 +295,36 @@ public enum SMBShareEnumerator {
                             PlozzLog.boot("share-list: anonymous login ok")
                         } catch {
                             PlozzLog.boot("share-list: anonymous login failed: \(error)")
+                            if isTransportError(error) {
+                                // The session dropped during the anonymous
+                                // fallback (server off/restarting, network blip)
+                                // — not an auth problem.
+                                throw ListError.unreachable
+                            }
                             throw ListError.authenticationRequired
                         }
                     } else {
-                        throw ListError.authenticationRequired
+                        // The user typed a username/password and the server
+                        // rejected them — surface that specifically.
+                        throw ListError.credentialsRejected
                     }
+                }
+
+                // Some servers (e.g. Samba `map to guest = Bad User`) don't reject
+                // a bad username/wrong password: they silently map it onto the
+                // guest account and report SUCCESS with the IS_GUEST session flag.
+                // If the user supplied credentials but we came back as guest, the
+                // credentials were effectively rejected — say so rather than
+                // letting the failed guest enumeration look like a generic error.
+                // (Exempt users who *deliberately* typed guest/anonymous: landing
+                // on a guest session is the expected success for them.)
+                if account != nil,
+                   account?.lowercased() != "guest",
+                   account?.lowercased() != "anonymous",
+                   client.session.isGuestSession {
+                    PlozzLog.boot("share-list: supplied credentials were mapped to guest — treating as rejected")
+                    try? await client.logoff()
+                    throw ListError.credentialsRejected
                 }
 
                 // Step 2 — enumerate shares over IPC$/srvsvc. This can be denied
@@ -274,6 +336,20 @@ public enum SMBShareEnumerator {
                 } catch {
                     PlozzLog.boot("share-list: enumerate failed: \(error)")
                     try? await client.logoff()
+                    if isTransportError(error) {
+                        // Session dropped mid-enumeration (server restart,
+                        // network blip) — not an auth issue, so don't prompt
+                        // for a password.
+                        throw ListError.unreachable
+                    }
+                    if account == nil {
+                        // Connected anonymously but the server won't list shares
+                        // without a login (e.g. Samba `restrict anonymous = 2`):
+                        // the fix is to supply credentials, so prompt for them.
+                        throw ListError.authenticationRequired
+                    }
+                    // Authenticated fine but this account isn't permitted to
+                    // enumerate — retrying the same credentials won't help.
                     throw ListError.failed("\(error)")
                 }
                 try? await client.logoff()
@@ -291,6 +367,7 @@ public enum SMBShareEnumerator {
             throw ListError.timedOut
         } catch {
             PlozzLog.boot("share-list: error \(error)")
+            if isTransportError(error) { throw ListError.unreachable }
             throw ListError.failed("\(error)")
         }
     }

@@ -11,6 +11,16 @@ public protocol ProviderResolving: Sendable {
     func provider(for session: UserSession) throws -> any MediaProvider
 }
 
+/// Optional capability a provider adopts to release long-lived connection state
+/// (open sockets, an SMB session) when the registry evicts it — on account
+/// removal, a token refresh, or a factory re-registration. Detected via
+/// `provider as? ProviderTeardown`; providers that hold no such state (or whose
+/// state is released by ARC) simply don't conform and are dropped as before.
+public protocol ProviderTeardown: Sendable {
+    /// Best-effort release of connection state. Safe to call more than once.
+    func teardown() async
+}
+
 /// A registry mapping `ProviderKind` → provider factory.
 ///
 /// The composition root (`AppShell`) registers the concrete factories it links
@@ -36,9 +46,12 @@ public final class ProviderRegistry: ProviderResolving, @unchecked Sendable {
     /// Registers (or replaces) the factory for `kind`. Clears any cached
     /// providers of that kind so the new factory takes effect.
     public func register(_ kind: ProviderKind, factory: @escaping Factory) {
-        lock.lock(); defer { lock.unlock() }
+        lock.lock()
         factories[kind] = factory
+        let evicted = Array(cache.values)
         cache.removeAll()
+        lock.unlock()
+        Self.teardown(evicted)
     }
 
     public func provider(for session: UserSession) throws -> any MediaProvider {
@@ -64,19 +77,35 @@ public final class ProviderRegistry: ProviderResolving, @unchecked Sendable {
         }
         // Evict any prior entry for the same server+user (e.g. a refreshed token)
         // so the cache holds exactly one live provider per account.
+        var evicted: [any MediaProvider] = []
         for staleKey in cache.keys where staleKey.hasPrefix("\(identity)|") {
-            cache.removeValue(forKey: staleKey)
+            if let stale = cache.removeValue(forKey: staleKey) { evicted.append(stale) }
         }
         cache[key] = provider
         lock.unlock()
+        Self.teardown(evicted)
         return provider
     }
 
     /// Drops all memoized providers. Call when the signed-in account set changes
     /// so removed accounts don't retain provider/connection state.
     public func invalidateCache() {
-        lock.lock(); defer { lock.unlock() }
+        lock.lock()
+        let evicted = Array(cache.values)
         cache.removeAll()
+        lock.unlock()
+        Self.teardown(evicted)
+    }
+
+    /// Fire-and-forget teardown of providers dropped from the cache, so a removed
+    /// account's SMB session (or any other connection state) is actively closed
+    /// rather than left to a `deinit` that may never release the socket.
+    private static func teardown(_ providers: [any MediaProvider]) {
+        let closeables = providers.compactMap { $0 as? ProviderTeardown }
+        guard !closeables.isEmpty else { return }
+        Task.detached {
+            for closeable in closeables { await closeable.teardown() }
+        }
     }
 }
 

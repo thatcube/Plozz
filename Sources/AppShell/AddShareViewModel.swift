@@ -22,8 +22,14 @@ final class AddShareViewModel {
         case idle
         case loading
         case loaded
-        /// The server rejected guest/anonymous — show credential fields + retry.
+        /// The server needs a login before it will list shares (guest was
+        /// refused or not allowed to enumerate) — show credential fields.
         case needsAuth
+        /// The user supplied a username/password and the server rejected them.
+        case badCredentials
+        /// Couldn't connect to the server at all (off, wrong address, different
+        /// network). No amount of credentials will help — offer to retry.
+        case unreachable
         case failed(String)
     }
 
@@ -80,7 +86,12 @@ final class AddShareViewModel {
                     self.discovered.append(server)
                 }
             }
-            self.scanning = false
+            // Only the CURRENT scan may clear the flag. A superseded scan (cancelled
+            // by a newer `startScan`) must not flip `scanning` back off — the newer
+            // scan already set it true and owns it now.
+            if !Task.isCancelled {
+                self.scanning = false
+            }
         }
     }
 
@@ -146,6 +157,18 @@ final class AddShareViewModel {
             } catch SMBShareEnumerator.ListError.authenticationRequired {
                 if Task.isCancelled { return }
                 self.shareLoad = .needsAuth
+            } catch SMBShareEnumerator.ListError.credentialsRejected {
+                if Task.isCancelled { return }
+                self.shareLoad = .badCredentials
+            } catch SMBShareEnumerator.ListError.unreachable {
+                if Task.isCancelled { return }
+                self.shareLoad = .unreachable
+            } catch SMBShareEnumerator.ListError.timedOut {
+                // A slow/unresponsive server is a reachability problem, not an
+                // auth one — show the "can't connect" panel with a retry rather
+                // than the generic failure (which prompts for credentials).
+                if Task.isCancelled { return }
+                self.shareLoad = .unreachable
             } catch {
                 if Task.isCancelled { return }
                 self.shareLoad = .failed(Self.friendlyError(error))
@@ -179,25 +202,31 @@ final class AddShareViewModel {
         // Drop any path component; the share is chosen separately.
         if let slash = s.firstIndex(of: "/") { s = String(s[..<slash]) }
         var host = s
-        var port = Int(portText.trimmingCharacters(in: .whitespaces))
+        let explicitPort = Int(portText.trimmingCharacters(in: .whitespaces))
+        var inlinePort: Int?
         // Inline host:port (skip IPv6 literals, which contain multiple colons).
-        if port == nil, s.filter({ $0 == ":" }).count == 1,
-           let colon = s.firstIndex(of: ":") {
+        // Always strip the `:port` suffix off the host — even when the separate
+        // Port field is also filled — so a pasted `192.168.1.5:9999` never leaks
+        // its port into the host and produces an unresolvable address.
+        if s.filter({ $0 == ":" }).count == 1, let colon = s.firstIndex(of: ":") {
             host = String(s[..<colon])
-            port = Int(s[s.index(after: colon)...])
+            inlinePort = Int(s[s.index(after: colon)...])
         }
-        return (host.trimmingCharacters(in: .whitespaces), port)
+        // The explicit Port field wins when both are supplied.
+        return (host.trimmingCharacters(in: .whitespaces), explicitPort ?? inlinePort)
     }
 
     private static func friendlyError(_ error: Error) -> String {
         if let e = error as? SMBShareEnumerator.ListError {
             switch e {
-            case .timedOut: return "Couldn't reach the server. Check it's on and try again."
-            case .authenticationRequired: return "This server needs a username and password."
-            case .failed: return "Couldn't list shares on this server."
+            case .timedOut: return "Couldn't reach the server. Check it's on and connected to the same network, then try again."
+            case .unreachable: return "Couldn't connect to the server. Check the address and that it's on the same network, then try again."
+            case .authenticationRequired: return "This server requires a username and password."
+            case .credentialsRejected: return "That username or password was incorrect. Please try again."
+            case .failed: return "Something went wrong talking to this server. Please try again."
             }
         }
-        return "Couldn't list shares on this server."
+        return "Something went wrong talking to this server. Please try again."
     }
 }
 #endif

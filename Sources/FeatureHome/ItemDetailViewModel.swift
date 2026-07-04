@@ -225,7 +225,12 @@ public final class ItemDetailViewModel {
         self.itemID = itemID
         self.activeProvider = provider
         self.activeItemID = itemID
-        self.activeSourceAccountID = sourceAccountID
+        // Fall back to the library-origin account when a direct source tag is
+        // absent, so a played item is always attributed to the account it was
+        // browsed from (a local media share persists resume/played state keyed by
+        // this id — dropping it silently routes the write to the primary server
+        // instead, which is why a share's resume never survived a relaunch).
+        self.activeSourceAccountID = sourceAccountID ?? originSourceAccountID
         self.ratingsProvider = ratingsProvider
         self.sourceAccountID = sourceAccountID
         self.originSourceAccountID = originSourceAccountID
@@ -349,7 +354,7 @@ public final class ItemDetailViewModel {
                 // exactly as it already does for a seeded open — so an empty-children
                 // first paint is safe and never strands the season picker.
                 let seededChildren = state.value?.children ?? []
-                state = .loaded(Detail(item: taggedItem, children: seededChildren))
+                state = .loaded(Detail(item: taggedItem, children: seededChildren, childrenLoaded: state.value?.childrenLoaded ?? false))
                 hasPaintedFreshDetail = true
                 seedSources(from: taggedItem)
                 // Speculative discovery (cross-server picker + alternate-source
@@ -480,8 +485,10 @@ public final class ItemDetailViewModel {
     private func runTrailersAndRatings(for item: MediaItem) async {
         async let trailersDone: Void = loadTrailers(for: item)
         async let ratingsDone: Void = enrichRatings(for: item)
+        async let overviewDone: Void = enrichOverview(for: item)
         _ = await trailersDone
         _ = await ratingsDone
+        _ = await overviewDone
     }
 
     /// Cancels ALL off-critical-path enrichment (trailers, ratings, cross-server
@@ -693,6 +700,7 @@ public final class ItemDetailViewModel {
         }
         guard !Task.isCancelled else { return }
         await enrichRatings(for: item)
+        await enrichOverview(for: item)
     }
 
     /// Whether the page can switch to `accountID`'s copy of this title in place —
@@ -974,7 +982,10 @@ public final class ItemDetailViewModel {
     private func applySnapshot(_ snapshot: DetailSnapshotCache.Snapshot) {
         let item = tagged(snapshot.item)
         captureSeriesContext(from: item)
-        state = .loaded(Detail(item: item, children: snapshot.children.map(tagged)))
+        // A snapshot's children are a COMPLETED fetch persisted from a prior visit,
+        // so mark them loaded — otherwise a revisited folder would flash its
+        // loading placeholder (and, worse, never distinguish empty-from-loading).
+        state = .loaded(Detail(item: item, children: snapshot.children.map(tagged), childrenLoaded: true))
         if !snapshot.seasonEpisodes.isEmpty {
             seasonEpisodes = snapshot.seasonEpisodes.mapValues { stampSeriesTMDb(into: $0.map(tagged)) }
         }
@@ -1005,7 +1016,7 @@ public final class ItemDetailViewModel {
     /// on the current value being empty/thinner).
     private func adoptSnapshotEnrichments(_ snapshot: DetailSnapshotCache.Snapshot) {
         if let detail = state.value, detail.children.isEmpty, !snapshot.children.isEmpty {
-            state = .loaded(Detail(item: detail.item, children: snapshot.children.map(tagged)))
+            state = .loaded(Detail(item: detail.item, children: snapshot.children.map(tagged), childrenLoaded: true))
         }
         if seasonEpisodes.isEmpty, !snapshot.seasonEpisodes.isEmpty {
             seasonEpisodes = snapshot.seasonEpisodes.mapValues { stampSeriesTMDb(into: $0.map(tagged)) }
@@ -1064,6 +1075,27 @@ public final class ItemDetailViewModel {
         guard !external.isEmpty else { return }
         guard case var .loaded(detail) = state, detail.item.id == item.id else { return }
         detail.item.ratings = detail.item.ratings.mergedWithAuthoritative(external)
+        state = .loaded(detail)
+    }
+
+    /// Fills in a missing plot/overview from the keyless ``OverviewRouter`` (TVmaze
+    /// for TV, Wikipedia for film/anime), off the critical path. Only runs when the
+    /// item has NO description of its own — so a real server's overview is never
+    /// overwritten, and in practice this only fires for local media-share items
+    /// (whose provider synthesises no text). Cached in the router, so revisiting a
+    /// page or opening another episode of the same show issues no new request. A
+    /// describable kind is required so folders/collections never trigger a lookup.
+    private func enrichOverview(for item: MediaItem) async {
+        guard item.overview?.isEmpty ?? true else { return }
+        switch item.kind {
+        case .movie, .series, .season, .episode, .video: break
+        case .folder, .collection, .unknown: return
+        }
+        let text = await OverviewRouter.shared.overview(for: item)
+        guard !Task.isCancelled, let text, !text.isEmpty else { return }
+        guard case var .loaded(detail) = state, detail.item.id == item.id else { return }
+        guard detail.item.overview?.isEmpty ?? true else { return }
+        detail.item.overview = text
         state = .loaded(detail)
     }
 

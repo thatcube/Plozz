@@ -89,6 +89,12 @@ public struct ItemDetailView: View {
                 )
             } else if isEmptyContainer(detail) {
                 emptyFolderState(detail.item)
+            } else if isLoadingContainer(detail) {
+                // A folder/collection whose children haven't arrived yet has NO
+                // focusable element in `container` (no Play button, no rail, no
+                // picker) — on tvOS that makes Menu quit the app. Show a focusable
+                // loading placeholder for the whole fetch so Back always works.
+                loadingFolderState(detail.item)
             } else {
                 container(detail)
             }
@@ -228,6 +234,21 @@ public struct ItemDetailView: View {
         }
     }
 
+    /// A folder/collection whose children are still being fetched (empty list,
+    /// not yet loaded). `container` renders nothing focusable for such an item —
+    /// no Play button, no children rail, no version/source picker — so on tvOS the
+    /// Menu button would exit the app instead of popping the page. We surface a
+    /// focusable loading placeholder (with a working Back) for the whole fetch,
+    /// which for a slow SMB share can be tens of seconds.
+    private func isLoadingContainer(_ detail: ItemDetailViewModel.Detail) -> Bool {
+        switch detail.item.kind {
+        case .folder, .collection:
+            return !detail.childrenLoaded && detail.children.isEmpty
+        default:
+            return false
+        }
+    }
+
     /// Shown when the user drills into a folder that holds no sub-folders and no
     /// playable video (e.g. a folder of `.zip`s). Without this the page would be a
     /// blank hero with NOTHING focusable — and on tvOS a screen with no focusable
@@ -245,6 +266,34 @@ public struct ItemDetailView: View {
                 .font(.title3)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
+            Button {
+                dismiss()
+            } label: {
+                Label("Go Back", systemImage: "chevron.backward")
+                    .frame(minWidth: 260)
+            }
+            .buttonStyle(.borderedProminent)
+            .focused($emptyBackFocused)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(PlozzTheme.Metrics.screenPadding)
+        .defaultFocus($emptyBackFocused, true)
+    }
+
+    /// Shown while a folder's contents are still being listed (a slow SMB share
+    /// can take tens of seconds). Mirrors `emptyFolderState` but with a spinner
+    /// and no "empty" copy — its whole job is to keep a focusable element (the
+    /// Back button) on screen so tvOS never treats the page as focusless and lets
+    /// Menu quit the app mid-load.
+    private func loadingFolderState(_ item: MediaItem) -> some View {
+        VStack(spacing: 24) {
+            ProgressView()
+                .scaleEffect(1.5)
+            Text(item.title)
+                .font(.title2.weight(.semibold))
+            Text("Loading…")
+                .font(.title3)
+                .foregroundStyle(.secondary)
             Button {
                 dismiss()
             } label: {

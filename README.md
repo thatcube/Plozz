@@ -20,7 +20,7 @@
 
 ## Try the beta
 
-Plozz is in **public beta** on TestFlight. [**Join the beta →**](https://testflight.apple.com/join/EKfReNMu) to install it on your Apple TV (tvOS 17 or later) and stream from your own Jellyfin or Plex server.
+Plozz is in **public beta** on TestFlight. [**Join the beta**](https://testflight.apple.com/join/EKfReNMu) to install it on your Apple TV right now.
 
 ## Unique Features
 

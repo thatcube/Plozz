@@ -51,6 +51,20 @@ public struct LibraryBrowseView: View {
             ScrollViewReader { proxy in
                 ScrollView(.vertical) {
                     LazyVStack(alignment: .leading, spacing: metrics.sectionTitleSpacing) {
+                        #if canImport(UIKit)
+                        // `.scrollIndicators(.never)` does NOT stick on tvOS for
+                        // this grid — the system still flashes the dotted indicator
+                        // on top of the alphabet rail. So we reach the enclosing
+                        // UIScrollView directly and toggle its vertical indicator,
+                        // hiding it only while the rail is up (name sort) and
+                        // restoring it for every other sort. The probe is a real
+                        // child of the scroll content so its superview walk lands
+                        // on the UIScrollView (mirrors HomeView's ScrollPanDisabler).
+                        ScrollIndicatorHider(hidden: viewModel.showsLetterRail)
+                            .frame(width: 0, height: 0)
+                            .allowsHitTesting(false)
+                            .accessibilityHidden(true)
+                        #endif
                         header
                         LazyVGrid(columns: columns, spacing: metrics.gridSpacing) {
                             ForEach(0..<total, id: \.self) { index in
@@ -68,12 +82,6 @@ public struct LibraryBrowseView: View {
                 }
                 // Never clip a focused card's lift, shadow or border.
                 .scrollClipDisabled()
-                // Hide the native scroll indicator ONLY when the alphabet rail is
-                // up (name sort): it otherwise draws right on top of the rail,
-                // which reads as janky. `.never` (not `.hidden`, which the system
-                // may still flash transiently) fully suppresses it; every other
-                // sort keeps the default indicator.
-                .scrollIndicators(viewModel.showsLetterRail ? .never : .automatic)
                 .overlay(alignment: .trailing) {
                     if viewModel.showsLetterRail {
                         LibraryLetterRail(
@@ -86,6 +94,10 @@ public struct LibraryBrowseView: View {
                                 }
                             }
                         )
+                        // Nudge the rail into the trailing gutter (where the native
+                        // scroll indicator used to sit) so it clears the poster
+                        // wall instead of hugging the last column.
+                        .offset(x: 22)
                     }
                 }
                 // A transient jumbo letter that appears while flying the rail so
@@ -332,5 +344,67 @@ private struct LetterJumpBubble: View {
             .shadow(color: .black.opacity(0.4), radius: 24, x: 0, y: 12)
     }
 }
+
+#if canImport(UIKit)
+/// Probe that reaches its enclosing `UIScrollView` and toggles the vertical
+/// scroll indicator directly. SwiftUI's `.scrollIndicators(.never)` proved
+/// unreliable on tvOS for the browse grid (the system kept flashing the dotted
+/// indicator on top of the alphabet rail), so we set
+/// `showsVerticalScrollIndicator` ourselves. Modeled on `HomeView`'s
+/// `ScrollPanDisabler`: a `UIViewController` re-asserts on every layout pass so
+/// SwiftUI can't quietly re-enable the indicator, and it flips back on when the
+/// rail is hidden (non-name sorts) so those keep the default indicator.
+private struct ScrollIndicatorHider: UIViewControllerRepresentable {
+    var hidden: Bool
+
+    func makeUIViewController(context: Context) -> ScrollIndicatorHiderController {
+        let controller = ScrollIndicatorHiderController()
+        controller.hidden = hidden
+        return controller
+    }
+
+    func updateUIViewController(_ controller: ScrollIndicatorHiderController, context: Context) {
+        controller.hidden = hidden
+        controller.reapply()
+    }
+}
+
+private final class ScrollIndicatorHiderController: UIViewController {
+    var hidden: Bool = false
+    private weak var scrollView: UIScrollView?
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.isUserInteractionEnabled = false
+        view.backgroundColor = .clear
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        reapply()
+    }
+
+    override func didMove(toParent parent: UIViewController?) {
+        super.didMove(toParent: parent)
+        reapply()
+    }
+
+    func reapply() {
+        if let scrollView {
+            scrollView.showsVerticalScrollIndicator = !hidden
+            return
+        }
+        var ancestor = view.superview
+        while let current = ancestor {
+            if let found = current as? UIScrollView {
+                scrollView = found
+                found.showsVerticalScrollIndicator = !hidden
+                return
+            }
+            ancestor = current.superview
+        }
+    }
+}
+#endif
 
 #endif

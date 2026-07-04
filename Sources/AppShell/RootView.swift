@@ -55,9 +55,17 @@ public struct RootView: View {
     /// Reconcile the crash reporter with the current opt-in consent. Safe to call
     /// repeatedly: starts on the first opt-in, stops on opt-out, no-op otherwise
     /// (and always a no-op when the build has no DSN).
+    ///
+    /// DEBUG: honours `PLOZZ_FORCE_CRASH_REPORTING=1` in the environment to force
+    /// the reporter on regardless of the persisted opt-in, so a crash-hunt build
+    /// can capture a backtrace without navigating Settings. Off by default (the
+    /// env var is unset in normal runs), so this changes no shipped behavior; it
+    /// still no-ops when the build has no DSN. Mirrors the env-gated PLZHFOCUS
+    /// diagnostics pattern.
     private func reconcileCrashReporting() {
+        let forced = ProcessInfo.processInfo.environment["PLOZZ_FORCE_CRASH_REPORTING"] == "1"
         crashReporting.apply(
-            enabled: appState.crashReportingModel.settings.isEnabled,
+            enabled: appState.crashReportingModel.settings.isEnabled || forced,
             context: makeCrashContext()
         )
     }

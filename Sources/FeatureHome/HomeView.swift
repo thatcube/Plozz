@@ -26,14 +26,28 @@ public struct HomeView: View {
     /// The curated hero items, recomputed as Home content or settings change.
     @State private var heroItems: [MediaItem] = []
 
-    /// The clamped upward parallax lift (0…`heroParallaxMaxLift`) applied to the
-    /// hero backdrop as the page scrolls down toward Continue Watching. Driven off
-    /// the ScrollView's live content offset so it ramps in lockstep with the recede.
-    @State private var heroParallaxLift: CGFloat = 0
+    /// Whether the hero is receded (focus moved down onto the Continue Watching
+    /// row). Driven by the page scroll crossing `recedeScrollThreshold` (see
+    /// `.onScrollGeometryChange`). When set, the hero's backdrop artwork glides UP
+    /// and the content column (logo/buttons/dots) plus the rows below lift toward
+    /// the top — the Apple TV recede. Every lift is expressed as a cheap `.offset`
+    /// (a GPU transform, no relayout) rather than animated layout, so the motion
+    /// stays smooth even though the rows are a non-lazy VStack.
+    @State private var heroReceded = false
 
-    /// Maximum backdrop parallax lift, in points — the artwork rises this far
-    /// faster than the content by the time the recede settles.
-    private static let heroParallaxMaxLift: CGFloat = 80
+    /// How long the content/row recede lifts take. Slow and cinematic — the
+    /// buttons and paging dots ease up rather than snapping. Because the lifts are
+    /// `.offset` transforms (not layout), a long duration costs nothing extra. The
+    /// backdrop artwork uses its OWN, even slower curve (see HomeHeroBackdrop) so
+    /// it lags behind and settles last — the Apple TV parallax feel.
+    private static let recedeAnimationDuration: CGFloat = 0.9
+
+    /// Page-scroll distance (points) past which the hero is considered "receded".
+    /// The focus engine scrolls the page ~480pt in a single frame the instant
+    /// focus lands on Continue Watching, so any threshold comfortably below that
+    /// (and above the few-pixel jitter at rest) flips the recede exactly on a
+    /// genuine downward move and clears it when focus scrolls back to the top.
+    private static let recedeScrollThreshold: CGFloat = 120
 
     /// Focus scope spanning the hero + rows; lets the hero's Play button be the
     /// preferred initial focus (see `.focusScope`/`prefersDefaultFocus`).
@@ -105,7 +119,15 @@ public struct HomeView: View {
             let watchlistedKeys = Set(content.watchlist.map {
                 HomeHeroView.watchlistKey(accountID: $0.sourceAccountID, itemID: $0.id)
             })
-            ScrollViewReader { proxy in
+            // The recede is driven by the page scroll (see
+            // `.onScrollGeometryChange`). Going DOWN, the focus engine scrolls the
+            // page to reveal Continue Watching and the recede arms itself. Going
+            // back UP, though, the hero's action row is still on-screen at that
+            // scroll offset, so the focus engine has no reason to scroll back — the
+            // page would stay stuck mid-recede. So on focus RETURNING to the hero
+            // we programmatically scroll `heroTopID` back to the top (see
+            // `onFocusGained`); nothing competes on the way up, so it sticks.
+            ScrollViewReader { heroScrollProxy in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
                         // Kill the Siri Remote **touch-surface pan** so a light touch
@@ -141,29 +163,33 @@ public struct HomeView: View {
                                 onSelect: onSelectItem,
                                 onPlay: onPlayItem,
                                 // When focus returns to the hero from a row below,
-                                // snap the scroll back to the top so the hero
-                                // re-expands to full-screen and its transition
-                                // replays — otherwise it stays partially scrolled.
+                                // un-recede: the content expands back to full-screen
+                                // and the backdrop settles back down. A SINGLE flag
+                                // drives both; the backdrop's slower timing is a
+                                // scoped `.animation` override inside HomeHeroView, so
+                                // there's no second `withAnimation` whose state change
+                                // could get dropped (the bug where the content
+                                // receded but the artwork stayed full-screen).
+                                // Recede is driven by the page scroll (see
+                                // `.onScrollGeometryChange` below). Focus returning
+                                // to the hero must scroll the page back to the top —
+                                // the focus engine won't, because the action row is
+                                // still visible mid-recede. We clear `heroReceded`
+                                // HERE, in the same animation as the scroll-to-top,
+                                // so the content un-recedes in PARALLEL with the
+                                // return scroll. (If we waited for the scroll to drop
+                                // back under the threshold — letting the Bool observer
+                                // clear it — the un-recede would only START partway up,
+                                // stacking scroll-time + un-recede-time and making the
+                                // way UP feel much slower than the way down. The
+                                // observer still clears it as a backstop.)
                                 onFocusGained: {
-                                    withAnimation(.easeInOut(duration: 0.4)) {
-                                        proxy.scrollTo(Self.heroTopID, anchor: .top)
+                                    withAnimation(.smooth(duration: Self.recedeAnimationDuration)) {
+                                        heroReceded = false
+                                        heroScrollProxy.scrollTo(Self.heroTopID, anchor: .top)
                                     }
                                 },
-                                // Focus leaving the hero downward: recede. Scroll
-                                // the anchor just above the buttons to ~12% down
-                                // the screen, so the logo/title lift off the top,
-                                // the overview/buttons/dots settle into the upper
-                                // region, and the Continue Watching row centers
-                                // below — the Apple TV "recede" move.
-                                onMoveDown: {
-                                    withAnimation(.easeInOut(duration: 0.45)) {
-                                        proxy.scrollTo(
-                                            HomeHeroView.recedeAnchorID,
-                                            anchor: UnitPoint(x: 0.5, y: 0.12)
-                                        )
-                                    }
-                                },
-                                backdropParallaxLift: heroParallaxLift
+                                receded: heroReceded
                             )
                             .id(Self.heroTopID)
                             // (touch-pan disabler lives as a sibling below so it is
@@ -176,9 +202,19 @@ public struct HomeView: View {
                         }
                         // When the hero is present, pull the rows up so the first row
                         // (Continue Watching) overlaps the hero's lower edge — the
-                        // Apple TV look. Otherwise keep the classic top padding.
-                        .padding(.top, heroActive ? -Self.heroRowOverlap : PlozzTheme.Metrics.screenVerticalPadding)
+                        // Apple TV look. Otherwise keep the classic top padding. This
+                        // padding is STATIC (never animated) — the recede lift is a
+                        // separate `.offset` below so it never triggers a relayout of
+                        // the non-lazy rows VStack (the source of the recede stutter).
+                        .padding(.top, heroActive
+                            ? -Self.heroRowOverlap
+                            : PlozzTheme.Metrics.screenVerticalPadding)
                         .padding(.bottom, PlozzTheme.Metrics.screenVerticalPadding)
+                        // Recede lift for the rows, as a cheap transform (no relayout).
+                        // Focus does not change during the recede animation (it's
+                        // already on Continue Watching), so the focus engine never
+                        // re-evaluates scroll mid-lift — the offset is safe.
+                        .offset(y: heroActive && heroReceded ? -Self.recedeRowLift : 0)
                     }
                     // Span the hero and rows in one focus scope so the hero's
                     // Play button can be the scope's preferred default — tvOS
@@ -188,15 +224,23 @@ public struct HomeView: View {
                 }
                 // Never clip a focused card's lift, shadow or border.
                 .scrollClipDisabled()
-                // Drive the hero backdrop parallax off the live scroll offset:
-                // as the page scrolls down toward Continue Watching, lift the
-                // backdrop up (clamped 0…max) so the artwork rises faster than the
-                // content. Fires every frame of the recede's scroll animation, so
-                // the lift ramps in lockstep with no separate animation trigger.
-                .onScrollGeometryChange(for: CGFloat.self) { geometry in
-                    min(max(geometry.contentOffset.y, 0), Self.heroParallaxMaxLift)
-                } action: { _, lift in
-                    heroParallaxLift = heroActive ? lift : 0
+                // Drive the recede off the SCROLL, observed as a BOOL so this fires
+                // ONLY when the threshold is crossed — never on every scroll frame.
+                // (The old per-frame CGFloat capture wrote @State each frame, forcing
+                // a full HomeView re-evaluation — and thus a relayout of the non-lazy
+                // rows — dozens of times a second: a major cause of the recede
+                // stutter.) When focus moves DOWN to a lower row the tvOS focus
+                // engine instantly scrolls the page past this threshold in one frame;
+                // moving UP to the tab bar or LEFT to the sidebar never scrolls the
+                // page down, so the hero only recedes on a genuine downward move —
+                // robust where `.onMoveCommand` was not (a Down that relocates focus
+                // is consumed by the engine and never delivered to the hero).
+                .onScrollGeometryChange(for: Bool.self) { geometry in
+                    heroActive && geometry.contentOffset.y > Self.recedeScrollThreshold
+                } action: { _, shouldRecede in
+                    withAnimation(.smooth(duration: Self.recedeAnimationDuration)) {
+                        heroReceded = shouldRecede
+                    }
                 }
                 // When the hero is active, let it bleed into the top overscan
                 // inset instead of the ScrollView reserving it as a blank bar
@@ -247,7 +291,15 @@ public struct HomeView: View {
     /// `HomeHeroView.contentBottomInset` (132): pulling up by slightly less than
     /// that inset lands the Continue Watching title ~40px below the dots, with the
     /// tops of its cards peeking over the hero's lower edge. Tuned on-device.
-    private static let heroRowOverlap: CGFloat = 92
+    private static let heroRowOverlap: CGFloat = 132
+
+    /// Extra upward lift (points) applied to the rows (Continue Watching et al.)
+    /// when the hero is receded, so the row rises a little higher on screen toward
+    /// a centered reading position (the artwork having receded above it). Added to
+    /// `heroRowOverlap` only while receded and animates with the recede. Row height
+    /// is user-variable, so this is a fixed nudge rather than an exact centering.
+    /// Tunable.
+    private static let recedeRowLift: CGFloat = 110
 
     /// Scroll anchor for the hero, so focus returning to it can snap the scroll
     /// back to the top and re-expand the hero to full-screen.

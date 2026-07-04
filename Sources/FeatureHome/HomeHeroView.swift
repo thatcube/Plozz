@@ -45,20 +45,33 @@ struct HomeHeroView: View {
     let onSelect: (MediaItem) -> Void
     let onPlay: (MediaItem) -> Void
     /// Fired when the hero *gains* focus (the user moved focus back up onto it),
-    /// so Home can scroll the carousel back to full-screen and replay the
-    /// enter transition. Not fired for interior button-to-button moves.
+    /// so Home can restore the full-screen hero and replay the enter transition.
+    /// Not fired for interior button-to-button moves.
     var onFocusGained: () -> Void = {}
-    /// Fired when the user presses **down** off the hero's buttons, so Home can
-    /// scroll the Continue Watching row up into a centered reading position while
-    /// the hero recedes to just its lower third — the Apple TV move. The native
-    /// focus engine still moves focus down to the row itself.
-    var onMoveDown: () -> Void = {}
+    /// Whether the hero is *receded*: the user has moved focus down onto the
+    /// Continue Watching row. When true the content column (logo / metadata /
+    /// action buttons / paging dots) lifts up via a transform and the full-bleed,
+    /// screen-pinned backdrop translates up on its own slower track, so the
+    /// Continue Watching row settles into a centered reading position — the Apple
+    /// TV move. Driven by `HomeView` off the page scroll offset (the tvOS focus
+    /// engine scrolls the page the instant focus lands on a lower row); the lifts
+    /// here are `.offset` transforms, not layout changes, so the animation never
+    /// fights the focus engine and never re-runs layout of the rows below.
+    var receded: Bool = false
 
-    /// How far (in points) the backdrop is lifted UP relative to the content as the
-    /// page scrolls down toward the Continue Watching row — the parallax. `HomeView`
-    /// drives this from the scroll offset (clamped 0…~80). Only the backdrop layer
-    /// receives it; the logo/overview/buttons scroll 1:1 with the page as normal.
-    var backdropParallaxLift: CGFloat = 0
+    /// Extra upward lift (points) applied to the hero's CONTENT column (logo,
+    /// metadata, action buttons, paging dots) when the hero recedes, so the
+    /// buttons/dots rise toward the top of the screen — the Apple TV look where
+    /// the artwork recedes and the controls compress up high. Applied as an
+    /// `.offset` transform; animates with the recede. Tunable.
+    private static let recedeContentLift: CGFloat = 170
+    /// Total upward travel (points) applied to the backdrop artwork when the hero
+    /// recedes. The backdrop is screen-pinned (see `heroBackdrop`), so this is its
+    /// absolute rise — independent of the content lift and of the page scroll. Kept
+    /// LESS than the focus engine's page scroll (~480pt) so the artwork doesn't fly
+    /// entirely off the top but recedes to sit just below the lifted buttons; the
+    /// slow 1.6s glide (see HomeHeroBackdrop) makes it lag the scroll. Tunable.
+    private static let recedeBackdropRise: CGFloat = 340
 
     /// The app-installed action handler — the SAME one the detail hero and the
     /// long-press context menu use — so the hero's Watchlist button is offered
@@ -96,7 +109,7 @@ struct HomeHeroView: View {
 
     /// The hero's focus targets. `leftGuard` is an invisible 1×1 sink used purely
     /// to capture a leftward move (see `focus`).
-    private enum HeroFocus: Hashable { case row, leftGuard }
+    private enum HeroFocus: Hashable { case row, leftGuard, rightGuard }
     /// Bumped on every manual page so the auto-advance `.task` restarts its dwell
     /// from the fresh slide instead of firing early.
     @State private var advanceToken = 0
@@ -130,23 +143,11 @@ struct HomeHeroView: View {
     /// Bumped on every page so a late metadata fade-in from a *previous* page
     /// can't fire after a newer page has already started.
     @State private var slideToken = 0
-    /// The last directional move delivered to the hero's action row. Used to gate
-    /// the recede: focus can leave the hero UP (to the tab bar) or LEFT (to the
-    /// sidebar) as well as DOWN (to the Continue Watching row) — only a genuine
-    /// DOWN should scroll the page. Recorded in `handleMove` before focus relocates.
-    @State private var lastMoveDirection: MoveCommandDirection?
     /// Best resolved hero backdrop URL per item id. For episode/season slides
     /// this is the **series-level** hero art (correct show, high-res — matching
     /// the detail page), resolved via ``ArtworkRouter`` and preloaded for the
     /// current slide and its neighbours so a page never animates a placeholder.
     @State private var resolvedBackdrop: [String: URL] = [:]
-
-    /// Pending "recede" scroll, scheduled when hero focus is lost and cancelled
-    /// if focus returns within the same runloop. This decouples the recede from
-    /// the Down *move command* (which a light Siri Remote trackpad graze fires
-    /// spuriously, scrolling the page while focus never actually moved) and ties
-    /// it instead to focus genuinely leaving the hero for the row below.
-    @State private var recedeWork: DispatchWorkItem?
 
     /// Pending "resume auto-advance" work, scheduled after each remote input and
     /// cancelled/rescheduled by the next one, so the carousel only starts counting
@@ -256,6 +257,16 @@ struct HomeHeroView: View {
 
     var body: some View {
         let height = Self.screenHeight * heroHeightFraction
+        // The hero keeps its FULL layout height whether or not it is receded. An
+        // earlier design collapsed this frame to lift Continue Watching into a
+        // centered position — but the recede now triggers *from* the focus engine's
+        // page scroll (see `HomeView`), and collapsing the frame after that scroll
+        // changed the content height, shifting Continue Watching up further (jamming
+        // it at the very top) and feeding back into the scroll. So we no longer
+        // collapse: the page scroll alone positions Continue Watching, and the
+        // recede is expressed as the content column lifting (a transform) and the
+        // backdrop artwork gliding UP and out of the way behind it.
+        let frameHeight = height
         // The backdrop is a full-bleed *background* of the hero content, not a
         // sibling layer in a ZStack. As a background it still bleeds edge-to-edge
         // (it ignores the horizontal safe area) but it no longer contributes to the
@@ -266,10 +277,10 @@ struct HomeHeroView: View {
         // rather than any SwiftUI animation, so it can never decompose into the
         // wrong-order wipe; and because we don't rely on SwiftUI insertion/removal
         // `.transition` for it, hosting it in a background is safe on tvOS. The
-        // background is `.bottom`-aligned (horizontally centered): the content column
+        // background is `.top`-aligned (horizontally centered): the content column
         // spans the symmetric safe area, so centering the full-screen-width backdrop
-        // on it lands it edge-to-edge across the whole screen, while the bottom pin
-        // keeps its dissolve lined up with the Continue Watching overlap.
+        // on it lands it edge-to-edge across the whole screen. Top-anchoring is what
+        // makes the recede clean — see the offset notes below.
         Group {
             if let item = current {
                 content(for: item)
@@ -277,8 +288,19 @@ struct HomeHeroView: View {
                 Color.clear
             }
         }
-        .frame(maxWidth: .infinity, minHeight: height, alignment: .bottomLeading)
-        .background(alignment: .bottom) {
+        .frame(maxWidth: .infinity, minHeight: frameHeight, alignment: .bottomLeading)
+        .background(alignment: .top) {
+            // Laid out at the FULL hero height and anchored to the frame's TOP, so
+            // it stays put as a full-bleed background regardless of the content
+            // column's recede lift.
+            //
+            // The backdrop's OWN vertical motion — the slower `receded` rise that
+            // gives the Apple TV parallax feel — is applied INSIDE HomeHeroBackdrop,
+            // BEFORE its `.ignoresSafeArea`. That is the only place an offset
+            // actually translates the backdrop on screen: an offset applied out here
+            // (after the backdrop's safe-area breakout) is silently cancelled by the
+            // breakout re-anchoring to the screen edge every layout pass — which is
+            // why every earlier attempt left the artwork stuck full-screen.
             heroBackdrop(height: height)
         }
         .opacity(heroVisible ? 1 : 0)
@@ -379,7 +401,13 @@ struct HomeHeroView: View {
                 // detail page (0.33) and only feather the very bottom into the
                 // Continue Watching panel.
                 dissolveStart: 0.82,
-                parallaxLift: backdropParallaxLift
+                // The recede rise. The backdrop is screen-pinned by its own
+                // `.ignoresSafeArea(.top)` breakout (it does NOT scroll with the
+                // page), so it needs no scroll counter. Drive it purely off
+                // `receded`: 0 at rest, a clean rise when receded, animated slowly
+                // (1.6s) inside HomeHeroBackdrop so it keeps gliding up after the
+                // content lift settles (the Apple TV feel).
+                recedeLift: receded ? Self.recedeBackdropRise : 0
             )
         } else {
             Color.clear.frame(width: w, height: height)
@@ -485,8 +513,16 @@ struct HomeHeroView: View {
         .padding(.leading, PlozzTheme.Metrics.heroLeadingPadding)
         // Lift the content column off the very bottom of the full-screen hero so
         // the logo / metadata / buttons / dots sit near the lower third and the
-        // Continue Watching row can peek in just beneath the dots.
+        // Continue Watching row can peek in just beneath the dots. This inset is
+        // STATIC so it never re-runs layout during the recede.
         .padding(.bottom, Self.contentBottomInset)
+        // When receded, lift the whole column further toward the top (buttons/dots
+        // stay visible but move up). Expressed as an `.offset` — a post-layout GPU
+        // transform — NOT padding, so the recede animation never triggers a relayout
+        // of this column or the rows below it. Padding-based lifts on a non-lazy
+        // stack re-run full layout every animation frame, which is what made the
+        // slow recede stutter; a transform is free at any duration.
+        .offset(y: receded ? -Self.recedeContentLift : 0)
     }
 
     @ViewBuilder
@@ -571,16 +607,27 @@ struct HomeHeroView: View {
             // delayed fade-IN still animates.
             .transaction { if !metadataVisible { $0.animation = nil } }
             .allowsHitTesting(false)
-            // ── The single hero focus target: an always-opaque, invisible leaf
-            // layered *over* the pills. Because `.overlay` is applied after the
+            // ── The single hero focus target: an always-opaque, invisible focusable
+            // leaf layered *over* the pills. Because `.overlay` is applied after the
             // pills' `.opacity`, it stays fully opaque and focusable even while the
             // pills fade to 0 — so focus (and therefore the scroll position) is
             // pinned throughout a page, while the buttons still disappear and
-            // reappear. There is NO per-button `@FocusState`: Right/Down resolve in
-            // `onMoveCommand` against our own `selectedButton` (always the true
-            // pre-move value); Left is captured by the guard above. The hero pages
-            // only on a real edge press, never because focus merely *landed* on an
-            // edge button. ──
+            // reappear. There is NO per-button `@FocusState`: Left and Right are
+            // each captured by an invisible guard (see above / below) and resolved
+            // in `.onChange(of: focus)` against our own `selectedButton` (always the
+            // true pre-move value); Down is left to the enclosing section's
+            // `onMoveCommand`. The hero pages only on a real edge press, never
+            // because focus merely *landed* on an edge button.
+            //
+            // Select is `.onTapGesture` (the select-press fires the tap) — the SAME
+            // pattern the Continue Watching cards use (`focusableCard`), NOT a
+            // `Button` (a `Button` paints tvOS's white focus platter over the
+            // backdrop, which `.focusEffectDisabled()` can't fully remove). Crucially
+            // `.onMoveCommand` is NOT attached here: on tvOS a move-command handler on
+            // the same view as `.onTapGesture` intercepts the select press, so the
+            // tap only landed intermittently (Select "needed five presses"). Moving
+            // the move handling up to the `.focusSection()` container (Apple's
+            // recommended placement) leaves this leaf a clean tap target. ──
             .overlay {
                 Color.clear
                     .contentShape(Rectangle())
@@ -588,8 +635,11 @@ struct HomeHeroView: View {
                     .focused($focus, equals: .row)
                     // Initial Home focus lands on the hero (not a CW card).
                     .prefersDefaultFocus(true, in: focusScope)
-                    .onMoveCommand { handleMove($0) }
-                    // Remote **Select** activates the selected pill.
+                    // No system focus platter on the clear overlay — we draw our own
+                    // selection styling via `selectedButton`.
+                    .focusEffectDisabled()
+                    // Remote **Select** activates the selected pill. Stands alone
+                    // (no `.onMoveCommand` here) so the tap can't be intercepted.
                     .onTapGesture { activateSelected() }
                     // Play/Pause is a shortcut straight to playback.
                     .onPlayPauseCommand { noteInteraction(); if let item = current { onPlay(item) } }
@@ -602,6 +652,24 @@ struct HomeHeroView: View {
             // Pin a *constant* identity so focus is retained across a page (item
             // id changes). Never key this on the item id — that would drop focus.
             .id(Self.actionRowFocusID)
+
+            // Invisible focus guard, just right of the pills and inside the same
+            // focus section — the mirror image of the left guard. A Right press
+            // has no focusable neighbour to relocate to (the pills are a single
+            // leaf, and everything else is below), so on tvOS a container-level
+            // `.onMoveCommand` never fires for it: Right silently died. Giving the
+            // engine an *internal* rightward target means a Right press is captured
+            // by the hero (routed through `.onChange(of: focus)` → `handleRight()`)
+            // exactly the way Left is captured by the left guard, with no reliance
+            // on `onMoveCommand`. Unlike the left guard it is ALWAYS focusable:
+            // Right never escapes the hero (there is nothing to the right to escape
+            // to) — it always pages or moves the selection — so there is no
+            // step-aside case and no `allowsSidebarEscape`-style race to guard.
+            Color.clear
+                .frame(width: 1, height: 1)
+                .focusable(true)
+                .focused($focus, equals: .rightGuard)
+                .accessibilityHidden(true)
         }
         .padding(.top, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -610,23 +678,31 @@ struct HomeHeroView: View {
         // which jostled the scroll position. Constant confinement keeps Down going
         // to Continue Watching and Right paging cleanly.
         .focusSection()
+        // Move handling lives HERE, on the section container, not on the focus
+        // target leaf. Apple's guidance is to put `.onMoveCommand` on a container
+        // rather than the focused element, and doing so is what lets the leaf's
+        // `.onTapGesture` (Select) fire reliably — a move handler on the same view
+        // was intercepting the select press. Its ONLY job now is to pause the
+        // auto-advance on any directional input (see `handleMove`): all
+        // paging/interior behaviour is driven by the invisible Left/Right guards,
+        // Up is left to the system, and the Down-recede is driven by the page
+        // scroll in `HomeView` — not by this handler.
+        .onMoveCommand { _ in handleMove() }
         .onChange(of: focus) { old, new in
             switch new {
             case .leftGuard:
                 // The engine parked focus on the guard because Left was pressed.
                 // Resolve it and bounce straight back to the row.
                 handleLeft()
+            case .rightGuard:
+                // The engine parked focus on the guard because Right was pressed.
+                // Resolve it and bounce straight back to the row (mirror of Left).
+                handleRight()
             case .row:
-                // Focus is (back) on the hero: cancel any pending recede — a
-                // transient focus blip must never scroll the page.
-                recedeWork?.cancel()
-                recedeWork = nil
-                // At rest on the row, clear the recorded move so a stale direction
-                // from an earlier press can't leak into the next focus-loss gate.
-                lastMoveDirection = nil
                 // Focus arriving into the hero from *outside* (a row below / the
-                // tab bar): snap back to full-screen. We do NOT recede on focus
-                // *loss* — focus can drop transiently and must never scroll.
+                // tab bar): snap back to full-screen and scroll the page to the top.
+                // We do NOT act on focus *loss* — focus can drop transiently, and
+                // the recede is driven by the page scroll (see `HomeView`), not here.
                 if old == nil {
                     if let item = current {
                         selectedButton = min(selectedButton, max(0, buttons(for: item).count - 1))
@@ -634,22 +710,10 @@ struct HomeHeroView: View {
                     onFocusGained()
                 }
             case .none:
-                // Hero lost focus. Only a genuine DOWN move (to the Continue
-                // Watching row) should recede/scroll the page. Focus can also leave
-                // UP (to the tab bar) or LEFT (to the sidebar) — those must NOT
-                // scroll (the reported bug: landing in the top/side nav still
-                // shifted the page down). A light graze never changes focus at all,
-                // so this case does not even run for a graze. Gate on the last move.
-                recedeWork?.cancel()
-                recedeWork = nil
-                guard lastMoveDirection == .down else { break }
-                // Confirm on the next runloop: a transient blip returns to `.row`
-                // and cancels this; a real Down keeps focus gone, so it fires.
-                let work = DispatchWorkItem {
-                    if focus == nil { onMoveDown() }
-                }
-                recedeWork = work
-                DispatchQueue.main.async(execute: work)
+                // Focus left the hero entirely (down to a row, up to the tab bar, or
+                // left to the sidebar). Nothing to do: the recede is driven purely
+                // by the page scroll offset in `HomeView`.
+                break
             }
         }
     }
@@ -686,63 +750,15 @@ struct HomeHeroView: View {
         !(allowsSidebarEscape && focus == .row)
     }
 
-    /// Applies the tested `HeroCarouselFocus` reducer to a Right/Down press on the
-    /// pill row. (Left is never delivered here — it is captured by the invisible
-    /// left guard and routed through `handleLeft()`.) Resolves the *live* slide
-    /// via `current` and clamps `selectedButton` to the live button count FIRST —
-    /// so a rapid repeat that arrives before SwiftUI reinstalls the row's closures
-    /// can't evaluate the edge against the previous slide's button count and
-    /// false-page. `selectedButton` is our own state, so it is always the true
-    /// PRE-move value. Interior moves update `selectedButton` ourselves (the engine
-    /// is not involved); only `.advance` pages.
-    private func handleMove(_ direction: MoveCommandDirection) {
-        // Any directional input pauses the auto-advance so it can't page out from
-        // under the user; this only observes (never consumes) the move, so edge
-        // Left/Right presses still page normally.
+    /// The container-level move handler. Its ONLY job is to pause the auto-advance
+    /// on any directional input so the carousel can't page out from under the user.
+    /// It does NOT resolve paging for any direction: **Left and Right are each
+    /// captured by their invisible focus guard** (→ `handleLeft()` / `handleRight()`),
+    /// Up is left to the system, and the Down-recede is driven by the page scroll in
+    /// `HomeView`. It only observes (never consumes) the move, so edge Left/Right
+    /// presses still page normally.
+    private func handleMove() {
         noteInteraction()
-        // Record the direction BEFORE focus can relocate, so the recede (driven by
-        // focus leaving the hero) can tell a genuine DOWN-to-row move from an UP
-        // (to the tab bar) or LEFT (to the sidebar) escape — only DOWN should
-        // scroll the page. A light trackpad graze fires a phantom `.down` here but
-        // never actually moves focus, so it still can't recede (see `.none` below).
-        lastMoveDirection = direction
-        guard let item = current else { return }
-        let buttonCount = buttons(for: item).count
-        selectedButton = min(selectedButton, max(0, buttonCount - 1))
-        switch direction {
-        case .down:
-            // Do NOT recede here. A light trackpad graze makes tvOS fire a phantom
-            // `.down` move command even when focus never relocates, which used to
-            // scroll the page down while focus stayed pinned (the reported bug).
-            // The recede is now driven purely by focus actually leaving the hero
-            // for the row below — see `.onChange(of: focus)`. On a real Down the
-            // focus engine relocates focus (dropping hero `focus` to nil) and that
-            // change triggers the recede; a graze leaves focus untouched, so
-            // nothing scrolls.
-            break
-        case .right:
-            let outcome = HeroCarouselFocus.resolve(
-                direction: .right,
-                itemIndex: index,
-                itemCount: items.count,
-                focusedButton: selectedButton,
-                buttonCount: buttonCount,
-                navigationStyle: navigationStyle
-            )
-            switch outcome {
-            case let .moveButton(newIndex):
-                // We own the selection — move it ourselves. No focus engine round
-                // trip, so this is instantaneous and can never race.
-                selectedButton = newIndex
-            case let .advance(toItem, keepButton):
-                page(to: toItem, keepButton: keepButton, forward: true)
-            case .escape, .blocked:
-                break
-            }
-        default:
-            // Left is handled by the guard; Up is left to the system.
-            break
-        }
     }
 
     /// Resolves a Left press captured by the invisible left guard, then bounces
@@ -769,6 +785,38 @@ struct HomeHeroView: View {
             selectedButton = newIndex
         case let .advance(toItem, keepButton):
             page(to: toItem, keepButton: keepButton, forward: false)
+        case .escape, .blocked:
+            break
+        }
+    }
+
+    /// Resolves a Right press captured by the invisible right guard, then bounces
+    /// focus straight back to the pill row so the guard never visibly holds it —
+    /// the exact mirror of `handleLeft()`. Interior moves adjust `selectedButton`;
+    /// `.advance` pages forward. Right never escapes (the reducer never returns
+    /// `.escape` for a rightward move), so there is no fall-through case. Routing
+    /// Right through the guard (rather than `onMoveCommand`) is what makes it fire
+    /// reliably even at the row's right edge, where there is no neighbour for a
+    /// container move handler to relocate to.
+    private func handleRight() {
+        noteInteraction()
+        defer { focus = .row }
+        guard let item = current else { return }
+        let buttonCount = buttons(for: item).count
+        selectedButton = min(selectedButton, max(0, buttonCount - 1))
+        let outcome = HeroCarouselFocus.resolve(
+            direction: .right,
+            itemIndex: index,
+            itemCount: items.count,
+            focusedButton: selectedButton,
+            buttonCount: buttonCount,
+            navigationStyle: navigationStyle
+        )
+        switch outcome {
+        case let .moveButton(newIndex):
+            selectedButton = newIndex
+        case let .advance(toItem, keepButton):
+            page(to: toItem, keepButton: keepButton, forward: true)
         case .escape, .blocked:
             break
         }

@@ -51,9 +51,11 @@ struct HomeHeroBackdrop: View {
     let scrimTone: Color
     /// Fraction of the height at which the bottom dissolve begins.
     let dissolveStart: CGFloat
-    /// Vertical parallax lift (points) applied as the page scrolls toward Continue
-    /// Watching. Applied in SwiftUI, outside the horizontal wipe.
-    let parallaxLift: CGFloat
+    /// How far UP (points) to translate the backdrop when the hero recedes: 0 at
+    /// rest, `recedeLift` when receded. Animated internally on a slow 1.6s smooth
+    /// curve so the artwork keeps gliding up for ~1s after the content lift settles
+    /// (the Apple TV feel).
+    var recedeLift: CGFloat = 0
 
     var body: some View {
         backdropImage
@@ -62,7 +64,16 @@ struct HomeHeroBackdrop: View {
             .overlay(scrim)
             .mask(dissolveMask)
             .frame(maxWidth: .infinity, alignment: .center)
-            .offset(y: -parallaxLift)
+            // The recede rise MUST be applied here, BEFORE .ignoresSafeArea().
+            // An .offset() applied AFTER .ignoresSafeArea() (as this view is when
+            // hosted as a `.background` on tvOS) is silently cancelled: the
+            // safe-area breakout re-anchors the view to the physical screen edge
+            // on every layout pass, nullifying any outer translation. This inner
+            // offset — the child of .ignoresSafeArea — is the only reliable place.
+            .offset(y: -recedeLift)
+            // Slow glide so the artwork keeps rising for ~1s after the content
+            // lift settles (the Apple TV recede feel).
+            .animation(.smooth(duration: 1.6), value: recedeLift)
             .ignoresSafeArea(edges: [.top, .horizontal])
     }
 

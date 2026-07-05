@@ -51,14 +51,14 @@ public struct ProviderBrandMark: View {
                 Image(systemName: systemSymbolName)
                     .resizable()
                     .scaledToFit()
-                    .padding(size * 0.18)
+                    .padding(size * (showsBackground ? 0.28 : 0.18))
                     .foregroundStyle(tint)
             } else {
                 Image(assetName)
                     .renderingMode(.template)
                     .resizable()
                     .scaledToFit()
-                    .padding(size * 0.12)
+                    .padding(size * (showsBackground ? 0.24 : 0.12))
                     .foregroundStyle(tint)
             }
         }

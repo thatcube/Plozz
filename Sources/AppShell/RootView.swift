@@ -284,8 +284,7 @@ public struct RootView: View {
         )) {
             SelectThemeView(
                 appState: appState,
-                onContinue: { appState.finishNewProfileThemeSelection() },
-                profileName: appState.profilesModel.activeProfile.name
+                onContinue: { appState.finishNewProfileThemeSelection() }
             )
         }
         .onAppear {

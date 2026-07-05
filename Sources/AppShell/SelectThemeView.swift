@@ -25,11 +25,6 @@ struct SelectThemeView: View {
     /// Called when the user accepts their choice (Continue, or Menu). The caller
     /// decides what "done" means (enter the app, or dismiss the cover).
     var onContinue: () -> Void
-    /// When set, personalises the heading ("Choose <name>'s look") for the
-    /// new-profile flow. `nil` uses the generic first-run heading.
-    var profileName: String? = nil
-
-    @Environment(\.themePalette) private var palette
     @Environment(\.colorScheme) private var systemColorScheme
     @FocusState private var focus: Field?
 
@@ -40,11 +35,14 @@ struct SelectThemeView: View {
 
     private var selectedTheme: AppTheme { appState.themeModel.theme }
 
-    private var headline: String {
-        if let profileName, !profileName.isEmpty {
-            return "Choose \(profileName)'s look"
-        }
-        return "Choose your look"
+    /// The palette for the currently selected theme, computed straight from the
+    /// observable `themeModel` rather than the `\.themePalette` environment.
+    /// Custom environment values don't reliably update inside a `fullScreenCover`
+    /// (the in-app new-profile flow), which left the backdrop stuck; reading the
+    /// model directly re-renders this view — and repaints the background — the
+    /// instant a card is tapped, in both the onboarding and cover flows.
+    private var livePalette: ThemePalette {
+        ThemePalette.palette(for: selectedTheme, systemColorScheme: systemColorScheme)
     }
 
     var body: some View {
@@ -52,7 +50,7 @@ struct SelectThemeView: View {
             Spacer(minLength: 0)
 
             VStack(spacing: 12) {
-                Text(headline)
+                Text("Choose theme")
                     .font(.largeTitle.weight(.bold))
                     .multilineTextAlignment(.center)
 
@@ -89,8 +87,9 @@ struct SelectThemeView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         // Own themed backdrop so the page previews the selected look even when
         // presented as a full-screen cover over the app (in the first-run flow
-        // RootView already paints the same background behind this).
-        .background { AppBackground(palette: palette).ignoresSafeArea() }
+        // RootView already paints the same background behind this). Driven by
+        // `livePalette` so it repaints the moment a card is tapped.
+        .background { AppBackground(palette: livePalette).ignoresSafeArea() }
         .preferredColorScheme(selectedTheme.preferredColorScheme)
         .onAppear { focus = .theme(selectedTheme) }
         // Pressing Menu accepts the current selection, so the app never suspends
@@ -103,6 +102,7 @@ struct SelectThemeView: View {
     @ViewBuilder
     private func themeCard(_ theme: AppTheme) -> some View {
         let isSelected = theme == selectedTheme
+        let isFocused = focus == .theme(theme)
         let preview = ThemePalette.palette(for: theme, systemColorScheme: systemColorScheme)
 
         Button {
@@ -122,7 +122,7 @@ struct SelectThemeView: View {
                         if isSelected {
                             Image(systemName: "checkmark.circle.fill")
                                 .font(.headline)
-                                .foregroundStyle(palette.accent)
+                                .foregroundStyle(livePalette.accent)
                         }
                     }
                     Text(theme.detail)
@@ -138,16 +138,26 @@ struct SelectThemeView: View {
                 RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
                     .fill(.ultraThinMaterial)
             )
+            // Resting hairline border, matching every SettingsPanel.
             .overlay(
                 RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
-                    .strokeBorder(
-                        isSelected ? palette.accent : Color.primary.opacity(0.08),
-                        lineWidth: isSelected ? 3 : 1
-                    )
+                    .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
             )
+            // Focus outline: the same soft, theme-tinted accent stroke blooming
+            // around the whole card that Settings' About panel uses
+            // (FocusableSettingsPanel), instead of the default tvOS lift.
+            .overlay(
+                RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
+                    .strokeBorder(livePalette.accent, lineWidth: 4)
+                    .opacity(isFocused ? 1 : 0)
+            )
+            .shadow(color: .black.opacity(isFocused ? 0.28 : 0), radius: isFocused ? 14 : 0, y: isFocused ? 6 : 0)
+            .scaleEffect(isFocused ? 1.01 : 1)
+            .animation(.easeOut(duration: 0.16), value: isFocused)
         }
         .buttonStyle(.plain)
         .focused($focus, equals: .theme(theme))
+        .focusEffectDisabled()
     }
 }
 

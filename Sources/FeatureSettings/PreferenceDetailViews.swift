@@ -108,17 +108,10 @@ struct AppearanceDetailView: View {
                     title: "Music Player",
                     description: "How the now-playing music screen looks.",
                 ) {
-                    VStack(alignment: .leading, spacing: 28) {
-                        CompactMusicStylePicker(selection: $musicPlayer.appearance)
-
-                        VStack(alignment: .leading, spacing: 6) {
-                            Toggle("Show track details", isOn: $musicPlayer.showTrackDetails)
-                            Text("Album name, audio quality & lyrics source on the now-playing screen.")
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
+                    MusicPlayerStyleDetail(
+                        appearance: $musicPlayer.appearance,
+                        showTrackDetails: $musicPlayer.showTrackDetails
+                    )
                 }
             ])
         ]

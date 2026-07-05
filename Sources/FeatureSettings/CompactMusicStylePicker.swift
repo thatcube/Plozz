@@ -3,6 +3,35 @@ import SwiftUI
 import CoreModels
 import CoreUI
 
+/// The detail-pane content for the "Music Player" settings row: the style
+/// preview cards with the "Show track details" toggle beneath.
+///
+/// Wrapped in a `focusScope` with the picker marked `prefersDefaultFocus`, so
+/// pressing **right** from the master list lands on the style cards first —
+/// otherwise the focus engine picks the geometrically-nearest control (the
+/// toggle, which sits closer to the master row) instead of the top card.
+struct MusicPlayerStyleDetail: View {
+    @Binding var appearance: MusicPlayerAppearance
+    @Binding var showTrackDetails: Bool
+    @Namespace private var scope
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 28) {
+            CompactMusicStylePicker(selection: $appearance)
+                .prefersDefaultFocus(in: scope)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Toggle("Show track details", isOn: $showTrackDetails)
+                Text("Album name, audio quality & lyrics source on the now-playing screen.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .focusScope(scope)
+    }
+}
+
 /// The compact, in-Settings music-player style picker: a row of smaller preview
 /// cards (`PreviewCard` + `MusicStyleSwatch`) that share the detail pane's width,
 /// mirroring `CompactThemePicker`. Tapping a card selects that appearance; the

@@ -1489,12 +1489,16 @@ private struct HomeTab: View {
         // `playbackInfo` for a series ratingKey returns notFound ("Can't play this
         // right now"). Route it to the detail page instead, which resolves the
         // next-up / resume episode and offers Play there — the same path a series
-        // tile already uses. Movies and episodes play directly below.
-        if item.kind == .series {
-            navigate(item)
+        // tile already uses. Resolve to the real library copy FIRST: a hero
+        // Watchlist series is a Discover stub whose id is the global catalog guid,
+        // which the detail page can't load (empty page) — `bestSourcePlayItem`
+        // retargets it onto the owned library ratingKey so seasons/metadata load.
+        // Movies and episodes play directly below.
+        let target = bestSourcePlayItem(item, accounts: accounts, identitySources: identitySources)
+        if target.kind == .series {
+            navigate(target)
             return
         }
-        let target = bestSourcePlayItem(item, accounts: accounts, identitySources: identitySources)
         if let resume = target.resumePosition, resume > 1 {
             resumePrompt = target
         } else {

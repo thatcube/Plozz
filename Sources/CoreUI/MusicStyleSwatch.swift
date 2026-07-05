@@ -23,55 +23,51 @@ private struct MusicStylePreviewColors {
 
     /// The album-art tile gradient AND the source of the background blobs — a
     /// fixed, vivid palette so every variant shows the same "artwork," with only
-    /// the surrounding chrome (base, veil) changing per style.
+    /// the surrounding chrome (base, veil) changing per style. The background
+    /// blobs use these SAME colors (pink → purple) so the tint always matches the
+    /// dummy album art rather than looking random.
     static let artwork: [Color] = [
-        Color(red: 0.98, green: 0.42, blue: 0.55),  // pink
-        Color(red: 0.42, green: 0.38, blue: 0.95)   // purple
-    ]
-    /// Extra blob colors so the tinted field reads multi-hue like real artwork.
-    static let blobs: [Color] = [
         Color(red: 0.98, green: 0.42, blue: 0.55),  // pink   (top-leading)
-        Color(red: 0.42, green: 0.38, blue: 0.95),  // purple (bottom-trailing)
-        Color(red: 0.20, green: 0.80, blue: 0.85)   // teal   (bottom-leading)
+        Color(red: 0.42, green: 0.38, blue: 0.95)   // purple (bottom-trailing)
     ]
 
     static let light = MusicStylePreviewColors(
         base: .white,
         blobOpacity: 0.95,
-        scrim: Color.white.opacity(0.34),
+        scrim: Color.white.opacity(0.32),
         track: Color.white.opacity(0.9),
         seek: Color.white
     )
     static let dark = MusicStylePreviewColors(
         base: .black,
         blobOpacity: 1.0,
-        scrim: Color.black.opacity(0.34),
+        scrim: Color.black.opacity(0.22),
         track: Color.white.opacity(0.3),
         seek: Color.white
     )
     static let oled = MusicStylePreviewColors(
         base: .black,
-        blobOpacity: 0.55,
-        scrim: Color.black.opacity(0.6),
+        blobOpacity: 1.0,
+        scrim: Color.black.opacity(0.42),
         track: Color.white.opacity(0.3),
         seek: Color.white
     )
 }
 
-/// Static stand-in for the player's animated liquid background: the artwork
-/// palette painted as a few soft, blended radial "blobs." No animation (cheap),
-/// but captures the tinted, multi-hue field.
+/// Static stand-in for the player's animated liquid background: the album's own
+/// artwork palette (pink → purple) painted as two large, soft, blended radial
+/// "blobs" — top-leading pink, bottom-trailing purple — echoing the album tile's
+/// gradient direction. No animation (cheap), but captures the tinted field.
 private struct ArtworkBlobs: View {
     let width: CGFloat
 
     var body: some View {
-        let c = MusicStylePreviewColors.blobs
+        let c = MusicStylePreviewColors.artwork
         ZStack {
-            RadialGradient(colors: [c[0].opacity(0.95), .clear], center: .topLeading, startRadius: 0, endRadius: width * 0.75)
-            RadialGradient(colors: [c[1].opacity(0.95), .clear], center: .bottomTrailing, startRadius: 0, endRadius: width * 0.75)
-            RadialGradient(colors: [c[2].opacity(0.85), .clear], center: .bottomLeading, startRadius: 0, endRadius: width * 0.6)
+            RadialGradient(colors: [c[0].opacity(0.95), .clear], center: .topLeading, startRadius: 0, endRadius: width * 1.15)
+            RadialGradient(colors: [c[1].opacity(0.95), .clear], center: .bottomTrailing, startRadius: 0, endRadius: width * 1.15)
         }
-        .blur(radius: width * 0.07)
+        .blur(radius: width * 0.09)
     }
 }
 

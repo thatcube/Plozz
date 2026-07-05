@@ -92,6 +92,21 @@ final class HomeAggregatorUnmergedTests: XCTestCase {
         XCTAssertTrue(content.librarySections.isEmpty, "A disabled library contributes no block")
     }
 
+    func testGlobalRecentlyAddedSurvivesInUnmergedMode() async {
+        let stub = UnmergedStub(
+            libraries: [lib("L1", "Movies", .movie)],
+            latest: [cw("newMovie", library: "L1")],
+            itemsByContainer: ["L1": [item("m1")]]
+        )
+        let accounts = [resolved("acct", provider: stub)]
+        // Nothing opted into per-library rows, but the global Recently Added feed
+        // must still be carried so the (checked) global row can render.
+        let content = await HomeAggregator().unmergedContent(from: accounts, visibility: HomeLibraryVisibility(mergeLibrariesOnHome: false))
+
+        XCTAssertEqual(content.latest.map(\.id), ["newMovie"],
+                       "Unmerged content must carry the global Recently Added feed for the global row")
+    }
+
     // MARK: - Music exclusion
 
     func testMusicLibraryGetsNoUnmergedSection() async {

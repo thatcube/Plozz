@@ -236,7 +236,7 @@ public final class HomeViewModel {
             let reconciledCW = Self.reconcileContinueWatching(unmerged.continueWatching, pending: pending, appliedRecency: appliedRecency)
             content = Content(
                 continueWatching: reconciledCW,
-                latest: [],
+                latest: unmerged.latest,
                 watchlist: unmerged.watchlist.filter(keepWatchlisted),
                 libraries: unmerged.libraries,
                 mergeLibraries: false,
@@ -254,19 +254,11 @@ public final class HomeViewModel {
         // Publish the playable rows to the App Group so the Top Shelf extension
         // can render them while the app is closed. Tracked so teardown cancels it.
         // Apply the same Home-visibility filter so a hidden library's items don't
-        // leak into Top Shelf. In unmerged mode there is no global Latest row, so
-        // Top Shelf's "recently added" is the per-library Recently Added rows
-        // flattened (already scoped to visible libraries + tagged).
+        // leak into Top Shelf. `content.latest` is the global Recently Added feed
+        // in both merged and unmerged mode, so Top Shelf is identical either way.
         let isLibraryVisible: (String) -> Bool = { visibility.isVisible($0) }
         let continueWatching = content.continueWatching.filter { $0.isVisibleOnHome(isLibraryVisible: isLibraryVisible) }
-        let latest: [MediaItem]
-        if content.mergeLibraries {
-            latest = content.latest.filter { $0.isVisibleOnHome(isLibraryVisible: isLibraryVisible) }
-        } else {
-            latest = content.librarySections.flatMap { group in
-                group.sections.first { $0.id == "recentlyAdded" }?.items ?? []
-            }
-        }
+        let latest = content.latest.filter { $0.isVisibleOnHome(isLibraryVisible: isLibraryVisible) }
         topShelfPublishTask = Task.detached(priority: .utility) {
             TopShelfPublisher.publish(continueWatching: continueWatching, latest: latest)
         }

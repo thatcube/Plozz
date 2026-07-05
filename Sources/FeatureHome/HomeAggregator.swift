@@ -136,6 +136,11 @@ public struct HomeAggregator: Sendable {
         /// Global, cross-server merged Continue Watching (unfiltered; the view
         /// applies Home-visibility just like the merged layout).
         public var continueWatching: [MediaItem]
+        /// Global, cross-server merged Recently Added — the same feed merged mode
+        /// shows. Rendered as the global "Recently Added" row when the user has
+        /// that row enabled (independent of the opt-in per-library "Recently Added
+        /// in X" rows).
+        public var latest: [MediaItem]
         /// Global, cross-server merged Watchlist.
         public var watchlist: [MediaItem]
         /// Full (Home-eligible, music-excluded) library inventory — feeds the
@@ -147,18 +152,21 @@ public struct HomeAggregator: Sendable {
 
         public init(
             continueWatching: [MediaItem] = [],
+            latest: [MediaItem] = [],
             watchlist: [MediaItem] = [],
             libraries: [AggregatedLibrary] = [],
             librarySections: [HomeLibrarySectionGroup] = []
         ) {
             self.continueWatching = continueWatching
+            self.latest = latest
             self.watchlist = watchlist
             self.libraries = libraries
             self.librarySections = librarySections
         }
 
         public var isEmpty: Bool {
-            continueWatching.isEmpty && watchlist.isEmpty && libraries.isEmpty && librarySections.isEmpty
+            continueWatching.isEmpty && latest.isEmpty && watchlist.isEmpty
+                && libraries.isEmpty && librarySections.isEmpty
         }
     }
 
@@ -204,6 +212,7 @@ public struct HomeAggregator: Sendable {
         guard !candidates.isEmpty else {
             return UnmergedContent(
                 continueWatching: merged.continueWatching,
+                latest: merged.latest,
                 watchlist: merged.watchlist,
                 libraries: merged.libraries,
                 librarySections: []
@@ -232,6 +241,7 @@ public struct HomeAggregator: Sendable {
 
         return UnmergedContent(
             continueWatching: merged.continueWatching,
+            latest: merged.latest,
             watchlist: merged.watchlist,
             libraries: merged.libraries,
             librarySections: groups.compactMap { $0 }

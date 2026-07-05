@@ -93,6 +93,21 @@ public enum MediaItemIdentity {
             }
         }
 
+        // Plex's global metadata guid (`plex://<type>/<globalid>`) is a strong,
+        // server-INDEPENDENT identity: the same across every server/account that
+        // matched the title, and the key the account-level Watchlist is addressed
+        // by. Emitting it lets items that carry *only* a PlexGuid — notably
+        // Watchlist rows, whose Discover fetch omits the external `Guid` array —
+        // merge across accounts/servers instead of leaving two cards with the same
+        // global item id, which SwiftUI renders as a ghost/empty gap in the row.
+        // Safe (unlike a bare per-server ratingKey): the guid is globally unique
+        // per work and self-scopes by kind (`plex://movie/…` vs `plex://show/…`),
+        // and the merge split-guard still ejects any genuinely contradictory pair.
+        if let plexGuid = item.providerIDs["PlexGuid"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !plexGuid.isEmpty {
+            result.append(.external(source: "plexguid", value: plexGuid.lowercased()))
+        }
+
         if result.isEmpty, let titleIdentity = titleIdentity(for: item) {
             result.append(titleIdentity)
         }

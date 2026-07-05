@@ -58,6 +58,35 @@ final class CrossServerMergeEdgeTests: XCTestCase {
         XCTAssertEqual(merged[0].sources.map(\.accountID), ["plex", "jelly"])
     }
 
+    // MARK: Plex global guid (Watchlist ghost-gap regression)
+
+    func testWatchlistShowsWithSamePlexGuidMergeAcrossAccounts() {
+        // The account-level Plex Watchlist is fetched once per Plex account. When a
+        // profile has two Plex servers on the same Plex account, each returns the
+        // *same* Discover item (identical global id + `plex://` guid) but the fetch
+        // omits the external Guid array, so a SHOW carries no imdb/tmdb/tvdb and no
+        // movie title-year fallback. Without a shared identity the two copies stay
+        // separate — two cards with the same id — which SwiftUI renders as an empty
+        // "ghost" gap in the row. The global PlexGuid must collapse them to one.
+        let a = item("g1", title: "Baby Reindeer", kind: .series, account: "acctA",
+                     ids: ["PlexGuid": "plex://show/65775ffef0d9d4f00f4d8f4e"])
+        let b = item("g1", title: "Baby Reindeer", kind: .series, account: "acctB",
+                     ids: ["PlexGuid": "plex://show/65775ffef0d9d4f00f4d8f4e"])
+        let merged = MediaItemMerger.merge([a, b])
+        XCTAssertEqual(merged.count, 1)
+        XCTAssertEqual(merged[0].sources.map(\.accountID), ["acctA", "acctB"])
+    }
+
+    func testDifferentPlexGuidsDoNotMerge() {
+        // Sanity: distinct works with distinct global guids stay separate.
+        let a = item("g1", title: "Baby Reindeer", kind: .series, account: "acctA",
+                     ids: ["PlexGuid": "plex://show/aaaa"])
+        let b = item("g2", title: "Severance", kind: .series, account: "acctA",
+                     ids: ["PlexGuid": "plex://show/bbbb"])
+        let merged = MediaItemMerger.merge([a, b])
+        XCTAssertEqual(merged.count, 2)
+    }
+
     // MARK: Partial / garbage metadata (criterion 6)
 
     func testMovieMissingYearDoesNotMergeWithYearedTwin() {

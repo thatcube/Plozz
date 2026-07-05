@@ -115,13 +115,16 @@ public extension HomeRow {
     /// title.
     static func rows(
         for content: HomeViewModel.Content,
-        isLibraryVisible: (String) -> Bool
+        isLibraryVisible: (String) -> Bool,
+        isGlobalRowEnabled: (HomeGlobalRow) -> Bool = { _ in true }
     ) -> [HomeRow] {
         var rows: [HomeRow] = []
 
-        let continueWatching = content.continueWatching.filter { $0.isVisibleOnHome(isLibraryVisible: isLibraryVisible) }
-        if !continueWatching.isEmpty {
-            rows.append(HomeRow(kind: .continueWatching, items: continueWatching))
+        if isGlobalRowEnabled(.continueWatching) {
+            let continueWatching = content.continueWatching.filter { $0.isVisibleOnHome(isLibraryVisible: isLibraryVisible) }
+            if !continueWatching.isEmpty {
+                rows.append(HomeRow(kind: .continueWatching, items: continueWatching))
+            }
         }
         // Watchlist is deliberately NOT library-filtered: it's an explicit user
         // save ("find this later"), and the Plex watchlist is an account-level
@@ -129,12 +132,14 @@ public extension HomeRow {
         // library never removes a title the user chose to watchlist. We keep this
         // explicit (rather than relying on watchlist items happening to lack a
         // libraryID) so the guarantee survives even if provenance is added later.
-        if !content.watchlist.isEmpty {
+        if isGlobalRowEnabled(.watchlist), !content.watchlist.isEmpty {
             rows.append(HomeRow(kind: .watchlist, items: content.watchlist))
         }
-        let latest = content.latest.filter { $0.isVisibleOnHome(isLibraryVisible: isLibraryVisible) }
-        if !latest.isEmpty {
-            rows.append(HomeRow(kind: .recentlyAdded, items: latest))
+        if isGlobalRowEnabled(.recentlyAdded) {
+            let latest = content.latest.filter { $0.isVisibleOnHome(isLibraryVisible: isLibraryVisible) }
+            if !latest.isEmpty {
+                rows.append(HomeRow(kind: .recentlyAdded, items: latest))
+            }
         }
 
         let visibleLibraries = content.libraries.filter { isLibraryVisible($0.key) }

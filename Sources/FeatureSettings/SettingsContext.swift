@@ -46,7 +46,7 @@ enum SettingsRoute: Hashable {
     case servers
     case myLibraries
     case appearance
-    case homeDisplay
+    case customizeHome
     case nightShift
     case playback
     case spoilers

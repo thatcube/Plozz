@@ -222,8 +222,9 @@ public final class HomeViewModel {
                 libraries: merged.libraries
             )
         } else {
-            // Unmerged: global Continue Watching + Watchlist stay at the top, then
-            // each visible library gets its own block of rows.
+            // Unmerged: global Continue Watching + Watchlist stay at the top, the
+            // full library inventory feeds the Libraries tiles, and each library the
+            // user opted rows into contributes a block below.
             let unmergedTask = Task.detached(priority: .userInitiated) {
                 await aggregator.unmergedContent(from: accounts, visibility: visibility, identitySources: identitySources)
             }
@@ -233,22 +234,13 @@ public final class HomeViewModel {
             let pending = await pendingWatchMutations()
             let appliedRecency = await recentlyAppliedRecency()
             let reconciledCW = Self.reconcileContinueWatching(unmerged.continueWatching, pending: pending, appliedRecency: appliedRecency)
-            // Re-slice each library's Continue Watching from the reconciled feed,
-            // then apply the "merge Continue Watching" choice so resumes appear in
-            // exactly one place (global row OR per-library rows, never both).
-            let reslicedSections = Self.reslicingLibraryContinueWatching(unmerged.librarySections, reconciledCW: reconciledCW)
-            let cwMerge = Self.applyingContinueWatchingMerge(
-                global: reconciledCW,
-                sections: reslicedSections,
-                mergeContinueWatching: visibility.mergeContinueWatchingOnHome
-            )
             content = Content(
-                continueWatching: cwMerge.global,
+                continueWatching: reconciledCW,
                 latest: [],
                 watchlist: unmerged.watchlist.filter(keepWatchlisted),
-                libraries: [],
+                libraries: unmerged.libraries,
                 mergeLibraries: false,
-                librarySections: cwMerge.sections
+                librarySections: unmerged.librarySections
             )
         }
         state = content.isEmpty ? .empty : .loaded(content)
@@ -404,55 +396,6 @@ public final class HomeViewModel {
     /// is fresh, so it can never override a genuine later play (e.g. on another
     /// client). Clamp-only-downward: worst case a card sits slightly lower, never
     /// wrongly at the top. (h2-cw-clamp)
-    /// Applies the "merge Continue Watching" choice to the unmerged content.
-    ///
-    /// Continue Watching is shown in exactly ONE place — never both globally and
-    /// per-library:
-    /// - `merge == true` (default): keep the global Continue Watching row and strip
-    ///   the per-library `"continueWatching"` section from every library block
-    ///   (dropping a block left with no rows).
-    /// - `merge == false`: hide the global row and keep the per-library rows.
-    nonisolated static func applyingContinueWatchingMerge(
-        global: [MediaItem],
-        sections: [HomeLibrarySectionGroup],
-        mergeContinueWatching: Bool
-    ) -> (global: [MediaItem], sections: [HomeLibrarySectionGroup]) {
-        guard mergeContinueWatching else {
-            // Per-library Continue Watching is canonical; hide the global row.
-            return ([], sections)
-        }
-        let stripped = sections.compactMap { group -> HomeLibrarySectionGroup? in
-            let kept = group.sections.filter { $0.id != "continueWatching" }
-            return kept.isEmpty ? nil : HomeLibrarySectionGroup(library: group.library, sections: kept)
-        }
-        return (global, stripped)
-    }
-
-    /// Re-derives each unmerged library block's **Continue Watching** row from the
-    /// *reconciled* global feed, so a just-played title's optimistic reorder /
-    /// progress (the durable-outbox overlay) shows in the per-library row too — not
-    /// only the global one. The aggregator seeds these rows from the un-reconciled
-    /// feed (to decide block inclusion); this overlays the reconciled slice. A block
-    /// whose Continue Watching empties after reconciliation drops that row, and a
-    /// block left with no rows is removed.
-    nonisolated static func reslicingLibraryContinueWatching(
-        _ groups: [HomeLibrarySectionGroup],
-        reconciledCW: [MediaItem]
-    ) -> [HomeLibrarySectionGroup] {
-        groups.compactMap { group in
-            let key = group.library.key
-            let cw = reconciledCW.filter { $0.homeVisibilityLibraryKeys.contains(key) }
-            var sections = group.sections
-            let cwSection = LibrarySection(id: "continueWatching", title: "Continue Watching", style: .landscape, items: cw)
-            if let idx = sections.firstIndex(where: { $0.id == "continueWatching" }) {
-                if cw.isEmpty { sections.remove(at: idx) } else { sections[idx] = cwSection }
-            } else if !cw.isEmpty {
-                sections.insert(cwSection, at: 0)
-            }
-            return sections.isEmpty ? nil : HomeLibrarySectionGroup(library: group.library, sections: sections)
-        }
-    }
-
     nonisolated static func reconcileContinueWatching(
         _ items: [MediaItem],
         pending: [WatchMutation],

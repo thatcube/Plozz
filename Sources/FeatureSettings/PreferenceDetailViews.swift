@@ -6,6 +6,11 @@ import CoreUI
 struct AppearanceDetailView: View {
     @Bindable var theme: ThemeSettingsModel
     @Environment(MusicPlayerSettingsModel.self) private var musicPlayer
+    /// App-wide card presentation — scale + style — that applies across every row
+    /// and grid in the app (not just Home), so it lives in Appearance rather than
+    /// Customize Home.
+    @Environment(UIDensitySettingsModel.self) private var density
+    @Environment(CardStyleSettingsModel.self) private var cardStyle
     /// App-wide (global) — persists across all profiles. Same un-namespaced
     /// `@AppStorage` key RootView reads. Do not move into a per-profile store.
     /// See AGENTS.local.md ("Per-profile vs app-wide settings").
@@ -28,6 +33,8 @@ struct AppearanceDetailView: View {
 
     private var sections: [SettingsSplitSection] {
         @Bindable var musicPlayer = musicPlayer
+        @Bindable var density = density
+        @Bindable var cardStyle = cardStyle
         let transparencyBinding = Binding(
             get: { transparencyPreference },
             set: { transparencyPreferenceRaw = $0.rawValue }
@@ -71,6 +78,30 @@ struct AppearanceDetailView: View {
                     DescribedSegmentedPicker(
                         options: TransparencyPreference.allCases,
                         selection: transparencyBinding,
+                        title: { $0.displayName },
+                        detail: { $0.detail }
+                    )
+                },
+                SettingsSplitRow(
+                    id: "display-size",
+                    title: "Display Size",
+                    description: "Scales card size, columns and spacing across the app.",
+                ) {
+                    SettingsOptionList(
+                        options: UIDensity.allCases,
+                        selection: $density.density,
+                        icon: { $0.symbolName },
+                        title: { $0.displayName }
+                    )
+                },
+                SettingsSplitRow(
+                    id: "card-style",
+                    title: "Card Style",
+                    description: "How media is shown in rows and grids.",
+                ) {
+                    DescribedSegmentedPicker(
+                        options: CardStyle.allCases,
+                        selection: $cardStyle.style,
                         title: { $0.displayName },
                         detail: { $0.detail }
                     )
@@ -571,241 +602,6 @@ private struct SubtitleModeControl: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .animation(.easeInOut(duration: 0.18), value: describedMode)
         }
-    }
-}
-
-// MARK: - Home Display
-
-/// The "Home Display" settings page: the app's card presentation controls
-/// (Display Size + Card Style, moved here from Appearance so all Home-facing
-/// display tuning lives together) plus the **Featured Hero** carousel controls.
-///
-/// The hero settings are per-profile (``HeroSettingsModel`` in the environment,
-/// injected at the app root next to Display Size / Card Style). Every control
-/// two-way binds the model, whose `didSet` persists + broadcasts the change so
-/// the live Home carousel recomputes.
-struct HomeDisplayDetailView: View {
-    /// The discovered libraries (with kind + owning account), used to populate
-    /// the Random-source library picker. Shared with the Your Libraries screen.
-    let discoveredLibraries: LoadState<[AggregatedLibrary]>
-    /// Home visibility, so the Random picker only offers libraries the profile
-    /// actually shows on Home (matching the hero's own visible-library default).
-    let homeVisibility: HomeLibraryVisibilityModel
-
-    @Environment(HeroSettingsModel.self) private var hero
-    @Environment(UIDensitySettingsModel.self) private var density
-    @Environment(CardStyleSettingsModel.self) private var cardStyle
-
-    var body: some View {
-        SettingsSplitLayout(sections: sections)
-    }
-
-    /// The movie/series libraries the profile shows on Home, in a stable display
-    /// order — the universe offered by the Random-source picker (other kinds
-    /// aren't browsable as a random grid).
-    private var randomEligibleLibraries: [AggregatedLibrary] {
-        (discoveredLibraries.value ?? [])
-            .filter { $0.library.kind == .movie || $0.library.kind == .series }
-            .filter { homeVisibility.isVisible($0.key) }
-            .sorted { lhs, rhs in
-                if lhs.serverName != rhs.serverName { return lhs.serverName < rhs.serverName }
-                return lhs.library.title.localizedCaseInsensitiveCompare(rhs.library.title) == .orderedAscending
-            }
-    }
-
-    private var sections: [SettingsSplitSection] {
-        @Bindable var density = density
-        @Bindable var cardStyle = cardStyle
-        @Bindable var hero = hero
-
-        var rows: [SettingsSplitRow] = [
-            SettingsSplitRow(
-                id: "display-size",
-                title: "Display Size",
-                description: "Scales card size, columns and spacing across the app.",
-            ) {
-                SettingsOptionList(
-                    options: UIDensity.allCases,
-                    selection: $density.density,
-                    icon: { $0.symbolName },
-                    title: { $0.displayName }
-                )
-            },
-            SettingsSplitRow(
-                id: "card-style",
-                title: "Card Style",
-                description: "How media is shown in rows and grids.",
-            ) {
-                DescribedSegmentedPicker(
-                    options: CardStyle.allCases,
-                    selection: $cardStyle.style,
-                    title: { $0.displayName },
-                    detail: { $0.detail }
-                )
-            }
-        ]
-
-        var heroRows: [SettingsSplitRow] = [
-            SettingsSplitRow(
-                id: "hero-enabled",
-                title: "Featured Hero",
-                description: "A cinematic, rotating spotlight at the top of Home, with a Continue Watching row tucked under its lower edge.",
-            ) {
-                Toggle("Show the featured hero", isOn: $hero.settings.isEnabled)
-                    .toggleStyle(SettingsSwitchToggleStyle())
-            }
-        ]
-
-        if hero.settings.isEnabled {
-            heroRows.append(
-                SettingsSplitRow(
-                    id: "hero-sources",
-                    title: "Sources",
-                    description: "Which content feeds the hero. Enabled sources are interleaved into one rotating set.",
-                ) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        ForEach(HeroSourceKind.allCases) { source in
-                            Toggle(isOn: sourceBinding(source)) {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Label(source.displayName, systemImage: source.symbolName)
-                                    Text(source.detail)
-                                        .font(.footnote)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                            .toggleStyle(SettingsSwitchToggleStyle())
-                        }
-                    }
-                }
-            )
-            heroRows.append(
-                SettingsSplitRow(
-                    id: "hero-items",
-                    title: "Items",
-                    description: "How many titles rotate through the hero.",
-                ) {
-                    LabeledSettingRow("Items in rotation") {
-                        SettingsStepper(
-                            options: Array(HeroSettings.maxItemsRange),
-                            selection: $hero.settings.maxItems,
-                            title: { "\($0)" }
-                        )
-                    }
-                }
-            )
-            if hero.settings.isEnabled(.randomFromLibrary) {
-                heroRows.append(randomLibrariesRow)
-            }
-            heroRows.append(
-                SettingsSplitRow(
-                    id: "hero-auto-advance",
-                    title: "Auto-Advance",
-                    description: "Automatically rotate to the next title after a few seconds. Rotation always pauses while the hero is focused.",
-                ) {
-                    VStack(alignment: .leading, spacing: 24) {
-                        Toggle("Rotate automatically", isOn: $hero.settings.autoAdvance)
-                            .toggleStyle(SettingsSwitchToggleStyle())
-                        if hero.settings.autoAdvance {
-                            LabeledSettingRow("Seconds per title") {
-                                SettingsStepper(
-                                    options: Array(HeroSettings.autoAdvanceRange),
-                                    selection: $hero.settings.autoAdvanceSeconds,
-                                    title: { "\($0)s" }
-                                )
-                            }
-                        }
-                    }
-                }
-            )
-            heroRows.append(
-                SettingsSplitRow(
-                    id: "hero-trailers",
-                    title: "Background Trailers",
-                    description: "Coming soon — play a muted trailer behind the hero when one is available. Fades in only once it's actually playing. Your choice is saved for when this lands.",
-                ) {
-                    Toggle("Play trailers in the background", isOn: $hero.settings.trailersEnabled)
-                        .toggleStyle(SettingsSwitchToggleStyle())
-                }
-            )
-        }
-
-        return [
-            SettingsSplitSection(id: "display", header: "Display", rows: rows),
-            SettingsSplitSection(id: "hero", header: "Featured Hero", rows: heroRows)
-        ]
-    }
-
-    /// The Random-source library picker row: a checklist of the profile's
-    /// movie/series libraries. An **empty** selection means "all visible
-    /// libraries", so the row seeds every library as included and collapses back
-    /// to the empty (= all) state whenever the user re-includes them all.
-    private var randomLibrariesRow: SettingsSplitRow {
-        @Bindable var hero = hero
-        let libraries = randomEligibleLibraries
-        return SettingsSplitRow(
-            id: "hero-random-libraries",
-            title: "Random Libraries",
-            description: "Which libraries the Random source draws from. Leave all selected to use every library shown on Home.",
-        ) {
-            if libraries.isEmpty {
-                Text("No movie or TV libraries are shown on this profile's Home yet.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            } else {
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(libraries) { library in
-                        Toggle(isOn: randomLibraryBinding(for: library.key, universe: libraries)) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(library.library.title)
-                                Text(library.serverName)
-                                    .font(.footnote)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        .toggleStyle(SettingsSwitchToggleStyle())
-                    }
-                }
-            }
-        }
-    }
-
-    /// A binding that adds/removes `source` from the hero's ordered source list
-    /// while keeping the canonical ``HeroSourceKind/allCases`` order (so the
-    /// stored order is stable regardless of toggle sequence).
-    private func sourceBinding(_ source: HeroSourceKind) -> Binding<Bool> {
-        Binding(
-            get: { hero.settings.sources.contains(source) },
-            set: { isOn in
-                let current = Set(hero.settings.sources)
-                var next = current
-                if isOn { next.insert(source) } else { next.remove(source) }
-                hero.settings.sources = HeroSourceKind.allCases.filter { next.contains($0) }
-            }
-        )
-    }
-
-    /// A binding for one library in the Random picker. Empty stored set == "all",
-    /// so toggling off while empty first materialises the full universe; toggling
-    /// the last-missing one back on collapses to empty (= all) again.
-    private func randomLibraryBinding(for key: String, universe: [AggregatedLibrary]) -> Binding<Bool> {
-        let allKeys = Set(universe.map(\.key))
-        return Binding(
-            get: {
-                let keys = hero.settings.randomLibraryKeys
-                return keys.isEmpty || keys.contains(key)
-            },
-            set: { isOn in
-                var keys = hero.settings.randomLibraryKeys.isEmpty
-                    ? allKeys
-                    : hero.settings.randomLibraryKeys
-                if isOn { keys.insert(key) } else { keys.remove(key) }
-                // Keep only still-valid keys, then collapse "everything" to the
-                // empty (= all) sentinel so newly-added libraries stay included.
-                keys.formIntersection(allKeys)
-                hero.settings.randomLibraryKeys = (keys == allKeys) ? [] : keys
-            }
-        )
     }
 }
 #endif

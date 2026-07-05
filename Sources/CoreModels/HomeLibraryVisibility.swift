@@ -1,108 +1,99 @@
 import Foundation
 
-/// A profile's library **display preferences**: how libraries are laid out on the
-/// unified Home screen, which libraries are available at all, and which of the
-/// available ones appear on Home.
+/// A profile's **Home & library display preferences**: how libraries are laid out
+/// on Home, which libraries are available at all, and which rows appear on Home.
 ///
-/// Historically this type modelled only the opt-out set of libraries hidden from
-/// Home (`excludedKeys`). It now carries the profile's full per-library display
-/// state so a single value can be persisted, broadcast, and rebuilt on a profile
-/// switch in one place:
+/// Persisted as one per-profile value so it can be saved, broadcast, and rebuilt
+/// on a profile switch in one place.
 ///
 /// - `mergeLibrariesOnHome` — the all-or-nothing "merge every library's content
 ///   into unified cross-server rows" switch. `true` (the default) is the classic
-///   behaviour; `false` gives each visible library its own section on Home.
-/// - `disabledKeys` — libraries the user has turned **off app-wide**. A disabled
-///   library is hidden *everywhere* (Home, Search, Music, browse), not just Home.
-/// - `excludedKeys` — libraries hidden from **Home only** (still available in
-///   Search / Music / browse). This is the original opt-out set, semantics
-///   unchanged.
+///   behaviour; `false` lets each library contribute its own opt-in rows.
+/// - `disabledKeys` — libraries turned **off app-wide** (hidden everywhere: Home,
+///   Search, Music, browse).
+/// - `excludedKeys` — libraries hidden from **Home only** (the merged-mode
+///   "show on Home" opt-out; still available in Search / Music / browse).
+/// - `disabledGlobalHomeRows` — the global Home rows (Continue Watching / Watchlist
+///   / Recently Added) the user has turned **off** (opt-out; default all on). The
+///   hero's on/off lives in `HeroSettings`, not here.
+/// - `enabledLibraryHomeRows` — the per-library rows the user has **opted in** to
+///   showing on Home in unmerged mode (default none, so Home stays lean). Keyed
+///   `"<accountID>:<libraryID>:<rowKind>"`.
 ///
 /// Library keys are `AggregatedLibrary.key` (`"accountID:libraryID"`).
 ///
 /// ### Predicate vocabulary (read before touching callers)
-///
-/// Three predicates express the two independent bits so call sites never conflate
-/// "available" with "on Home":
 /// - ``isEnabled(_:)`` — app-wide availability (`!disabledKeys`).
-/// - ``isShownOnHome(_:)`` — the Home-only bit the Settings "Show on Home" toggle
-///   reads/writes (`!excludedKeys`); independent of enabled so re-enabling a
-///   library restores its previous Home choice.
-/// - ``isVisibleOnHome(_:)`` — what Home *rendering* and aggregation use: enabled
-///   **and** shown. ``isVisible(_:)`` is a compatibility alias for this so the
-///   existing render/hero/Top-Shelf call sites keep their meaning.
+/// - ``isShownOnHome(_:)`` — the Home-only bit (`!excludedKeys`), independent of
+///   enabled so re-enabling a library restores its previous Home choice.
+/// - ``isVisibleOnHome(_:)`` — enabled **and** shown; what Home rendering /
+///   aggregation use. ``isVisible(_:)`` is a compatibility alias.
 public struct HomeLibraryVisibility: Codable, Equatable, Sendable {
     /// Whether Home merges every library's content into unified cross-server rows
-    /// (`true`, the classic behaviour) or gives each visible library its own
-    /// section (`false`).
+    /// (`true`, the classic behaviour) or lets each library contribute its own
+    /// opt-in rows (`false`).
     public var mergeLibrariesOnHome: Bool
 
-    /// Whether, in **unmerged** mode, Continue Watching is shown as a single global
-    /// row at the top (`true`, the default) or as a per-library row inside each
-    /// library's section (`false`). The two are mutually exclusive — the same
-    /// resumes are never shown twice. No effect in merged mode (there are no
-    /// per-library rows). Per-profile.
-    public var mergeContinueWatchingOnHome: Bool
-
-    /// Keys of libraries the user has turned off **app-wide** — hidden from Home,
-    /// Search, Music and browse alike.
+    /// Keys of libraries turned off **app-wide** — hidden from Home, Search, Music
+    /// and browse alike.
     public var disabledKeys: Set<String>
 
-    /// Keys of libraries hidden from **Home only**. Still available everywhere
-    /// else. (The original opt-out set; name kept to avoid a wide rename.)
+    /// Keys of libraries hidden from **Home only** (merged-mode opt-out). Still
+    /// available everywhere else.
     public var excludedKeys: Set<String>
+
+    /// Raw values of the global Home rows the user has turned **off** (opt-out, so
+    /// the default empty set = every global row on). See ``HomeGlobalRow``.
+    public var disabledGlobalHomeRows: Set<String>
+
+    /// Per-library rows the user has **opted in** to on Home (unmerged mode).
+    /// Opt-in, so the default empty set keeps Home lean. Keys are
+    /// `"<accountID>:<libraryID>:<rowKind>"` (see ``libraryRowKey(_:kind:)``).
+    public var enabledLibraryHomeRows: Set<String>
 
     public init(
         mergeLibrariesOnHome: Bool = true,
-        mergeContinueWatchingOnHome: Bool = true,
         disabledKeys: Set<String> = [],
-        excludedKeys: Set<String> = []
+        excludedKeys: Set<String> = [],
+        disabledGlobalHomeRows: Set<String> = [],
+        enabledLibraryHomeRows: Set<String> = []
     ) {
         self.mergeLibrariesOnHome = mergeLibrariesOnHome
-        self.mergeContinueWatchingOnHome = mergeContinueWatchingOnHome
         self.disabledKeys = disabledKeys
         self.excludedKeys = excludedKeys
+        self.disabledGlobalHomeRows = disabledGlobalHomeRows
+        self.enabledLibraryHomeRows = enabledLibraryHomeRows
     }
 
-    /// The default: merge on, nothing disabled, nothing hidden — every library is
-    /// available and visible on a single merged Home, matching pre-customization
-    /// behaviour.
+    /// The default: merge on, nothing disabled/hidden, every global row on, no
+    /// per-library rows — matching pre-customization behaviour.
     public static let `default` = HomeLibraryVisibility()
 
-    // MARK: - Predicates
+    // MARK: - Library availability predicates
 
     /// Whether the library with `key` is available **app-wide** (not disabled).
-    /// A disabled library is hidden everywhere: Home, Search, Music and browse.
     public func isEnabled(_ key: String) -> Bool {
         !disabledKeys.contains(key)
     }
 
-    /// The Home-only visibility bit — whether the user has kept this library on
-    /// Home, *ignoring* whether it's enabled. This is what the Settings
-    /// "Show on Home" toggle reflects, so toggling it while a library is disabled
-    /// (or re-enabling later) preserves the user's Home choice.
+    /// The Home-only visibility bit (merged mode), independent of enabled.
     public func isShownOnHome(_ key: String) -> Bool {
         !excludedKeys.contains(key)
     }
 
-    /// Whether the library actually appears on Home: it must be both enabled
-    /// (available app-wide) **and** shown on Home. Used by Home rendering and the
-    /// aggregator's visible-library scoping.
+    /// Whether the library appears on Home: enabled **and** shown.
     public func isVisibleOnHome(_ key: String) -> Bool {
         isEnabled(key) && isShownOnHome(key)
     }
 
-    /// Compatibility alias for ``isVisibleOnHome(_:)`` for the render/hero/Top-Shelf
-    /// call sites that previously asked "is this library visible on Home?".
+    /// Compatibility alias for ``isVisibleOnHome(_:)``.
     public func isVisible(_ key: String) -> Bool {
         isVisibleOnHome(key)
     }
 
-    // MARK: - Mutation
+    // MARK: - Library availability mutation
 
-    /// Turns a library on/off **app-wide**. Disabling hides it everywhere; the
-    /// separate Home-only choice (`excludedKeys`) is left untouched so re-enabling
-    /// restores it.
+    /// Turns a library on/off **app-wide** (leaves the Home-only choice intact).
     public mutating func setEnabled(_ enabled: Bool, for key: String) {
         if enabled {
             disabledKeys.remove(key)
@@ -111,7 +102,7 @@ public struct HomeLibraryVisibility: Codable, Equatable, Sendable {
         }
     }
 
-    /// Sets whether a library is shown on **Home only** (the original opt-out).
+    /// Sets whether a library is shown on **Home only** (merged-mode opt-out).
     public mutating func setShownOnHome(_ shown: Bool, for key: String) {
         if shown {
             excludedKeys.remove(key)
@@ -125,33 +116,110 @@ public struct HomeLibraryVisibility: Codable, Equatable, Sendable {
         setShownOnHome(visible, for: key)
     }
 
+    // MARK: - Global Home rows (opt-out)
+
+    /// Whether a global Home row is shown (default on).
+    public func isGlobalRowEnabled(_ row: HomeGlobalRow) -> Bool {
+        !disabledGlobalHomeRows.contains(row.rawValue)
+    }
+
+    /// Shows/hides a global Home row.
+    public mutating func setGlobalRowEnabled(_ enabled: Bool, for row: HomeGlobalRow) {
+        if enabled {
+            disabledGlobalHomeRows.remove(row.rawValue)
+        } else {
+            disabledGlobalHomeRows.insert(row.rawValue)
+        }
+    }
+
+    // MARK: - Per-library Home rows (opt-in)
+
+    /// The persistence key for a per-library row: `"<libraryKey>:<rowKind>"`.
+    public static func libraryRowKey(_ libraryKey: String, kind: LibraryHomeRowKind) -> String {
+        "\(libraryKey):\(kind.rawValue)"
+    }
+
+    /// Whether a per-library row is opted in to Home (default off).
+    public func isLibraryRowEnabled(_ libraryKey: String, kind: LibraryHomeRowKind) -> Bool {
+        enabledLibraryHomeRows.contains(Self.libraryRowKey(libraryKey, kind: kind))
+    }
+
+    /// Opts a per-library row in/out of Home.
+    public mutating func setLibraryRowEnabled(_ enabled: Bool, libraryKey: String, kind: LibraryHomeRowKind) {
+        let key = Self.libraryRowKey(libraryKey, kind: kind)
+        if enabled {
+            enabledLibraryHomeRows.insert(key)
+        } else {
+            enabledLibraryHomeRows.remove(key)
+        }
+    }
+
     // MARK: - Codable (backward compatible)
 
     private enum CodingKeys: String, CodingKey {
         case mergeLibrariesOnHome
-        case mergeContinueWatchingOnHome
         case disabledKeys
         case excludedKeys
+        case disabledGlobalHomeRows
+        case enabledLibraryHomeRows
     }
 
-    /// Decodes leniently so a pre-existing blob written when this type held only
-    /// `excludedKeys` still loads: the missing `mergeLibrariesOnHome` /
-    /// `mergeContinueWatchingOnHome` fall back to `true` (classic merged Home) and
-    /// `disabledKeys` to empty, so an upgrading install sees zero Home behaviour
-    /// change until it opts in.
+    /// Decodes leniently so a pre-existing blob (which had only `excludedKeys`, or
+    /// later `mergeLibrariesOnHome`/`disabledKeys`) still loads: missing fields
+    /// fall back to the defaults (merge on, every global row on, no per-library
+    /// rows), so an upgrading install sees zero Home behaviour change until it opts
+    /// in. A since-removed `mergeContinueWatchingOnHome` key is simply ignored.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.mergeLibrariesOnHome = try container.decodeIfPresent(Bool.self, forKey: .mergeLibrariesOnHome) ?? true
-        self.mergeContinueWatchingOnHome = try container.decodeIfPresent(Bool.self, forKey: .mergeContinueWatchingOnHome) ?? true
         self.disabledKeys = try container.decodeIfPresent(Set<String>.self, forKey: .disabledKeys) ?? []
         self.excludedKeys = try container.decodeIfPresent(Set<String>.self, forKey: .excludedKeys) ?? []
+        self.disabledGlobalHomeRows = try container.decodeIfPresent(Set<String>.self, forKey: .disabledGlobalHomeRows) ?? []
+        self.enabledLibraryHomeRows = try container.decodeIfPresent(Set<String>.self, forKey: .enabledLibraryHomeRows) ?? []
     }
 
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(mergeLibrariesOnHome, forKey: .mergeLibrariesOnHome)
-        try container.encode(mergeContinueWatchingOnHome, forKey: .mergeContinueWatchingOnHome)
         try container.encode(disabledKeys, forKey: .disabledKeys)
         try container.encode(excludedKeys, forKey: .excludedKeys)
+        try container.encode(disabledGlobalHomeRows, forKey: .disabledGlobalHomeRows)
+        try container.encode(enabledLibraryHomeRows, forKey: .enabledLibraryHomeRows)
+    }
+}
+
+/// A global (cross-server, cross-library) row on Home. The hero is handled
+/// separately via `HeroSettings`.
+public enum HomeGlobalRow: String, CaseIterable, Sendable {
+    case continueWatching
+    case watchlist
+    case recentlyAdded
+
+    /// The row's display heading (matches ``HomeRowKind`` titles).
+    public var title: String {
+        switch self {
+        case .continueWatching: return "Continue Watching"
+        case .watchlist: return "Watchlist"
+        case .recentlyAdded: return "Recently Added"
+        }
+    }
+}
+
+/// A per-library row kind that can be opted in to Home in unmerged mode.
+///
+/// Continue Watching is deliberately **not** here — it's always the single global
+/// Continue Watching row (a per-library duplicate is redundant). `hubs` is the
+/// provider's native discovery rows (Plex "More in Drama", …); providers without
+/// them (Jellyfin) simply contribute nothing for that kind.
+public enum LibraryHomeRowKind: String, CaseIterable, Sendable {
+    case recentlyAdded
+    case hubs
+
+    /// A short label for the Customize Home checklist.
+    public var displayName: String {
+        switch self {
+        case .recentlyAdded: return "Recently Added"
+        case .hubs: return "Recommended rows"
+        }
     }
 }

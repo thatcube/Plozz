@@ -106,7 +106,11 @@ public struct HomeView: View {
             // Libraries tiles), so a hidden library's content is suppressed
             // app-wide; passing the reactive `isVisible` here keeps toggles taking
             // effect on the next render even before any re-fetch settles.
-            let rows = HomeRow.rows(for: content) { visibility.isVisible($0) }
+            let rows = HomeRow.rows(
+                for: content,
+                isLibraryVisible: { visibility.isVisible($0) },
+                isGlobalRowEnabled: { visibility.visibility.isGlobalRowEnabled($0) }
+            )
             // The descriptor the next launch's skeleton renders from: each row's
             // kind, order *and* how many cards it actually showed, so the skeleton
             // matches a full row and a sparse one alike.
@@ -208,18 +212,25 @@ public struct HomeView: View {
                             //  unambiguously inside the scroll content — see note.)
                         }
                         VStack(alignment: .leading, spacing: metrics.rowSpacing) {
-                            // Global rows (Continue Watching + Watchlist in unmerged
-                            // mode; all four in merged mode — `latest`/`libraries` are
-                            // empty when unmerged, so `HomeRow.rows` yields just the
-                            // global rows here).
-                            ForEach(rows) { row in
-                                rowView(row)
-                            }
-                            // Unmerged: each visible library's own block below the
-                            // global rows.
-                            if !content.mergeLibraries {
+                            if content.mergeLibraries {
+                                // Merged: the classic ordered rows (Continue Watching,
+                                // Watchlist, Recently Added, Libraries tiles).
+                                ForEach(rows) { row in
+                                    rowView(row)
+                                }
+                            } else {
+                                // Unmerged: global media rows first, then each library's
+                                // opted-in rows, then the Libraries tiles (boxes) last as
+                                // the browse entry points — so per-library rows sit with
+                                // the global rows and the grid of tiles anchors the foot.
+                                ForEach(rows.filter { $0.kind != .libraries }) { row in
+                                    rowView(row)
+                                }
                                 ForEach(content.librarySections) { group in
                                     libraryGroupView(group)
+                                }
+                                if let librariesRow = rows.first(where: { $0.kind == .libraries }) {
+                                    rowView(librariesRow)
                                 }
                             }
                         }
@@ -454,27 +465,21 @@ public struct HomeView: View {
         }
     }
 
-    /// One unmerged library's block: a tappable heading (opens full browse) with
-    /// its rows below (Continue Watching / Recently Added / provider hubs). A
-    /// landscape row (Continue Watching) plays on select; poster rows open detail —
-    /// matching the merged rows' behaviour.
+    /// One unmerged library's block: its opted-in rows rendered as normal media
+    /// rows, each already titled ("Recently Added in Movies", "More in Drama").
+    /// There's no tappable section header — the Libraries tiles below are the
+    /// browse entry points into each library's full grid. Poster rows open detail
+    /// on select; a landscape row plays — matching the merged rows' behaviour.
     @ViewBuilder
     private func libraryGroupView(_ group: HomeLibrarySectionGroup) -> some View {
-        VStack(alignment: .leading, spacing: metrics.rowSpacing) {
-            LibrarySectionHeader(
-                library: group.library,
-                fontSize: metrics.sectionHeaderFontSize,
-                action: { onSelectLibrary(group.library.library) }
+        ForEach(group.sections) { section in
+            MediaRowView(
+                title: section.title,
+                items: section.items,
+                style: cardStyle(section.style),
+                spoilerSettings: spoilerSettings,
+                onSelect: section.style == .landscape ? onPlayItem : onSelectItem
             )
-            ForEach(group.sections) { section in
-                MediaRowView(
-                    title: section.title,
-                    items: section.items,
-                    style: cardStyle(section.style),
-                    spoilerSettings: spoilerSettings,
-                    onSelect: section.style == .landscape ? onPlayItem : onSelectItem
-                )
-            }
         }
     }
 
@@ -553,42 +558,6 @@ private struct HeroRecomputeKey: Equatable {
         self.watchlistIDs = content.watchlist.map(\.id)
         self.libraryKeys = content.libraries.map(\.key)
         self.settings = settings
-    }
-}
-
-/// A tappable heading above an unmerged library's block. Selecting it opens the
-/// full library browse grid. Focusable (10-foot UI) with a soft accent/scale
-/// treatment rather than the default button bezel, so it reads as a heading and
-/// the focus engine can move down from it into the library's first row.
-private struct LibrarySectionHeader: View {
-    let library: AggregatedLibrary
-    let fontSize: CGFloat
-    let action: () -> Void
-
-    @FocusState private var isFocused: Bool
-    @Environment(\.themePalette) private var palette
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 12) {
-                ProviderBrandMark(provider: library.providerKind, size: fontSize * 0.9, showsBackground: false)
-                Text(library.library.title)
-                    .font(.system(size: fontSize, weight: .bold))
-                    .lineLimit(1)
-                Image(systemName: "chevron.right")
-                    .font(.system(size: fontSize * 0.55, weight: .bold))
-                    .opacity(isFocused ? 1 : 0.4)
-                Spacer(minLength: 0)
-            }
-            .foregroundStyle(isFocused ? palette.accent : .primary)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .focused($isFocused)
-        .scaleEffect(isFocused ? 1.03 : 1, anchor: .leading)
-        .animation(.easeOut(duration: 0.15), value: isFocused)
-        .padding(.leading, PlozzTheme.Metrics.screenPadding)
-        .accessibilityHint("Opens the \(library.library.title) library")
     }
 }
 

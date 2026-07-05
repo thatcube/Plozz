@@ -64,16 +64,30 @@ public final class HomeLibraryVisibilityModel {
         store.save(visibility)
     }
 
-    /// Whether Continue Watching is a single global row (`true`) or per-library
-    /// rows (`false`) in unmerged mode.
-    public var mergeContinueWatchingOnHome: Bool {
-        visibility.mergeContinueWatchingOnHome
+    // MARK: - Global Home rows
+
+    /// Whether a global Home row (Continue Watching / Watchlist / Recently Added)
+    /// is shown (default on).
+    public func isGlobalRowEnabled(_ row: HomeGlobalRow) -> Bool {
+        visibility.isGlobalRowEnabled(row)
     }
 
-    /// Sets the "merge Continue Watching" switch and persists.
-    public func setMergeContinueWatchingOnHome(_ merge: Bool) {
-        guard visibility.mergeContinueWatchingOnHome != merge else { return }
-        visibility.mergeContinueWatchingOnHome = merge
+    /// Shows/hides a global Home row and persists.
+    public func setGlobalRowEnabled(_ enabled: Bool, for row: HomeGlobalRow) {
+        visibility.setGlobalRowEnabled(enabled, for: row)
+        store.save(visibility)
+    }
+
+    // MARK: - Per-library Home rows (unmerged, opt-in)
+
+    /// Whether a per-library row is opted in to Home (default off).
+    public func isLibraryRowEnabled(_ libraryKey: String, kind: LibraryHomeRowKind) -> Bool {
+        visibility.isLibraryRowEnabled(libraryKey, kind: kind)
+    }
+
+    /// Opts a per-library row in/out of Home and persists.
+    public func setLibraryRowEnabled(_ enabled: Bool, libraryKey: String, kind: LibraryHomeRowKind) {
+        visibility.setLibraryRowEnabled(enabled, libraryKey: libraryKey, kind: kind)
         store.save(visibility)
     }
 

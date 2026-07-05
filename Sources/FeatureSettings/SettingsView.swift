@@ -368,10 +368,10 @@ public struct SettingsView: View {
             navRow("Appearance", icon: "paintpalette",
                    value: nil,
                    route: .appearance)
-            navRow("Home Display", icon: "rectangle.on.rectangle.angled",
+            navRow("Customize Home", icon: "rectangle.on.rectangle.angled",
                    value: nil,
-                   route: .homeDisplay) {
-                Text("Display size, card style & the featured hero")
+                   route: .customizeHome) {
+                Text("Rows, libraries & the featured hero on Home")
                     .font(.footnote)
                     .settingsRowSecondary()
                     .lineLimit(2)
@@ -568,8 +568,8 @@ public struct SettingsView: View {
             MyLibrariesDetailView(context: context)
         case .appearance:
             AppearanceDetailView(theme: theme)
-        case .homeDisplay:
-            HomeDisplayDetailView(
+        case .customizeHome:
+            CustomizeHomeDetailView(
                 discoveredLibraries: librariesStore.state,
                 homeVisibility: homeVisibility
             )

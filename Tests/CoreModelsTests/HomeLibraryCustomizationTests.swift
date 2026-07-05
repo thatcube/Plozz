@@ -103,6 +103,48 @@ final class HomeLibraryVisibilityTests: XCTestCase {
         XCTAssertEqual(decoded.excludedKeys, ["acct:movies"])
         XCTAssertFalse(decoded.isVisibleOnHome("acct:movies"))
         XCTAssertTrue(decoded.isEnabled("acct:movies"))
+        // New row-selection fields also default sensibly: every global row on, no
+        // per-library rows opted in.
+        XCTAssertTrue(decoded.isGlobalRowEnabled(.continueWatching))
+        XCTAssertTrue(decoded.isGlobalRowEnabled(.recentlyAdded))
+        XCTAssertFalse(decoded.isLibraryRowEnabled("acct:movies", kind: .recentlyAdded))
+    }
+
+    // MARK: - Global & per-library Home rows
+
+    func testGlobalRowsDefaultOnAndToggleOff() {
+        var v = HomeLibraryVisibility.default
+        for row in HomeGlobalRow.allCases {
+            XCTAssertTrue(v.isGlobalRowEnabled(row), "\(row) should default on")
+        }
+        v.setGlobalRowEnabled(false, for: .watchlist)
+        XCTAssertFalse(v.isGlobalRowEnabled(.watchlist))
+        XCTAssertTrue(v.isGlobalRowEnabled(.continueWatching), "other rows unaffected")
+        XCTAssertEqual(v.disabledGlobalHomeRows, ["watchlist"])
+    }
+
+    func testPerLibraryRowsDefaultOffAndOptIn() {
+        var v = HomeLibraryVisibility.default
+        XCTAssertFalse(v.isLibraryRowEnabled("acct:L1", kind: .recentlyAdded))
+        v.setLibraryRowEnabled(true, libraryKey: "acct:L1", kind: .recentlyAdded)
+        XCTAssertTrue(v.isLibraryRowEnabled("acct:L1", kind: .recentlyAdded))
+        // Independent per kind and per library.
+        XCTAssertFalse(v.isLibraryRowEnabled("acct:L1", kind: .hubs))
+        XCTAssertFalse(v.isLibraryRowEnabled("acct:L2", kind: .recentlyAdded))
+        v.setLibraryRowEnabled(false, libraryKey: "acct:L1", kind: .recentlyAdded)
+        XCTAssertTrue(v.enabledLibraryHomeRows.isEmpty)
+    }
+
+    func testRowSelectionSurvivesCodableRoundTrip() throws {
+        var v = HomeLibraryVisibility.default
+        v.setGlobalRowEnabled(false, for: .recentlyAdded)
+        v.setLibraryRowEnabled(true, libraryKey: "acct:L1", kind: .hubs)
+
+        let data = try JSONEncoder().encode(v)
+        let decoded = try JSONDecoder().decode(HomeLibraryVisibility.self, from: data)
+
+        XCTAssertFalse(decoded.isGlobalRowEnabled(.recentlyAdded))
+        XCTAssertTrue(decoded.isLibraryRowEnabled("acct:L1", kind: .hubs))
     }
 }
 

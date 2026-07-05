@@ -43,7 +43,6 @@ struct MyLibrariesDetailView: View {
                     if watchedGroups.isEmpty {
                         notWatchingState
                     } else {
-                        mergeTogglePanel
                         ForEach(watchedGroups, id: \.serverKey) { serverCard($0) }
                     }
                     addServerSection
@@ -73,48 +72,6 @@ struct MyLibrariesDetailView: View {
             footer: "You're signed in to servers, but this profile isn't watching any yet. Add one below."
         ) {
             Text("Not watching any servers.").font(.headline)
-        }
-    }
-
-    // MARK: - Merge libraries toggle (prominent, top of page)
-
-    /// The all-or-nothing "Merge libraries on Home" switch. When on, Home combines
-    /// every library into unified cross-server rows (today's behaviour); when off,
-    /// each visible library gets its own section — including a Plex server's own
-    /// rows like "More in Drama". Per-profile, using the shared switch control.
-    /// When unmerged, a nested "Merge Continue Watching" switch controls whether
-    /// resumes show as one global row or per-library.
-    private var mergeTogglePanel: some View {
-        SettingsPanel(
-            footer: "On: every library's content is combined into unified rows (Continue Watching, Recently Added, and one Libraries row). Off: each library shown on Home gets its own section — including your server's own rows like “More in Drama”. Either way you still choose which libraries appear. Affects only \(context.activeProfile.name)'s Home."
-        ) {
-            VStack(alignment: .leading, spacing: 8) {
-                Toggle(isOn: Binding(
-                    get: { context.homeVisibility.mergeLibrariesOnHome },
-                    set: { context.homeVisibility.setMergeLibrariesOnHome($0) }
-                )) {
-                    Text("Merge libraries on Home")
-                }
-                .toggleStyle(SettingsSwitchToggleStyle())
-
-                // Only meaningful when libraries are unmerged (there are no
-                // per-library rows to reconcile in merged mode).
-                if !context.homeVisibility.mergeLibrariesOnHome {
-                    Divider()
-                    Toggle(isOn: Binding(
-                        get: { context.homeVisibility.mergeContinueWatchingOnHome },
-                        set: { context.homeVisibility.setMergeContinueWatchingOnHome($0) }
-                    )) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Merge Continue Watching")
-                            Text("On: one Continue Watching row at the top. Off: a Continue Watching row inside each library instead.")
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .toggleStyle(SettingsSwitchToggleStyle())
-                }
-            }
         }
     }
 
@@ -309,14 +266,10 @@ struct MyLibrariesDetailView: View {
         }
     }
 
-    /// One library's two-level control: a master **Enabled** switch (off ⇒ hidden
-    /// everywhere: Home, Search, Music, browse) and, when enabled, an indented
-    /// **Show on Home** switch (the Home-only choice, preserved across enable/disable
-    /// so re-enabling restores it).
-    ///
-    /// **Music libraries** are special: they never appear on Home (they have their
-    /// own Music tab), so the Show-on-Home switch is replaced with a caption — the
-    /// Enabled switch alone governs whether the library shows in the Music tab.
+    /// One library's whole-library **Enabled** switch (off ⇒ hidden everywhere:
+    /// Home, Search, Music, browse). A short caption explains what "on" means,
+    /// differing for music (Music tab) vs video (Home & Search). Which *rows* a
+    /// video library contributes to Home is chosen separately on Customize Home.
     @ViewBuilder
     private func libraryRow(_ aggregated: AggregatedLibrary) -> some View {
         let key = aggregated.key
@@ -330,35 +283,23 @@ struct MyLibrariesDetailView: View {
             }
             .toggleStyle(SettingsSwitchToggleStyle())
 
-            if !context.homeVisibility.isEnabled(key) {
-                Text(isMusic
-                     ? "Hidden everywhere, including the Music tab."
-                     : "Hidden everywhere, including Search and Music.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .padding(.leading, 12)
-                    .padding(.bottom, 6)
-            } else if isMusic {
-                // Music never shows on Home — it lives in the Music tab — so there's
-                // no Show-on-Home choice for it.
-                Text("Shown in the Music tab, not on Home.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .padding(.leading, 12)
-                    .padding(.bottom, 6)
-            } else {
-                Toggle(isOn: Binding(
-                    get: { context.homeVisibility.isShownOnHome(key) },
-                    set: { context.homeVisibility.setShownOnHome($0, for: key) }
-                )) {
-                    Text("Show on Home")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                }
-                .toggleStyle(SettingsSwitchToggleStyle())
-                .padding(.leading, 28)
-            }
+            captionText(enabled: context.homeVisibility.isEnabled(key), isMusic: isMusic)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .padding(.leading, 12)
+                .padding(.bottom, 6)
         }
+    }
+
+    private func captionText(enabled: Bool, isMusic: Bool) -> Text {
+        if !enabled {
+            return Text(isMusic
+                        ? "Hidden everywhere, including the Music tab."
+                        : "Hidden everywhere, including Search.")
+        }
+        return Text(isMusic
+                    ? "Shown in the Music tab."
+                    : "Available in Search and eligible for Home. Choose its Home rows in Customize Home.")
     }
 
     private func libraries(for group: ServerAccountGroup, in all: [AggregatedLibrary]) -> [AggregatedLibrary] {

@@ -179,7 +179,10 @@ struct SettingsSplitLayout: View {
 
     private var detailPane: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
+            // Exactly two children: the title/description block and the control.
+            // The spacing is therefore the gap between the description and the
+            // first toggle/checkmark/box below it.
+            VStack(alignment: .leading, spacing: 80) {
                 if let row = selectedRow {
                     VStack(alignment: .leading, spacing: 6) {
                         Text(row.title)

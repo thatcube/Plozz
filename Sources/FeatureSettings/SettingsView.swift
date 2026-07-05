@@ -393,10 +393,10 @@ public struct SettingsView: View {
             navRow("Trackers", icon: "link",
                    value: nil,
                    route: .integrations) {
-                Text("Trakt, Simkl, AniList, MyAnimeList, Last.fm")
+                Text("Trakt, Simkl, AniList, MyAnimeList, Last.fm, Seerr")
                     .font(.footnote)
                     .settingsRowSecondary()
-                    .lineLimit(1)
+                    .lineLimit(2)
             }
         }
     }

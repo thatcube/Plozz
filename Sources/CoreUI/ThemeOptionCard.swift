@@ -249,14 +249,62 @@ public struct ThemeOptionCard: View {
     }
 
     public var body: some View {
+        PreviewCard(
+            title: theme.displayName,
+            detail: theme.detail,
+            isSelected: isSelected,
+            accent: accent,
+            compact: compact,
+            action: action
+        ) {
+            ThemeSwatch(theme: theme, cornerRadius: compact ? 10 : 16)
+        }
+    }
+}
+
+/// A selectable "picture + label" card shared by the theme picker and the music
+/// player style picker, so both use identical sizing, focus/selection chrome
+/// (`ThemeCardButtonStyle`) and the compact/full geometry. The `swatch` closure
+/// supplies the preview graphic (e.g. `ThemeSwatch` or `MusicStyleSwatch`).
+///
+/// The caller owns focus (apply `.focused(...)`) and selection state; tapping
+/// invokes `action`.
+public struct PreviewCard<Swatch: View>: View {
+    private let title: String
+    private let detail: String?
+    private let isSelected: Bool
+    private let accent: Color
+    private let compact: Bool
+    private let action: () -> Void
+    private let swatch: () -> Swatch
+
+    public init(
+        title: String,
+        detail: String? = nil,
+        isSelected: Bool,
+        accent: Color,
+        compact: Bool = false,
+        action: @escaping () -> Void,
+        @ViewBuilder swatch: @escaping () -> Swatch
+    ) {
+        self.title = title
+        self.detail = detail
+        self.isSelected = isSelected
+        self.accent = accent
+        self.compact = compact
+        self.action = action
+        self.swatch = swatch
+    }
+
+    public var body: some View {
         Button(action: action) {
             VStack(spacing: compact ? 10 : 18) {
-                ThemeSwatch(theme: theme, cornerRadius: compact ? 10 : 16)
+                swatch()
                     .frame(height: compact ? 124 : 200)
 
                 VStack(spacing: compact ? 2 : 6) {
                     HStack(spacing: 6) {
-                        Text(theme.displayName)
+                        Text(title)
                             .font(compact ? .headline : .title3.weight(.semibold))
                         if isSelected {
                             Image(systemName: "checkmark.circle.fill")
@@ -264,8 +312,8 @@ public struct ThemeOptionCard: View {
                                 .foregroundStyle(accent)
                         }
                     }
-                    if !compact {
-                        Text(theme.detail)
+                    if !compact, let detail {
+                        Text(detail)
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)

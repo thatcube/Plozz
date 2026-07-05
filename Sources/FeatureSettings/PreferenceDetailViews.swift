@@ -104,23 +104,21 @@ struct AppearanceDetailView: View {
             ]),
             SettingsSplitSection(id: "music", header: "Music Player", rows: [
                 SettingsSplitRow(
-                    id: "music-style",
-                    title: "Style",
-                    description: "How the now-playing music screen is presented.",
+                    id: "music-player",
+                    title: "Music Player",
+                    description: "How the now-playing music screen looks.",
                 ) {
-                    SettingsOptionList(
-                        options: MusicPlayerAppearance.allCases,
-                        selection: $musicPlayer.appearance,
-                        icon: { $0.symbolName },
-                        title: { $0.displayName }
-                    )
-                },
-                SettingsSplitRow(
-                    id: "music-track-details",
-                    title: "Track details",
-                    description: "Show album name, audio quality & lyrics source on the now-playing screen.",
-                ) {
-                    Toggle("Show track details", isOn: $musicPlayer.showTrackDetails)
+                    VStack(alignment: .leading, spacing: 28) {
+                        CompactMusicStylePicker(selection: $musicPlayer.appearance)
+
+                        VStack(alignment: .leading, spacing: 6) {
+                            Toggle("Show track details", isOn: $musicPlayer.showTrackDetails)
+                            Text("Album name, audio quality & lyrics source on the now-playing screen.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
                 }
             ])
         ]

@@ -98,6 +98,11 @@ public enum MusicPlayerAppearance: String, CaseIterable, Identifiable, Codable, 
 
     public static let `default`: MusicPlayerAppearance = .matchTheme
 
+    /// The order the music-player style picker presents options in: Dark, OLED,
+    /// Light, then Match Theme last (mirroring the theme picker, where the
+    /// "follows something else" option sits at the end).
+    public static let pickerOrder: [MusicPlayerAppearance] = [.dark, .oled, .light, .matchTheme]
+
     /// AppStorage key shared by the player (reads it) and Settings (writes it).
     public static let storageKey = "musicPlayerAppearance"
 }

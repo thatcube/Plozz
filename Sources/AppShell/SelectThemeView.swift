@@ -25,7 +25,6 @@ struct SelectThemeView: View {
     /// Called when the user accepts their choice (Continue, or Menu). The caller
     /// decides what "done" means (enter the app, or dismiss the cover).
     var onContinue: () -> Void
-    @Environment(\.colorScheme) private var systemColorScheme
     @FocusState private var focus: Field?
 
     private enum Field: Hashable {
@@ -40,9 +39,11 @@ struct SelectThemeView: View {
     /// Custom environment values don't reliably update inside a `fullScreenCover`
     /// (the in-app new-profile flow), which left the backdrop stuck; reading the
     /// model directly re-renders this view — and repaints the background — the
-    /// instant a card is tapped, in both the onboarding and cover flows.
+    /// instant a card is tapped, in both the onboarding and cover flows. `.system`
+    /// resolves against `SystemAppearance.colorScheme` (the screen's real scheme,
+    /// which our `preferredColorScheme` override can't pollute).
     private var livePalette: ThemePalette {
-        ThemePalette.palette(for: selectedTheme, systemColorScheme: systemColorScheme)
+        ThemePalette.palette(for: selectedTheme, systemColorScheme: SystemAppearance.colorScheme)
     }
 
     /// Personalised when profiles are on; plain otherwise (e.g. the user chose
@@ -88,7 +89,10 @@ struct SelectThemeView: View {
         // RootView already paints the same background behind this). Driven by
         // `livePalette` so it repaints the moment a card is tapped.
         .background { AppBackground(palette: livePalette).ignoresSafeArea() }
-        .preferredColorScheme(selectedTheme.preferredColorScheme)
+        // Force a CONCRETE scheme (never nil) derived from the resolved palette,
+        // so System follows the real device appearance and switching away from a
+        // forced Light/Dark never gets stuck (matches RootView).
+        .preferredColorScheme(livePalette.isLight ? .light : .dark)
         .onAppear { focus = .theme(selectedTheme) }
         // Pressing Menu accepts the current selection, so the app never suspends
         // from this one-time setup screen.

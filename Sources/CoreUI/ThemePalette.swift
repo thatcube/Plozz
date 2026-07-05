@@ -212,6 +212,35 @@ public extension AppTheme {
     }
 }
 
+// MARK: - Device (system) appearance
+
+/// Reads the device's *system* colour scheme independently of any window-level
+/// `preferredColorScheme` the app applies.
+///
+/// The app forces a concrete colour scheme for Light/Dark/OLED (see
+/// `AppTheme.preferredColorScheme`). That override lives on the app's window, so
+/// SwiftUI's `@Environment(\.colorScheme)` reflects the *forced* value — which
+/// makes it useless for resolving the `.system` theme: switching Light → System
+/// would keep reading the stuck Light value (SwiftUI also doesn't reliably reset
+/// a `preferredColorScheme(nil)` back to "follow system"). The screen's trait
+/// collection sits above the window and never carries the override, so it always
+/// reports the true system appearance.
+public enum SystemAppearance {
+    /// The device's current system colour scheme (Light/Dark), read from the
+    /// active window scene's screen — unaffected by the app's own override.
+    @MainActor public static var colorScheme: ColorScheme {
+        #if canImport(UIKit)
+        let style = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first?
+            .screen.traitCollection.userInterfaceStyle ?? .unspecified
+        return style == .light ? .light : .dark
+        #else
+        return .dark
+        #endif
+    }
+}
+
 // MARK: - App background
 
 /// The shared app background: a soft vertical gradient between the palette's two

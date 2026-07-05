@@ -15,7 +15,6 @@ import FeaturePlayback
 /// Top-level view that renders one screen per `SessionState`.
 public struct RootView: View {
     @State private var appState: AppState
-    @Environment(\.colorScheme) private var systemColorScheme
     @Environment(\.scenePhase) private var scenePhase
     /// The OS-level Reduce Transparency setting, resolved against the in-app
     /// "Transparency (liquid glass)" preference (Settings ▸ Appearance) and
@@ -46,10 +45,13 @@ public struct RootView: View {
         _appState = State(initialValue: appState ?? AppState())
     }
 
-    /// The palette for the currently-selected theme, re-resolved when either the
-    /// chosen `AppTheme` or the device colour scheme changes.
+    /// The palette for the currently-selected theme. `.system` resolves against
+    /// `SystemAppearance.colorScheme` (the screen's real scheme) rather than
+    /// `@Environment(\.colorScheme)`, which our own `preferredColorScheme`
+    /// override pollutes. Re-resolves when the chosen `AppTheme` changes and,
+    /// via `scenePhase`, when the app returns to the foreground.
     private var resolvedPalette: ThemePalette {
-        ThemePalette.palette(for: appState.themeModel.theme, systemColorScheme: systemColorScheme)
+        ThemePalette.palette(for: appState.themeModel.theme, systemColorScheme: SystemAppearance.colorScheme)
     }
 
     /// Reconcile the crash reporter with the current opt-in consent. Safe to call
@@ -262,7 +264,11 @@ public struct RootView: View {
         .environment(\.plozzCardStyle, appState.cardStyleModel.style)
         .environment(\.plozzReduceTransparency, (TransparencyPreference(rawValue: transparencyPreferenceRaw) ?? .default).reducesTransparency(systemReduceTransparency: systemReduceTransparency))
         .environment(displayVeil)
-        .preferredColorScheme(appState.themeModel.theme.preferredColorScheme)
+        // Always force a CONCRETE scheme (never nil): `preferredColorScheme(nil)`
+        // for System doesn't reliably reset a previously-forced scheme, which
+        // left the app stuck (e.g. Light → System stayed light). Deriving it from
+        // the resolved palette keeps System following the real device appearance.
+        .preferredColorScheme(resolvedPalette.isLight ? .light : .dark)
         .fullScreenCover(item: Binding(
             get: { pinRequest },
             set: { newValue in if newValue == nil { appState.dismissPlexPINIfPresented() } }

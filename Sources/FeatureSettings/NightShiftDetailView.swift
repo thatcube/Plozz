@@ -172,7 +172,11 @@ private struct NightShiftScheduleControl: View {
                 .contentTransition(.opacity)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
+            // Extra breathing room between the mode's description and its inline
+            // controls (Manual's Turns on/off steppers, Auto's Location menu) so
+            // they don't crowd the subtext.
             modeExtras
+                .padding(.top, 40)
         }
         .animation(.easeInOut(duration: 0.18), value: describedMode)
         .animation(.easeInOut(duration: 0.18), value: mode)

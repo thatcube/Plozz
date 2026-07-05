@@ -46,6 +46,11 @@ public struct LabeledSettingRow<Trailing: View>: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(title)
                     .font(.headline.weight(.semibold))
+                    // Never wrap the label to a second line: keep it on one line
+                    // and let the column grow past `labelWidth` for a long title
+                    // (e.g. "Preferred language") instead of wrapping.
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
                 if let subtitle {
                     Text(subtitle)
                         .font(.footnote)
@@ -53,7 +58,7 @@ public struct LabeledSettingRow<Trailing: View>: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            .frame(width: labelWidth, alignment: .leading)
+            .frame(minWidth: labelWidth, alignment: .leading)
 
             trailing
                 .frame(maxWidth: .infinity, alignment: trailingAlignment)

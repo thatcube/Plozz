@@ -102,20 +102,17 @@ struct SelectThemeView: View {
     @ViewBuilder
     private func themeCard(_ theme: AppTheme) -> some View {
         let isSelected = theme == selectedTheme
-        let preview = ThemePalette.palette(for: theme, systemColorScheme: systemColorScheme)
 
         Button {
             // Apply immediately for a full-page live preview.
             appState.themeModel.theme = theme
         } label: {
             VStack(spacing: 18) {
-                ThemePreviewSwatch(palette: preview)
+                ThemePreviewSwatch(theme: theme)
                     .frame(height: 200)
 
                 VStack(spacing: 6) {
                     HStack(spacing: 8) {
-                        Image(systemName: theme.symbolName)
-                            .font(.headline)
                         Text(theme.displayName)
                             .font(.title3.weight(.semibold))
                         if isSelected {
@@ -128,7 +125,7 @@ struct SelectThemeView: View {
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
-                        .fixedSize(horizontal: false, vertical: true)
+                        .lineLimit(2, reservesSpace: true)
                 }
             }
         }
@@ -192,66 +189,133 @@ private struct ThemeCardButtonBody: View {
     }
 }
 
-/// A small, self-contained mock of a Home screen painted with a given
-/// `ThemePalette`, so each option previews its true colours regardless of the
-/// theme currently applied to the app.
-private struct ThemePreviewSwatch: View {
-    let palette: ThemePalette
+/// Fixed, theme-independent colours for a preview swatch. Deliberately NOT
+/// derived from `ThemePalette` or the environment colour scheme: a swatch is a
+/// *picture* of a theme, so it must always show that theme's own look no matter
+/// which theme is currently applied (previously the swatches shifted with the
+/// selected theme because they resolved against the overridden colour scheme).
+private struct ThemePreviewColors {
+    let bgTop: Color
+    let bgBottom: Color
+    let card: Color
+    let cardBorder: Color
+    let textPrimary: Color
+    let textSecondary: Color
+    let accent: Color
+
+    /// One fixed accent for every swatch, so the graphics never pick up the
+    /// app's (theme-tinted) accent.
+    static let accentBlue = Color(red: 0.20, green: 0.60, blue: 1.0)
+
+    static let light = ThemePreviewColors(
+        bgTop: Color(white: 1.0),
+        bgBottom: Color(white: 0.93),
+        card: Color(white: 0.99),
+        cardBorder: Color.black.opacity(0.10),
+        textPrimary: Color.black.opacity(0.80),
+        textSecondary: Color.black.opacity(0.42),
+        accent: accentBlue
+    )
+    static let dark = ThemePreviewColors(
+        bgTop: Color(red: 0.17, green: 0.17, blue: 0.19),
+        bgBottom: Color(red: 0.10, green: 0.10, blue: 0.12),
+        card: Color(red: 0.26, green: 0.26, blue: 0.29),
+        cardBorder: Color.white.opacity(0.12),
+        textPrimary: Color.white.opacity(0.90),
+        textSecondary: Color.white.opacity(0.45),
+        accent: accentBlue
+    )
+    static let oled = ThemePreviewColors(
+        bgTop: .black,
+        bgBottom: .black,
+        card: Color(white: 0.11),
+        cardBorder: Color.white.opacity(0.16),
+        textPrimary: Color.white.opacity(0.92),
+        textSecondary: Color.white.opacity(0.45),
+        accent: accentBlue
+    )
+}
+
+/// A tiny mock "Home screen" painted with a fixed `ThemePreviewColors`. Sizes
+/// everything relative to its own width so it reads correctly at full width
+/// (Light/Dark/OLED) and at half width (each side of the System split).
+private struct MiniPreview: View {
+    let colors: ThemePreviewColors
 
     var body: some View {
-        RoundedRectangle(cornerRadius: 16, style: .continuous)
-            .fill(
-                LinearGradient(
-                    colors: [palette.backgroundBase, palette.backgroundSecondary],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-            )
-            .overlay(alignment: .topLeading) {
-                VStack(alignment: .leading, spacing: 12) {
-                    // Faux title bar.
-                    HStack(spacing: 8) {
-                        RoundedRectangle(cornerRadius: 3)
-                            .fill(palette.accent)
-                            .frame(width: 44, height: 8)
-                        RoundedRectangle(cornerRadius: 3)
-                            .fill(palette.secondaryText.opacity(0.5))
-                            .frame(width: 70, height: 8)
-                    }
+        GeometryReader { geo in
+            let w = geo.size.width
+            let pad = w * 0.09
+            let content = w - pad * 2
+            let gap = w * 0.045
+            let cardW = (content - gap * 2) / 3
+            let bar = max(3.0, w * 0.024)
 
-                    // Faux card row.
-                    HStack(spacing: 10) {
-                        ForEach(0..<3, id: \.self) { index in
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .fill(palette.cardSurface)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                        .strokeBorder(palette.cardBorder, lineWidth: 1)
-                                )
-                                .frame(width: 60, height: 84)
-                                .overlay(alignment: .bottomLeading) {
-                                    RoundedRectangle(cornerRadius: 2)
-                                        .fill(index == 0 ? palette.accent : palette.secondaryText.opacity(0.4))
-                                        .frame(width: 34, height: 5)
-                                        .padding(6)
-                                }
-                        }
-                    }
-
-                    // Faux text lines.
-                    RoundedRectangle(cornerRadius: 3)
-                        .fill(palette.primaryText.opacity(0.85))
-                        .frame(width: 130, height: 7)
-                    RoundedRectangle(cornerRadius: 3)
-                        .fill(palette.secondaryText.opacity(0.5))
-                        .frame(width: 96, height: 7)
+            VStack(alignment: .leading, spacing: w * 0.05) {
+                // Faux title bar.
+                HStack(spacing: w * 0.03) {
+                    Capsule().fill(colors.accent).frame(width: w * 0.16, height: bar)
+                    Capsule().fill(colors.textSecondary).frame(width: w * 0.28, height: bar)
                 }
-                .padding(16)
+                // Faux poster row.
+                HStack(spacing: gap) {
+                    ForEach(0..<3, id: \.self) { index in
+                        RoundedRectangle(cornerRadius: w * 0.035, style: .continuous)
+                            .fill(colors.card)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: w * 0.035, style: .continuous)
+                                    .strokeBorder(colors.cardBorder, lineWidth: 1)
+                            )
+                            .frame(width: cardW, height: cardW * 1.35)
+                            .overlay(alignment: .bottomLeading) {
+                                Capsule()
+                                    .fill(index == 0 ? colors.accent : colors.textSecondary)
+                                    .frame(width: cardW * 0.55, height: bar * 0.8)
+                                    .padding(w * 0.02)
+                            }
+                    }
+                }
+                // Faux text lines.
+                Capsule().fill(colors.textPrimary).frame(width: content * 0.6, height: bar)
+                Capsule().fill(colors.textSecondary).frame(width: content * 0.42, height: bar)
+                Spacer(minLength: 0)
             }
-            .overlay(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .strokeBorder(palette.cardBorder, lineWidth: 1)
+            .padding(pad)
+            .frame(width: w, height: geo.size.height, alignment: .topLeading)
+            .background(
+                LinearGradient(colors: [colors.bgTop, colors.bgBottom], startPoint: .top, endPoint: .bottom)
             )
+        }
+    }
+}
+
+/// The per-option preview graphic. Light/Dark/OLED show their own fixed look;
+/// System is split half-light / half-dark to signal "follows your device."
+private struct ThemePreviewSwatch: View {
+    let theme: AppTheme
+    private let corner: CGFloat = 16
+
+    var body: some View {
+        Group {
+            switch theme {
+            case .system:
+                HStack(spacing: 0) {
+                    MiniPreview(colors: .light)
+                    MiniPreview(colors: .dark)
+                }
+            case .light:
+                MiniPreview(colors: .light)
+            case .dark:
+                MiniPreview(colors: .dark)
+            case .oled:
+                MiniPreview(colors: .oled)
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: corner, style: .continuous)
+                .strokeBorder(Color(white: 0.5).opacity(0.35), lineWidth: 1)
+        )
     }
 }
 #endif

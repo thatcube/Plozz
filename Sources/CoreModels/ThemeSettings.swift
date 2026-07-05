@@ -54,6 +54,10 @@ public enum AppTheme: String, CaseIterable, Identifiable, Codable, Sendable {
     /// dark/OLED read best for a lean-back media app. Users can still pick any
     /// look during onboarding or later in Settings.
     public static let `default`: AppTheme = .dark
+
+    /// The order the theme pickers (onboarding + Settings) present options in:
+    /// Dark first (the default), then OLED, Light, and System last.
+    public static let pickerOrder: [AppTheme] = [.dark, .oled, .light, .system]
 }
 
 /// How the full-screen music player paints its background and text. Independent

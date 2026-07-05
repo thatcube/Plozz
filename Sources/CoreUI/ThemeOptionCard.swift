@@ -49,10 +49,10 @@ struct ThemePreviewColors {
 }
 
 /// A tiny mock "Home screen" painted with a fixed `ThemePreviewColors`: a title
-/// bar, two wide poster tiles, and a couple of text lines sitting toward the top.
-/// Horizontal metrics scale with width and vertical metrics with height, so it
-/// stays balanced at both the full onboarding size and the shorter, compact
-/// Settings size (and at half width, for each side of the System split).
+/// bar and two wide poster tiles that fill the rest of the window. ~16pt of inset
+/// padding all round. Horizontal metrics scale with width; the tiles fill the
+/// remaining height, so they stay proportionate at the full onboarding size, the
+/// compact Settings size, and at half width (each side of the System split).
 private struct MiniPreview: View {
     let colors: ThemePreviewColors
 
@@ -60,23 +60,21 @@ private struct MiniPreview: View {
         GeometryReader { geo in
             let w = geo.size.width
             let h = geo.size.height
-            let padH = w * 0.08
-            let padV = h * 0.12
-            let contentW = w - padH * 2
-            let gap = w * 0.05
+            let pad: CGFloat = 16
+            let contentW = w - pad * 2
+            let gap = max(6, w * 0.05)
             let cardW = (contentW - gap) / 2
-            let cardH = h * 0.44
-            let vGap = h * 0.07
-            let barH = max(3.0, h * 0.045)
-            let cardCorner = min(w, h) * 0.05
+            let barH = max(4, h * 0.05)
+            let titleGap = h * 0.07
+            let cardCorner = min(cardW, h) * 0.08
 
-            VStack(alignment: .leading, spacing: vGap) {
+            VStack(alignment: .leading, spacing: titleGap) {
                 // Faux title bar.
                 HStack(spacing: w * 0.03) {
                     Capsule().fill(colors.accent).frame(width: w * 0.18, height: barH)
                     Capsule().fill(colors.textSecondary).frame(width: w * 0.30, height: barH)
                 }
-                // Two wide poster tiles.
+                // Two wide poster tiles that fill the remaining height.
                 HStack(spacing: gap) {
                     ForEach(0..<2, id: \.self) { index in
                         RoundedRectangle(cornerRadius: cardCorner, style: .continuous)
@@ -85,22 +83,18 @@ private struct MiniPreview: View {
                                 RoundedRectangle(cornerRadius: cardCorner, style: .continuous)
                                     .strokeBorder(colors.cardBorder, lineWidth: 1)
                             )
-                            .frame(width: cardW, height: cardH)
+                            .frame(width: cardW)
                             .overlay(alignment: .bottomLeading) {
                                 Capsule()
                                     .fill(index == 0 ? colors.accent : colors.textSecondary)
-                                    .frame(width: cardW * 0.4, height: barH * 0.8)
-                                    .padding(w * 0.025)
+                                    .frame(width: cardW * 0.42, height: barH * 0.85)
+                                    .padding(w * 0.03)
                             }
                     }
                 }
-                // Faux text lines.
-                Capsule().fill(colors.textPrimary).frame(width: contentW * 0.62, height: barH)
-                Capsule().fill(colors.textSecondary).frame(width: contentW * 0.44, height: barH)
-                Spacer(minLength: 0)
+                .frame(maxHeight: .infinity)
             }
-            .padding(.horizontal, padH)
-            .padding(.vertical, padV)
+            .padding(pad)
             .frame(width: w, height: h, alignment: .topLeading)
             .background(
                 LinearGradient(colors: [colors.bgTop, colors.bgBottom], startPoint: .top, endPoint: .bottom)
@@ -258,7 +252,7 @@ public struct ThemeOptionCard: View {
         Button(action: action) {
             VStack(spacing: compact ? 10 : 18) {
                 ThemeSwatch(theme: theme, cornerRadius: compact ? 10 : 16)
-                    .frame(height: compact ? 84 : 160)
+                    .frame(height: compact ? 124 : 200)
 
                 VStack(spacing: compact ? 2 : 6) {
                     HStack(spacing: 6) {

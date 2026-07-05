@@ -62,7 +62,7 @@ struct SelectThemeView: View {
                 .multilineTextAlignment(.center)
 
             HStack(alignment: .top, spacing: 28) {
-                ForEach(AppTheme.allCases) { theme in
+                ForEach(AppTheme.pickerOrder) { theme in
                     themeCard(theme)
                 }
             }

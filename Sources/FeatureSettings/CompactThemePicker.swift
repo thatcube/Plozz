@@ -16,7 +16,7 @@ struct CompactThemePicker: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 16) {
-            ForEach(AppTheme.allCases) { theme in
+            ForEach(AppTheme.pickerOrder) { theme in
                 ThemeOptionCard(
                     theme: theme,
                     isSelected: selection == theme,

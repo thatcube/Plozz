@@ -4,47 +4,82 @@ import CoreModels
 
 /// Fixed, appearance-independent colours for a music-player preview swatch.
 /// Like `ThemePreviewColors`, these are a *picture* of each player look and never
-/// adapt to the currently applied theme.
+/// adapt to the currently applied theme. Models the real player's layering: a
+/// solid `base`, artwork-colored blobs at `blobOpacity`, and a `scrim` veil.
 private struct MusicStylePreviewColors {
-    let bgTop: Color
-    let bgBottom: Color
+    /// Solid floor under the artwork blobs (white for the frosted look, else black).
+    let base: Color
+    /// How strongly the artwork colors show through, per style (mirrors the real
+    /// `LiquidArtworkBackground.gradientOpacity`).
+    let blobOpacity: Double
+    /// Legibility veil painted over the blobs (a white frost for Light, black
+    /// veils for Dark/OLED — OLED heaviest so colors read as faint accents).
+    let scrim: Color
     /// Progress-track colour (the unfilled scrubber behind the played portion).
     let track: Color
     /// Played-portion colour of the scrubber. The real player uses white on a
-    /// lighter-white track, so this is white (tuned per look for contrast).
+    /// lighter-white track, so this is white.
     let seek: Color
 
-    /// A fixed, vivid "album art" gradient — the artwork is the same in every
-    /// variant; only the surrounding chrome (background, track) changes.
+    /// The album-art tile gradient AND the source of the background blobs — a
+    /// fixed, vivid palette so every variant shows the same "artwork," with only
+    /// the surrounding chrome (base, veil) changing per style.
     static let artwork: [Color] = [
-        Color(red: 0.98, green: 0.42, blue: 0.55),
-        Color(red: 0.42, green: 0.38, blue: 0.95)
+        Color(red: 0.98, green: 0.42, blue: 0.55),  // pink
+        Color(red: 0.42, green: 0.38, blue: 0.95)   // purple
+    ]
+    /// Extra blob colors so the tinted field reads multi-hue like real artwork.
+    static let blobs: [Color] = [
+        Color(red: 0.98, green: 0.42, blue: 0.55),  // pink   (top-leading)
+        Color(red: 0.42, green: 0.38, blue: 0.95),  // purple (bottom-trailing)
+        Color(red: 0.20, green: 0.80, blue: 0.85)   // teal   (bottom-leading)
     ]
 
     static let light = MusicStylePreviewColors(
-        bgTop: Color(white: 0.97),
-        bgBottom: Color(white: 0.90),
+        base: .white,
+        blobOpacity: 0.95,
+        scrim: Color.white.opacity(0.34),
         track: Color.white.opacity(0.9),
         seek: Color.white
     )
     static let dark = MusicStylePreviewColors(
-        bgTop: Color(red: 0.17, green: 0.16, blue: 0.20),
-        bgBottom: Color(red: 0.10, green: 0.09, blue: 0.13),
+        base: .black,
+        blobOpacity: 1.0,
+        scrim: Color.black.opacity(0.34),
         track: Color.white.opacity(0.3),
         seek: Color.white
     )
     static let oled = MusicStylePreviewColors(
-        bgTop: .black,
-        bgBottom: .black,
+        base: .black,
+        blobOpacity: 0.55,
+        scrim: Color.black.opacity(0.6),
         track: Color.white.opacity(0.3),
         seek: Color.white
     )
 }
 
-/// A tiny mock "now playing" screen: a centred album-art tile with a progress
-/// bar beneath it. Deliberately simple (per the small preview size). Fills
-/// whatever frame the caller gives it and stays proportionate at half width
-/// (each side of the Match-Theme split).
+/// Static stand-in for the player's animated liquid background: the artwork
+/// palette painted as a few soft, blended radial "blobs." No animation (cheap),
+/// but captures the tinted, multi-hue field.
+private struct ArtworkBlobs: View {
+    let width: CGFloat
+
+    var body: some View {
+        let c = MusicStylePreviewColors.blobs
+        ZStack {
+            RadialGradient(colors: [c[0].opacity(0.95), .clear], center: .topLeading, startRadius: 0, endRadius: width * 0.75)
+            RadialGradient(colors: [c[1].opacity(0.95), .clear], center: .bottomTrailing, startRadius: 0, endRadius: width * 0.75)
+            RadialGradient(colors: [c[2].opacity(0.85), .clear], center: .bottomLeading, startRadius: 0, endRadius: width * 0.6)
+        }
+        .blur(radius: width * 0.07)
+    }
+}
+
+/// A tiny mock "now playing" screen: an artwork-tinted background (base + blobs
+/// + scrim, mirroring the real player), a centred album-art tile, and a progress
+/// bar. Deliberately static (per the small preview size). Fills whatever frame
+/// the caller gives it and stays proportionate at half width (each side of the
+/// Match-Theme split).
 private struct MusicMini: View {
     let colors: MusicStylePreviewColors
 
@@ -88,9 +123,14 @@ private struct MusicMini: View {
             }
             .padding(pad)
             .frame(width: w, height: h)
-            .background(
-                LinearGradient(colors: [colors.bgTop, colors.bgBottom], startPoint: .top, endPoint: .bottom)
-            )
+            .background {
+                // Base → artwork blobs (per-style strength) → legibility veil.
+                ZStack {
+                    colors.base
+                    ArtworkBlobs(width: w).opacity(colors.blobOpacity)
+                    colors.scrim
+                }
+            }
         }
     }
 }

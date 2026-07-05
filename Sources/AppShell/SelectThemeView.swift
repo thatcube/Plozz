@@ -132,7 +132,7 @@ struct SelectThemeView: View {
         // exactly how the profile tiles and Settings' About panel show focus:
         // a soft accent outline around the whole card. `.focusEffectDisabled()`
         // drops the system focus halo so the outline is the only indicator.
-        .buttonStyle(ThemeCardButtonStyle(accent: livePalette.accent))
+        .buttonStyle(ThemeCardButtonStyle(accent: livePalette.accent, isSelected: isSelected))
         .focusEffectDisabled()
         .focused($focus, equals: .theme(theme))
     }
@@ -149,15 +149,17 @@ struct SelectThemeView: View {
 /// environment value doesn't reliably reach a `fullScreenCover`.
 private struct ThemeCardButtonStyle: ButtonStyle {
     let accent: Color
+    let isSelected: Bool
 
     func makeBody(configuration: Configuration) -> some View {
-        ThemeCardButtonBody(configuration: configuration, accent: accent)
+        ThemeCardButtonBody(configuration: configuration, accent: accent, isSelected: isSelected)
     }
 }
 
 private struct ThemeCardButtonBody: View {
     let configuration: ButtonStyle.Configuration
     let accent: Color
+    let isSelected: Bool
     @Environment(\.isFocused) private var isFocused
 
     private var corner: CGFloat { PlozzTheme.Metrics.mediumCardCornerRadius }
@@ -169,11 +171,20 @@ private struct ThemeCardButtonBody: View {
             .background(
                 RoundedRectangle(cornerRadius: corner, style: .continuous)
                     .fill(.ultraThinMaterial)
+                    .overlay(
+                        // Accent wash marks the ACTIVE theme so selection reads
+                        // at a glance, even when another card is focused.
+                        RoundedRectangle(cornerRadius: corner, style: .continuous)
+                            .fill(accent.opacity(isSelected ? 0.22 : 0))
+                    )
             )
-            // Resting hairline border, matching every SettingsPanel.
+            // Resting border: a soft accent ring when selected, else a hairline.
             .overlay(
                 RoundedRectangle(cornerRadius: corner, style: .continuous)
-                    .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
+                    .strokeBorder(
+                        isSelected ? accent.opacity(0.7) : Color.primary.opacity(0.08),
+                        lineWidth: isSelected ? 2 : 1
+                    )
             )
             // Focus outline (accent), shown only when focused.
             .overlay(
@@ -184,6 +195,7 @@ private struct ThemeCardButtonBody: View {
             .shadow(color: .black.opacity(isFocused ? 0.28 : 0), radius: isFocused ? 14 : 0, y: isFocused ? 6 : 0)
             .scaleEffect(isFocused ? 1.01 : 1)
             .animation(.easeOut(duration: 0.16), value: isFocused)
+            .animation(.easeOut(duration: 0.16), value: isSelected)
     }
 }
 

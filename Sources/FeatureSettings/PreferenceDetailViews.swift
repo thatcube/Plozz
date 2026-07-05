@@ -588,6 +588,9 @@ private struct SubtitleModeControl: View {
                     }
                 }
             }
+            // Breathing room between the base "Show subtitles" picker and the
+            // per-type override section below it.
+            .padding(.top, 40)
 
             Text(describedMode.detail)
                 .font(.callout)

@@ -102,7 +102,6 @@ struct SelectThemeView: View {
     @ViewBuilder
     private func themeCard(_ theme: AppTheme) -> some View {
         let isSelected = theme == selectedTheme
-        let isFocused = focus == .theme(theme)
         let preview = ThemePalette.palette(for: theme, systemColorScheme: systemColorScheme)
 
         Button {
@@ -132,32 +131,64 @@ struct SelectThemeView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
+        }
+        // A custom ButtonStyle OWNS the focus look (not `.plain` + a manual
+        // overlay, which still lets tvOS paint its default focus fill). This is
+        // exactly how the profile tiles and Settings' About panel show focus:
+        // a soft accent outline around the whole card. `.focusEffectDisabled()`
+        // drops the system focus halo so the outline is the only indicator.
+        .buttonStyle(ThemeCardButtonStyle(accent: livePalette.accent))
+        .focusEffectDisabled()
+        .focused($focus, equals: .theme(theme))
+    }
+}
+
+/// Focus look for a theme card, mirroring `FocusableSettingsPanel` (Settings'
+/// About panel) and the profile tiles: a resting hairline border, and on focus a
+/// soft 4pt accent outline blooming around the whole card plus a gentle shadow +
+/// 1.01 lift — never the inverted/filled tvOS focus background.
+///
+/// Implemented as a `ButtonStyle` reading `\.isFocused` (rather than a `.plain`
+/// button with a manual overlay) so the system focus fill never draws. The
+/// accent is passed in — not read from `\.themePalette` — because that custom
+/// environment value doesn't reliably reach a `fullScreenCover`.
+private struct ThemeCardButtonStyle: ButtonStyle {
+    let accent: Color
+
+    func makeBody(configuration: Configuration) -> some View {
+        ThemeCardButtonBody(configuration: configuration, accent: accent)
+    }
+}
+
+private struct ThemeCardButtonBody: View {
+    let configuration: ButtonStyle.Configuration
+    let accent: Color
+    @Environment(\.isFocused) private var isFocused
+
+    private var corner: CGFloat { PlozzTheme.Metrics.mediumCardCornerRadius }
+
+    var body: some View {
+        configuration.label
             .frame(width: 320)
             .padding(20)
             .background(
-                RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
+                RoundedRectangle(cornerRadius: corner, style: .continuous)
                     .fill(.ultraThinMaterial)
             )
             // Resting hairline border, matching every SettingsPanel.
             .overlay(
-                RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
+                RoundedRectangle(cornerRadius: corner, style: .continuous)
                     .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
             )
-            // Focus outline: the same soft, theme-tinted accent stroke blooming
-            // around the whole card that Settings' About panel uses
-            // (FocusableSettingsPanel), instead of the default tvOS lift.
+            // Focus outline (accent), shown only when focused.
             .overlay(
-                RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
-                    .strokeBorder(livePalette.accent, lineWidth: 4)
+                RoundedRectangle(cornerRadius: corner, style: .continuous)
+                    .strokeBorder(accent, lineWidth: 4)
                     .opacity(isFocused ? 1 : 0)
             )
             .shadow(color: .black.opacity(isFocused ? 0.28 : 0), radius: isFocused ? 14 : 0, y: isFocused ? 6 : 0)
             .scaleEffect(isFocused ? 1.01 : 1)
             .animation(.easeOut(duration: 0.16), value: isFocused)
-        }
-        .buttonStyle(.plain)
-        .focused($focus, equals: .theme(theme))
-        .focusEffectDisabled()
     }
 }
 

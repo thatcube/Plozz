@@ -25,6 +25,11 @@ struct SelectThemeView: View {
     /// Called when the user accepts their choice (Continue, or Menu). The caller
     /// decides what "done" means (enter the app, or dismiss the cover).
     var onContinue: () -> Void
+    /// The real device colour scheme, passed in from RootView (which reads it
+    /// unpolluted). Used to resolve `.system`; passed explicitly rather than read
+    /// from `@Environment` because that value can be stale inside a
+    /// `fullScreenCover` (the in-app new-profile flow).
+    var deviceColorScheme: ColorScheme
     @FocusState private var focus: Field?
 
     private enum Field: Hashable {
@@ -35,15 +40,11 @@ struct SelectThemeView: View {
     private var selectedTheme: AppTheme { appState.themeModel.theme }
 
     /// The palette for the currently selected theme, computed straight from the
-    /// observable `themeModel` rather than the `\.themePalette` environment.
-    /// Custom environment values don't reliably update inside a `fullScreenCover`
-    /// (the in-app new-profile flow), which left the backdrop stuck; reading the
-    /// model directly re-renders this view — and repaints the background — the
-    /// instant a card is tapped, in both the onboarding and cover flows. `.system`
-    /// resolves against `SystemAppearance.colorScheme` (the screen's real scheme,
-    /// which our `preferredColorScheme` override can't pollute).
+    /// observable `themeModel` (so it repaints the instant a card is tapped, in
+    /// both the onboarding and cover flows). `.system` resolves against the
+    /// passed-in `deviceColorScheme`.
     private var livePalette: ThemePalette {
-        ThemePalette.palette(for: selectedTheme, systemColorScheme: SystemAppearance.colorScheme)
+        ThemePalette.palette(for: selectedTheme, systemColorScheme: deviceColorScheme)
     }
 
     /// Personalised when profiles are on; plain otherwise (e.g. the user chose
@@ -89,10 +90,10 @@ struct SelectThemeView: View {
         // RootView already paints the same background behind this). Driven by
         // `livePalette` so it repaints the moment a card is tapped.
         .background { AppBackground(palette: livePalette).ignoresSafeArea() }
-        // Force a CONCRETE scheme (never nil) derived from the resolved palette,
-        // so System follows the real device appearance and switching away from a
-        // forced Light/Dark never gets stuck (matches RootView).
-        .preferredColorScheme(livePalette.isLight ? .light : .dark)
+        // Push the effective scheme DOWN via the environment (not
+        // `preferredColorScheme`, which forces the window and pollutes the device
+        // scheme). Matches RootView so System follows the device.
+        .environment(\.colorScheme, livePalette.isLight ? .light : .dark)
         .onAppear { focus = .theme(selectedTheme) }
         // Pressing Menu accepts the current selection, so the app never suspends
         // from this one-time setup screen.

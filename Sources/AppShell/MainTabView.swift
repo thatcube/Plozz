@@ -197,6 +197,7 @@ struct MainTabView: View {
     /// user backed all the way out to Home. HomeTab/SearchTab write these bindings.
     @State private var playRequest: PlayRequest?
     @State private var resumePrompt: MediaItem?
+    @Environment(\.colorScheme) private var systemColorScheme
 
     /// App-wide navigation chrome (top bar vs. sidebar), edited in Settings ▸
     /// Appearance. Un-namespaced on purpose — it's a global shell choice, not a
@@ -221,10 +222,10 @@ struct MainTabView: View {
     }
 
     private var resolvedPalette: ThemePalette {
-        // `.system` resolves against the screen's real scheme (not the polluted
-        // `@Environment(\.colorScheme)`), matching RootView — so Settings' theme
-        // switching follows the device correctly.
-        ThemePalette.palette(for: themeModel.theme, systemColorScheme: SystemAppearance.colorScheme)
+        // `systemColorScheme` here is the scheme RootView pushed down via
+        // `.environment(\.colorScheme,)` — for `.system` that equals the real
+        // device scheme, so Settings' theme switching follows the device.
+        ThemePalette.palette(for: themeModel.theme, systemColorScheme: systemColorScheme)
     }
 
     var body: some View {

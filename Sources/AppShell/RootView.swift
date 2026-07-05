@@ -15,6 +15,7 @@ import FeaturePlayback
 /// Top-level view that renders one screen per `SessionState`.
 public struct RootView: View {
     @State private var appState: AppState
+    @Environment(\.colorScheme) private var systemColorScheme
     @Environment(\.scenePhase) private var scenePhase
     /// The OS-level Reduce Transparency setting, resolved against the in-app
     /// "Transparency (liquid glass)" preference (Settings ▸ Appearance) and
@@ -46,12 +47,14 @@ public struct RootView: View {
     }
 
     /// The palette for the currently-selected theme. `.system` resolves against
-    /// `SystemAppearance.colorScheme` (the screen's real scheme) rather than
-    /// `@Environment(\.colorScheme)`, which our own `preferredColorScheme`
-    /// override pollutes. Re-resolves when the chosen `AppTheme` changes and,
-    /// via `scenePhase`, when the app returns to the foreground.
+    /// `systemColorScheme` — which stays the TRUE device scheme because we no
+    /// longer force `preferredColorScheme` (that override polluted every colour-
+    /// scheme source, incl. `@Environment` and the screen trait). We instead push
+    /// the effective scheme DOWN via `.environment(\.colorScheme,)`, which never
+    /// propagates back up to pollute this read. Re-resolves when the chosen theme
+    /// or the device appearance changes.
     private var resolvedPalette: ThemePalette {
-        ThemePalette.palette(for: appState.themeModel.theme, systemColorScheme: SystemAppearance.colorScheme)
+        ThemePalette.palette(for: appState.themeModel.theme, systemColorScheme: systemColorScheme)
     }
 
     /// Reconcile the crash reporter with the current opt-in consent. Safe to call
@@ -148,7 +151,7 @@ public struct RootView: View {
                 FirstRunProfileView(appState: appState)
 
             case .onboarding(.selectTheme, _):
-                SelectThemeView(appState: appState, onContinue: { appState.finishThemeSelection() })
+                SelectThemeView(appState: appState, onContinue: { appState.finishThemeSelection() }, deviceColorScheme: systemColorScheme)
 
             case .ready:
                 ZStack {
@@ -264,11 +267,13 @@ public struct RootView: View {
         .environment(\.plozzCardStyle, appState.cardStyleModel.style)
         .environment(\.plozzReduceTransparency, (TransparencyPreference(rawValue: transparencyPreferenceRaw) ?? .default).reducesTransparency(systemReduceTransparency: systemReduceTransparency))
         .environment(displayVeil)
-        // Always force a CONCRETE scheme (never nil): `preferredColorScheme(nil)`
-        // for System doesn't reliably reset a previously-forced scheme, which
-        // left the app stuck (e.g. Light → System stayed light). Deriving it from
-        // the resolved palette keeps System following the real device appearance.
-        .preferredColorScheme(resolvedPalette.isLight ? .light : .dark)
+        // Push the theme's effective scheme DOWN into the tree instead of forcing
+        // it on the window via `preferredColorScheme`. A downward environment value
+        // themes SwiftUI content (materials, text, symbols) without propagating up
+        // to override the window — so `systemColorScheme` above stays the real
+        // device scheme and `.system` can follow it (and switching away from a
+        // forced scheme never gets stuck).
+        .environment(\.colorScheme, resolvedPalette.isLight ? .light : .dark)
         .fullScreenCover(item: Binding(
             get: { pinRequest },
             set: { newValue in if newValue == nil { appState.dismissPlexPINIfPresented() } }
@@ -290,7 +295,8 @@ public struct RootView: View {
         )) {
             SelectThemeView(
                 appState: appState,
-                onContinue: { appState.finishNewProfileThemeSelection() }
+                onContinue: { appState.finishNewProfileThemeSelection() },
+                deviceColorScheme: systemColorScheme
             )
         }
         .onAppear {

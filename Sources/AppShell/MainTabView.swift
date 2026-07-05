@@ -1333,7 +1333,7 @@ private struct HomeTab: View {
                 seerConnected: seer.isConfigured,
                 onRequestItem: { try? await seer.request($0) },
                 navigationStyle: navigationStyle,
-                onSelectItem: { navigate($0) },
+                onSelectItem: { navigate(bestSourcePlayItem($0, accounts: accounts, identitySources: identitySources)) },
                 onPlayItem: { requestPlay($0) },
                 onSelectLibrary: { library in
                     path.append(library)

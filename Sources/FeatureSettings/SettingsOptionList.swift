@@ -2,6 +2,33 @@
 import SwiftUI
 import CoreUI
 
+/// The shared bordered container that groups a checkmark list in the Settings
+/// detail pane — the same treatment as the Customize Home "Rows on Home" cards,
+/// so every checkmark section (Theme, Display Size, Music Player style, Circadian
+/// options, …) reads as one grouped box. ``SettingsOptionList`` / ``SettingsCheckList``
+/// wrap themselves in it by default; pass `bordered: false` when the list already
+/// sits inside another container (e.g. a Customize Home group card) to avoid a
+/// double border. Matches `HomeRowsGroupCard`'s corner/fill/stroke + 22pt inset so
+/// the focus cards bleed identically.
+struct SettingsCheckGroup<Content: View>: View {
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        content()
+            .padding(.vertical, 10)
+            .padding(.horizontal, 22)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(Color.primary.opacity(0.05))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.12), lineWidth: 1)
+            )
+    }
+}
+
 /// A vertical, checkable list of **mutually-exclusive** options for the Settings
 /// detail pane: one focusable row per option (leading icon, title, trailing
 /// checkmark on the current selection).
@@ -17,11 +44,14 @@ struct SettingsOptionList<Option: Hashable>: View {
     /// Called with `true` when any row in the list gains focus and `false` when
     /// focus leaves the list entirely (live-preview hook — Circadian Mode).
     var onFocusChange: ((Bool) -> Void)? = nil
+    /// Wrap the list in the shared bordered container. Default `true`; pass
+    /// `false` when the list already sits inside another container.
+    var bordered: Bool = true
     let title: (Option) -> String
 
     @FocusState private var focusedOption: Option?
 
-    var body: some View {
+    private var list: some View {
         VStack(alignment: .leading, spacing: 8) {
             ForEach(options, id: \.self) { option in
                 SettingsCheckableRow(
@@ -31,6 +61,16 @@ struct SettingsOptionList<Option: Hashable>: View {
                     action: { selection = option }
                 )
                 .focused($focusedOption, equals: option)
+            }
+        }
+    }
+
+    var body: some View {
+        Group {
+            if bordered {
+                SettingsCheckGroup { list }
+            } else {
+                list
             }
         }
         .onChange(of: focusedOption) { _, focused in
@@ -50,10 +90,14 @@ struct SettingsCheckList<Option: Hashable & Identifiable>: View {
     var title: (Option) -> String
     var subtitle: (Option) -> String? = { _ in nil }
     var icon: (Option) -> String? = { _ in nil }
+    /// Wrap the list in the shared bordered container. Default `true`; pass
+    /// `false` when the list already sits inside another container (e.g. a
+    /// Customize Home group card that provides its own border + header).
+    var bordered: Bool = true
     var isChecked: (Option) -> Bool
     var onToggle: (Option) -> Void
 
-    var body: some View {
+    private var list: some View {
         VStack(alignment: .leading, spacing: 8) {
             ForEach(options) { option in
                 SettingsCheckableRow(
@@ -64,6 +108,14 @@ struct SettingsCheckList<Option: Hashable & Identifiable>: View {
                     action: { onToggle(option) }
                 )
             }
+        }
+    }
+
+    var body: some View {
+        if bordered {
+            SettingsCheckGroup { list }
+        } else {
+            list
         }
     }
 }

@@ -87,6 +87,7 @@ struct CustomizeHomeDetailView: View {
                 SettingsCheckList(
                     options: HomeGlobalRow.allCases.map(GlobalRowOption.init),
                     title: { $0.row.title },
+                    bordered: false,
                     isChecked: { homeVisibility.isGlobalRowEnabled($0.row) },
                     onToggle: { opt in
                         homeVisibility.setGlobalRowEnabled(!homeVisibility.isGlobalRowEnabled(opt.row), for: opt.row)
@@ -117,6 +118,7 @@ struct CustomizeHomeDetailView: View {
                             SettingsCheckList(
                                 options: rowKinds(for: library).map { LibraryRowOption(libraryKey: library.key, kind: $0) },
                                 title: { $0.kind.displayName },
+                                bordered: false,
                                 isChecked: { homeVisibility.isLibraryRowEnabled($0.libraryKey, kind: $0.kind) },
                                 onToggle: { opt in
                                     let now = homeVisibility.isLibraryRowEnabled(opt.libraryKey, kind: opt.kind)

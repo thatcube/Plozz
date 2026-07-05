@@ -48,53 +48,60 @@ struct ThemePreviewColors {
     )
 }
 
-/// A tiny mock "Home screen" painted with a fixed `ThemePreviewColors`. Sizes
-/// everything relative to its own width so it reads correctly at full width
-/// (Light/Dark/OLED) and at half width (each side of the System split), and at
-/// any overall scale (full onboarding card vs. compact Settings card).
+/// A tiny mock "Home screen" painted with a fixed `ThemePreviewColors`: a title
+/// bar, two wide poster tiles, and a couple of text lines sitting toward the top.
+/// Horizontal metrics scale with width and vertical metrics with height, so it
+/// stays balanced at both the full onboarding size and the shorter, compact
+/// Settings size (and at half width, for each side of the System split).
 private struct MiniPreview: View {
     let colors: ThemePreviewColors
 
     var body: some View {
         GeometryReader { geo in
             let w = geo.size.width
-            let pad = w * 0.09
-            let content = w - pad * 2
-            let gap = w * 0.045
-            let cardW = (content - gap * 2) / 3
-            let bar = max(3.0, w * 0.024)
+            let h = geo.size.height
+            let padH = w * 0.08
+            let padV = h * 0.12
+            let contentW = w - padH * 2
+            let gap = w * 0.05
+            let cardW = (contentW - gap) / 2
+            let cardH = h * 0.44
+            let vGap = h * 0.07
+            let barH = max(3.0, h * 0.045)
+            let cardCorner = min(w, h) * 0.05
 
-            VStack(alignment: .leading, spacing: w * 0.05) {
+            VStack(alignment: .leading, spacing: vGap) {
                 // Faux title bar.
                 HStack(spacing: w * 0.03) {
-                    Capsule().fill(colors.accent).frame(width: w * 0.16, height: bar)
-                    Capsule().fill(colors.textSecondary).frame(width: w * 0.28, height: bar)
+                    Capsule().fill(colors.accent).frame(width: w * 0.18, height: barH)
+                    Capsule().fill(colors.textSecondary).frame(width: w * 0.30, height: barH)
                 }
-                // Faux poster row.
+                // Two wide poster tiles.
                 HStack(spacing: gap) {
-                    ForEach(0..<3, id: \.self) { index in
-                        RoundedRectangle(cornerRadius: w * 0.035, style: .continuous)
+                    ForEach(0..<2, id: \.self) { index in
+                        RoundedRectangle(cornerRadius: cardCorner, style: .continuous)
                             .fill(colors.card)
                             .overlay(
-                                RoundedRectangle(cornerRadius: w * 0.035, style: .continuous)
+                                RoundedRectangle(cornerRadius: cardCorner, style: .continuous)
                                     .strokeBorder(colors.cardBorder, lineWidth: 1)
                             )
-                            .frame(width: cardW, height: cardW * 1.35)
+                            .frame(width: cardW, height: cardH)
                             .overlay(alignment: .bottomLeading) {
                                 Capsule()
                                     .fill(index == 0 ? colors.accent : colors.textSecondary)
-                                    .frame(width: cardW * 0.55, height: bar * 0.8)
-                                    .padding(w * 0.02)
+                                    .frame(width: cardW * 0.4, height: barH * 0.8)
+                                    .padding(w * 0.025)
                             }
                     }
                 }
                 // Faux text lines.
-                Capsule().fill(colors.textPrimary).frame(width: content * 0.6, height: bar)
-                Capsule().fill(colors.textSecondary).frame(width: content * 0.42, height: bar)
+                Capsule().fill(colors.textPrimary).frame(width: contentW * 0.62, height: barH)
+                Capsule().fill(colors.textSecondary).frame(width: contentW * 0.44, height: barH)
                 Spacer(minLength: 0)
             }
-            .padding(pad)
-            .frame(width: w, height: geo.size.height, alignment: .topLeading)
+            .padding(.horizontal, padH)
+            .padding(.vertical, padV)
+            .frame(width: w, height: h, alignment: .topLeading)
             .background(
                 LinearGradient(colors: [colors.bgTop, colors.bgBottom], startPoint: .top, endPoint: .bottom)
             )
@@ -251,7 +258,7 @@ public struct ThemeOptionCard: View {
         Button(action: action) {
             VStack(spacing: compact ? 10 : 18) {
                 ThemeSwatch(theme: theme, cornerRadius: compact ? 10 : 16)
-                    .frame(height: compact ? 104 : 200)
+                    .frame(height: compact ? 84 : 160)
 
                 VStack(spacing: compact ? 2 : 6) {
                     HStack(spacing: 6) {

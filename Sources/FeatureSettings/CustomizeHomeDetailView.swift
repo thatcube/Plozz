@@ -356,25 +356,17 @@ private struct HomeRowsGroupCard<Content: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: 14) {
+            HStack(spacing: 16) {
                 Group {
                     if let providerKind {
-                        // Brand-tinted circular background (matches the app's
-                        // provider marks everywhere else).
-                        ProviderBrandMark(provider: providerKind, size: 44)
+                        ProviderBrandMark(provider: providerKind, size: 56, showsBackground: false)
                     } else if let systemIcon {
-                        // Generic icons (Shared / empty) get a neutral circle so
-                        // every card header reads consistently.
-                        ZStack {
-                            Circle().fill(Color.secondary.opacity(0.18))
-                            Image(systemName: systemIcon)
-                                .font(.system(size: 19, weight: .semibold))
-                                .foregroundStyle(.secondary)
-                        }
-                        .frame(width: 44, height: 44)
+                        Image(systemName: systemIcon)
+                            .font(.system(size: 34, weight: .semibold))
+                            .foregroundStyle(.secondary)
                     }
                 }
-                .frame(width: 44, height: 44)
+                .frame(width: 56, height: 56)
                 // Library title + server name on ONE line ("Movies · Brandoland"):
                 // the title reads prominent, the server name trails as a lighter
                 // qualifier separated by a mid-dot.

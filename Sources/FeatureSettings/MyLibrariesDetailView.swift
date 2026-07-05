@@ -80,8 +80,8 @@ struct MyLibrariesDetailView: View {
     private func serverCard(_ group: ServerAccountGroup) -> some View {
         SettingsPanel {
             VStack(alignment: .leading, spacing: 18) {
-                HStack(spacing: 14) {
-                    ProviderIcon(provider: group.providerKind, size: 52).frame(width: 52)
+                HStack(spacing: 16) {
+                    ProviderBrandMark(provider: group.providerKind, size: 60, showsBackground: false).frame(width: 60)
                     Text(group.serverName).font(.title3.weight(.semibold))
                     Spacer()
                 }
@@ -207,7 +207,7 @@ struct MyLibrariesDetailView: View {
                         startWatching(group)
                     } label: {
                         HStack(spacing: 14) {
-                            ProviderIcon(provider: group.providerKind, size: 42).frame(width: 42)
+                            ProviderBrandMark(provider: group.providerKind, size: 46, showsBackground: false).frame(width: 46)
                             Text(group.serverName).font(.callout.weight(.medium))
                             Spacer()
                             Label("Add", systemImage: "plus.circle").labelStyle(.titleAndIcon)

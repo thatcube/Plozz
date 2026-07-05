@@ -371,7 +371,7 @@ public struct SettingsView: View {
             navRow("Customize Home", icon: "rectangle.on.rectangle.angled",
                    value: nil,
                    route: .customizeHome) {
-                Text("Rows, libraries & the featured hero on Home")
+                Text("Rows, libraries & the hero on Home")
                     .font(.footnote)
                     .settingsRowSecondary()
                     .lineLimit(2)

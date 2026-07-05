@@ -8,7 +8,7 @@ import CoreUI
 ///  - **Merge libraries on Home** switch (the big mode decision — a *switch*).
 ///  - **Global rows** — Continue Watching / Watchlist / Recently Added, each a
 ///    *checkmark* (pick which appear).
-///  - **Featured Hero** — its on/off *switch* and all its settings (moved in from
+///  - **Hero** — its on/off *switch* and all its settings (moved in from
 ///    the old Home Display page, since the hero is Home-only).
 ///  - **Per-library rows** (only when merging is off) — a *checkmark* per library
 ///    row you want promoted onto Home (Recently Added, Recommended rows).
@@ -159,17 +159,17 @@ struct CustomizeHomeDetailView: View {
         var id: String { row.rawValue }
     }
 
-    // MARK: - Featured Hero (moved in from Home Display)
+    // MARK: - Hero (moved in from Home Display)
 
     private var heroSection: SettingsSplitSection {
         @Bindable var hero = hero
         var rows: [SettingsSplitRow] = [
             SettingsSplitRow(
                 id: "hero-enabled",
-                title: "Featured Hero",
+                title: "Show on Home",
                 description: "A cinematic, rotating spotlight at the top of Home, with a Continue Watching row tucked under its lower edge.",
             ) {
-                Toggle("Show the featured hero", isOn: $hero.settings.isEnabled)
+                Toggle("Show the hero", isOn: $hero.settings.isEnabled)
                     .toggleStyle(SettingsSwitchToggleStyle())
             }
         ]
@@ -182,7 +182,7 @@ struct CustomizeHomeDetailView: View {
             rows.append(heroAutoAdvanceRow)
             rows.append(heroTrailersRow)
         }
-        return SettingsSplitSection(id: "hero", header: "Featured Hero", rows: rows)
+        return SettingsSplitSection(id: "hero", header: "Hero", rows: rows)
     }
 
     private var heroSourcesRow: SettingsSplitRow {
@@ -190,6 +190,7 @@ struct CustomizeHomeDetailView: View {
             id: "hero-sources",
             title: "Sources",
             description: "Which content feeds the hero. Enabled sources are interleaved into one rotating set.",
+            indented: true,
         ) {
             VStack(alignment: .leading, spacing: 8) {
                 ForEach(HeroSourceKind.allCases) { source in
@@ -213,6 +214,7 @@ struct CustomizeHomeDetailView: View {
             id: "hero-items",
             title: "Items",
             description: "How many titles rotate through the hero.",
+            indented: true,
         ) {
             LabeledSettingRow("Items in rotation") {
                 SettingsStepper(
@@ -230,6 +232,7 @@ struct CustomizeHomeDetailView: View {
             id: "hero-auto-advance",
             title: "Auto-Advance",
             description: "Automatically rotate to the next title after a few seconds. Rotation always pauses while the hero is focused.",
+            indented: true,
         ) {
             VStack(alignment: .leading, spacing: 24) {
                 Toggle("Rotate automatically", isOn: $hero.settings.autoAdvance)
@@ -253,6 +256,7 @@ struct CustomizeHomeDetailView: View {
             id: "hero-trailers",
             title: "Background Trailers",
             description: "Coming soon — play a muted trailer behind the hero when one is available. Fades in only once it's actually playing. Your choice is saved for when this lands.",
+            indented: true,
         ) {
             Toggle("Play trailers in the background", isOn: $hero.settings.trailersEnabled)
                 .toggleStyle(SettingsSwitchToggleStyle())
@@ -285,6 +289,7 @@ struct CustomizeHomeDetailView: View {
             id: "hero-random-libraries",
             title: "Random Libraries",
             description: "Which libraries the Random source draws from. Leave all selected to use every library shown on Home.",
+            indented: true,
         ) {
             if libraries.isEmpty {
                 Text("No movie or TV libraries are shown on this profile's Home yet.")

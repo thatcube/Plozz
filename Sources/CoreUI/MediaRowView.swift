@@ -174,13 +174,18 @@ public struct MediaRowView: View {
                         // clearance in layout, so the row's height and its gap to the
                         // neighbouring rows are unchanged; only the clip grows.
                         .padding(.vertical, metrics.railShadowClearance)
-                        // Treat the rail as a single focus section so pressing down
-                        // *enters the section* and selects its only focusable card
-                        // (the gated target) regardless of horizontal alignment with
-                        // the season tab above — without this, a target parked far to
-                        // the right falls outside tvOS's downward search and the row
-                        // becomes unreachable.
-                        .focusSection()
+                        // Treat the rail as a single focus section ONLY when this
+                        // row runs the gated single-target flow (the episode rail):
+                        // there, pressing down must enter the section and land on the
+                        // gated target even when it's parked far right, which tvOS's
+                        // geometric downward search would otherwise miss. For ordinary
+                        // rows (Home, detail children — `tracksFocus == false`) a focus
+                        // section is HARMFUL: it makes the row remember its own last-
+                        // focused card, so navigating up/down between rows restores a
+                        // far-side card instead of tvOS's normal column-aligned
+                        // X-projection — the "focus jumps to the opposite side" bug.
+                        // Leaving it off lets vertical navigation keep the column.
+                        .focusSectionIf(tracksFocus)
                     }
                     .padding(.top, metrics.railTopClearanceOffset)
                     .padding(.bottom, metrics.railBottomClearanceOffset)
@@ -384,6 +389,21 @@ public struct MediaRowView: View {
             }
         } else {
             proxy.scrollTo(target, anchor: anchor)
+        }
+    }
+}
+
+private extension View {
+    /// Applies `.focusSection()` only when `enabled`. Used so the gated episode
+    /// rail keeps its single-section entry behavior while ordinary rows stay plain
+    /// focusable scrollers whose vertical navigation is column-aligned by tvOS's
+    /// geometric X-projection (no per-section last-focus memory).
+    @ViewBuilder
+    func focusSectionIf(_ enabled: Bool) -> some View {
+        if enabled {
+            focusSection()
+        } else {
+            self
         }
     }
 }

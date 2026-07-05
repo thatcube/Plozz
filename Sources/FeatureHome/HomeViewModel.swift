@@ -248,7 +248,7 @@ public final class HomeViewModel {
         // an unchanged visibility snapshot is recognised as a no-op (see
         // `loadIfNeeded(for:)`).
         lastLoadedVisibility = visibility
-        PlozzLog.boot("HomeVM.load DONE vm=\(UInt(bitPattern: ObjectIdentifier(self).hashValue)) empty=\(content.isEmpty) merged=\(content.mergeLibraries) cw=\(content.continueWatching.count) latest=\(content.latest.count) libs=\(content.libraries.count) sections=\(content.librarySections.count)")
+        PlozzLog.boot("HomeVM.load DONE vm=\(UInt(bitPattern: ObjectIdentifier(self).hashValue)) empty=\(content.isEmpty) merged=\(content.mergeLibraries) cw=\(content.continueWatching.count) latest=\(content.latest.count) wl=\(content.watchlist.count) libs=\(content.libraries.count) sections=\(content.librarySections.count)")
         guard !Task.isCancelled else { return }
 
         // Publish the playable rows to the App Group so the Top Shelf extension

@@ -15,6 +15,7 @@ public struct LabeledSettingRow<Trailing: View>: View {
     private let title: String
     private let subtitle: String?
     private let labelWidth: CGFloat
+    private let trailingAlignment: Alignment
     private let trailing: Trailing
 
     /// - Parameters:
@@ -22,16 +23,21 @@ public struct LabeledSettingRow<Trailing: View>: View {
     ///   - subtitle: Optional helper text shown under the title.
     ///   - labelWidth: Width of the fixed title column so rows align. Defaults to
     ///     a value tuned for the Settings panels.
+    ///   - trailingAlignment: How the trailing control sits in its column.
+    ///     Defaults to `.leading` (hugs the label). Pass `.trailing` for dropdown
+    ///     "button menus" so they align to the right edge of the row.
     ///   - trailing: The control shown to the right of the label.
     public init(
         _ title: String,
         subtitle: String? = nil,
         labelWidth: CGFloat = 240,
+        trailingAlignment: Alignment = .leading,
         @ViewBuilder trailing: () -> Trailing
     ) {
         self.title = title
         self.subtitle = subtitle
         self.labelWidth = labelWidth
+        self.trailingAlignment = trailingAlignment
         self.trailing = trailing()
     }
 
@@ -50,7 +56,7 @@ public struct LabeledSettingRow<Trailing: View>: View {
             .frame(width: labelWidth, alignment: .leading)
 
             trailing
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: trailingAlignment)
         }
     }
 }

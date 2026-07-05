@@ -400,7 +400,7 @@ struct PlaybackDetailView: View {
                 description: "How Plozz picks the audio language when a title offers more than one — with optional per-content-type rules and per-series memory.",
             ) {
                 VStack(alignment: .leading, spacing: 32) {
-                    LabeledSettingRow("Preferred language") {
+                    LabeledSettingRow("Preferred language", trailingAlignment: .trailing) {
                         audioLanguageMenu($playback.settings.audioLanguagePreference)
                     }
 
@@ -410,7 +410,7 @@ struct PlaybackDetailView: View {
                         revealedHeader: "Per Content Type"
                     ) {
                         ForEach(Self.policyCategories, id: \.self) { category in
-                            LabeledSettingRow(category.displayName) {
+                            LabeledSettingRow(category.displayName, trailingAlignment: .trailing) {
                                 audioLanguageMenu(audioPreferenceBinding(for: category))
                             }
                         }

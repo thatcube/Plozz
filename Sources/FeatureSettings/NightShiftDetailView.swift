@@ -186,7 +186,7 @@ private struct NightShiftScheduleControl: View {
         case .off, .alwaysOn:
             EmptyView()
         case .auto:
-            LabeledSettingRow("Location") { locationMenu }
+            LabeledSettingRow("Location", trailingAlignment: .trailing) { locationMenu }
         case .manual:
             VStack(alignment: .leading, spacing: 20) {
                 LabeledSettingRow("Turns on") {

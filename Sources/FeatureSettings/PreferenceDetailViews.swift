@@ -63,12 +63,7 @@ struct AppearanceDetailView: View {
                     title: "Theme",
                     description: "The overall light or dark appearance of the app.",
                 ) {
-                    SettingsOptionList(
-                        options: AppTheme.allCases,
-                        selection: $theme.theme,
-                        icon: { $0.symbolName },
-                        title: { $0.displayName }
-                    )
+                    CompactThemePicker(selection: $theme.theme)
                 },
                 SettingsSplitRow(
                     id: "transparency",

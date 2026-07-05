@@ -65,9 +65,9 @@ struct MyLibrariesDetailView: View {
                     .font(.system(size: 26, weight: .semibold))
                     .foregroundStyle(.secondary)
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Choose who you watch as, and which libraries are on")
+                    Text("Libraries & who you watch as")
                         .font(.headline.weight(.semibold))
-                    Text("A library that's off is hidden everywhere — Home, Search, browse, and the Music tab. To pick which of an on library's rows appear on Home, use Customize Home. Changes here affect only \(context.activeProfile.name).")
+                    Text("Turn a library off to hide it from this profile everywhere. Choose who you watch as for each server.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)

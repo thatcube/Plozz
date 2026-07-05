@@ -39,13 +39,14 @@ public enum AppTheme: String, CaseIterable, Identifiable, Codable, Sendable {
     }
 
     /// One-line explanation of each look, shown under the option in the
-    /// onboarding theme picker (and available to Settings).
+    /// onboarding theme picker (and available to Settings). Kept factual — a
+    /// description of the look, never a claim about what's "best".
     public var detail: String {
         switch self {
-        case .system: return "Follows your Apple TV — light by day, dark after dark."
-        case .light: return "Bright and breezy, made for sun-filled rooms."
-        case .dark: return "Cozy and low-glare — our pick for movie night."
-        case .oled: return "Deep, inky blacks that make colors pop."
+        case .system: return "Follows your Apple TV's theme settings."
+        case .light: return "Dark text on light backgrounds."
+        case .dark: return "Light text on dark gray backgrounds."
+        case .oled: return "Light text on pure black, tuned for OLED screens."
         }
     }
 

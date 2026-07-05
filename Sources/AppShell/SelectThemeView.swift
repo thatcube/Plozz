@@ -45,21 +45,19 @@ struct SelectThemeView: View {
         ThemePalette.palette(for: selectedTheme, systemColorScheme: systemColorScheme)
     }
 
+    /// Personalised when profiles are on; plain otherwise (e.g. the user chose
+    /// "Not Now — Just Me" on first run).
+    private var title: String {
+        appState.profilesModel.profilesEnabled ? "Choose theme for this profile" : "Choose theme"
+    }
+
     var body: some View {
         VStack(spacing: 40) {
             Spacer(minLength: 0)
 
-            VStack(spacing: 12) {
-                Text("Choose theme")
-                    .font(.largeTitle.weight(.bold))
-                    .multilineTextAlignment(.center)
-
-                Text("Dark looks best for most rooms. You can change this anytime in Settings.")
-                    .font(.title3)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 900)
-            }
+            Text(title)
+                .font(.largeTitle.weight(.bold))
+                .multilineTextAlignment(.center)
 
             HStack(alignment: .top, spacing: 28) {
                 ForEach(AppTheme.allCases) { theme in

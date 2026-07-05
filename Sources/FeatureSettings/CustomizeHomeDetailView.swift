@@ -201,7 +201,9 @@ struct CustomizeHomeDetailView: View {
                 rows.append(randomLibrariesRow)
             }
             rows.append(heroAutoAdvanceRow)
-            rows.append(heroTrailersRow)
+            // Background Trailers is hidden until the feature ships. The setting
+            // (`heroTrailersRow` / `trailersEnabled`) is intentionally kept so a
+            // previously-saved choice survives and it can be re-listed later.
         }
         return SettingsSplitSection(id: "hero", header: "Hero", rows: rows)
     }

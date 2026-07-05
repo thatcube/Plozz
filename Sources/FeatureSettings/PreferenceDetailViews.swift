@@ -393,37 +393,32 @@ struct PlaybackDetailView: View {
     }
 
     private var audioSection: SettingsSplitSection {
-        SettingsSplitSection(id: "audio", header: "Audio Language", rows: [
+        SettingsSplitSection(id: "audio", header: "Audio", rows: [
             SettingsSplitRow(
-                id: "audio-preferred",
-                title: "Preferred language",
-                description: "The audio language Plozz selects automatically when a title offers more than one.",
+                id: "audio-defaults",
+                title: "Audio defaults",
+                description: "How Plozz picks the audio language when a title offers more than one — with optional per-content-type rules and per-series memory.",
             ) {
-                audioLanguageMenu($playback.settings.audioLanguagePreference)
-            },
-            SettingsSplitRow(
-                id: "audio-per-type",
-                title: "Different audio default per type",
-                description: "Use a separate preferred audio language for each kind of content — for example original audio for anime but your device language elsewhere.",
-            ) {
-                SettingsRevealSection(
-                    isOn: audioPerContentTypeBinding,
-                    masterLabel: "Use per-type defaults",
-                    revealedHeader: "Per Content Type"
-                ) {
-                    ForEach(Self.policyCategories, id: \.self) { category in
-                        LabeledSettingRow(category.displayName) {
-                            audioLanguageMenu(audioPreferenceBinding(for: category))
+                VStack(alignment: .leading, spacing: 32) {
+                    LabeledSettingRow("Preferred language") {
+                        audioLanguageMenu($playback.settings.audioLanguagePreference)
+                    }
+
+                    SettingsRevealSection(
+                        isOn: audioPerContentTypeBinding,
+                        masterLabel: "Different default per type",
+                        revealedHeader: "Per Content Type"
+                    ) {
+                        ForEach(Self.policyCategories, id: \.self) { category in
+                            LabeledSettingRow(category.displayName) {
+                                audioLanguageMenu(audioPreferenceBinding(for: category))
+                            }
                         }
                     }
+
+                    Toggle("Remember audio per series", isOn: $playback.settings.rememberAudioTrackPerSeries)
                 }
-            },
-            SettingsSplitRow(
-                id: "audio-remember",
-                title: "Remember audio per series",
-                description: "When you change the audio track while watching a series, reuse that choice for the rest of the series.",
-            ) {
-                Toggle("Remember per series", isOn: $playback.settings.rememberAudioTrackPerSeries)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         ])
     }

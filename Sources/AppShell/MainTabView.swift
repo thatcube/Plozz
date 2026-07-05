@@ -124,6 +124,11 @@ struct MainTabView: View {
     /// the loading skeleton so it matches the user's real Home before content
     /// arrives. Constructed with the active profile's namespace by `RootView`.
     let homeLayoutStore: HomeLayoutStoring
+    /// Per-profile store for the last successful Home content snapshot, so the hero
+    /// + Continue Watching (and the rest of Home) paint instantly on launch and
+    /// then silently refresh. Constructed with the active profile's namespace by
+    /// `RootView` (same lifecycle as `homeLayoutStore`).
+    let homeContentStore: HomeContentStoring
     let ratingsProvider: any ExternalRatingsProviding
     let trakt: TraktService
     let simkl: SimklService
@@ -228,6 +233,7 @@ struct MainTabView: View {
                 seer: seer,
                 homeVisibility: homeVisibility,
                 homeLayoutStore: homeLayoutStore,
+                homeContentStore: homeContentStore,
                 heroSettings: heroSettingsModel,
                 navigationStyle: navigationStyle,
                 behavior: subtitleBehaviorModel.settings,
@@ -1227,6 +1233,9 @@ private struct HomeTab: View {
     let seer: SeerService
     let homeVisibility: HomeLibraryVisibilityModel
     let homeLayoutStore: HomeLayoutStoring
+    /// Per-profile store for the last successful Home content snapshot (instant
+    /// launch paint + silent refresh). Same lifecycle as `homeLayoutStore`.
+    let homeContentStore: HomeContentStoring
     /// Per-profile hero carousel settings driving the Home featured section.
     let heroSettings: HeroSettingsModel
     /// App-wide navigation style, so the carousel's left-edge focus behaviour
@@ -1273,6 +1282,7 @@ private struct HomeTab: View {
                 viewModel: HomeViewModel(
                     accounts: accounts,
                     layoutStore: homeLayoutStore,
+                    contentStore: homeContentStore,
                     identitySources: identitySources,
                     currentVisibility: { homeVisibility.visibility },
                     pendingWatchMutations: pendingWatchMutations,

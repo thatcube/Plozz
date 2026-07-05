@@ -11,7 +11,7 @@ import TopShelfKit
 @MainActor
 @Observable
 public final class HomeViewModel {
-    public struct Content: Equatable, Sendable {
+    public struct Content: Equatable, Sendable, Codable {
         public var continueWatching: [MediaItem]
         public var latest: [MediaItem]
         /// The unified Watchlist row, merged across `WatchlistProviding` accounts.
@@ -27,13 +27,70 @@ public final class HomeViewModel {
         /// library's own Continue Watching / Recently Added / discovery-hub rows.
         public var librarySections: [HomeLibrarySectionGroup] = []
 
+        public init(
+            continueWatching: [MediaItem] = [],
+            latest: [MediaItem] = [],
+            watchlist: [MediaItem] = [],
+            libraries: [AggregatedLibrary] = [],
+            mergeLibraries: Bool = true,
+            librarySections: [HomeLibrarySectionGroup] = []
+        ) {
+            self.continueWatching = continueWatching
+            self.latest = latest
+            self.watchlist = watchlist
+            self.libraries = libraries
+            self.mergeLibraries = mergeLibraries
+            self.librarySections = librarySections
+        }
+
+        // The launch snapshot persists only the merged-mode rows plus the merge
+        // flag. `librarySections` (the unmerged per-library blocks) are deliberately
+        // NOT Codable-persisted — they'd force Codable onto the whole provider-
+        // agnostic section model for little gain, and the silent refresh repopulates
+        // them within the first appearance. The instant paint still shows the global
+        // rows, the Libraries tiles, and the correct merged/unmerged layout.
+        private enum CodingKeys: String, CodingKey {
+            case continueWatching, latest, watchlist, libraries, mergeLibraries
+        }
+
         public var isEmpty: Bool {
             continueWatching.isEmpty && latest.isEmpty && watchlist.isEmpty
                 && libraries.isEmpty && librarySections.isEmpty
         }
+
+        /// A copy bounded to at most `perRow` items in each media row (libraries
+        /// kept whole — they're few and cheap). Used before persisting a snapshot so
+        /// the on-disk cache stays small; the first launch paint only needs enough
+        /// to fill the hero + the top of each row anyway. Preserves the merge flag
+        /// and per-library blocks so an unmerged snapshot paints in the right layout.
+        func bounded(perRow: Int) -> Content {
+            Content(
+                continueWatching: Array(continueWatching.prefix(perRow)),
+                latest: Array(latest.prefix(perRow)),
+                watchlist: Array(watchlist.prefix(perRow)),
+                libraries: libraries,
+                mergeLibraries: mergeLibraries,
+                librarySections: librarySections.map {
+                    HomeLibrarySectionGroup(
+                        library: $0.library,
+                        sections: $0.sections.map {
+                            LibrarySection(id: $0.id, title: $0.title, style: $0.style,
+                                           items: Array($0.items.prefix(perRow)))
+                        }
+                    )
+                }
+            )
+        }
     }
 
     public private(set) var state: LoadState<Content> = .idle
+
+    /// `true` while `state` holds a snapshot hydrated from `contentStore` on launch
+    /// that has NOT yet been refreshed from the network this session. The first
+    /// appearance then refreshes **silently** (no `.loading`/skeleton) so the
+    /// instant cached hero + rows stay on screen until fresh content swaps in.
+    /// Cleared the moment that first refresh starts.
+    private var isShowingCachedSnapshot = false
 
     /// The row structure to render as a skeleton while loading: the layout
     /// persisted from the previous successful load (row kinds, order **and** the
@@ -44,6 +101,11 @@ public final class HomeViewModel {
     private let accounts: [ResolvedAccount]
     private let aggregator: HomeAggregator
     private let layoutStore: HomeLayoutStoring
+    /// Persists a bounded snapshot of the last successful `Content` so the next
+    /// launch can paint the hero + rows instantly from disk (artwork bytes already
+    /// persist in `ArtworkImageCache`/`URLCache`) and then silently refresh. See
+    /// `HomeContentStore`.
+    private let contentStore: HomeContentStoring
     /// The shared identity-index lookup folded into every merged row so a card
     /// surfaced by one server still carries its full cross-server source set.
     private let identitySources: @Sendable (MediaItem) -> [MediaSourceRef]
@@ -117,6 +179,7 @@ public final class HomeViewModel {
         accounts: [ResolvedAccount],
         aggregator: HomeAggregator = HomeAggregator(),
         layoutStore: HomeLayoutStoring = HomeLayoutStore(),
+        contentStore: HomeContentStoring = NoOpHomeContentStore(),
         identitySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef] = { _ in [] },
         currentVisibility: @escaping () -> HomeLibraryVisibility = { .default },
         pendingWatchMutations: @escaping @Sendable () async -> [WatchMutation] = { [] },
@@ -125,12 +188,22 @@ public final class HomeViewModel {
         self.accounts = accounts
         self.aggregator = aggregator
         self.layoutStore = layoutStore
+        self.contentStore = contentStore
         self.identitySources = identitySources
         self.currentVisibility = currentVisibility
         self.pendingWatchMutations = pendingWatchMutations
         self.recentlyAppliedRecency = recentlyAppliedRecency
         let persisted = layoutStore.load()
         self.skeletonLayout = persisted.isEmpty ? HomeRowKind.defaultSkeletonLayout : persisted
+        // Hydrate the last-known Home from disk so the hero + Continue Watching (and
+        // the rest of the rows) paint INSTANTLY on launch — no skeleton, no network
+        // in the critical path. The first appearance then refreshes silently (see
+        // `loadIfNeeded`). Only a non-empty snapshot is used; anything else leaves
+        // `state == .idle` so a genuine first launch shows the normal loading state.
+        if let cached = contentStore.load() {
+            self.state = .loaded(cached)
+            self.isShowingCachedSnapshot = true
+        }
     }
 
     deinit {
@@ -161,8 +234,18 @@ public final class HomeViewModel {
     /// detail), so binding `load()` directly to the task would reload on every
     /// back-navigation — flashing the skeleton and resetting focus to the top.
     /// This guard makes the reappearance a no-op while still reacting to a genuine
+    /// This guard makes the reappearance a no-op while still reacting to a genuine
     /// change: hiding/showing/disabling a library, or flipping the merge switch.
     public func loadIfNeeded(for visibility: HomeLibraryVisibility) async {
+        // Showing a cached snapshot from launch: refresh SILENTLY so the instant
+        // hero + rows never flash to a skeleton — the cached content stays until
+        // the fresh aggregate swaps in. Clear the flag first so a re-entrant call
+        // (tvOS restarts this `.task` on reappearance) can't loop back here.
+        if isShowingCachedSnapshot {
+            isShowingCachedSnapshot = false
+            await load(showLoadingState: false)
+            return
+        }
         switch state {
         case .loaded, .empty:
             if lastLoadedVisibility == visibility {
@@ -201,6 +284,9 @@ public final class HomeViewModel {
             item.isVisibleOnHome(isLibraryVisible: { visibility.isEnabled($0) })
         }
 
+        // Overlay the durable outbox's not-yet-confirmed plays onto the freshly
+        // fetched Continue Watching row so a reload doesn't revert it to stale
+        // pre-play order while the server catches up (r8-cw-outbox-patch).
         // Overlay the durable outbox's not-yet-confirmed plays onto the freshly
         // fetched Continue Watching row so a reload doesn't revert it to stale
         // pre-play order while the server catches up (r8-cw-outbox-patch).
@@ -243,11 +329,26 @@ public final class HomeViewModel {
                 librarySections: unmerged.librarySections
             )
         }
+        // A SILENT background refresh that came back empty must not blank out good
+        // content already on screen — e.g. the cached snapshot painted at launch,
+        // or the rows after playback, when the server is momentarily unreachable.
+        // Keep what's showing and bail (also skipping the Top Shelf republish that
+        // would otherwise clear it); `lastLoadedVisibility` stays put so the next
+        // appearance retries. A *loud* load still surfaces the genuine empty state.
+        if content.isEmpty, !showLoadingState, case .loaded = state {
+            PlozzLog.boot("HomeVM.load KEEP-CACHED silent-empty vm=\(UInt(bitPattern: ObjectIdentifier(self).hashValue))")
+            return
+        }
         state = content.isEmpty ? .empty : .loaded(content)
         // Record what this content was aggregated for so a later reappearance with
         // an unchanged visibility snapshot is recognised as a no-op (see
         // `loadIfNeeded(for:)`).
         lastLoadedVisibility = visibility
+        // Persist a bounded snapshot of the fresh content so the next launch paints
+        // Home instantly (see `HomeContentStore`). Only meaningful, non-empty
+        // content is cached — a transient empty aggregate (e.g. server briefly
+        // unreachable) must not overwrite a good snapshot with nothing.
+        if !content.isEmpty { contentStore.save(content) }
         PlozzLog.boot("HomeVM.load DONE vm=\(UInt(bitPattern: ObjectIdentifier(self).hashValue)) empty=\(content.isEmpty) merged=\(content.mergeLibraries) cw=\(content.continueWatching.count) latest=\(content.latest.count) wl=\(content.watchlist.count) libs=\(content.libraries.count) sections=\(content.librarySections.count)")
         guard !Task.isCancelled else { return }
 

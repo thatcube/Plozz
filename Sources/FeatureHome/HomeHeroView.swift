@@ -22,6 +22,17 @@ import MetadataKit
 /// change here (`index` + `lastPageForward`); the backdrop reacts to the fronted
 /// slide's id/URLs and entering direction on its own.
 struct HomeHeroView: View {
+    /// Reports the hero action-button row's measured width up the view tree so the
+    /// overview/description can cap itself to the same width. Takes the max of any
+    /// reported values in a pass (there is only one pills row, so this is just a
+    /// straightforward carry-up).
+    private struct HeroButtonsWidthKey: PreferenceKey {
+        static var defaultValue: CGFloat { 0 }
+        static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+            value = max(value, nextValue())
+        }
+    }
+
     let items: [MediaItem]
     let settings: HeroSettings
     let spoilerSettings: SpoilerSettings
@@ -77,10 +88,11 @@ struct HomeHeroView: View {
     /// Total upward travel (points) applied to the backdrop artwork when the hero
     /// recedes. The backdrop is screen-pinned (see `heroBackdrop`), so this is its
     /// absolute rise — independent of the content lift and of the page scroll. Kept
-    /// LESS than the focus engine's page scroll (~480pt) so the artwork doesn't fly
-    /// entirely off the top but recedes to sit just below the lifted buttons; the
-    /// slow 1.6s glide (see HomeHeroBackdrop) makes it lag the scroll. Tunable.
-    private static let recedeBackdropRise: CGFloat = 340
+    /// well below the focus engine's page scroll (~480pt) so the artwork keeps its
+    /// parallax lag but does NOT fly up: its melted bottom edge stays below the
+    /// paging dots as you navigate down. The slow 1.6s glide (see HomeHeroBackdrop)
+    /// makes it lag the scroll. Tunable.
+    private static let recedeBackdropRise: CGFloat = 240
 
     /// The app-installed action handler — the SAME one the detail hero and the
     /// long-press context menu use — so the hero's Watchlist button is offered
@@ -154,6 +166,11 @@ struct HomeHeroView: View {
     /// faded back in once the backdrop wipe has landed — so the old show's text
     /// never lingers over the new artwork.
     @State private var metadataVisible = true
+    /// Measured width of the action-button row (the visible pills), used to cap the
+    /// overview/description to the same width so the text block never runs wider
+    /// than the buttons beneath it. `0` until first measured (overview falls back to
+    /// its default cap). Varies per slide as the button set changes.
+    @State private var actionButtonsWidth: CGFloat = 0
     /// Bumped on every page so a late metadata fade-in from a *previous* page
     /// can't fire after a newer page has already started.
     @State private var slideToken = 0
@@ -283,30 +300,19 @@ struct HomeHeroView: View {
             .first { $0 == .addToWatchlist || $0 == .removeFromWatchlist }
     }
 
-    private static var screenHeight: CGFloat {
-        #if canImport(UIKit)
-        return UIScreen.main.bounds.height
-        #else
-        return 1080
-        #endif
-    }
+    private static var screenHeight: CGFloat { HomeHeroLayout.screenHeight }
 
-    private static var screenWidth: CGFloat {
-        #if canImport(UIKit)
-        return UIScreen.main.bounds.width
-        #else
-        return 1920
-        #endif
-    }
+    private static var screenWidth: CGFloat { HomeHeroLayout.screenWidth }
 
     /// Distance the content column is lifted off the bottom edge of the
     /// full-screen hero, so the paging dots land in the lower third. Paired with
     /// `HomeView.heroRowOverlap`: the Continue Watching row is pulled up by
-    /// slightly less than this, so its title peeks ~40px below the dots.
-    private static let contentBottomInset: CGFloat = 252
-    // Pushes the paging dots back down relative to the lifted content column.
-    // (Column was lifted 120pt; this holds the dots ~60pt above their original spot.)
-    private static let pagingDotsDrop: CGFloat = 60
+    /// slightly less than this, so its title peeks ~40px below the dots. Shared via
+    /// ``HomeHeroLayout`` so the loading skeleton lines up 1:1.
+    private static let contentBottomInset: CGFloat = HomeHeroLayout.contentBottomInset
+    // Pushes the paging dots back down relative to the lifted content column, so
+    // the dots sit a little below the action buttons rather than tight against them.
+    private static let pagingDotsDrop: CGFloat = 40
 
     var body: some View {
         let height = Self.screenHeight * heroHeightFraction
@@ -475,17 +481,17 @@ struct HomeHeroView: View {
                 width: w,
                 height: height,
                 scrimTone: scrimTone,
-                // Full-screen hero: keep the artwork opaque far lower than the
-                // detail page (0.33) and only feather the very bottom into the
-                // Continue Watching panel.
-                dissolveStart: 0.82,
                 // The recede rise. The backdrop is screen-pinned by its own
                 // `.ignoresSafeArea(.top)` breakout (it does NOT scroll with the
                 // page), so it needs no scroll counter. Drive it purely off
-                // `receded`: 0 at rest, a clean rise when receded, animated slowly
-                // (1.6s) inside HomeHeroBackdrop so it keeps gliding up after the
-                // content lift settles (the Apple TV feel).
-                recedeLift: receded ? Self.recedeBackdropRise : 0
+                // `receded`: 0 at rest, a clean rise when receded, animated inside
+                // HomeHeroBackdrop so it lags the content lift (the Apple TV feel).
+                // The bottom-melt shaping (theme-aware height, left weighting) lives
+                // entirely inside HomeHeroBackdrop's dissolve now.
+                recedeLift: receded ? Self.recedeBackdropRise : 0,
+                // On recede, melt the right side into the page like the left so the
+                // whole backdrop blends together while browsing the rows below.
+                receded: receded
             )
         } else {
             Color.clear.frame(width: w, height: height)
@@ -520,6 +526,17 @@ struct HomeHeroView: View {
     private func content(for item: MediaItem) -> some View {
         let hideText = spoilerSettings.shouldHideText(for: item)
         VStack(alignment: .leading, spacing: 12) {
+            // Absorbs the vertical slack at the TOP of the (fixed-height) column so
+            // the bottom block — logo/metadata/overview + buttons + dots — is pinned
+            // to an integer offset from the frame's bottom edge. Previously the whole
+            // column was bottom-anchored as one unit, so the metadata block's
+            // *fractional*, per-slide-varying height (different overviews / metadata)
+            // nudged the column's rounded origin by 1–2pt every page — the reported
+            // paging jitter where the buttons and dots crept up/down. With this
+            // Spacer taking the fractional slack, a taller/shorter metadata block
+            // only changes the Spacer's height; the buttons and dots stay put.
+            Spacer(minLength: 0)
+
             // The show *description* (logo/title/metadata/overview). ONLY this
             // fades: hidden instantly on a page and faded back in once the new
             // backdrop has wiped into place, so the old title/overview never sit
@@ -533,19 +550,28 @@ struct HomeHeroView: View {
                 HeroLogoArtwork(
                     primaryURL: item.logoURL,
                     asyncFallbackURL: logoFallback(for: item),
-                    backgroundSample: backgroundSample(for: item)
+                    backgroundSample: backgroundSample(for: item),
+                    // Cap the logo image to the action-button row width (measured
+                    // below) so it never runs wider than the buttons beneath it —
+                    // matching the title/overview. Falls back to the component's
+                    // default until first measured.
+                    maxWidth: actionButtonsWidth > 0 ? actionButtonsWidth : 620
                 ) {
                     Text(hideText ? spoilerSettings.maskedTitle(for: item) : item.title)
                         .font(.system(size: 64, weight: .bold))
                         .lineLimit(2)
                         .minimumScaleFactor(0.5)
                         .multilineTextAlignment(.leading)
-                        .frame(maxWidth: 1200, alignment: .leading)
+                        // Cap the text title to the action-button row width (measured
+                        // below) so it wraps to fit within the buttons, like the
+                        // overview. Falls back to the old cap until first measured.
+                        .frame(maxWidth: actionButtonsWidth > 0 ? actionButtonsWidth : 1200, alignment: .leading)
                         .contentTransition(.opacity)
                 }
                 .id("logo-\(item.id)")
 
                 metadataLine(for: item)
+                    .modifier(HeroTextLegibilityShadow(colorScheme: colorScheme))
 
                 if !hideText, let overview = item.overview {
                     Text(overview)
@@ -553,7 +579,13 @@ struct HomeHeroView: View {
                         .foregroundStyle(.secondary)
                         .lineSpacing(2)
                         .lineLimit(3, reservesSpace: true)
-                        .frame(maxWidth: 960, alignment: .topLeading)
+                        // Cap the description to the action-button row width (measured
+                        // below) so it never runs wider than the buttons beneath it.
+                        // Falls back to the previous fixed cap until first measured.
+                        .frame(maxWidth: actionButtonsWidth > 0 ? actionButtonsWidth : 960, alignment: .topLeading)
+                        // Subtle legibility shadow so the description reads clearly
+                        // over the (now more dissolved) lower hero — see modifier.
+                        .modifier(HeroTextLegibilityShadow(colorScheme: colorScheme))
                         .contentTransition(.opacity)
                 }
             }
@@ -585,8 +617,14 @@ struct HomeHeroView: View {
                 // original screen position, so push them back down by the same 120pt.
                 .offset(y: Self.pagingDotsDrop)
         }
+        // Fixed, INTEGER height for the column so its origin never rounds to a
+        // different pixel per slide (the paging-jitter root cause). The height is
+        // the full hero height minus the bottom inset; the top Spacer inside then
+        // absorbs the fractional slack, and the bottom block (buttons + dots) sits
+        // at an integer offset from this frame's bottom. `screenHeight` and
+        // `contentBottomInset` are whole numbers, so the frame bottom is integral.
+        .frame(height: HomeHeroLayout.screenHeight - Self.contentBottomInset)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.top, PlozzTheme.Metrics.screenPadding)
         .padding(.trailing, PlozzTheme.Metrics.screenPadding)
         .padding(.leading, PlozzTheme.Metrics.heroLeadingPadding)
         // Lift the content column off the very bottom of the full-screen hero so
@@ -601,6 +639,10 @@ struct HomeHeroView: View {
         // stack re-run full layout every animation frame, which is what made the
         // slow recede stutter; a transform is free at any duration.
         .offset(y: receded ? -Self.recedeContentLift : 0)
+        // Cap the overview to the button-row width: adopt the pills' measured width.
+        .onPreferenceChange(HeroButtonsWidthKey.self) { width in
+            if width > 0 { actionButtonsWidth = width }
+        }
     }
 
     @ViewBuilder
@@ -687,6 +729,14 @@ struct HomeHeroView: View {
             HStack(spacing: 24) {
                 ForEach(Array(itemButtons.enumerated()), id: \.element) { offset, button in
                     heroButtonVisual(button, for: item, selected: focus != nil && selectedButton == offset)
+                }
+            }
+            // Report the pills' natural width up so the overview above can cap itself
+            // to the button row (see `actionButtonsWidth`). Measured on the pills
+            // themselves — NOT the enclosing action row, which is `maxWidth: .infinity`.
+            .background {
+                GeometryReader { geo in
+                    Color.clear.preference(key: HeroButtonsWidthKey.self, value: geo.size.width)
                 }
             }
             .opacity(metadataVisible ? 1 : 0)
@@ -1137,8 +1187,17 @@ struct HomeHeroView: View {
         @ViewBuilder _ label: () -> Content
     ) -> some View {
         let shape = Capsule(style: .continuous)
+        // Glyph/label tint. When focused the pill is a bright WHITE platter, so the
+        // glyph is black. When idle it sits on Liquid Glass — which renders LIGHT
+        // (frosted) in light mode and dark in dark mode — so the glyph must follow
+        // the appearance: dark ink in light mode, white in dark mode. (Forcing white
+        // unconditionally made idle pills white-on-light = invisible in light mode;
+        // the frosted glass lightens whatever art is behind it, so the dark backdrop
+        // doesn't rescue it.) This also matches the Play button's `onLight` flag, so
+        // the resume progress bar and its glyph/text now flip together.
+        let idleTint: Color = colorScheme == .light ? .black : .white
         label()
-            .foregroundStyle(selected ? Color.black : Color.white)
+            .foregroundStyle(selected ? Color.black : idleTint)
             .transaction { $0.animation = nil }
             .padding(.horizontal, 30)
             .padding(.vertical, 18)
@@ -1310,58 +1369,122 @@ struct HomeHeroView: View {
     private var pagingDots: some View {
         if items.count > 1 {
             HStack(spacing: Self.dotSpacing) {
-                ForEach(items.indices, id: \.self) { i in
-                    pagingIndicator(active: i == index)
+                // Windowed: at most `maxVisibleDots` are shown. When there are more
+                // slides than fit, the row scrolls and the dots nearest a hidden
+                // edge shrink to signal "more this way" (see `HeroPagingDots`). Keyed
+                // by the slide's real index so a scroll SLIDES the shared dots (and
+                // fades the one leaving / entering) rather than snapping.
+                ForEach(HeroPagingDots.layout(count: items.count, index: index, maxVisible: Self.maxVisibleDots, edgeShrink: Self.edgeShrinkCount)) { dot in
+                    pagingIndicator(active: dot.index == index, scale: Self.dotScale(for: dot.size))
                 }
             }
+            // Pin the row to the dot height so its vertical centering can NEVER
+            // change. Without this, the active dot's animating frame let the HStack
+            // recompute a sub-pixel-different vertical center mid-morph, drifting the
+            // dots down a few px on every page (the reported jitter). When windowed,
+            // also pin the WIDTH: a scroll momentarily renders a 9th (entering/leaving)
+            // dot, which would otherwise widen the row and make the glass pill breathe
+            // — the fixed width holds the pill steady while the extra dot fades at the
+            // edge.
+            .frame(width: windowedRowWidth, height: Self.dotSize)
             .padding(.horizontal, 14)
             .padding(.vertical, 9)
-            // Liquid Glass rounded container so the indicators stay legible over
-            // any backdrop (matches the hero action pills' glass treatment).
+            // Liquid Glass rounded container so the indicators stay legible over any
+            // backdrop (matches the hero action pills' glass treatment).
             .background { pagingDotsGlass(shape: Capsule()) }
             .padding(.top, 10)
+            // ONE coordinated morph for the whole row, keyed on the fronted slide.
+            // Both the outgoing and incoming dot (and their fills) animate in a
+            // single transaction, so there are no dueling per-dot `.animation`s whose
+            // independent interpolations nudged each dot's origin on both axes. The
+            // row width is constant while windowed (always `maxVisibleDots` fixed-pitch
+            // slots, exactly one of which is the wide pill), so the glass pill never
+            // resizes; the shrunk edge dots scale WITHIN their fixed slots.
+            .animation(.easeInOut(duration: Self.dotMorph), value: index)
             .accessibilityHidden(true)
         }
     }
 
-    private static let dotSize: CGFloat = 8
-    private static let dotSpacing: CGFloat = 8
+    private static let dotSize: CGFloat = 10
+    private static let dotSpacing: CGFloat = 12
     private static let activeDotWidth: CGFloat = 30
     /// Duration of the simultaneous dot→pill / pill→dot open/close on a page.
     private static let dotMorph: Double = 0.3
+
+    /// Maximum page indicators shown at once. Beyond this the row becomes a scrolling
+    /// window with shrinking edge dots — a fixed UX cap independent of how many
+    /// titles the user lets the hero rotate through (`HeroSettings.maxItems`).
+    private static let maxVisibleDots = 8
+    /// How many dots shrink on each edge that has hidden content (outermost first).
+    private static let edgeShrinkCount = 2
+
+    /// Fixed width of the windowed dot row (nil when not windowed, so the classic
+    /// row sizes naturally to its dots). Exactly `maxVisibleDots` slots: one active
+    /// pill plus the rest full-size dots, with uniform spacing. Holding this constant
+    /// keeps the glass pill from resizing when a scroll transiently renders an extra
+    /// entering/leaving dot.
+    private var windowedRowWidth: CGFloat? {
+        guard items.count > Self.maxVisibleDots else { return nil }
+        let others = CGFloat(Self.maxVisibleDots - 1)
+        return others * Self.dotSize + Self.activeDotWidth + others * Self.dotSpacing
+    }
+
+    /// Theme-aware ink for the paging indicators — dark in light mode, white in dark
+    /// mode — mirroring the action pills' `idleTint`. The dots sit on the same
+    /// Liquid Glass (which renders light/frosted in light mode), so hardcoded white
+    /// dots washed out in light mode; this keeps them legible in both appearances.
+    private var dotTint: Color { colorScheme == .light ? .black : .white }
+
+    /// One rendered page indicator: the slide it represents and how large to draw it
+    /// (1 = full dot/pill, <1 = a shrunk edge dot signalling more content that way).
+    /// Maps `HeroPagingDots.Size` (the pure windowing result) to a render scale. The
+    /// falloff is deliberately gentle — the outermost dot stays clearly visible (a
+    /// tiny speck read as "too small" on device) rather than shrinking to a dot.
+    private static func dotScale(for size: HeroPagingDots.Size) -> CGFloat {
+        switch size {
+        case .full: return 1.0
+        case .medium: return 0.78   // second-from-edge
+        case .small: return 0.55    // outermost edge
+        }
+    }
 
     /// A single page indicator. It is always the same `Capsule` so its width can
     /// smoothly animate between a dot (inactive) and a pill (active) — the active
     /// one opening exactly as the outgoing one closes, keeping the container width
     /// constant. The active pill fills left→right as the auto-advance dwell elapses
-    /// (a live "time until next page" gauge).
-    private func pagingIndicator(active: Bool) -> some View {
+    /// (a live "time until next page" gauge). The width morph is animated once, by
+    /// the container's `value: index` animation — NOT per-dot here — so the outgoing
+    /// and incoming dots interpolate in the same transaction and never drift.
+    ///
+    /// `scale` shrinks a non-active edge dot toward the hidden-content side. The
+    /// shrunk circle is rendered INSIDE a full-size (`dotSize`) slot so the row's
+    /// pitch and total width stay constant as dots shrink/grow — the glass pill
+    /// never resizes, and there's no per-page width jitter.
+    private func pagingIndicator(active: Bool, scale: CGFloat) -> some View {
         Capsule()
-            .fill(Color.white.opacity(0.28))
+            .fill(dotTint.opacity(0.28))
             .overlay(alignment: .leading) {
                 activeDotFill(active: active, trackWidth: Self.activeDotWidth, height: Self.dotSize)
             }
-            .frame(width: active ? Self.activeDotWidth : Self.dotSize, height: Self.dotSize)
+            .frame(width: active ? Self.activeDotWidth : Self.dotSize * scale, height: Self.dotSize * scale)
             .clipShape(Capsule())
-            .animation(.easeInOut(duration: Self.dotMorph), value: active)
+            // Reserve a full-size slot so the pitch is uniform regardless of `scale`.
+            .frame(width: active ? Self.activeDotWidth : Self.dotSize, height: Self.dotSize)
     }
 
     /// The bright progress fill inside an indicator. Kept in a `TimelineView` for
     /// every dot (stable identity) so the active one grows from a dot to the full
     /// pill across the dwell; when a dot goes inactive its fill closes back down
-    /// (animated by the `active` flip), and when auto-advance is off the active
+    /// (via the container's page animation), and when auto-advance is off the active
     /// pill just sits fully lit.
     private func activeDotFill(active: Bool, trackWidth: CGFloat, height: CGFloat) -> some View {
         TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !settings.autoAdvance || pausedAt != nil)) { timeline in
             Capsule()
-                .fill(Color.white)
+                .fill(dotTint)
                 .frame(
                     width: brightFillWidth(active: active, trackWidth: trackWidth, height: height, now: timeline.date),
                     height: height
                 )
-                // Animate only the open/close that a page (active flip) triggers;
-                // the per-frame progress growth is driven by the timeline itself.
-                .animation(.easeInOut(duration: Self.dotMorph), value: active)
         }
     }
 
@@ -1381,7 +1504,9 @@ struct HomeHeroView: View {
     }
 
     /// Liquid Glass background for the paging-dot container: real glass on
-    /// tvOS 26+, `.ultraThinMaterial` below (mirrors `heroPillIdleBackground`).
+    /// tvOS 26+, `.ultraThinMaterial` below (mirrors `heroPillIdleBackground`). The
+    /// container width is constant across pages, so this pill never resizes — the
+    /// paging jitter was the dots' animation, not this background.
     @ViewBuilder
     private func pagingDotsGlass(shape: Capsule) -> some View {
         if #available(tvOS 26.0, *) {
@@ -1497,6 +1622,22 @@ struct HomeHeroView: View {
     private struct RequestStatusSignature: Equatable {
         let id: String
         let availability: MediaAvailabilityStatus?
+    }
+}
+
+/// A subtle, mode-aware legibility shadow for hero text (year / description) so it
+/// reads clearly over the artwork. In dark mode a soft dark shadow makes the light
+/// text pop; in light mode it drops to a faint value that just grounds the dark
+/// text without muddying it (the light-mode scrim already gives a light backing).
+private struct HeroTextLegibilityShadow: ViewModifier {
+    let colorScheme: ColorScheme
+
+    func body(content: Content) -> some View {
+        content.shadow(
+            color: .black.opacity(colorScheme == .dark ? 0.55 : 0.15),
+            radius: 5,
+            y: 1
+        )
     }
 }
 #endif

@@ -49,13 +49,36 @@ struct HomeHeroBackdrop: View {
     let height: CGFloat
     /// Legibility scrim tone — dark in dark mode, light in light mode.
     let scrimTone: Color
-    /// Fraction of the height at which the bottom dissolve begins.
-    let dissolveStart: CGFloat
     /// How far UP (points) to translate the backdrop when the hero recedes: 0 at
     /// rest, `recedeLift` when receded. Animated internally on a slow 1.6s smooth
     /// curve so the artwork keeps gliding up for ~1s after the content lift settles
     /// (the Apple TV feel).
     var recedeLift: CGFloat = 0
+    /// Whether the hero is receded (focus moved down to Continue Watching). At rest
+    /// the right side keeps its vivid image (the hero looks its best); when receded
+    /// the right side melts into the app background much more — like the left — so
+    /// the whole backdrop blends together as you browse the rows below, instead of
+    /// leaving a hard image edge on the right.
+    var receded: Bool = false
+
+    @Environment(\.colorScheme) private var colorScheme
+    private var isLight: Bool { colorScheme == .light }
+
+    /// Right-side "keep the image" strength for the dissolve. Full at rest, low when
+    /// receded so the right melts into the page like the left.
+    private var rightKeep: CGFloat { receded ? 0.12 : 1.0 }
+
+    /// Height fraction at which the bottom melt BEGINS on the left. Theme-aware:
+    /// light mode starts much higher (a taller, gentler fade) because the revealed
+    /// **white** background contrasts hard with the artwork and needs a long runway
+    /// to hide the edge; dark mode reveals **black**, which blends with dark image
+    /// edges, so it can start lower and stay compact.
+    private var meltStart: CGFloat { isLight ? 0.38 : 0.62 }
+
+    /// Where the RIGHT side begins melting — lower than `meltStart` so the subject
+    /// on the right keeps more image, but sharing the exact same eased tail (both
+    /// reach clear at the very bottom) so the two fades blend with no seam.
+    private var rightMeltStart: CGFloat { isLight ? 0.60 : 0.80 }
 
     var body: some View {
         backdropImage
@@ -71,9 +94,11 @@ struct HomeHeroBackdrop: View {
             // on every layout pass, nullifying any outer translation. This inner
             // offset — the child of .ignoresSafeArea — is the only reliable place.
             .offset(y: -recedeLift)
-            // Slow glide so the artwork keeps rising for ~1s after the content
-            // lift settles (the Apple TV recede feel).
-            .animation(.smooth(duration: 1.6), value: recedeLift)
+            // Glide the artwork up/down on recede, lagging the content lift a touch
+            // for the Apple TV parallax feel (but not sluggish). The right-side
+            // dissolve strengthening rides the same curve so it blends in step.
+            .animation(.smooth(duration: 0.96), value: recedeLift)
+            .animation(.smooth(duration: 0.96), value: receded)
             .ignoresSafeArea(edges: [.top, .horizontal])
     }
 
@@ -119,18 +144,57 @@ struct HomeHeroBackdrop: View {
         )
     }
 
-    /// Bottom dissolve mask — identical to `HeroBackdropLayer`'s. Static across
-    /// slides.
-    private var dissolveMask: some View {
-        LinearGradient(
+    /// A smooth, EASED vertical fade from opaque (`white × peak`) down to `clear`,
+    /// holding solid until `start` then easing out to the very bottom. The extra
+    /// intermediate stops give an ease-out shape so the melt reads as a gentle,
+    /// gradual dissolve rather than a hard linear band. Both dissolve layers use
+    /// this same curve shape, so they never produce a mismatched-curve seam.
+    private func easedVerticalFade(start: CGFloat, peak: CGFloat = 1.0) -> LinearGradient {
+        let span = max(1 - start, 0.0001)
+        return LinearGradient(
             stops: [
-                .init(color: .white, location: 0.0),
-                .init(color: .white, location: dissolveStart),
+                .init(color: .white.opacity(peak), location: 0.0),
+                .init(color: .white.opacity(peak), location: start),
+                .init(color: .white.opacity(peak * 0.72), location: start + span * 0.32),
+                .init(color: .white.opacity(peak * 0.36), location: start + span * 0.60),
+                .init(color: .white.opacity(peak * 0.10), location: start + span * 0.83),
                 .init(color: .clear, location: 1.0)
             ],
             startPoint: .top,
             endPoint: .bottom
         )
+    }
+
+    /// Bottom dissolve mask (alpha: white keeps the image, clear lets the app
+    /// background show through). **Left-weighted 2D melt**: the melt is strong on
+    /// the LEFT (under the title / description / paging dots) and gentle on the
+    /// right so the hero subject isn't eaten there. Both layers share
+    /// `easedVerticalFade` (matching multi-stop curves) and the horizontal hand-off
+    /// is gradual, so the two fades blend into one smooth field with no seam — and
+    /// with NO blur, so the top / left / right image edges stay crisp (a blurred
+    /// mask bled transparency in from those edges). Static per appearance; only
+    /// `rightKeep` (recede) and the theme change it.
+    private var dissolveMask: some View {
+        ZStack {
+            // Base vertical melt — the strong LEFT-side dissolve to the background.
+            easedVerticalFade(start: meltStart)
+            // Adds the image back toward the RIGHT: a very gradual left→right lean
+            // (full only at the far right, so no vertical seam) gated by an eased
+            // fade that shares the base's tail. `rightKeep` drops it toward 0 on
+            // recede, so the right then melts like the left.
+            easedVerticalFade(start: rightMeltStart, peak: rightKeep)
+                .mask(
+                    LinearGradient(
+                        stops: [
+                            .init(color: .clear, location: 0.0),
+                            .init(color: .clear, location: 0.22),
+                            .init(color: .white, location: 0.85)
+                        ],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                )
+        }
     }
 }
 

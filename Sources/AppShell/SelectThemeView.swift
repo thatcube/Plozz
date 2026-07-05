@@ -67,17 +67,29 @@ struct SelectThemeView: View {
                 }
             }
             .frame(maxWidth: 1500)
+            // Group the cards into one focus section so moving DOWN from any card
+            // (incl. the far-left System / far-right OLED) reliably exits to the
+            // Continue button below, instead of the focus engine giving up because
+            // the centred button isn't directly beneath the edge cards.
+            .focusSection()
 
-            Button {
-                onContinue()
-            } label: {
-                Text("Continue")
-                    .fontWeight(.semibold)
-                    .frame(minWidth: 360)
-                    .padding(.vertical, 8)
+            // Full-width focus region for the Continue button (via a centring
+            // ZStack) so a straight-down move from any card lands on it regardless
+            // of horizontal alignment.
+            ZStack {
+                Button {
+                    onContinue()
+                } label: {
+                    Text("Continue")
+                        .fontWeight(.semibold)
+                        .frame(minWidth: 360)
+                        .padding(.vertical, 8)
+                }
+                .buttonStyle(.borderedProminent)
+                .focused($focus, equals: .continueButton)
             }
-            .buttonStyle(.borderedProminent)
-            .focused($focus, equals: .continueButton)
+            .frame(maxWidth: .infinity)
+            .focusSection()
             .padding(.top, 8)
 
             Spacer(minLength: 0)

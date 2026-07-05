@@ -33,18 +33,14 @@ struct MyLibrariesDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
-                Text("Who you watch as, and what shows on \(context.activeProfile.name)'s Home. Only this profile is affected.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-
                 if allGroups.isEmpty {
                     emptyInventoryState
+                } else if watchedGroups.isEmpty {
+                    notWatchingState
+                    addServerSection
                 } else {
-                    if watchedGroups.isEmpty {
-                        notWatchingState
-                    } else {
-                        ForEach(watchedGroups, id: \.serverKey) { serverCard($0) }
-                    }
+                    purposePanel
+                    ForEach(watchedGroups, id: \.serverKey) { serverCard($0) }
                     addServerSection
                 }
             }
@@ -55,6 +51,30 @@ struct MyLibrariesDetailView: View {
         }
         .scrollClipDisabled()
         .task { await context.reloadLibraries() }
+    }
+
+    // MARK: - What this page does
+
+    /// One obvious explainer at the top instead of a caption repeated under every
+    /// toggle. Makes clear this screen is identity + whole-library on/off — NOT
+    /// Home-row customization (that's Customize Home).
+    private var purposePanel: some View {
+        SettingsPanel {
+            HStack(alignment: .top, spacing: 16) {
+                Image(systemName: "info.circle.fill")
+                    .font(.system(size: 26, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Choose who you watch as, and which libraries are on")
+                        .font(.headline.weight(.semibold))
+                    Text("A library that's off is hidden everywhere — Home, Search, browse, and the Music tab. To pick which of an on library's rows appear on Home, use Customize Home. Changes here affect only \(context.activeProfile.name).")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+            }
+        }
     }
 
     // MARK: - Empty states
@@ -267,39 +287,18 @@ struct MyLibrariesDetailView: View {
     }
 
     /// One library's whole-library **Enabled** switch (off ⇒ hidden everywhere:
-    /// Home, Search, Music, browse). A short caption explains what "on" means,
-    /// differing for music (Music tab) vs video (Home & Search). Which *rows* a
-    /// video library contributes to Home is chosen separately on Customize Home.
-    @ViewBuilder
+    /// Home, Search, Music, browse). The screen-level `purposePanel` explains what
+    /// on/off means, so the row itself is just the switch — no repeated caption.
     private func libraryRow(_ aggregated: AggregatedLibrary) -> some View {
         let key = aggregated.key
-        let isMusic = aggregated.library.isMusic
-        VStack(alignment: .leading, spacing: 2) {
-            Toggle(isOn: Binding(
-                get: { context.homeVisibility.isEnabled(key) },
-                set: { context.homeVisibility.setEnabled($0, for: key) }
-            )) {
-                Text(aggregated.library.title)
-            }
-            .toggleStyle(SettingsSwitchToggleStyle())
-
-            captionText(enabled: context.homeVisibility.isEnabled(key), isMusic: isMusic)
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .padding(.leading, 12)
-                .padding(.bottom, 6)
+        return Toggle(isOn: Binding(
+            get: { context.homeVisibility.isEnabled(key) },
+            set: { context.homeVisibility.setEnabled($0, for: key) }
+        )) {
+            Text(aggregated.library.title)
         }
-    }
-
-    private func captionText(enabled: Bool, isMusic: Bool) -> Text {
-        if !enabled {
-            return Text(isMusic
-                        ? "Hidden everywhere, including the Music tab."
-                        : "Hidden everywhere, including Search.")
-        }
-        return Text(isMusic
-                    ? "Shown in the Music tab."
-                    : "Available in Search and eligible for Home. Choose its Home rows in Customize Home.")
+        .toggleStyle(SettingsSwitchToggleStyle())
+        .padding(.bottom, 2)
     }
 
     private func libraries(for group: ServerAccountGroup, in all: [AggregatedLibrary]) -> [AggregatedLibrary] {

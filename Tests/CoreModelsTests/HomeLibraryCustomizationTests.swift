@@ -259,4 +259,44 @@ final class MediaItemSourceTaggingTests: XCTestCase {
         XCTAssertNil(item.sourceAccountID)
         XCTAssertEqual(item.id, "m1")
     }
+
+    // MARK: - Seeding per-library rows when first unmerging
+
+    func testSeedLibraryRowsFillsEverythingWhenEmpty() {
+        var visibility = HomeLibraryVisibility.default
+        let seeded = visibility.seedLibraryRowsIfEmpty([
+            ("acct:movies", .recentlyAdded),
+            ("acct:movies", .hubs),
+            ("acct:shows", .recentlyAdded)
+        ])
+
+        XCTAssertTrue(seeded)
+        XCTAssertTrue(visibility.isLibraryRowEnabled("acct:movies", kind: .recentlyAdded))
+        XCTAssertTrue(visibility.isLibraryRowEnabled("acct:movies", kind: .hubs))
+        XCTAssertTrue(visibility.isLibraryRowEnabled("acct:shows", kind: .recentlyAdded))
+    }
+
+    func testSeedLibraryRowsPreservesExistingCustomization() {
+        var visibility = HomeLibraryVisibility.default
+        // User has already opted into exactly one row.
+        visibility.setLibraryRowEnabled(true, libraryKey: "acct:movies", kind: .recentlyAdded)
+
+        let seeded = visibility.seedLibraryRowsIfEmpty([
+            ("acct:movies", .recentlyAdded),
+            ("acct:movies", .hubs),
+            ("acct:shows", .recentlyAdded)
+        ])
+
+        XCTAssertFalse(seeded, "Must not seed once the user has any per-library row set")
+        // Their single choice stands; nothing else was force-enabled.
+        XCTAssertTrue(visibility.isLibraryRowEnabled("acct:movies", kind: .recentlyAdded))
+        XCTAssertFalse(visibility.isLibraryRowEnabled("acct:movies", kind: .hubs))
+        XCTAssertFalse(visibility.isLibraryRowEnabled("acct:shows", kind: .recentlyAdded))
+    }
+
+    func testSeedLibraryRowsNoOpWhenNothingToSeed() {
+        var visibility = HomeLibraryVisibility.default
+        XCTAssertFalse(visibility.seedLibraryRowsIfEmpty([]))
+        XCTAssertTrue(visibility.enabledLibraryHomeRows.isEmpty)
+    }
 }

@@ -154,6 +154,25 @@ public struct HomeLibraryVisibility: Codable, Equatable, Sendable {
         }
     }
 
+    /// Seeds the given per-library rows **on**, but only when the user hasn't
+    /// opted into any per-library rows yet (`enabledLibraryHomeRows` is empty).
+    ///
+    /// Turning the merge switch **off** is a clear "I want each library's own
+    /// rows" signal, so the first time that happens we start with everything on
+    /// and let the user pare it back — much better than dropping them onto an
+    /// empty Home. The empty-set guard means a later re-toggle (merge on, then off
+    /// again) never clobbers a customized selection; it only seeds the untouched
+    /// first-run state. Returns `true` when it actually seeded (so the caller can
+    /// persist).
+    @discardableResult
+    public mutating func seedLibraryRowsIfEmpty(_ rows: [(libraryKey: String, kind: LibraryHomeRowKind)]) -> Bool {
+        guard enabledLibraryHomeRows.isEmpty, !rows.isEmpty else { return false }
+        for row in rows {
+            enabledLibraryHomeRows.insert(Self.libraryRowKey(row.libraryKey, kind: row.kind))
+        }
+        return true
+    }
+
     // MARK: - Codable (backward compatible)
 
     private enum CodingKeys: String, CodingKey {

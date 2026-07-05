@@ -45,7 +45,16 @@ struct CustomizeHomeDetailView: View {
             ) {
                 Toggle(isOn: Binding(
                     get: { homeVisibility.mergeLibrariesOnHome },
-                    set: { homeVisibility.setMergeLibrariesOnHome($0) }
+                    set: { merge in
+                        homeVisibility.setMergeLibrariesOnHome(merge)
+                        // Turning merge OFF is a clear "I want per-library rows"
+                        // signal. Seed every applicable row for every Home-visible
+                        // library so the unmerged Home starts full (the user pares
+                        // it back), instead of empty. No-op once they've customized.
+                        if !merge {
+                            homeVisibility.seedLibraryRowsIfEmpty(defaultLibraryRowSeeds)
+                        }
+                    }
                 )) {
                     Text("Merge libraries on Home")
                 }
@@ -153,6 +162,16 @@ struct CustomizeHomeDetailView: View {
             case .recentlyAdded: return true
             case .hubs: return library.providerKind == .plex
             }
+        }
+    }
+
+    /// Every (library, applicable row) pair across the Home-visible libraries —
+    /// the "everything on" set used to seed the unmerged Home the first time the
+    /// user turns merging off. Mirrors exactly the checkmarks the per-library
+    /// cards show, so seeding ticks all of them.
+    private var defaultLibraryRowSeeds: [(libraryKey: String, kind: LibraryHomeRowKind)] {
+        homeVisibleLibraries.flatMap { library in
+            rowKinds(for: library).map { (libraryKey: library.key, kind: $0) }
         }
     }
 

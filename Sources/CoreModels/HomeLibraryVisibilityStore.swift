@@ -91,6 +91,17 @@ public final class HomeLibraryVisibilityModel {
         store.save(visibility)
     }
 
+    /// Seeds all provided per-library rows **on** when the user has none opted in
+    /// yet, then persists. Called when the merge switch is turned **off** so the
+    /// unmerged Home starts populated rather than empty (see
+    /// ``HomeLibraryVisibility/seedLibraryRowsIfEmpty(_:)``). A no-op once the
+    /// user has customized their per-library rows.
+    public func seedLibraryRowsIfEmpty(_ rows: [(libraryKey: String, kind: LibraryHomeRowKind)]) {
+        if visibility.seedLibraryRowsIfEmpty(rows) {
+            store.save(visibility)
+        }
+    }
+
     // MARK: - Per-library predicates
 
     /// Whether the library is available **app-wide** (not disabled).

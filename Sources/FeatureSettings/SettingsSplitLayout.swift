@@ -99,8 +99,9 @@ struct SettingsSplitLayout: View {
                 detailPane
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
-            .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
+            .padding(.leading, PlozzTheme.Metrics.screenPadding)
         }
+        .ignoresSafeArea(edges: .trailing)
         .onAppear {
             if selectedRowID == nil { selectedRowID = allRowIDs.first }
         }
@@ -199,7 +200,8 @@ struct SettingsSplitLayout: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.top, 56)
             .padding(.bottom, 48)
-            .padding(.horizontal, 56)
+            .padding(.leading, 80)
+            .padding(.trailing, 120)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         // Full-height detail panel, separated from the master list by a single

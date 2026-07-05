@@ -67,7 +67,7 @@ struct MyLibrariesDetailView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Libraries & who you watch as")
                         .font(.headline.weight(.semibold))
-                    Text("Turn a library off to hide it from this profile everywhere. Choose who you watch as for each server.")
+                    Text("Turn a library off to hide it from this profile everywhere. Choose who you watch as for each library.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)

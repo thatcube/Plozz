@@ -31,15 +31,7 @@ struct CustomizeHomeDetailView: View {
     }
 
     private var sections: [SettingsSplitSection] {
-        var result: [SettingsSplitSection] = [
-            layoutSection,
-            globalRowsSection,
-            heroSection
-        ]
-        if !homeVisibility.mergeLibrariesOnHome {
-            result.append(contentsOf: perLibrarySections)
-        }
-        return result
+        [layoutSection, homeRowsSection, heroSection]
     }
 
     // MARK: - Layout (merge switch)
@@ -62,14 +54,35 @@ struct CustomizeHomeDetailView: View {
         ])
     }
 
-    // MARK: - Global rows (checkmarks)
+    // MARK: - Rows on Home (one entry, grouped detail)
 
-    private var globalRowsSection: SettingsSplitSection {
-        SettingsSplitSection(id: "global-rows", header: "Rows", rows: [
+    /// A SINGLE master row whose detail groups every Home row into bordered
+    /// containers: the "Shared" cross-library rows first, then — when merging is
+    /// off — one card per Home-visible library, each headed by its name + provider
+    /// logo. This replaces the old scattered layout (a global "Rows on Home" row
+    /// plus a separate one repeated for every library), which read as disjointed.
+    private var homeRowsSection: SettingsSplitSection {
+        SettingsSplitSection(id: "home-rows", header: "Rows", rows: [
             SettingsSplitRow(
-                id: "global-rows-list",
+                id: "home-rows-all",
                 title: "Rows on Home",
-                description: "Which of the standard rows appear at the top of Home.",
+                description: homeVisibility.mergeLibrariesOnHome
+                    ? "Pick which of the combined rows appear on Home. Turn off Merge Libraries (under Layout) to also choose each library's own rows."
+                    : "Pick which rows appear on Home — the shared rows at the top, then each library's own rows, grouped below.",
+            ) {
+                homeRowsDetail
+            }
+        ])
+    }
+
+    /// The grouped detail: a "Shared" card (global rows) followed by one bordered
+    /// card per Home-visible library (unmerged only).
+    @ViewBuilder private var homeRowsDetail: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            HomeRowsGroupCard(
+                title: "Shared",
+                subtitle: "Combined across every library",
+                systemIcon: "rectangle.stack.fill"
             ) {
                 SettingsCheckList(
                     options: HomeGlobalRow.allCases.map(GlobalRowOption.init),
@@ -80,7 +93,65 @@ struct CustomizeHomeDetailView: View {
                     }
                 )
             }
-        ])
+
+            if !homeVisibility.mergeLibrariesOnHome {
+                let libraries = homeVisibleLibraries
+                if libraries.isEmpty {
+                    HomeRowsGroupCard(
+                        title: "No libraries shown on Home",
+                        systemIcon: "rectangle.on.rectangle.slash"
+                    ) {
+                        Text("Enable a library on Your Libraries, or turn Merge Libraries back on.")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.vertical, 4)
+                    }
+                } else {
+                    ForEach(libraries) { library in
+                        HomeRowsGroupCard(
+                            title: library.library.title,
+                            subtitle: library.serverName,
+                            providerKind: library.providerKind
+                        ) {
+                            SettingsCheckList(
+                                options: rowKinds(for: library).map { LibraryRowOption(libraryKey: library.key, kind: $0) },
+                                title: { $0.kind.displayName },
+                                isChecked: { homeVisibility.isLibraryRowEnabled($0.libraryKey, kind: $0.kind) },
+                                onToggle: { opt in
+                                    let now = homeVisibility.isLibraryRowEnabled(opt.libraryKey, kind: opt.kind)
+                                    homeVisibility.setLibraryRowEnabled(!now, libraryKey: opt.libraryKey, kind: opt.kind)
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Home-visible, non-music libraries, sorted by server then title — the ones
+    /// that get their own row-selection card in unmerged mode.
+    private var homeVisibleLibraries: [AggregatedLibrary] {
+        (discoveredLibraries.value ?? [])
+            .filter { !$0.library.isMusic && homeVisibility.isVisibleOnHome($0.key) }
+            .sorted { lhs, rhs in
+                if lhs.serverName != rhs.serverName { return lhs.serverName < rhs.serverName }
+                return lhs.library.title.localizedCaseInsensitiveCompare(rhs.library.title) == .orderedAscending
+            }
+    }
+
+    /// The row kinds worth offering for a library. Discovery "hubs" are Plex-only
+    /// (`libraryHubs` yields nothing for other providers), so a Jellyfin / media-
+    /// share library never shows a dead "Recommended rows" checkmark.
+    private func rowKinds(for library: AggregatedLibrary) -> [LibraryHomeRowKind] {
+        LibraryHomeRowKind.allCases.filter { kind in
+            switch kind {
+            case .recentlyAdded: return true
+            case .hubs: return library.providerKind == .plex
+            }
+        }
     }
 
     private struct GlobalRowOption: Identifiable, Hashable {
@@ -188,48 +259,7 @@ struct CustomizeHomeDetailView: View {
         }
     }
 
-    // MARK: - Per-library rows (checkmarks; unmerged only)
-
-    /// One section per Home-visible, non-music library, offering a checkmark for
-    /// each row kind that library can contribute. Providers without a given row
-    /// (e.g. Jellyfin has no discovery hubs) still list it; it simply yields
-    /// nothing at render time — kept simple and predictable.
-    private var perLibrarySections: [SettingsSplitSection] {
-        let libraries = (discoveredLibraries.value ?? [])
-            .filter { !$0.library.isMusic && homeVisibility.isVisibleOnHome($0.key) }
-            .sorted { lhs, rhs in
-                if lhs.serverName != rhs.serverName { return lhs.serverName < rhs.serverName }
-                return lhs.library.title.localizedCaseInsensitiveCompare(rhs.library.title) == .orderedAscending
-            }
-        guard !libraries.isEmpty else {
-            return [SettingsSplitSection(id: "per-library-empty", header: "Library Rows", rows: [
-                SettingsSplitRow(
-                    id: "per-library-none",
-                    title: "No libraries shown on Home",
-                    description: "Enable a library on Your Libraries, or turn Merge Libraries back on.",
-                ) { EmptyView() }
-            ])]
-        }
-        return libraries.map { library in
-            SettingsSplitSection(id: "lib-\(library.key)", header: library.library.title, rows: [
-                SettingsSplitRow(
-                    id: "lib-rows-\(library.key)",
-                    title: "Rows on Home",
-                    description: "Which of \(library.library.title)'s rows appear on Home.",
-                ) {
-                    SettingsCheckList(
-                        options: LibraryHomeRowKind.allCases.map { LibraryRowOption(libraryKey: library.key, kind: $0) },
-                        title: { $0.kind.displayName },
-                        isChecked: { homeVisibility.isLibraryRowEnabled($0.libraryKey, kind: $0.kind) },
-                        onToggle: { opt in
-                            let now = homeVisibility.isLibraryRowEnabled(opt.libraryKey, kind: opt.kind)
-                            homeVisibility.setLibraryRowEnabled(!now, libraryKey: opt.libraryKey, kind: opt.kind)
-                        }
-                    )
-                }
-            ])
-        }
-    }
+    // MARK: - Per-library row option identity
 
     private struct LibraryRowOption: Identifiable, Hashable {
         let libraryKey: String
@@ -306,6 +336,66 @@ struct CustomizeHomeDetailView: View {
                 keys.formIntersection(allKeys)
                 hero.settings.randomLibraryKeys = (keys == allKeys) ? [] : keys
             }
+        )
+    }
+}
+
+/// A titled, bordered container that groups one source's Home-row checkmarks in
+/// the Customize Home detail pane — either the cross-library "Shared" rows (drawn
+/// with an SF Symbol) or a single library, headed by its name + provider logo and
+/// server. The border + small header make each source read as its own group
+/// instead of a flat, repeating list.
+private struct HomeRowsGroupCard<Content: View>: View {
+    let title: String
+    var subtitle: String? = nil
+    /// When set, the header shows this provider's brand logo (library cards).
+    var providerKind: ProviderKind? = nil
+    /// Fallback header glyph when there's no provider logo (the Shared / empty cards).
+    var systemIcon: String? = nil
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 12) {
+                Group {
+                    if let providerKind {
+                        ProviderBrandMark(provider: providerKind, size: 28, showsBackground: false)
+                    } else if let systemIcon {
+                        Image(systemName: systemIcon)
+                            .font(.system(size: 20, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .frame(width: 32)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(title)
+                        .font(.headline.weight(.semibold))
+                        .lineLimit(1)
+                    if let subtitle {
+                        Text(subtitle)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 22)
+            .padding(.top, 18)
+            .padding(.bottom, 8)
+
+            content()
+                .padding(.horizontal, 22)
+                .padding(.bottom, 14)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color.primary.opacity(0.05))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.12), lineWidth: 1)
         )
     }
 }

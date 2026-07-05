@@ -1485,25 +1485,64 @@ private struct HomeTab: View {
     /// In-progress items prompt "Resume vs Start Over"; fully-unwatched items
     /// play immediately from the start.
     private func requestPlay(_ item: MediaItem) {
-        // A whole series can't be direct-played — its container has no media, so
-        // `playbackInfo` for a series ratingKey returns notFound ("Can't play this
-        // right now"). Route it to the detail page instead, which resolves the
-        // next-up / resume episode and offers Play there — the same path a series
-        // tile already uses. Resolve to the real library copy FIRST: a hero
-        // Watchlist series is a Discover stub whose id is the global catalog guid,
-        // which the detail page can't load (empty page) — `bestSourcePlayItem`
-        // retargets it onto the owned library ratingKey so seasons/metadata load.
-        // Movies and episodes play directly below.
         let target = bestSourcePlayItem(item, accounts: accounts, identitySources: identitySources)
+        // A whole series can't be direct-played (its container has no media, so
+        // `playbackInfo` for a series ratingKey returns notFound). Resolve its
+        // next-up / resume EPISODE and play that — matching Apple TV's hero Play.
+        // If we can't resolve an episode (e.g. the show isn't really in the library
+        // or the fetch fails), fall back to opening the show's detail page.
         if target.kind == .series {
-            navigate(target)
+            Task { @MainActor in
+                if let episode = await resolveSeriesNextUpEpisode(target) {
+                    presentPlay(bestSourcePlayItem(episode, accounts: accounts, identitySources: identitySources))
+                } else {
+                    navigate(target)
+                }
+            }
             return
         }
+        presentPlay(target)
+    }
+
+    /// Presents the player for an already-resolved, directly-playable `target`
+    /// (movie or episode), prompting Resume vs Start Over when it has progress.
+    private func presentPlay(_ target: MediaItem) {
         if let resume = target.resumePosition, resume > 1 {
             resumePrompt = target
         } else {
             playRequest = PlayRequest(item: target, startPosition: 0)
         }
+    }
+
+    /// Resolves a series to the episode Play should start: the next-up / resume
+    /// episode of its next-up season. Mirrors the detail page's selection
+    /// (``SeriesResume/nextUp(in:)``) so the hero's Play matches what the show page
+    /// would front. Returns `nil` when no episode can be resolved (the caller then
+    /// opens the show detail instead). The episode is stamped with the series'
+    /// account so best-source routing and playback address the right server.
+    private func resolveSeriesNextUpEpisode(_ series: MediaItem) async -> MediaItem? {
+        let provider = resolveProvider(series.sourceAccountID, in: accounts)
+        let topChildren = (try? await provider.children(of: series.id)) ?? []
+        guard !topChildren.isEmpty else { return nil }
+
+        // A show's children are usually seasons, but some libraries expose episodes
+        // directly. Pick the pool of episodes accordingly.
+        let episodes: [MediaItem]
+        if topChildren.contains(where: { $0.kind == .episode }) {
+            episodes = topChildren.filter { $0.kind == .episode }
+        } else if let season = SeriesResume.nextUp(in: topChildren) {
+            episodes = ((try? await provider.children(of: season.id)) ?? [])
+                .filter { $0.kind == .episode }
+        } else {
+            episodes = []
+        }
+
+        guard let episode = SeriesResume.nextUp(in: episodes) else { return nil }
+        // Raw provider children may not carry the owning account; stamp it so
+        // `bestSourcePlayItem` and the player target the correct server.
+        var stamped = episode
+        if stamped.sourceAccountID == nil { stamped.sourceAccountID = series.sourceAccountID }
+        return stamped
     }
 }
 

@@ -146,7 +146,7 @@ public struct RootView: View {
                 FirstRunProfileView(appState: appState)
 
             case .onboarding(.selectTheme, _):
-                SelectThemeView(appState: appState)
+                SelectThemeView(appState: appState, onContinue: { appState.finishThemeSelection() })
 
             case .ready:
                 ZStack {
@@ -273,6 +273,19 @@ public struct RootView: View {
                 avatarURLString: request.homeUserAvatarURL,
                 onSubmit: { appState.submitPlexPIN($0) },
                 onCancel: { appState.cancelPlexPIN() }
+            )
+        }
+        // One-time theme picker for a profile just created in-app (Settings →
+        // "Add Profile"). The app has already switched to the new profile, so
+        // this edits its per-profile theme; Continue dismisses into the app.
+        .fullScreenCover(isPresented: Binding(
+            get: { appState.isPickingThemeForNewProfile },
+            set: { newValue in if !newValue { appState.finishNewProfileThemeSelection() } }
+        )) {
+            SelectThemeView(
+                appState: appState,
+                onContinue: { appState.finishNewProfileThemeSelection() },
+                profileName: appState.profilesModel.activeProfile.name
             )
         }
         .onAppear {

@@ -3,21 +3,32 @@ import SwiftUI
 import CoreModels
 import CoreUI
 
-/// One-time first-run theme picker (brand-new install only), shown right after
-/// profile setup — whether profiles were enabled+confirmed or declined — and
-/// before the app opens.
+/// One-time theme picker shown when a profile is first set up.
 ///
-/// Selecting a theme applies it **live**: because `RootView` derives its palette
-/// and `preferredColorScheme` from `appState.themeModel.theme`, pressing an
-/// option repaints the whole screen immediately. Each card also renders an
-/// independent mini-preview built from that theme's own palette, so all four
-/// looks can be compared at a glance. "Continue" commits the choice
-/// (`AppState.finishThemeSelection`) and enters the app.
+/// Two entry points, both driven by the same view:
+/// - **First run** — rendered by `RootView` in the onboarding flow, right after
+///   profile setup (`onContinue` fires `AppState.finishThemeSelection`).
+/// - **New in-app profile** — presented as a full-screen cover after Settings →
+///   "Add Profile" switches to the freshly created profile (`onContinue` fires
+///   `AppState.finishNewProfileThemeSelection`).
 ///
-/// Never appears again once first-run setup completes; the theme can still be
-/// changed later in Settings → Appearance.
+/// Selecting a theme applies it **live**: `RootView` derives its palette and
+/// `preferredColorScheme` from `appState.themeModel.theme`, so pressing an option
+/// repaints the whole screen immediately. Each card also renders an independent
+/// mini-preview built from that theme's own palette, so all four looks can be
+/// compared at a glance. "Continue" commits the choice and dismisses.
+///
+/// Never appears again once setup completes; the theme can still be changed
+/// later in Settings → Appearance.
 struct SelectThemeView: View {
     @Bindable var appState: AppState
+    /// Called when the user accepts their choice (Continue, or Menu). The caller
+    /// decides what "done" means (enter the app, or dismiss the cover).
+    var onContinue: () -> Void
+    /// When set, personalises the heading ("Choose <name>'s look") for the
+    /// new-profile flow. `nil` uses the generic first-run heading.
+    var profileName: String? = nil
+
     @Environment(\.themePalette) private var palette
     @Environment(\.colorScheme) private var systemColorScheme
     @FocusState private var focus: Field?
@@ -29,12 +40,19 @@ struct SelectThemeView: View {
 
     private var selectedTheme: AppTheme { appState.themeModel.theme }
 
+    private var headline: String {
+        if let profileName, !profileName.isEmpty {
+            return "Choose \(profileName)'s look"
+        }
+        return "Choose your look"
+    }
+
     var body: some View {
         VStack(spacing: 40) {
             Spacer(minLength: 0)
 
             VStack(spacing: 12) {
-                Text("Choose your look")
+                Text(headline)
                     .font(.largeTitle.weight(.bold))
                     .multilineTextAlignment(.center)
 
@@ -53,7 +71,7 @@ struct SelectThemeView: View {
             .frame(maxWidth: 1500)
 
             Button {
-                appState.finishThemeSelection()
+                onContinue()
             } label: {
                 Text("Continue")
                     .fontWeight(.semibold)
@@ -69,10 +87,15 @@ struct SelectThemeView: View {
         .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
         .padding(.vertical, 48)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Own themed backdrop so the page previews the selected look even when
+        // presented as a full-screen cover over the app (in the first-run flow
+        // RootView already paints the same background behind this).
+        .background { AppBackground(palette: palette).ignoresSafeArea() }
+        .preferredColorScheme(selectedTheme.preferredColorScheme)
         .onAppear { focus = .theme(selectedTheme) }
-        // Pressing Menu accepts the current selection and enters the app, so the
-        // app never suspends from this one-time setup screen.
-        .onExitCommand { appState.finishThemeSelection() }
+        // Pressing Menu accepts the current selection, so the app never suspends
+        // from this one-time setup screen.
+        .onExitCommand { onContinue() }
     }
 
     // MARK: Theme card

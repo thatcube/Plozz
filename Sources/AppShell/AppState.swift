@@ -122,6 +122,12 @@ public final class AppState {
     /// already-active profile.
     public private(set) var isProfileSelectionCancelable = false
 
+    /// When `true`, `RootView` presents the one-time theme picker (as a
+    /// full-screen cover) for a profile just created in-app. Set right after
+    /// Settings → "Add Profile" switches to the new profile; cleared by
+    /// `finishNewProfileThemeSelection()`.
+    public private(set) var isPickingThemeForNewProfile = false
+
     /// A pending Plex PIN prompt, raised when activating a profile mapped to a
     /// PIN-protected Plex Home user. `RootView` presents an entry sheet bound to
     /// this; `nil` when no prompt is outstanding.
@@ -1622,6 +1628,16 @@ public final class AppState {
         ensurePlexIdentityForActiveProfile()
     }
 
+    /// Dismisses the one-time theme picker shown after creating a profile in-app
+    /// and applies the (now active) new profile's Plex identity — raising a PIN
+    /// prompt if it maps to a protected Home user. Guarded so it's safe to call
+    /// from both the Continue button and the cover's dismissal binding.
+    public func finishNewProfileThemeSelection() {
+        guard isPickingThemeForNewProfile else { return }
+        isPickingThemeForNewProfile = false
+        ensurePlexIdentityForActiveProfile()
+    }
+
     /// Completes a Plex sign-in started from the provider chooser.
     ///
     /// The Plex PIN-link flow resolves the chosen server only *after* the user
@@ -1819,7 +1835,7 @@ public final class AppState {
                 ensurePlexIdentityForActiveProfile()
             }
         } else {
-            profilesModel.add(
+            let created = profilesModel.add(
                 name: draft.name,
                 avatarSymbol: draft.avatarSymbol,
                 colorIndex: draft.colorIndex,
@@ -1833,6 +1849,19 @@ public final class AppState {
                 plexHomeUserBindings: draft.plexHomeUserBindings,
                 avatarImageURL: draft.avatarImageURL
             )
+            // Switch to the freshly created profile so the per-profile theme
+            // picker edits *its* namespace, then present it. Mirrors
+            // `switchProfile(to:)` minus the Plex identity check, which is
+            // deferred to `finishNewProfileThemeSelection()` so any PIN prompt
+            // surfaces as the new profile actually enters the app — not stacked
+            // under the theme cover.
+            audioController.stop()
+            profilesModel.select(created.id)
+            rebuildSettingsModels()
+            updateTraktForActiveProfile()
+            reloadAccounts()
+            isChoosingProfile = false
+            isPickingThemeForNewProfile = true
         }
     }
 

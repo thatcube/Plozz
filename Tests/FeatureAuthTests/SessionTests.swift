@@ -41,23 +41,28 @@ final class SessionStateMachineTests: XCTestCase {
 
     func testFirstRunAuthDetoursThroughProfileSetup() {
         // First-ever account: auth success routes into the profile-setup
-        // sub-flow (enable-profiles prompt → confirm), not straight to the app.
+        // sub-flow (enable-profiles prompt → confirm → theme picker), not
+        // straight to the app.
         var m = SessionStateMachine(state: .onboarding(.authenticating(server), canReturnToApp: false))
         m.apply(.accountAuthenticatedNeedsProfile)
         XCTAssertEqual(m.state, .onboarding(.enableProfilesPrompt, canReturnToApp: true))
         m.apply(.profilesEnabled)
         XCTAssertEqual(m.state, .onboarding(.confirmProfile, canReturnToApp: true))
         m.apply(.profileConfirmed)
+        XCTAssertEqual(m.state, .onboarding(.selectTheme, canReturnToApp: true))
+        m.apply(.themeSelected)
         XCTAssertEqual(m.state, .ready)
     }
 
-    func testFirstRunDeclineProfilesGoesStraightToApp() {
-        // "Not Now — Just Me" on the enable-profiles prompt enters the app
-        // without the confirm screen.
+    func testFirstRunDeclineProfilesStillShowsThemePicker() {
+        // "Not Now — Just Me" on the enable-profiles prompt skips the confirm
+        // screen but still stops at the one-time theme picker before the app.
         var m = SessionStateMachine(state: .onboarding(.authenticating(server), canReturnToApp: false))
         m.apply(.accountAuthenticatedNeedsProfile)
         XCTAssertEqual(m.state, .onboarding(.enableProfilesPrompt, canReturnToApp: true))
         m.apply(.profilesDeclined)
+        XCTAssertEqual(m.state, .onboarding(.selectTheme, canReturnToApp: true))
+        m.apply(.themeSelected)
         XCTAssertEqual(m.state, .ready)
     }
 

@@ -9,10 +9,10 @@ final class ThemeSettingsStoreTests: XCTestCase {
         return defaults
     }
 
-    func testDefaultIsSystemWhenEmpty() {
+    func testDefaultIsDarkWhenEmpty() {
         let store = ThemeSettingsStore(defaults: makeDefaults())
-        XCTAssertEqual(store.load(), .system)
-        XCTAssertEqual(AppTheme.default, .system)
+        XCTAssertEqual(store.load(), .dark)
+        XCTAssertEqual(AppTheme.default, .dark)
     }
 
     func testRoundTripForEveryTheme() {
@@ -36,7 +36,7 @@ final class ThemeSettingsStoreTests: XCTestCase {
     func testModelPersistsOnChange() {
         let defaults = makeDefaults()
         let model = ThemeSettingsModel(store: ThemeSettingsStore(defaults: defaults))
-        XCTAssertEqual(model.theme, .system)
+        XCTAssertEqual(model.theme, .dark)
         model.theme = .oled
         XCTAssertEqual(ThemeSettingsStore(defaults: defaults).load(), .oled)
     }

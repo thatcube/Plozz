@@ -42,6 +42,10 @@ public enum OnboardingStep: Equatable, Sendable {
     /// First-ever account was just added on a brand-new install; confirm (or
     /// edit) the profile we seeded from the sign-in before entering the app.
     case confirmProfile
+    /// Brand-new install only: after profile setup completes (whether profiles
+    /// were enabled+confirmed or declined), pick the app's appearance/theme
+    /// before entering the app. Never shown again once first-run setup is done.
+    case selectTheme
 }
 
 public enum SessionState: Equatable, Sendable {
@@ -84,6 +88,8 @@ public enum SessionEvent: Sendable {
     case profilesDeclined
     /// The user confirmed (or edited) their seeded profile on first run.
     case profileConfirmed
+    /// The user picked an app theme on the one-time first-run theme step.
+    case themeSelected
     case authenticationFailed(AppError)
     /// Back out of onboarding without adding an account.
     case cancelOnboarding
@@ -163,11 +169,18 @@ public struct SessionStateMachine: Sendable {
         // First-run enable-profiles decision.
         case (.onboarding(.enableProfilesPrompt, _), .profilesEnabled):
             return .onboarding(.confirmProfile, canReturnToApp: true)
+        // Declining profiles still stops at the one-time theme picker before the
+        // app (brand-new install only).
         case (.onboarding(.enableProfilesPrompt, _), .profilesDeclined):
-            return .ready
+            return .onboarding(.selectTheme, canReturnToApp: true)
 
-        // Finished the one-time first-run profile confirm step.
+        // Finished the one-time first-run profile confirm step — continue to the
+        // one-time theme picker before entering the app.
         case (.onboarding(.confirmProfile, _), .profileConfirmed):
+            return .onboarding(.selectTheme, canReturnToApp: true)
+
+        // Picked an app theme on the one-time first-run theme step — enter the app.
+        case (.onboarding(.selectTheme, _), .themeSelected):
             return .ready
 
         // Cancelling the Quick Connect / password step steps BACK to the

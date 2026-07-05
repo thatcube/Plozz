@@ -145,6 +145,9 @@ public struct RootView: View {
             case .onboarding(.confirmProfile, _):
                 FirstRunProfileView(appState: appState)
 
+            case .onboarding(.selectTheme, _):
+                SelectThemeView(appState: appState)
+
             case .ready:
                 ZStack {
                 if appState.isChoosingProfile {

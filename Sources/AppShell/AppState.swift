@@ -1598,20 +1598,27 @@ public final class AppState {
     }
 
     /// First-run "Not Now — Just Me": keeps profiles hidden/disabled, marks
-    /// first-run setup done, and enters the app with the single seeded profile.
+    /// first-run setup done, and continues to the one-time theme picker before
+    /// the app.
     public func declineProfilesForFirstRun() {
         profilesModel.markFirstRunProfileSetupComplete()
         apply(.profilesDeclined)
-        ensurePlexIdentityForActiveProfile()
     }
 
-    /// Completes the one-time first-run profile confirm step and enters the app.
-    /// Marks the setup done so re-adding a server later never re-runs it.
+    /// Completes the one-time first-run profile confirm step and continues to the
+    /// one-time theme picker. Marks the setup done so re-adding a server later
+    /// never re-runs it.
     public func confirmFirstRunProfile() {
         profilesModel.markFirstRunProfileSetupComplete()
         apply(.profileConfirmed)
-        // Apply any Plex Home-user binding picked during onboarding now that we
-        // enter the app (a protected user raises the PIN prompt here).
+    }
+
+    /// Completes the one-time first-run theme picker and enters the app. Applying
+    /// any Plex Home-user binding (which can raise a PIN prompt) is deferred to
+    /// here so it surfaces as the user actually enters the app — not over the
+    /// theme screen.
+    public func finishThemeSelection() {
+        apply(.themeSelected)
         ensurePlexIdentityForActiveProfile()
     }
 

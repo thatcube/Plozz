@@ -38,7 +38,21 @@ public enum AppTheme: String, CaseIterable, Identifiable, Codable, Sendable {
         }
     }
 
-    public static let `default`: AppTheme = .system
+    /// One-line explanation of each look, shown under the option in the
+    /// onboarding theme picker (and available to Settings).
+    public var detail: String {
+        switch self {
+        case .system: return "Follow your Apple TV's light or dark appearance."
+        case .light: return "A bright theme for well-lit rooms."
+        case .dark: return "A soft dark gray — easy on the eyes for most rooms."
+        case .oled: return "Pure black for the deepest contrast on OLED screens."
+        }
+    }
+
+    /// Fresh installs default to Dark, regardless of the device appearance —
+    /// dark/OLED read best for a lean-back media app. Users can still pick any
+    /// look during onboarding or later in Settings.
+    public static let `default`: AppTheme = .dark
 }
 
 /// How the full-screen music player paints its background and text. Independent

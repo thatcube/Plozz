@@ -13,6 +13,36 @@ import Foundation
 //
 // Only fields Plozz actually uses are modelled; unknown fields are ignored.
 
+/// Decodes an integer that Plex serializes as a **number** on the per-server
+/// (PMS) API but as a **string** on the plex.tv Discover service (e.g. the
+/// watchlist's `Media`/`Part`/`Stream` ids are global string ids). Tolerating
+/// both keeps one string id from aborting the decode of an entire payload; a
+/// non-numeric string decodes to `nil` (those ids don't resolve against a PMS
+/// anyway, so nothing downstream is lost).
+@propertyWrapper
+struct LenientInt: Decodable {
+    var wrappedValue: Int?
+    init(wrappedValue: Int?) { self.wrappedValue = wrappedValue }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        if let i = try? c.decode(Int.self) {
+            wrappedValue = i
+        } else if let s = try? c.decode(String.self) {
+            wrappedValue = Int(s)
+        } else {
+            wrappedValue = nil
+        }
+    }
+}
+
+extension KeyedDecodingContainer {
+    // Synthesized Decodable calls `decode(_:forKey:)` for a wrapped property, so a
+    // missing key would throw; default it to an empty value instead.
+    func decode(_ type: LenientInt.Type, forKey key: Key) throws -> LenientInt {
+        (try? decodeIfPresent(LenientInt.self, forKey: key)) ?? LenientInt(wrappedValue: nil)
+    }
+}
+
 // MARK: Server: MediaContainer envelopes
 
 struct PlexMediaContainerResponse: Decodable {
@@ -199,7 +229,7 @@ struct PlexRole: Decodable {
 }
 
 struct PlexMedia: Decodable {
-    let id: Int?
+    @LenientInt var id: Int?
     let duration: Int?
     let container: String?
     let videoCodec: String?
@@ -268,7 +298,7 @@ struct PlexMarker: Decodable {
 }
 
 struct PlexPart: Decodable {
-    let id: Int?
+    @LenientInt var id: Int?
     let key: String?           // e.g. "/library/parts/123/16000/file.mkv"
     /// Absolute filesystem path of the file, e.g.
     /// `/data/Movies/Movie (2009)/Movie (2009) Extended Bluray-2160p.mkv`. Its
@@ -285,7 +315,7 @@ struct PlexPart: Decodable {
 }
 
 struct PlexStream: Decodable {
-    let id: Int?
+    @LenientInt var id: Int?
     let streamType: Int?       // 1 video, 2 audio, 3 subtitle
     let index: Int?
     let codec: String?

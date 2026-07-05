@@ -522,15 +522,14 @@ public struct PlexClient: Sendable {
     // MARK: Watchlist (plex.tv Discover service)
     //
     // Plex's Watchlist is an **account-level** feature served by the global
-    // Discover endpoints (`discover.provider.plex.tv` to mutate,
-    // `metadata.provider.plex.tv` to read) — NOT the per-server PMS API. It's
-    // keyed by the item's global `plex://` guid (its trailing id), so these
-    // requests bypass the connection resolver and hit the fixed plex.tv hosts
-    // directly with the account token. Failures surface to the caller, which
-    // reverts the optimistic UI.
+    // Discover host `discover.provider.plex.tv` — NOT the per-server PMS API and
+    // no longer the legacy `metadata.provider.plex.tv` read host (that now 404s;
+    // reads were migrated to the Discover host). It's keyed by the item's global
+    // `plex://` guid (its trailing id), so these requests bypass the connection
+    // resolver and hit the fixed plex.tv host directly with the account token.
+    // Failures surface to the caller, which reverts the optimistic UI.
 
-    private static let watchlistActionBase = URL(string: "https://discover.provider.plex.tv")!
-    private static let watchlistMetadataBase = URL(string: "https://metadata.provider.plex.tv")!
+    private static let watchlistBase = URL(string: "https://discover.provider.plex.tv")!
 
     /// The Discover metadata id for a `plex://<type>/<id>` guid — the trailing
     /// path component the watchlist endpoints key on. `nil` for a non-`plex://`
@@ -562,10 +561,10 @@ public struct PlexClient: Sendable {
             ],
             headers: headers
         )
-        _ = try await http.send(endpoint, baseURL: Self.watchlistActionBase)
+        _ = try await http.send(endpoint, baseURL: Self.watchlistBase)
     }
 
-    /// `GET https://metadata.provider.plex.tv/library/sections/watchlist/all` —
+    /// `GET https://discover.provider.plex.tv/library/sections/watchlist/all` —
     /// the account's current watchlist. Items carry global Discover ids that do
     /// not resolve against a specific PMS for playback (documented limitation).
     func watchlist() async throws -> [PlexMetadata] {
@@ -577,7 +576,7 @@ public struct PlexClient: Sendable {
             ],
             headers: headers
         )
-        let (data, _) = try await http.send(endpoint, baseURL: Self.watchlistMetadataBase)
+        let (data, _) = try await http.send(endpoint, baseURL: Self.watchlistBase)
         do {
             return try JSONDecoder.plozz.decode(PlexMediaContainerResponse.self, from: data)
                 .MediaContainer.Metadata ?? []

@@ -90,4 +90,54 @@ final class PlexWatchlistTests: XCTestCase {
         XCTAssertEqual(items.map(\.title), ["Dune"])
         XCTAssertTrue(items.first?.isFavorite ?? false)
     }
+
+    /// Regression: the watchlist READ must hit `discover.provider.plex.tv`, not
+    /// the legacy `metadata.provider.plex.tv` host (which now 404s — reads were
+    /// migrated to the Discover host, matching the write action's host).
+    func testWatchlistReadUsesDiscoverHost() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/library/sections/watchlist/all", json: """
+        {"MediaContainer":{"size":0,"Metadata":[]}}
+        """)
+        let provider = PlexProvider(session: makeSession(), http: stub)
+
+        _ = try await provider.watchlist()
+
+        let host = stub.baseURL(forPathSuffix: "/library/sections/watchlist/all")?.host
+        XCTAssertEqual(host, "discover.provider.plex.tv")
+    }
+
+    func testWatchlistWriteUsesDiscoverHost() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/actions/addToWatchlist", json: "{}")
+        let provider = PlexProvider(session: makeSession(), http: stub)
+        var item = MediaItem(id: "101", title: "m", kind: .movie)
+        item.providerIDs = ["PlexGuid": "plex://movie/abc123"]
+
+        try await provider.setWatchlisted(true, item: item)
+
+        let host = stub.baseURL(forPathSuffix: "/actions/addToWatchlist")?.host
+        XCTAssertEqual(host, "discover.provider.plex.tv")
+    }
+
+    /// Regression: the Discover watchlist serializes `Media`/`Part`/`Stream` ids
+    /// as **strings** (global ids), unlike the PMS API's integers. One string id
+    /// must not abort the decode of the whole payload (previously it threw
+    /// `typeMismatch: Expected Int … found a string`, yielding an empty row).
+    func testWatchlistDecodesDiscoverStringPartIDs() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/library/sections/watchlist/all", json: """
+        {"MediaContainer":{"librarySectionID":"watchlist","totalSize":2,"size":2,"Metadata":[
+          {"ratingKey":"g1","type":"movie","title":"Dune","year":2021,
+           "Media":[{"id":"m-abc","Part":[{"id":"p-xyz","Stream":[{"id":"s-1"}]}]}]},
+          {"ratingKey":"g2","type":"show","title":"Severance"}
+        ]}}
+        """)
+        let provider = PlexProvider(session: makeSession(), http: stub)
+
+        let items = try await provider.watchlist()
+
+        XCTAssertEqual(items.map(\.title), ["Dune", "Severance"])
+        XCTAssertTrue(items.allSatisfy(\.isFavorite))
+    }
 }

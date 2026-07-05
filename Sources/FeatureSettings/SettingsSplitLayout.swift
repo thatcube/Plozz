@@ -90,13 +90,13 @@ struct SettingsSplitLayout: View {
         GeometryReader { geo in
             HStack(alignment: .top, spacing: 120) {
                 masterList
-                    .frame(width: max(320, geo.size.width * 0.40 - 80), alignment: .leading)
+                    .frame(width: max(280, geo.size.width * 0.40 - 160), alignment: .leading)
 
                 detailPane
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
             .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
-            .padding(.vertical, 24)
+            .padding(.vertical, 8)
         }
         .onAppear {
             if selectedRowID == nil { selectedRowID = allRowIDs.first }
@@ -194,7 +194,8 @@ struct SettingsSplitLayout: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(80)
+            .padding(.horizontal, 80)
+            .padding(.vertical, 56)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(

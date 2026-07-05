@@ -309,9 +309,23 @@ private struct ThemePreviewSwatch: View {
         Group {
             switch theme {
             case .system:
-                HStack(spacing: 0) {
-                    MiniPreview(colors: .light)
-                    MiniPreview(colors: .dark)
+                // One continuous UI, split down the middle: the left half is
+                // painted light, the right half dark, so the centre poster card
+                // straddles the seam. Both layers render the IDENTICAL full-width
+                // layout, then each is masked to its half so every element lines
+                // up exactly across the split. The light layer overruns the seam
+                // by 0.5pt (and sits under the dark layer) to avoid a hairline gap.
+                GeometryReader { geo in
+                    ZStack {
+                        MiniPreview(colors: .light)
+                            .mask(alignment: .leading) {
+                                Rectangle().frame(width: geo.size.width / 2 + 0.5)
+                            }
+                        MiniPreview(colors: .dark)
+                            .mask(alignment: .trailing) {
+                                Rectangle().frame(width: geo.size.width / 2)
+                            }
+                    }
                 }
             case .light:
                 MiniPreview(colors: .light)

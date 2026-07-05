@@ -81,7 +81,7 @@ struct MyLibrariesDetailView: View {
         SettingsPanel {
             VStack(alignment: .leading, spacing: 18) {
                 HStack(spacing: 14) {
-                    ProviderIcon(provider: group.providerKind, size: 40).frame(width: 30)
+                    ProviderIcon(provider: group.providerKind, size: 52).frame(width: 52)
                     Text(group.serverName).font(.title3.weight(.semibold))
                     Spacer()
                 }
@@ -207,7 +207,7 @@ struct MyLibrariesDetailView: View {
                         startWatching(group)
                     } label: {
                         HStack(spacing: 14) {
-                            ProviderIcon(provider: group.providerKind, size: 36).frame(width: 28)
+                            ProviderIcon(provider: group.providerKind, size: 42).frame(width: 42)
                             Text(group.serverName).font(.callout.weight(.medium))
                             Spacer()
                             Label("Add", systemImage: "plus.circle").labelStyle(.titleAndIcon)

@@ -356,28 +356,33 @@ private struct HomeRowsGroupCard<Content: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: 12) {
+            HStack(spacing: 14) {
                 Group {
                     if let providerKind {
-                        ProviderBrandMark(provider: providerKind, size: 28, showsBackground: false)
+                        ProviderBrandMark(provider: providerKind, size: 44, showsBackground: false)
                     } else if let systemIcon {
                         Image(systemName: systemIcon)
-                            .font(.system(size: 20, weight: .semibold))
+                            .font(.system(size: 30, weight: .semibold))
                             .foregroundStyle(.secondary)
                     }
                 }
-                .frame(width: 32)
-                VStack(alignment: .leading, spacing: 1) {
+                .frame(width: 46)
+                // Library title + server name on ONE line ("Movies · Brandoland"):
+                // the title reads prominent, the server name trails as a lighter
+                // qualifier separated by a mid-dot.
+                HStack(spacing: 8) {
                     Text(title)
                         .font(.headline.weight(.semibold))
-                        .lineLimit(1)
                     if let subtitle {
+                        Text("·")
+                            .font(.subheadline)
+                            .foregroundStyle(.tertiary)
                         Text(subtitle)
-                            .font(.footnote)
+                            .font(.subheadline)
                             .foregroundStyle(.secondary)
-                            .lineLimit(1)
                     }
                 }
+                .lineLimit(1)
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 22)

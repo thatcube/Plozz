@@ -28,7 +28,7 @@ struct AppearanceDetailView: View {
     }
 
     var body: some View {
-        SettingsSplitLayout(sections: sections)
+        SettingsSplitLayout(title: "Appearance", sections: sections)
     }
 
     private var sections: [SettingsSplitSection] {
@@ -145,7 +145,7 @@ struct SpoilersDetailView: View {
     }
 
     var body: some View {
-        SettingsSplitLayout(sections: sections)
+        SettingsSplitLayout(title: "Spoilers", sections: sections)
     }
 
     private var sections: [SettingsSplitSection] {
@@ -318,7 +318,7 @@ struct PlaybackDetailView: View {
     }
 
     var body: some View {
-        SettingsSplitLayout(sections: sections)
+        SettingsSplitLayout(title: "Playback", sections: sections)
     }
 
     // MARK: - Split sections

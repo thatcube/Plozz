@@ -27,7 +27,7 @@ struct CustomizeHomeDetailView: View {
     @Environment(HeroSettingsModel.self) private var hero
 
     var body: some View {
-        SettingsSplitLayout(sections: sections)
+        SettingsSplitLayout(title: "Customize Home", sections: sections)
     }
 
     private var sections: [SettingsSplitSection] {

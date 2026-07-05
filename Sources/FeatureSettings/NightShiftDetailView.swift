@@ -12,7 +12,7 @@ struct NightShiftDetailView: View {
     @Bindable var model: NightShiftSettingsModel
 
     var body: some View {
-        SettingsSplitLayout(sections: sections)
+        SettingsSplitLayout(title: "Circadian Mode", sections: sections)
             .onChange(of: model.settings.isEnabled) { _, enabled in
                 if !enabled { model.isPreviewing = false }
             }

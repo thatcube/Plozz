@@ -61,6 +61,9 @@ struct SettingsSplitSection: Identifiable {
 /// flipping a toggle in the detail pane recomputes the list (revealing or
 /// hiding indented sub-rows) on the next render.
 struct SettingsSplitLayout: View {
+    /// The page's own name (matches the parent nav row that opened it, e.g.
+    /// "Appearance") — shown as the single header atop the left list.
+    let title: String
     let sections: [SettingsSplitSection]
 
     @State private var selectedRowID: String?
@@ -119,18 +122,15 @@ struct SettingsSplitLayout: View {
     private var masterList: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 6) {
-                ForEach(sections) { section in
-                    if let header = section.header {
-                        Text(header)
-                            .font(.subheadline.weight(.semibold))
-                            .textCase(.uppercase)
-                            .tracking(1.0)
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 12)
-                            .padding(.top, 22)
-                            .padding(.bottom, 4)
-                    }
+                // One page header at the top, always in sync with the nav row the
+                // user came from. Per-section subheaders are intentionally omitted.
+                Text(title)
+                    .font(.title2.weight(.bold))
+                    .foregroundStyle(.primary)
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 12)
 
+                ForEach(sections) { section in
                     ForEach(section.rows) { row in
                         masterRow(row)
                             .focused($focusedRow, equals: row.id)

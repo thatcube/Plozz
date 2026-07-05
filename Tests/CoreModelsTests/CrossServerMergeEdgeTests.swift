@@ -87,6 +87,51 @@ final class CrossServerMergeEdgeTests: XCTestCase {
         XCTAssertEqual(merged.count, 2)
     }
 
+    func testWatchlistDiscoverStubContributesNoPlayableSource() {
+        // A real Plex Watchlist item is a Discover stub: its `id` IS the global
+        // catalog guid tail (`plex://show/<id>` → `<id>`), which no PMS can play.
+        // Two such stubs (one per Plex account) merge, and the identity index
+        // supplies the real, playable library copy (acctB:12860). The merged card's
+        // sources must be ONLY the real library copy — the Discover stubs must add
+        // no self-source, or a dead ref wins best-source selection and playback
+        // fails for a title the user owns ("Can't play this right now").
+        let guid = "plex://show/65775ffef0d9d4f00f4d8f4e"
+        let stubA = item("65775ffef0d9d4f00f4d8f4e", title: "Baby Reindeer", kind: .series,
+                         account: "acctA", ids: ["PlexGuid": guid])
+        let stubB = item("65775ffef0d9d4f00f4d8f4e", title: "Baby Reindeer", kind: .series,
+                         account: "acctB", ids: ["PlexGuid": guid])
+        let libraryRef = MediaSourceRef(accountID: "acctB", itemID: "12860")
+
+        let merged = MediaItemMerger.merge(
+            [stubA, stubB],
+            identitySources: { _ in [libraryRef] }
+        )
+
+        XCTAssertEqual(merged.count, 1)
+        XCTAssertEqual(merged[0].sources.map(\.id), ["acctB:12860"],
+                       "Only the real library copy is a playable source; the Discover stubs add none")
+        XCTAssertFalse(merged[0].sources.contains { $0.itemID == "65775ffef0d9d4f00f4d8f4e" },
+                       "No source may point at the un-playable global Discover id")
+    }
+
+    func testNonStubPlexItemStillContributesItsSource() {
+        // Guard against over-filtering: an ordinary Plex library item carries a
+        // PlexGuid too, but its id is the per-server ratingKey (≠ the guid tail),
+        // so it MUST still contribute its own playable source.
+        let libraryItem = item("12860", title: "Baby Reindeer", kind: .series, account: "acctB",
+                               ids: ["PlexGuid": "plex://show/65775ffef0d9d4f00f4d8f4e"])
+        let twin = MediaSourceRef(accountID: "acctA", itemID: "999")
+
+        let merged = MediaItemMerger.merge(
+            [libraryItem],
+            identitySources: { _ in [twin] }
+        )
+
+        XCTAssertEqual(merged.count, 1)
+        XCTAssertTrue(merged[0].sources.contains { $0.id == "acctB:12860" },
+                      "A real library item (id = ratingKey ≠ guid tail) keeps its own source")
+    }
+
     // MARK: Partial / garbage metadata (criterion 6)
 
     func testMovieMissingYearDoesNotMergeWithYearedTwin() {

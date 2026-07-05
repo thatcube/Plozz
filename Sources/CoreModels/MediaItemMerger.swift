@@ -356,6 +356,21 @@ public enum MediaItemMerger {
         serverInfo: (String) -> SourceServerInfo?
     ) -> MediaSourceRef? {
         guard let accountID = item.sourceAccountID else { return nil }
+        // A Plex **Discover / watchlist stub** addresses the title only by its
+        // GLOBAL catalog guid — its own `id` equals the `PlexGuid` tail
+        // (`plex://show/<id>` → `<id>`). No Plex Media Server can play that global
+        // id, so the stub must NOT contribute a playable source: doing so let a
+        // dead Discover ref win best-source selection over the real library copy,
+        // surfacing as "Can't play this right now" for a title the user owns. The
+        // concrete, playable library copies are folded in via the identity index
+        // instead (the same way Seerr items — which carry no `sourceAccountID` —
+        // already rely on the index). Real library items are unaffected: their
+        // integer ratingKey never equals the 24-hex global guid tail.
+        if let plexGuid = item.providerIDs["PlexGuid"],
+           let guidTail = plexGuid.split(separator: "/").last.map(String.init),
+           item.id == guidTail {
+            return nil
+        }
         let info = serverInfo(accountID)
         let versions = item.versions.isEmpty ? [MediaVersion.synthesized(from: item)] : item.versions
         return MediaSourceRef(

@@ -77,11 +77,14 @@ private struct MusicMini: View {
                     .shadow(color: .black.opacity(0.35), radius: art * 0.08, y: art * 0.04)
                 Spacer(minLength: 0)
                 // Progress bar: white played portion on a lighter-white track.
+                // A soft shadow lifts it off light backgrounds where white-on-
+                // near-white would otherwise wash out.
                 ZStack(alignment: .leading) {
                     Capsule().fill(colors.track).frame(height: barH)
                     Capsule().fill(colors.seek).frame(width: innerW * 0.4, height: barH)
                 }
                 .frame(width: innerW)
+                .shadow(color: .black.opacity(0.25), radius: barH * 0.9, y: barH * 0.35)
             }
             .padding(pad)
             .frame(width: w, height: h)

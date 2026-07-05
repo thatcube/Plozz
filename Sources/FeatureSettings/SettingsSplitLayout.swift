@@ -88,15 +88,18 @@ struct SettingsSplitLayout: View {
 
     var body: some View {
         GeometryReader { geo in
-            HStack(alignment: .top, spacing: 120) {
+            HStack(alignment: .top, spacing: 60) {
                 masterList
                     .frame(width: max(280, geo.size.width * 0.40 - 160), alignment: .leading)
+                    // Generous top inset so the nav list starts level with the
+                    // detail panel's content (which the panel pads down to match),
+                    // even though the panel itself now runs full height.
+                    .padding(.top, 26)
 
                 detailPane
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
             .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
-            .padding(.vertical, 8)
         }
         .onAppear {
             if selectedRowID == nil { selectedRowID = allRowIDs.first }
@@ -194,23 +197,21 @@ struct SettingsSplitLayout: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 80)
-            .padding(.vertical, 56)
+            .padding(.top, 56)
+            .padding(.bottom, 48)
+            .padding(.horizontal, 56)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(
-            RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
-                .fill(.ultraThinMaterial)
-        )
-        // Keep scrolling content inside the card from every edge — without this
-        // the controls scroll out past the top/bottom and the wide horizontal
-        // rows run off the side. Clip to the card shape, then stroke on top so
-        // the border itself isn't clipped away.
-        .clipShape(RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
-        )
+        .background(Rectangle().fill(.ultraThinMaterial))
+        // Full-height detail panel, separated from the master list by a single
+        // left-edge divider instead of an enclosing card border. Clip so the
+        // wide horizontal rows / scrolling content stay inside the panel.
+        .clipShape(Rectangle())
+        .overlay(alignment: .leading) {
+            Rectangle()
+                .fill(Color.primary.opacity(0.12))
+                .frame(width: 1)
+        }
         // The detail pane's Text/description views are REPLACED whenever
         // `selectedRowID` changes — and that changes as focus moves in the master
         // list (see `onChange(of: focusedRow)`). Animating that hierarchy swap on
@@ -235,18 +236,11 @@ private struct SettingsMasterRowLabel: View {
     let row: SettingsSplitRow
     let isSelected: Bool
     @Environment(\.settingsRowIsFocused) private var isFocused
-    @Environment(\.settingsRowFocusForeground) private var focusFg
     @Environment(\.themePalette) private var palette
 
     /// Accent selection only shows when this row is the live selection AND the
     /// list does not currently hold focus (focus is in the detail pane).
     private var showSelection: Bool { isSelected && !isFocused }
-
-    private var chevronColor: AnyShapeStyle {
-        if isFocused { return AnyShapeStyle(focusFg.opacity(0.65)) }
-        if isSelected { return AnyShapeStyle(palette.accent) }
-        return AnyShapeStyle(.secondary)
-    }
 
     var body: some View {
         HStack(spacing: 14) {
@@ -260,9 +254,6 @@ private struct SettingsMasterRowLabel: View {
                 .lineLimit(2)
                 .multilineTextAlignment(.leading)
             Spacer(minLength: 12)
-            Image(systemName: "chevron.right")
-                .font(.caption.weight(.bold))
-                .foregroundStyle(chevronColor)
         }
         .padding(.vertical, 12)
         .padding(.horizontal, 12)

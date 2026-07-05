@@ -202,15 +202,16 @@ struct SettingsSplitLayout: View {
             .padding(.horizontal, 56)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Rectangle().fill(.ultraThinMaterial))
         // Full-height detail panel, separated from the master list by a single
-        // left-edge divider instead of an enclosing card border. Clip so the
-        // wide horizontal rows / scrolling content stay inside the panel.
-        .clipShape(Rectangle())
-        .overlay(alignment: .leading) {
-            Rectangle()
-                .fill(Color.primary.opacity(0.12))
-                .frame(width: 1)
+        // left-edge divider instead of an enclosing card border. The fill + divider
+        // ignore the vertical safe area so the panel reaches the very top and bottom
+        // of the page; the scrolling content stays within the safe-area frame.
+        .background(alignment: .leading) {
+            ZStack(alignment: .leading) {
+                Rectangle().fill(.ultraThinMaterial)
+                Rectangle().fill(Color.primary.opacity(0.12)).frame(width: 1)
+            }
+            .ignoresSafeArea(edges: .vertical)
         }
         // The detail pane's Text/description views are REPLACED whenever
         // `selectedRowID` changes — and that changes as focus moves in the master

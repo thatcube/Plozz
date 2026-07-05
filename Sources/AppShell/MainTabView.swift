@@ -1485,6 +1485,15 @@ private struct HomeTab: View {
     /// In-progress items prompt "Resume vs Start Over"; fully-unwatched items
     /// play immediately from the start.
     private func requestPlay(_ item: MediaItem) {
+        // A whole series can't be direct-played — its container has no media, so
+        // `playbackInfo` for a series ratingKey returns notFound ("Can't play this
+        // right now"). Route it to the detail page instead, which resolves the
+        // next-up / resume episode and offers Play there — the same path a series
+        // tile already uses. Movies and episodes play directly below.
+        if item.kind == .series {
+            navigate(item)
+            return
+        }
         let target = bestSourcePlayItem(item, accounts: accounts, identitySources: identitySources)
         if let resume = target.resumePosition, resume > 1 {
             resumePrompt = target

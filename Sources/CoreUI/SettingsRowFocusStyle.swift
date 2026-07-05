@@ -93,7 +93,8 @@ private struct SettingsFocusBody: View {
             // checkmarks) still wins.
             .foregroundStyle(isFocused ? AnyShapeStyle(focusForeground) : AnyShapeStyle(.primary))
             .opacity(configuration.isPressed ? 0.88 : 1.0)
-            .animation(.easeOut(duration: 0.16), value: isFocused)
+            // Focus is INSTANT — no fill/scale/shadow easing when focus moves
+            // between rows. (Deliberately no `.animation(value: isFocused)`.)
     }
 }
 

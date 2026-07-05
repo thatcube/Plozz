@@ -306,6 +306,8 @@ public struct PreviewCard<Swatch: View>: View {
                     HStack(spacing: 6) {
                         Text(title)
                             .font(compact ? .headline : .title3.weight(.semibold))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
                         if isSelected {
                             Image(systemName: "checkmark.circle.fill")
                                 .font(compact ? .subheadline : .headline)

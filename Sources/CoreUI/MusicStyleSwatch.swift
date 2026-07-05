@@ -8,8 +8,11 @@ import CoreModels
 private struct MusicStylePreviewColors {
     let bgTop: Color
     let bgBottom: Color
-    /// Progress-track colour (the unfilled scrubber).
+    /// Progress-track colour (the unfilled scrubber behind the played portion).
     let track: Color
+    /// Played-portion colour of the scrubber. The real player uses white on a
+    /// lighter-white track, so this is white (tuned per look for contrast).
+    let seek: Color
 
     /// A fixed, vivid "album art" gradient — the artwork is the same in every
     /// variant; only the surrounding chrome (background, track) changes.
@@ -17,22 +20,24 @@ private struct MusicStylePreviewColors {
         Color(red: 0.98, green: 0.42, blue: 0.55),
         Color(red: 0.42, green: 0.38, blue: 0.95)
     ]
-    static let accent = ThemePreviewColors.accentBlue
 
     static let light = MusicStylePreviewColors(
         bgTop: Color(white: 0.97),
         bgBottom: Color(white: 0.90),
-        track: Color.black.opacity(0.14)
+        track: Color.white.opacity(0.9),
+        seek: Color.white
     )
     static let dark = MusicStylePreviewColors(
         bgTop: Color(red: 0.17, green: 0.16, blue: 0.20),
         bgBottom: Color(red: 0.10, green: 0.09, blue: 0.13),
-        track: Color.white.opacity(0.22)
+        track: Color.white.opacity(0.3),
+        seek: Color.white
     )
     static let oled = MusicStylePreviewColors(
         bgTop: .black,
         bgBottom: .black,
-        track: Color.white.opacity(0.24)
+        track: Color.white.opacity(0.3),
+        seek: Color.white
     )
 }
 
@@ -69,11 +74,12 @@ private struct MusicMini: View {
                         RoundedRectangle(cornerRadius: art * 0.12, style: .continuous)
                             .strokeBorder(Color.white.opacity(0.14), lineWidth: 1)
                     )
+                    .shadow(color: .black.opacity(0.35), radius: art * 0.08, y: art * 0.04)
                 Spacer(minLength: 0)
-                // Progress bar.
+                // Progress bar: white played portion on a lighter-white track.
                 ZStack(alignment: .leading) {
                     Capsule().fill(colors.track).frame(height: barH)
-                    Capsule().fill(MusicStylePreviewColors.accent).frame(width: innerW * 0.4, height: barH)
+                    Capsule().fill(colors.seek).frame(width: innerW * 0.4, height: barH)
                 }
                 .frame(width: innerW)
             }

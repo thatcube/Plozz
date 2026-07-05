@@ -770,6 +770,19 @@ private func bestSourcePlayItem(
         unioned.append(ref)
     }
 
+    // Drop any un-playable Plex **Discover** source: a watchlist/Discover stub is
+    // addressed by the GLOBAL catalog guid (its itemID == the `plex://…/<id>`
+    // tail), which no Plex Media Server can play. Such refs can linger on an item
+    // rebuilt before the merger fix, or hydrated from an older on-disk Home cache;
+    // if one wins best-source selection, playback dead-ends on "Can't play this"
+    // even though a real library copy exists. Filtering here is cache-proof — but
+    // only when a real, playable twin remains (never strip the last source, so a
+    // genuinely Discover-only title still resolves to its stub rather than nothing).
+    if let guidTail = item.providerIDs["PlexGuid"]?.split(separator: "/").last.map(String.init) {
+        let playable = unioned.filter { $0.itemID != guidTail }
+        if !playable.isEmpty { unioned = playable }
+    }
+
     let liveSources = (activeAccountIDs.isEmpty
         ? unioned
         : unioned.filter { activeAccountIDs.contains($0.accountID) })
@@ -791,6 +804,30 @@ private func bestSourcePlayItem(
        let picked = item.selectedSourceAccountID,
        liveSources.contains(where: { $0.accountID == picked }) {
         return item
+    }
+
+    // If the item's OWN (account, id) isn't itself a playable source — the
+    // Discover-stub case, where its id is the global guid we filtered out above —
+    // force a retarget onto the best remaining source, so we never launch the
+    // un-playable id even when the real copy sits on the same account as the stub
+    // (which the single-source heuristic below wouldn't otherwise catch). No-op
+    // for ordinary items, whose primary (account, id) is always among liveSources.
+    let primaryIsPlayable = liveSources.contains {
+        $0.accountID == item.sourceAccountID && $0.itemID == item.id
+    }
+    if !primaryIsPlayable, !liveSources.isEmpty {
+        let selection = CrossSourceSelector.bestSelection(
+            from: liveSources,
+            capabilities: .detected(),
+            preferring: item.sourceAccountID
+        )
+        let target = selection?.source ?? liveSources[0]
+        return MediaItem.retargetedForPlayback(
+            item: item,
+            sources: liveSources,
+            activeAccountID: target.accountID,
+            versionID: selection?.version?.id
+        )
     }
 
     guard liveSources.count > 1,

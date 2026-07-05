@@ -36,6 +36,17 @@ public struct ProviderBrandMark: View {
         provider == .plex ? "PlexLogo" : "JellyfinLogo"
     }
 
+    /// Interior padding for the bundled logo asset. The Plex mark reads visibly
+    /// smaller than the Jellyfin mark at the same frame, so Plex gets less padding
+    /// — rendering ~8pt larger at the settings icon sizes — while the `size` frame
+    /// is unchanged, so surrounding layout never shifts. Proportional, so small
+    /// marks stay comfortably in-bounds.
+    private var assetPadding: CGFloat {
+        let base = size * (showsBackground ? 0.24 : 0.12)
+        let plexBoost: CGFloat = provider == .plex ? size * 0.07 : 0
+        return max(0, base - plexBoost)
+    }
+
     /// A media share has no bundled brand logo (it isn't a product), so it draws
     /// an SF Symbol instead of a `*Logo` asset. `nil` for the real providers.
     private var systemSymbolName: String? {
@@ -58,7 +69,7 @@ public struct ProviderBrandMark: View {
                     .renderingMode(.template)
                     .resizable()
                     .scaledToFit()
-                    .padding(size * (showsBackground ? 0.24 : 0.12))
+                    .padding(assetPadding)
                     .foregroundStyle(tint)
             }
         }

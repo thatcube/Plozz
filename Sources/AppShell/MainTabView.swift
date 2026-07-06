@@ -1466,11 +1466,13 @@ private struct HomeTab: View {
     /// pinned to its library's server.
     @ViewBuilder
     private func itemDetail(for item: MediaItem, libraryOrigin: String?) -> some View {
-        // A discovery (Seerr) title — e.g. a "More Info" tap on a not-owned
-        // featured hero slide — carries an availability status no library item
-        // has. Route it to the request-focused discovery detail page instead of a
-        // doomed library fetch.
-        let isDiscovery = item.availability != nil
+        // A discovery (Seerr) title that isn't in the library — e.g. a "More Info"
+        // tap on a *not-owned* featured hero slide — routes to the request-focused
+        // discovery detail page instead of a doomed library fetch. Owned featured
+        // titles (available/partiallyAvailable) are NOT discovery: they resolve to
+        // a real library copy via the identity index, so they keep the normal
+        // playable detail page.
+        let isDiscovery = item.isNotInLibraryDiscovery
         ItemDetailView(
             viewModel: ItemDetailViewModel(
                 provider: resolveProvider(item.sourceAccountID, in: accounts),
@@ -1743,10 +1745,12 @@ private struct SearchTab: View {
                 onSelect: { open($0) }
             )
             .navigationDestination(for: MediaItem.self) { item in
-                // A discovery (Seerr) result — id `seer:<tmdbId>`, carrying an
-                // availability status no library item has — opens the request-
-                // focused discovery detail page rather than a library fetch.
-                let isDiscovery = item.availability != nil
+                // A discovery (Seerr) result that isn't in the library (id
+                // `seer:<tmdbId>`, requestable/in-flight availability) opens the
+                // request-focused discovery detail page rather than a library
+                // fetch. Search's "Not in Your Library" section only ever surfaces
+                // such titles (owned ones are filtered out).
+                let isDiscovery = item.isNotInLibraryDiscovery
                 ItemDetailView(
                     viewModel: ItemDetailViewModel(
                         provider: resolveProvider(item.sourceAccountID, in: accounts),

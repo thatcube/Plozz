@@ -39,6 +39,25 @@ public extension MediaItem {
         )
     }
 
+    /// Whether this is a Seerr **discovery** title that isn't in the library — it
+    /// carries a discovery `availability` that is requestable or in-flight
+    /// (`unknown`/`pending`/`processing`/`deleted`), as opposed to an *owned*
+    /// discovery title (`available`/`partiallyAvailable`, which still resolves to a
+    /// real library copy via the identity index) or an ordinary library item (no
+    /// `availability`).
+    ///
+    /// Drives request-focused detail routing and the suppression of library
+    /// actions (Play / Watchlist / Watched / Refresh) that can't apply to a title
+    /// with no resolvable library id. Owned featured titles are deliberately
+    /// excluded so their working Play/Watchlist affordances are preserved.
+    var isNotInLibraryDiscovery: Bool {
+        guard let availability else { return false }
+        switch availability {
+        case .available, .partiallyAvailable: return false
+        case .unknown, .pending, .processing, .deleted: return true
+        }
+    }
+
     /// Pure decision used by ``heroCTA(seerConnected:)`` and directly by the hero
     /// (which may apply a just-tapped optimistic `availability` override).
     ///

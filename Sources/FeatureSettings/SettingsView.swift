@@ -567,7 +567,8 @@ public struct SettingsView: View {
             CustomizeHomeDetailView(
                 discoveredLibraries: librariesStore.state,
                 homeVisibility: homeVisibility,
-                spoilers: spoilers
+                spoilers: spoilers,
+                seerConfigured: seer.isConfigured
             )
         case .nightShift:
             NightShiftDetailView(model: nightShift)

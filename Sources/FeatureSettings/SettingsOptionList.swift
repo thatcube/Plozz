@@ -90,6 +90,9 @@ struct SettingsCheckList<Option: Hashable & Identifiable>: View {
     var title: (Option) -> String
     var subtitle: (Option) -> String? = { _ in nil }
     var icon: (Option) -> String? = { _ in nil }
+    /// Per-option enablement. A `false` row is dimmed and non-focusable (e.g. a
+    /// source that depends on an integration that isn't configured yet).
+    var isEnabled: (Option) -> Bool = { _ in true }
     /// Wrap the list in the shared bordered container. Default `true`; pass
     /// `false` when the list already sits inside another container (e.g. a
     /// Customize Home group card that provides its own border + header).
@@ -105,6 +108,7 @@ struct SettingsCheckList<Option: Hashable & Identifiable>: View {
                     subtitle: subtitle(option),
                     icon: icon(option),
                     isChecked: isChecked(option),
+                    isEnabled: isEnabled(option),
                     action: { onToggle(option) }
                 )
             }

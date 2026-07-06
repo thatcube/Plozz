@@ -27,6 +27,11 @@ struct CustomizeHomeDetailView: View {
     /// art/titles/ratings is a browsing concern, so it lives with Home rather than
     /// as its own thin top-level row.
     let spoilers: SpoilerSettingsModel
+    /// Whether a Seerr server is configured. The hero's **Featured** source is
+    /// sourced entirely from Seerr's trending feed, so without it that source has
+    /// nothing to show — we keep the row visible (so it's discoverable) but
+    /// disabled with a "Requires Seerr" note.
+    let seerConfigured: Bool
 
     @Environment(HeroSettingsModel.self) private var hero
 
@@ -229,8 +234,14 @@ struct CustomizeHomeDetailView: View {
             if hero.settings.isEnabled {
                 SettingsDetailGroup(title: "Sources") {
                     SettingsCheckList(
-                        options: HeroSourceKind.allCases,
+                        options: orderedHeroSources,
                         title: { $0.displayName },
+                        subtitle: { source in
+                            (source == .featured && !seerConfigured) ? "Requires Seerr" : nil
+                        },
+                        isEnabled: { source in
+                            source == .featured ? seerConfigured : true
+                        },
                         isChecked: { hero.settings.sources.contains($0) },
                         onToggle: { toggleSource($0) }
                     )
@@ -311,7 +322,18 @@ struct CustomizeHomeDetailView: View {
         }
     }
 
+    /// Hero sources in the order shown in Settings: the always-available,
+    /// library-sourced ones first, then **Featured** pinned last (it depends on
+    /// Seerr, so it reads as the "extra" that may be disabled). The stored
+    /// `sources` order is unaffected — `toggleSource` re-derives it from
+    /// `allCases`, so curation/interleaving order doesn't change.
+    private var orderedHeroSources: [HeroSourceKind] {
+        HeroSourceKind.allCases.filter { $0 != .featured } + [.featured]
+    }
+
     private func toggleSource(_ source: HeroSourceKind) {
+        // Featured can't be enabled without Seerr (it has no content otherwise).
+        guard source != .featured || seerConfigured else { return }
         var next = Set(hero.settings.sources)
         if next.contains(source) { next.remove(source) } else { next.insert(source) }
         hero.settings.sources = HeroSourceKind.allCases.filter { next.contains($0) }

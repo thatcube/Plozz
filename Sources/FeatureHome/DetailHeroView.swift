@@ -89,10 +89,28 @@ struct DetailHeroView: View {
     /// rather than down in the episode row.
     var playButtonFocus: FocusState<Bool>.Binding? = nil
 
+    /// Marks this hero as presenting a **discovery** (Seerr) title that isn't in
+    /// the library. When `true` the library-only action buttons (Play, Trailer,
+    /// watchlist/watched/refresh, server/version "…" menu) are suppressed and the
+    /// row shows a single request/status pill driven by ``requestCTA`` instead.
+    var isDiscoveryItem: Bool = false
+    /// The request/download CTA for a discovery title, derived from its Seerr
+    /// availability via ``MediaItem/heroCTA(availability:downloadProgress:seerConnected:)``
+    /// (with any just-tapped optimistic override already applied by the parent).
+    /// Ignored unless ``isDiscoveryItem`` is `true`.
+    var requestCTA: HeroCTA = .play
+    /// One-tap request action, invoked when the user activates the "Request" pill.
+    /// `nil` disables requesting (e.g. Seerr disconnected), leaving the pill inert.
+    var onRequest: (() -> Void)? = nil
+
     /// Local focus state of the Play button, so the inline resume progress bar
     /// can flip its colours to stay visible against the button's focused (white)
     /// vs unfocused (dark) background.
     @FocusState private var playButtonHasFocus: Bool
+    /// Focus state of the discovery request/status pill, so its inline download
+    /// progress capsule flips colour against the focused (white) pill background,
+    /// mirroring the Play button.
+    @FocusState private var requestPillHasFocus: Bool
     /// The last non-nil resume "… left" text seen for the current play target. The
     /// Play button reserves the width of the resume form (▶ bar … left) using this
     /// even after the item is marked Watched (which clears the live resume text),
@@ -211,6 +229,18 @@ struct DetailHeroView: View {
     /// whether the action row appears even when there's no Play/Trailer/Version.
     private var hasHeroActionButtons: Bool {
         heroWatchlistAction != nil || heroWatchedAction != nil || heroOffersRefresh
+    }
+
+    /// Whether the discovery request/status pill should render: a discovery title
+    /// that is requestable, already requested, or downloading. An `.unavailable`
+    /// discovery title (Seerr disconnected) or a `.play` one (already owned) shows
+    /// no pill.
+    private var showsRequestPill: Bool {
+        guard isDiscoveryItem else { return false }
+        switch requestCTA {
+        case .request, .requested, .downloading: return true
+        case .play, .unavailable: return false
+        }
     }
 
     /// Routes a hero button through the shared action handler with this hero's
@@ -360,8 +390,13 @@ struct DetailHeroView: View {
                     .frame(maxWidth: 960, alignment: .topLeading)
                     .contentTransition(.opacity)
             }
-            if (playTitle != nil && onPlay != nil) || onPlayTrailer != nil || showsMoreMenu || hasHeroActionButtons {
+            if isDiscoveryItem ? showsRequestPill : ((playTitle != nil && onPlay != nil) || onPlayTrailer != nil || showsMoreMenu || hasHeroActionButtons) {
                 HStack(spacing: 24) {
+                    if isDiscoveryItem {
+                        // A not-in-library discovery title offers only a request /
+                        // status pill; every library-only affordance is suppressed.
+                        requestPill()
+                    } else {
                     if let playTitle, let onPlay {
                         playButton(title: playTitle, action: onPlay)
                     }
@@ -386,6 +421,7 @@ struct DetailHeroView: View {
                     // tap reveals which servers host it and which files each has.
                     if showsMoreMenu {
                         moreMenu(onSelectSource: onSelectSource, onSelectVersion: onSelectVersion)
+                    }
                     }
                 }
                 .padding(.top, 8)
@@ -524,6 +560,47 @@ struct DetailHeroView: View {
         } else {
             button
                 .prefersDefaultFocus(true, in: heroActionsScope)
+        }
+    }
+
+    /// The single request/status pill shown in place of the library action row for
+    /// a not-in-library discovery (Seerr) title. Mirrors the Home hero's CTA:
+    /// a prominent, actionable **Request** button when the title is requestable, or
+    /// an informational **Requested** / **Downloading n%** status pill for a request
+    /// that's already in flight. Whichever pill renders is the action row's
+    /// preferred default focus so entering the row lands on it.
+    @ViewBuilder
+    private func requestPill() -> some View {
+        switch requestCTA {
+        case .request:
+            Button { onRequest?() } label: {
+                Label("Request", systemImage: "plus.circle")
+            }
+            .modifier(HeroActionButtonStyle(prominent: true))
+            .prefersDefaultFocus(true, in: heroActionsScope)
+            .accessibilityLabel("Request")
+        case let .downloading(progress):
+            let percent = Int((progress * 100).rounded())
+            Button {} label: {
+                HStack(spacing: 16) {
+                    Image(systemName: "arrow.down.circle")
+                    ResumeProgressCapsule(progress: progress, onLight: requestPillHasFocus || colorScheme == .light)
+                    Text("\(percent)%").lineLimit(1)
+                }
+            }
+            .modifier(HeroActionButtonStyle(prominent: false))
+            .focused($requestPillHasFocus)
+            .prefersDefaultFocus(true, in: heroActionsScope)
+            .accessibilityLabel("Downloading \(percent) percent")
+        case .requested:
+            Button {} label: {
+                Label("Requested", systemImage: "clock")
+            }
+            .modifier(HeroActionButtonStyle(prominent: false))
+            .prefersDefaultFocus(true, in: heroActionsScope)
+            .accessibilityLabel("Requested")
+        case .play, .unavailable:
+            EmptyView()
         }
     }
 

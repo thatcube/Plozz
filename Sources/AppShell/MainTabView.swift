@@ -265,6 +265,7 @@ struct MainTabView: View {
             Tab("Search", systemImage: "magnifyingglass", value: MainTab.search) {
             SearchTab(
                 accounts: accounts,
+                seer: seer,
                 homeVisibility: homeVisibility,
                 behavior: subtitleBehaviorModel.settings,
                 style: subtitleStyleModel.style,
@@ -1465,11 +1466,17 @@ private struct HomeTab: View {
     /// pinned to its library's server.
     @ViewBuilder
     private func itemDetail(for item: MediaItem, libraryOrigin: String?) -> some View {
+        // A discovery (Seerr) title — e.g. a "More Info" tap on a not-owned
+        // featured hero slide — carries an availability status no library item
+        // has. Route it to the request-focused discovery detail page instead of a
+        // doomed library fetch.
+        let isDiscovery = item.availability != nil
         ItemDetailView(
             viewModel: ItemDetailViewModel(
                 provider: resolveProvider(item.sourceAccountID, in: accounts),
                 itemID: item.id,
                 initialItem: item,
+                isDiscoveryItem: isDiscovery,
                 ratingsProvider: ratingsProvider,
                 sourceAccountID: item.sourceAccountID,
                 originSourceAccountID: libraryOrigin,
@@ -1481,7 +1488,10 @@ private struct HomeTab: View {
             spoilerSettings: spoilerSettings,
             onPlay: { requestPlay($0) },
             onSelectChild: { navigate($0, libraryOrigin: libraryOrigin) },
-            initialSeasonID: item.seasonID
+            initialSeasonID: item.seasonID,
+            isDiscoveryItem: isDiscovery,
+            seerConnected: seer.isConfigured,
+            onRequest: { try? await seer.request($0) }
         )
     }
 
@@ -1689,6 +1699,9 @@ private extension View {
 /// across every active account; results route to their owning provider.
 private struct SearchTab: View {
     let accounts: [ResolvedAccount]
+    /// Seerr discovery service, backing the "Not in Your Library" search section
+    /// and the discovery detail page's one-tap Request.
+    let seer: SeerService
     let homeVisibility: HomeLibraryVisibilityModel
     let behavior: SubtitleBehavior
     let style: SubtitleStyle
@@ -1719,17 +1732,26 @@ private struct SearchTab: View {
                 viewModel: SearchViewModel(
                     accounts: accounts,
                     identitySources: identitySources,
-                    disabledLibraryKeys: { homeVisibility.visibility.disabledKeys }
+                    disabledLibraryKeys: { homeVisibility.visibility.disabledKeys },
+                    // Fold Seerr discovery hits into a trailing "Not in Your Library"
+                    // section. Swallows errors to [] so a Seerr outage never breaks
+                    // library search; returns [] when Seerr is unconfigured.
+                    seerSearch: { [seer] query in (try? await seer.search(query)) ?? [] }
                 ),
                 spoilerSettings: spoilerSettings,
                 onSelect: { open($0) }
             )
             .navigationDestination(for: MediaItem.self) { item in
+                // A discovery (Seerr) result — id `seer:<tmdbId>`, carrying an
+                // availability status no library item has — opens the request-
+                // focused discovery detail page rather than a library fetch.
+                let isDiscovery = item.availability != nil
                 ItemDetailView(
                     viewModel: ItemDetailViewModel(
                         provider: resolveProvider(item.sourceAccountID, in: accounts),
                         itemID: item.id,
                         initialItem: item,
+                        isDiscoveryItem: isDiscovery,
                         ratingsProvider: ratingsProvider,
                         sourceAccountID: item.sourceAccountID,
                         initialSources: item.sources,
@@ -1740,7 +1762,10 @@ private struct SearchTab: View {
                     spoilerSettings: spoilerSettings,
                     onPlay: { requestPlay($0) },
                     onSelectChild: { open($0) },
-                    initialSeasonID: item.seasonID
+                    initialSeasonID: item.seasonID,
+                    isDiscoveryItem: isDiscovery,
+                    seerConnected: seer.isConfigured,
+                    onRequest: { try? await seer.request($0) }
                 )
             }
             .navigationDestination(for: EpisodeContextRoute.self) { route in

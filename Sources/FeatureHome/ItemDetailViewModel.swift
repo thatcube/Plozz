@@ -49,6 +49,13 @@ public final class ItemDetailViewModel {
     private let provider: any MediaProvider
     private let itemID: String
     private let ratingsProvider: any ExternalRatingsProviding
+    /// A **discovery** item (a Seerr/Overseerr title that may not be in any
+    /// library). Its synthetic `seer:<tmdbId>` id isn't resolvable through a
+    /// `MediaProvider`, so `load()`/`reload()` skip the provider fetch and every
+    /// library-only enrichment (children, trailers, ratings, cross-server) and
+    /// simply keep the seeded `initialItem` — which already carries the TMDB
+    /// artwork + overview the discovery detail page shows.
+    private let isDiscoveryItem: Bool
 
     /// The currently *active* source the page is showing. Defaults to the base
     /// `provider`/`itemID`/`sourceAccountID` the page was opened with, but is
@@ -210,6 +217,7 @@ public final class ItemDetailViewModel {
         provider: any MediaProvider,
         itemID: String,
         initialItem: MediaItem? = nil,
+        isDiscoveryItem: Bool = false,
         ratingsProvider: any ExternalRatingsProviding = DisabledRatingsProvider(),
         sourceAccountID: String? = nil,
         originSourceAccountID: String? = nil,
@@ -225,6 +233,7 @@ public final class ItemDetailViewModel {
         self.itemID = itemID
         self.activeProvider = provider
         self.activeItemID = itemID
+        self.isDiscoveryItem = isDiscoveryItem
         // Fall back to the library-origin account when a direct source tag is
         // absent, so a played item is always attributed to the account it was
         // browsed from (a local media share persists resume/played state keyed by
@@ -282,6 +291,15 @@ public final class ItemDetailViewModel {
     }
 
     public func load() async {
+        // Discovery (Seerr) items aren't backed by a resolvable library provider,
+        // so the fetch below would only 404. The seeded `initialItem` already has
+        // everything the discovery detail page renders — keep it and skip all the
+        // library-only work (provider fetch, children, trailers, ratings,
+        // cross-server discovery).
+        guard !isDiscoveryItem else {
+            if state.value == nil { state = .empty }
+            return
+        }
         alternateSourceEnrichmentTask?.cancel()
         alternateSourceEnrichmentTask = nil
         enrichmentTask?.cancel()
@@ -666,6 +684,7 @@ public final class ItemDetailViewModel {
     /// after a context-menu action (e.g. mark watched) so the hero, child rail
     /// and watched badges reflect the new server state in place.
     public func reload() async {
+        guard !isDiscoveryItem else { return }
         guard case .loaded = state else { await load(); return }
         // Capture the active source identity for this reload. An in-place
         // ``switchToSource(accountID:)`` can re-point active* (and start its own

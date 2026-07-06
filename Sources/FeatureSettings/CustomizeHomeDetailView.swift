@@ -242,7 +242,15 @@ struct CustomizeHomeDetailView: View {
                         isEnabled: { source in
                             source == .featured ? seerConfigured : true
                         },
-                        isChecked: { hero.settings.sources.contains($0) },
+                        isChecked: { source in
+                            // Without Seerr, Featured can't be active — show it
+                            // unchecked (and disabled) so it reads as unavailable,
+                            // not "on". Stored preference is untouched, so it
+                            // restores once Seerr is connected.
+                            source == .featured && !seerConfigured
+                                ? false
+                                : hero.settings.sources.contains(source)
+                        },
                         onToggle: { toggleSource($0) }
                     )
                 }

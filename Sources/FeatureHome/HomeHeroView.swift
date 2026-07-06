@@ -174,12 +174,16 @@ struct HomeHeroView: View {
     /// Bumped on every page so a late metadata fade-in from a *previous* page
     /// can't fire after a newer page has already started.
     @State private var slideToken = 0
-    /// While `Date() < this`, a *manual* page (Left/Right at an edge, or the Next
-    /// pill) is refused so the user cannot advance again until the hero has finished
-    /// its transition. Armed on every real page in ``page(to:forward:)`` (auto-advance
-    /// arms it too, but never *checks* it — so the auto rotation can't stall). Pure
-    /// timestamp gate: no timer/task, so it clears itself and can't get stuck.
-    @State private var pageUnlockAt: Date = .distantPast
+    /// True while the hero is mid page-transition: from the instant a page starts
+    /// until the wipe has settled (`pageTransitionLockout`). While set, a *manual*
+    /// page (Left/Right at an edge, or the Next pill) is refused, and — crucially —
+    /// the invisible Left/Right focus guards go non-focusable at the paging edge so
+    /// the press produces **no focus-move tick** (the "phantom click" that made an
+    /// ignored press feel like a dropped one). Cleared by a small guarded task keyed
+    /// on ``advanceToken`` so a fresh page re-arms it and it can never get stuck set.
+    /// Auto-advance sets it (via `page`) but never *checks* it, so the auto rotation
+    /// can't stall.
+    @State private var isTransitioning = false
     /// Best resolved hero backdrop URL per item id. For episode/season slides
     /// this is the **series-level** hero art (correct show, high-res — matching
     /// the detail page), resolved via ``ArtworkRouter`` and preloaded for the
@@ -201,8 +205,13 @@ struct HomeHeroView: View {
     /// transition" behaviour.
     private static let pageTransitionLockout: TimeInterval = 0.85
 
-    /// Whether a manual page is currently blocked because the hero is mid-transition.
-    private var isPageLocked: Bool { Date() < pageUnlockAt }
+    /// Number of action buttons on the fronted slide (1 if none resolved yet).
+    private var currentButtonCount: Int { current.map { buttons(for: $0).count } ?? 1 }
+    /// Whether a Right press right now would *page* (we're on the right-most button)
+    /// rather than move the selection between buttons.
+    private var atRightPagingEdge: Bool { selectedButton >= currentButtonCount - 1 }
+    /// Whether a Left press right now would *page* (we're on the left-most button).
+    private var atLeftPagingEdge: Bool { selectedButton <= 0 }
 
     @Environment(\.colorScheme) private var colorScheme
 
@@ -814,13 +823,12 @@ struct HomeHeroView: View {
             // engine an *internal* rightward target means a Right press is captured
             // by the hero (routed through `.onChange(of: focus)` → `handleRight()`)
             // exactly the way Left is captured by the left guard, with no reliance
-            // on `onMoveCommand`. Unlike the left guard it is ALWAYS focusable:
-            // Right never escapes the hero (there is nothing to the right to escape
-            // to) — it always pages or moves the selection — so there is no
-            // step-aside case and no `allowsSidebarEscape`-style race to guard.
+            // on `onMoveCommand`. It steps aside (non-focusable) only mid-transition
+            // at the right-most button (see `rightGuardActive`), so a Right press that
+            // would page during the lockout finds no target and makes no tick.
             Color.clear
                 .frame(width: 1, height: 1)
-                .focusable(true)
+                .focusable(rightGuardActive)
                 .focused($focus, equals: .rightGuard)
                 .accessibilityHidden(true)
         }
@@ -916,7 +924,30 @@ struct HomeHeroView: View {
     /// it, so the escape only fires from a genuine at-rest Left on item 0's
     /// left-most button.
     private var leftGuardActive: Bool {
-        !(allowsSidebarEscape && focus == .row)
+        // Normal step-aside: at the sidebar-escape spot, let Left reach the sidebar.
+        if allowsSidebarEscape && focus == .row { return false }
+        // During a transition, silence a left *page* press by dropping the guard so
+        // it makes no focus-move tick — but ONLY in top-bar nav, where nothing sits
+        // to the left to escape to. In sidebar nav the sidebar is the left neighbour,
+        // so we must keep trapping Left (it just clicks); a locked Left must never
+        // open the sidebar.
+        if isTransitioning, atLeftPagingEdge, navigationStyle == .tabBar, focus == .row {
+            return false
+        }
+        return true
+    }
+
+    /// Whether the invisible right guard should be focusable. Normally always true
+    /// (Right never escapes the hero). During a page transition, at the right-most
+    /// button — where the next Right would *page* — it steps aside so the refused
+    /// press finds no focusable neighbour and produces **no focus-move tick**, the
+    /// fix for the "phantom click on an ignored press" feel. Gated on `focus == .row`
+    /// so it only drops out once focus has returned to the row (never while the guard
+    /// itself is focused), mirroring `leftGuardActive`'s race-free rule. Interior
+    /// right moves (not at the edge) keep the guard, so button navigation still works
+    /// mid-transition.
+    private var rightGuardActive: Bool {
+        !(isTransitioning && atRightPagingEdge && focus == .row)
     }
 
     /// The container-level move handler. Its ONLY job is to pause the auto-advance
@@ -967,7 +998,7 @@ struct HomeHeroView: View {
         case let .advance(toItem, keepButton):
             // Refuse the page while the hero is still transitioning — the user can't
             // navigate again until the current wipe has settled.
-            guard !isPageLocked else { break }
+            guard !isTransitioning else { break }
             page(to: toItem, keepButton: keepButton, forward: false)
             restoreFocusAfterPage()
         case .escape, .blocked:
@@ -1035,7 +1066,7 @@ struct HomeHeroView: View {
         case let .advance(toItem, keepButton):
             // Refuse the page while the hero is still transitioning — the user can't
             // navigate again until the current wipe has settled.
-            guard !isPageLocked else { break }
+            guard !isTransitioning else { break }
             page(to: toItem, keepButton: keepButton, forward: true)
             restoreFocusAfterPage()
         case .escape, .blocked:
@@ -1261,10 +1292,6 @@ struct HomeHeroView: View {
             return
         }
         HeroFocusDiagnostics.emit("page BEGIN from=\(index) to=\(toItem) keepButton=\(keepButton) forward=\(isForward) | \(hfState())")
-        // Arm the manual-navigation lockout: from now until the transition settles,
-        // a manual Left/Right/Next page is refused (see `isPageLocked`). Auto-advance
-        // arms this too but never checks it, so the auto rotation is unaffected.
-        pageUnlockAt = Date().addingTimeInterval(Self.pageTransitionLockout)
         // Record the entering direction so the backdrop wipe pushes from the
         // correct edge. Batched with `index` below into one SwiftUI update.
         lastPageForward = isForward
@@ -1275,6 +1302,19 @@ struct HomeHeroView: View {
 
         index = toItem
         advanceToken &+= 1
+        // Arm the manual-navigation lockout for the length of the wipe: manual
+        // Left/Right/Next pages are refused, and the paging-edge focus guards go
+        // non-focusable so an ignored press produces no phantom focus-move tick.
+        // Cleared by a task keyed on this page's `advanceToken`, so a newer page
+        // re-arms it and it can never get stuck set. Auto-advance sets it too but
+        // never checks it, so the auto rotation is unaffected.
+        isTransitioning = true
+        let lockToken = advanceToken
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: UInt64(Self.pageTransitionLockout * 1_000_000_000))
+            guard lockToken == advanceToken else { return } // a newer page owns the lock
+            isTransitioning = false
+        }
         // A page is a fresh dwell: reset the progress gauge (so the newly-active
         // dot opens from empty instead of flashing the outgoing dot's progress)
         // and clear any pause so the new slide counts down normally.
@@ -1365,7 +1405,7 @@ struct HomeHeroView: View {
     /// carousel. Used by the Next pill. Refused while the hero is mid-transition so
     /// the user can't advance again until the wipe has settled.
     private func advanceForward() {
-        guard items.count > 1, !isPageLocked else { return }
+        guard items.count > 1, !isTransitioning else { return }
         let next = (index + 1) % items.count
         let destinationButtons = buttons(for: items[next]).count
         page(to: next, keepButton: destinationButtons - 1, forward: true)

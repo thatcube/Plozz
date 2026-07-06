@@ -214,8 +214,14 @@ private struct WipeImageView: UIViewRepresentable {
     /// Backdrops are landscape; anything wider than 3:1 is junk provider art and
     /// is skipped (matches `HeroBackdropLayer`'s `maxAspectRatio`).
     private static let maxAspectRatio: CGFloat = 3.0
-    /// Slightly longer than a push so the easeOut "settle" tail reads clearly.
-    private static let duration: TimeInterval = 0.85
+    /// Base wipe time for a lone press — snappy but long enough for the easeOut
+    /// "settle" tail to read. A backlog of queued pages drains faster (see
+    /// `catchUpDuration`) so a rapid burst stays responsive.
+    private static let duration: TimeInterval = 0.6
+    /// Wipe time used while there is still a backlog of queued pages, so a burst
+    /// "catches up" — each intermediate slide flicks past quickly and only the last
+    /// one gets the full `duration` settle.
+    private static let catchUpDuration: TimeInterval = 0.3
     /// Tiny horizontal overscan, purely to avoid a sub-pixel seam shimmer during the
     /// wipe. It is intentionally small: in the wipe model the incoming content is
     /// shifted *into* the revealed area and the outgoing only drifts a little, so
@@ -231,7 +237,11 @@ private struct WipeImageView: UIViewRepresentable {
     private static let driftOut: CGFloat = 320
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(maxAspectRatio: Self.maxAspectRatio, duration: Self.duration)
+        Coordinator(
+            maxAspectRatio: Self.maxAspectRatio,
+            duration: Self.duration,
+            catchUpDuration: Self.catchUpDuration
+        )
     }
 
     func makeUIView(context: Context) -> HeroWipeContainerView {
@@ -258,15 +268,17 @@ private struct WipeImageView: UIViewRepresentable {
 
     // MARK: - Coordinator
 
-    /// Owns transition scheduling: which slide is displayed, which is the pending
-    /// target, cache-first art loading (with a monotonic token so only the newest
-    /// target can apply), and serialization of the wipe so a burst of rapid pages
-    /// coalesces to the newest target with one clean animation.
+    /// Owns transition scheduling: which slide is displayed, a small FIFO queue of
+    /// pages waiting to wipe, cache-first art loading (with a monotonic token so only
+    /// the newest requested art may apply), and serialization of the wipe. A burst of
+    /// rapid pages is NOT coalesced to just the newest — each queued page gets its own
+    /// wipe, but a backlog drains on a shorter duration so it stays caught up.
     @MainActor
     final class Coordinator {
         weak var container: HeroWipeContainerView?
         private let maxAspectRatio: CGFloat
         private let duration: TimeInterval
+        private let catchUpDuration: TimeInterval
 
         /// Identity of the slide currently settled on screen.
         private var displayedID: String?
@@ -285,18 +297,25 @@ private struct WipeImageView: UIViewRepresentable {
         /// Its curve stays ≤ the incoming curve at every instant, so the outgoing art
         /// can never retreat past the growing reveal window (no background sliver).
         private var outgoingAnimator: UIViewPropertyAnimator?
-        /// Newest fully-resolved target that arrived while a wipe was in flight,
-        /// applied on completion. Always the most recent — never a queue.
-        private var pending: (image: UIImage, url: URL, id: String, forward: Bool)?
+        /// Pages that arrived while a wipe was in flight, waiting their turn — oldest
+        /// first. Unlike a single "newest wins" slot, this lets every press in a burst
+        /// play its own wipe (the queue just drains faster when it's deep). Capped so
+        /// an extreme hold can't build a long tail.
+        private var queue: [(image: UIImage, url: URL, id: String, forward: Bool)] = []
+        /// Upper bound on the wait queue; beyond this the oldest waiting pages are
+        /// dropped (a couple of intermediate slides are skipped) so the burst catches
+        /// up instead of animating for seconds after you stop pressing.
+        private static let maxQueued = 6
         /// Newest target that resolved to *no* usable art while a wipe was in
-        /// flight. Reconciled on completion so state can't get stuck pointing at a
-        /// slide that never became `displayed` (and a later cached upgrade for it
+        /// flight. Reconciled once the queue drains so state can't get stuck pointing
+        /// at a slide that never became `displayed` (and a later cached upgrade for it
         /// can still apply in place).
         private var pendingNoArtID: String?
 
-        init(maxAspectRatio: CGFloat, duration: TimeInterval) {
+        init(maxAspectRatio: CGFloat, duration: TimeInterval, catchUpDuration: TimeInterval) {
             self.maxAspectRatio = maxAspectRatio
             self.duration = duration
+            self.catchUpDuration = catchUpDuration
         }
 
         func configure(width: CGFloat, height: CGFloat) {
@@ -351,10 +370,17 @@ private struct WipeImageView: UIViewRepresentable {
                 displayedURL = url
                 return
             }
-            // A wipe is in flight: stash the newest resolved target and reconcile
-            // on completion (this also covers "paged away then back" mid-wipe).
+            // A wipe is in flight: enqueue this page so it plays its own wipe when the
+            // current one finishes (a burst is NOT collapsed to just the newest). A
+            // repeat of a slide already waiting is de-duped, and the queue is capped so
+            // an extreme hold drops the oldest waiters rather than animating for
+            // seconds after you stop.
             if isAnimating {
-                pending = (image, url, id, forward)
+                queue.removeAll { $0.id == id }
+                queue.append((image, url, id, forward))
+                if queue.count > Self.maxQueued {
+                    queue.removeFirst(queue.count - Self.maxQueued)
+                }
                 return
             }
             // Already settled on this slide (art resolved to the same slide): just
@@ -366,12 +392,12 @@ private struct WipeImageView: UIViewRepresentable {
                 }
                 return
             }
-            startWipe(to: image, url: url, id: id, forward: forward)
+            startWipe(to: image, url: url, id: id, forward: forward, duration: duration)
         }
 
         /// Couldn't resolve any art for the slide. Keep whatever is on screen (never
-        /// flash to empty). If a wipe is in flight, stash the id so `drainPending`
-        /// reconciles it on completion; otherwise mark it displayed at rest.
+        /// flash to empty). If a wipe is in flight, stash the id so `drainQueue`
+        /// reconciles it once the queue empties; otherwise mark it displayed at rest.
         private func noArtResolved(for id: String) {
             guard id == targetID else { return }
             if isAnimating {
@@ -393,7 +419,7 @@ private struct WipeImageView: UIViewRepresentable {
             displayedURL = url
         }
 
-        private func startWipe(to image: UIImage, url: URL, id: String, forward: Bool) {
+        private func startWipe(to image: UIImage, url: URL, id: String, forward: Bool, duration: TimeInterval) {
             guard let container else { return }
             isAnimating = true
             container.prepareWipe(incomingImage: image, forward: forward)
@@ -418,7 +444,7 @@ private struct WipeImageView: UIViewRepresentable {
                 self.isAnimating = false
                 self.animator = nil
                 self.outgoingAnimator = nil
-                self.drainPending()
+                self.drainQueue()
             }
 
             // Outgoing page: ease-IN (lingers, then accelerates away) — a distinct
@@ -435,28 +461,32 @@ private struct WipeImageView: UIViewRepresentable {
             outgoingAnimator.startAnimation()
         }
 
-        /// After a wipe completes, reconcile with the newest requested target: if
-        /// it differs from what just settled, wipe on to it (rapid paging coalesces
-        /// to a single follow-up wipe); if it's the same slide but fresher art, swap
-        /// in place; if the newest target resolved to no art, accept it as displayed
-        /// so state never stalls and a later cached upgrade for it can still apply.
-        private func drainPending() {
-            defer { pendingNoArtID = nil }
-            if let pending, pending.id == targetID {
-                self.pending = nil
-                if pending.id != displayedID {
-                    startWipe(to: pending.image, url: pending.url, id: pending.id, forward: pending.forward)
-                } else if pending.url != displayedURL, let container {
-                    container.frontImage = pending.image
-                    displayedURL = pending.url
+        /// After a wipe completes, play the next queued page (a burst thus animates one
+        /// wipe per press instead of jumping to the newest). While a backlog remains,
+        /// each wipe runs on the shorter `catchUpDuration` so the queue drains quickly;
+        /// the final page gets the full `duration` settle. A queued page that is
+        /// already the displayed slide just swaps art in place and keeps draining. Once
+        /// the queue empties, a newest target that resolved to no art is reconciled so
+        /// state never stalls (and a later cached upgrade for it can still apply).
+        private func drainQueue() {
+            while let next = queue.first {
+                queue.removeFirst()
+                if next.id == displayedID {
+                    if next.url != displayedURL, let container {
+                        container.frontImage = next.image
+                        displayedURL = next.url
+                    }
+                    continue
                 }
+                let dur = queue.isEmpty ? duration : catchUpDuration
+                startWipe(to: next.image, url: next.url, id: next.id, forward: next.forward, duration: dur)
                 return
             }
-            self.pending = nil
-            if let noArt = pendingNoArtID, noArt == targetID, noArt != displayedID {
+            if let noArt = pendingNoArtID, noArt != displayedID {
                 displayedID = noArt
                 displayedURL = nil
             }
+            pendingNoArtID = nil
         }
 
         // MARK: - Loading

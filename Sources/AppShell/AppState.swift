@@ -1075,7 +1075,10 @@ public final class AppState {
         // One-time migration of any legacy per-profile Seerr connection into the
         // shared household slot, then an initial reachability probe. Runs on the
         // main actor (inherited); safe because migration no-ops once the household
-        // slot is set.
+        // slot is set. The result's `promotedUserID` is intentionally not applied:
+        // the legacy per-profile `userId` was off-by-default and never set by the
+        // connect UI, so it's always nil in practice; per-profile acting users are
+        // established via the (upcoming) Settings mapping, not migration.
         let seerNamespaces: [String?] = [nil] + profilesModel.profiles.map { $0.id }
         Task { [seerService] in
             await seerService.migrateLegacyConnectionIfNeeded(namespaces: seerNamespaces)

@@ -525,4 +525,33 @@ final class SeerServiceTests: XCTestCase {
         XCTAssertFalse(result.didPromote, "Never clobber an already-configured household slot")
         XCTAssertEqual(household.load()?.apiKey, "HOUSEHOLD")
     }
+
+    func testMigrationKeepsLegacyIntactWhenHouseholdSaveFails() async {
+        // Loss-safe guarantee: if the household Keychain write fails, the legacy
+        // per-profile connection MUST survive so the next launch can retry — never
+        // delete it and report a promotion that didn't persist.
+        let http = SeerRecordingHTTPClient()
+        let legacy = InMemorySeerCredentialStore()
+        legacy.setNamespace("kid")
+        try? legacy.save(SeerCredentials(baseURL: seerBaseURL, apiKey: "LEGACY", userId: nil))
+
+        let household = FailingSeerConnectionStore()
+        let service = SeerService(connectionStore: household, legacyCredentialStore: legacy, http: http)
+
+        let result = await service.migrateLegacyConnectionIfNeeded(namespaces: [nil, "kid"])
+
+        XCTAssertFalse(result.didPromote, "A failed household save must not report a promotion")
+        XCTAssertNil(result.connection)
+        XCTAssertNil(household.load(), "Nothing persisted to the household slot")
+        legacy.setNamespace("kid")
+        XCTAssertEqual(legacy.load()?.apiKey, "LEGACY", "Legacy connection preserved for a retry")
+    }
+}
+
+/// A connection store whose `save` always throws, to exercise the migration's
+/// loss-safe path (legacy must not be cleared when the household write fails).
+private final class FailingSeerConnectionStore: SeerConnectionStoring, @unchecked Sendable {
+    func load() -> SeerConnection? { nil }
+    func save(_ connection: SeerConnection) throws { throw SeerConnectionStoreError.encodingFailed }
+    func clear() throws {}
 }

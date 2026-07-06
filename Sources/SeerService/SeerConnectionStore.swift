@@ -179,8 +179,16 @@ public enum SeerConnectionMigration {
             return SeerConnectionMigrationResult(connection: nil, didPromote: false)
         }
 
+        // Persist FIRST and only clear the legacy items once the household write is
+        // confirmed. If the Keychain write fails, leave every legacy item intact and
+        // report no promotion, so the next launch retries rather than losing the
+        // connection from both places (loss-safe guarantee).
         let connection = SeerConnection(baseURL: promoted.baseURL, apiKey: promoted.apiKey)
-        try? household.save(connection)
+        do {
+            try household.save(connection)
+        } catch {
+            return SeerConnectionMigrationResult(connection: nil, didPromote: false)
+        }
 
         // Remove every legacy item we consumed so it can't resurface.
         for ns in consumed {

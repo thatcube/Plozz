@@ -231,10 +231,14 @@ public final class SeerService {
         while true {
             let page = try await client.users(take: take, skip: skip)
             collected.append(contentsOf: page.results)
-            let total = page.pageInfo?.results ?? collected.count
             skip += page.results.count
-            // Stop when a page is short/empty or we've collected the reported total.
-            if page.results.isEmpty || collected.count >= total { break }
+            // Terminate on an empty/short page always. When the server reports a
+            // total (`pageInfo.results`), also stop once we've collected it. Do NOT
+            // fall back to `collected.count` as the total — that would make the
+            // "collected >= total" check trivially true and stop after page one for
+            // any payload missing `pageInfo`.
+            if page.results.isEmpty || page.results.count < take { break }
+            if let total = page.pageInfo?.results, collected.count >= total { break }
             if skip > 5000 { break } // safety cap for pathological instances
         }
         let base = config.baseURL
@@ -266,10 +270,19 @@ public final class SeerService {
         else { return .failure(.unknown("This title can’t be requested.")) }
 
         let isTV = mediaType == "tv"
+        // Snapshot the connection at call start so this request is internally
+        // consistent: a reconnect/disconnect that reentrantly changes `config`
+        // across the default-lookup await can't make us fetch defaults from one
+        // Seerr and POST the request to another. Everything below uses this one
+        // client + config snapshot.
+        let activeConfig = config
+        let activeClient = SeerClient(config: activeConfig, http: http)
+
         // Only the admin (unmapped) path seeds a server; a mapped user lets
         // Overseerr resolve their own defaults from the omitted body.
         let server: SeerServiceServer? = actingUserID == nil
-            ? (isTV ? await defaultSonarr() : await defaultRadarr())
+            ? (isTV ? await defaultSonarr(using: activeClient, configSnapshot: activeConfig)
+                    : await defaultRadarr(using: activeClient, configSnapshot: activeConfig))
             : nil
 
         let body = SeerRequestBody(
@@ -284,7 +297,7 @@ public final class SeerService {
         )
 
         do {
-            let result = try await client.createRequest(body, actingUserID: actingUserID)
+            let result = try await activeClient.createRequest(body, actingUserID: actingUserID)
             switch result {
             case let .created(response):
                 if let raw = response?.media?.status,
@@ -295,14 +308,14 @@ public final class SeerService {
                 // pending by definition.
                 return .success(.pending)
             case let .failed(status, message):
-                return .failure(.classify(status: status, message: message))
+                return .failure(.classify(status: status, message: message, actingUserSent: actingUserID != nil))
             }
         } catch {
             return .failure(.unreachable)
         }
     }
 
-    private func defaultRadarr() async -> SeerServiceServer? {
+    private func defaultRadarr(using client: SeerClient, configSnapshot: SeerConfig) async -> SeerServiceServer? {
         if let cached = cachedRadarr { return cached }
         // Only cache a *successful* fetch. A transient failure (timeout, 401,
         // network blip) must stay uncached so the next request retries — caching
@@ -310,15 +323,17 @@ public final class SeerService {
         // serverId/profileId/rootFolder for the rest of the session.
         guard let resolved = try? await client.radarrServers() else { return nil }
         let chosen = Self.pickDefault(resolved)
-        cachedRadarr = .some(chosen)
+        // Don't pollute the cache with a snapshot that no longer matches the live
+        // connection (a reconnect during the fetch already cleared the cache).
+        if config == configSnapshot { cachedRadarr = .some(chosen) }
         return chosen
     }
 
-    private func defaultSonarr() async -> SeerServiceServer? {
+    private func defaultSonarr(using client: SeerClient, configSnapshot: SeerConfig) async -> SeerServiceServer? {
         if let cached = cachedSonarr { return cached }
         guard let resolved = try? await client.sonarrServers() else { return nil }
         let chosen = Self.pickDefault(resolved)
-        cachedSonarr = .some(chosen)
+        if config == configSnapshot { cachedSonarr = .some(chosen) }
         return chosen
     }
 

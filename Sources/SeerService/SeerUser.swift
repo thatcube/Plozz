@@ -93,8 +93,12 @@ public enum SeerRequestFailure: Equatable, Sendable {
     case unknown(String?)
 
     /// Classifies a failed request from its HTTP status and decoded error message.
+    /// Classifies a failed request from its HTTP status and decoded error message.
     /// `message` is Overseerr's `{ "message": … }` body when present.
-    static func classify(status: Int, message: String?) -> SeerRequestFailure {
+    /// `actingUserSent` indicates whether the request carried an `X-API-User`
+    /// header — a 401 is only an *invalid acting user* when one was actually sent;
+    /// on the admin path (no header) a 401 means a bad/expired admin API key.
+    static func classify(status: Int, message: String?, actingUserSent: Bool) -> SeerRequestFailure {
         let lowered = message?.lowercased() ?? ""
         func mentions(_ needles: String...) -> Bool { needles.contains { lowered.contains($0) } }
 
@@ -102,7 +106,7 @@ public enum SeerRequestFailure: Equatable, Sendable {
         case 409:
             return .alreadyRequested
         case 401:
-            return .invalidActingUser
+            return actingUserSent ? .invalidActingUser : .unknown(message ?? "Seerr rejected the admin API key.")
         case 403:
             if mentions("quota", "limit") { return .quotaExceeded }
             if mentions("default", "no server", "no radarr", "no sonarr", "profile", "root folder") {

@@ -182,15 +182,14 @@ struct SettingsSplitLayout: View {
             // Exactly two children: the title/description block and the control.
             // The spacing is therefore the gap between the description and the
             // first toggle/checkmark/box below it.
-            VStack(alignment: .leading, spacing: 40) {
+            VStack(alignment: .leading, spacing: 44) {
                 if let row = selectedRow {
-                    VStack(alignment: .leading, spacing: 6) {
+                    VStack(alignment: .leading, spacing: 12) {
                         Text(row.title)
-                            .font(.title3.weight(.semibold))
+                            .settingsFeatureTitle()
                         if let description = row.description {
                             Text(description)
-                                .font(.callout)
-                                .foregroundStyle(.secondary)
+                                .settingsHelperText()
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }
@@ -301,12 +300,8 @@ struct SettingsRevealSection<Content: View>: View {
                 VStack(alignment: .leading, spacing: 16) {
                     if let revealedHeader {
                         Text(revealedHeader)
-                            .font(.subheadline.weight(.semibold))
-                            .textCase(.uppercase)
-                            .tracking(1.0)
-                            .foregroundStyle(.secondary)
+                            .settingsSectionHeader()
                             .padding(.top, 4)
-                            .padding(.horizontal, 4)
                     }
                     content()
                 }
@@ -331,17 +326,16 @@ struct SettingsDetailGroup<Content: View>: View {
     @ViewBuilder var content: () -> Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 14) {
             Text(title)
-                .font(.headline.weight(.semibold))
+                .settingsSectionHeader()
             if let description {
                 Text(description)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .settingsHelperText()
                     .fixedSize(horizontal: false, vertical: true)
             }
             content()
-                .padding(.top, 2)
+                .padding(.top, 4)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

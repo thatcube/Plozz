@@ -231,19 +231,12 @@ struct CustomizeHomeDetailView: View {
                     title: "Sources",
                     description: "Which content feeds the hero. Enabled sources are interleaved into one rotating set."
                 ) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        ForEach(HeroSourceKind.allCases) { source in
-                            Toggle(isOn: sourceBinding(source)) {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Label(source.displayName, systemImage: source.symbolName)
-                                    Text(source.detail)
-                                        .font(.footnote)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                            .toggleStyle(SettingsSwitchToggleStyle())
-                        }
-                    }
+                    SettingsCheckList(
+                        options: HeroSourceKind.allCases,
+                        title: { $0.displayName },
+                        isChecked: { hero.settings.sources.contains($0) },
+                        onToggle: { toggleSource($0) }
+                    )
                 }
 
                 SettingsDetailGroup(
@@ -318,50 +311,36 @@ struct CustomizeHomeDetailView: View {
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
         } else {
-            VStack(alignment: .leading, spacing: 8) {
-                ForEach(libraries) { library in
-                    Toggle(isOn: randomLibraryBinding(for: library.key, universe: libraries)) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(library.library.title)
-                            Text(library.serverName)
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .toggleStyle(SettingsSwitchToggleStyle())
-                }
-            }
+            SettingsCheckList(
+                options: libraries,
+                title: { $0.library.title },
+                subtitle: { $0.serverName },
+                isChecked: { isRandomLibraryOn($0.key, universe: libraries) },
+                onToggle: { toggleRandomLibrary($0.key, universe: libraries) }
+            )
         }
     }
 
-    private func sourceBinding(_ source: HeroSourceKind) -> Binding<Bool> {
-        Binding(
-            get: { hero.settings.sources.contains(source) },
-            set: { isOn in
-                let current = Set(hero.settings.sources)
-                var next = current
-                if isOn { next.insert(source) } else { next.remove(source) }
-                hero.settings.sources = HeroSourceKind.allCases.filter { next.contains($0) }
-            }
-        )
+    private func toggleSource(_ source: HeroSourceKind) {
+        var next = Set(hero.settings.sources)
+        if next.contains(source) { next.remove(source) } else { next.insert(source) }
+        hero.settings.sources = HeroSourceKind.allCases.filter { next.contains($0) }
     }
 
-    private func randomLibraryBinding(for key: String, universe: [AggregatedLibrary]) -> Binding<Bool> {
+    /// A library feeds the Random source when it's explicitly selected, or when
+    /// nothing is (empty == "all libraries").
+    private func isRandomLibraryOn(_ key: String, universe: [AggregatedLibrary]) -> Bool {
+        let keys = hero.settings.randomLibraryKeys
+        return keys.isEmpty || keys.contains(key)
+    }
+
+    private func toggleRandomLibrary(_ key: String, universe: [AggregatedLibrary]) {
         let allKeys = Set(universe.map(\.key))
-        return Binding(
-            get: {
-                let keys = hero.settings.randomLibraryKeys
-                return keys.isEmpty || keys.contains(key)
-            },
-            set: { isOn in
-                var keys = hero.settings.randomLibraryKeys.isEmpty
-                    ? allKeys
-                    : hero.settings.randomLibraryKeys
-                if isOn { keys.insert(key) } else { keys.remove(key) }
-                keys.formIntersection(allKeys)
-                hero.settings.randomLibraryKeys = (keys == allKeys) ? [] : keys
-            }
-        )
+        var keys = hero.settings.randomLibraryKeys.isEmpty ? allKeys : hero.settings.randomLibraryKeys
+        if keys.contains(key) { keys.remove(key) } else { keys.insert(key) }
+        keys.formIntersection(allKeys)
+        // Canonicalise "everything selected" back to empty.
+        hero.settings.randomLibraryKeys = (keys == allKeys) ? [] : keys
     }
 }
 

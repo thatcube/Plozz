@@ -60,7 +60,7 @@ public final class PlaybackDiagnosticsSampler {
     ///   - engineName: the engine decoding the stream (e.g. `AVPlayer`, `VLCKit`),
     ///     shown in the overlay so the user can see which engine is active.
     ///
-    /// `player` is optional: a non-AVFoundation engine (VLCKit/mpv) has no
+    /// `player` is optional: a non-AVFoundation engine (Plozzigen) has no
     /// `AVPlayer`, so the live per-tick metrics (observed bitrate, dropped frames,
     /// presentation size) are skipped, but the authoritative baseline from
     /// `metadata` — container, codecs, HDR, mode, and the engine name — is still
@@ -93,10 +93,10 @@ public final class PlaybackDiagnosticsSampler {
         staticDiagnostics = base
         latest = staticDiagnostics
 
-        // mpv/VLCKit expose no AVFoundation item, but we still run the timer so
+        // Plozzigen exposes no AVFoundation item, but we still run the timer so
         // the system metrics (memory / thermal / live-instance counts) refresh
         // ~1s on *every* engine — that's what surfaces a leak on the HDR/DoVi
-        // (mpv) path, which otherwise published a single static snapshot.
+        // (Plozzigen) path, which otherwise published a single static snapshot.
         if player != nil {
             Task { await loadStaticInfo() }
         }
@@ -150,7 +150,7 @@ public final class PlaybackDiagnosticsSampler {
     private func sampleTick() {
         var diagnostics = staticDiagnostics
 
-        // Per-tick AVFoundation metrics (native engine only; mpv has no item).
+        // Per-tick AVFoundation metrics (native engine only; Plozzigen has no item).
         if let item = player?.currentItem {
             // Source metadata resolution wins; only fall back to the rendered
             // presentation size when the provider didn't report dimensions.
@@ -194,7 +194,7 @@ public final class PlaybackDiagnosticsSampler {
             }
         }
 
-        // Engines without an AVPlayer (Plozzigen/mpv) have no access log, so the
+        // Engines without an AVPlayer (Plozzigen) have no access log, so the
         // dropped-frames/FPS/bitrate fields stay blank above. Fill them from the
         // engine's own live telemetry; only overwrite where the access log didn't.
         if let t = engineTelemetry?() {
@@ -210,7 +210,7 @@ public final class PlaybackDiagnosticsSampler {
         }
 
         // System metrics refresh on every engine so a leak is visible on the
-        // mpv (HDR/DoVi) path too.
+        // Plozzigen (HDR/DoVi) path too.
         Self.fillSystemMetrics(into: &diagnostics)
         latest = diagnostics
     }

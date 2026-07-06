@@ -1,7 +1,7 @@
 import Foundation
 
 /// Live, per-tick decode/render stats an engine can publish for the diagnostics
-/// overlay. Engines without an `AVPlayer` (Plozzigen/mpv) have no access log, so
+/// overlay. Engines without an `AVPlayer` (Plozzigen) have no access log, so
 /// the sampler reads these instead to fill dropped frames, observed FPS, and
 /// bitrate — otherwise those fields would stay `-` on every non-native engine.
 public struct EngineLiveTelemetry: Equatable, Sendable {

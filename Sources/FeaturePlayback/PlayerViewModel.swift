@@ -53,7 +53,7 @@ public final class PlayerViewModel {
     /// fades to black around the switch.
     ///
     /// Only the native engine drives `AVDisplayManager`'s HDMI mode switch; the
-    /// hybrid (mpv) engine renders HDR without a panel mode switch, so it stays
+    /// Plozzigen engine renders HDR without a panel mode switch, so it stays
     /// `.sdr` here and the view never raises an unnecessary veil. Provider-
     /// agnostic — derived from `MediaSourceMetadata`, identical for Plex/Jellyfin.
     private(set) var displayMode: HDRDisplayMode = .sdr
@@ -61,10 +61,10 @@ public final class PlayerViewModel {
     /// The dynamic range of the **content** being played, independent of which
     /// engine renders it. `displayMode` only goes HDR for the native engine
     /// (the only one that drives `AVDisplayManager`'s mode switch *itself*), but
-    /// on some TVs the mpv engine's HDR/DV output still makes the panel switch
+    /// on some TVs the Plozzigen engine's HDR/DV output still makes the panel switch
     /// HDMI modes — so the exit veil must cover that switch for *any* engine
     /// playing HDR/DV content. Gating the exit veil on content (not engine)
-    /// avoids the flash-on-Home when an mpv-played HDR/DV title is dismissed.
+    /// avoids the flash-on-Home when a Plozzigen-played HDR/DV title is dismissed.
     private(set) var contentDisplayMode: HDRDisplayMode = .sdr
 
     /// Shared, observable transport state for the custom player overlay. The
@@ -624,7 +624,7 @@ public final class PlayerViewModel {
         case .hybrid, .plozzigen:
             // Plozzigen is the sole on-device decode engine. `.hybrid` is the
             // router's abstract "needs on-device decode" signal; it resolves here
-            // to Plozzigen (the former mpv backing is retired).
+            // to Plozzigen (the former backing engine is retired).
             if let makePlozzigen = engineFactory.makePlozzigen, let engine = makePlozzigen() {
                 return engine
             }
@@ -774,8 +774,7 @@ public final class PlayerViewModel {
                 // The router's `.hybrid` return is its abstract "needs on-device
                 // decode" signal; Plozzigen (AetherEngine) is that engine — it
                 // fetches the source itself and remuxes HEVC/`hev1`/etc. to
-                // AVPlayer on-device. Resolve `.hybrid` to it. (The former mpv
-                // backing is retired.)
+                // AVPlayer on-device. Resolve `.hybrid` to it. (The former backing engine is retired.)
                 if kind == .hybrid, engineFactory.plozzigenAvailable {
                     kind = .plozzigen
                 }
@@ -1044,7 +1043,7 @@ public final class PlayerViewModel {
         // Publish the dynamic range the display is being driven to *before*
         // engine.load() requests the actual HDMI mode switch, so the view can
         // fade to black ahead of it. Only the native engine drives the panel's
-        // display-mode switch; the hybrid (mpv) engine plays HDR without one, so
+        // display-mode switch; the Plozzigen engine plays HDR without one, so
         // it stays `.sdr` and no veil is raised. On a cross-engine fallback this
         // re-evaluates correctly: native→hybrid drops to `.sdr` (the native
         // engine's teardown restores SDR — a real switch the view should veil),
@@ -1052,7 +1051,7 @@ public final class PlayerViewModel {
         displayMode = engineKind == .native ? HDRDisplayMode(request.sourceMetadata) : .sdr
         // Engine-independent: tracks the *content's* range so the exit veil can
         // cover a panel HDR/DV → SDR switch even when a match-content engine
-        // (Plozzigen, formerly mpv) — which keeps `displayMode` `.sdr` above —
+        // (Plozzigen) — which keeps `displayMode` `.sdr` above —
         // drove the panel into HDR on this TV.
         contentDisplayMode = HDRDisplayMode(request.sourceMetadata)
         // The overlay clamps its white point on HDR frames; mirror whether the
@@ -1072,7 +1071,7 @@ public final class PlayerViewModel {
         await engine.load(request: request, startPosition: startPosition)
         phase = .ready
         // Publish diagnostics after the engine load attempt returns, so the
-        // diagnostics sampler doesn't churn SwiftUI layout during mpv init.
+        // diagnostics sampler doesn't churn SwiftUI layout during Plozzigen init.
         diagnosticsToken = UUID()
         // Report the *resolved* start position explicitly (not engine.currentTime,
         // which can still read 0 before the seek settles). When best-source routing
@@ -1132,7 +1131,7 @@ public final class PlayerViewModel {
         // which calls this again. The per-load flag makes it fire exactly once.
         // (selectedSubtitleTrackID is intentionally NOT reset here: the image-sub
         // resolve path seeds it before playResolved so the menu reflects the
-        // bitmap track mpv draws; the routing below sets it for native/Plozzigen.)
+        // bitmap track Plozzigen draws; the routing below sets it for native/Plozzigen.)
         initialSubtitleApplied = false
         applyInitialSubtitleSelectionIfReady(for: request)
 
@@ -1808,7 +1807,7 @@ public final class PlayerViewModel {
 
     /// Live engine telemetry (dropped frames / FPS / bitrate) for diagnostics.
     /// `nil` on the native engine (the sampler uses the AVPlayer access log); the
-    /// Plozzigen/mpv engines vend it so those fields aren't blank.
+    /// Plozzigen engines vend it so those fields aren't blank.
     public var engineLiveTelemetry: EngineLiveTelemetry? { engine.liveTelemetry }
 
     /// A stable identity for the active player instance, so views can restart
@@ -2287,7 +2286,7 @@ public final class PlayerViewModel {
         // active cues; route them through Plozz's owned overlay (live-feed mode)
         // so text *and* bitmap subs draw on the same SDR renderer as native. The
         // `onSubtitleCues` callback (wired in configureEngineCallbacks) does the
-        // feeding. Other engines that draw their own subs (mpv) get an empty live
+        // feeding. Other engines that draw their own subs (Plozzigen) get an empty live
         // feed and keep drawing themselves — harmless.
         subtitleCueLoadTask?.cancel()
         subtitleCueLoadTask = nil

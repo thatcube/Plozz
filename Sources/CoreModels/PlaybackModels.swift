@@ -252,7 +252,7 @@ public struct PlaybackRequest: Hashable, Sendable {
     /// An optional *separate* audio track to be muxed with `streamURL` at playback
     /// time. Used for adaptive sources whose video and audio are delivered as two
     /// distinct streams (e.g. a high-resolution YouTube DASH trailer: `streamURL`
-    /// is video-only, this is the companion audio). Only the **hybrid (mpv)**
+    /// is video-only, this is the companion audio). Only the **Plozzigen**
     /// engine can combine two bare URLs, so a request that sets this must be
     /// routed there; `nil` for ordinary single-file/HLS playback.
     public var externalAudioURL: URL?

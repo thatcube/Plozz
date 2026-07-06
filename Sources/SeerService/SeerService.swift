@@ -164,6 +164,25 @@ public final class SeerService {
         return SeerMapper.mediaItems(from: page)
     }
 
+    /// The current request/availability state for a discovery title, fetched fresh
+    /// from Seerr by its TMDB id. Lets a discovery detail page refresh itself on
+    /// (re)open so a title requested in an earlier visit shows "Requested"/
+    /// "Downloading" instead of a stale "Request" seeded from the search result.
+    ///
+    /// Returns `nil` when unconfigured, when the item isn't a movie/series with a
+    /// TMDB id, or when the lookup fails — the caller then just keeps the seeded
+    /// state. An untracked (never-requested) title decodes as `.unknown`.
+    public func availability(for item: MediaItem) async -> (MediaAvailabilityStatus, Double?)? {
+        guard config.isConfigured,
+              let mediaType = SeerMapper.requestMediaType(for: item),
+              let tmdbID = SeerMapper.tmdbID(for: item),
+              let details = try? await client.mediaDetails(mediaType: mediaType, tmdbID: tmdbID)
+        else { return nil }
+        let status = details.mediaInfo?.status.flatMap(MediaAvailabilityStatus.init(rawValue:)) ?? .unknown
+        let progress = SeerMapper.downloadProgress(from: details.mediaInfo?.downloadStatus)
+        return (status, progress)
+    }
+
     // MARK: - Requests
 
     /// One-tap request for a title that isn't yet in the library. Derives the

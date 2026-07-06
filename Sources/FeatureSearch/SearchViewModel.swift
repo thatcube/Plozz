@@ -27,19 +27,28 @@ public final class SearchViewModel {
     /// Called only on the main actor (its `Set` result — `Sendable` — is what the
     /// per-account search tasks capture), so it needn't be `@Sendable` itself.
     private let disabledLibraryKeys: () -> Set<String>
+    /// Optional Seerr (Overseerr/Jellyseerr) discovery search. When set, its hits
+    /// are folded into a trailing "Not in Your Library" section — titles the user
+    /// can request rather than play. Runs concurrently with the library search and
+    /// must never throw (swallow errors to `[]` at the call site) so a Seerr outage
+    /// can't break library search. `nil` disables the discovery section entirely
+    /// (the zero-cost path when Seerr isn't connected).
+    private let seerSearch: (@Sendable (String) async -> [MediaItem])?
 
     public init(
         accounts: [ResolvedAccount],
         limit: Int = 40,
         debounceMilliseconds: Int = 350,
         identitySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef] = { _ in [] },
-        disabledLibraryKeys: @escaping () -> Set<String> = { [] }
+        disabledLibraryKeys: @escaping () -> Set<String> = { [] },
+        seerSearch: (@Sendable (String) async -> [MediaItem])? = nil
     ) {
         self.accounts = accounts
         self.limit = limit
         self.debounce = .milliseconds(debounceMilliseconds)
         self.identitySources = identitySources
         self.disabledLibraryKeys = disabledLibraryKeys
+        self.seerSearch = seerSearch
     }
 
     /// Runs a debounced search for the current `query`. Safe to call on every
@@ -63,23 +72,55 @@ public final class SearchViewModel {
         guard !Task.isCancelled else { return }
 
         state = .loading
+
+        // Start the discovery (Seerr) search concurrently with the library search
+        // so the two round-trips overlap. Structured `async let` so cancelling this
+        // task (the user kept typing) cancels the discovery child too. Never throws
+        // — a Seerr outage yields `[]` and leaves the library results intact.
+        let discoverySearch = seerSearch
+        async let discoveryItemsTask: [MediaItem] = {
+            guard let discoverySearch else { return [] }
+            return await discoverySearch(requested)
+        }()
+
+        // The library search may throw only when EVERY account fails; capture that
+        // rather than throwing, so a library outage still lets Seerr hits show.
+        var libraryItems: [MediaItem] = []
+        var libraryError: AppError?
         do {
-            let items = try await aggregatedSearch(query: requested)
-            guard SearchPolicy.isCurrent(requestedQuery: requested, liveQuery: query) else { return }
-            let serverInfo = accounts.sourceServerInfo()
-            let deduped = SearchDeduplicator.deduplicate(
-                items,
-                identitySources: identitySources,
-                serverInfo: { serverInfo[$0] }
-            )
-            let sections = SearchSection.sections(from: deduped)
-            state = sections.isEmpty ? .empty : .loaded(sections)
+            libraryItems = try await aggregatedSearch(query: requested)
         } catch let error as AppError {
-            guard SearchPolicy.isCurrent(requestedQuery: requested, liveQuery: query) else { return }
-            state = .failed(error)
+            libraryError = error
         } catch {
-            guard SearchPolicy.isCurrent(requestedQuery: requested, liveQuery: query) else { return }
-            state = .failed(.unknown(""))
+            libraryError = .unknown("")
+        }
+
+        let discoveryItems = await discoveryItemsTask
+        guard SearchPolicy.isCurrent(requestedQuery: requested, liveQuery: query) else { return }
+
+        let serverInfo = accounts.sourceServerInfo()
+        let dedupedLibrary = SearchDeduplicator.deduplicate(
+            libraryItems,
+            identitySources: identitySources,
+            serverInfo: { serverInfo[$0] }
+        )
+        var sections = SearchSection.sections(from: dedupedLibrary)
+        if let notInLibrary = SearchSection.notInLibrarySection(
+            discoveryResults: discoveryItems,
+            libraryResults: dedupedLibrary,
+            limit: limit
+        ) {
+            sections.append(notInLibrary)
+        }
+
+        if !sections.isEmpty {
+            state = .loaded(sections)
+        } else if let libraryError {
+            // Nothing to show and the library search failed outright — surface the
+            // error (matches prior behaviour). A Seerr-only failure just reads empty.
+            state = .failed(libraryError)
+        } else {
+            state = .empty
         }
     }
 

@@ -24,8 +24,8 @@ import EnginePlozzigen
 /// AVPlayer) is the sole on-device decode engine. It plays AVPlayer-incompatible
 /// media (MKV, DoVi/Atmos MKV, HEVC `hev1`, AV1, DTS/TrueHD, …) and decodes
 /// embedded + bitmap (PGS/DVB/DVD) subtitles itself, so nothing needs a server
-/// transcode/burn-in. (The former mpv/VLCKit hybrid engine is retired; VLCKit is
-/// archived at the `archive/vlckit-engine` git tag if ever needed.)
+/// transcode/burn-in. (The former hybrid engine is retired; its archived code is
+/// available at historical git tags if ever needed.)
 ///
 /// When no UIKit engine is linked (e.g. a macOS unit-test build), everything
 /// collapses to the native-only path, so behaviour is byte-for-byte today's.

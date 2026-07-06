@@ -1,184 +1,80 @@
-# LGPL Compliance — libmpv + FFmpeg (EngineMPV) — ⚠️ HISTORICAL / RETIRED
+# LGPL Compliance — FFmpeg (via AetherEngine / FFmpegBuild)
 
-> **⚠️ This document describes the RETIRED local mpv build pipeline.**
-> The `EngineMPV` engine, `tools/build-mpv-tvos.sh`, `tools/stage-mpv-frameworks.sh`,
-> `tools/setup-mpv.sh`, and the local `Frameworks/mpv/` xcframeworks referenced
-> below **no longer exist** in the tree — they were removed when mpv was retired
-> (recoverable at the `archive/mpv-engine` git tag). The content below is kept as
-> the compliance record for that archived build.
->
-> **Open item for Brandon (FFmpeg LGPL still applies via a different source):**
-> the shipping app still bundles FFmpeg — now through the **AetherEngine** /
-> **FFmpegBuild** Swift Package (URL-pulled prebuilt xcframeworks), *not* this
-> local build. The LGPL relink / source-offer / attribution obligations in the
-> "Obligations" section below therefore still need to be satisfied against
-> **FFmpegBuild's** build, and this NOTICE should be rewritten to document that
-> package rather than the retired mpv pipeline. Flagging rather than editing the
-> body, since compliance wording is your call.
-
----
-
-This documents the licensing of the libmpv + FFmpeg binaries that back the
-optional `EngineMPV` video engine, the exact build change that makes them
-App-Store-redistributable, and the obligations Plozz must meet to ship them.
+Plozz's on-device decode engine, **Plozzigen** (the app's branding of the
+**AetherEngine** media engine), uses **FFmpeg** to demux and software-decode the
+formats `AVPlayer` can't. Plozz does **not** build FFmpeg itself — it is pulled
+in transitively, as prebuilt xcframeworks, by AetherEngine via the
+**FFmpegBuild** Swift package. This documents FFmpeg's licensing and the LGPL
+obligations Plozz must meet to ship it.
 
 ## TL;DR
 
-`EngineMPV` links a **decode-only, LGPLv3** build of FFmpeg + libmpv. The build
-is produced by `tools/build-mpv-tvos.sh`, which wraps **MPVKit `0.41.0-n8.1`**
-(mpv 0.41.0 + FFmpeg n8.1) and **patches out MPVKit's hard-coded
-`--enable-nonfree`**. No GPL components are built (`--enable-gpl` is never
-passed). Verified result, on every FFmpeg slice:
+The bundled FFmpeg is a **decode-only, LGPL-3.0** build — no `--enable-gpl` (so
+no GPL-only codecs such as x264/x265) and nothing "nonfree/unredistributable".
+It is App-Store-redistributable, subject to the LGPL relink / source-offer /
+attribution duties below. FFmpeg's `libav*` libraries ship as xcframeworks
+embedded in the app bundle as frameworks (`Libavcodec.framework`,
+`Libavformat.framework`, `Libavutil.framework`, `Libswscale.framework`,
+`Libavfilter.framework`, `Libswresample.framework`, …).
 
-```
-#define FFMPEG_LICENSE "LGPL version 3 or later"
-#define CONFIG_NONFREE 0
-#define CONFIG_GPL     0
-#define CONFIG_VERSION3 1
-```
+## What ships, and where it comes from
 
-## The problem
+| Component | Source (pinned) | License |
+|---|---|---|
+| AetherEngine (media engine; "Plozzigen") | `github.com/thatcube/AetherEngine` @ `82871715…` | per upstream |
+| FFmpeg `libav*` (demux / decode / thin HLS-fMP4 mux) | `github.com/superuser404notfound/FFmpegBuild` @ `1.0.3` (FFmpeg **n8.1.x**) | **LGPL-3.0** |
+| dav1d (AV1 software decoder, separate xcframework) | bundled by FFmpegBuild | BSD-2-Clause (permissive) |
+| libdovi (Dolby Vision RPU parser) | `github.com/superuser404notfound/LibDovi` @ `1.0.2` | per upstream |
 
-MPVKit's **default** (non-GPL) build
-still passes `--enable-nonfree` **unconditionally** in its FFmpeg `configure`
-(`Sources/BuildScripts/XCFrameworkBuild/main.swift`). That makes every FFmpeg
-slice:
+Plozz's own `Package.swift` declares **only** AetherEngine; FFmpegBuild and
+LibDovi are its transitive dependencies (AetherEngine owns their version
+alignment). The concrete pins live in
+`Plozz.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved`.
 
-```
-FFMPEG_LICENSE "nonfree and unredistributable"   // CONFIG_NONFREE 1
-```
+## FFmpeg license facts
 
-A "nonfree and unredistributable" FFmpeg is **not** shippable on the App Store
-and is **not** the clean LGPL the engine needs.
+Upstream FFmpeg `libav*` is LGPL-2.1-or-later; FFmpegBuild ships an **LGPL-3.0**
+decode-only build (its `LICENSE` is GNU LGPL v3, and its README states
+"LGPL-3.0, same as upstream FFmpeg. App Store compatible when linked
+dynamically"). The build is scoped to demux + decode + a thin HLS-fMP4 mux for
+the AVPlayer bridge — **no CLI binaries, no network/protocol stack, and no GPL
+or nonfree components** — so there is no GPL/nonfree taint to redistribution.
 
-## The fix (Phase A)
+## LGPL obligations (what Plozz must satisfy to ship)
 
-FFmpeg only needs `--enable-nonfree` when it is combined with a GPL-incompatible
-dependency — classically OpenSSL. In MPVKit's config the **FFmpeg TLS provider is
-gnutls** (`--enable-gnutls`), and FFmpeg is **not** configured `--enable-openssl`
-(OpenSSL static libs are present for other reasons but FFmpeg does not link them
-for protocols). So `--enable-nonfree` is unnecessary and can simply be dropped.
+LGPL-3.0 is App-Store-compatible but imposes **relink**, **source-offer**, and
+**attribution** duties:
 
-**Exact change** (applied automatically by `tools/build-mpv-tvos.sh` to the freshly
-cloned MPVKit before building), in
-`Sources/BuildScripts/XCFrameworkBuild/main.swift`, the `ffmpegConfiguers` array:
+1. **Dynamic-link / relink ability.** FFmpeg is distributed as xcframeworks
+   embedded in the app bundle as frameworks (see the `Copy *.framework` /
+   `Signing *.framework` build steps), and the complete corresponding source +
+   public build recipe (below) together let a user relink the app against a
+   modified FFmpeg. *(Before an App Store submission, confirm the embedded
+   frameworks are the relink-eligible artifacts for that release.)*
+2. **Source offer.** Publish, or offer in writing, the complete corresponding
+   source for the exact FFmpeg version shipped. FFmpegBuild pins FFmpeg
+   **n8.1.x** and its build script (`build.sh`) is public at
+   `github.com/superuser404notfound/FFmpegBuild`, so the corresponding source is
+   fully reproducible from a pinned upstream.
+3. **Attribution + license texts.** The in-app **Settings → Acknowledgements**
+   screen (`FeatureSettings/IntegrationsDetailView.swift`, `AttributionsDetailView`)
+   credits FFmpeg, libdovi, and the other bundled components. Ship FFmpeg's
+   LGPL-3.0 license text (and any bundled dependency notices) there and/or in a
+   `THIRD_PARTY_LICENSES` file in the bundle.
+4. **No GPL/nonfree creep.** Keep the FFmpeg build decode-only: never adopt a
+   `--enable-gpl` / `--enable-nonfree` FFmpeg (no x264/x265, etc.). This is owned
+   by the FFmpegBuild package, so pin a decode-only LGPL release.
 
-```diff
-- "--enable-cross-compile", "--enable-libxml2", "--enable-nonfree",
-+ "--enable-cross-compile", "--enable-libxml2", "--disable-nonfree",
-```
+## Verifying the shipped license
 
-- `--enable-version3` is **kept** → the result is **LGPL v3** (rather than v2.1).
-- `--enable-gpl` is **never** added → no GPL-only components (x264/x265, etc.).
-- gnutls continues to provide TLS, so no functionality is lost.
-
-### Before → after (verified)
-
-| Field            | Before (`--enable-nonfree`)        | After (`--disable-nonfree`)     |
-|------------------|------------------------------------|---------------------------------|
-| `FFMPEG_LICENSE` | `nonfree and unredistributable`    | `LGPL version 3 or later`       |
-| `CONFIG_NONFREE` | `1`                                | `0`                             |
-| `CONFIG_GPL`     | `0`                                | `0`                             |
-| `CONFIG_VERSION3`| `1`                                | `1`                             |
-
-Checked directly in the built `config.h` embedded in each FFmpeg framework
-(e.g. `Libavcodec.xcframework/<slice>/.../config.h`).
-
-## What was built
-
-MPVKit `0.41.0-n8.1`, `make build platform=tvos,tvsimulator`, ~8m30s wall-clock
-on an Apple-Silicon Mac (Xcode 27, AppleTVOS 27 SDK). FFmpeg + libmpv are
-compiled locally; the heavy dependencies are MPVKit's prebuilt, checksummed
-xcframeworks (downloaded, unchanged).
-
-### Locally-built, LGPLv3 frameworks (referenced by local-path `.binaryTarget`s)
-
-Each has a `tvos-arm64_arm64e` device slice + `tvos-arm64_x86_64-simulator` slice:
-
-| xcframework                | size |
-|----------------------------|-----:|
-| Libmpv.xcframework         | 12 M |
-| Libavcodec.xcframework     | 40 M |
-| Libavformat.xcframework    | 9.6 M|
-| Libavutil.xcframework      | 6.3 M|
-| Libswscale.xcframework     | 6.0 M|
-| Libavfilter.xcframework    | 4.7 M|
-| Libswresample.xcframework  | 620 K|
-| Libavdevice.xcframework    | 124 K|
-
-(Staged under `Frameworks/mpv/`, **gitignored**, regenerated by
-`tools/build-mpv-tvos.sh` + `tools/stage-mpv-frameworks.sh`. Never committed.)
-
-### Prebuilt dependency xcframeworks (MPVKit-published, pulled by URL+checksum)
-
-These are independent libraries whose licenses are **unaffected** by the FFmpeg
-config; they are consumed verbatim from MPVKit's release repos and pinned by
-checksum in `Package.swift`:
-
-- **LGPL**: gnutls (LGPLv2.1+), libplacebo (LGPLv2.1+), libass, libdovi.
-- **Permissive (BSD/MIT/ISC/zlib-ish)**: dav1d, libuavs3d, lcms2, MoltenVK
-  (Apache-2.0), shaderc (Apache-2.0), freetype (FTL/GPL dual → FTL), fribidi
-  (LGPL), harfbuzz (MIT), libunibreak (zlib), libuchardet (MPL), libbluray
-  (LGPL), gmp (LGPLv3), nettle/hogweed (LGPLv3).
-- **OpenSSL (Libssl/Libcrypto)**: Apache-2.0 (OpenSSL 3.x). Linked into the
-  SwiftPM target but **not** used by FFmpeg for TLS (gnutls is), so it does not
-  taint the FFmpeg license. Could be dropped from the link in a later cleanup.
-
-## Obligations to actually ship mpv (for the orchestrator)
-
-LGPL (v2.1/v3) and the permissive licenses above are App-Store-compatible, but
-LGPL imposes **relink** and **attribution** duties:
-
-1. **Dynamic-link / relink ability.** LGPL requires users be able to relink the
-   app against a modified version of the LGPL library. The robust path on iOS/tvOS
-   is to ship the LGPL libraries as **dynamically-linked `.framework`s embedded in
-   the app bundle** (not statically baked into the main binary) **and** to make the
-   corresponding object files / relink instructions available on request. The
-   current build emits **static** libs inside the xcframeworks; before shipping,
-   switch to embedded dynamic frameworks (or otherwise provide relinkable objects)
-   to satisfy the LGPL relink clause. *(Open item — not required for this
-   compile-only branch.)*
-2. **Source offer.** Publish (or offer in writing) the **complete corresponding
-   source** for the exact FFmpeg/libmpv/gnutls/etc. versions built, plus the build
-   scripts and any patches. `tools/build-mpv-tvos.sh` pins MPVKit `0.41.0-n8.1`
-   (→ FFmpeg n8.1, mpv 0.41.0) and records the one-line `--disable-nonfree` patch,
-   so the corresponding source is fully reproducible from pinned upstreams.
-3. **Attribution + license texts.** Bundle the license texts and copyright
-   notices for FFmpeg (LGPLv3), libmpv (LGPLv2.1+), and every bundled dependency
-   (gnutls, libplacebo, libass, dav1d, MoltenVK, shaderc, freetype, fribidi,
-   harfbuzz, lcms2, libdovi, libunibreak, libuchardet, libbluray, gmp, nettle,
-   OpenSSL, …) in an in-app "Licenses / Acknowledgements" screen and/or a
-   `THIRD_PARTY_LICENSES` file in the bundle. *(To be assembled when mpv is wired
-   into the app — the texts live in each upstream repo / MPVKit's release notes.)*
-4. **No GPL creep.** Keep `--enable-gpl` **off** and `--enable-nonfree` **off**.
-   Do not add GPL-only filters/codecs (x264, x265, libsmbclient via the GPL path,
-   …). The build script fails loudly if it can't apply the `--disable-nonfree`
-   patch.
-
-## Reproduce
+FFmpeg compiles its license flags into each framework's `config.h`. To confirm a
+build is clean LGPL (no GPL, no nonfree):
 
 ```bash
-brew install nasm pkg-config cmake meson ninja autoconf automake libtool
-PATH="/opt/homebrew/opt/libtool/libexec/gnubin:$PATH" \
-  tools/build-mpv-tvos.sh                       # ~9 min; patches out --enable-nonfree
-MPV_RELEASE_DIR=<MPVKit>/dist/release \
-  tools/stage-mpv-frameworks.sh                 # unzip the 8 LGPL xcframeworks into Frameworks/mpv/
-# verify:
-grep -E 'FFMPEG_LICENSE|CONFIG_NONFREE|CONFIG_GPL ' \
-  "$(find Frameworks/mpv/Libavformat.xcframework -name config.h | head -1)"
+# In the built FFmpeg framework (SwiftPM checkout / DerivedData artifact):
+grep -E 'define (FFMPEG_LICENSE|CONFIG_NONFREE|CONFIG_GPL|CONFIG_VERSION3) ' <path>/config.h
+# Expect: FFMPEG_LICENSE "LGPL version 3 or later", CONFIG_NONFREE 0, CONFIG_GPL 0
 ```
 
-### Day-to-day: staging into a fresh worktree (no rebuild)
-
-The ~9-minute `build-mpv-tvos.sh` only needs to run **once per machine**. To make
-any worktree or branch buildable, run:
-
-```bash
-tools/setup-mpv.sh    # clones Frameworks/mpv/ from a shared cache; instant (<1s)
-```
-
-It populates the gitignored `Frameworks/mpv/` from
-`~/Library/Caches/plozz-mpv/mpv` using an APFS copy-on-write clone (no disk
-duplication), self-seeding that cache the first time from a sibling worktree, the
-build zips, or — only as a last resort — a full `build-mpv-tvos.sh`. Re-seed the
-cache after a rebuild with `tools/setup-mpv.sh --refresh`.
+Authoritative build details (FFmpeg version, configure flags, dependency
+provenance) live in the FFmpegBuild repository, which produces the binaries.

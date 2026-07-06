@@ -189,8 +189,8 @@ final class JellyfinCapabilityProfileTests: XCTestCase {
     }
 
     func testOpusPresentInHybridMP4Profile() throws {
-        // When the hybrid engine is on, mpv decodes Opus, so we can advertise it
-        // even in Apple containers (the router sends Opus-in-MP4 to mpv).
+        // When the hybrid engine is on, Plozzigen decodes Opus, so we can advertise it
+        // even in Apple containers (the router sends Opus-in-MP4 to Plozzigen).
         let json = try encoded(.appleTV(capabilities: .default, hybridEngineEnabled: true))
         let direct = try XCTUnwrap(json["DirectPlayProfiles"] as? [[String: Any]])
         let mp4 = try XCTUnwrap(direct.first { ($0["Container"] as? String) == "mp4,m4v" })

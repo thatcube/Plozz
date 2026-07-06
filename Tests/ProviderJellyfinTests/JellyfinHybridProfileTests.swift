@@ -167,17 +167,17 @@ final class JellyfinHybridProfileTests: XCTestCase {
     }
 
     func testHybridOnEmbedsImageSubtitles() throws {
-        // mpv renders bitmap subs, so the server must keep them embedded in the
+        // Plozzigen renders bitmap subs, so the server must keep them embedded in the
         // direct-played container instead of forcing a burn-in (video) transcode.
         let json = try encoded(.appleTV(capabilities: caps, hybridEngineEnabled: true))
         for format in ["pgssub", "dvdsub", "dvbsub", "xsub"] {
             XCTAssertEqual(try subtitleMethods(json, format: format), ["Embed"],
-                           "\(format) must be Embed when the mpv engine is wired in")
+                           "\(format) must be Embed when the hybrid engine is wired in")
         }
     }
 
     func testHybridOnEmbedsStyledSubtitles() throws {
-        // libass (mpv) renders ASS/SSA faithfully, so embed rather than burn in.
+        // Plozzigen (libass) renders ASS/SSA faithfully, so embed rather than burn in.
         let json = try encoded(.appleTV(capabilities: caps, hybridEngineEnabled: true))
         XCTAssertEqual(try subtitleMethods(json, format: "ass"), ["Embed"])
         XCTAssertEqual(try subtitleMethods(json, format: "ssa"), ["Embed"])
@@ -189,7 +189,7 @@ final class JellyfinHybridProfileTests: XCTestCase {
         let json = try encoded(.appleTV(capabilities: caps, hybridEngineEnabled: false))
         for format in ["pgssub", "dvdsub", "dvbsub", "xsub", "ass", "ssa"] {
             XCTAssertEqual(try subtitleMethods(json, format: format), ["Encode"],
-                           "\(format) must be Encode (burn-in) without the mpv engine")
+                           "\(format) must be Encode (burn-in) without the hybrid engine")
         }
     }
 

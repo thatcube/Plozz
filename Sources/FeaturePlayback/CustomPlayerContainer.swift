@@ -50,7 +50,7 @@ struct PlayerActions {
 /// SwiftUI controls overlay on top, and handles all Siri Remote input in UIKit
 /// (the only reliable way to get analog touch-surface scrubbing on tvOS). It
 /// drives playback purely through the `VideoEngine` protocol and the
-/// `PlayerActions` closures, so any engine (AVPlayer today, libmpv/VLCKit later)
+/// `PlayerActions` closures, so any engine (AVPlayer or Plozzigen)
 /// reuses it without change.
 struct CustomPlayerContainer: UIViewControllerRepresentable {
     let engine: any VideoEngine
@@ -75,7 +75,7 @@ struct CustomPlayerContainer: UIViewControllerRepresentable {
 }
 
 /// Minimal, controls-free host for an engine's bare video surface. Used during
-/// loading so engines that require an attached/windowed render target (mpv)
+/// loading so engines that require an attached/windowed render target
 /// can initialize before playback reaches `.ready`.
 struct VideoSurfaceContainer: UIViewRepresentable {
     let engine: any VideoEngine
@@ -189,7 +189,7 @@ final class PlayerInputViewController: UIViewController {
     /// Suppresses the tvOS screensaver / Apple TV sleep while video is actively
     /// playing, and releases it the instant playback pauses, ends, or this host
     /// goes away. Driven every refresh tick off `engine.preventsDisplaySleep`, so
-    /// it behaves identically for every engine/decoder (AVPlayer *and* mpv).
+    /// it behaves identically for every engine/decoder (AVPlayer *and* Plozzigen).
     private let idleSleepGuard = IdleSleepGuard()
 
     /// Whether the Siri Remote currently drives the scrub surface or the bottom

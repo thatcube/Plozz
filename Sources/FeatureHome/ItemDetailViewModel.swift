@@ -49,6 +49,19 @@ public final class ItemDetailViewModel {
     private let provider: any MediaProvider
     private let itemID: String
     private let ratingsProvider: any ExternalRatingsProviding
+    /// A **discovery** item (a Seerr/Overseerr title that may not be in any
+    /// library). Its synthetic `seer:<tmdbId>` id isn't resolvable through a
+    /// `MediaProvider`, so `load()`/`reload()` skip the provider fetch and every
+    /// library-only enrichment (children, trailers, ratings, cross-server) and
+    /// simply keep the seeded `initialItem` — which already carries the TMDB
+    /// artwork + overview the discovery detail page shows.
+    private let isDiscoveryItem: Bool
+    /// For a discovery item, fetches its current request/availability + download
+    /// progress from Seerr (by TMDB id). Called on every `load()` so reopening a
+    /// title requested in an earlier visit reflects the real "Requested"/
+    /// "Downloading" state instead of the stale "Request" seeded from the search
+    /// result. `nil` (or a `nil` result) leaves the seeded state untouched.
+    private let discoveryStatusRefresh: (@Sendable (MediaItem) async -> (MediaAvailabilityStatus, Double?)?)?
 
     /// The currently *active* source the page is showing. Defaults to the base
     /// `provider`/`itemID`/`sourceAccountID` the page was opened with, but is
@@ -210,6 +223,8 @@ public final class ItemDetailViewModel {
         provider: any MediaProvider,
         itemID: String,
         initialItem: MediaItem? = nil,
+        isDiscoveryItem: Bool = false,
+        discoveryStatusRefresh: (@Sendable (MediaItem) async -> (MediaAvailabilityStatus, Double?)?)? = nil,
         ratingsProvider: any ExternalRatingsProviding = DisabledRatingsProvider(),
         sourceAccountID: String? = nil,
         originSourceAccountID: String? = nil,
@@ -225,6 +240,8 @@ public final class ItemDetailViewModel {
         self.itemID = itemID
         self.activeProvider = provider
         self.activeItemID = itemID
+        self.isDiscoveryItem = isDiscoveryItem
+        self.discoveryStatusRefresh = discoveryStatusRefresh
         // Fall back to the library-origin account when a direct source tag is
         // absent, so a played item is always attributed to the account it was
         // browsed from (a local media share persists resume/played state keyed by
@@ -282,6 +299,14 @@ public final class ItemDetailViewModel {
     }
 
     public func load() async {
+        // Discovery (Seerr) items aren't backed by a resolvable library provider,
+        // so the library fetch below would only 404. Instead of the fetch, refresh
+        // the title's request/availability state from Seerr (so a reopened title
+        // reflects a request made earlier) and keep the seeded item otherwise.
+        guard !isDiscoveryItem else {
+            await refreshDiscoveryStatus()
+            return
+        }
         alternateSourceEnrichmentTask?.cancel()
         alternateSourceEnrichmentTask = nil
         enrichmentTask?.cancel()
@@ -399,6 +424,28 @@ public final class ItemDetailViewModel {
         } catch {
             if state.value == nil { state = .failed(.unknown("")) }
         }
+    }
+
+    /// Refreshes a discovery (Seerr) title's request/availability + download
+    /// progress from Seerr on (re)open, so a title requested in an earlier visit
+    /// shows "Requested"/"Downloading" rather than a stale "Request" seeded from
+    /// the search result. The seeded item is kept untouched on any failure, and the
+    /// state is only republished when something actually changed (no needless
+    /// re-render / focus churn).
+    private func refreshDiscoveryStatus() async {
+        guard let current = state.value?.item else {
+            if state.value == nil { state = .empty }
+            return
+        }
+        guard let discoveryStatusRefresh,
+              let (availability, downloadProgress) = await discoveryStatusRefresh(current),
+              !Task.isCancelled
+        else { return }
+        guard current.availability != availability || current.downloadProgress != downloadProgress else { return }
+        var updated = current
+        updated.availability = availability
+        updated.downloadProgress = downloadProgress
+        state = .loaded(Detail(item: updated, children: [], childrenLoaded: true))
     }
 
     /// A season must never render a page of its own. When the fetched item is a
@@ -666,6 +713,7 @@ public final class ItemDetailViewModel {
     /// after a context-menu action (e.g. mark watched) so the hero, child rail
     /// and watched badges reflect the new server state in place.
     public func reload() async {
+        guard !isDiscoveryItem else { return }
         guard case .loaded = state else { await load(); return }
         // Capture the active source identity for this reload. An in-place
         // ``switchToSource(accountID:)`` can re-point active* (and start its own

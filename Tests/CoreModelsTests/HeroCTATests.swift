@@ -41,4 +41,22 @@ final class HeroCTATests: XCTestCase {
         XCTAssertEqual(item(.processing, download: nil).heroCTA(seerConnected: true), .requested)
         XCTAssertEqual(item(.processing, download: 0.42).heroCTA(seerConnected: false), .unavailable)
     }
+
+    // MARK: - isNotInLibraryDiscovery
+
+    func testNotInLibraryDiscoveryIsFalseForLibraryAndOwnedTitles() {
+        // Ordinary library item (no availability) and owned featured titles must
+        // NOT be treated as discovery — they resolve to a real library copy, so
+        // their Play/Watchlist/etc. actions stay live.
+        XCTAssertFalse(item(nil).isNotInLibraryDiscovery)
+        XCTAssertFalse(item(.available).isNotInLibraryDiscovery)
+        XCTAssertFalse(item(.partiallyAvailable).isNotInLibraryDiscovery)
+    }
+
+    func testNotInLibraryDiscoveryIsTrueForRequestableAndInFlightTitles() {
+        XCTAssertTrue(item(.unknown).isNotInLibraryDiscovery)
+        XCTAssertTrue(item(.pending).isNotInLibraryDiscovery)
+        XCTAssertTrue(item(.processing).isNotInLibraryDiscovery)
+        XCTAssertTrue(item(.deleted).isNotInLibraryDiscovery)
+    }
 }

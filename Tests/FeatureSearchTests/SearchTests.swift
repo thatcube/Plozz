@@ -57,6 +57,61 @@ final class SearchSectionTests: XCTestCase {
     func testEmptyInputYieldsNoSections() {
         XCTAssertTrue(SearchSection.sections(from: []).isEmpty)
     }
+
+    // MARK: - Not in Your Library (Seerr discovery) section
+
+    private func discovery(
+        _ tmdb: Int,
+        _ kind: MediaItemKind,
+        availability: MediaAvailabilityStatus = .unknown
+    ) -> MediaItem {
+        MediaItem(
+            id: "seer:\(tmdb)",
+            title: "T\(tmdb)",
+            kind: kind,
+            providerIDs: ["Tmdb": String(tmdb)],
+            availability: availability
+        )
+    }
+
+    func testNotInLibrarySectionCollectsRequestableTitles() {
+        let results = [discovery(1, .movie), discovery(2, .series)]
+        let section = SearchSection.notInLibrarySection(discoveryResults: results, libraryResults: [])
+        XCTAssertEqual(section?.title, "Not in Your Library")
+        XCTAssertEqual(section?.items.map(\.id), ["seer:1", "seer:2"], "Seerr relevance order is preserved")
+    }
+
+    func testNotInLibrarySectionExcludesTitlesAlreadyInLibrary() {
+        let results = [
+            discovery(1, .movie, availability: .available),
+            discovery(2, .movie, availability: .partiallyAvailable),
+            discovery(3, .movie, availability: .unknown),
+            discovery(4, .series, availability: .pending)
+        ]
+        let section = SearchSection.notInLibrarySection(discoveryResults: results, libraryResults: [])
+        // available / partiallyAvailable are in the library already and are dropped;
+        // unknown (requestable) and pending (already requested) remain.
+        XCTAssertEqual(section?.items.map(\.id), ["seer:3", "seer:4"])
+    }
+
+    func testNotInLibrarySectionDropsTitlesTheLibrarySearchAlreadyReturned() {
+        let libraryMovie = MediaItem(id: "j1", title: "Dune", kind: .movie, providerIDs: ["Tmdb": "100"])
+        let results = [discovery(100, .movie), discovery(200, .movie)]
+        let section = SearchSection.notInLibrarySection(discoveryResults: results, libraryResults: [libraryMovie])
+        XCTAssertEqual(section?.items.map(\.id), ["seer:200"], "A TMDB match with a library hit is de-duped out")
+    }
+
+    func testNotInLibrarySectionCapsToLimit() {
+        let results = (1...5).map { discovery($0, .movie) }
+        let section = SearchSection.notInLibrarySection(discoveryResults: results, libraryResults: [], limit: 2)
+        XCTAssertEqual(section?.items.count, 2)
+    }
+
+    func testNotInLibrarySectionNilWhenNothingRequestableRemains() {
+        let allOwned = [discovery(1, .movie, availability: .available)]
+        XCTAssertNil(SearchSection.notInLibrarySection(discoveryResults: allOwned, libraryResults: []))
+        XCTAssertNil(SearchSection.notInLibrarySection(discoveryResults: [], libraryResults: []))
+    }
 }
 
 @MainActor
@@ -66,6 +121,18 @@ final class SearchViewModelTests: XCTestCase {
             ResolvedAccount(account: Account(id: provider.accountID, from: provider.session), provider: provider)
         }
         return SearchViewModel(accounts: accounts, debounceMilliseconds: debounceMilliseconds)
+    }
+
+    /// Builds a view model wired to a Seerr discovery search closure.
+    private func makeVM(
+        providers: [SearchStubProvider],
+        seerSearch: @escaping @Sendable (String) async -> [MediaItem],
+        debounceMilliseconds: Int = 0
+    ) -> SearchViewModel {
+        let accounts = providers.map { provider in
+            ResolvedAccount(account: Account(id: provider.accountID, from: provider.session), provider: provider)
+        }
+        return SearchViewModel(accounts: accounts, debounceMilliseconds: debounceMilliseconds, seerSearch: seerSearch)
     }
 
     func testBlankQueryResetsToIdleWithoutSearching() async {
@@ -159,6 +226,71 @@ final class SearchViewModelTests: XCTestCase {
         }
         XCTAssertEqual(sections.first { $0.title == "Movies" }?.items.map(\.id), ["m1"])
     }
+
+    // MARK: - Seerr "Not in Your Library" section
+
+    func testDiscoveryResultsAppendNotInLibrarySection() async {
+        let provider = SearchStubProvider(results: [MediaItem(id: "m1", title: "Dune", kind: .movie)])
+        let vm = makeVM(providers: [provider], seerSearch: { _ in
+            [discoveryItem(1, "Foundation", .series)]
+        })
+        vm.query = "d"
+
+        await vm.search()
+
+        guard case let .loaded(sections) = vm.state else {
+            return XCTFail("Expected loaded, got \(vm.state)")
+        }
+        XCTAssertEqual(sections.map(\.title), ["Movies", "Not in Your Library"],
+                       "Discovery hits form a trailing section after the library sections")
+        XCTAssertEqual(sections.last?.items.map(\.id), ["seer:1"])
+    }
+
+    func testAvailableDiscoveryTitlesAreNotShownAsNotInLibrary() async {
+        let provider = SearchStubProvider(results: [MediaItem(id: "m1", title: "Dune", kind: .movie)])
+        let vm = makeVM(providers: [provider], seerSearch: { _ in
+            [discoveryItem(1, "Owned", .movie, availability: .available),
+             discoveryItem(2, "Wanted", .movie, availability: .unknown)]
+        })
+        vm.query = "d"
+
+        await vm.search()
+
+        guard case let .loaded(sections) = vm.state else {
+            return XCTFail("Expected loaded, got \(vm.state)")
+        }
+        XCTAssertEqual(sections.last?.title, "Not in Your Library")
+        XCTAssertEqual(sections.last?.items.map(\.id), ["seer:2"], "An already-available title isn't listed")
+    }
+
+    func testLibraryDownButDiscoveryStillShows() async {
+        let down = SearchStubProvider(results: [], error: .serverUnreachable)
+        let vm = makeVM(providers: [down], seerSearch: { _ in
+            [discoveryItem(9, "Severance", .series)]
+        })
+        vm.query = "sev"
+
+        await vm.search()
+
+        guard case let .loaded(sections) = vm.state else {
+            return XCTFail("Expected loaded (discovery survives a library outage), got \(vm.state)")
+        }
+        XCTAssertEqual(sections.map(\.title), ["Not in Your Library"])
+    }
+
+    func testDiscoveryOnlyResultsLoadWithNoLibraryAccounts() async {
+        let vm = SearchViewModel(accounts: [], debounceMilliseconds: 0, seerSearch: { _ in
+            [discoveryItem(5, "Andor", .series, availability: .pending)]
+        })
+        vm.query = "andor"
+
+        await vm.search()
+
+        guard case let .loaded(sections) = vm.state else {
+            return XCTFail("Expected loaded, got \(vm.state)")
+        }
+        XCTAssertEqual(sections.map(\.title), ["Not in Your Library"])
+    }
 }
 
 /// Minimal `MediaProvider` stub that only implements `search`.
@@ -211,6 +343,13 @@ private final class SearchStubProvider: MediaProvider, @unchecked Sendable {
 
 private func makeItems(_ count: Int) -> [MediaItem] {
     (0..<count).map { MediaItem(id: "i\($0)", title: "Item \($0)", kind: .movie) }
+}
+
+/// A Seerr discovery `MediaItem` (synthetic `seer:<tmdb>` id + TMDB provider id +
+/// an availability status), mirroring what `SeerMapper` produces. File-scope so it
+/// stays nonisolated and is usable inside `@Sendable` search closures.
+private func discoveryItem(_ tmdb: Int, _ title: String, _ kind: MediaItemKind, availability: MediaAvailabilityStatus = .unknown) -> MediaItem {
+    MediaItem(id: "seer:\(tmdb)", title: title, kind: kind, providerIDs: ["Tmdb": String(tmdb)], availability: availability)
 }
 
 final class SearchDeduplicatorTests: XCTestCase {

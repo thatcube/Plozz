@@ -21,6 +21,13 @@ final class MediaItemActionCoordinator: MediaItemActionHandling {
     }
 
     func actions(for item: MediaItem, context: MediaItemActionContext) -> [MediaItemAction] {
+        // A not-in-library discovery (Seerr) title has a synthetic `seer:<tmdbId>`
+        // id that isn't addressable on any provider, so watch-state / watchlist /
+        // refresh actions would silently fail — offer none (the discovery detail
+        // page surfaces a Request affordance instead). This deliberately excludes
+        // *owned* featured titles (available/partiallyAvailable), which resolve to a
+        // real library copy via the identity index and keep their working actions.
+        guard !item.isNotInLibraryDiscovery else { return [] }
         let provider = provider(for: item)
         return MediaItemActionCatalog.actions(
             for: item,

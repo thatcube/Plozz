@@ -88,6 +88,15 @@ struct SeerClient: Sendable {
         return try await http.decode(SeerDiscoverPage.self, from: endpoint, baseURL: baseURL)
     }
 
+    /// `GET /api/v1/{movie|tv}/{tmdbId}` — title details, decoded down to just its
+    /// `mediaInfo` (request status + live download queue) so the app can refresh a
+    /// discovery title's request/availability state on (re)open. `mediaType` is
+    /// Seerr's `"movie"`/`"tv"` (see ``SeerMapper/requestMediaType(for:)``).
+    func mediaDetails(mediaType: String, tmdbID: Int) async throws -> SeerMediaDetails {
+        let endpoint = Endpoint(method: .get, path: "/api/v1/\(mediaType)/\(tmdbID)", headers: headers())
+        return try await http.decode(SeerMediaDetails.self, from: endpoint, baseURL: baseURL)
+    }
+
     // MARK: - Radarr / Sonarr defaults
 
     /// `GET /api/v1/service/radarr` — configured Radarr servers (for defaults).

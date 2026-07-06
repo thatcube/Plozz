@@ -205,6 +205,62 @@ final class SeerServiceTests: XCTestCase {
         XCTAssertTrue(http.sentPaths.isEmpty)
     }
 
+    // MARK: - availability(for:) — discovery detail refresh
+
+    func testAvailabilityFetchesMovieStatusAndDownloadProgress() async throws {
+        let http = SeerRecordingHTTPClient()
+        http.stub(pathSuffix: "/movie/550", json: """
+        {"id":550,"mediaInfo":{"status":3,"downloadStatus":[{"size":100,"sizeLeft":40}]}}
+        """)
+        let service = makeConnectedService(http)
+        let item = MediaItem(id: "seer:550", title: "Fight Club", kind: .movie, providerIDs: ["Tmdb": "550"])
+
+        let result = await service.availability(for: item)
+
+        XCTAssertEqual(result?.0, .processing)
+        XCTAssertEqual(result?.1 ?? 0, 0.6, accuracy: 0.0001, "(100-40)/100 fetched fraction")
+        let sent = http.lastSent(pathSuffix: "/movie/550")
+        XCTAssertEqual(sent?.headers["X-Api-Key"], "KEY", "Admin key is sent")
+    }
+
+    func testAvailabilityUsesTvEndpointForSeries() async throws {
+        let http = SeerRecordingHTTPClient()
+        http.stub(pathSuffix: "/tv/1396", json: #"{"id":1396,"mediaInfo":{"status":2}}"#)
+        let service = makeConnectedService(http)
+        let item = MediaItem(id: "seer:1396", title: "Breaking Bad", kind: .series, providerIDs: ["Tmdb": "1396"])
+
+        let result = await service.availability(for: item)
+
+        XCTAssertEqual(result?.0, .pending)
+        XCTAssertNil(result?.1, "No download queue -> no progress")
+        XCTAssertNotNil(http.lastSent(pathSuffix: "/tv/1396"), "Series uses the /tv/{id} endpoint")
+    }
+
+    func testAvailabilityIsUnknownForUntrackedTitle() async throws {
+        // A never-requested title: the details payload carries no mediaInfo, which
+        // maps to `.unknown` (requestable) rather than nil.
+        let http = SeerRecordingHTTPClient()
+        http.stub(pathSuffix: "/movie/777", json: #"{"id":777}"#)
+        let service = makeConnectedService(http)
+        let item = MediaItem(id: "seer:777", title: "Untracked", kind: .movie, providerIDs: ["Tmdb": "777"])
+
+        let result = await service.availability(for: item)
+
+        XCTAssertEqual(result?.0, .unknown)
+        XCTAssertNil(result?.1)
+    }
+
+    func testAvailabilityNilWhenUnconfigured() async throws {
+        let http = SeerRecordingHTTPClient()
+        let service = SeerService(credentialStore: InMemorySeerCredentialStore(), http: http)
+        let item = MediaItem(id: "seer:1", title: "X", kind: .movie, providerIDs: ["Tmdb": "1"])
+
+        let result = await service.availability(for: item)
+
+        XCTAssertNil(result)
+        XCTAssertTrue(http.sentPaths.isEmpty, "No network when Seerr isn't configured")
+    }
+
     func testMovieRequestBuildsBodyWithRadarrDefaults() async throws {
         let http = SeerRecordingHTTPClient()
         http.stub(pathSuffix: "/service/radarr", json: """

@@ -7,9 +7,9 @@ import UIKit
 /// The tvOS screensaver / Apple TV sleep must be suppressed **only while a
 /// stream is actively playing** and re-enabled the moment it pauses, ends, or
 /// the player goes away. Because the custom player renders a bare engine surface
-/// (an `AVPlayerLayer` *or* mpv's Metal layer) with a hand-built transport, no
-/// system component manages the idle timer for us — the mpv path in particular
-/// has no `AVPlayer` and would otherwise let the screensaver start mid-movie.
+/// (an `AVPlayerLayer` *or* another engine's render layer) with a hand-built transport, no
+/// system component manages the idle timer for us — non-AVPlayer paths in particular
+/// have no `AVPlayer` and would otherwise let the screensaver start mid-movie.
 ///
 /// This guard makes the toggle idempotent and self-healing: callers push the
 /// desired state every refresh tick via `keepAwake(_:)`, and the assertion is

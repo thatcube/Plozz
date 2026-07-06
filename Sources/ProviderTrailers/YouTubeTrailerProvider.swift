@@ -98,7 +98,7 @@ public struct YouTubeTrailerProvider: MediaProvider {
     /// primary video is unavailable. `nil` (the default) means no fallback.
     private let alternatives: AlternativeResolving?
     /// Whether this provider may resolve a higher-resolution **adaptive** stream
-    /// (separate video + audio tracks the hybrid mpv engine muxes). Set from the
+    /// (separate video + audio tracks the Plozzigen engine muxes). Set from the
     /// player composition: `true` only when a hybrid engine is actually wired in,
     /// so a build with native-AVPlayer-only playback never gets a video-only URL
     /// it can't add sound to.

@@ -9,6 +9,19 @@ public struct ItemDetailView: View {
     private let spoilerSettings: SpoilerSettings
     private let onPlay: (MediaItem) -> Void
     private let onSelectChild: (MediaItem) -> Void
+    /// Whether the opened item is a not-in-library **discovery** (Seerr) title.
+    /// When `true` the page renders a request-focused hero (no children rail,
+    /// server/version pickers, watchlist/watched actions) instead of the library
+    /// detail layout, and a season/series discovery title is NOT routed into
+    /// `SeriesDetailView` (which expects real library seasons/episodes).
+    private let isDiscoveryItem: Bool
+    /// Whether Seerr is currently connected — gates the discovery Request pill.
+    private let seerConnected: Bool
+    /// One-tap Seerr request for a not-in-library discovery title. Returns the
+    /// title's new availability so the pill flips to Requested/Downloading
+    /// immediately; `nil` (or a `nil` return) leaves it requestable. Only used on
+    /// the discovery page.
+    private let onRequest: ((MediaItem) async -> MediaAvailabilityStatus?)?
     /// When this detail is a series opened via "Go to Season", the season to
     /// pre-select on the series page. Ignored for non-series items.
     private let initialSeasonID: String?
@@ -36,6 +49,12 @@ public struct ItemDetailView: View {
     /// The user's explicit server override for this visit (an `Account.id`). `nil`
     /// means "use the cross-server best-source default". Cleared sources reset it.
     @State private var sourceOverride: String?
+    /// Optimistic availability override applied the instant the user taps Request
+    /// on a discovery title, so the pill flips to Requested/Downloading without
+    /// waiting for the next fetch; reconciled with the server's returned status
+    /// (or cleared on failure so Request returns for a retry). Mirrors the Home
+    /// hero's `requestOverrides` pattern.
+    @State private var requestOverride: MediaAvailabilityStatus?
 
     public init(
         viewModel: ItemDetailViewModel,
@@ -44,6 +63,9 @@ public struct ItemDetailView: View {
         onSelectChild: @escaping (MediaItem) -> Void,
         initialSeasonID: String? = nil,
         initialEpisode: MediaItem? = nil,
+        isDiscoveryItem: Bool = false,
+        seerConnected: Bool = false,
+        onRequest: ((MediaItem) async -> MediaAvailabilityStatus?)? = nil,
         capabilities: MediaCapabilities = .detected(),
         versionPreferences: VersionPreferenceStoring = VersionPreferenceStore()
     ) {
@@ -53,6 +75,9 @@ public struct ItemDetailView: View {
         self.onSelectChild = onSelectChild
         self.initialSeasonID = initialSeasonID
         self.initialEpisode = initialEpisode
+        self.isDiscoveryItem = isDiscoveryItem
+        self.seerConnected = seerConnected
+        self.onRequest = onRequest
         self.capabilities = capabilities
         self.versionPreferences = versionPreferences
     }
@@ -66,7 +91,13 @@ public struct ItemDetailView: View {
             // redirects a season load to its parent series, so by the time we
             // render here a season has become a `.series`. `container` only ever
             // serves movies, episodes, folders and collections.
-            if detail.item.kind == .series {
+            if isDiscoveryItem {
+                // A not-in-library discovery title (movie OR series) has no library
+                // children/sources to render, and must NOT enter SeriesDetailView
+                // (which expects real seasons/episodes). Show a request-focused
+                // hero built from the seeded TMDB metadata.
+                discoveryDetail(detail)
+            } else if detail.item.kind == .series {
                 SeriesDetailView(
                     series: detail.item,
                     seasons: detail.children.filter { $0.kind == .season },
@@ -121,6 +152,51 @@ public struct ItemDetailView: View {
     /// Layout for non-series detail: a hero plus, for seasons/folders/collections,
     /// a single rail of children. Movies and episodes show just the hero + Play.
     private static let topAnchorID = "item-hero-top"
+
+    /// The detail page for a not-in-library discovery (Seerr) title: a full-screen
+    /// hero built entirely from the seeded TMDB metadata (poster/backdrop/overview)
+    /// with a single Request / Requested / Downloading pill. There is no children
+    /// rail, server/version picker, or watchlist/watched action — none apply to a
+    /// title that isn't in any library.
+    private func discoveryDetail(_ detail: ItemDetailViewModel.Detail) -> some View {
+        let effectiveAvailability = requestOverride ?? detail.item.availability
+        let cta = MediaItem.heroCTA(
+            availability: effectiveAvailability,
+            downloadProgress: detail.item.downloadProgress,
+            seerConnected: seerConnected
+        )
+        return ScrollView {
+            DetailHeroView(
+                item: detail.item,
+                heroHeightFraction: 1.0,
+                spoilerSettings: spoilerSettings,
+                playTitle: nil,
+                onPlay: nil,
+                isDiscoveryItem: true,
+                requestCTA: cta,
+                onRequest: (onRequest != nil && cta == .request) ? { performRequest(detail.item) } : nil
+            )
+            .id(Self.topAnchorID)
+        }
+        // Never clip the focused request pill's lift/shadow.
+        .scrollClipDisabled()
+    }
+
+    /// Sends a one-tap Seerr request for a discovery title, optimistically flipping
+    /// the pill to Requested/Downloading immediately, then reconciling with the
+    /// server's returned availability (or clearing the override on failure so the
+    /// Request button returns for a retry). Mirrors the Home hero's request path.
+    private func performRequest(_ item: MediaItem) {
+        guard let onRequest else { return }
+        requestOverride = .pending
+        Task {
+            if let status = await onRequest(item) {
+                requestOverride = status
+            } else {
+                requestOverride = nil
+            }
+        }
+    }
 
     private func container(_ detail: ItemDetailViewModel.Detail) -> some View {
         let sources = viewModel.sources

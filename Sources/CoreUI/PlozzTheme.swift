@@ -175,15 +175,14 @@ public enum PlozzTheme {
             /// glass panels, the mini player. Matches Home's poster-glass family
             /// (== `mediumCardCornerRadius`).
             public static let panel: CGFloat = 28
-            /// Medium container radius — landscape media, grouped list boxes
-            /// (== `mediumMediaCornerRadius`).
-            public static let card: CGFloat = 18
+            /// Medium container radius — grouped list boxes, cards, overlays.
+            public static let card: CGFloat = 22
             /// Content nested inside a `panel` with `inset` padding; stays
             /// concentric with the panel (`panel − inset`). Matches poster artwork
             /// (== `posterArtCornerRadius`).
             public static let content: CGFloat = 16
-            /// Small controls / compact chips.
-            public static let control: CGFloat = 12
+            /// Small controls / compact chips, buttons, rows, PIN & QR frames.
+            public static let control: CGFloat = 16
             /// The concentric gap between a `panel` and its nested `content`
             /// (`panel − content`; == `cardInset` base).
             public static let inset: CGFloat = 12

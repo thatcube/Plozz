@@ -495,9 +495,9 @@ private struct PlexPINEntryView: View {
                 let filled = idx < pin.count
                 let next = !filled && idx == pin.count
                 ZStack {
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    RoundedRectangle(cornerRadius: PlozzTheme.Metrics.Radius.control, style: .continuous)
                         .fill(filled ? Color.white.opacity(0.95) : Color.white.opacity(0.08))
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    RoundedRectangle(cornerRadius: PlozzTheme.Metrics.Radius.control, style: .continuous)
                         .strokeBorder(
                             next ? Color.white.opacity(0.85) : Color.white.opacity(filled ? 0 : 0.25),
                             lineWidth: next ? 3 : 2
@@ -609,7 +609,7 @@ private struct PINKeyBody: View {
         configuration.label
             .frame(width: width, height: height)
             .background(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                RoundedRectangle(cornerRadius: PlozzTheme.Metrics.Radius.control, style: .continuous)
                     .fill(isFocused ? Color.white : Color.white.opacity(0.18))
             )
             .foregroundStyle(

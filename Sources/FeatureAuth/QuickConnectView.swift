@@ -90,7 +90,7 @@ public struct QuickConnectView: View {
                     .tracking(12)
                     .padding(.horizontal, 48)
                     .padding(.vertical, 24)
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24))
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: PlozzTheme.Metrics.Radius.panel))
 
                 ExpiryCountdown(expiresAt: expiresAt, lifetime: viewModel.codeLifetime)
             }

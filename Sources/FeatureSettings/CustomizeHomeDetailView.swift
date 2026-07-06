@@ -236,16 +236,6 @@ struct CustomizeHomeDetailView: View {
                     )
                 }
 
-                SettingsDetailGroup(title: "Items") {
-                    LabeledSettingRow("Items in rotation") {
-                        SettingsStepper(
-                            options: Array(HeroSettings.maxItemsRange),
-                            selection: $hero.settings.maxItems,
-                            title: { "\($0)" }
-                        )
-                    }
-                }
-
                 if hero.settings.isEnabled(.randomFromLibrary) {
                     SettingsDetailGroup(
                         title: "Random Libraries",
@@ -255,8 +245,15 @@ struct CustomizeHomeDetailView: View {
                     }
                 }
 
-                SettingsDetailGroup(title: "Auto-Advance") {
+                SettingsDetailGroup(title: "Rotation") {
                     VStack(alignment: .leading, spacing: 24) {
+                        LabeledSettingRow("Items in rotation") {
+                            SettingsStepper(
+                                options: Array(HeroSettings.maxItemsRange),
+                                selection: $hero.settings.maxItems,
+                                title: { "\($0)" }
+                            )
+                        }
                         Toggle("Rotate automatically", isOn: $hero.settings.autoAdvance)
                             .toggleStyle(SettingsSwitchToggleStyle())
                         if hero.settings.autoAdvance {

@@ -40,6 +40,21 @@ final class ResumeRewindSettingsTests: XCTestCase {
                        "60s is the largest preset")
     }
 
+    /// The non-uniform "dial-in" ladder: 1s steps to 10, 5s steps to 30, 15s to 60.
+    func testPresetLadderProgression() {
+        XCTAssertEqual(
+            ResumeRewindInterval.allCases.map(\.rawValue),
+            [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 15, 20, 25, 30, 45, 60],
+            "Ladder must be 1s steps through 10, then 5s to 30, then 15s to 60"
+        )
+    }
+
+    func testTitleReadsAsSeconds() {
+        XCTAssertEqual(ResumeRewindInterval.off.title, "0 sec")
+        XCTAssertEqual(ResumeRewindInterval.one.title, "1 sec")
+        XCTAssertEqual(ResumeRewindInterval.twentyFive.title, "25 sec")
+    }
+
     // MARK: - effectDescription helper text
 
     func testEffectDescriptionOff() {
@@ -47,6 +62,7 @@ final class ResumeRewindSettingsTests: XCTestCase {
     }
 
     func testEffectDescriptionForEachRewind() {
+        XCTAssertEqual(ResumeRewindInterval.one.effectDescription, "Media will resume 1 second earlier.")
         XCTAssertEqual(ResumeRewindInterval.five.effectDescription, "Media will resume 5 seconds earlier.")
         XCTAssertEqual(ResumeRewindInterval.thirty.effectDescription, "Media will resume 30 seconds earlier.")
         XCTAssertEqual(ResumeRewindInterval.sixty.effectDescription, "Media will resume 60 seconds earlier.")

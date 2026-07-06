@@ -56,6 +56,12 @@ public final class ItemDetailViewModel {
     /// simply keep the seeded `initialItem` — which already carries the TMDB
     /// artwork + overview the discovery detail page shows.
     private let isDiscoveryItem: Bool
+    /// For a discovery item, fetches its current request/availability + download
+    /// progress from Seerr (by TMDB id). Called on every `load()` so reopening a
+    /// title requested in an earlier visit reflects the real "Requested"/
+    /// "Downloading" state instead of the stale "Request" seeded from the search
+    /// result. `nil` (or a `nil` result) leaves the seeded state untouched.
+    private let discoveryStatusRefresh: (@Sendable (MediaItem) async -> (MediaAvailabilityStatus, Double?)?)?
 
     /// The currently *active* source the page is showing. Defaults to the base
     /// `provider`/`itemID`/`sourceAccountID` the page was opened with, but is
@@ -218,6 +224,7 @@ public final class ItemDetailViewModel {
         itemID: String,
         initialItem: MediaItem? = nil,
         isDiscoveryItem: Bool = false,
+        discoveryStatusRefresh: (@Sendable (MediaItem) async -> (MediaAvailabilityStatus, Double?)?)? = nil,
         ratingsProvider: any ExternalRatingsProviding = DisabledRatingsProvider(),
         sourceAccountID: String? = nil,
         originSourceAccountID: String? = nil,
@@ -234,6 +241,7 @@ public final class ItemDetailViewModel {
         self.activeProvider = provider
         self.activeItemID = itemID
         self.isDiscoveryItem = isDiscoveryItem
+        self.discoveryStatusRefresh = discoveryStatusRefresh
         // Fall back to the library-origin account when a direct source tag is
         // absent, so a played item is always attributed to the account it was
         // browsed from (a local media share persists resume/played state keyed by
@@ -292,12 +300,11 @@ public final class ItemDetailViewModel {
 
     public func load() async {
         // Discovery (Seerr) items aren't backed by a resolvable library provider,
-        // so the fetch below would only 404. The seeded `initialItem` already has
-        // everything the discovery detail page renders — keep it and skip all the
-        // library-only work (provider fetch, children, trailers, ratings,
-        // cross-server discovery).
+        // so the library fetch below would only 404. Instead of the fetch, refresh
+        // the title's request/availability state from Seerr (so a reopened title
+        // reflects a request made earlier) and keep the seeded item otherwise.
         guard !isDiscoveryItem else {
-            if state.value == nil { state = .empty }
+            await refreshDiscoveryStatus()
             return
         }
         alternateSourceEnrichmentTask?.cancel()
@@ -417,6 +424,28 @@ public final class ItemDetailViewModel {
         } catch {
             if state.value == nil { state = .failed(.unknown("")) }
         }
+    }
+
+    /// Refreshes a discovery (Seerr) title's request/availability + download
+    /// progress from Seerr on (re)open, so a title requested in an earlier visit
+    /// shows "Requested"/"Downloading" rather than a stale "Request" seeded from
+    /// the search result. The seeded item is kept untouched on any failure, and the
+    /// state is only republished when something actually changed (no needless
+    /// re-render / focus churn).
+    private func refreshDiscoveryStatus() async {
+        guard let current = state.value?.item else {
+            if state.value == nil { state = .empty }
+            return
+        }
+        guard let discoveryStatusRefresh,
+              let (availability, downloadProgress) = await discoveryStatusRefresh(current),
+              !Task.isCancelled
+        else { return }
+        guard current.availability != availability || current.downloadProgress != downloadProgress else { return }
+        var updated = current
+        updated.availability = availability
+        updated.downloadProgress = downloadProgress
+        state = .loaded(Detail(item: updated, children: [], childrenLoaded: true))
     }
 
     /// A season must never render a page of its own. When the fetched item is a

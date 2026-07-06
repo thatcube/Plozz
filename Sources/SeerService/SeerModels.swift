@@ -149,6 +149,24 @@ struct SeerStatus: Decodable {
     var commitTag: String?
 }
 
+/// Minimal decode of `GET /api/v1/movie/{id}` and `/api/v1/tv/{id}`: only the
+/// `mediaInfo` (request status + live download queue) needed to refresh a
+/// discovery title's request/availability state when its detail page is
+/// (re)opened — so a title requested earlier reads "Requested"/"Downloading"
+/// instead of a stale "Request".
+struct SeerMediaDetails: Decodable {
+    var mediaInfo: SeerMediaInfo?
+
+    init(mediaInfo: SeerMediaInfo? = nil) { self.mediaInfo = mediaInfo }
+
+    enum CodingKeys: String, CodingKey { case mediaInfo }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        mediaInfo = try c.decodeIfPresent(SeerMediaInfo.self, forKey: .mediaInfo)
+    }
+}
+
 // MARK: - Radarr / Sonarr service defaults
 
 /// One configured Radarr/Sonarr server from `GET /api/v1/service/{radarr|sonarr}`.

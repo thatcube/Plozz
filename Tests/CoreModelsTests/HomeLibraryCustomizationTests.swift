@@ -262,15 +262,17 @@ final class MediaItemSourceTaggingTests: XCTestCase {
 
     // MARK: - Seeding per-library rows when first unmerging
 
-    func testSeedLibraryRowsFillsEverythingWhenEmpty() {
+    func testSeedLibraryRowsFillsEverythingWhenFirstUnmerging() {
         var visibility = HomeLibraryVisibility.default
-        let seeded = visibility.seedLibraryRowsIfEmpty([
+        XCTAssertFalse(visibility.hasSeededLibraryRows)
+        let seeded = visibility.seedLibraryRowsIfNeeded([
             ("acct:movies", .recentlyAdded),
             ("acct:movies", .hubs),
             ("acct:shows", .recentlyAdded)
         ])
 
         XCTAssertTrue(seeded)
+        XCTAssertTrue(visibility.hasSeededLibraryRows)
         XCTAssertTrue(visibility.isLibraryRowEnabled("acct:movies", kind: .recentlyAdded))
         XCTAssertTrue(visibility.isLibraryRowEnabled("acct:movies", kind: .hubs))
         XCTAssertTrue(visibility.isLibraryRowEnabled("acct:shows", kind: .recentlyAdded))
@@ -278,25 +280,71 @@ final class MediaItemSourceTaggingTests: XCTestCase {
 
     func testSeedLibraryRowsPreservesExistingCustomization() {
         var visibility = HomeLibraryVisibility.default
-        // User has already opted into exactly one row.
-        visibility.setLibraryRowEnabled(true, libraryKey: "acct:movies", kind: .recentlyAdded)
-
-        let seeded = visibility.seedLibraryRowsIfEmpty([
+        let seeds: [(libraryKey: String, kind: LibraryHomeRowKind)] = [
             ("acct:movies", .recentlyAdded),
             ("acct:movies", .hubs),
             ("acct:shows", .recentlyAdded)
-        ])
+        ]
+        // First unmerge seeds everything on.
+        XCTAssertTrue(visibility.seedLibraryRowsIfNeeded(seeds))
+        // User pares it back to a single row.
+        visibility.setLibraryRowEnabled(false, libraryKey: "acct:movies", kind: .hubs)
+        visibility.setLibraryRowEnabled(false, libraryKey: "acct:shows", kind: .recentlyAdded)
 
-        XCTAssertFalse(seeded, "Must not seed once the user has any per-library row set")
-        // Their single choice stands; nothing else was force-enabled.
+        // A later merge on→off re-toggle must NOT re-seed over that choice.
+        XCTAssertFalse(visibility.seedLibraryRowsIfNeeded(seeds), "Must not re-seed after the one-time seed")
         XCTAssertTrue(visibility.isLibraryRowEnabled("acct:movies", kind: .recentlyAdded))
         XCTAssertFalse(visibility.isLibraryRowEnabled("acct:movies", kind: .hubs))
         XCTAssertFalse(visibility.isLibraryRowEnabled("acct:shows", kind: .recentlyAdded))
     }
 
-    func testSeedLibraryRowsNoOpWhenNothingToSeed() {
+    func testSeedLibraryRowsDoesNotReSeedAfterUserTurnsEveryRowOff() {
+        // Regression: an all-off selection must survive a merge re-toggle. An
+        // emptiness check couldn't tell "customized to nothing on Home" from
+        // "never seeded"; the explicit flag can.
         var visibility = HomeLibraryVisibility.default
-        XCTAssertFalse(visibility.seedLibraryRowsIfEmpty([]))
+        let seeds: [(libraryKey: String, kind: LibraryHomeRowKind)] = [
+            ("acct:movies", .recentlyAdded),
+            ("acct:shows", .recentlyAdded)
+        ]
+        XCTAssertTrue(visibility.seedLibraryRowsIfNeeded(seeds))
+        // User turns EVERY per-library row off — a valid "only Shared rows" Home.
+        visibility.setLibraryRowEnabled(false, libraryKey: "acct:movies", kind: .recentlyAdded)
+        visibility.setLibraryRowEnabled(false, libraryKey: "acct:shows", kind: .recentlyAdded)
         XCTAssertTrue(visibility.enabledLibraryHomeRows.isEmpty)
+
+        // Re-toggling merge off again must NOT re-enable everything.
+        XCTAssertFalse(visibility.seedLibraryRowsIfNeeded(seeds))
+        XCTAssertTrue(visibility.enabledLibraryHomeRows.isEmpty, "All-off choice must be preserved")
+    }
+
+    func testSeedLibraryRowsNoOpWhenNothingToSeedAndStaysUnseeded() {
+        var visibility = HomeLibraryVisibility.default
+        // Discovery not ready yet (no seeds) — must no-op AND stay unseeded so a
+        // later attempt (once libraries load) can still seed.
+        XCTAssertFalse(visibility.seedLibraryRowsIfNeeded([]))
+        XCTAssertFalse(visibility.hasSeededLibraryRows)
+        XCTAssertTrue(visibility.enabledLibraryHomeRows.isEmpty)
+
+        XCTAssertTrue(visibility.seedLibraryRowsIfNeeded([("acct:movies", .recentlyAdded)]))
+        XCTAssertTrue(visibility.hasSeededLibraryRows)
+    }
+
+    func testSeededFlagMigratesFromExistingOptedInRows() throws {
+        // A blob predating the flag that already has opted-in rows must decode as
+        // already-seeded, so a post-upgrade re-toggle doesn't re-seed over it.
+        let legacyJSON = """
+        {"mergeLibrariesOnHome":false,"enabledLibraryHomeRows":["acct:movies:recentlyAdded"]}
+        """.data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(HomeLibraryVisibility.self, from: legacyJSON)
+        XCTAssertTrue(decoded.hasSeededLibraryRows, "Existing opted-in rows imply prior seeding")
+
+        // A legacy blob with NO rows stays unseeded (can't tell first-run from
+        // all-off for old data; safest is to allow one seed going forward).
+        let emptyLegacy = """
+        {"mergeLibrariesOnHome":true}
+        """.data(using: .utf8)!
+        let decodedEmpty = try JSONDecoder().decode(HomeLibraryVisibility.self, from: emptyLegacy)
+        XCTAssertFalse(decodedEmpty.hasSeededLibraryRows)
     }
 }

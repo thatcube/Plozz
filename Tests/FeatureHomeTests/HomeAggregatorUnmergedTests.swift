@@ -144,6 +144,36 @@ final class HomeAggregatorUnmergedTests: XCTestCase {
                        "A music item must not leak into the Recently Added row")
     }
 
+    // MARK: - In-place mutations reach the unmerged per-library rows
+
+    func testApplyWatchedStateAlsoUpdatesUnmergedLibraryRows() async {
+        // Regression: marking a title watched must update its card in the unmerged
+        // per-library row too, not just the global rows — otherwise the same title
+        // reads watched in the global "Recently Added" but unwatched in "Recently
+        // Added in Movies" on the same screen until relaunch.
+        let stub = UnmergedStub(
+            libraries: [lib("L1", "Movies", .movie)],
+            itemsByContainer: ["L1": [item("m1")]]
+        )
+        let vm = HomeViewModel(
+            accounts: [resolved("acct", provider: stub)],
+            layoutStore: InMemoryHomeLayoutStore(),
+            currentVisibility: { self.vis([("acct:L1", .recentlyAdded)]) }
+        )
+        await vm.load()
+
+        let before = vm.state.value?.librarySections.first?.sections.first?.items.first
+        XCTAssertEqual(before?.id, "m1")
+        XCTAssertNotEqual(before?.isPlayed, true)
+
+        vm.applyWatchedState(MediaItemMutation(itemIDs: ["m1"], scopedItemIDs: ["acct:m1"], played: true))
+
+        let after = vm.state.value?.librarySections.first?.sections.first?.items.first
+        XCTAssertEqual(after?.id, "m1")
+        XCTAssertEqual(after?.isPlayed, true,
+                       "in-place mark-watched must update the unmerged per-library row too")
+    }
+
     // MARK: - Helpers
 
     private func item(_ id: String) -> MediaItem { MediaItem(id: id, title: id, kind: .movie) }

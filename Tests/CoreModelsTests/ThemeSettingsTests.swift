@@ -47,6 +47,15 @@ final class ThemeSettingsStoreTests: XCTestCase {
             XCTAssertEqual(try JSONDecoder().decode(AppTheme.self, from: data), theme)
         }
     }
+
+    func testPickerOrderCoversEveryThemeCase() {
+        // The pickers iterate `pickerOrder`, not `allCases`, so a new case added to
+        // the enum but forgotten in `pickerOrder` would be silently unselectable.
+        XCTAssertEqual(Set(AppTheme.pickerOrder), Set(AppTheme.allCases))
+        XCTAssertEqual(AppTheme.pickerOrder.count, AppTheme.allCases.count)
+        XCTAssertEqual(Set(MusicPlayerAppearance.pickerOrder), Set(MusicPlayerAppearance.allCases))
+        XCTAssertEqual(MusicPlayerAppearance.pickerOrder.count, MusicPlayerAppearance.allCases.count)
+    }
 }
 
 #if canImport(SwiftUI)

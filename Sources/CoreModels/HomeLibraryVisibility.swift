@@ -51,18 +51,27 @@ public struct HomeLibraryVisibility: Codable, Equatable, Sendable {
     /// `"<accountID>:<libraryID>:<rowKind>"` (see ``libraryRowKey(_:kind:)``).
     public var enabledLibraryHomeRows: Set<String>
 
+    /// Whether the one-time per-library row seeding has already run (see
+    /// ``seedLibraryRowsIfNeeded(_:)``). Tracked explicitly rather than inferred
+    /// from `enabledLibraryHomeRows.isEmpty`, so a user who unmerges and then
+    /// turns *every* per-library row off keeps that "nothing on Home" choice
+    /// across a later merge on→off re-toggle instead of being re-seeded.
+    public var hasSeededLibraryRows: Bool
+
     public init(
         mergeLibrariesOnHome: Bool = true,
         disabledKeys: Set<String> = [],
         excludedKeys: Set<String> = [],
         disabledGlobalHomeRows: Set<String> = [],
-        enabledLibraryHomeRows: Set<String> = []
+        enabledLibraryHomeRows: Set<String> = [],
+        hasSeededLibraryRows: Bool = false
     ) {
         self.mergeLibrariesOnHome = mergeLibrariesOnHome
         self.disabledKeys = disabledKeys
         self.excludedKeys = excludedKeys
         self.disabledGlobalHomeRows = disabledGlobalHomeRows
         self.enabledLibraryHomeRows = enabledLibraryHomeRows
+        self.hasSeededLibraryRows = hasSeededLibraryRows
     }
 
     /// The default: merge on, nothing disabled/hidden, every global row on, no
@@ -154,22 +163,26 @@ public struct HomeLibraryVisibility: Codable, Equatable, Sendable {
         }
     }
 
-    /// Seeds the given per-library rows **on**, but only when the user hasn't
-    /// opted into any per-library rows yet (`enabledLibraryHomeRows` is empty).
+    /// Seeds the given per-library rows **on**, but only the first time the user
+    /// unmerges (tracked by ``hasSeededLibraryRows``).
     ///
     /// Turning the merge switch **off** is a clear "I want each library's own
     /// rows" signal, so the first time that happens we start with everything on
     /// and let the user pare it back — much better than dropping them onto an
-    /// empty Home. The empty-set guard means a later re-toggle (merge on, then off
-    /// again) never clobbers a customized selection; it only seeds the untouched
-    /// first-run state. Returns `true` when it actually seeded (so the caller can
-    /// persist).
+    /// empty Home. Keying off an explicit `hasSeededLibraryRows` flag (rather than
+    /// `enabledLibraryHomeRows.isEmpty`) means a later re-toggle (merge on, then
+    /// off again) never re-seeds — including when the user has deliberately turned
+    /// *every* per-library row off, which an emptiness check couldn't distinguish
+    /// from first-run. Only sets the flag when it actually seeds (rows non-empty),
+    /// so a toggle made before library discovery finishes is retried later.
+    /// Returns `true` when it seeded (so the caller can persist).
     @discardableResult
-    public mutating func seedLibraryRowsIfEmpty(_ rows: [(libraryKey: String, kind: LibraryHomeRowKind)]) -> Bool {
-        guard enabledLibraryHomeRows.isEmpty, !rows.isEmpty else { return false }
+    public mutating func seedLibraryRowsIfNeeded(_ rows: [(libraryKey: String, kind: LibraryHomeRowKind)]) -> Bool {
+        guard !hasSeededLibraryRows, !rows.isEmpty else { return false }
         for row in rows {
             enabledLibraryHomeRows.insert(Self.libraryRowKey(row.libraryKey, kind: row.kind))
         }
+        hasSeededLibraryRows = true
         return true
     }
 
@@ -181,6 +194,7 @@ public struct HomeLibraryVisibility: Codable, Equatable, Sendable {
         case excludedKeys
         case disabledGlobalHomeRows
         case enabledLibraryHomeRows
+        case hasSeededLibraryRows
     }
 
     /// Decodes leniently so a pre-existing blob (which had only `excludedKeys`, or
@@ -195,6 +209,11 @@ public struct HomeLibraryVisibility: Codable, Equatable, Sendable {
         self.excludedKeys = try container.decodeIfPresent(Set<String>.self, forKey: .excludedKeys) ?? []
         self.disabledGlobalHomeRows = try container.decodeIfPresent(Set<String>.self, forKey: .disabledGlobalHomeRows) ?? []
         self.enabledLibraryHomeRows = try container.decodeIfPresent(Set<String>.self, forKey: .enabledLibraryHomeRows) ?? []
+        // Migration: a blob predating this flag that already has opted-in rows was
+        // clearly seeded before, so treat it as seeded — otherwise the first
+        // post-upgrade merge re-toggle would re-seed over its customization.
+        self.hasSeededLibraryRows = (try container.decodeIfPresent(Bool.self, forKey: .hasSeededLibraryRows) ?? false)
+            || !self.enabledLibraryHomeRows.isEmpty
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -204,6 +223,7 @@ public struct HomeLibraryVisibility: Codable, Equatable, Sendable {
         try container.encode(excludedKeys, forKey: .excludedKeys)
         try container.encode(disabledGlobalHomeRows, forKey: .disabledGlobalHomeRows)
         try container.encode(enabledLibraryHomeRows, forKey: .enabledLibraryHomeRows)
+        try container.encode(hasSeededLibraryRows, forKey: .hasSeededLibraryRows)
     }
 }
 

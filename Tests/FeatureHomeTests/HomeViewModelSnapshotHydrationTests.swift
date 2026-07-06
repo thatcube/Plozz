@@ -91,6 +91,16 @@ final class HomeViewModelSnapshotHydrationTests: XCTestCase {
             loadedContent(vm)?.continueWatching.map(\.id), ["cachedA", "cachedB"],
             "A silent refresh that came back empty must not blank out the cached content"
         )
+
+        // Regression: a SECOND appearance with unchanged visibility (tvOS restarts
+        // the `.task` on every reappearance) must stay a no-op and keep the cached
+        // content — NOT run a loud load that flashes the skeleton and then drops to
+        // `.empty` while the server is still down.
+        await vm.loadIfNeeded(for: .default)
+        XCTAssertEqual(
+            loadedContent(vm)?.continueWatching.map(\.id), ["cachedA", "cachedB"],
+            "Reappearance before the first successful refresh must keep the cached content, not reload loudly"
+        )
     }
 
     func testSuccessfulLoadPersistsSnapshotForNextLaunch() async {

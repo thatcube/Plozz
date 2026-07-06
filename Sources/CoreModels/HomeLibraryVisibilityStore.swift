@@ -91,13 +91,13 @@ public final class HomeLibraryVisibilityModel {
         store.save(visibility)
     }
 
-    /// Seeds all provided per-library rows **on** when the user has none opted in
-    /// yet, then persists. Called when the merge switch is turned **off** so the
-    /// unmerged Home starts populated rather than empty (see
-    /// ``HomeLibraryVisibility/seedLibraryRowsIfEmpty(_:)``). A no-op once the
-    /// user has customized their per-library rows.
-    public func seedLibraryRowsIfEmpty(_ rows: [(libraryKey: String, kind: LibraryHomeRowKind)]) {
-        if visibility.seedLibraryRowsIfEmpty(rows) {
+    /// Seeds all provided per-library rows **on** the first time the user
+    /// unmerges, then persists. Called when the merge switch is turned **off** so
+    /// the unmerged Home starts populated rather than empty (see
+    /// ``HomeLibraryVisibility/seedLibraryRowsIfNeeded(_:)``). A no-op once the
+    /// one-time seeding has run, so it never re-seeds over the user's row choices.
+    public func seedLibraryRowsIfNeeded(_ rows: [(libraryKey: String, kind: LibraryHomeRowKind)]) {
+        if visibility.seedLibraryRowsIfNeeded(rows) {
             store.save(visibility)
         }
     }

@@ -52,7 +52,7 @@ struct CustomizeHomeDetailView: View {
                         // library so the unmerged Home starts full (the user pares
                         // it back), instead of empty. No-op once they've customized.
                         if !merge {
-                            homeVisibility.seedLibraryRowsIfEmpty(defaultLibraryRowSeeds)
+                            homeVisibility.seedLibraryRowsIfNeeded(defaultLibraryRowSeeds)
                         }
                     }
                 )) {

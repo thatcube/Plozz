@@ -333,10 +333,16 @@ public final class HomeViewModel {
         // content already on screen — e.g. the cached snapshot painted at launch,
         // or the rows after playback, when the server is momentarily unreachable.
         // Keep what's showing and bail (also skipping the Top Shelf republish that
-        // would otherwise clear it); `lastLoadedVisibility` stays put so the next
-        // appearance retries. A *loud* load still surfaces the genuine empty state.
+        // would otherwise clear it). Record `lastLoadedVisibility` for THIS snapshot
+        // so a reappearance with the same visibility stays a no-op (see
+        // `loadIfNeeded`) instead of running a *loud* load that flashes the skeleton
+        // and then drops the kept content to `.empty` if the server is still down —
+        // the exact flash the cached snapshot exists to prevent. A genuine
+        // visibility change still reloads; other triggers (post-play resume reload)
+        // still refresh.
         if content.isEmpty, !showLoadingState, case .loaded = state {
             PlozzLog.boot("HomeVM.load KEEP-CACHED silent-empty vm=\(UInt(bitPattern: ObjectIdentifier(self).hashValue))")
+            lastLoadedVisibility = visibility
             return
         }
         state = content.isEmpty ? .empty : .loaded(content)
@@ -435,6 +441,23 @@ public final class HomeViewModel {
         }
         content.latest = content.latest.map { apply(mutation, to: $0) }
         content.watchlist = updatedWatchlist(content.watchlist, mutation: mutation, in: content)
+        // Unmerged mode renders the per-library rows straight from
+        // `librarySections`, so the same title's card there must reflect an
+        // in-place mark-watched / favourite / finish too — otherwise the global
+        // "Recently Added" flips but the per-library copy on the same screen stays
+        // stale until relaunch. These are single-source rows, so a plain per-item
+        // apply (no recency re-sort) mirrors the `latest` treatment above.
+        if !content.librarySections.isEmpty {
+            content.librarySections = content.librarySections.map { group in
+                var group = group
+                group.sections = group.sections.map { section in
+                    var section = section
+                    section.items = section.items.map { apply(mutation, to: $0) }
+                    return section
+                }
+                return group
+            }
+        }
         state = .loaded(content)
     }
 

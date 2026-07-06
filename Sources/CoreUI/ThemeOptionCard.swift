@@ -257,7 +257,7 @@ public struct ThemeOptionCard: View {
             compact: compact,
             action: action
         ) {
-            ThemeSwatch(theme: theme, cornerRadius: compact ? 10 : 16)
+            ThemeSwatch(theme: theme, cornerRadius: PlozzTheme.Metrics.Radius.content)
         }
     }
 }
@@ -318,12 +318,12 @@ public struct PreviewCard<Swatch: View>: View {
             }
             .frame(maxWidth: compact ? .infinity : nil)
             .frame(width: compact ? nil : 320)
-            .padding(compact ? 14 : 20)
+            .padding(PlozzTheme.Metrics.Radius.inset)
         }
         .buttonStyle(ThemeCardButtonStyle(
             accent: accent,
             isSelected: isSelected,
-            cornerRadius: compact ? 18 : PlozzTheme.Metrics.mediumCardCornerRadius
+            cornerRadius: PlozzTheme.Metrics.Radius.panel
         ))
         .focusEffectDisabled()
     }

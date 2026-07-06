@@ -21,7 +21,7 @@ struct SpoilerModePicker: View {
                     compact: true,
                     action: { mode = option }
                 ) {
-                    SpoilerModeSwatch(mode: option, cornerRadius: 10)
+                    SpoilerModeSwatch(mode: option, cornerRadius: PlozzTheme.Metrics.Radius.content)
                 }
             }
         }

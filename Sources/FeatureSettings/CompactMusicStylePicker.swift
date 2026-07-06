@@ -43,7 +43,7 @@ struct MusicPlayerStyleDetail: View {
                         compact: true,
                         action: { appearance = style }
                     ) {
-                        MusicStyleSwatch(appearance: style, cornerRadius: 10)
+                        MusicStyleSwatch(appearance: style, cornerRadius: PlozzTheme.Metrics.Radius.content)
                     }
                     .focused($focused, equals: .style(style))
                 }

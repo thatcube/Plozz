@@ -174,6 +174,12 @@ struct HomeHeroView: View {
     /// Bumped on every page so a late metadata fade-in from a *previous* page
     /// can't fire after a newer page has already started.
     @State private var slideToken = 0
+    /// While `Date() < this`, a *manual* page (Left/Right at an edge, or the Next
+    /// pill) is refused so the user cannot advance again until the hero has finished
+    /// its transition. Armed on every real page in ``page(to:forward:)`` (auto-advance
+    /// arms it too, but never *checks* it — so the auto rotation can't stall). Pure
+    /// timestamp gate: no timer/task, so it clears itself and can't get stuck.
+    @State private var pageUnlockAt: Date = .distantPast
     /// Best resolved hero backdrop URL per item id. For episode/season slides
     /// this is the **series-level** hero art (correct show, high-res — matching
     /// the detail page), resolved via ``ArtworkRouter`` and preloaded for the
@@ -187,6 +193,16 @@ struct HomeHeroView: View {
     /// How long the user must be idle after their last remote input before the
     /// auto-advance resumes counting down toward the next page.
     private static let resumeAfterIdle: Double = 2.5
+
+    /// How long a manual page is locked out after a page starts — i.e. how long the
+    /// hero's transition "owns" navigation before the user may advance again. Mirrors
+    /// the backdrop wipe duration (`WipeImageView.duration`) so the lock clears just
+    /// as the wipe settles. Tunable; this is the whole feel of the "wait for the
+    /// transition" behaviour.
+    private static let pageTransitionLockout: TimeInterval = 0.85
+
+    /// Whether a manual page is currently blocked because the hero is mid-transition.
+    private var isPageLocked: Bool { Date() < pageUnlockAt }
 
     @Environment(\.colorScheme) private var colorScheme
 
@@ -949,6 +965,9 @@ struct HomeHeroView: View {
         case let .moveButton(newIndex):
             selectedButton = newIndex
         case let .advance(toItem, keepButton):
+            // Refuse the page while the hero is still transitioning — the user can't
+            // navigate again until the current wipe has settled.
+            guard !isPageLocked else { break }
             page(to: toItem, keepButton: keepButton, forward: false)
             restoreFocusAfterPage()
         case .escape, .blocked:
@@ -1014,6 +1033,9 @@ struct HomeHeroView: View {
         case let .moveButton(newIndex):
             selectedButton = newIndex
         case let .advance(toItem, keepButton):
+            // Refuse the page while the hero is still transitioning — the user can't
+            // navigate again until the current wipe has settled.
+            guard !isPageLocked else { break }
             page(to: toItem, keepButton: keepButton, forward: true)
             restoreFocusAfterPage()
         case .escape, .blocked:
@@ -1239,6 +1261,10 @@ struct HomeHeroView: View {
             return
         }
         HeroFocusDiagnostics.emit("page BEGIN from=\(index) to=\(toItem) keepButton=\(keepButton) forward=\(isForward) | \(hfState())")
+        // Arm the manual-navigation lockout: from now until the transition settles,
+        // a manual Left/Right/Next page is refused (see `isPageLocked`). Auto-advance
+        // arms this too but never checks it, so the auto rotation is unaffected.
+        pageUnlockAt = Date().addingTimeInterval(Self.pageTransitionLockout)
         // Record the entering direction so the backdrop wipe pushes from the
         // correct edge. Batched with `index` below into one SwiftUI update.
         lastPageForward = isForward
@@ -1336,9 +1362,10 @@ struct HomeHeroView: View {
 
     /// Pages one slide forward (wrapping), keeping focus on the destination's
     /// chevron so repeated chevron presses / right-edge presses walk through the
-    /// carousel. Used by the chevron button and the auto-advance timer.
+    /// carousel. Used by the Next pill. Refused while the hero is mid-transition so
+    /// the user can't advance again until the wipe has settled.
     private func advanceForward() {
-        guard items.count > 1 else { return }
+        guard items.count > 1, !isPageLocked else { return }
         let next = (index + 1) % items.count
         let destinationButtons = buttons(for: items[next]).count
         page(to: next, keepButton: destinationButtons - 1, forward: true)

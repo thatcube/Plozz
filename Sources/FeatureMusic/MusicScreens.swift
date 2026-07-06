@@ -281,8 +281,8 @@ struct MusicGridView: View {
                 PlaylistCard(playlist: playlist) { onSelectRoute(.playlist(playlist)) }
             }
         case .genre:
-            ForEach(viewModel.genres) { genre in
-                GenreCard(genre: genre) { onSelectRoute(.grid(.album)) }
+            ForEach(Array(viewModel.genres.enumerated()), id: \.element.id) { index, genre in
+                GenreCard(genre: genre, index: index) { onSelectRoute(.grid(.album)) }
             }
         case .track:
             EmptyView()
@@ -302,53 +302,61 @@ struct MusicGridView: View {
     private var emptyMessage: String { "Nothing here yet." }
 }
 
-/// A colourful genre tile: a deterministic gradient + a genre-appropriate icon,
-/// so every genre reads as distinct at a glance (Apple Music / Spotify style).
+/// A colourful genre tile: a curated gradient + a genre-appropriate icon, so
+/// every genre reads as distinct at a glance (Apple Music / Spotify style).
 ///
 /// Deliberately uses a **solid gradient** surface — NOT the artwork-card live
 /// `.glassEffect` — because a `.focusable` view compositing a live glass effect
 /// per-tile in a grid storms the render server (that combination froze this whole
-/// page). A flat gradient + `.compositingGroup()` is cheap, and focus is drawn
-/// with a scale/shadow/ring lift, matching the poster cards' feel without a Button
-/// (whose tvOS focus platter would paint a white plate over the tile).
+/// page). Colour is assigned by the tile's **position** from a curated palette,
+/// so two neighbours never share a colour. Focus is a scale/shadow/ring lift,
+/// matching the poster cards without a Button (whose tvOS focus platter would
+/// paint a white plate over the tile).
 private struct GenreCard: View {
     let genre: MusicGenre
+    /// Position in the sorted grid — drives the palette pick so adjacent tiles
+    /// always differ in colour.
+    let index: Int
     let action: () -> Void
     @FocusState private var isFocused: Bool
     @Environment(\.plozzReduceTransparency) private var reduceTransparency
 
     var body: some View {
-        let art = GenreArt(name: genre.name)
         let shape = RoundedRectangle(cornerRadius: PlozzTheme.Metrics.Radius.card, style: .continuous)
-        return ZStack(alignment: .bottomLeading) {
-            LinearGradient(colors: art.colors, startPoint: .topLeading, endPoint: .bottomTrailing)
+        return ZStack {
+            LinearGradient(colors: GenrePalette.colors(at: index), startPoint: .topLeading, endPoint: .bottomTrailing)
 
-            // Large decorative icon, canted into the trailing edge like a genre
-            // tile's motif. Clipped by the card shape below.
-            Image(systemName: art.symbol)
-                .font(.system(size: 104, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.22))
-                .rotationEffect(.degrees(-15))
-                .offset(x: 30, y: 26)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+            // Subtle motif icon in the top-trailing corner — small and low-contrast
+            // so a repeated icon between two genres is barely noticeable and the
+            // name stays the hero.
+            Image(systemName: GenreArt.symbol(for: genre.name))
+                .font(.system(size: 66, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.18))
+                .rotationEffect(.degrees(-12))
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                .padding(.trailing, 6)
+                .padding(.top, 10)
 
+            // The genre name is the hero: shrinks to fit (never ellipsises — the
+            // "Interna…" wrap-then-truncate bug) and can use two lines.
             Text(genre.name)
-                .font(.title3.weight(.bold))
+                .font(.system(size: 26, weight: .bold))
                 .foregroundStyle(.white)
                 .lineLimit(2)
-                .shadow(color: .black.opacity(0.35), radius: 4, y: 1)
-                .padding(20)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .minimumScaleFactor(0.55)
+                .shadow(color: .black.opacity(0.4), radius: 4, y: 1)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                .padding(18)
         }
         .frame(width: 280, height: 160)
         .clipShape(shape)
         .overlay {
             shape.strokeBorder(.white.opacity(isFocused ? 0.95 : 0.10), lineWidth: isFocused ? 4 : 1)
         }
-        // Same proven modifier order as MusicCard (which works in this exact grid):
+        // Same proven modifier order as MusicCard (works in this exact grid):
         // visual → focusableCard → rasterize → shadow → scale. `plozzCardRasterize`
-        // flattens the layer tree into a single GPU pass; omitting it on a
-        // `.focusable` card in this grid is what froze the render server.
+        // flattens the layer tree into one GPU pass; omitting it on a `.focusable`
+        // card in this grid is what froze the render server.
         .focusableCard(isFocused: $isFocused, cornerRadius: PlozzTheme.Metrics.Radius.card, action: action)
         .plozzCardRasterize(reduceTransparency: reduceTransparency)
         .shadow(color: .black.opacity(isFocused ? 0.4 : 0.15), radius: isFocused ? 22 : 8, y: isFocused ? 12 : 4)
@@ -357,49 +365,66 @@ private struct GenreCard: View {
     }
 }
 
-/// Deterministic art (icon + gradient) for a genre name, so a given genre always
-/// looks the same and different genres look different. Well-known genres get a
-/// fitting SF Symbol; anything else falls back to a hash-picked music glyph.
-private struct GenreArt {
-    let symbol: String
-    let colors: [Color]
-
-    init(name: String) {
-        let key = name.lowercased()
-        self.symbol = GenreArt.symbol(for: key)
-
-        // Hash the name → a stable base hue, then build a two-stop diagonal
-        // gradient (a deeper, slightly-shifted second stop) for depth.
-        var hash: UInt64 = 5381
-        for byte in key.utf8 { hash = (hash &* 33) ^ UInt64(byte) }
-        let hue = Double(hash % 360) / 360.0
-        self.colors = [
-            Color(hue: hue, saturation: 0.55, brightness: 0.64),
-            Color(hue: (hue + 0.08).truncatingRemainder(dividingBy: 1.0), saturation: 0.7, brightness: 0.42)
-        ]
+/// A curated set of distinct, tasteful gradients for genre tiles. Assigned by the
+/// tile's position (`colors(at:)`), so two neighbours always differ — no more
+/// "purple next to purple" (the old per-name hash could land similar hues side by
+/// side). 12 stops spread around the wheel; with more genres than stops the set
+/// cycles, but never for adjacent tiles.
+private enum GenrePalette {
+    static func colors(at index: Int) -> [Color] {
+        let stops = all[((index % all.count) + all.count) % all.count]
+        return stops
     }
 
-    private static func symbol(for key: String) -> String {
+    private static func pair(_ t: (Double, Double, Double), _ b: (Double, Double, Double)) -> [Color] {
+        [Color(red: t.0, green: t.1, blue: t.2), Color(red: b.0, green: b.1, blue: b.2)]
+    }
+
+    static let all: [[Color]] = [
+        pair((0.30, 0.28, 0.66), (0.18, 0.16, 0.42)), // indigo
+        pair((0.13, 0.52, 0.55), (0.08, 0.34, 0.40)), // teal
+        pair((0.74, 0.36, 0.22), (0.50, 0.22, 0.16)), // rust
+        pair((0.80, 0.30, 0.48), (0.52, 0.18, 0.36)), // rose
+        pair((0.20, 0.46, 0.78), (0.12, 0.28, 0.54)), // blue
+        pair((0.80, 0.56, 0.18), (0.56, 0.36, 0.12)), // amber
+        pair((0.52, 0.28, 0.66), (0.34, 0.16, 0.48)), // purple
+        pair((0.24, 0.54, 0.34), (0.14, 0.36, 0.24)), // green
+        pair((0.72, 0.22, 0.30), (0.48, 0.14, 0.22)), // crimson
+        pair((0.34, 0.40, 0.48), (0.20, 0.24, 0.32)), // slate (neutral)
+        pair((0.16, 0.52, 0.62), (0.10, 0.34, 0.44)), // cyan
+        pair((0.62, 0.24, 0.56), (0.42, 0.16, 0.40))  // magenta
+    ]
+}
+
+/// A genre-appropriate SF Symbol for a genre name. Well-known genres get a fitting
+/// glyph; anything else falls back to a hash-picked music glyph so unknown genres
+/// still vary.
+private enum GenreArt {
+    static func symbol(for name: String) -> String {
+        let key = name.lowercased()
         // Match on substrings so "Alternative Rock", "Hard Rock" etc. all map.
         let map: [(String, String)] = [
-            ("rock", "guitars"), ("metal", "guitars"), ("punk", "guitars"),
-            ("pop", "star"), ("dance", "figure.dance"), ("disco", "figure.dance"),
+            ("international", "globe"), ("world", "globe"),
+            ("rock", "guitars"), ("metal", "guitars"), ("punk", "bolt.fill"),
+            ("pop", "star.fill"), ("dance", "figure.dance"), ("disco", "figure.dance"),
             ("hip", "waveform"), ("rap", "waveform"),
-            ("electro", "dial.max"), ("edm", "dial.max"), ("techno", "dial.max"), ("house", "dial.max"),
+            ("electro", "dial.medium"), ("edm", "dial.medium"), ("techno", "dial.medium"), ("house", "dial.medium"),
             ("jazz", "music.quarternote.3"), ("blues", "music.quarternote.3"),
             ("classic", "pianokeys"), ("piano", "pianokeys"), ("opera", "pianokeys"),
             ("soundtrack", "film"), ("score", "film"), ("film", "film"),
             ("country", "guitars"), ("folk", "guitars"), ("acoustic", "guitars"),
             ("r&b", "music.mic"), ("soul", "music.mic"), ("funk", "music.mic"), ("vocal", "music.mic"),
-            ("reggae", "music.note"), ("latin", "music.note"), ("world", "globe"),
-            ("ambient", "waveform.path"), ("chill", "waveform.path"), ("lo-fi", "waveform.path"),
-            ("kids", "teddybear"), ("holiday", "gift"), ("christmas", "gift")
+            ("reggae", "music.note"), ("latin", "music.note.list"),
+            ("ambient", "waveform.path"), ("chill", "waveform.path"), ("lo-fi", "waveform.path"), ("lofi", "waveform.path"),
+            ("comedy", "theatermasks.fill"), ("spoken", "mic.fill"), ("podcast", "mic.fill"),
+            ("new age", "sparkles"), ("kids", "teddybear.fill"),
+            ("holiday", "gift.fill"), ("christmas", "gift.fill"), ("radio", "dot.radiowaves.left.and.right")
         ]
         for (needle, symbol) in map where key.contains(needle) {
             return symbol
         }
         // Fallback: a stable music glyph chosen by hash so unknown genres still vary.
-        let fallbacks = ["music.note", "music.note.list", "music.mic", "waveform", "guitars"]
+        let fallbacks = ["music.note", "music.note.list", "music.mic", "waveform", "guitars", "music.quarternote.3", "radio", "hifispeaker.fill"]
         var hash = 0
         for scalar in key.unicodeScalars { hash = (hash &* 31 &+ Int(scalar.value)) & 0xFFFFFF }
         return fallbacks[abs(hash) % fallbacks.count]

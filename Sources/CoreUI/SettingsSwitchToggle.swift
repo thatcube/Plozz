@@ -55,6 +55,51 @@ private struct SettingsSwitchToggleBody: View {
     }
 }
 
+/// A switch-style control identical in look to `SettingsSwitchToggleStyle`, but
+/// with an explicit `canFocus` gate.
+///
+/// Unlike a stock `Toggle` (whose internal `Button` can't be removed from focus
+/// with `.focusable(false)`, and where `.disabled` dims the row), this owns its
+/// `Button` and renders with the custom `SettingsFocusButtonStyle`, which ignores
+/// `\.isEnabled`. So `.disabled(!canFocus)` takes the control out of the focus
+/// order **without** dimming it — letting a caller steer where a directional
+/// focus move lands (e.g. keep this off the focus map until sibling controls have
+/// been focused) while it still looks fully enabled.
+public struct FocusGatedSwitch: View {
+    private let title: String
+    @Binding private var isOn: Bool
+    private let canFocus: Bool
+    private let hInset: CGFloat = 12
+
+    public init(_ title: String, isOn: Binding<Bool>, canFocus: Bool = true) {
+        self.title = title
+        self._isOn = isOn
+        self.canFocus = canFocus
+    }
+
+    public var body: some View {
+        Button {
+            isOn.toggle()
+        } label: {
+            HStack(spacing: 20) {
+                Text(title)
+                    .font(.headline.weight(.semibold))
+                    .lineLimit(1)
+                Spacer(minLength: 20)
+                SettingsSwitchIndicator(isOn: isOn)
+            }
+            .padding(.vertical, 14)
+            .padding(.horizontal, hInset)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(SettingsFocusButtonStyle())
+        .padding(.leading, -hInset)
+        // Custom button style ignores `\.isEnabled`, so disabling only removes it
+        // from the focus order — no dimming.
+        .disabled(!canFocus)
+    }
+}
+
 /// The track-and-knob graphic plus the On/Off state word. Reads the shared
 /// settings focus environment so it stays legible against the inverted
 /// (white-in-dark-mode) focus card.

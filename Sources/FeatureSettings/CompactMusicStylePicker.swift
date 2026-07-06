@@ -6,58 +6,74 @@ import CoreUI
 /// The detail-pane content for the "Music Player" settings row: the style
 /// preview cards with the "Show track details" toggle beneath.
 ///
-/// Wrapped in a `focusScope` with the picker marked `prefersDefaultFocus`, so
-/// pressing **right** from the master list lands on the style cards first —
-/// otherwise the focus engine picks the geometrically-nearest control (the
-/// toggle, which sits closer to the master row) instead of the top card.
+/// Pressing **right** from the master list must land on the style cards, not the
+/// toggle. The focus engine picks the geometrically-nearest control, and since
+/// "Music Player" sits low in the master list the toggle is closer than the top
+/// cards — and neither `prefersDefaultFocus` nor `.defaultFocus` overrides a
+/// directional move, while redirecting off the (visible) toggle looks janky.
+///
+/// Instead we simply keep the toggle OUT of the focus order until a style card
+/// has been focused: `FocusGatedSwitch(canFocus:)` uses the custom settings
+/// button style, so disabling it removes it from focus without dimming. On entry
+/// the cards are therefore the only focus target; once one is focused
+/// (`cardFocused`) the toggle joins the focus order so **down** reaches it. The
+/// gate resets when focus leaves the pane, re-applying on the next entry.
 struct MusicPlayerStyleDetail: View {
     @Binding var appearance: MusicPlayerAppearance
     @Binding var showTrackDetails: Bool
-    @Namespace private var scope
+    @Environment(\.themePalette) private var palette
+    @FocusState private var focused: FocusTarget?
+    /// Whether a style card has been focused this entry — gates the toggle into
+    /// the focus order so it can't steal the initial right-press.
+    @State private var cardFocused = false
+
+    private enum FocusTarget: Hashable {
+        case style(MusicPlayerAppearance)
+        case toggle
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 28) {
-            CompactMusicStylePicker(selection: $appearance)
-                .prefersDefaultFocus(in: scope)
+            HStack(alignment: .top, spacing: 16) {
+                ForEach(MusicPlayerAppearance.pickerOrder) { style in
+                    PreviewCard(
+                        title: style.displayName,
+                        isSelected: appearance == style,
+                        accent: palette.accent,
+                        compact: true,
+                        action: { appearance = style }
+                    ) {
+                        MusicStyleSwatch(appearance: style, cornerRadius: 10)
+                    }
+                    .focused($focused, equals: .style(style))
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             VStack(alignment: .leading, spacing: 6) {
-                Toggle("Show track details", isOn: $showTrackDetails)
+                FocusGatedSwitch("Show track details", isOn: $showTrackDetails, canFocus: cardFocused)
+                    .focused($focused, equals: .toggle)
                 Text("Album name, audio quality & lyrics source on the now-playing screen.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .focusScope(scope)
-    }
-}
-
-/// The compact, in-Settings music-player style picker: a row of smaller preview
-/// cards (`PreviewCard` + `MusicStyleSwatch`) that share the detail pane's width,
-/// mirroring `CompactThemePicker`. Tapping a card selects that appearance; the
-/// active one carries the same accent wash/ring.
-struct CompactMusicStylePicker: View {
-    @Binding var selection: MusicPlayerAppearance
-    @Environment(\.themePalette) private var palette
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 16) {
-            ForEach(MusicPlayerAppearance.pickerOrder) { appearance in
-                PreviewCard(
-                    title: appearance.displayName,
-                    isSelected: selection == appearance,
-                    accent: palette.accent,
-                    compact: true,
-                    action: { selection = appearance }
-                ) {
-                    MusicStyleSwatch(appearance: appearance, cornerRadius: 10)
-                }
+        .focusSection()
+        .onChange(of: focused) { _, new in
+            switch new {
+            case .style:
+                // A card is focused — let the toggle into the focus order so
+                // pressing down can reach it.
+                cardFocused = true
+            case .none:
+                // Focus left the pane (back to the master list) — re-gate so the
+                // next entry can't land on the toggle.
+                cardFocused = false
+            case .toggle:
+                break
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        // Group the cards so moving DOWN from any card (incl. the edge ones)
-        // reliably exits to the "Show track details" toggle beneath.
-        .focusSection()
     }
 }
 #endif

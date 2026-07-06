@@ -227,10 +227,7 @@ struct CustomizeHomeDetailView: View {
                 .toggleStyle(SettingsSwitchToggleStyle())
 
             if hero.settings.isEnabled {
-                SettingsDetailGroup(
-                    title: "Sources",
-                    description: "Which content feeds the hero. Enabled sources are interleaved into one rotating set."
-                ) {
+                SettingsDetailGroup(title: "Sources") {
                     SettingsCheckList(
                         options: HeroSourceKind.allCases,
                         title: { $0.displayName },
@@ -239,10 +236,7 @@ struct CustomizeHomeDetailView: View {
                     )
                 }
 
-                SettingsDetailGroup(
-                    title: "Items",
-                    description: "How many titles rotate through the hero."
-                ) {
+                SettingsDetailGroup(title: "Items") {
                     LabeledSettingRow("Items in rotation") {
                         SettingsStepper(
                             options: Array(HeroSettings.maxItemsRange),
@@ -255,7 +249,7 @@ struct CustomizeHomeDetailView: View {
                 if hero.settings.isEnabled(.randomFromLibrary) {
                     SettingsDetailGroup(
                         title: "Random Libraries",
-                        description: "Which libraries the Random source draws from. Leave all selected to use every library shown on Home."
+                        description: "Leave all selected to use every library on Home."
                     ) {
                         randomLibrariesContent
                     }
@@ -263,7 +257,7 @@ struct CustomizeHomeDetailView: View {
 
                 SettingsDetailGroup(
                     title: "Auto-Advance",
-                    description: "Automatically rotate to the next title after a few seconds. Rotation always pauses while the hero is focused."
+                    description: "Rotation pauses while the hero is focused."
                 ) {
                     VStack(alignment: .leading, spacing: 24) {
                         Toggle("Rotate automatically", isOn: $hero.settings.autoAdvance)

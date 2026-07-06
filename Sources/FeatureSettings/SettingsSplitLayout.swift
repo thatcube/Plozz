@@ -339,7 +339,7 @@ struct SettingsDetailGroup<Content: View>: View {
                 .settingsSectionHeader()
             if let description {
                 Text(description)
-                    .settingsHelperText()
+                    .settingsSectionDescription()
                     .fixedSize(horizontal: false, vertical: true)
             }
             content()

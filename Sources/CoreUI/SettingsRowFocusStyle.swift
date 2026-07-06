@@ -210,19 +210,28 @@ public extension View {
     }
 
     /// L2 — a section header inside a detail pane (e.g. "SOURCES"). Uppercase,
-    /// tracked and secondary — the classic grouped-list header idiom, so it reads
-    /// as a *header* and never collides with the sentence-case, primary-colour
-    /// control labels beneath it (distinct by style, not just size).
+    /// tracked, bold and secondary — the classic grouped-list header idiom, so it
+    /// reads as a *header* and never collides with the sentence-case, primary
+    /// control labels beneath it, nor with its own (smaller, dimmer) description.
     func settingsSectionHeader() -> some View {
-        font(.subheadline.weight(.semibold))
+        font(.subheadline.weight(.bold))
             .textCase(.uppercase)
-            .tracking(1.5)
+            .tracking(1.8)
             .foregroundStyle(.secondary)
     }
 
-    /// L4 — helper/descriptive text under a title or section header.
+    /// L3 — a **feature** description: the intro sentence under the pane's feature
+    /// title (e.g. under "Hero"). Readable but secondary.
     func settingsHelperText() -> some View {
         font(.callout).foregroundStyle(.secondary)
+    }
+
+    /// L4 — a **section** description: a small, dim note under a section header.
+    /// Deliberately smaller + dimmer than both the header and feature description
+    /// so it reads as a footnote and never competes with the header. Use sparingly
+    /// (only when the header + control aren't self-explanatory).
+    func settingsSectionDescription() -> some View {
+        font(.footnote).foregroundStyle(.tertiary)
     }
 }
 #endif

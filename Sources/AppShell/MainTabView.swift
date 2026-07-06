@@ -968,9 +968,9 @@ private func makePlayerViewModel(
                     )
                     return results.compactMap(\.youTubeTrailerVideoID)
                 },
-                // Adaptive (separate audio) trailers need an on-device muxer to
-                // pair the video+audio streams; none exists now that the mpv
-                // hybrid engine is retired, so use the progressive **muxed** path
+                // Adaptive (separate audio) trailers need routing through the
+                // Plozzigen muxer to pair the video+audio streams; this preview
+                // path uses the progressive **muxed** URL instead
                 // (AVPlayer/Plozzigen play it directly). Trailers stay playable,
                 // capped to the muxed resolution YouTube serves.
                 allowsSeparateAudio: false
@@ -1164,7 +1164,7 @@ func makePlaybackStoppedHandler(
 /// render spawns engines that storm `AttributeGraph`, which drives more renders.
 /// On device this showed up as the live VM/Native instance counters racing
 /// upward (Native far ahead of VM, since every model makes a native engine before
-/// it ever routes to mpv), thermal throttling, and growing lag the longer the
+/// it ever routes to an engine), thermal throttling, and growing lag the longer the
 /// player stayed up.
 ///
 /// Building the model in `.task`, gated by this view's identity, fires the factory

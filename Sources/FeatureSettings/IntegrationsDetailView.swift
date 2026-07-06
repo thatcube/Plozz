@@ -540,11 +540,6 @@ struct AttributionsDetailView: View {
                     licenses: [.lgpl("LGPL-2.1+")]
                 )
                 attribution(
-                    "mpv & mpvkit",
-                    "Fallback playback uses mpv packaged by the mpvkit project. github.com/nicxleo/mpvkit",
-                    licenses: [.gpl("GPL-2.0+")]
-                )
-                attribution(
                     "libdovi",
                     "Dolby Vision metadata parsing uses libdovi.",
                     licenses: [.mit()]

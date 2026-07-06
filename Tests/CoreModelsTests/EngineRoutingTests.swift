@@ -329,7 +329,7 @@ final class EngineRoutingTests: XCTestCase {
 
     func testM2TSContainerIsHybrid() {
         // M2TS (Blu-ray raw stream) has no seek index; AVPlayer's file demux breaks
-        // seeking. The hybrid engine (mpv) handles it correctly.
+        // seeking. The hybrid engine (Plozzigen) handles it correctly.
         let m2ts = source(container: "m2ts", videoCodec: "h264", videoRangeType: "SDR", audioCodec: "ac3")
         XCTAssertEqual(route(m2ts), .hybrid)
     }

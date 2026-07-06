@@ -7,7 +7,7 @@ import YouTubeKit
 /// manifest that `AVPlayer` plays directly) or — for higher resolutions YouTube
 /// only offers as *adaptive* tracks — a video-only URL paired with a separate
 /// audio URL. AVPlayer can't combine two bare URLs, so an adaptive pair is played
-/// by the hybrid (mpv) engine, which muxes them at playback time.
+/// by the Plozzigen engine, which muxes them at playback time.
 public struct TrailerStream: Equatable, Sendable {
     /// The video (or muxed) stream URL — always present and always the one to
     /// byte-verify, since it carries the picture.
@@ -147,7 +147,7 @@ enum TrailerStreamSelector {
     }
 
     /// Best adaptive audio-only track: prefer an AVPlayer-native codec (AAC) by
-    /// bitrate, otherwise the highest-bitrate track (mpv decodes Opus fine).
+    /// bitrate, otherwise the highest-bitrate track (Plozzigen decodes Opus fine).
     static func bestAdaptiveAudio(in candidates: [TrailerStreamCandidate]) -> TrailerStreamCandidate? {
         let audioOnly = candidates.filter { $0.hasAudio && !$0.hasVideo }
         let native = audioOnly.filter { $0.audioNativelyPlayable }

@@ -151,7 +151,7 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
     public var mode: PlaybackMode
     public var hdr: HDRFormat
     /// Human-readable name of the engine decoding the stream (e.g. `AVPlayer`,
-    /// `VLCKit`, `mpv`). `nil` until the player wires it in.
+    /// `Plozzigen`). `nil` until the player wires it in.
     public var engineName: String?
     /// Seconds of media buffered ahead of the current playback position.
     public var bufferedSecondsAhead: Double?
@@ -455,7 +455,7 @@ public extension PlaybackDiagnostics {
         let isAtmos = profileText.contains("atmos")
         // Plozzigen (AetherEngine) bridges codecs AVPlayer can't decode to a
         // lossless FLAC (>6ch) or EAC3 5.1 stream on-device, so DTS/TrueHD play
-        // without passthrough or mpv. Reflect that instead of the AVPlayer caveat.
+        // without passthrough. Reflect that instead of the AVPlayer caveat.
         if mode == .plozzigen {
             switch token {
             case "dts", "dca", "dts-hd", "dtshd", "dca-ma", "truehd", "mlp":
@@ -478,9 +478,9 @@ public extension PlaybackDiagnostics {
         case "truehd", "mlp":
             return isAtmos ? "TrueHD Atmos is not AVPlayer-compatible" : "TrueHD is not AVPlayer-compatible"
         case "dts", "dca":
-            return capabilities.supportsDTSPassthrough ? "DTS passthrough" : "DTS requires mpv decode or a passthrough route"
+            return capabilities.supportsDTSPassthrough ? "DTS passthrough" : "DTS requires Plozzigen decode or a passthrough route"
         case "dts-hd", "dtshd", "dca-ma":
-            return capabilities.supportsDTSPassthrough ? "DTS-HD passthrough" : "DTS-HD requires mpv decode or a passthrough route"
+            return capabilities.supportsDTSPassthrough ? "DTS-HD passthrough" : "DTS-HD requires Plozzigen decode or a passthrough route"
         case "aac", "mp4a", "alac", "mp3", "flac", "pcm", "lpcm":
             return "Decoded by Apple TV"
         default:
@@ -613,7 +613,7 @@ public extension PlaybackDiagnostics {
 
     /// Human-readable Dolby Vision profile, calling out the make-or-break facts:
     /// Profile 5 has **no** HDR10 fallback (a wrong sample entry = no picture),
-    /// Profile 8 is HDR10-compatible, Profile 7 is dual-layer (stays on mpv).
+    /// Profile 8 is HDR10-compatible, Profile 7 is dual-layer (stays on Plozzigen).
     static func dolbyVisionDescription(profile: Int?) -> String? {
         guard let profile else { return nil }
         switch profile {

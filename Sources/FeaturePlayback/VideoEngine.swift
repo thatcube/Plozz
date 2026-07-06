@@ -55,7 +55,7 @@ public struct PlayerEngineCapabilities: OptionSet, Sendable {
 /// Engine-agnostic abstraction over a single playback session.
 ///
 /// `VideoEngine` captures everything `PlayerViewModel` needs from a player while
-/// hiding the concrete playback stack, so a second engine (e.g. libmpv / VLCKit)
+/// hiding the concrete playback stack, so a second engine (Plozzigen)
 /// can be dropped in later without touching the view model, `PlayerView`, or the
 /// rest of the app. Phase 1 ships exactly one implementation,
 /// `NativeVideoEngine`, which wraps `AVPlayer` with byte-for-byte the behaviour
@@ -147,7 +147,7 @@ public protocol VideoEngine: AnyObject {
     // MARK: Observable state
 
     /// A short, human-readable name for the concrete engine (e.g. `AVPlayer`,
-    /// `VLCKit`, `mpv`), surfaced in the diagnostics overlay so the user can see
+    /// `Plozzigen`), surfaced in the diagnostics overlay so the user can see
     /// which engine is actually decoding the stream. Defaulted (see the protocol
     /// extension) so engines that don't override it report a generic label.
     var displayName: String { get }
@@ -186,7 +186,7 @@ public protocol VideoEngine: AnyObject {
 
     /// Live decode/render telemetry (dropped frames, observed FPS, bitrate) for
     /// the diagnostics overlay. Engines backed by `AVPlayer` return `nil` (the
-    /// sampler reads the access log instead); non-native engines (Plozzigen/mpv)
+    /// sampler reads the access log instead); non-native engines (Plozzigen)
     /// vend it here so dropped frames / FPS aren't blank. Defaulted to `nil`.
     var liveTelemetry: EngineLiveTelemetry? { get }
 
@@ -255,7 +255,7 @@ public protocol VideoEngine: AnyObject {
     /// this is the engine's decoded *read-ahead* buffer (not just the on-screen
     /// line), so the owner must time-filter it against the playhead before
     /// drawing — `LiveSubtitleModel` does this in its clock tick. Engines whose
-    /// subtitles are drawn elsewhere — the AVPlayer legible group, an mpv overlay,
+    /// subtitles are drawn elsewhere — the AVPlayer legible group, a Plozzigen overlay,
     /// or a parsed sidecar timeline — never fire it. Invoked on the main actor.
     var onSubtitleCues: (@MainActor ([SubtitleCue]) -> Void)? { get set }
 
@@ -278,7 +278,7 @@ public protocol VideoEngine: AnyObject {
     /// should vend a stable instance and keep it fed by the live stream across
     /// reloads (e.g. a transcode-fallback swap), so callers render it once and
     /// never rebuild it. The native engine returns an `AVPlayerLayer`-backed view;
-    /// a future libmpv/VLCKit engine returns its own drawable from the same call,
+    /// another engine returns its own drawable from the same call,
     /// reusing the shared overlay verbatim.
     func makeVideoOutputView() -> UIView
     #endif
@@ -308,7 +308,7 @@ public extension VideoEngine {
 
     /// Default: keep the display awake whenever the engine isn't paused. Engines
     /// that can report a finer-grained "frames are advancing" signal (native
-    /// `timeControlStatus`, mpv `eof-reached`) override this so the screensaver
+    /// `timeControlStatus`, Plozzigen end-of-stream signals) override this so the screensaver
     /// is also allowed at end-of-stream / during a stall, not just on pause.
     var preventsDisplaySleep: Bool { !isPaused }
 

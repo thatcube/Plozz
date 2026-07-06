@@ -824,13 +824,13 @@ public struct PlexClient: Sendable {
         return capabilities.allowedPassthroughAudioCodecs.contains(passthrough)
     }
 
-    /// DTS / DTS-HD / TrueHD / Opus / Vorbis: audio the on-device VLCKit/mpv engine
+    /// DTS / DTS-HD / TrueHD / Opus / Vorbis: audio the on-device Plozzigen engine
     /// decodes regardless of the connected receiver's passthrough support.
     static func isHybridDecodableAudio(_ codec: String) -> Bool {
         let codec = codec.lowercased()
         return codec.contains("dts") || codec == "dca" || codec.hasPrefix("dca")
             || codec.contains("truehd") || codec == "mlp"
-            || codec == "opus" || codec == "vorbis"   // mpv decodes these; AVPlayer can't in Apple containers
+            || codec == "opus" || codec == "vorbis"   // Plozzigen decodes these; AVPlayer can't in Apple containers
     }
 
     /// Maps a Plex `audioCodec` token onto a `MediaCapabilities` passthrough

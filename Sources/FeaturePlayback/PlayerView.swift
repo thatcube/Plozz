@@ -126,7 +126,7 @@ public struct PlayerView: View {
                 .animation(.easeInOut(duration: 0.35), value: hdrTransition.veilOpacity)
         }
         .overlay(alignment: .topLeading) {
-            // Keep diagnostics off during load/failure while mpv is initializing;
+            // Keep diagnostics off during load/failure while Plozzigen is initializing;
             // this avoids extra SwiftUI preference/layout churn on the crash path.
             if viewModel.controls.diagnosticsEnabled, viewModel.phase == .ready {
                 PlaybackDiagnosticsOverlay(diagnostics: diagnosticsSampler.latest)
@@ -239,7 +239,7 @@ public struct PlayerView: View {
     }
 
     /// Starts the diagnostics sampler against the active engine. `viewModel.player`
-    /// is the live `AVPlayer` for the native engine and `nil` for VLCKit/mpv — in
+    /// is the live `AVPlayer` for the native engine and `nil` for Plozzigen — in
     /// the latter case the sampler publishes the metadata-only baseline plus the
     /// engine name, so the overlay works on every engine.
     private func startSampling() {

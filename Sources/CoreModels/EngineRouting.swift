@@ -14,7 +14,7 @@ public enum PlaybackEngineKind: String, Sendable, Equatable, CaseIterable {
     case native
     /// Abstract "needs on-device decode" signal for AVPlayer-incompatible sources
     /// (MKV, DTS / DTS-HD / TrueHD, odd codecs). Resolved to the Plozzigen engine
-    /// in `FeaturePlayback` (the former mpv backing is retired); kept as a distinct
+    /// in `FeaturePlayback` (the former backing engine is retired); kept as a distinct
     /// routing value so the pure router stays engine-agnostic and its tests hold.
     case hybrid
     /// `AetherVideoEngine`. FFmpeg demux → HLS-fMP4 copy-remux → localhost →

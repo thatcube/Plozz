@@ -78,7 +78,7 @@ let package = Package(
         // NOTE: FFmpegBuild (FFmpeg n8.1.x decode-only) and LibDovi (Dolby Vision
         // RPU parser) are pulled in TRANSITIVELY by AetherEngine — its own manifest
         // declares and consumes them. Plozz used to declare them directly only for
-        // the retired EngineMPV target; with mpv gone, no Plozz target references
+        // the retired hybrid-engine target; no Plozz target references
         // their products, so the direct declarations were removed (SwiftPM flagged
         // them as unused). AetherEngine owns their version alignment.
 

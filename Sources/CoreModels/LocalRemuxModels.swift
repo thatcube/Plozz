@@ -44,7 +44,7 @@ public struct LocalRemuxSourceDescriptor: Hashable, Sendable {
     }
 
     /// The shared policy for when Plozz should prefer the native local-remux seam
-    /// over the raw-MKV mpv path.
+    /// over the raw-MKV Plozzigen path.
     ///
     /// **Default (narrow) gate** — single-layer Dolby Vision Profile 5 / 8.x in an
     /// MKV/Matroska container, Apple-decodable HEVC video, and AC-3 / E-AC-3 audio
@@ -55,11 +55,11 @@ public struct LocalRemuxSourceDescriptor: Hashable, Sendable {
     /// an MKV with AC-3 / E-AC-3 audio, regardless of HDR signal: Dolby Vision
     /// (P5/8), HDR10, HDR10+, HLG, **or** SDR; 8- or 10-bit. The remux `-c copy`
     /// muxer handles HEVC + (e)ac3 identically for all of these, so routing them
-    /// to remux→AVPlayer keeps them off the multichannel-crashing mpv fallback and
+    /// to remux→AVPlayer keeps them off the multichannel-crashing fallback and
     /// preserves native seek + surround/Atmos. Only formats AVPlayer genuinely
     /// can't hardware-decode stay on the hybrid engine: dual-layer Dolby Vision
     /// Profile 7 (BL+EL+RPU) and HEVC Range Extensions (4:2:2 / 4:4:4 / ≥12-bit).
-    /// TrueHD audio still stays on mpv either way.
+    /// TrueHD audio still stays on Plozzigen either way.
     public func eligibility(
         capabilities: MediaCapabilities,
         allowAnyDecodableHEVC: Bool = false
@@ -131,7 +131,7 @@ public struct LocalRemuxSourceDescriptor: Hashable, Sendable {
     /// Matroska/WebM **and** the MPEG-TS family (`.ts`/`.m2ts`/`.mts`). MP4/MOV are
     /// deliberately excluded — those direct-play natively, so they never need the
     /// remux pipeline. This is wider than `isMatroskaContainer` because the engine
-    /// handles transport-stream parts (UHD-BD remuxes ship as `.m2ts`) that mpv
+    /// handles transport-stream parts (UHD-BD remuxes ship as `.m2ts`) that the previous hybrid path
     /// could only play by crashing on multichannel audio.
     public var isPlozzigenContainer: Bool {
         let container = (sourceMetadata.container ?? "").lowercased()

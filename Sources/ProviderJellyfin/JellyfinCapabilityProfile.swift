@@ -110,7 +110,7 @@ extension JellyfinCapabilityProfile {
         let trueHDTokens = hybrid ? ["truehd", "mlp"] : []
         // Opus and Vorbis are not decodable by AVPlayer in an MP4/MOV/TS container —
         // the file plays video with no sound. Only include them in Apple containers
-        // when the hybrid engine is available (mpv decodes them fine). They're
+        // when the hybrid engine is available (Plozzigen decodes them fine). They're
         // always included in the MKV/WebM profile below.
         let opusTokens = hybrid ? ["opus"] : []
         let vorbisTokens = hybrid ? ["vorbis"] : []
@@ -161,7 +161,7 @@ extension JellyfinCapabilityProfile {
             )
         }
 
-        // Hybrid engine: advertise the extra containers the on-device mpv engine
+        // Hybrid engine: advertise the extra containers the on-device Plozzigen engine
         // demuxes directly (Matroska/WebM + transport-stream variants). HEVC and
         // AV1 are listed unconditionally here (not gated on hardware decode)
         // because the on-device engine software-decodes them regardless of
@@ -256,7 +256,7 @@ extension JellyfinCapabilityProfile {
             )
         }
 
-        // Hybrid engine: a raw MKV is fully decoded on-device by VLCKit/mpv —
+        // Hybrid engine: a raw MKV is fully decoded on-device by Plozzigen —
         // including Dolby Vision (the engine decodes the HEVC base layer: HDR10/
         // HLG/SDR for Profile 8, tone-mapped for Profile 5). We therefore add NO
         // container-scoped range restriction for MKV: the global HEVC/AV1 codec
@@ -279,11 +279,11 @@ extension JellyfinCapabilityProfile {
         // (a) wastes the server and (b) on these servers produces an HDR10 stream
         // the device can't play, surfacing as "this file can't be played".
         //
-        // When the on-device mpv engine is wired in it renders bitmap subs (PGS/
+        // When the on-device Plozzigen engine is wired in it renders bitmap subs (PGS/
         // VOBSUB/…) and styled ASS/SSA itself (libass), so we advertise those as
         // `Embed` instead. The server then leaves them in the **direct-played**
         // container — no transcode — and the engine router sends the file (MKV,
-        // and any image-subtitle default) to mpv, which draws the subtitle. This
+        // and any image-subtitle default) to Plozzigen, which draws the subtitle. This
         // is exactly why the same file direct-plays on Plex (whose client renders
         // these subs) but transcoded on Jellyfin.
         let imageAndStyledMethod = hybrid ? "Embed" : "Encode"
@@ -299,12 +299,12 @@ extension JellyfinCapabilityProfile {
             SubtitleProfile(format: "ttml", method: "Embed"),
             // ASS/SSA carry complex font/colour/positioning metadata the native
             // text renderer can't reproduce — so AVPlayer needs them burned in
-            // (`Encode`). mpv (libass) renders them faithfully, so the hybrid
+            // (`Encode`). Plozzigen renders them faithfully, so the hybrid
             // build embeds them instead and avoids the transcode.
             SubtitleProfile(format: "ass", method: imageAndStyledMethod),
             SubtitleProfile(format: "ssa", method: imageAndStyledMethod),
             // Image-based subtitles: AVPlayer can't draw them at all → burn-in on
-            // the native-only build; mpv draws them, so the hybrid build embeds
+            // the native-only build; Plozzigen draws them, so the hybrid build embeds
             // them and keeps the source direct-playing.
             SubtitleProfile(format: "dvbsub", method: imageAndStyledMethod),
             SubtitleProfile(format: "dvdsub", method: imageAndStyledMethod),

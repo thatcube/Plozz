@@ -212,12 +212,12 @@ final class PlexHybridDirectPlayTests: XCTestCase {
         XCTAssertFalse(try canDirectPlay(json, caps: caps, hybrid: false),
                        "Opus-in-MKV must not direct-play when hybrid is off (container blocked)")
         XCTAssertTrue(try canDirectPlay(json, caps: caps, hybrid: true),
-                      "Opus-in-MKV must direct-play on the hybrid mpv engine")
+                      "Opus-in-MKV must direct-play on the hybrid engine")
     }
 
     func testOpusInAppleContainerDirectPlaysWhenHybridOn() throws {
         // Opus in an MP4/MOV container — AVPlayer can't decode Opus in these, but
-        // when hybrid is on the router sends it to mpv.
+        // when hybrid is on the router sends it to Plozzigen.
         let json = """
         {"id":1,"container":"mp4","videoCodec":"h264","audioCodec":"opus",
          "Part":[{"id":2,"key":"/library/parts/2/16000/file.mp4","container":"mp4","Stream":[
@@ -228,7 +228,7 @@ final class PlexHybridDirectPlayTests: XCTestCase {
         XCTAssertFalse(try canDirectPlay(json, caps: .default, hybrid: false),
                        "Opus-in-MP4 must not direct-play without hybrid (AVPlayer can't decode it)")
         XCTAssertTrue(try canDirectPlay(json, caps: .default, hybrid: true),
-                      "Opus-in-MP4 must direct-play when hybrid is on (mpv decodes it)")
+                      "Opus-in-MP4 must direct-play when hybrid is on (Plozzigen decodes it)")
     }
 
     func testVorbisInMKVDirectPlaysWhenHybridOn() throws {
@@ -259,7 +259,7 @@ final class PlexHybridDirectPlayTests: XCTestCase {
     }
 
     func testM2TSDirectPlaysWhenHybridOn() throws {
-        // mpv handles M2TS with correct seeking.
+        // Plozzigen handles M2TS with correct seeking.
         XCTAssertTrue(try canDirectPlay(sdrM2TS, caps: .default, hybrid: true))
     }
 

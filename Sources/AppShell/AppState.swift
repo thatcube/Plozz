@@ -1200,6 +1200,22 @@ public final class AppState {
         ensurePlexIdentityForActiveProfile()
     }
 
+    /// Maps a household **profile** to a Seerr user (or clears the mapping when
+    /// `user` is `nil`, reverting to requesting as admin). Non-secret metadata,
+    /// persisted on the profile — mirrors `setPlexHomeUserForActiveProfile`, but
+    /// operates on any profile by id so the Settings list can map every member.
+    /// No re-probe needed: the acting user is read per-request from the active
+    /// profile, so a mapping change takes effect on the next request.
+    public func setSeerrUserForProfile(profileID: String, user: SeerUser?) {
+        guard let profile = profilesModel.profiles.first(where: { $0.id == profileID }) else { return }
+        let updated = profile.settingSeerrUser(
+            id: user?.id,
+            name: user?.name,
+            avatarURL: user?.avatarURL?.absoluteString
+        )
+        profilesModel.update(updated)
+    }
+
     /// Submits a PIN for the outstanding Plex Home-user switch.
     public func submitPlexPIN(_ pin: String) {
         guard let request = pendingPlexPINRequest else { return }

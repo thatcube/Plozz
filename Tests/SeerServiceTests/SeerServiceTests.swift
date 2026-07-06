@@ -407,6 +407,22 @@ final class SeerServiceTests: XCTestCase {
         XCTAssertEqual(outcome, .failure(.invalidActingUser))
     }
 
+    func testAdmin401IsNotInvalidActingUser() async {
+        // On the admin path (no X-API-User) a 401 means a bad admin key, NOT an
+        // invalid acting user — it must not be misclassified as invalidActingUser.
+        let http = SeerRecordingHTTPClient()
+        http.stub(pathSuffix: "/service/radarr", json: "[]")
+        http.stub(pathSuffix: "/request", json: #"{"message":"Unauthorized"}"#, status: 401)
+        let service = makeConnectedService(http)
+        let item = MediaItem(id: "seer:5", title: "T", kind: .movie, providerIDs: ["Tmdb": "5"])
+        let outcome = await service.request(item) // admin (actingUserID nil)
+        guard case let .failure(reason) = outcome else {
+            return XCTFail("expected failure, got \(outcome)")
+        }
+        XCTAssertNotEqual(reason, .invalidActingUser)
+        if case .unknown = reason {} else { XCTFail("admin 401 should map to .unknown, got \(reason)") }
+    }
+
     func testRequestUnreachableMapsTransportFailure() async {
         let http = SeerRecordingHTTPClient()
         http.error = .serverUnreachable

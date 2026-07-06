@@ -17,11 +17,20 @@ public struct ItemDetailView: View {
     private let isDiscoveryItem: Bool
     /// Whether Seerr is currently connected — gates the discovery Request pill.
     private let seerConnected: Bool
-    /// One-tap Seerr request for a not-in-library discovery title. Returns the
-    /// title's new availability so the pill flips to Requested/Downloading
-    /// immediately; `nil` (or a `nil` return) leaves it requestable. Only used on
-    /// the discovery page.
-    private let onRequest: ((MediaItem) async -> MediaAvailabilityStatus?)?
+    /// One-tap Seerr request for a not-in-library discovery title. Returns a
+    /// provider-agnostic ``MediaRequestActionResult`` — a status on success (the
+    /// pill flips to Requested/Downloading), or a user-facing failure the page
+    /// surfaces as an alert. Only used on the discovery page.
+    private let onRequest: ((MediaItem) async -> MediaRequestActionResult)?
+    /// Display name of the Seerr user the active profile requests as, when mapped.
+    /// Drives the "Request as <name>" pill so a shared-TV request's identity is
+    /// visible **before** the press. `nil` = requests run as admin.
+    private let requestActingName: String?
+    /// Whether requesting as **admin** (unmapped) should show a confirm step
+    /// first — used in a multi-profile household so a member on an unmapped
+    /// profile doesn't silently one-tap-request (and possibly auto-approve) as the
+    /// unrestricted admin.
+    private let confirmAdminRequest: Bool
     /// When this detail is a series opened via "Go to Season", the season to
     /// pre-select on the series page. Ignored for non-series items.
     private let initialSeasonID: String?
@@ -55,6 +64,18 @@ public struct ItemDetailView: View {
     /// (or cleared on failure so Request returns for a retry). Mirrors the Home
     /// hero's `requestOverrides` pattern.
     @State private var requestOverride: MediaAvailabilityStatus?
+    /// A pending request failure to surface as an alert (title + optional message),
+    /// set from the ``MediaRequestActionResult`` when a request is rejected.
+    @State private var requestFailure: RequestFailureAlert?
+    /// Drives the "Request as Admin?" confirmation dialog for the unmapped case.
+    @State private var showingAdminConfirm = false
+
+    /// A user-facing request failure, wrapped for `.alert(item:)`.
+    private struct RequestFailureAlert: Identifiable {
+        let id = UUID()
+        let title: String
+        let message: String?
+    }
 
     public init(
         viewModel: ItemDetailViewModel,
@@ -65,7 +86,9 @@ public struct ItemDetailView: View {
         initialEpisode: MediaItem? = nil,
         isDiscoveryItem: Bool = false,
         seerConnected: Bool = false,
-        onRequest: ((MediaItem) async -> MediaAvailabilityStatus?)? = nil,
+        onRequest: ((MediaItem) async -> MediaRequestActionResult)? = nil,
+        requestActingName: String? = nil,
+        confirmAdminRequest: Bool = false,
         capabilities: MediaCapabilities = .detected(),
         versionPreferences: VersionPreferenceStoring = VersionPreferenceStore()
     ) {
@@ -78,6 +101,8 @@ public struct ItemDetailView: View {
         self.isDiscoveryItem = isDiscoveryItem
         self.seerConnected = seerConnected
         self.onRequest = onRequest
+        self.requestActingName = requestActingName
+        self.confirmAdminRequest = confirmAdminRequest
         self.capabilities = capabilities
         self.versionPreferences = versionPreferences
     }
@@ -174,26 +199,63 @@ public struct ItemDetailView: View {
                 onPlay: nil,
                 isDiscoveryItem: true,
                 requestCTA: cta,
-                onRequest: (onRequest != nil && cta == .request) ? { performRequest(detail.item) } : nil
+                // Show "Request as <name>" before the press so a shared-TV
+                // request's identity is visible up front.
+                requestActingName: requestActingName,
+                onRequest: (onRequest != nil && cta == .request) ? { requestTapped(detail.item) } : nil
             )
             .id(Self.topAnchorID)
         }
         // Never clip the focused request pill's lift/shadow.
         .scrollClipDisabled()
+        // Unmapped (admin) requests in a multi-profile household confirm first so a
+        // member on an unmapped profile can't silently request as the unrestricted
+        // admin. Mapped requests fire directly.
+        .confirmationDialog(
+            "Request as Admin?",
+            isPresented: $showingAdminConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Request as Admin") { performRequest(detail.item) }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This profile isn’t linked to a Seerr user, so the request is made as the unrestricted admin. Link a user in Settings to track requests per person.")
+        }
+        .alert(item: $requestFailure) { failure in
+            Alert(
+                title: Text(failure.title),
+                message: failure.message.map(Text.init),
+                dismissButton: .default(Text("OK"))
+            )
+        }
+    }
+
+    /// Handles a Request tap: confirm first for the unmapped admin case in a
+    /// household (see `confirmAdminRequest`), otherwise request immediately.
+    private func requestTapped(_ item: MediaItem) {
+        if confirmAdminRequest && requestActingName == nil {
+            showingAdminConfirm = true
+        } else {
+            performRequest(item)
+        }
     }
 
     /// Sends a one-tap Seerr request for a discovery title, optimistically flipping
     /// the pill to Requested/Downloading immediately, then reconciling with the
-    /// server's returned availability (or clearing the override on failure so the
-    /// Request button returns for a retry). Mirrors the Home hero's request path.
+    /// returned result: a success keeps the new status; a failure clears the
+    /// optimistic override (so Request returns for a retry) and surfaces an alert.
     private func performRequest(_ item: MediaItem) {
         guard let onRequest else { return }
         requestOverride = .pending
         Task {
-            if let status = await onRequest(item) {
+            let result = await onRequest(item)
+            if let status = result.status {
                 requestOverride = status
             } else {
                 requestOverride = nil
+                if let title = result.failureTitle {
+                    requestFailure = RequestFailureAlert(title: title, message: result.failureMessage)
+                }
             }
         }
     }

@@ -101,6 +101,7 @@ public struct SettingsView: View {
     private let onResetToFirstRun: () -> Void
     private let plexHomeUsersFetcher: (String) async -> [PlexHomeUser]
     private let onSelectPlexHomeUser: (String, PlexHomeUser?) -> Void
+    private let onSetSeerrUser: (String, SeerUser?) -> Void
 
     public init(
         subtitleBehavior: SubtitleBehaviorModel,
@@ -144,7 +145,8 @@ public struct SettingsView: View {
         onSignOutAll: @escaping () -> Void,
         onResetToFirstRun: @escaping () -> Void,
         plexHomeUsersFetcher: @escaping (String) async -> [PlexHomeUser],
-        onSelectPlexHomeUser: @escaping (String, PlexHomeUser?) -> Void
+        onSelectPlexHomeUser: @escaping (String, PlexHomeUser?) -> Void,
+        onSetSeerrUser: @escaping (String, SeerUser?) -> Void = { _, _ in }
     ) {
         self.subtitleBehavior = subtitleBehavior
         self.spoilers = spoilers
@@ -188,6 +190,7 @@ public struct SettingsView: View {
         self.onResetToFirstRun = onResetToFirstRun
         self.plexHomeUsersFetcher = plexHomeUsersFetcher
         self.onSelectPlexHomeUser = onSelectPlexHomeUser
+        self.onSetSeerrUser = onSetSeerrUser
     }
 
     private var context: SettingsContext {
@@ -580,7 +583,7 @@ public struct SettingsView: View {
         case .spoilers:
             SpoilersDetailView(spoilers: spoilers)
         case .integrations:
-            IntegrationsDetailView(trakt: trakt, simkl: simkl, seer: seer, anilist: anilist, mal: mal, lastfm: lastfm, playback: playback, serverCount: activeProfileServerCount, knownServerHosts: knownServerHosts)
+            IntegrationsDetailView(trakt: trakt, simkl: simkl, seer: seer, anilist: anilist, mal: mal, lastfm: lastfm, playback: playback, serverCount: activeProfileServerCount, knownServerHosts: knownServerHosts, profiles: profiles, onSetSeerrUser: onSetSeerrUser)
         case .attributions:
             AttributionsDetailView()
         case .help:

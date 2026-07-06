@@ -22,6 +22,10 @@ struct IntegrationsDetailView: View {
     /// give Seerr auto-discovery a near-instant hit when it's co-hosted on the
     /// same box — very common for self-hosted setups.
     var knownServerHosts: [String] = []
+    /// Household profiles, for the Seerr "requests are made as" mapping list.
+    var profiles: [Profile] = []
+    /// Maps a household profile to a Seerr user (or clears it when `nil`).
+    var onSetSeerrUser: (String, SeerUser?) -> Void = { _, _ in }
 
     var body: some View {
         SettingsSplitLayout(title: "Trackers", sections: sections)
@@ -162,7 +166,7 @@ struct IntegrationsDetailView: View {
                 title: "Seerr",
                 description: "Connect a Seerr server (formerly Overseerr or Jellyseerr) to surface trending titles in the Home hero and request movies & shows right from your Apple TV.",
             ) {
-                SeerConfigurationView(seer: seer, knownServerHosts: knownServerHosts)
+                SeerConfigurationView(seer: seer, knownServerHosts: knownServerHosts, profiles: profiles, onSetSeerrUser: onSetSeerrUser)
             }
         ])
 
@@ -713,12 +717,20 @@ private struct LicenseBadge: Identifiable {
 private struct SeerConfigurationView: View {
     let seer: SeerService
     var knownServerHosts: [String] = []
+    /// Household profiles for the "requests are made as" mapping list.
+    var profiles: [Profile] = []
+    /// Persists a profile → Seerr-user mapping (or clears it when `nil`).
+    var onSetSeerrUser: (String, SeerUser?) -> Void = { _, _ in }
 
     @State private var urlText: String = ""
     @State private var apiKeyText: String = ""
     @State private var didPrefill = false
     @State private var discovered: [DiscoveredSeerServer] = []
     @State private var discoveryScanning = false
+    /// Loaded Seerr users for the mapping picker; `LoadState` mirrors the app's
+    /// idle/loading/loaded/failed convention so the list shows a spinner, an
+    /// error + Retry, or the picker rows.
+    @State private var users: LoadState<[SeerUser]> = .idle
     private let discovery = SeerDiscovery()
 
     var body: some View {
@@ -841,12 +853,99 @@ private struct SeerConfigurationView: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
+
+            requestsAsSection
+
             Button(role: .destructive) {
                 seer.disconnect()
                 apiKeyText = ""
             } label: {
                 Label("Disconnect", systemImage: "xmark.circle")
             }
+        }
+        .task { await loadUsersIfNeeded() }
+    }
+
+    /// "Requests are made as" — one row per household profile, mapping it to a
+    /// Seerr user so that person's requests use their own quota / approvals /
+    /// default quality profile. Unmapped profiles request as the unrestricted
+    /// admin. Shown only when the household actually has profiles to map.
+    @ViewBuilder
+    private var requestsAsSection: some View {
+        if !profiles.isEmpty {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Requests are made as")
+                    .font(.headline)
+                Text("Link each profile to a Seerr user so their requests use that person’s quota, approvals, and quality profile. Unlinked profiles request as the admin (unrestricted).")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                switch users {
+                case .loading, .idle:
+                    HStack(spacing: 12) {
+                        ProgressView().controlSize(.small)
+                        Text("Loading Seerr users…").font(.callout).foregroundStyle(.secondary)
+                    }
+                case .failed:
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("Couldn’t load Seerr users.", systemImage: "exclamationmark.triangle.fill")
+                            .font(.callout)
+                            .foregroundStyle(.orange)
+                        Button { Task { await loadUsers() } } label: {
+                            Label("Retry", systemImage: "arrow.clockwise")
+                        }
+                    }
+                case let .loaded(list):
+                    ForEach(profiles) { profile in
+                        NavigationLink {
+                            SeerUserPickerView(
+                                profileName: profile.name,
+                                users: list,
+                                selectedUserID: profile.seerrUserID,
+                                onSelect: { onSetSeerrUser(profile.id, $0) }
+                            )
+                        } label: {
+                            profileMappingRow(profile: profile, users: list)
+                        }
+                    }
+                case .empty:
+                    Text("No Seerr users found.").font(.callout).foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    /// A single profile → Seerr-user row: profile name on the left, the mapped
+    /// user (or "Admin — unrestricted") on the right.
+    @ViewBuilder
+    private func profileMappingRow(profile: Profile, users: [SeerUser]) -> some View {
+        // Prefer the freshly-loaded user's name (self-heals a stale cached name),
+        // else the cached name, else the neutral admin label.
+        let mappedName: String? = profile.seerrUserID.flatMap { id in
+            users.first(where: { $0.id == id })?.name ?? profile.seerrUserName
+        }
+        HStack {
+            Label(profile.name, systemImage: "person.crop.circle")
+            Spacer()
+            Text(mappedName ?? "Admin — unrestricted")
+                .foregroundStyle(mappedName == nil ? .secondary : .primary)
+            Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+        }
+    }
+
+    private func loadUsersIfNeeded() async {
+        if case .loaded = users { return }
+        await loadUsers()
+    }
+
+    private func loadUsers() async {
+        users = .loading
+        do {
+            let list = try await seer.users()
+            users = list.isEmpty ? .empty : .loaded(list)
+        } catch {
+            users = .failed((error as? AppError) ?? .unknown(""))
         }
     }
 
@@ -859,6 +958,57 @@ private struct SeerConfigurationView: View {
         guard let url = SeerConfig.normalizedBaseURL(from: urlText) else { return }
         let key = apiKeyText
         Task { await seer.connect(baseURL: url, apiKey: key) }
+    }
+}
+
+/// Push-navigation picker for mapping one household profile to a Seerr user.
+/// A focusable list (remote-friendly — no keyboard) with "Admin — unrestricted"
+/// first, then each Seerr user; the current selection is checkmarked and holds
+/// initial focus. Selecting a row writes the mapping and pops back.
+private struct SeerUserPickerView: View {
+    let profileName: String
+    let users: [SeerUser]
+    let selectedUserID: Int?
+    let onSelect: (SeerUser?) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        List {
+            Section {
+                row(title: "Admin — unrestricted", subtitle: "Requests as the admin; no per-user quota or approval.", isSelected: selectedUserID == nil) {
+                    onSelect(nil)
+                    dismiss()
+                }
+            }
+            Section("Seerr users") {
+                ForEach(users) { user in
+                    row(title: user.name, subtitle: user.subtitle, isSelected: user.id == selectedUserID) {
+                        onSelect(user)
+                        dismiss()
+                    }
+                }
+            }
+        }
+        .navigationTitle("Requests as — \(profileName)")
+    }
+
+    @ViewBuilder
+    private func row(title: String, subtitle: String?, isSelected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                    if let subtitle, !subtitle.isEmpty {
+                        Text(subtitle).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                Spacer()
+                if isSelected {
+                    Image(systemName: "checkmark").foregroundStyle(.tint)
+                }
+            }
+        }
     }
 }
 #endif

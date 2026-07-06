@@ -306,19 +306,33 @@ private struct GenreCard: View {
     let genre: MusicGenre
     let action: () -> Void
     @FocusState private var isFocused: Bool
+    @Environment(\.plozzReduceTransparency) private var reduceTransparency
 
     var body: some View {
-        VStack {
+        let shape = RoundedRectangle(cornerRadius: PlozzTheme.Metrics.Radius.card, style: .continuous)
+        return VStack {
             Image(systemName: "guitars")
                 .font(.system(size: 40))
                 .foregroundStyle(Color.accentColor.gradient)
-            Text(genre.name).font(.headline).lineLimit(1)
+            Text(genre.name)
+                .font(.headline)
+                .lineLimit(1)
+                .foregroundStyle(PlozzCardCaption.titleColor(isFocused: isFocused, reduceTransparency: reduceTransparency))
         }
         .frame(width: 280, height: 160)
-        // Match the poster/landscape cards' focus treatment exactly: our own glass
-        // focus surface via `.focusable` (never a Button, whose tvOS focus platter
-        // paints a white plate over the glass) + the same lift shadow and scale.
-        .plozzGlassCard(cornerRadius: PlozzTheme.Metrics.Radius.card, isFocused: isFocused)
+        .background {
+            // This card has no artwork, so it needs a cheap resting surface of its
+            // own. Crucially it does NOT use the artwork-card glass at rest: a live
+            // `.glassEffect` on every tile of a full genre grid storms the GPU (it
+            // froze the whole page). The glass/lift is applied to the *focused* card
+            // only, via `glassAtRest: false` below — exactly how dense poster grids
+            // opt out. Focusing a genre card then gets the same treatment as posters.
+            if !isFocused {
+                shape.fill(Color.primary.opacity(0.08))
+                    .overlay(shape.strokeBorder(Color.primary.opacity(0.12), lineWidth: 1))
+            }
+        }
+        .plozzGlassCard(cornerRadius: PlozzTheme.Metrics.Radius.card, isFocused: isFocused, glassAtRest: false)
         .focusableCard(isFocused: $isFocused, cornerRadius: PlozzTheme.Metrics.Radius.card, action: action)
         .shadow(color: .black.opacity(isFocused ? 0.36 : 0), radius: 20, y: 10)
         .scaleEffect(isFocused ? PlozzTheme.Metrics.mediumFocusedCardScale : 1)

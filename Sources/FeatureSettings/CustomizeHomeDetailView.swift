@@ -28,6 +28,22 @@ struct CustomizeHomeDetailView: View {
 
     var body: some View {
         SettingsSplitLayout(title: "Customize Home", sections: sections)
+            // If the user unmerged BEFORE library discovery finished, the initial
+            // seed (in the toggle setter) was a no-op on an empty seed list. Retry
+            // once libraries are known — on appear and when discovery loads — so the
+            // unmerged Home fills in rather than staying empty until a re-toggle.
+            // Idempotent: seeding runs only once (tracked by hasSeededLibraryRows).
+            .onAppear { seedUnmergedRowsIfReady() }
+            .onChange(of: discoveredLibraries.value?.count ?? 0) { _, _ in
+                seedUnmergedRowsIfReady()
+            }
+    }
+
+    /// Seeds the default per-library rows when unmerged and libraries are known.
+    /// A no-op while merging, before discovery, or once seeding has already run.
+    private func seedUnmergedRowsIfReady() {
+        guard !homeVisibility.mergeLibrariesOnHome else { return }
+        homeVisibility.seedLibraryRowsIfNeeded(defaultLibraryRowSeeds)
     }
 
     private var sections: [SettingsSplitSection] {

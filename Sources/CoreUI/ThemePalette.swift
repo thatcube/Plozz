@@ -58,7 +58,11 @@ public struct ThemePalette: Equatable, Sendable {
     /// opaque backing that stops the drop shadow bleeding through the glass.
     public let isLight: Bool
 
-    public init(
+    /// Only the module's own `dark`/`oled`/`light` literals construct palettes;
+    /// external callers use the static factories (`palette(for:)`) or the ready
+    /// palettes. Kept `internal` (not `public`) so adding tokens here is never a
+    /// source-breaking change for consumers of the package.
+    init(
         backgroundBase: Color,
         backgroundSecondary: Color,
         cardSurface: Color,

@@ -23,11 +23,15 @@ struct CustomizeHomeDetailView: View {
     /// The per-profile Home/visibility model (merge switch, global-row + per-library
     /// row selection, library visibility).
     let homeVisibility: HomeLibraryVisibilityModel
+    /// Spoiler-protection settings, folded in as a section here — hiding unwatched
+    /// art/titles/ratings is a browsing concern, so it lives with Home rather than
+    /// as its own thin top-level row.
+    let spoilers: SpoilerSettingsModel
 
     @Environment(HeroSettingsModel.self) private var hero
 
     var body: some View {
-        SettingsSplitLayout(title: "Customize Home", sections: sections)
+        SettingsSplitLayout(title: "Home", sections: sections)
             // If the user unmerged BEFORE library discovery finished, the initial
             // seed (in the toggle setter) was a no-op on an empty seed list. Retry
             // once libraries are known — on appear and when discovery loads — so the
@@ -48,6 +52,7 @@ struct CustomizeHomeDetailView: View {
 
     private var sections: [SettingsSplitSection] {
         [layoutSection, homeRowsSection, heroSection]
+            + SpoilerSectionsBuilder(spoilers: spoilers).sections
     }
 
     // MARK: - Layout (merge switch)

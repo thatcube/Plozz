@@ -12,14 +12,28 @@ struct NightShiftDetailView: View {
     @Bindable var model: NightShiftSettingsModel
 
     var body: some View {
-        SettingsSplitLayout(title: "Circadian Mode", sections: sections)
+        SettingsSplitLayout(title: "Circadian Mode", sections: CircadianSectionsBuilder(model: model).sections)
             .onChange(of: model.settings.isEnabled) { _, enabled in
                 if !enabled { model.isPreviewing = false }
             }
             .onDisappear { model.isPreviewing = false }
     }
+}
 
-    private var sections: [SettingsSplitSection] {
+/// Builds the Circadian Mode settings sections. Extracted from
+/// ``NightShiftDetailView`` so the same controls can appear both as their own
+/// page and folded into Appearance as a group of sections (the top-level
+/// "Circadian Mode" row was retired in favour of living under Appearance).
+///
+/// - Parameter primaryHeader: header for the first (toggle + schedule) section.
+///   `nil` on the standalone page (the page title already says "Circadian Mode");
+///   set to a label like "Circadian Mode" when embedded among other sections.
+@MainActor
+struct CircadianSectionsBuilder {
+    let model: NightShiftSettingsModel
+    var primaryHeader: String? = nil
+
+    var sections: [SettingsSplitSection] {
         @Bindable var model = model
 
         // One control governs on/off *and* schedule (Off · Auto · Manual ·
@@ -56,7 +70,7 @@ struct NightShiftDetailView: View {
         }
 
         var sections: [SettingsSplitSection] = [
-            SettingsSplitSection(id: "night-shift", header: nil, rows: primaryRows)
+            SettingsSplitSection(id: "night-shift", header: primaryHeader, rows: primaryRows)
         ]
 
         // Off hides the rest — there's nothing to tune when the tint never paints.

@@ -5,6 +5,9 @@ import CoreUI
 
 struct AppearanceDetailView: View {
     @Bindable var theme: ThemeSettingsModel
+    /// Circadian Mode (night-warming) settings, folded in as sections here — it's
+    /// a display concern, so it no longer earns its own top-level row.
+    @Bindable var nightShift: NightShiftSettingsModel
     @Environment(MusicPlayerSettingsModel.self) private var musicPlayer
     /// App-wide card presentation — scale + style — that applies across every row
     /// and grid in the app (not just Home), so it lives in Appearance rather than
@@ -29,6 +32,12 @@ struct AppearanceDetailView: View {
 
     var body: some View {
         SettingsSplitLayout(title: "Appearance", sections: sections)
+            // Circadian's day/night preview animates a model flag; make sure it
+            // never keeps running once you leave Appearance or turn Circadian off.
+            .onChange(of: nightShift.settings.isEnabled) { _, enabled in
+                if !enabled { nightShift.isPreviewing = false }
+            }
+            .onDisappear { nightShift.isPreviewing = false }
     }
 
     private var sections: [SettingsSplitSection] {
@@ -114,12 +123,25 @@ struct AppearanceDetailView: View {
                     )
                 }
             ])
-        ]
+        ] + CircadianSectionsBuilder(model: nightShift, primaryHeader: "Circadian Mode").sections
     }
 }
 
 struct SpoilersDetailView: View {
     @Bindable var spoilers: SpoilerSettingsModel
+
+    var body: some View {
+        SettingsSplitLayout(title: "Spoilers", sections: SpoilerSectionsBuilder(spoilers: spoilers).sections)
+    }
+}
+
+/// Builds the Spoiler-protection settings section. Extracted from
+/// ``SpoilersDetailView`` so the same controls can appear folded into the Home
+/// settings page (the standalone top-level "Spoilers" row was retired — spoiler
+/// masking is a browsing concern, so it lives with Home).
+@MainActor
+struct SpoilerSectionsBuilder {
+    let spoilers: SpoilerSettingsModel
 
     private var modeExplanation: String {
         switch spoilers.settings.mode {
@@ -130,11 +152,8 @@ struct SpoilersDetailView: View {
         }
     }
 
-    var body: some View {
-        SettingsSplitLayout(title: "Spoilers", sections: sections)
-    }
-
-    private var sections: [SettingsSplitSection] {
+    var sections: [SettingsSplitSection] {
+        @Bindable var spoilers = spoilers
         var rows: [SettingsSplitRow] = [
             SettingsSplitRow(
                 id: "hide-spoilers",

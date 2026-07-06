@@ -344,13 +344,14 @@ public struct SettingsView: View {
     }
 
     /// Rows nested inside the profile container — the settings this profile
-    /// actually *owns*: identity + presentation only. Order: personal per-server
-    /// settings first ("Your Libraries" — who you watch as + what shows on Home),
-    /// then presentation (Appearance, Night Shift, Playback, Spoilers), then
-    /// Trackers. Server sign-ins AND profile management (the roster) are
-    /// intentionally NOT here — they're device-shared (see
-    /// `thisAppleTVSection`). Each row pushes its own detail page via the root
-    /// NavigationStack.
+    /// actually *owns*: identity + presentation only. Grouped by concern and
+    /// consolidated so there are no thin one-off pages: content/browsing first
+    /// (Your Libraries, then Home — which now also holds spoiler masking), then
+    /// the core watching page (Playback), then look (Appearance — which now also
+    /// holds Circadian Mode), then external connections (Integrations). Server
+    /// sign-ins AND profile management (the roster) are intentionally NOT here —
+    /// they're device-shared (see `thisAppleTVSection`). Each row pushes its own
+    /// detail page via the root NavigationStack.
     @ViewBuilder
     private var profileOwnedRows: some View {
         // Inter-row spacing replaces the previous dividers: it lets the
@@ -365,21 +366,10 @@ public struct SettingsView: View {
                    route: .myLibraries) {
                 signedInStrip
             }
-            navRow("Appearance", icon: "paintpalette",
-                   value: nil,
-                   route: .appearance)
-            navRow("Customize Home", icon: "rectangle.on.rectangle.angled",
+            navRow("Home", icon: "rectangle.on.rectangle.angled",
                    value: nil,
                    route: .customizeHome) {
-                Text("Rows, libraries & the hero on Home")
-                    .font(.footnote)
-                    .settingsRowSecondary()
-                    .lineLimit(2)
-            }
-            navRow("Circadian Mode", icon: "moon.stars",
-                   value: nil,
-                   route: .nightShift) {
-                Text("Warms the display at night to help you sleep")
+                Text("Rows, libraries, the hero & spoilers")
                     .font(.footnote)
                     .settingsRowSecondary()
                     .lineLimit(2)
@@ -387,10 +377,15 @@ public struct SettingsView: View {
             navRow("Playback", icon: "play.rectangle",
                    value: nil,
                    route: .playback)
-            navRow("Spoilers", icon: "eye.slash",
+            navRow("Appearance", icon: "paintpalette",
                    value: nil,
-                   route: .spoilers)
-            navRow("Trackers", icon: "link",
+                   route: .appearance) {
+                Text("Theme, display size, cards & Circadian Mode")
+                    .font(.footnote)
+                    .settingsRowSecondary()
+                    .lineLimit(2)
+            }
+            navRow("Integrations", icon: "link",
                    value: nil,
                    route: .integrations) {
                 Text("Trakt, Simkl, AniList, MyAnimeList, Last.fm, Seerr")
@@ -567,11 +562,12 @@ public struct SettingsView: View {
         case .myLibraries:
             MyLibrariesDetailView(context: context)
         case .appearance:
-            AppearanceDetailView(theme: theme)
+            AppearanceDetailView(theme: theme, nightShift: nightShift)
         case .customizeHome:
             CustomizeHomeDetailView(
                 discoveredLibraries: librariesStore.state,
-                homeVisibility: homeVisibility
+                homeVisibility: homeVisibility,
+                spoilers: spoilers
             )
         case .nightShift:
             NightShiftDetailView(model: nightShift)

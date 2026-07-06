@@ -24,7 +24,7 @@ struct IntegrationsDetailView: View {
     var knownServerHosts: [String] = []
 
     var body: some View {
-        SettingsSplitLayout(title: "Trackers", sections: sections)
+        SettingsSplitLayout(title: "Integrations", sections: sections)
             .task {
                 // Load all statuses up front so the left list's value
                 // summaries are correct before any row is focused.

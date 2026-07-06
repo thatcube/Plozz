@@ -2,6 +2,14 @@
 import SwiftUI
 import CoreUI
 
+/// Shared metrics for the Settings detail panes so spacing is consistent (and
+/// tunable in one place) across every feature form.
+enum SettingsMetrics {
+    /// Vertical gap between top-level sections within a detail pane (the enable
+    /// toggle and each headed group). Deliberately generous for the 10-foot UI.
+    static let sectionSpacing: CGFloat = 80
+}
+
 /// One row in a Settings master/detail split. The left list shows the row's
 /// `title`; focusing it live-updates the right detail pane, which renders the
 /// row's `description` and the row's existing `detail` control.

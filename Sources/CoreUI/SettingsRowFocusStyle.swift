@@ -209,10 +209,15 @@ public extension View {
         font(.title2.weight(.bold)).foregroundStyle(.primary)
     }
 
-    /// L2 — a section header inside a detail pane (e.g. "Sources"). Sits clearly
-    /// above control labels so groups read as headers.
+    /// L2 — a section header inside a detail pane (e.g. "SOURCES"). Uppercase,
+    /// tracked and secondary — the classic grouped-list header idiom, so it reads
+    /// as a *header* and never collides with the sentence-case, primary-colour
+    /// control labels beneath it (distinct by style, not just size).
     func settingsSectionHeader() -> some View {
-        font(.title3.weight(.bold)).foregroundStyle(.primary)
+        font(.subheadline.weight(.semibold))
+            .textCase(.uppercase)
+            .tracking(1.5)
+            .foregroundStyle(.secondary)
     }
 
     /// L4 — helper/descriptive text under a title or section header.

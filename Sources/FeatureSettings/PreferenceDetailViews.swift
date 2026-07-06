@@ -160,7 +160,7 @@ struct SpoilerSectionsBuilder {
                 title: "Spoilers",
                 description: "Keep unwatched episodes and ratings from spoiling you while you browse.",
             ) {
-                VStack(alignment: .leading, spacing: 36) {
+                VStack(alignment: .leading, spacing: SettingsMetrics.sectionSpacing) {
                     SettingsRevealSection(
                         isOn: $spoilers.settings.isEnabled,
                         masterLabel: "Hide spoilers for unwatched episodes"

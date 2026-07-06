@@ -222,11 +222,11 @@ struct CustomizeHomeDetailView: View {
 
     @ViewBuilder private var heroForm: some View {
         @Bindable var hero = hero
-        SettingsRevealSection(
-            isOn: $hero.settings.isEnabled,
-            masterLabel: "Show the hero on Home"
-        ) {
-            VStack(alignment: .leading, spacing: 36) {
+        VStack(alignment: .leading, spacing: SettingsMetrics.sectionSpacing) {
+            Toggle("Show the hero on Home", isOn: $hero.settings.isEnabled)
+                .toggleStyle(SettingsSwitchToggleStyle())
+
+            if hero.settings.isEnabled {
                 SettingsDetailGroup(
                     title: "Sources",
                     description: "Which content feeds the hero. Enabled sources are interleaved into one rotating set."
@@ -281,6 +281,8 @@ struct CustomizeHomeDetailView: View {
                 }
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .animation(.easeInOut(duration: 0.22), value: hero.settings.isEnabled)
     }
 
     // MARK: - Per-library row option identity

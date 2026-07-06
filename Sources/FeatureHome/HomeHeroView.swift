@@ -199,11 +199,13 @@ struct HomeHeroView: View {
     private static let resumeAfterIdle: Double = 2.5
 
     /// How long a manual page is locked out after a page starts — i.e. how long the
-    /// hero's transition "owns" navigation before the user may advance again. Mirrors
-    /// the backdrop wipe duration (`WipeImageView.duration`) so the lock clears just
-    /// as the wipe settles. Tunable; this is the whole feel of the "wait for the
-    /// transition" behaviour.
-    private static let pageTransitionLockout: TimeInterval = 0.85
+    /// hero's transition "owns" navigation before the user may advance again. A touch
+    /// shorter than the backdrop wipe (`WipeImageView.duration` = 0.85) so you can
+    /// line up the next page just before the current one fully settles — snappy but
+    /// still one page at a time (no flying past). Tunable; this is the whole feel of
+    /// the "wait for the transition" behaviour. Known-good slower value was 0.85 (tag
+    /// `hero-nav-known-good`); raise it back toward there if this feels too eager.
+    private static let pageTransitionLockout: TimeInterval = 0.6
 
     /// Number of action buttons on the fronted slide (1 if none resolved yet).
     private var currentButtonCount: Int { current.map { buttons(for: $0).count } ?? 1 }

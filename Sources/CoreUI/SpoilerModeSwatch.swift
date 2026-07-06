@@ -53,7 +53,7 @@ public struct SpoilerModeSwatch: View {
                 case .blur:
                     fakeStill(index: index).blur(radius: width * 0.10)
                 case .placeholder:
-                    placeholderArt(index: index, width: width)
+                    placeholderArt(width: width)
                 }
             }
             .frame(width: width, height: height * 0.60)
@@ -88,18 +88,32 @@ public struct SpoilerModeSwatch: View {
         }
     }
 
-    /// The "no real frame" look: a muted fill with a play glyph + the episode
-    /// number, matching `PosterCardView`'s neutral placeholder.
-    private func placeholderArt(index: Int, width: CGFloat) -> some View {
+    /// The "no real frame" look: the same simple, generic **series artwork** shown
+    /// for every episode (a fabricated stand-in for the show's fan-art), so no
+    /// per-episode frame ever leaks. Deliberately reads as a stylised poster, not
+    /// a photo — three identical tiles is the point (you can't tell episodes
+    /// apart). Matches `PosterCardView` swapping in `fallbackArtworkURL` art.
+    private func placeholderArt(width: CGFloat) -> some View {
         ZStack {
-            Color.primary.opacity(0.10)
-            VStack(spacing: width * 0.04) {
-                Image(systemName: "play.rectangle")
-                    .font(.system(size: width * 0.24, weight: .regular))
-                    .foregroundStyle(.secondary)
-                Text("E\(index + 1)")
-                    .font(.system(size: width * 0.15, weight: .semibold))
-                    .foregroundStyle(.secondary)
+            LinearGradient(
+                colors: [Color(red: 0.28, green: 0.22, blue: 0.52), Color(red: 0.68, green: 0.30, blue: 0.56)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            // A soft "glow" reading as a sun/moon in cover art.
+            Circle()
+                .fill(RadialGradient(
+                    colors: [Color.white.opacity(0.9), Color.white.opacity(0.15)],
+                    center: .center, startRadius: 0, endRadius: width * 0.2
+                ))
+                .frame(width: width * 0.34, height: width * 0.34)
+                .offset(x: width * 0.14, y: -width * 0.08)
+            // A darker "horizon" band along the bottom.
+            VStack(spacing: 0) {
+                Spacer(minLength: 0)
+                Rectangle()
+                    .fill(Color.black.opacity(0.22))
+                    .frame(height: width * 0.24)
             }
         }
     }

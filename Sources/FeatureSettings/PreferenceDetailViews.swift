@@ -154,44 +154,36 @@ struct SpoilerSectionsBuilder {
 
     var sections: [SettingsSplitSection] {
         @Bindable var spoilers = spoilers
-        var rows: [SettingsSplitRow] = [
+        return [SettingsSplitSection(id: "spoilers", header: nil, rows: [
             SettingsSplitRow(
-                id: "hide-spoilers",
-                title: "Hide spoilers for unwatched episodes",
-                description: "Blur or replace episode thumbnails and keep titles and descriptions hidden until you finish an episode.",
+                id: "spoilers",
+                title: "Spoilers",
+                description: "Keep unwatched episodes and ratings from spoiling you while you browse.",
             ) {
-                Toggle("Hide spoilers", isOn: $spoilers.settings.isEnabled)
-            }
-        ]
+                VStack(alignment: .leading, spacing: 36) {
+                    SettingsRevealSection(
+                        isOn: $spoilers.settings.isEnabled,
+                        masterLabel: "Hide spoilers for unwatched episodes"
+                    ) {
+                        SettingsDetailGroup(title: "Mode", description: modeExplanation) {
+                            SettingsOptionPicker(
+                                options: SpoilerSettings.Mode.allCases,
+                                selection: $spoilers.settings.mode,
+                                title: { $0.displayName }
+                            )
+                        }
+                    }
 
-        if spoilers.settings.isEnabled {
-            rows.append(
-                SettingsSplitRow(
-                    id: "spoiler-mode",
-                    title: "Mode",
-                    description: modeExplanation,
-                    indented: true
-                ) {
-                    SettingsOptionPicker(
-                        options: SpoilerSettings.Mode.allCases,
-                        selection: $spoilers.settings.mode,
-                        title: { $0.displayName }
-                    )
+                    SettingsDetailGroup(
+                        title: "Ratings",
+                        description: "Keeps IMDb, Rotten Tomatoes and other scores hidden on a movie or episode until you've finished it, so the ratings don't bias you beforehand. They appear once it's marked watched."
+                    ) {
+                        Toggle("Hide ratings until watched", isOn: $spoilers.settings.hideRatingsUntilWatched)
+                            .toggleStyle(SettingsSwitchToggleStyle())
+                    }
                 }
-            )
-        }
-
-        rows.append(
-            SettingsSplitRow(
-                id: "hide-ratings",
-                title: "Hide ratings until watched",
-                description: "Keeps IMDb, Rotten Tomatoes and other scores hidden on a movie or episode until you've finished it, so the ratings don't bias you beforehand. They appear once it's marked watched.",
-            ) {
-                Toggle("Hide ratings", isOn: $spoilers.settings.hideRatingsUntilWatched)
             }
-        )
-
-        return [SettingsSplitSection(id: "spoilers", header: "Spoiler Protection", rows: rows)]
+        ])]
     }
 }
 struct PlaybackDetailView: View {

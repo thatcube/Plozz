@@ -201,109 +201,92 @@ struct CustomizeHomeDetailView: View {
         var id: String { row.rawValue }
     }
 
-    // MARK: - Hero (moved in from Home Display)
+    // MARK: - Hero (a single feature row: the whole hero form in one pane)
 
+    /// One master row — "Hero" — whose detail pane holds the entire hero form:
+    /// the on/off switch, then (revealed when on) Sources, Items, Random
+    /// Libraries and Auto-Advance as headed groups. Previously these were five
+    /// separate (mostly indented) master rows, which buried the feature; now Hero
+    /// reads as one dedicated space.
     private var heroSection: SettingsSplitSection {
-        @Bindable var hero = hero
-        var rows: [SettingsSplitRow] = [
+        SettingsSplitSection(id: "hero", header: nil, rows: [
             SettingsSplitRow(
-                id: "hero-enabled",
-                title: "Show on Home",
+                id: "hero",
+                title: "Hero",
                 description: "A cinematic, rotating spotlight at the top of Home, with a Continue Watching row tucked under its lower edge.",
             ) {
-                Toggle("Show the hero", isOn: $hero.settings.isEnabled)
-                    .toggleStyle(SettingsSwitchToggleStyle())
+                heroForm
             }
-        ]
-        if hero.settings.isEnabled {
-            rows.append(heroSourcesRow)
-            rows.append(heroItemsRow)
-            if hero.settings.isEnabled(.randomFromLibrary) {
-                rows.append(randomLibrariesRow)
-            }
-            rows.append(heroAutoAdvanceRow)
-            // Background Trailers is hidden until the feature ships. The setting
-            // (`heroTrailersRow` / `trailersEnabled`) is intentionally kept so a
-            // previously-saved choice survives and it can be re-listed later.
-        }
-        return SettingsSplitSection(id: "hero", header: "Hero", rows: rows)
+        ])
     }
 
-    private var heroSourcesRow: SettingsSplitRow {
-        SettingsSplitRow(
-            id: "hero-sources",
-            title: "Sources",
-            description: "Which content feeds the hero. Enabled sources are interleaved into one rotating set.",
-            indented: true,
+    @ViewBuilder private var heroForm: some View {
+        @Bindable var hero = hero
+        SettingsRevealSection(
+            isOn: $hero.settings.isEnabled,
+            masterLabel: "Show the hero on Home"
         ) {
-            VStack(alignment: .leading, spacing: 8) {
-                ForEach(HeroSourceKind.allCases) { source in
-                    Toggle(isOn: sourceBinding(source)) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Label(source.displayName, systemImage: source.symbolName)
-                            Text(source.detail)
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 36) {
+                SettingsDetailGroup(
+                    title: "Sources",
+                    description: "Which content feeds the hero. Enabled sources are interleaved into one rotating set."
+                ) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(HeroSourceKind.allCases) { source in
+                            Toggle(isOn: sourceBinding(source)) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Label(source.displayName, systemImage: source.symbolName)
+                                    Text(source.detail)
+                                        .font(.footnote)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            .toggleStyle(SettingsSwitchToggleStyle())
                         }
                     }
-                    .toggleStyle(SettingsSwitchToggleStyle())
                 }
-            }
-        }
-    }
 
-    private var heroItemsRow: SettingsSplitRow {
-        @Bindable var hero = hero
-        return SettingsSplitRow(
-            id: "hero-items",
-            title: "Items",
-            description: "How many titles rotate through the hero.",
-            indented: true,
-        ) {
-            LabeledSettingRow("Items in rotation") {
-                SettingsStepper(
-                    options: Array(HeroSettings.maxItemsRange),
-                    selection: $hero.settings.maxItems,
-                    title: { "\($0)" }
-                )
-            }
-        }
-    }
-
-    private var heroAutoAdvanceRow: SettingsSplitRow {
-        @Bindable var hero = hero
-        return SettingsSplitRow(
-            id: "hero-auto-advance",
-            title: "Auto-Advance",
-            description: "Automatically rotate to the next title after a few seconds. Rotation always pauses while the hero is focused.",
-            indented: true,
-        ) {
-            VStack(alignment: .leading, spacing: 24) {
-                Toggle("Rotate automatically", isOn: $hero.settings.autoAdvance)
-                    .toggleStyle(SettingsSwitchToggleStyle())
-                if hero.settings.autoAdvance {
-                    LabeledSettingRow("Seconds per title") {
+                SettingsDetailGroup(
+                    title: "Items",
+                    description: "How many titles rotate through the hero."
+                ) {
+                    LabeledSettingRow("Items in rotation") {
                         SettingsStepper(
-                            options: Array(HeroSettings.autoAdvanceRange),
-                            selection: $hero.settings.autoAdvanceSeconds,
-                            title: { "\($0)s" }
+                            options: Array(HeroSettings.maxItemsRange),
+                            selection: $hero.settings.maxItems,
+                            title: { "\($0)" }
                         )
                     }
                 }
-            }
-        }
-    }
 
-    private var heroTrailersRow: SettingsSplitRow {
-        @Bindable var hero = hero
-        return SettingsSplitRow(
-            id: "hero-trailers",
-            title: "Background Trailers",
-            description: "Coming soon — play a muted trailer behind the hero when one is available. Fades in only once it's actually playing. Your choice is saved for when this lands.",
-            indented: true,
-        ) {
-            Toggle("Play trailers in the background", isOn: $hero.settings.trailersEnabled)
-                .toggleStyle(SettingsSwitchToggleStyle())
+                if hero.settings.isEnabled(.randomFromLibrary) {
+                    SettingsDetailGroup(
+                        title: "Random Libraries",
+                        description: "Which libraries the Random source draws from. Leave all selected to use every library shown on Home."
+                    ) {
+                        randomLibrariesContent
+                    }
+                }
+
+                SettingsDetailGroup(
+                    title: "Auto-Advance",
+                    description: "Automatically rotate to the next title after a few seconds. Rotation always pauses while the hero is focused."
+                ) {
+                    VStack(alignment: .leading, spacing: 24) {
+                        Toggle("Rotate automatically", isOn: $hero.settings.autoAdvance)
+                            .toggleStyle(SettingsSwitchToggleStyle())
+                        if hero.settings.autoAdvance {
+                            LabeledSettingRow("Seconds per title") {
+                                SettingsStepper(
+                                    options: Array(HeroSettings.autoAdvanceRange),
+                                    selection: $hero.settings.autoAdvanceSeconds,
+                                    title: { "\($0)s" }
+                                )
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -327,32 +310,25 @@ struct CustomizeHomeDetailView: View {
             }
     }
 
-    private var randomLibrariesRow: SettingsSplitRow {
+    @ViewBuilder private var randomLibrariesContent: some View {
         let libraries = randomEligibleLibraries
-        return SettingsSplitRow(
-            id: "hero-random-libraries",
-            title: "Random Libraries",
-            description: "Which libraries the Random source draws from. Leave all selected to use every library shown on Home.",
-            indented: true,
-        ) {
-            if libraries.isEmpty {
-                Text("No movie or TV libraries are shown on this profile's Home yet.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            } else {
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(libraries) { library in
-                        Toggle(isOn: randomLibraryBinding(for: library.key, universe: libraries)) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(library.library.title)
-                                Text(library.serverName)
-                                    .font(.footnote)
-                                    .foregroundStyle(.secondary)
-                            }
+        if libraries.isEmpty {
+            Text("No movie or TV libraries are shown on this profile's Home yet.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(libraries) { library in
+                    Toggle(isOn: randomLibraryBinding(for: library.key, universe: libraries)) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(library.library.title)
+                            Text(library.serverName)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
                         }
-                        .toggleStyle(SettingsSwitchToggleStyle())
                     }
+                    .toggleStyle(SettingsSwitchToggleStyle())
                 }
             }
         }

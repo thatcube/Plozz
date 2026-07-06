@@ -318,4 +318,32 @@ struct SettingsRevealSection<Content: View>: View {
         .animation(.easeInOut(duration: 0.22), value: isOn)
     }
 }
+
+/// A headed group of related controls *inside* a single detail pane: a bold
+/// heading, optional helper text, then its control(s) stacked beneath. This is
+/// how a feature that owns several controls (e.g. Hero: Sources, Items,
+/// Auto-Advance) keeps them together in ONE master row's detail — instead of
+/// scattering them as separate (or indented) rows in the master list. The
+/// master list then stays one clean row per feature.
+struct SettingsDetailGroup<Content: View>: View {
+    let title: String
+    var description: String? = nil
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title)
+                .font(.headline.weight(.semibold))
+            if let description {
+                Text(description)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            content()
+                .padding(.top, 2)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
 #endif

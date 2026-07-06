@@ -143,15 +143,6 @@ struct SpoilersDetailView: View {
 struct SpoilerSectionsBuilder {
     let spoilers: SpoilerSettingsModel
 
-    private var modeExplanation: String {
-        switch spoilers.settings.mode {
-        case .blur:
-            return "Episode thumbnails are blurred until watched. Titles and descriptions stay hidden until you finish the episode."
-        case .placeholder:
-            return "Episode thumbnails are replaced with generic series art and the episode number, so no real frame is ever shown. Titles and descriptions stay hidden until you finish the episode."
-        }
-    }
-
     var sections: [SettingsSplitSection] {
         @Bindable var spoilers = spoilers
         return [SettingsSplitSection(id: "spoilers", header: nil, rows: [
@@ -165,12 +156,8 @@ struct SpoilerSectionsBuilder {
                         isOn: $spoilers.settings.isEnabled,
                         masterLabel: "Hide spoilers for unwatched episodes"
                     ) {
-                        SettingsDetailGroup(title: "Mode", description: modeExplanation) {
-                            SettingsOptionPicker(
-                                options: SpoilerSettings.Mode.allCases,
-                                selection: $spoilers.settings.mode,
-                                title: { $0.displayName }
-                            )
+                        SettingsDetailGroup(title: "Mode") {
+                            SpoilerModePicker(mode: $spoilers.settings.mode)
                         }
                     }
 

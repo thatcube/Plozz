@@ -255,10 +255,7 @@ struct CustomizeHomeDetailView: View {
                     }
                 }
 
-                SettingsDetailGroup(
-                    title: "Auto-Advance",
-                    description: "Rotation pauses while the hero is focused."
-                ) {
+                SettingsDetailGroup(title: "Auto-Advance") {
                     VStack(alignment: .leading, spacing: 24) {
                         Toggle("Rotate automatically", isOn: $hero.settings.autoAdvance)
                             .toggleStyle(SettingsSwitchToggleStyle())

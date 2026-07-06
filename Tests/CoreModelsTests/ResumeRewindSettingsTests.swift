@@ -29,7 +29,27 @@ final class ResumeRewindSettingsTests: XCTestCase {
 
     func testOffIsZeroSeconds() {
         XCTAssertEqual(ResumeRewindInterval.off.seconds, 0)
-        XCTAssertEqual(ResumeRewindInterval.off.title, "Off")
+        XCTAssertEqual(ResumeRewindInterval.off.title, "0 sec",
+                       "Off reads as 0 sec so the range shows as 0–60 seconds")
+    }
+
+    func testSixtySecondMaximum() {
+        XCTAssertEqual(ResumeRewindInterval.sixty.seconds, 60)
+        XCTAssertEqual(ResumeRewindInterval.sixty.title, "60 sec")
+        XCTAssertEqual(ResumeRewindInterval.allCases.map(\.rawValue).max(), 60,
+                       "60s is the largest preset")
+    }
+
+    // MARK: - effectDescription helper text
+
+    func testEffectDescriptionOff() {
+        XCTAssertEqual(ResumeRewindInterval.off.effectDescription, "Rewind on resume is off.")
+    }
+
+    func testEffectDescriptionForEachRewind() {
+        XCTAssertEqual(ResumeRewindInterval.five.effectDescription, "Media will resume 5 seconds earlier.")
+        XCTAssertEqual(ResumeRewindInterval.thirty.effectDescription, "Media will resume 30 seconds earlier.")
+        XCTAssertEqual(ResumeRewindInterval.sixty.effectDescription, "Media will resume 60 seconds earlier.")
     }
 
     // MARK: - applied(to:) maths
@@ -38,6 +58,7 @@ final class ResumeRewindSettingsTests: XCTestCase {
         XCTAssertEqual(ResumeRewindInterval.five.applied(to: 100), 95)
         XCTAssertEqual(ResumeRewindInterval.ten.applied(to: 100), 90)
         XCTAssertEqual(ResumeRewindInterval.thirty.applied(to: 100), 70)
+        XCTAssertEqual(ResumeRewindInterval.sixty.applied(to: 100), 40)
     }
 
     func testOffNeverRewinds() {

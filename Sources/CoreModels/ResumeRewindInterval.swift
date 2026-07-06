@@ -16,19 +16,33 @@ public enum ResumeRewindInterval: Int, Codable, CaseIterable, Hashable, Sendable
     case ten = 10
     case fifteen = 15
     case thirty = 30
+    case sixty = 60
 
     /// Rewind amount in seconds (`0` for `.off`).
     public var seconds: TimeInterval { TimeInterval(rawValue) }
 
-    /// Human-readable label for the settings picker (e.g. "5 sec", "Off").
+    /// Human-readable label for the settings stepper. `.off` reads "0 sec" so the
+    /// preset range is unambiguously **0 to 60 seconds** rather than an opaque
+    /// "Off" that looks like a separate switch.
     public var title: String {
         switch self {
-        case .off:     return "Off"
+        case .off:     return "0 sec"
         case .five:    return "5 sec"
         case .ten:     return "10 sec"
         case .fifteen: return "15 sec"
         case .thirty:  return "30 sec"
+        case .sixty:   return "60 sec"
         }
+    }
+
+    /// A cohesive one-line summary of the *effect* of the current value, shown as
+    /// live helper text beneath the stepper so the setting explains itself as you
+    /// dial it. `.off` states it's off; every other value says how much earlier
+    /// playback resumes.
+    public var effectDescription: String {
+        rawValue == 0
+            ? "Rewind on resume is off."
+            : "Media will resume \(rawValue) seconds earlier."
     }
 
     /// Applies the rewind to a resume position, returning where playback should

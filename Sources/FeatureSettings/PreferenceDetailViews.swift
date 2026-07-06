@@ -458,16 +458,21 @@ struct PlaybackDetailView: View {
         SettingsSplitSection(id: "resume", header: "Resume", rows: [
             SettingsSplitRow(
                 id: "resume-rewind",
-                title: "Resume rewind",
-                description: playback.settings.resumeRewindInterval == .off
-                    ? "Returning to a partially-watched title resumes exactly where you left off."
-                    : "When you come back to a partially-watched title, playback starts \(playback.settings.resumeRewindInterval.title) earlier so you can pick up the thread. Set to Off to resume exactly where you left off.",
+                title: "Rewind on resume",
+                description: "When you return to a partially-watched title, playback starts a little before where you left off. Set anywhere from 0 to 60 seconds.",
             ) {
-                SettingsStepper(
-                    options: ResumeRewindInterval.allCases,
-                    selection: $playback.settings.resumeRewindInterval,
-                    title: { $0.title }
-                )
+                VStack(alignment: .leading, spacing: 20) {
+                    SettingsStepper(
+                        options: ResumeRewindInterval.allCases,
+                        selection: $playback.settings.resumeRewindInterval,
+                        title: { $0.title }
+                    )
+                    Text(playback.settings.resumeRewindInterval.effectDescription)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         ])
     }

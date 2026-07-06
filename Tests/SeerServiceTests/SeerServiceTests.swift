@@ -172,10 +172,10 @@ final class SeerConfigTests: XCTestCase {
 final class SeerServiceTests: XCTestCase {
 
     private func makeConnectedService(_ http: SeerRecordingHTTPClient) -> SeerService {
-        let store = InMemorySeerCredentialStore(
-            credentials: SeerCredentials(baseURL: seerBaseURL, apiKey: "KEY", userId: 7)
+        let store = InMemorySeerConnectionStore(
+            connection: SeerConnection(baseURL: seerBaseURL, apiKey: "KEY")
         )
-        return SeerService(credentialStore: store, http: http)
+        return SeerService(connectionStore: store, http: http)
     }
 
     func testTrendingMapsAndCaps() async throws {
@@ -191,18 +191,39 @@ final class SeerServiceTests: XCTestCase {
         let items = try await service.trending(limit: 5)
         XCTAssertEqual(items.map(\.id), ["seer:10", "seer:12"])
         XCTAssertEqual(items.first?.availability, .available)
-        // Auth header injected.
+        // Auth header injected; browse runs as ADMIN (no X-API-User).
         let sent = http.lastSent(pathSuffix: "/discover/trending")
         XCTAssertEqual(sent?.headers["X-Api-Key"], "KEY")
-        XCTAssertEqual(sent?.headers["X-API-User"], "7")
+        XCTAssertNil(sent?.headers["X-API-User"], "Browse calls run as admin")
     }
 
     func testTrendingEmptyWhenUnconfigured() async throws {
         let http = SeerRecordingHTTPClient()
-        let service = SeerService(credentialStore: InMemorySeerCredentialStore(), http: http)
+        let service = SeerService(connectionStore: InMemorySeerConnectionStore(), http: http)
         let items = try await service.trending(limit: 5)
         XCTAssertTrue(items.isEmpty)
         XCTAssertTrue(http.sentPaths.isEmpty)
+    }
+
+    // MARK: - Users
+
+    func testUsersFetchesAllPagesSortedByName() async throws {
+        let http = SeerRecordingHTTPClient()
+        // Two pages (take=100 each). First page full-ish, second short → stop.
+        // The stub matches on path suffix only, so both /user calls return this
+        // page; assert the merge + sort, and that pagination terminates.
+        http.stub(pathSuffix: "/user", json: """
+        {"pageInfo":{"pages":1,"page":1,"results":2},"results":[
+          {"id":3,"displayName":"Zoe","email":"z@x.com"},
+          {"id":1,"displayName":"Amy","plexUsername":"amy"}
+        ]}
+        """)
+        let service = makeConnectedService(http)
+        let users = try await service.users()
+        XCTAssertEqual(users.map(\.name), ["Amy", "Zoe"], "Sorted by display name")
+        XCTAssertEqual(users.map(\.id), [1, 3])
+        // Admin identity for the user list.
+        XCTAssertNil(http.lastSent(pathSuffix: "/user")?.headers["X-API-User"])
     }
 
     // MARK: - availability(for:) — discovery detail refresh
@@ -237,8 +258,6 @@ final class SeerServiceTests: XCTestCase {
     }
 
     func testAvailabilityIsUnknownForUntrackedTitle() async throws {
-        // A never-requested title: the details payload carries no mediaInfo, which
-        // maps to `.unknown` (requestable) rather than nil.
         let http = SeerRecordingHTTPClient()
         http.stub(pathSuffix: "/movie/777", json: #"{"id":777}"#)
         let service = makeConnectedService(http)
@@ -252,7 +271,7 @@ final class SeerServiceTests: XCTestCase {
 
     func testAvailabilityNilWhenUnconfigured() async throws {
         let http = SeerRecordingHTTPClient()
-        let service = SeerService(credentialStore: InMemorySeerCredentialStore(), http: http)
+        let service = SeerService(connectionStore: InMemorySeerConnectionStore(), http: http)
         let item = MediaItem(id: "seer:1", title: "X", kind: .movie, providerIDs: ["Tmdb": "1"])
 
         let result = await service.availability(for: item)
@@ -261,7 +280,9 @@ final class SeerServiceTests: XCTestCase {
         XCTAssertTrue(http.sentPaths.isEmpty, "No network when Seerr isn't configured")
     }
 
-    func testMovieRequestBuildsBodyWithRadarrDefaults() async throws {
+    // MARK: - Requests (admin path seeds defaults)
+
+    func testMovieRequestAsAdminBuildsBodyWithRadarrDefaults() async throws {
         let http = SeerRecordingHTTPClient()
         http.stub(pathSuffix: "/service/radarr", json: """
         [{"id":1,"name":"Main","is4k":false,"isDefault":true,"activeDirectory":"/movies","activeProfileId":4}]
@@ -272,10 +293,11 @@ final class SeerServiceTests: XCTestCase {
 
         let service = makeConnectedService(http)
         let item = MediaItem(id: "seer:550", title: "Fight Club", kind: .movie, providerIDs: ["Tmdb": "550"])
-        let status = try await service.request(item)
+        let outcome = await service.request(item) // actingUserID nil = admin
 
-        XCTAssertEqual(status, .pending)
+        XCTAssertEqual(outcome, .success(.pending))
         let sent = http.lastSent(pathSuffix: "/request")
+        XCTAssertNil(sent?.headers["X-API-User"], "Admin request omits X-API-User")
         let body = sent?.json
         XCTAssertEqual(body?["mediaType"] as? String, "movie")
         XCTAssertEqual(body?["mediaId"] as? Int, 550)
@@ -285,84 +307,135 @@ final class SeerServiceTests: XCTestCase {
         XCTAssertNil(body?["seasons"])
     }
 
-    func testRadarrDefaultFetchFailureIsNotCached() async throws {
+    func testRequestAsMappedUserSendsHeaderAndOmitsServerDefaults() async throws {
         let http = SeerRecordingHTTPClient()
-        // No /service/radarr stub -> the lookup throws .notFound each time.
-        http.stub(pathSuffix: "/request", json: """
-        {"id":44,"media":{"tmdbId":550,"status":2}}
-        """, status: 201)
+        // Even if a radarr default exists, a mapped user must NOT seed it — let
+        // Overseerr apply that user's own defaults.
+        http.stub(pathSuffix: "/service/radarr", json: """
+        [{"id":1,"isDefault":true,"activeDirectory":"/movies","activeProfileId":4}]
+        """)
+        http.stub(pathSuffix: "/request", json: #"{"id":42,"media":{"tmdbId":550,"status":2}}"#, status: 201)
 
         let service = makeConnectedService(http)
         let item = MediaItem(id: "seer:550", title: "Fight Club", kind: .movie, providerIDs: ["Tmdb": "550"])
+        let outcome = await service.request(item, actingUserID: 9)
 
-        // First request: radarr lookup fails, so defaults are omitted but the
-        // request still succeeds.
-        _ = try await service.request(item)
-        _ = try await service.request(item)
-
-        // A transient failure must NOT be cached: the second request re-attempts
-        // the radarr lookup rather than permanently giving up on defaults.
-        let radarrHits = http.sentPaths.filter { $0.hasSuffix("/service/radarr") }.count
-        XCTAssertEqual(radarrHits, 2)
-        // Defaults were omitted (lookup never succeeded).
-        let body = http.lastSent(pathSuffix: "/request")?.json
-        XCTAssertNil(body?["serverId"])
+        XCTAssertEqual(outcome, .success(.pending))
+        let sent = http.lastSent(pathSuffix: "/request")
+        XCTAssertEqual(sent?.headers["X-API-User"], "9", "Requests as the mapped user")
+        let body = sent?.json
+        XCTAssertNil(body?["serverId"], "Mapped user omits server so Overseerr uses their default")
+        XCTAssertNil(body?["profileId"])
+        XCTAssertNil(body?["rootFolder"])
+        // The admin radarr-default lookup should NOT even be attempted for a mapped user.
+        XCTAssertTrue(http.sentPaths.filter { $0.hasSuffix("/service/radarr") }.isEmpty)
     }
 
-    func testTVRequestRequestsAllSeasonsWithSonarrDefaults() async throws {
+    func testTVRequestAsAdminRequestsAllSeasonsWithSonarrDefaults() async throws {
         let http = SeerRecordingHTTPClient()
         http.stub(pathSuffix: "/service/sonarr", json: """
         [{"id":2,"name":"TV","is4k":false,"isDefault":true,"activeDirectory":"/tv","activeProfileId":6,"activeLanguageProfileId":1}]
         """)
-        http.stub(pathSuffix: "/request", json: """
-        {"id":43,"media":{"tmdbId":1396,"status":3}}
-        """, status: 201)
+        http.stub(pathSuffix: "/request", json: #"{"id":43,"media":{"tmdbId":1396,"status":3}}"#, status: 201)
 
         let service = makeConnectedService(http)
         let item = MediaItem(id: "seer:1396", title: "Breaking Bad", kind: .series, providerIDs: ["Tmdb": "1396"])
-        let status = try await service.request(item)
+        let outcome = await service.request(item)
 
-        XCTAssertEqual(status, .processing)
+        XCTAssertEqual(outcome, .success(.processing))
         let body = http.lastSent(pathSuffix: "/request")?.json
         XCTAssertEqual(body?["mediaType"] as? String, "tv")
-        XCTAssertEqual(body?["mediaId"] as? Int, 1396)
         XCTAssertEqual(body?["seasons"] as? String, "all")
         XCTAssertEqual(body?["serverId"] as? Int, 2)
         XCTAssertEqual(body?["languageProfileId"] as? Int, 1)
     }
 
-    func testRequestWithoutTMDBIDThrows() async {
+    func testRequestWithoutTMDBIDFailsWithReason() async {
         let http = SeerRecordingHTTPClient()
         let service = makeConnectedService(http)
         let item = MediaItem(id: "jf:abc", title: "No id", kind: .movie)
-        do {
-            _ = try await service.request(item)
-            XCTFail("expected throw")
-        } catch let error as AppError {
-            XCTAssertEqual(error, .invalidResponse)
-        } catch {
-            XCTFail("expected AppError.invalidResponse, got \(error)")
+        let outcome = await service.request(item)
+        guard case .failure(.unknown) = outcome else {
+            return XCTFail("expected .failure(.unknown), got \(outcome)")
         }
     }
+
+    // MARK: - RequestOutcome failure mapping (status + message)
+
+    func testRequestAlreadyRequestedMapsFrom409() async {
+        let http = SeerRecordingHTTPClient()
+        http.stub(pathSuffix: "/request", json: #"{"message":"Request already exists"}"#, status: 409)
+        let service = makeConnectedService(http)
+        let item = MediaItem(id: "seer:5", title: "T", kind: .movie, providerIDs: ["Tmdb": "5"])
+        let outcome = await service.request(item, actingUserID: 2)
+        XCTAssertEqual(outcome, .failure(.alreadyRequested))
+    }
+
+    func testRequestQuotaMapsFrom403Message() async {
+        let http = SeerRecordingHTTPClient()
+        http.stub(pathSuffix: "/request", json: #"{"message":"You have exceeded your request quota"}"#, status: 403)
+        let service = makeConnectedService(http)
+        let item = MediaItem(id: "seer:5", title: "T", kind: .movie, providerIDs: ["Tmdb": "5"])
+        let outcome = await service.request(item, actingUserID: 2)
+        XCTAssertEqual(outcome, .failure(.quotaExceeded))
+    }
+
+    func testRequestNoPermissionMapsFrom403() async {
+        let http = SeerRecordingHTTPClient()
+        http.stub(pathSuffix: "/request", json: #"{"message":"You do not have permission"}"#, status: 403)
+        let service = makeConnectedService(http)
+        let item = MediaItem(id: "seer:5", title: "T", kind: .movie, providerIDs: ["Tmdb": "5"])
+        let outcome = await service.request(item, actingUserID: 2)
+        XCTAssertEqual(outcome, .failure(.noPermission))
+    }
+
+    func testRequestNoDefaultsMapsFromServerMessage() async {
+        let http = SeerRecordingHTTPClient()
+        http.stub(pathSuffix: "/request", json: #"{"message":"No default server was found"}"#, status: 500)
+        let service = makeConnectedService(http)
+        let item = MediaItem(id: "seer:5", title: "T", kind: .movie, providerIDs: ["Tmdb": "5"])
+        let outcome = await service.request(item, actingUserID: 2)
+        XCTAssertEqual(outcome, .failure(.noDefaults))
+    }
+
+    func testRequestInvalidActingUserMapsFrom401() async {
+        let http = SeerRecordingHTTPClient()
+        http.stub(pathSuffix: "/request", json: #"{"message":"Unauthorized"}"#, status: 401)
+        let service = makeConnectedService(http)
+        let item = MediaItem(id: "seer:5", title: "T", kind: .movie, providerIDs: ["Tmdb": "5"])
+        let outcome = await service.request(item, actingUserID: 999)
+        XCTAssertEqual(outcome, .failure(.invalidActingUser))
+    }
+
+    func testRequestUnreachableMapsTransportFailure() async {
+        let http = SeerRecordingHTTPClient()
+        http.error = .serverUnreachable
+        let service = makeConnectedService(http)
+        let item = MediaItem(id: "seer:5", title: "T", kind: .movie, providerIDs: ["Tmdb": "5"])
+        let outcome = await service.request(item, actingUserID: 2)
+        XCTAssertEqual(outcome, .failure(.unreachable))
+    }
+
+    // MARK: - Connection lifecycle
 
     func testConnectSuccessPersistsAndReportsConnected() async {
         let http = SeerRecordingHTTPClient()
         http.stub(pathSuffix: "/status", json: #"{"version":"1.33.2"}"#)
-        let store = InMemorySeerCredentialStore()
-        let service = SeerService(credentialStore: store, http: http)
+        let store = InMemorySeerConnectionStore()
+        let service = SeerService(connectionStore: store, http: http)
 
         await service.connect(baseURL: seerBaseURL, apiKey: "KEY")
 
         XCTAssertEqual(service.phase, .connected(summary: "Version 1.33.2"))
         XCTAssertTrue(service.isConfigured)
-        XCTAssertNotNil(store.load())
+        XCTAssertEqual(store.load()?.apiKey, "KEY")
     }
 
     func testConnectFailureDoesNotPersist() async {
         let http = SeerRecordingHTTPClient()
         http.error = .serverUnreachable
-        let store = InMemorySeerCredentialStore()
-        let service = SeerService(credentialStore: store, http: http)
+        let store = InMemorySeerConnectionStore()
+        let service = SeerService(connectionStore: store, http: http)
 
         await service.connect(baseURL: seerBaseURL, apiKey: "KEY")
 
@@ -373,10 +446,10 @@ final class SeerServiceTests: XCTestCase {
 
     func testDisconnectClears() async {
         let http = SeerRecordingHTTPClient()
-        let store = InMemorySeerCredentialStore(
-            credentials: SeerCredentials(baseURL: seerBaseURL, apiKey: "KEY", userId: nil)
+        let store = InMemorySeerConnectionStore(
+            connection: SeerConnection(baseURL: seerBaseURL, apiKey: "KEY")
         )
-        let service = SeerService(credentialStore: store, http: http)
+        let service = SeerService(connectionStore: store, http: http)
         XCTAssertTrue(service.isConfigured)
 
         service.disconnect()
@@ -388,8 +461,68 @@ final class SeerServiceTests: XCTestCase {
 
     func testRefreshStatusUnconfigured() async {
         let http = SeerRecordingHTTPClient()
-        let service = SeerService(credentialStore: InMemorySeerCredentialStore(), http: http)
+        let service = SeerService(connectionStore: InMemorySeerConnectionStore(), http: http)
         await service.refreshStatus()
         XCTAssertEqual(service.phase, .unconfigured)
+    }
+
+    // MARK: - Legacy connection migration
+
+    func testMigrationPromotesFirstConfiguredConnection() async {
+        let http = SeerRecordingHTTPClient()
+        http.stub(pathSuffix: "/status", json: #"{"version":"1.0"}"#)
+        // Legacy: default profile (nil ns) unconfigured; a secondary profile "kid"
+        // has a connection. First CONFIGURED wins — never empty-over-configured.
+        let legacy = InMemorySeerCredentialStore()
+        legacy.setNamespace("kid")
+        try? legacy.save(SeerCredentials(baseURL: seerBaseURL, apiKey: "LEGACY", userId: nil))
+
+        let household = InMemorySeerConnectionStore()
+        let service = SeerService(connectionStore: household, legacyCredentialStore: legacy, http: http)
+
+        let result = await service.migrateLegacyConnectionIfNeeded(namespaces: [nil, "kid"])
+
+        XCTAssertTrue(result.didPromote)
+        XCTAssertEqual(household.load()?.apiKey, "LEGACY")
+        XCTAssertTrue(service.isConfigured, "Household connection adopted after migration")
+        // Legacy item consumed.
+        legacy.setNamespace("kid")
+        XCTAssertNil(legacy.load(), "Legacy per-profile connection cleared after promotion")
+    }
+
+    func testMigrationFlagsConflictingConnections() async {
+        let http = SeerRecordingHTTPClient()
+        http.stub(pathSuffix: "/status", json: #"{"version":"1.0"}"#)
+        let legacy = InMemorySeerCredentialStore()
+        legacy.setNamespace(nil)
+        try? legacy.save(SeerCredentials(baseURL: URL(string: "https://a.example.com")!, apiKey: "A"))
+        legacy.setNamespace("kid")
+        try? legacy.save(SeerCredentials(baseURL: URL(string: "https://b.example.com")!, apiKey: "B"))
+
+        let household = InMemorySeerConnectionStore()
+        let service = SeerService(connectionStore: household, legacyCredentialStore: legacy, http: http)
+
+        let result = await service.migrateLegacyConnectionIfNeeded(namespaces: [nil, "kid"])
+
+        XCTAssertTrue(result.didPromote)
+        XCTAssertEqual(household.load()?.apiKey, "A", "Default (first) connection wins")
+        XCTAssertTrue(result.hadConflictingConnections, "A second, different server is flagged")
+    }
+
+    func testMigrationNoOpWhenHouseholdAlreadyConfigured() async {
+        let http = SeerRecordingHTTPClient()
+        let legacy = InMemorySeerCredentialStore()
+        legacy.setNamespace(nil)
+        try? legacy.save(SeerCredentials(baseURL: URL(string: "https://legacy.example.com")!, apiKey: "LEGACY"))
+
+        let household = InMemorySeerConnectionStore(
+            connection: SeerConnection(baseURL: seerBaseURL, apiKey: "HOUSEHOLD")
+        )
+        let service = SeerService(connectionStore: household, legacyCredentialStore: legacy, http: http)
+
+        let result = await service.migrateLegacyConnectionIfNeeded(namespaces: [nil])
+
+        XCTAssertFalse(result.didPromote, "Never clobber an already-configured household slot")
+        XCTAssertEqual(household.load()?.apiKey, "HOUSEHOLD")
     }
 }

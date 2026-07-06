@@ -933,8 +933,9 @@ public final class AppState {
         self.traktService = traktService ?? TraktServiceFactory.make(namespace: ns)
         // Seed other trackers with the same profile namespace.
         self.simklService = simklService ?? SimklServiceFactory.make(namespace: ns)
-        // Seerr discovery is per-profile too (each profile links its own server).
-        self.seerService = seerService ?? SeerServiceFactory.make(namespace: ns)
+        // Seerr uses ONE shared household connection (user-independent Keychain);
+        // profiles differ only by which Seerr user they request as (per request).
+        self.seerService = seerService ?? Self.makeDefaultSeerService()
         self.anilistService = anilistService ?? AniListServiceFactory.make(namespace: ns)
         self.malService = malService ?? MALServiceFactory.make(namespace: ns)
         // Last.fm is user-scoped like the trackers; seed it with the active
@@ -978,6 +979,20 @@ public final class AppState {
         return AccountStore(secureStore: KeychainStore())
         #else
         return AccountStore(secureStore: InMemorySecureStore())
+        #endif
+    }
+
+    /// Builds the shared-household `SeerService`. The connection (URL + admin key)
+    /// is persisted via the **user-independent household Keychain** (same store as
+    /// the profile set) so every Apple TV system user shares one Seerr connection;
+    /// the acting Seerr user is per-profile and applied per request.
+    @MainActor
+    private static func makeDefaultSeerService() -> SeerService {
+        #if canImport(Security)
+        let store = HouseholdSeerConnectionStore(secureStore: KeychainStore(service: "com.plozz.app.household"))
+        return SeerServiceFactory.make(connectionStore: store)
+        #else
+        return SeerServiceFactory.make()
         #endif
     }
 
@@ -1055,6 +1070,16 @@ public final class AppState {
         // picks instead.
         if !isChoosingProfile {
             ensurePlexIdentityForActiveProfile()
+        }
+
+        // One-time migration of any legacy per-profile Seerr connection into the
+        // shared household slot, then an initial reachability probe. Runs on the
+        // main actor (inherited); safe because migration no-ops once the household
+        // slot is set.
+        let seerNamespaces: [String?] = [nil] + profilesModel.profiles.map { $0.id }
+        Task { [seerService] in
+            await seerService.migrateLegacyConnectionIfNeeded(namespaces: seerNamespaces)
+            await seerService.refreshStatus()
         }
     }
 

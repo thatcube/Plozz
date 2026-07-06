@@ -234,6 +234,7 @@ struct MainTabView: View {
             HomeTab(
                 accounts: accounts,
                 seer: seer,
+                activeSeerrUserID: activeProfile.seerrUserID,
                 homeVisibility: homeVisibility,
                 homeLayoutStore: homeLayoutStore,
                 homeContentStore: homeContentStore,
@@ -266,6 +267,7 @@ struct MainTabView: View {
             SearchTab(
                 accounts: accounts,
                 seer: seer,
+                activeSeerrUserID: activeProfile.seerrUserID,
                 homeVisibility: homeVisibility,
                 behavior: subtitleBehaviorModel.settings,
                 style: subtitleStyleModel.style,
@@ -1272,6 +1274,9 @@ private struct HomeTab: View {
     let accounts: [ResolvedAccount]
     /// Seerr discovery service backing the hero's featured content seam.
     let seer: SeerService
+    /// The active profile's linked Seerr user (`X-API-User`) for requests, or
+    /// `nil` to request as admin. Read at request time from the current profile.
+    let activeSeerrUserID: Int?
     let homeVisibility: HomeLibraryVisibilityModel
     let homeLayoutStore: HomeLayoutStoring
     /// Per-profile store for the last successful Home content snapshot (instant
@@ -1335,7 +1340,11 @@ private struct HomeTab: View {
                 heroFeaturedProvider: makeHeroFeaturedProvider(seer: seer),
                 heroRandomProvider: makeHeroRandomProvider(accounts: accounts),
                 seerConnected: seer.isConfigured,
-                onRequestItem: { try? await seer.request($0) },
+                onRequestItem: { item in
+                    let outcome = await seer.request(item, actingUserID: activeSeerrUserID)
+                    if case let .success(status) = outcome { return status }
+                    return nil
+                },
                 navigationStyle: navigationStyle,
                 onSelectItem: { navigate(bestSourcePlayItem($0, accounts: accounts, identitySources: identitySources)) },
                 onPlayItem: { requestPlay($0) },
@@ -1494,7 +1503,11 @@ private struct HomeTab: View {
             initialSeasonID: item.seasonID,
             isDiscoveryItem: isDiscovery,
             seerConnected: seer.isConfigured,
-            onRequest: { try? await seer.request($0) }
+            onRequest: { item in
+                let outcome = await seer.request(item, actingUserID: activeSeerrUserID)
+                if case let .success(status) = outcome { return status }
+                return nil
+            }
         )
     }
 
@@ -1705,6 +1718,9 @@ private struct SearchTab: View {
     /// Seerr discovery service, backing the "Not in Your Library" search section
     /// and the discovery detail page's one-tap Request.
     let seer: SeerService
+    /// The active profile's linked Seerr user (`X-API-User`) for requests, or
+    /// `nil` to request as admin.
+    let activeSeerrUserID: Int?
     let homeVisibility: HomeLibraryVisibilityModel
     let behavior: SubtitleBehavior
     let style: SubtitleStyle
@@ -1771,7 +1787,11 @@ private struct SearchTab: View {
                     initialSeasonID: item.seasonID,
                     isDiscoveryItem: isDiscovery,
                     seerConnected: seer.isConfigured,
-                    onRequest: { try? await seer.request($0) }
+                    onRequest: { item in
+                        let outcome = await seer.request(item, actingUserID: activeSeerrUserID)
+                        if case let .success(status) = outcome { return status }
+                        return nil
+                    }
                 )
             }
             .navigationDestination(for: EpisodeContextRoute.self) { route in

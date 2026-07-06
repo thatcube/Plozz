@@ -316,7 +316,7 @@ private struct GenreCard: View {
             }
             .frame(width: 280, height: 160)
         }
-        .plozzCardButton(cornerRadius: PlozzTheme.Metrics.cornerRadius)
+        .plozzCardButton(cornerRadius: PlozzTheme.Metrics.Radius.card)
     }
 }
 

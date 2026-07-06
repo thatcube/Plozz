@@ -17,6 +17,11 @@ public struct PlaybackSettings: Codable, Equatable, Sendable {
     /// How many seconds a right-press on the Siri Remote skips forward.
     public var skipForwardInterval: SkipInterval
 
+    /// How many seconds *earlier* than the saved resume point a partially-watched
+    /// title starts when you return to it ("resume rewind"). A gentle nudge to
+    /// re-establish context. `.five` by default; `.off` restores exact resume.
+    public var resumeRewindInterval: ResumeRewindInterval
+
     /// Whether finishing/resuming/marking a title converges your watch state on
     /// **every** server that holds it (the default), or only the server you
     /// actually watched on. ON (default) preserves today's cross-server fan-out;
@@ -69,6 +74,7 @@ public struct PlaybackSettings: Codable, Equatable, Sendable {
         skipIntros: SkipIntrosMode = .off,
         skipBackwardInterval: SkipInterval = .ten,
         skipForwardInterval: SkipInterval = .ten,
+        resumeRewindInterval: ResumeRewindInterval = .five,
         syncWatchAcrossServers: Bool = true,
         seekWithoutPausing: Bool = true,
         showUpNextCard: Bool = true,
@@ -79,6 +85,7 @@ public struct PlaybackSettings: Codable, Equatable, Sendable {
         self.skipIntros = skipIntros
         self.skipBackwardInterval = skipBackwardInterval
         self.skipForwardInterval = skipForwardInterval
+        self.resumeRewindInterval = resumeRewindInterval
         self.syncWatchAcrossServers = syncWatchAcrossServers
         self.seekWithoutPausing = seekWithoutPausing
         self.showUpNextCard = showUpNextCard
@@ -97,6 +104,7 @@ public extension PlaybackSettings {
         case skipIntros
         case skipBackwardInterval
         case skipForwardInterval
+        case resumeRewindInterval
         case syncWatchAcrossServers
         case seekWithoutPausing
         case showUpNextCard
@@ -119,6 +127,9 @@ public extension PlaybackSettings {
     /// card during episode credits.
     /// `skipBackwardInterval` / `skipForwardInterval` default to `.ten` when
     /// absent so existing installs keep the original 10-second skip behaviour.
+    /// `resumeRewindInterval` defaults to `.five` when absent — the maintainer
+    /// wants the resume-rewind nudge on for upgrading installs too, not just fresh
+    /// ones (`.off` is available for anyone who prefers exact resume).
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let defaults = PlaybackSettings.default
@@ -135,6 +146,9 @@ public extension PlaybackSettings {
         self.skipForwardInterval =
             (try? container.decodeIfPresent(SkipInterval.self, forKey: .skipForwardInterval))
             .flatMap { $0 } ?? defaults.skipForwardInterval
+        self.resumeRewindInterval =
+            (try? container.decodeIfPresent(ResumeRewindInterval.self, forKey: .resumeRewindInterval))
+            .flatMap { $0 } ?? defaults.resumeRewindInterval
         self.syncWatchAcrossServers =
             (try? container.decodeIfPresent(Bool.self, forKey: .syncWatchAcrossServers))
             .flatMap { $0 } ?? defaults.syncWatchAcrossServers
@@ -171,6 +185,7 @@ public extension PlaybackSettings {
         try container.encode(skipIntros, forKey: .skipIntros)
         try container.encode(skipBackwardInterval, forKey: .skipBackwardInterval)
         try container.encode(skipForwardInterval, forKey: .skipForwardInterval)
+        try container.encode(resumeRewindInterval, forKey: .resumeRewindInterval)
         try container.encode(syncWatchAcrossServers, forKey: .syncWatchAcrossServers)
         try container.encode(seekWithoutPausing, forKey: .seekWithoutPausing)
         try container.encode(showUpNextCard, forKey: .showUpNextCard)

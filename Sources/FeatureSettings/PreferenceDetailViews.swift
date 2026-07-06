@@ -315,6 +315,7 @@ struct PlaybackDetailView: View {
             audioSection,
             skipIntrosSection,
             skipIntervalsSection,
+            resumeSection,
             scrubbingSection,
             upNextSection
         ]
@@ -449,6 +450,24 @@ struct PlaybackDetailView: View {
                         )
                     }
                 }
+            }
+        ])
+    }
+
+    private var resumeSection: SettingsSplitSection {
+        SettingsSplitSection(id: "resume", header: "Resume", rows: [
+            SettingsSplitRow(
+                id: "resume-rewind",
+                title: "Resume rewind",
+                description: playback.settings.resumeRewindInterval == .off
+                    ? "Returning to a partially-watched title resumes exactly where you left off."
+                    : "When you come back to a partially-watched title, playback starts \(playback.settings.resumeRewindInterval.title) earlier so you can pick up the thread. Set to Off to resume exactly where you left off.",
+            ) {
+                SettingsStepper(
+                    options: ResumeRewindInterval.allCases,
+                    selection: $playback.settings.resumeRewindInterval,
+                    title: { $0.title }
+                )
             }
         ])
     }

@@ -737,7 +737,19 @@ public final class PlayerViewModel {
 
             // An explicit override wins over the provider's resume point so the
             // caller can force "start over" (0) or resume from a chosen second.
-            let startPosition = resumeOverride ?? startPositionOverride ?? request.startPosition
+            // Apply the profile's "resume rewind" nudge so returning to a
+            // partially-watched title starts a few seconds earlier — but only for
+            // a genuine resume (base > 0; "start over" stays 0) and never on the
+            // engine/transcode fallback retry (`resumeOverride`), which must land
+            // exactly where the failed attempt was so the nudge can't compound
+            // across retries.
+            let startPosition: TimeInterval
+            if let resumeOverride {
+                startPosition = resumeOverride
+            } else {
+                let base = startPositionOverride ?? request.startPosition
+                startPosition = playbackSettings.resumeRewindInterval.applied(to: base)
+            }
 
             // Pick the engine from the resolved source facts (pure decision).
             var kind: PlaybackEngineKind

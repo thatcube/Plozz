@@ -305,18 +305,24 @@ struct MusicGridView: View {
 private struct GenreCard: View {
     let genre: MusicGenre
     let action: () -> Void
+    @FocusState private var isFocused: Bool
 
     var body: some View {
-        Button(action: action) {
-            VStack {
-                Image(systemName: "guitars")
-                    .font(.system(size: 40))
-                    .foregroundStyle(Color.accentColor.gradient)
-                Text(genre.name).font(.headline).lineLimit(1)
-            }
-            .frame(width: 280, height: 160)
+        VStack {
+            Image(systemName: "guitars")
+                .font(.system(size: 40))
+                .foregroundStyle(Color.accentColor.gradient)
+            Text(genre.name).font(.headline).lineLimit(1)
         }
-        .plozzCardButton(cornerRadius: PlozzTheme.Metrics.Radius.card)
+        .frame(width: 280, height: 160)
+        // Match the poster/landscape cards' focus treatment exactly: our own glass
+        // focus surface via `.focusable` (never a Button, whose tvOS focus platter
+        // paints a white plate over the glass) + the same lift shadow and scale.
+        .plozzGlassCard(cornerRadius: PlozzTheme.Metrics.Radius.card, isFocused: isFocused)
+        .focusableCard(isFocused: $isFocused, cornerRadius: PlozzTheme.Metrics.Radius.card, action: action)
+        .shadow(color: .black.opacity(isFocused ? 0.36 : 0), radius: 20, y: 10)
+        .scaleEffect(isFocused ? PlozzTheme.Metrics.mediumFocusedCardScale : 1)
+        .animation(.easeOut(duration: 0.18), value: isFocused)
     }
 }
 

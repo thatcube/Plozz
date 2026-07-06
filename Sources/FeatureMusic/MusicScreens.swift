@@ -302,6 +302,15 @@ struct MusicGridView: View {
     private var emptyMessage: String { "Nothing here yet." }
 }
 
+/// A colourful genre tile: a deterministic gradient + a genre-appropriate icon,
+/// so every genre reads as distinct at a glance (Apple Music / Spotify style).
+///
+/// Deliberately uses a **solid gradient** surface — NOT the artwork-card live
+/// `.glassEffect` — because a `.focusable` view compositing a live glass effect
+/// per-tile in a grid storms the render server (that combination froze this whole
+/// page). A flat gradient + `.compositingGroup()` is cheap, and focus is drawn
+/// with a scale/shadow/ring lift, matching the poster cards' feel without a Button
+/// (whose tvOS focus platter would paint a white plate over the tile).
 private struct GenreCard: View {
     let genre: MusicGenre
     let action: () -> Void
@@ -309,34 +318,91 @@ private struct GenreCard: View {
     @Environment(\.plozzReduceTransparency) private var reduceTransparency
 
     var body: some View {
+        let art = GenreArt(name: genre.name)
         let shape = RoundedRectangle(cornerRadius: PlozzTheme.Metrics.Radius.card, style: .continuous)
-        return VStack {
-            Image(systemName: "guitars")
-                .font(.system(size: 40))
-                .foregroundStyle(Color.accentColor.gradient)
+        return ZStack(alignment: .bottomLeading) {
+            LinearGradient(colors: art.colors, startPoint: .topLeading, endPoint: .bottomTrailing)
+
+            // Large decorative icon, canted into the trailing edge like a genre
+            // tile's motif. Clipped by the card shape below.
+            Image(systemName: art.symbol)
+                .font(.system(size: 104, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.22))
+                .rotationEffect(.degrees(-15))
+                .offset(x: 30, y: 26)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+
             Text(genre.name)
-                .font(.headline)
-                .lineLimit(1)
-                .foregroundStyle(PlozzCardCaption.titleColor(isFocused: isFocused, reduceTransparency: reduceTransparency))
+                .font(.title3.weight(.bold))
+                .foregroundStyle(.white)
+                .lineLimit(2)
+                .shadow(color: .black.opacity(0.35), radius: 4, y: 1)
+                .padding(20)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(width: 280, height: 160)
-        .background {
-            // This card has no artwork, so it needs a cheap resting surface of its
-            // own. Crucially it does NOT use the artwork-card glass at rest: a live
-            // `.glassEffect` on every tile of a full genre grid storms the GPU (it
-            // froze the whole page). The glass/lift is applied to the *focused* card
-            // only, via `glassAtRest: false` below — exactly how dense poster grids
-            // opt out. Focusing a genre card then gets the same treatment as posters.
-            if !isFocused {
-                shape.fill(Color.primary.opacity(0.08))
-                    .overlay(shape.strokeBorder(Color.primary.opacity(0.12), lineWidth: 1))
-            }
+        .clipShape(shape)
+        .overlay {
+            shape.strokeBorder(.white.opacity(isFocused ? 0.95 : 0.10), lineWidth: isFocused ? 4 : 1)
         }
-        .plozzGlassCard(cornerRadius: PlozzTheme.Metrics.Radius.card, isFocused: isFocused, glassAtRest: false)
+        // Same proven modifier order as MusicCard (which works in this exact grid):
+        // visual → focusableCard → rasterize → shadow → scale. `plozzCardRasterize`
+        // flattens the layer tree into a single GPU pass; omitting it on a
+        // `.focusable` card in this grid is what froze the render server.
         .focusableCard(isFocused: $isFocused, cornerRadius: PlozzTheme.Metrics.Radius.card, action: action)
-        .shadow(color: .black.opacity(isFocused ? 0.36 : 0), radius: 20, y: 10)
+        .plozzCardRasterize(reduceTransparency: reduceTransparency)
+        .shadow(color: .black.opacity(isFocused ? 0.4 : 0.15), radius: isFocused ? 22 : 8, y: isFocused ? 12 : 4)
         .scaleEffect(isFocused ? PlozzTheme.Metrics.mediumFocusedCardScale : 1)
         .animation(.easeOut(duration: 0.18), value: isFocused)
+    }
+}
+
+/// Deterministic art (icon + gradient) for a genre name, so a given genre always
+/// looks the same and different genres look different. Well-known genres get a
+/// fitting SF Symbol; anything else falls back to a hash-picked music glyph.
+private struct GenreArt {
+    let symbol: String
+    let colors: [Color]
+
+    init(name: String) {
+        let key = name.lowercased()
+        self.symbol = GenreArt.symbol(for: key)
+
+        // Hash the name → a stable base hue, then build a two-stop diagonal
+        // gradient (a deeper, slightly-shifted second stop) for depth.
+        var hash: UInt64 = 5381
+        for byte in key.utf8 { hash = (hash &* 33) ^ UInt64(byte) }
+        let hue = Double(hash % 360) / 360.0
+        self.colors = [
+            Color(hue: hue, saturation: 0.55, brightness: 0.64),
+            Color(hue: (hue + 0.08).truncatingRemainder(dividingBy: 1.0), saturation: 0.7, brightness: 0.42)
+        ]
+    }
+
+    private static func symbol(for key: String) -> String {
+        // Match on substrings so "Alternative Rock", "Hard Rock" etc. all map.
+        let map: [(String, String)] = [
+            ("rock", "guitars"), ("metal", "guitars"), ("punk", "guitars"),
+            ("pop", "star"), ("dance", "figure.dance"), ("disco", "figure.dance"),
+            ("hip", "waveform"), ("rap", "waveform"),
+            ("electro", "dial.max"), ("edm", "dial.max"), ("techno", "dial.max"), ("house", "dial.max"),
+            ("jazz", "music.quarternote.3"), ("blues", "music.quarternote.3"),
+            ("classic", "pianokeys"), ("piano", "pianokeys"), ("opera", "pianokeys"),
+            ("soundtrack", "film"), ("score", "film"), ("film", "film"),
+            ("country", "guitars"), ("folk", "guitars"), ("acoustic", "guitars"),
+            ("r&b", "music.mic"), ("soul", "music.mic"), ("funk", "music.mic"), ("vocal", "music.mic"),
+            ("reggae", "music.note"), ("latin", "music.note"), ("world", "globe"),
+            ("ambient", "waveform.path"), ("chill", "waveform.path"), ("lo-fi", "waveform.path"),
+            ("kids", "teddybear"), ("holiday", "gift"), ("christmas", "gift")
+        ]
+        for (needle, symbol) in map where key.contains(needle) {
+            return symbol
+        }
+        // Fallback: a stable music glyph chosen by hash so unknown genres still vary.
+        let fallbacks = ["music.note", "music.note.list", "music.mic", "waveform", "guitars"]
+        var hash = 0
+        for scalar in key.unicodeScalars { hash = (hash &* 31 &+ Int(scalar.value)) & 0xFFFFFF }
+        return fallbacks[abs(hash) % fallbacks.count]
     }
 }
 

@@ -24,12 +24,7 @@ Plozz is in **public beta** on TestFlight. [**Join the beta**](https://testfligh
 
 ## Reporting bugs & requesting features
 
-Found a bug or have an idea? [**Open an issue**](https://github.com/thatcube/Plozz/issues/new/choose) and pick a template:
-
-- **🐞 Bug report** — walks you through what makes a bug fixable: steps, expected vs actual, which backend (Jellyfin / Plex / SMB), and your app, tvOS, and Apple TV versions.
-- **✨ Feature request** — a short form for problems worth solving.
-
-**Development pipeline.** When a *real* bug turns up — a genuine defect, not a flaky test — the habit here is to file a bug-report issue first, then fix it and reference the issue in the commit or PR (e.g. `Fixes #123`). That keeps a searchable trail of what broke and why. It's a solo, open-source project, so keep it lightweight — but do file the issue.
+Found a bug or have an idea? [**Open an issue**](https://github.com/thatcube/Plozz/issues/new/choose) and pick a template — 🐞 **Bug report** or ✨ **Feature request**. For the full contribution flow (the file-an-issue-then-fix habit, dev setup, and the dual-provider expectation), see [**CONTRIBUTING.md**](CONTRIBUTING.md).
 
 ## Unique Features
 

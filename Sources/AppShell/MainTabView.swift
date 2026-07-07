@@ -108,6 +108,11 @@ struct MainTabView: View {
     /// Injected into the environment for the Settings editor; card rendering reads
     /// `\.plozzCardStyle` (installed at the app root in RootView).
     let cardStyleModel: CardStyleSettingsModel
+    /// Per-profile watch-status indicator (a "watched" check badge vs an
+    /// "unwatched" corner flag), edited in Settings ▸ Appearance ▸ Display.
+    /// Injected into the environment for the Settings editor; card rendering reads
+    /// `\.plozzWatchStatusIndicator` (installed at the app root in RootView).
+    let watchStatusIndicatorModel: WatchStatusIndicatorSettingsModel
     /// Per-profile Home hero (featured carousel) settings, edited in
     /// Settings ▸ Home display. Threaded into `HomeTab` to drive the carousel and
     /// into Settings for editing.
@@ -406,6 +411,7 @@ struct MainTabView: View {
         .environment(musicPlayerModel)
         .environment(uiDensityModel)
         .environment(cardStyleModel)
+        .environment(watchStatusIndicatorModel)
         .environment(heroSettingsModel)
         .task(id: accounts.map(\.account.id)) {
             onWarmIdentityIndex()

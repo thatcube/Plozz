@@ -14,6 +14,7 @@ struct AppearanceDetailView: View {
     /// Customize Home.
     @Environment(UIDensitySettingsModel.self) private var density
     @Environment(CardStyleSettingsModel.self) private var cardStyle
+    @Environment(WatchStatusIndicatorSettingsModel.self) private var watchStatusIndicator
     /// App-wide (global) — persists across all profiles. Same un-namespaced
     /// `@AppStorage` key RootView reads. Do not move into a per-profile store.
     /// See AGENTS.local.md ("Per-profile vs app-wide settings").
@@ -44,6 +45,7 @@ struct AppearanceDetailView: View {
         @Bindable var musicPlayer = musicPlayer
         @Bindable var density = density
         @Bindable var cardStyle = cardStyle
+        @Bindable var watchStatusIndicator = watchStatusIndicator
         let transparencyBinding = Binding(
             get: { transparencyPreference },
             set: { transparencyPreferenceRaw = $0.rawValue }
@@ -106,6 +108,18 @@ struct AppearanceDetailView: View {
                     DescribedSegmentedPicker(
                         options: CardStyle.allCases,
                         selection: $cardStyle.style,
+                        title: { $0.displayName },
+                        detail: { $0.detail }
+                    )
+                },
+                SettingsSplitRow(
+                    id: "watch-indicator",
+                    title: "Watched Indicator",
+                    description: "Mark what you've finished with a check, or flag what you haven't started with a corner. In-progress items always show a progress bar.",
+                ) {
+                    DescribedSegmentedPicker(
+                        options: WatchStatusIndicator.allCases,
+                        selection: $watchStatusIndicator.indicator,
                         title: { $0.displayName },
                         detail: { $0.detail }
                     )

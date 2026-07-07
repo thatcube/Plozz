@@ -177,6 +177,7 @@ public struct RootView: View {
                         musicPlayerModel: appState.musicPlayerModel,
                         uiDensityModel: appState.uiDensityModel,
                         cardStyleModel: appState.cardStyleModel,
+                        watchStatusIndicatorModel: appState.watchStatusIndicatorModel,
                         heroSettingsModel: appState.heroSettingsModel,
                         nightShiftModel: appState.nightShiftModel,
                         audioController: appState.audioController,
@@ -266,6 +267,7 @@ public struct RootView: View {
         .environment(\.themePalette, resolvedPalette)
         .environment(\.plozzMetrics, PlozzMetrics(density: appState.uiDensityModel.density))
         .environment(\.plozzCardStyle, appState.cardStyleModel.style)
+        .environment(\.plozzWatchStatusIndicator, appState.watchStatusIndicatorModel.indicator)
         .environment(\.plozzReduceTransparency, (TransparencyPreference(rawValue: transparencyPreferenceRaw) ?? .default).reducesTransparency(systemReduceTransparency: systemReduceTransparency))
         .environment(displayVeil)
         // Push the theme's effective scheme DOWN into the tree instead of forcing

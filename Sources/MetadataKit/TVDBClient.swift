@@ -54,6 +54,52 @@ public actor TVDBClient {
         return nil
     }
 
+    /// Resolve a wide **backdrop** (fanart) URL for a title, or `nil`. Uses a known
+    /// TVDB id when available (skipping the search), else searches by title/year,
+    /// then reads the title's extended record and picks the largest landscape
+    /// artwork. TheTVDB has rich fanart for most TV + film, so this fills heroes
+    /// that would otherwise have no wide art. Never throws.
+    public func backdropURL(title: String, year: Int?, isMovie: Bool, tvdbID: String?) async -> URL? {
+        guard config.isConfigured else { return nil }
+        let id: String?
+        if let tvdbID, !tvdbID.isEmpty {
+            id = tvdbID
+        } else {
+            id = await resolve(title: title, year: year, isMovie: isMovie)?.tvdbID
+        }
+        guard let id, let token = await ensureToken() else { return nil }
+        let type = isMovie ? "movies" : "series"
+        guard let url = URL(string: "\(config.apiBaseURL.absoluteString)/\(type)/\(id)/extended") else { return nil }
+        let (response, reachable) = await MetadataHTTP.getWithStatus(
+            ExtendedResponse.self, url: url, headers: ["Authorization": "Bearer \(token)"]
+        )
+        guard let response else {
+            if !reachable { self.token = nil }   // likely-expired token; re-login next time
+            return nil
+        }
+        return Self.bestBackdrop(response.data?.artworks ?? [])
+    }
+
+    /// Pick the highest-resolution genuinely-landscape artwork (a background/fanart
+    /// rather than a poster or square), by aspect + area — avoids relying on
+    /// TheTVDB's per-content artwork *type* ids, which differ series vs movie.
+    private static func bestBackdrop(_ artworks: [Artwork]) -> URL? {
+        let landscape = artworks.filter { art in
+            guard let w = art.width, let h = art.height, h > 0 else { return false }
+            return Double(w) / Double(h) >= 1.4
+        }
+        let best = landscape.max { (($0.width ?? 0) * ($0.height ?? 0)) < (($1.width ?? 0) * ($1.height ?? 0)) }
+        guard let image = best?.image, !image.isEmpty else { return nil }
+        return Self.imageURL(image)
+    }
+
+    /// TheTVDB artwork `image` fields are usually absolute; prefix the CDN host for
+    /// the occasional bare path.
+    private static func imageURL(_ raw: String) -> URL? {
+        if raw.hasPrefix("http") { return URL(string: raw) }
+        return URL(string: "https://artworks.thetvdb.com" + (raw.hasPrefix("/") ? raw : "/" + raw))
+    }
+
     // MARK: - Auth
 
     private func ensureToken() async -> String? {
@@ -103,6 +149,18 @@ public actor TVDBClient {
     private struct LoginResponse: Decodable {
         let data: TokenData?
         struct TokenData: Decodable { let token: String? }
+    }
+
+    private struct ExtendedResponse: Decodable {
+        let data: DataField?
+        struct DataField: Decodable { let artworks: [Artwork]? }
+    }
+
+    private struct Artwork: Decodable {
+        let image: String?
+        let width: Int?
+        let height: Int?
+        let type: Int?
     }
 
     private struct SearchResponse: Decodable {

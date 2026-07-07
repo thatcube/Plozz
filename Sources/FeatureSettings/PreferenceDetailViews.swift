@@ -117,12 +117,7 @@ struct AppearanceDetailView: View {
                     title: "Watched Indicator",
                     description: "Mark what you've finished with a check, or flag what you haven't started with a corner. In-progress items always show a progress bar.",
                 ) {
-                    DescribedSegmentedPicker(
-                        options: WatchStatusIndicator.allCases,
-                        selection: $watchStatusIndicator.indicator,
-                        title: { $0.displayName },
-                        detail: { $0.detail }
-                    )
+                    CompactWatchIndicatorPicker(selection: $watchStatusIndicator.indicator)
                 }
             ]),
             SettingsSplitSection(id: "music", header: "Music Player", rows: [

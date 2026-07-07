@@ -41,12 +41,20 @@ struct ServerDetailView: View {
             VStack(alignment: .leading, spacing: 28) {
                 if let group = currentGroup {
                     header(group)
+                    // Each panel is its own focus section so directional (up/down)
+                    // navigation bridges them even when their focusable controls are
+                    // horizontally offset — e.g. the left-aligned "Scan now" button
+                    // and the right-aligned "Sign Out & Remove Server" button, which
+                    // tvOS otherwise can't connect (a diagonal move it won't make).
                     accountsPanel(group)
+                        .focusSection()
                     if group.providerKind == .mediaShare {
                         shareLibraryPanel(group)
+                            .focusSection()
                     }
                     if group.accounts.count > 1 {
                         removeServerPanel(group)
+                            .focusSection()
                     }
                 } else {
                     // Focusable so Menu/Back can pop back to the Servers list

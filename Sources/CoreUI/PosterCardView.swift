@@ -564,7 +564,7 @@ public struct PosterCardView: View {
                     // not a loud outline; the theme-derived `mediaEdgeColor` (not a
                     // flat white) is what guarantees contrast against blue-on-blue.
                     TopTrailingCornerFlagEdge()
-                        .stroke(palette.mediaEdgeColor.opacity(0.75), lineWidth: 1)
+                        .stroke(palette.mediaEdgeColor.opacity(0.55), lineWidth: 1)
                 }
                 .frame(width: 48, height: 48)
         }

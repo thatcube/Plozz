@@ -123,6 +123,15 @@ targets:
         # users. Empty by default: the app then relies on the keyless providers
         # (AniList/Kitsu/TVmaze/Deezer/MusicBrainz) and the user's own server art.
         TMDBProxyBaseURL: "$(TMDB_PROXY_BASE_URL)"
+        # TheTVDB v4 API key — the BUNDLED, always-included keyed metadata/artwork
+        # provider (the keyless base's primary keyed layer). Substituted from the
+        # TVDB_API_KEY build setting (gitignored Config/Secrets.local.xcconfig,
+        # symlinked from the canonical secrets file). TheTVDB licenses by parent-
+        # company revenue (free under $50k/yr, FOSS-friendly) — an objective test
+        # with no "commercial-use" gray area — so it ships in every build. Empty by
+        # default (e.g. a contributor without the key), which disables the TVDB tier
+        # and leaves the keyless providers powering enrichment. Attribution required.
+        TVDBAPIKey: "$(TVDB_API_KEY)"
         # Trakt OAuth application credentials, powering per-profile watch-history
         # sync (scrobbling). Substituted from the TRAKT_CLIENT_ID /
         # TRAKT_CLIENT_SECRET build settings (gitignored

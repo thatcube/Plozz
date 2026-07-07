@@ -1,4 +1,5 @@
 import Foundation
+import MetadataKit
 
 /// Process-wide cache of one `ShareCatalogStore` + `ShareScanner` per share
 /// account. `ShareProvider` is a value type SwiftUI rebuilds constantly, so the
@@ -41,7 +42,17 @@ actor ShareCatalogRegistry {
             scanners[accountKey] = scanner
         }
         if enrichers[accountKey] == nil {
-            enrichers[accountKey] = ShareEnricher(store: store, resolver: KeylessShareResolver())
+            // Use the bundled TheTVDB tier when a key is configured (adds movie ids
+            // + posters that the keyless sources can't provide); otherwise the
+            // keyless base carries enrichment on its own.
+            let resolver: ShareMetadataResolving
+            let tvdbConfig = TVDBConfig.resolved()
+            if tvdbConfig.isConfigured {
+                resolver = TVDBShareResolver(tvdb: TVDBClient(config: tvdbConfig))
+            } else {
+                resolver = KeylessShareResolver()
+            }
+            enrichers[accountKey] = ShareEnricher(store: store, resolver: resolver)
         }
         ensureScanning(accountKey)
         return store

@@ -185,7 +185,7 @@ public struct ProfileEditorView: View {
                 }
             }
         }
-        .frame(minWidth: 1500, minHeight: 920)
+        .frame(minWidth: 1720, minHeight: 960)
         .task { await loadPhotoCandidates() }
         .onChange(of: avatarMode) { _, newValue in
             // Leaving Photo mode drops any borrowed image so the symbol shows.
@@ -211,31 +211,43 @@ public struct ProfileEditorView: View {
         }
     }
 
-    // MARK: Left column — always-visible live preview
+    // MARK: Left column — always-visible live preview + colour
 
     private var previewColumn: some View {
-        VStack(spacing: 22) {
-            Text("PREVIEW")
-                .font(.caption.weight(.bold))
-                .tracking(3)
-                .foregroundStyle(palette.secondaryText)
+        VStack(alignment: .leading, spacing: 32) {
+            VStack(spacing: 18) {
+                Text("PREVIEW")
+                    .font(.caption.weight(.bold))
+                    .tracking(3)
+                    .foregroundStyle(palette.secondaryText)
 
-            ProfileAvatarView(profile: previewProfile, size: 300)
-                .shadow(color: .black.opacity(0.35), radius: 26, y: 14)
+                // Roughly the size the avatar actually renders at elsewhere —
+                // enough to judge the choice without dominating the screen.
+                ProfileAvatarView(profile: previewProfile, size: 160)
+                    .shadow(color: .black.opacity(0.3), radius: 20, y: 10)
 
-            Text(previewName)
-                .font(.system(size: 40, weight: .bold))
-                .foregroundStyle(palette.primaryText)
-                .multilineTextAlignment(.center)
-                .lineLimit(2)
-                .minimumScaleFactor(0.6)
+                Text(previewName)
+                    .font(.system(size: 32, weight: .bold))
+                    .foregroundStyle(palette.primaryText)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.6)
 
-            Text(previewSubtitle)
-                .font(.headline)
-                .foregroundStyle(palette.secondaryText)
+                Text(previewSubtitle)
+                    .font(.headline)
+                    .foregroundStyle(palette.secondaryText)
+            }
+            .frame(maxWidth: .infinity)
+
+            // Colour lives here — high up beside the live preview, not buried at
+            // the bottom of the scrolling symbol wall — so it reads as prominent
+            // and you can watch the avatar recolour as you pick. Only symbol
+            // avatars use a colour; a borrowed photo ignores it.
+            if avatarMode == .symbol {
+                colorSection
+            }
         }
-        .frame(width: 460)
-        .frame(maxHeight: .infinity)
+        .frame(width: 460, alignment: .leading)
     }
 
     private var previewProfile: Profile {
@@ -303,7 +315,6 @@ public struct ProfileEditorView: View {
 
             if avatarMode == .symbol {
                 symbolCategoriesSection
-                colorSection
             } else {
                 photoSection
             }
@@ -335,19 +346,19 @@ public struct ProfileEditorView: View {
             avatarSymbol = symbol
         } label: {
             ZStack {
-                Circle().fill(.ultraThinMaterial)
-                Circle()
-                    .fill(ProfileTileColor.color(forIndex: colorIndex))
-                    .opacity(isSelected ? 1 : 0)
+                // Theme-aware resting surface (never a stray white material):
+                // the selected tile fills with the chosen avatar colour exactly
+                // as it will render, otherwise a subtle themed card circle.
+                Circle().fill(isSelected
+                    ? AnyShapeStyle(ProfileTileColor.color(forIndex: colorIndex))
+                    : AnyShapeStyle(palette.cardSurface))
                 Image(systemName: symbol)
                     .font(.system(size: 46, weight: .semibold))
                     .foregroundStyle(isSelected ? Color.white : palette.primaryText)
             }
             .frame(width: diameter, height: diameter)
-            .overlay {
-                Circle()
-                    .strokeBorder(Color.white.opacity(0.9), lineWidth: isSelected ? 3 : 0)
-            }
+            .overlay { Circle().strokeBorder(palette.cardBorder, lineWidth: 1) }
+            .overlay(alignment: .bottomTrailing) { selectionBadge(isSelected) }
         }
         .buttonStyle(CircularSelectionButtonStyle(diameter: diameter))
         .focusEffectDisabled()
@@ -355,13 +366,31 @@ public struct ProfileEditorView: View {
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
     }
 
+    /// The one shared, theme-aware "this is selected" indicator used by every
+    /// tile (symbol, colour, photo) so selection reads identically everywhere
+    /// and never collides with the tile's own colour: an accent check badge in
+    /// the bottom-trailing corner. It persists regardless of focus (the focus
+    /// halo is a separate, also-shared treatment), so a choice stays visibly
+    /// selected after focus moves away.
+    @ViewBuilder
+    private func selectionBadge(_ isSelected: Bool) -> some View {
+        if isSelected {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 34, weight: .bold))
+                .symbolRenderingMode(.palette)
+                .foregroundStyle(.white, palette.accent)
+                .background(Circle().fill(.white).padding(5))
+                .offset(x: 4, y: 4)
+        }
+    }
+
     // MARK: Colors
 
     private var colorSection: some View {
-        let columns = [GridItem(.adaptive(minimum: 68, maximum: 84), spacing: 22)]
+        let columns = [GridItem(.adaptive(minimum: 84, maximum: 100), spacing: 20)]
         return VStack(alignment: .leading, spacing: 16) {
             categoryHeader("Color")
-            LazyVGrid(columns: columns, spacing: 22) {
+            LazyVGrid(columns: columns, spacing: 20) {
                 ForEach(0..<ProfileTileColor.palette.count, id: \.self) { index in
                     colorSwatch(index)
                 }
@@ -371,22 +400,16 @@ public struct ProfileEditorView: View {
 
     private func colorSwatch(_ index: Int) -> some View {
         let isSelected = index == colorIndex
-        let diameter: CGFloat = 68
+        let diameter: CGFloat = 84
         return Button {
             colorIndex = index
         } label: {
             Circle()
                 .fill(ProfileTileColor.color(forIndex: index))
                 .frame(width: diameter, height: diameter)
-                .overlay {
-                    // Hairline so pale swatches still read against the surface.
-                    Circle().strokeBorder(Color.black.opacity(0.12), lineWidth: 1)
-                }
-                .overlay {
-                    Circle()
-                        .strokeBorder(.white, lineWidth: isSelected ? 6 : 0)
-                        .padding(3)
-                }
+                // Hairline so pale swatches still read against the surface.
+                .overlay { Circle().strokeBorder(palette.cardBorder, lineWidth: 1) }
+                .overlay(alignment: .bottomTrailing) { selectionBadge(isSelected) }
         }
         .buttonStyle(CircularSelectionButtonStyle(diameter: diameter))
         .focusEffectDisabled()
@@ -415,8 +438,10 @@ public struct ProfileEditorView: View {
                     avatarMode = .symbol
                 } label: {
                     Label("Use a symbol instead", systemImage: "face.smiling")
+                        .font(.headline)
                 }
-                .buttonStyle(.bordered)
+                .plozzGlassPillButton()
+                .focusEffectDisabled()
                 .padding(.top, 6)
             }
             .padding(.vertical, 8)
@@ -443,13 +468,24 @@ public struct ProfileEditorView: View {
     // MARK: Delete
 
     private func deleteSection(_ onDelete: @escaping () -> Void) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 12) {
             categoryHeader("Delete")
+            // Same theme-aware destructive row the rest of Settings uses (red on
+            // both idle and the inverted focus card), so it's always legible.
             Button(role: .destructive, action: onDelete) {
-                Label("Delete Profile", systemImage: "trash")
-                    .frame(maxWidth: .infinity)
+                HStack(spacing: 16) {
+                    Image(systemName: "trash")
+                        .font(.system(size: 22, weight: .regular))
+                        .frame(width: 30, height: 30)
+                    Text("Delete Profile").font(.callout.weight(.medium))
+                    Spacer()
+                }
+                .foregroundStyle(.red)
+                .padding(.vertical, 12)
+                .padding(.horizontal, 12)
+                .contentShape(Rectangle())
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(SettingsFocusButtonStyle())
             Text("Deleting a profile removes its preferences (theme, captions, spoilers, Trakt) and which servers it includes. Signed-in server accounts stay in the household pool.")
                 .font(.footnote)
                 .foregroundStyle(palette.secondaryText)
@@ -563,7 +599,7 @@ private struct PhotoTileLabel: View {
     var body: some View {
         VStack(spacing: 10) {
             ZStack {
-                Circle().fill(.ultraThinMaterial)
+                Circle().fill(palette.cardSurface)
                 FallbackAsyncImage(urls: [candidate.imageURL], variant: .posterCard) {
                     Image(systemName: "person.fill")
                         .font(.system(size: 40))
@@ -571,10 +607,21 @@ private struct PhotoTileLabel: View {
                 }
                 .frame(width: diameter, height: diameter)
                 .clipShape(Circle())
-                Circle()
-                    .strokeBorder(palette.accent, lineWidth: isSelected ? 6 : 0)
             }
             .frame(width: diameter, height: diameter)
+            .overlay { Circle().strokeBorder(palette.cardBorder, lineWidth: 1) }
+            // Same accent check badge the symbol/colour tiles use, so selection
+            // reads identically across all three.
+            .overlay(alignment: .bottomTrailing) {
+                if isSelected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 34, weight: .bold))
+                        .symbolRenderingMode(.palette)
+                        .foregroundStyle(.white, palette.accent)
+                        .background(Circle().fill(.white).padding(5))
+                        .offset(x: 4, y: 4)
+                }
+            }
             .plozzFocusHalo(
                 cornerRadius: diameter / 2,
                 focusScale: PlozzTheme.Metrics.mediumFocusedCardScale,

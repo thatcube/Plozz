@@ -31,7 +31,7 @@ struct SettingsContext {
     let onDeleteProfile: (String) -> Void
     let onAddAccount: () -> Void
     let onRemoveAccount: (Account) -> Void
-    /// Force a fresh scan + enrichment of a media share now (its `server.id`).
+    /// Force a fresh scan + enrichment of a media share now (its account id).
     let onRescanShare: (String) -> Void
     let onSignOutAll: () -> Void
     let plexHomeUsersFetcher: (String) async -> [PlexHomeUser]

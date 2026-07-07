@@ -136,7 +136,8 @@ struct ServerDetailView: View {
     /// control. A share has no server to index it, so the library is built by an
     /// on-device scan — surfacing its status makes that legible.
     private func shareLibraryPanel(_ group: ServerAccountGroup) -> some View {
-        let shareID = group.accounts.first?.server.id
+        let account = group.accounts.first
+        let shareID = account?.server.id
         let state = shareID.flatMap { shareScanStatus?.state(forShareID: $0) }
         return SettingsPanel(
             footer: "Your share's library is built on this Apple TV by scanning it while the app is open. New files appear after the next scan."
@@ -160,9 +161,9 @@ struct ServerDetailView: View {
                 }
                 .font(.footnote)
 
-                if let shareID {
+                if let account {
                     Button {
-                        context.onRescanShare(shareID)
+                        context.onRescanShare(account.id)
                     } label: {
                         Label("Scan now", systemImage: "arrow.clockwise")
                     }

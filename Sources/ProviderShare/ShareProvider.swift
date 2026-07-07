@@ -63,6 +63,14 @@ public struct ShareProvider: MediaProvider {
         }
     }
 
+    /// Force a fresh scan + enrichment of this share now (Settings "Scan now").
+    /// Touches `catalog` first so the store/scanner/enricher are registered even if
+    /// Home never queried this share yet, then forces a scan bypassing the throttle.
+    public func rescan() async {
+        _ = await catalog
+        await ShareCatalogRegistry.shared.rescan(accountKey: session.server.id)
+    }
+
     public func libraries() async throws -> [MediaLibrary] {
         // Home aggregation calls this at launch, so it must be instant — SQLite
         // reads only (no network) plus a fire-and-forget scan kick. Indexed

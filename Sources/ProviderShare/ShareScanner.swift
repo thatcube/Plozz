@@ -27,7 +27,7 @@ actor ShareScanner {
     private let list: Lister
     private let shareID: String
     private let name: String
-    private let reporter: ShareScanReporter
+    private var reporter: ShareScanReporter
     private var isRunning = false
 
     /// Folder names whose subtree is skipped wholesale (extras/junk, not library
@@ -46,6 +46,10 @@ actor ShareScanner {
         self.reporter = reporter
         self.list = list
     }
+
+    /// Re-point progress reporting after creation, so a scanner built before the
+    /// app wired its status reporter (a startup race) still drives the UI.
+    func setReporter(_ reporter: ShareScanReporter) { self.reporter = reporter }
 
     /// Run a scan unless one already ran within `minInterval` (or is running).
     /// Called fire-and-forget from the Home hot path, so it must be cheap to no-op.

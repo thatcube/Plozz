@@ -241,7 +241,7 @@ public struct RootView: View {
                         onDeleteProfile: { appState.removeProfile(id: $0) },
                         onAddAccount: { appState.addAccount() },
                         onRemoveAccount: { appState.removeAccount(id: $0.id) },
-                        onRescanShare: { appState.rescanShare(shareID: $0) },
+                        onRescanShare: { appState.rescanShare(accountID: $0) },
                         onSignOutAll: { appState.signOutAll() },
                         onSwitchProfile: { appState.requestProfileSelection() },
                         onResetToFirstRun: { appState.resetToFirstRunForDebugging() },

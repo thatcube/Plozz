@@ -987,8 +987,16 @@ public final class AppState {
     }
 
     /// Force a fresh scan + enrichment of a media share now (Settings "Scan now").
-    public func rescanShare(shareID: String) {
-        Task { await ShareLibraryControl.rescan(shareID: shareID) }
+    /// Builds the share's provider directly from its account (tolerating an empty
+    /// token for a guest share, which `provider(forAccountID:)` would reject) and
+    /// asks it to rescan — registering its catalog/scanner if needed, so this works
+    /// even when Home never queried the share, and it drives the scan indicator.
+    public func rescanShare(accountID: String) {
+        guard let account = accounts.first(where: { $0.id == accountID }),
+              account.server.provider == .mediaShare else { return }
+        let token = resolvedToken(for: account.id) ?? ""
+        guard let shareProvider = try? registry.provider(for: account.session(token: token)) as? ShareProvider else { return }
+        Task { await shareProvider.rescan() }
     }
 
     private static func makeDefaultAccountStore() -> AccountPersisting {

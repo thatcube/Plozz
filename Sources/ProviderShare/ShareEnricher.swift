@@ -18,7 +18,7 @@ actor ShareEnricher {
     private let store: ShareCatalogStore
     private let resolver: ShareMetadataResolving
     private let shareID: String
-    private let reporter: ShareScanReporter
+    private var reporter: ShareScanReporter
     /// How many items to resolve concurrently (each is a handful of small HTTP
     /// calls to keyless APIs — keep modest so a large library doesn't burst).
     private let concurrency: Int
@@ -35,6 +35,9 @@ actor ShareEnricher {
         self.concurrency = max(1, concurrency)
         self.maxPerRun = maxPerRun
     }
+
+    /// Re-point progress reporting after creation (startup race — see ShareScanner).
+    func setReporter(_ reporter: ShareScanReporter) { self.reporter = reporter }
 
     /// Resolve + persist pending items until none remain (or the run cap / cancel).
     func enrichPending() async {

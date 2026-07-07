@@ -21,10 +21,14 @@ actor ShareCatalogRegistry {
     private init() {}
 
     /// Inject the app's scan-status reporter (call once at startup). Applies to
-    /// scanners/enrichers created after this point — which is every real one, since
-    /// the app configures the registry before Home first queries a share.
-    func configure(reporter: ShareScanReporter) {
+    /// future scanners/enrichers AND back-fills any already created before this
+    /// ran (a startup race: the app configures the reporter from an async Task in
+    /// its init, which can land after Home's first share query created a scanner
+    /// with the `.noop` default — that left the banner + last-scanned line dead).
+    func configure(reporter: ShareScanReporter) async {
         self.reporter = reporter
+        for scanner in scanners.values { await scanner.setReporter(reporter) }
+        for enricher in enrichers.values { await enricher.setReporter(reporter) }
     }
 
     /// Return the shared catalog store for a share, creating it (and a dedicated
@@ -70,16 +74,17 @@ actor ShareCatalogRegistry {
         return store
     }
 
-    /// Force a fresh scan + enrichment now, bypassing the staleness throttle — the
-    /// "Scan now" control in Settings. No-op if the share isn't registered yet.
+    /// Force a fresh scan + enrichment of a share now (the Settings "Scan now"
+    /// action). Unlike the auto path it ignores the staleness throttle. `scan()`
+    /// and `enrichPending()` each self-guard against a concurrent run, so this is
+    /// safe even if an auto-scan is already in flight. No-op only if the share was
+    /// never registered (its scanner doesn't exist) — callers ensure it does by
+    /// touching the provider's catalog first (see `ShareProvider.rescan()`).
     func rescan(accountKey: String) {
-        guard scanTasks[accountKey] == nil,
-              let scanner = scanners[accountKey],
-              let enricher = enrichers[accountKey] else { return }
-        scanTasks[accountKey] = Task { [weak self] in
+        guard let scanner = scanners[accountKey], let enricher = enrichers[accountKey] else { return }
+        Task {
             await scanner.scan()
             await enricher.enrichPending()
-            await self?.clearScanTask(accountKey)
         }
     }
 
@@ -105,18 +110,13 @@ actor ShareCatalogRegistry {
 }
 
 /// Public control surface over the (internal) `ShareCatalogRegistry`, so the app
-/// layer can wire the scan-status reporter and trigger a manual rescan without
-/// seeing the registry's internal types.
+/// layer can wire the scan-status reporter without seeing the registry's internal
+/// types. (Rescan is driven through `ShareProvider.rescan()` instead, so it can
+/// register the share's catalog on demand.)
 public enum ShareLibraryControl {
-    /// Wire the app's scan-status reporter into the registry (call once at startup,
-    /// before Home first queries a share).
+    /// Wire the app's scan-status reporter into the registry (call once at startup).
+    /// Back-fills any scanners already created before this ran.
     public static func configure(reporter: ShareScanReporter) async {
         await ShareCatalogRegistry.shared.configure(reporter: reporter)
-    }
-
-    /// Force a fresh scan + enrichment of a share now (the Settings "Scan now"
-    /// action). `shareID` is the share account's `server.id`.
-    public static func rescan(shareID: String) async {
-        await ShareCatalogRegistry.shared.rescan(accountKey: shareID)
     }
 }

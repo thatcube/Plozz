@@ -387,7 +387,8 @@ public struct HomeView: View {
                 // climbs.
                 .fixedSize(horizontal: true, vertical: false)
             }
-            .padding(.horizontal, 18)
+            .padding(.leading, 18)
+            .padding(.trailing, 28)
             .padding(.vertical, 10)
             .background(.thinMaterial, in: Capsule())
             .transition(.move(edge: .top).combined(with: .opacity))
@@ -781,17 +782,17 @@ private struct LibraryCardView: View {
                 placeholder
             }
         }
-        // A media share still filling in shows a small glassy spinner in the
-        // top-trailing corner of the tile — a quiet "this is updating" hint that
+        // A media share still filling in shows a spinner CENTERED in the tile —
+        // right where the library glyph would sit (the glyph is hidden while
+        // updating, see `placeholder`) — a quiet "this is updating" hint that
         // matches the Home status pill, without a repetitive text label on each card.
-        .overlay(alignment: .topTrailing) {
+        .overlay {
             if isUpdating {
                 ProgressView()
                     .progressViewStyle(.circular)
-                    .controlSize(.small)
-                    .padding(8)
-                    .background(.ultraThinMaterial, in: Circle())
-                    .padding(10)
+                    .controlSize(.large)
+                    .scaleEffect(1.5)
+                    .tint(palette.secondaryText.opacity(0.7))
                     .transition(.opacity)
                     .accessibilityHidden(true)
             }
@@ -813,9 +814,13 @@ private struct LibraryCardView: View {
                 startPoint: .top,
                 endPoint: .bottom
             )
-            Image(systemName: librarySymbol)
-                .font(.system(size: 64, weight: .semibold))
-                .foregroundStyle(palette.secondaryText.opacity(0.4))
+            // The centered updating spinner takes the glyph's place, so hide the
+            // glyph while a share is updating (see `artwork`'s centered overlay).
+            if !isUpdating {
+                Image(systemName: librarySymbol)
+                    .font(.system(size: 64, weight: .semibold))
+                    .foregroundStyle(palette.secondaryText.opacity(0.4))
+            }
         }
     }
 

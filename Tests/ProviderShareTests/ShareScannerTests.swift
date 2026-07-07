@@ -164,6 +164,51 @@ final class ShareScannerTests: XCTestCase {
         XCTAssertEqual(after.tvSeries, 1)
     }
 
+    func testFailedConnectionIsRecycledAndWalkStillCompletes() async {
+        // A wedged connection (a listing that fails) must be discarded and replaced by
+        // a fresh one, so it can't drag the walk. Fail a media-less "Decoy" branch so
+        // the recycle is exercised while the real libraries still index fully.
+        struct ListError: Error {}
+        final class Flag: @unchecked Sendable {
+            private let lock = NSLock()
+            private var fired = false
+            func takeFirst() -> Bool { lock.lock(); defer { lock.unlock() }
+                if fired { return false }; fired = true; return true }
+        }
+        actor Counter { var made = 0; func madeOne() { made += 1 } }
+        let counter = Counter()
+        let decoyFails = Flag()
+        let store = ShareCatalogStore(accountKey: "a", directory: tempDir())
+
+        var tree = standardTree()
+        tree[""] = [dir("Movies"), dir("TV Shows"), dir("Anime"), dir("Decoy")]
+        tree["Decoy"] = [dir("Empty")]
+        tree["Decoy/Empty"] = []
+        let fake = FakeShare(tree)
+
+        // The first listing of "Decoy" fails once (wedging that connection), forcing a
+        // recycle; every fresh replacement then works. Decoy carries no media, so the
+        // real libraries are unaffected.
+        let scanner = ShareScanner(store: store, concurrency: 4, makeLister: {
+            Task { await counter.madeOne() }
+            return ShareScanner.ScanLister(
+                list: { path in
+                    if path == "Decoy" && decoyFails.takeFirst() { throw ListError() }
+                    return await fake.list(path)
+                },
+                close: {}
+            )
+        })
+        await scanner.scan()
+
+        let counts = await store.libraryCounts()
+        XCTAssertEqual(counts.movies, 1, "walk completes and indexes movies despite a recycle")
+        XCTAssertEqual(counts.tvSeries, 1)
+        XCTAssertEqual(counts.animeSeries, 1)
+        let made = await counter.made
+        XCTAssertGreaterThan(made, 4, "a failed connection was replaced by a fresh one (beyond the initial pool of 4)")
+    }
+
     func testScanIfStaleThrottlesRepeatWalks() async {
         let store = ShareCatalogStore(accountKey: "a", directory: tempDir())
         let fake = FakeShare(standardTree())

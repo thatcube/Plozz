@@ -91,14 +91,21 @@ actor ShareScanner {
         isRunning = true
         reporter.scanStarted(shareID, name)
 
-        // Pre-build the pool of independent listers (each its own SMB connection),
-        // and ensure they're all torn down when the scan ends (normal or cancel).
-        let listers = (0..<concurrency).map { _ in makeLister() }
+        // Pre-build the pool of independent listers (each its own SMB connection).
+        // `pool` tracks EVERY lister we create (including ones swapped in to replace
+        // a wedged connection) so all are torn down when the scan ends. Each close
+        // runs in its own task so one hung teardown can't block the others.
+        var pool = (0..<concurrency).map { _ in makeLister() }
+        // The live free-list of healthy connections, carried ACROSS BFS levels. Every
+        // dispatched lister returns here exactly once per level (healthy back as-is; a
+        // failed one replaced by a fresh connection), so at each level boundary it
+        // holds exactly `concurrency` healthy listers.
+        var free = pool
         defer {
             isRunning = false
             reporter.scanFinished(shareID)
-            let toClose = listers
-            Task { for lister in toClose { await lister.close() } }
+            let toClose = pool
+            Task { for lister in toClose { Task { await lister.close() } } }
         }
 
         let scanID = await nextScanID()
@@ -122,7 +129,6 @@ actor ShareScanner {
                 return
             }
             var nextFrontier: [String] = []
-            var free = listers                    // available connections this level
             var index = 0                         // next directory in `frontier` to dispatch
 
             await withTaskGroup(of: DirResult.self) { group in
@@ -133,11 +139,26 @@ actor ShareScanner {
                     group.addTask { await Self.processDirectory(dir, using: lister) }
                 }
                 // Fill the pool.
-                for _ in 0..<listers.count { spawnNext() }
+                for _ in 0..<concurrency { spawnNext() }
                 // Drain results, committing each directory and launching the next.
                 while let result = await group.next() {
-                    free.append(result.lister)     // return the connection to the pool
-                    if !result.ok { anyListingFailed = true }
+                    if result.ok {
+                        free.append(result.lister)     // healthy — return it to the pool
+                    } else {
+                        // A failed listing likely left this connection WEDGED: the SMB
+                        // library doesn't honour cancellation mid-read, so a timed-out
+                        // read keeps holding the connection's lock and every later list
+                        // on it also times out (20s each) — one bad socket crawls the
+                        // whole walk and it looks stuck. Discard it (fire-and-forget
+                        // close, since that may hang too) and swap in a FRESH
+                        // connection so throughput recovers immediately.
+                        anyListingFailed = true
+                        let dead = result.lister
+                        Task { await dead.close() }
+                        let fresh = makeLister()
+                        pool.append(fresh)
+                        free.append(fresh)
+                    }
                     dirsWalked += 1
                     nextFrontier.append(contentsOf: result.subdirs)
                     if !result.assets.isEmpty {

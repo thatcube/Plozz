@@ -98,6 +98,17 @@ actor ShareCatalogRegistry {
         }
     }
 
+    /// Fast-track enrichment of ONE item the user just opened, ahead of the
+    /// background backlog, so its hero/poster/overview persist promptly (and the
+    /// persisted art then supersedes the flaky live title-only fallback). Spawns a
+    /// background task and returns immediately — callers on the detail hot path add
+    /// no latency. No-op if the share was never registered or the item is already
+    /// enriched.
+    func enrichItem(accountKey: String, itemID: String) {
+        guard let enricher = enrichers[accountKey] else { return }
+        Task { await enricher.enrichOne(itemID: itemID) }
+    }
+
     /// Spawn a throttled scan attempt (then an enrichment pass) unless one is
     /// already in flight for this share. `ShareScanner.scanIfStale` time-throttles
     /// the real walk, so a rapid burst of Home reloads collapses to one run.

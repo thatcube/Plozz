@@ -121,6 +121,10 @@ public struct ShareProvider: MediaProvider {
         // Indexed items (movies/series/seasons/episodes) resolve from the catalog;
         // raw file-tree ids (`share:root`, `d:`) fall back to the live browser.
         if let indexed = await catalog.item(id: id) {
+            // A user just opened this — fast-track its enrichment ahead of the
+            // background backlog so its hero/poster/overview persist promptly. Fire-
+            // and-forget (no added latency); a no-op once the item is enriched.
+            await ShareCatalogRegistry.shared.enrichItem(accountKey: session.server.id, itemID: id)
             return await stampWatchState(indexed)
         }
         guard let item = await store.item(id: id) else {

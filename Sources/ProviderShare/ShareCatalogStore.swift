@@ -253,6 +253,65 @@ actor ShareCatalogStore {
         return out
     }
 
+    /// The pending-enrichment request for a SINGLE catalog id (the item a user just
+    /// opened), or `nil` when it's already enriched at `version`, isn't a logical
+    /// movie/series, or is unknown. Lets the provider jump the viewed item to the
+    /// front of the enrichment queue so its art/overview/ids persist promptly.
+    func pendingEnrichment(forItemID id: String, version: Int) -> PendingEnrichment? {
+        ensureOpen()
+        guard db != nil else { return nil }
+
+        // Series → the enrichment row is keyed by `series:<key>`.
+        if ShareCatalogID.isSeries(id), let key = ShareCatalogID.seriesKey(forSeriesID: id) {
+            let itemID = ShareCatalogID.series(key)
+            if isEnriched(itemID: itemID, version: version) { return nil }
+            var out: PendingEnrichment?
+            query("SELECT series_title, library, MAX(year) FROM assets WHERE series_key=? AND kind='episode';",
+                  bind: { self.bindText($0, 1, key) }) { stmt in
+                guard sqlite3_column_type(stmt, 0) != SQLITE_NULL else { return }
+                let lib = self.columnText(stmt, 1) ?? "tv"
+                out = PendingEnrichment(
+                    itemID: itemID,
+                    title: self.columnText(stmt, 0) ?? key,
+                    year: self.columnOptInt(stmt, 2),
+                    isMovie: false, isAnime: lib == "anime"
+                )
+            }
+            return out
+        }
+
+        // Movie file → the enrichment row is keyed by `f:<relPath>`. Episodes enrich
+        // through their series (above), so a bare episode file id is skipped here.
+        if let relPath = ShareCatalogID.relPath(forFileID: id) {
+            let itemID = ShareCatalogID.file(relPath)
+            if isEnriched(itemID: itemID, version: version) { return nil }
+            var out: PendingEnrichment?
+            query("SELECT title, year, kind FROM assets WHERE rel_path=?;",
+                  bind: { self.bindText($0, 1, relPath) }) { stmt in
+                guard (self.columnText(stmt, 2) ?? "movie") == "movie" else { return }
+                out = PendingEnrichment(
+                    itemID: itemID,
+                    title: self.columnText(stmt, 0) ?? relPath,
+                    year: self.columnOptInt(stmt, 1),
+                    isMovie: true, isAnime: false
+                )
+            }
+            return out
+        }
+        return nil
+    }
+
+    /// Whether an enrichment row exists for `itemID` at the given version.
+    private func isEnriched(itemID: String, version: Int) -> Bool {
+        guard db != nil else { return false }
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "SELECT 1 FROM enrichment WHERE item_id=? AND enrich_version=? LIMIT 1;", -1, &stmt, nil) == SQLITE_OK else { return false }
+        defer { sqlite3_finalize(stmt) }
+        bindText(stmt, 1, itemID)
+        sqlite3_bind_int64(stmt, 2, Int64(version))
+        return sqlite3_step(stmt) == SQLITE_ROW
+    }
+
     /// Persist one item's enrichment. When strong anime ids (AniList/MAL) resolve
     /// for a series currently filed under TV, reclassify all its assets to Anime —
     /// this is the Phase-2 "anime confirmed once ids resolve" correction.

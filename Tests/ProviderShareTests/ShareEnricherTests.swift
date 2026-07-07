@@ -128,4 +128,44 @@ final class ShareEnricherTests: XCTestCase {
         let after = await store.pendingEnrichment(version: ShareEnricher.version, limit: 10)
         XCTAssertTrue(after.isEmpty, "every pending item was attempted and marked at the current version")
     }
+
+    func testSingleItemPendingLookupTargetsTheOpenedItem() async {
+        let store = ShareCatalogStore(accountKey: "a", directory: tempDir())
+        await store.upsert([movie("Movies/Dune (2021).mkv", "Dune", 2021)], scanID: 1)
+        let id = ShareCatalogID.file("Movies/Dune (2021).mkv")
+
+        let pending = await store.pendingEnrichment(forItemID: id, version: ShareEnricher.version)
+        XCTAssertEqual(pending?.itemID, id)
+        XCTAssertEqual(pending?.title, "Dune")
+        XCTAssertEqual(pending?.year, 2021)
+        XCTAssertEqual(pending?.isMovie, true)
+
+        // Once enriched, the same lookup reports nothing pending.
+        await store.saveEnrichment(itemID: id, .init(providerIDs: ["Tmdb": "438631"]), version: ShareEnricher.version)
+        let after = await store.pendingEnrichment(forItemID: id, version: ShareEnricher.version)
+        XCTAssertNil(after, "an already-enriched item is not pending")
+    }
+
+    func testEnrichOneFastTracksTheOpenedItemOnly() async {
+        // Two indexed movies; enrichOne must persist art for the ONE we open and
+        // leave the other still pending for the background drain.
+        let store = ShareCatalogStore(accountKey: "a", directory: tempDir())
+        await store.upsert([
+            movie("Movies/Arrival (2016).mkv", "Arrival", 2016),
+            movie("Movies/Sicario (2015).mkv", "Sicario", 2015),
+        ], scanID: 1)
+        let opened = ShareCatalogID.file("Movies/Arrival (2016).mkv")
+        let rec = ShareCatalogStore.EnrichmentRecord(
+            providerIDs: ["Tmdb": "329865"],
+            backdropURL: URL(string: "https://img/arrival-backdrop.jpg")
+        )
+        await ShareEnricher(store: store, resolver: FakeResolver(byTitle: ["Arrival": rec]))
+            .enrichOne(itemID: opened)
+
+        let openedItem = await store.item(id: opened)
+        XCTAssertEqual(openedItem?.heroBackdropURL?.absoluteString, "https://img/arrival-backdrop.jpg",
+                       "the opened item gained persisted hero art")
+        let stillPending = await store.pendingEnrichment(version: ShareEnricher.version, limit: 10)
+        XCTAssertEqual(stillPending.map(\.title), ["Sicario"], "only the opened item was fast-tracked")
+    }
 }

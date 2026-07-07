@@ -22,12 +22,17 @@ actor ShareEnricher {
     /// How many items to resolve concurrently (each is a handful of small HTTP
     /// calls to keyless APIs — keep modest so a large library doesn't burst).
     private let concurrency: Int
-    /// Safety cap on items enriched per run so one pass can't spin unbounded.
+    /// Safety cap on items enriched per run. Defaults to "drain the whole backlog"
+    /// (`.max`): a partial cap left large libraries perpetually under-enriched — the
+    /// pass only re-triggers on the next scan/Home load, so heroes/cards stayed
+    /// blank for most of the library. Each processed item is marked done at the
+    /// current version, so the pending set strictly shrinks and the drain always
+    /// terminates. Tests pass a small cap to bound a single run.
     private let maxPerRun: Int
     private var isRunning = false
 
     init(store: ShareCatalogStore, resolver: ShareMetadataResolving, shareID: String = "",
-         reporter: ShareScanReporter = .noop, concurrency: Int = 6, maxPerRun: Int = 400) {
+         reporter: ShareScanReporter = .noop, concurrency: Int = 6, maxPerRun: Int = .max) {
         self.store = store
         self.resolver = resolver
         self.shareID = shareID
@@ -79,5 +84,21 @@ actor ShareEnricher {
             }
         }
         PlozzLog.boot("share.enrich pass done processed=\(processed) cancelled=\(Task.isCancelled)")
+    }
+
+    /// Resolve + persist ONE item immediately (the one a user just opened), jumping
+    /// it ahead of the background backlog so its art/overview/ids land promptly. A
+    /// no-op when the item is already enriched at the current version or isn't a
+    /// logical movie/series. Runs independently of `enrichPending` (no `isRunning`
+    /// guard) so opening an item during a full drain still fast-tracks it.
+    func enrichOne(itemID: String) async {
+        guard let pending = await store.pendingEnrichment(forItemID: itemID, version: Self.version) else { return }
+        let request = ShareEnrichRequest(
+            itemID: pending.itemID, title: pending.title, year: pending.year,
+            isMovie: pending.isMovie, isAnime: pending.isAnime
+        )
+        let record = await resolver.resolve(request)
+        guard !Task.isCancelled else { return }
+        await store.saveEnrichment(itemID: pending.itemID, record, version: Self.version)
     }
 }

@@ -164,32 +164,21 @@ public struct ProfileEditorView: View {
     }
 
     public var body: some View {
-        NavigationStack {
-            ZStack {
-                AppBackground(palette: palette).ignoresSafeArea()
+        ZStack {
+            AppBackground(palette: palette).ignoresSafeArea()
 
-                HStack(alignment: .top, spacing: 48) {
-                    previewColumn
-                    // Full-height hairline separating the fixed preview/colour
-                    // column from the scrolling picker.
-                    Rectangle()
-                        .fill(palette.cardBorder)
-                        .frame(width: 1)
-                        .frame(maxHeight: .infinity)
-                    pickerColumn
-                }
-                .padding(.horizontal, 72)
-                .padding(.vertical, 24)
+            HStack(alignment: .top, spacing: 48) {
+                previewColumn
+                // Full-height hairline separating the fixed preview/colour
+                // column from the scrolling picker.
+                Rectangle()
+                    .fill(palette.cardBorder)
+                    .frame(width: 1)
+                    .frame(maxHeight: .infinity)
+                pickerColumn
             }
-            .navigationTitle(isEditing ? "Edit Profile" : "New Profile")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel", action: attemptCancel)
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Save", action: save).disabled(!canSave)
-                }
-            }
+            .padding(.horizontal, 72)
+            .padding(.vertical, 24)
         }
         .frame(minWidth: 1720, minHeight: 960)
         .task { await loadPhotoCandidates() }
@@ -204,6 +193,25 @@ public struct ProfileEditorView: View {
             Button("Keep Editing", role: .cancel) {}
         } message: {
             Text("You've made changes that haven't been saved. Going back now will lose them.")
+        }
+    }
+
+    /// Title + Cancel/Save, rendered in visible themed controls at the top of the
+    /// scrolling column (they used to live in the navigation toolbar, where they
+    /// rendered nearly invisible against the sheet). Scrolls with the page.
+    private var headerRow: some View {
+        HStack(alignment: .center, spacing: 20) {
+            Text(isEditing ? "Edit Profile" : "New Profile")
+                .font(.system(size: 44, weight: .bold))
+                .foregroundStyle(palette.primaryText)
+            Spacer(minLength: 24)
+            Button("Cancel", action: attemptCancel)
+                .plozzGlassPillButton()
+                .focusEffectDisabled()
+            Button("Save", action: save)
+                .plozzGlassPillButton(isSelected: true)
+                .focusEffectDisabled()
+                .disabled(!canSave)
         }
     }
 
@@ -282,6 +290,7 @@ public struct ProfileEditorView: View {
     private var pickerColumn: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 40) {
+                headerRow
                 nameSection
                 avatarSection
                 if canDelete, let onDelete {

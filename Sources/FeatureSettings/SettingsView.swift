@@ -396,7 +396,7 @@ public struct SettingsView: View {
             navRow("Trackers", icon: "link",
                    value: nil,
                    route: .integrations) {
-                Text("Trakt, Simkl, AniList, MyAnimeList, Last.fm, Seerr")
+                Text("Trakt, Simkl, AniList, MyAnimeList, Last.fm")
                     .font(.footnote)
                     .settingsRowSecondary()
                     .lineLimit(2)
@@ -454,6 +454,19 @@ public struct SettingsView: View {
                 } else {
                     enableProfilesRow
                         .prefersDefaultFocus(in: rootFocusScope)
+                }
+
+                // Seerr is one shared admin connection powering the Home hero's
+                // trending row + requests for everyone on this Apple TV, so it's
+                // a household concern — not a per-profile tracker. The per-profile
+                // "requests are made as" mapping is managed inside its page.
+                navRow("Seerr", icon: "sparkles.tv",
+                       value: seerrRowValue,
+                       route: .seerr) {
+                    Text("Discover & request movies, shows and anime")
+                        .font(.footnote)
+                        .settingsRowSecondary()
+                        .lineLimit(2)
                 }
             }
             .padding(.horizontal, 28)
@@ -583,7 +596,9 @@ public struct SettingsView: View {
         case .spoilers:
             SpoilersDetailView(spoilers: spoilers)
         case .integrations:
-            IntegrationsDetailView(trakt: trakt, simkl: simkl, seer: seer, anilist: anilist, mal: mal, lastfm: lastfm, playback: playback, serverCount: activeProfileServerCount, knownServerHosts: knownServerHosts, profiles: profiles, onSetSeerrUser: onSetSeerrUser)
+            IntegrationsDetailView(trakt: trakt, simkl: simkl, anilist: anilist, mal: mal, lastfm: lastfm, playback: playback, serverCount: activeProfileServerCount)
+        case .seerr:
+            SeerDetailView(seer: seer, knownServerHosts: knownServerHosts, profiles: profiles, onSetSeerrUser: onSetSeerrUser)
         case .attributions:
             AttributionsDetailView()
         case .help:
@@ -757,6 +772,14 @@ public struct SettingsView: View {
             hosts.append(host)
         }
         return hosts
+    }
+
+    /// Right-hand summary for the This Apple TV › Seerr row. `savedBaseURLString`
+    /// is loaded synchronously from the stored config at launch and cleared on
+    /// disconnect, so it's a reliable "is a server configured?" signal without
+    /// waiting on an async status refresh.
+    private var seerrRowValue: String {
+        seer.savedBaseURLString == nil ? "Not connected" : "Connected"
     }
 
     /// Shared leading icon for every Settings row. Explicit point size +

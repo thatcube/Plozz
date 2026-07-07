@@ -51,6 +51,7 @@ enum SettingsRoute: Hashable {
     case playback
     case spoilers
     case integrations
+    case seerr
     case attributions
     case help
     case recentActivity

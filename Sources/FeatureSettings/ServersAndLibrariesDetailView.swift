@@ -18,10 +18,11 @@ struct ServersAndLibrariesDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
-                SettingsPanel(
-                    title: "Servers",
+                SettingsPageHeader(
+                    "Servers",
                     subtitle: "Sign-ins are shared by everyone on this Apple TV. Choose what each profile sees under Profile › Your Libraries."
-                ) {
+                )
+                SettingsPanel {
                     // Rows separated by a gap rather than flush dividers: the
                     // focus lift bleeds outward and would otherwise paint over a
                     // divider sitting directly against a row.

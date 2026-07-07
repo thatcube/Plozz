@@ -43,12 +43,10 @@ struct SeerDetailView: View {
     @State private var users: LoadState<[SeerUser]> = .idle
     private let discovery = SeerDiscovery()
 
-    @Environment(\.themePalette) private var palette
-
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
-                header
+                SettingsPageHeader("Seerr", subtitle: headerSubtitle)
                 switch seer.phase {
                 case let .connected(summary):
                     connectionPanel(summary: summary)
@@ -71,36 +69,20 @@ struct SeerDetailView: View {
         }
     }
 
-    // MARK: - Header
-
-    private var header: some View {
-        HStack(spacing: 16) {
-            ZStack {
-                Circle().fill(palette.accent.opacity(0.18))
-                Image(systemName: "sparkles.tv")
-                    .font(.system(size: 30, weight: .regular))
-                    .foregroundStyle(palette.accent)
-            }
-            .frame(width: 64, height: 64)
-            .overlay(Circle().strokeBorder(palette.accent.opacity(0.4), lineWidth: 1.5))
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Seerr").font(.largeTitle.bold())
-                Text("Shared across every profile on this Apple TV.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
+    /// Subtitle conveys the one thing the "Seerr" title doesn't: that this is a
+    /// device-wide connection. When disconnected it also names what Seerr is,
+    /// since that's the first-run context a new user needs to connect.
+    private var headerSubtitle: String {
+        if case .connected = seer.phase {
+            return "Shared across every profile on this Apple TV."
         }
+        return "Connect a Seerr server (Overseerr / Jellyseerr) to discover and request movies, shows & anime for everyone on this Apple TV."
     }
 
     // MARK: - Connect (not yet connected)
 
     private var connectPanel: some View {
-        SettingsPanel(
-            title: "Connect a Seerr server",
-            subtitle: "Connect a Seerr server (formerly Overseerr or Jellyseerr) to surface trending titles in the Home hero and request movies & shows right from your Apple TV."
-        ) {
+        SettingsPanel {
             VStack(alignment: .leading, spacing: 16) {
                 discoveredSection
 

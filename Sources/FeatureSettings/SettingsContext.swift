@@ -114,6 +114,37 @@ struct SettingsPanel<Content: View>: View {
     }
 }
 
+/// The consistent page-level heading for the top-level "This Apple TV" detail
+/// pages (Servers, Profiles, Seerr). It's a single large title — the heading
+/// for the whole page — with an optional one-line subtitle used ONLY where it
+/// conveys something the title alone doesn't (e.g. that a page's data is shared
+/// device-wide). The small UPPERCASE `SettingsPanel` titles are reserved for
+/// the sub-sections *within* a page; this is the page heading that sits above
+/// them.
+struct SettingsPageHeader: View {
+    let title: String
+    var subtitle: String?
+
+    init(_ title: String, subtitle: String? = nil) {
+        self.title = title
+        self.subtitle = subtitle
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.largeTitle.bold())
+            if let subtitle {
+                Text(subtitle)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
 /// A `SettingsPanel` that can itself take focus, for panels whose content is
 /// **read-only** (or whose only control is disabled) and would otherwise be
 /// unreachable on tvOS — a non-focusable view never receives focus, so the

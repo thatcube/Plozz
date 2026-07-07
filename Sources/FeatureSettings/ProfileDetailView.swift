@@ -32,6 +32,10 @@ struct ProfileDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
+                SettingsPageHeader(
+                    "Profiles",
+                    subtitle: "Each profile keeps its own settings — theme, playback, subtitles, spoilers, trackers, and Home layout. Only your servers are shared."
+                )
                 profilesListPanel
                 if context.profiles.count == 1 {
                     disablePanel
@@ -77,10 +81,7 @@ struct ProfileDetailView: View {
     }
 
     private var profilesListPanel: some View {
-        SettingsPanel(
-            title: "Profiles",
-            subtitle: "Each profile keeps its own settings — theme, playback, subtitles, spoilers, trackers, and Home layout. Only your servers are shared."
-        ) {
+        SettingsPanel {
             VStack(alignment: .leading, spacing: 12) {
                 ForEach(context.profiles) { profile in
                     profileRow(profile)

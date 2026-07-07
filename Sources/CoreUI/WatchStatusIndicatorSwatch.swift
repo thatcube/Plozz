@@ -109,21 +109,21 @@ private struct WatchIndicatorMini: View {
     private func cornerMark(for state: PreviewTileState, tileWidth: CGFloat) -> some View {
         switch (indicator, state) {
         case (.watched, .finished):
-            let d = tileWidth * 0.42
+            let d = tileWidth * 0.47
             Image(systemName: "checkmark")
                 .font(.system(size: d * 0.52, weight: .bold))
                 .foregroundStyle(.white)
                 .frame(width: d, height: d)
                 .background(Circle().fill(ThemePalette.brandBlue))
                 .overlay(Circle().strokeBorder(Color.white.opacity(0.4), lineWidth: 1))
-                .padding(tileWidth * 0.10)
+                .padding(tileWidth * 0.09)
         case (.unwatched, .new):
-            let s = tileWidth * 0.5
+            let s = tileWidth * 0.56
             TopTrailingCornerFlag()
                 .fill(ThemePalette.brandBlue)
                 .overlay(alignment: .topTrailing) {
                     TopTrailingCornerFlagEdge()
-                        .stroke(Color.white.opacity(0.4), lineWidth: 1)
+                        .stroke(Color.white.opacity(0.45), lineWidth: 2)
                 }
                 .frame(width: s, height: s)
         default:

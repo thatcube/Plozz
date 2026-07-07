@@ -272,10 +272,10 @@ public struct PosterCardView: View {
     }
 
     /// Inset that keeps the watched badge concentric with the borderless card's
-    /// rounded corner. The badge is a 30pt circle (radius 15), so its inset is
-    /// `outerRadius − 15`, matching the progress bar's even spacing.
+    /// rounded corner. The badge is a 38pt circle (radius 19), so its inset is
+    /// `outerRadius − 19`, matching the progress bar's even spacing.
     private var borderlessBadgeInset: CGFloat {
-        max(borderlessCornerRadius - 15, 8)
+        max(borderlessCornerRadius - 19, 8)
     }
 
     /// Aspect ratio for the borderless full-bleed image.
@@ -531,9 +531,9 @@ public struct PosterCardView: View {
     private func watchedBadge(inset: CGFloat) -> some View {
         if item.isPlayed && !showsProgressBar && !hideThumbnail {
             Image(systemName: "checkmark")
-                .font(.system(size: 16, weight: .bold))
+                .font(.system(size: 20, weight: .bold))
                 .foregroundStyle(.white)
-                .frame(width: 30, height: 30)
+                .frame(width: 38, height: 38)
                 .background(Circle().fill(ThemePalette.brandBlue))
                 .overlay {
                     Circle()
@@ -557,12 +557,13 @@ public struct PosterCardView: View {
             TopTrailingCornerFlag()
                 .fill(ThemePalette.brandBlue)
                 .overlay(alignment: .topTrailing) {
-                    // A thin glass rim along the flag's diagonal edge so it reads
-                    // off bright artwork, mirroring the watched badge's rim.
+                    // A theme-dependent border along the flag's diagonal edge, so
+                    // the seam between artwork and flag reads as the same clean
+                    // glass edge every thumbnail carries (`mediaEdgeColor`).
                     TopTrailingCornerFlagEdge()
-                        .stroke(watchedBadgeRim, lineWidth: 1.5)
+                        .stroke(palette.mediaEdgeColor, lineWidth: 2)
                 }
-                .frame(width: 44, height: 44)
+                .frame(width: 48, height: 48)
         }
     }
 

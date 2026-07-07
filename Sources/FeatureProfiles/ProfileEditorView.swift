@@ -339,12 +339,15 @@ public struct ProfileEditorView: View {
     // MARK: Symbols
 
     private var symbolCategoriesSection: some View {
-        let columns = [GridItem(.adaptive(minimum: 108, maximum: 128), spacing: 24)]
+        // Fixed 8-up grid: every category holds 8 symbols, so each renders as
+        // exactly one clean row — no orphan 1-or-2-icon line from an adaptive
+        // grid that only fit 7.
+        let columns = Array(repeating: GridItem(.flexible(), spacing: 18), count: 8)
         return VStack(alignment: .leading, spacing: 28) {
             ForEach(Profile.avatarSymbolCategories) { category in
                 VStack(alignment: .leading, spacing: 16) {
                     categoryHeader(category.title)
-                    LazyVGrid(columns: columns, spacing: 24) {
+                    LazyVGrid(columns: columns, spacing: 18) {
                         ForEach(category.symbols, id: \.self) { symbol in
                             symbolTile(symbol)
                         }
@@ -356,7 +359,7 @@ public struct ProfileEditorView: View {
 
     private func symbolTile(_ symbol: String) -> some View {
         let isSelected = symbol == avatarSymbol
-        let diameter: CGFloat = 108
+        let diameter: CGFloat = 92
         return Button {
             avatarSymbol = symbol
         } label: {
@@ -404,7 +407,7 @@ public struct ProfileEditorView: View {
     private var colorSection: some View {
         let columns = [GridItem(.adaptive(minimum: 84, maximum: 100), spacing: 20)]
         return VStack(alignment: .leading, spacing: 16) {
-            categoryHeader("Color")
+            sectionHeader("Color")
             LazyVGrid(columns: columns, spacing: 20) {
                 ForEach(0..<ProfileTileColor.palette.count, id: \.self) { index in
                     colorSwatch(index)
@@ -495,7 +498,7 @@ public struct ProfileEditorView: View {
 
     private func deleteSection(_ onDelete: @escaping () -> Void) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            categoryHeader("Delete")
+            sectionHeader("Delete")
             // Same construction as Settings ▸ Server's "Sign Out & Remove
             // Server" row: a plain destructive Button with the default tvOS
             // focus style (which inverts to a clearly-legible focused card),
@@ -516,17 +519,20 @@ public struct ProfileEditorView: View {
 
     // MARK: Section headers
 
+    /// L1 section label — the app's shared uppercase settings section-header
+    /// style, so "Name / Avatar / Color / Delete" read as peers of the section
+    /// headers everywhere else in Settings and sit clearly below the page title.
     private func sectionHeader(_ text: String) -> some View {
-        Text(text)
-            .font(.title2.weight(.bold))
-            .foregroundStyle(palette.primaryText)
+        Text(text).settingsSectionHeader()
     }
 
+    /// L2 sub-group label (the symbol categories). Sentence-case and a step
+    /// smaller than an L1 section header so it nests *under* "Avatar" instead of
+    /// competing with it.
     private func categoryHeader(_ text: String) -> some View {
-        Text(text.uppercased())
-            .font(.subheadline.weight(.semibold))
-            .tracking(1.5)
-            .foregroundStyle(palette.secondaryText)
+        Text(text)
+            .font(.footnote.weight(.semibold))
+            .foregroundStyle(.secondary)
     }
 
     private func loadPhotoCandidates() async {

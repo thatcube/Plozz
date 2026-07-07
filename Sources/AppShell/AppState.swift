@@ -103,6 +103,12 @@ public final class AppState {
     /// choice, not a per-profile persona. See `CrashReportingSettings`.
     public let crashReportingModel = CrashReportingSettingsModel()
 
+    /// Live status of media-share background scans/enrichment, so Home can show an
+    /// "Updating library…" banner and Settings can show last-scanned / Scan now.
+    /// App-wide (a share and its scan are household-global, not per-profile). Its
+    /// reporter is wired into the share catalog registry in `configureShareScanReporting()`.
+    public let shareScanStatusModel = ShareScanStatusModel()
+
     /// The household's profiles + active selection. Owned at the app level and
     /// layered on top of the multi-account core.
     public let profilesModel: ProfilesModel
@@ -971,6 +977,18 @@ public final class AppState {
                 track: track, event: event, position: position, duration: duration
             )
         }
+
+        // Wire the media-share scan/enrich progress reporter into the (process-wide)
+        // share catalog registry, so the first share query (from Home) reports into
+        // this model and the "Updating library…" banner + Settings last-scanned line
+        // light up. The reporter is a Sendable value; capture it before the Task.
+        let scanReporter = self.shareScanStatusModel.reporter()
+        Task { await ShareLibraryControl.configure(reporter: scanReporter) }
+    }
+
+    /// Force a fresh scan + enrichment of a media share now (Settings "Scan now").
+    public func rescanShare(shareID: String) {
+        Task { await ShareLibraryControl.rescan(shareID: shareID) }
     }
 
     private static func makeDefaultAccountStore() -> AccountPersisting {

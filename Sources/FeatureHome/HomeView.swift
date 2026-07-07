@@ -61,6 +61,10 @@ public struct HomeView: View {
 
     @Environment(\.plozzMetrics) private var metrics
 
+    /// App-wide media-share scan/enrich status (optional so previews/tests that
+    /// don't inject it don't crash). Drives the "Updating library…" banner.
+    @Environment(ShareScanStatusModel.self) private var shareScanStatus: ShareScanStatusModel?
+
     public init(
         viewModel: HomeViewModel,
         visibility: HomeLibraryVisibilityModel,
@@ -333,6 +337,35 @@ public struct HomeView: View {
             // the index publishes once per warmed account, so this arrives in a
             // burst on a multi-server boot — debounce to a single fold.
             viewModel.scheduleReenrich()
+        }
+        .overlay(alignment: .top) { scanBanner }
+    }
+
+    /// A subtle, non-focusable "Updating library…" pill shown while a media share
+    /// is scanning or enriching, so the otherwise-invisible foreground scan is
+    /// legible. Floats over the top (no layout reflow of the hero) and never takes
+    /// focus or hits. Absent entirely when nothing is busy.
+    @ViewBuilder
+    private var scanBanner: some View {
+        if let status = shareScanStatus, status.isAnyBusy {
+            let names = status.busyShareNames
+            let label = names.count == 1 ? "Updating \(names[0])…" : "Updating library…"
+            HStack(spacing: 12) {
+                ProgressView()
+                    .progressViewStyle(.circular)
+                    .controlSize(.small)
+                Text(label)
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 12)
+            .background(.thinMaterial, in: Capsule())
+            .padding(.top, 24)
+            .transition(.move(edge: .top).combined(with: .opacity))
+            .allowsHitTesting(false)
+            .accessibilityLabel(label)
+            .animation(.easeInOut(duration: 0.25), value: status.isAnyBusy)
         }
     }
 

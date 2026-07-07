@@ -56,6 +56,7 @@ public struct ShareProvider: MediaProvider {
         get async {
             await ShareCatalogRegistry.shared.store(
                 accountKey: session.server.id,
+                displayName: session.server.name,
                 host: host, port: port, share: share,
                 user: session.userName, password: session.accessToken
             )

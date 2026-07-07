@@ -17,6 +17,8 @@ actor ShareEnricher {
 
     private let store: ShareCatalogStore
     private let resolver: ShareMetadataResolving
+    private let shareID: String
+    private let reporter: ShareScanReporter
     /// How many items to resolve concurrently (each is a handful of small HTTP
     /// calls to keyless APIs — keep modest so a large library doesn't burst).
     private let concurrency: Int
@@ -24,9 +26,12 @@ actor ShareEnricher {
     private let maxPerRun: Int
     private var isRunning = false
 
-    init(store: ShareCatalogStore, resolver: ShareMetadataResolving, concurrency: Int = 4, maxPerRun: Int = 400) {
+    init(store: ShareCatalogStore, resolver: ShareMetadataResolving, shareID: String = "",
+         reporter: ShareScanReporter = .noop, concurrency: Int = 4, maxPerRun: Int = 400) {
         self.store = store
         self.resolver = resolver
+        self.shareID = shareID
+        self.reporter = reporter
         self.concurrency = max(1, concurrency)
         self.maxPerRun = maxPerRun
     }
@@ -35,7 +40,11 @@ actor ShareEnricher {
     func enrichPending() async {
         if isRunning { return }
         isRunning = true
-        defer { isRunning = false }
+        // Only advertise "enriching" when there's actually pending work, so the
+        // banner doesn't blink for a no-op pass.
+        let hasWork = !(await store.pendingEnrichment(version: Self.version, limit: 1)).isEmpty
+        if hasWork { reporter.enrichStarted(shareID) }
+        defer { isRunning = false; if hasWork { reporter.enrichFinished(shareID) } }
 
         var processed = 0
         while !Task.isCancelled, processed < maxPerRun {

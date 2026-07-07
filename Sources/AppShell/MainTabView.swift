@@ -112,6 +112,9 @@ struct MainTabView: View {
     /// Settings ▸ Home display. Threaded into `HomeTab` to drive the carousel and
     /// into Settings for editing.
     let heroSettingsModel: HeroSettingsModel
+    /// App-wide media-share scan/enrich status, injected into the environment so
+    /// Home shows an "Updating library…" banner and Settings shows last-scanned.
+    let shareScanStatusModel: ShareScanStatusModel
     /// Per-profile Night Shift settings, edited in Settings ▸ Night Shift. Its
     /// overlay is installed at the app root (RootView); here it's only threaded
     /// into Settings for editing.
@@ -163,6 +166,7 @@ struct MainTabView: View {
     let onDeleteProfile: (String) -> Void
     let onAddAccount: () -> Void
     let onRemoveAccount: (Account) -> Void
+    let onRescanShare: (String) -> Void
     let onSignOutAll: () -> Void
     let onSwitchProfile: () -> Void
     let onResetToFirstRun: () -> Void
@@ -352,6 +356,7 @@ struct MainTabView: View {
                 onDeleteProfile: onDeleteProfile,
                 onAddAccount: onAddAccount,
                 onRemoveAccount: onRemoveAccount,
+                onRescanShare: onRescanShare,
                 onSignOutAll: onSignOutAll,
                 onResetToFirstRun: onResetToFirstRun,
                 plexHomeUsersFetcher: plexHomeUsersFetcher,
@@ -397,6 +402,7 @@ struct MainTabView: View {
         .environment(uiDensityModel)
         .environment(cardStyleModel)
         .environment(heroSettingsModel)
+        .environment(shareScanStatusModel)
         .task(id: accounts.map(\.account.id)) {
             onWarmIdentityIndex()
         }

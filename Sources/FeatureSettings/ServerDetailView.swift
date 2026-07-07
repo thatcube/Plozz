@@ -18,6 +18,9 @@ struct ServerDetailView: View {
     let context: SettingsContext
     let serverKey: String
 
+    /// App-wide media-share scan/enrich status (optional; absent in previews).
+    @Environment(ShareScanStatusModel.self) private var shareScanStatus: ShareScanStatusModel?
+
     /// Account the user has asked to sign out, captured at button-tap so the
     /// confirmation alert can show its name + recompute "is this the last
     /// account?" wording even if the underlying group changes.
@@ -39,6 +42,9 @@ struct ServerDetailView: View {
                 if let group = currentGroup {
                     header(group)
                     accountsPanel(group)
+                    if group.providerKind == .mediaShare {
+                        shareLibraryPanel(group)
+                    }
                     if group.accounts.count > 1 {
                         removeServerPanel(group)
                     }
@@ -114,6 +120,58 @@ struct ServerDetailView: View {
             }
             Spacer()
         }
+    }
+
+    // MARK: - Media-share library status
+
+    /// For a media share: last-scanned time / live scan status + a "Scan now"
+    /// control. A share has no server to index it, so the library is built by an
+    /// on-device scan — surfacing its status makes that legible.
+    private func shareLibraryPanel(_ group: ServerAccountGroup) -> some View {
+        let shareID = group.accounts.first?.server.id
+        let state = shareID.flatMap { shareScanStatus?.state(forShareID: $0) }
+        return SettingsPanel(
+            footer: "Your share's library is built on this Apple TV by scanning it while the app is open. New files appear after the next scan."
+        ) {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Library")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                HStack(spacing: 12) {
+                    if state?.isBusy == true {
+                        ProgressView().progressViewStyle(.circular).controlSize(.small)
+                        Text(state?.isScanning == true ? "Scanning…" : "Finding artwork & details…")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Image(systemName: "checkmark.circle")
+                            .foregroundStyle(.secondary)
+                        Text(Self.lastScannedText(state?.lastScanAt))
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
+                .font(.footnote)
+
+                if let shareID {
+                    Button {
+                        context.onRescanShare(shareID)
+                    } label: {
+                        Label("Scan now", systemImage: "arrow.clockwise")
+                    }
+                    .disabled(state?.isBusy == true)
+                }
+            }
+        }
+    }
+
+    /// "Last scanned just now / 5m ago / …" or a first-run hint.
+    private static func lastScannedText(_ date: Date?) -> String {
+        guard let date else { return "Not scanned yet" }
+        let elapsed = Date().timeIntervalSince(date)
+        if elapsed < 60 { return "Last scanned just now" }
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .full
+        return "Last scanned " + formatter.localizedString(for: date, relativeTo: Date())
     }
 
     // MARK: - Accounts

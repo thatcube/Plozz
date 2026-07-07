@@ -1,4 +1,5 @@
 import Foundation
+import CoreModels
 import CoreNetworking
 
 /// Walks a share's directory tree once and populates a `ShareCatalogStore`, so the
@@ -24,6 +25,9 @@ actor ShareScanner {
 
     private let store: ShareCatalogStore
     private let list: Lister
+    private let shareID: String
+    private let name: String
+    private let reporter: ShareScanReporter
     private var isRunning = false
 
     /// Folder names whose subtree is skipped wholesale (extras/junk, not library
@@ -34,8 +38,12 @@ actor ShareScanner {
         "other", "subs", "subtitles", "@eadir", ".actors",
     ]
 
-    init(store: ShareCatalogStore, list: @escaping Lister) {
+    init(store: ShareCatalogStore, shareID: String = "", name: String = "",
+         reporter: ShareScanReporter = .noop, list: @escaping Lister) {
         self.store = store
+        self.shareID = shareID
+        self.name = name
+        self.reporter = reporter
         self.list = list
     }
 
@@ -55,7 +63,10 @@ actor ShareScanner {
     func scan() async {
         if isRunning { return }
         isRunning = true
-        defer { isRunning = false }
+        reporter.scanStarted(shareID, name)
+        // Clears the "scanning" indicator even on cancel/early return, so the
+        // Home banner never hangs.
+        defer { isRunning = false; reporter.scanFinished(shareID) }
 
         let scanID = await nextScanID()
         PlozzLog.boot("share.scan begin scanID=\(scanID)")
@@ -92,6 +103,7 @@ actor ShareScanner {
             if !batch.isEmpty {
                 filesFound += batch.count
                 await store.upsert(batch, scanID: scanID)
+                reporter.scanProgress(shareID, filesFound)
             }
         }
 

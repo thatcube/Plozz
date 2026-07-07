@@ -383,7 +383,13 @@ actor ShareCatalogStore {
         // so a miss is retried across passes and then settled, never cached as a
         // permanent blank and never looped forever.
         let merged = Self.merged(existing: enrichmentRow(itemID: itemID), new: record)
-        let attempts = merged.isUsable ? 0 : enrichmentAttempts(itemID: itemID) + 1
+        // Attempt budget is PER VERSION: a future `ShareEnricher.version` bump (the
+        // mechanism to re-enrich everything with improved sources) resets the budget
+        // so a previously-exhausted miss gets the full retry count again, not one.
+        // Within the same version the count accrues as before.
+        let prior = enrichmentVersionAndAttempts(itemID: itemID)
+        let priorAttempts = (prior?.version == version) ? (prior?.attempts ?? 0) : 0
+        let attempts = merged.isUsable ? 0 : priorAttempts + 1
 
         var stmt: OpaquePointer?
         let sql = """
@@ -442,13 +448,16 @@ actor ShareCatalogStore {
         return out
     }
 
-    /// How many times enrichment has been attempted for `itemID` (0 when no row).
-    private func enrichmentAttempts(itemID: String) -> Int {
-        var n = 0
-        query("SELECT attempts FROM enrichment WHERE item_id=?;", bind: { self.bindText($0, 1, itemID) }) { stmt in
-            n = Int(sqlite3_column_int64(stmt, 0))
+    /// The stored `(enrich_version, attempts)` for `itemID`, or `nil` when no row
+    /// exists. Lets `saveEnrichment` give each enrichment version its own retry
+    /// budget (attempts accrue within a version, reset across a version bump).
+    private func enrichmentVersionAndAttempts(itemID: String) -> (version: Int, attempts: Int)? {
+        guard db != nil else { return nil }
+        var out: (Int, Int)?
+        query("SELECT enrich_version, attempts FROM enrichment WHERE item_id=?;", bind: { self.bindText($0, 1, itemID) }) { stmt in
+            out = (Int(sqlite3_column_int64(stmt, 0)), Int(sqlite3_column_int64(stmt, 1)))
         }
-        return n
+        return out
     }
 
     private func reclassifySeriesToAnime(seriesKey: String) {

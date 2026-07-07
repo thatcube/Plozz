@@ -177,6 +177,36 @@ final class ShareEnricherTests: XCTestCase {
         XCTAssertTrue(afterCap.isEmpty, "after the attempt cap a persistent miss is settled")
     }
 
+    func testRetryBudgetResetsOnVersionBump() async {
+        // The attempt budget is PER version: after exhausting retries at v1, a future
+        // ShareEnricher.version bump must grant the full budget again (not settle the
+        // item after a single v2 attempt).
+        let store = ShareCatalogStore(accountKey: "a", directory: tempDir())
+        await store.upsert([movie("Movies/A (2000).mkv", "A", 2000)], scanID: 1)
+        let id = ShareCatalogID.file("Movies/A (2000).mkv")
+
+        // Exhaust the budget at version 1 with empty (unusable) results.
+        for _ in 0..<ShareCatalogStore.maxEnrichAttempts {
+            await store.saveEnrichment(itemID: id, .init(), version: 1)
+        }
+        let pendingV1 = await store.pendingEnrichment(version: 1, limit: 10)
+        XCTAssertTrue(pendingV1.isEmpty, "settled as a miss at v1 after the cap")
+
+        // A single empty write at the NEW version must NOT settle it — the budget
+        // reset, so it stays pending for the remaining v2 retries.
+        await store.saveEnrichment(itemID: id, .init(), version: 2)
+        let pendingV2First = await store.pendingEnrichment(version: 2, limit: 10)
+        XCTAssertEqual(pendingV2First.count, 1,
+                       "a version bump resets the retry budget (one v2 attempt doesn't settle it)")
+
+        // And it still eventually settles at v2 after its own full budget.
+        for _ in 1..<ShareCatalogStore.maxEnrichAttempts {
+            await store.saveEnrichment(itemID: id, .init(), version: 2)
+        }
+        let pendingV2After = await store.pendingEnrichment(version: 2, limit: 10)
+        XCTAssertTrue(pendingV2After.isEmpty, "settles at v2 after v2's own cap")
+    }
+
     func testUsableResultRecoversAPreviouslyMissedItem() async {
         // A miss that later resolves to real data must recover (not stay blank).
         let store = ShareCatalogStore(accountKey: "a", directory: tempDir())

@@ -46,17 +46,20 @@ public struct ShareScanState: Sendable, Equatable {
 
     /// The optional trailing progress detail (e.g. "1,234 items" while scanning,
     /// "142 of 900" while enriching), or `nil` when there's no count worth showing.
-    /// During enrichment the `done` value is left-padded (with figure spaces, which
-    /// share the tabular-digit width) to the width of `total`, so — paired with a
-    /// monospaced-digit font — the string stays a **fixed width** for the whole
-    /// pass and the pill never jitters as the counter flies up.
+    /// During enrichment the `done`/`total` counters are rendered WITHOUT grouping
+    /// separators and `done` is left-padded (with figure spaces, which share the
+    /// tabular-digit width) to the width of `total` — so, paired with a
+    /// monospaced-digit font, the string is a **fixed width** for the whole pass and
+    /// the pill can't jitter as the counter flies. (Grouping commas are deliberately
+    /// dropped here: a comma is NOT tabular under `monospacedDigit`, so "999 of 1,000"
+    /// and "1,000 of 1,000" would differ in width at the thousands boundary.)
     public var progressDetail: String? {
         if isScanning {
             return itemsFound > 0 ? "\(Self.decimal(itemsFound)) items" : nil
         }
         if isEnriching, enrichTotal > 0 {
-            let totalStr = Self.decimal(enrichTotal)
-            let doneStr = Self.decimal(min(enrichDone, enrichTotal))
+            let totalStr = String(enrichTotal)
+            let doneStr = String(min(enrichDone, enrichTotal))
             let pad = String(repeating: "\u{2007}", count: max(0, totalStr.count - doneStr.count))
             return "\(pad)\(doneStr) of \(totalStr)"
         }

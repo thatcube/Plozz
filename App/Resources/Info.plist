@@ -65,6 +65,8 @@
 	<string>$(TMDB_BEARER_TOKEN)</string>
 	<key>TMDBProxyBaseURL</key>
 	<string>$(TMDB_PROXY_BASE_URL)</string>
+	<key>TVDBAPIKey</key>
+	<string>$(TVDB_API_KEY)</string>
 	<key>TraktClientID</key>
 	<string>$(TRAKT_CLIENT_ID)</string>
 	<key>TraktClientSecret</key>

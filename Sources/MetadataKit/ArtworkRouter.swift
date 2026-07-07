@@ -26,6 +26,8 @@ public actor ArtworkRouter {
     private let deezer = DeezerMusicProvider()
     private let musicBrainz = MusicBrainzArtworkProvider()
     private var tmdb: TMDbMetadataProvider
+    /// Bundled TheTVDB backdrop tier (hero art only). Nil-safe when unconfigured.
+    private let tvdb = TVDBArtworkProvider(client: TVDBClient(config: .resolved()))
     private let cache: MetadataDiskCache
 
     public init(
@@ -82,22 +84,22 @@ public actor ArtworkRouter {
             }
         case .tvShow:
             switch kind {
-            case .hero: return [tmdb, wikidata, wikipedia]
-            case .poster: return [tmdb, tvmaze, wikidata, wikipedia]
+            case .hero: return [tvdb, tmdb, wikidata, wikipedia]
+            case .poster: return [tmdb, tvmaze, tvdb, wikidata, wikipedia]
             case .thumbnail: return [tmdb, tvmaze]
             case .logo: return [tmdb, wikidata, wikipedia]
             }
         case .movie:
             switch kind {
-            case .hero: return [tmdb, wikidata, wikipedia]
-            case .poster: return [tmdb, wikidata, wikipedia]
+            case .hero: return [tvdb, tmdb, wikidata, wikipedia]
+            case .poster: return [tmdb, tvdb, wikidata, wikipedia]
             case .thumbnail: return [tmdb]
             case .logo: return [tmdb, wikidata, wikipedia]
             }
         case .unknown:
             switch kind {
-            case .hero: return [tmdb, wikidata, wikipedia]
-            case .poster: return [tmdb, wikidata, wikipedia]
+            case .hero: return [tvdb, tmdb, wikidata, wikipedia]
+            case .poster: return [tmdb, tvdb, wikidata, wikipedia]
             case .thumbnail: return [tmdb]
             case .logo: return [tmdb, wikidata, wikipedia]
             }

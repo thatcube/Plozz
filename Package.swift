@@ -152,6 +152,7 @@ let package = Package(
             dependencies: [
                 "CoreModels",
                 "CoreNetworking",
+                "MetadataKit",
                 .product(name: "SMBClient", package: "SMBClient"),
             ]
         ),

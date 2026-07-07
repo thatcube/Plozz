@@ -48,12 +48,50 @@ public struct ShareProvider: MediaProvider {
 
     // MARK: Library browsing
 
+    /// Shared, process-wide catalog for this share (SQLite index built by a
+    /// background `ShareScanner`). Fetched from the registry rather than stored on
+    /// the provider, which SwiftUI rebuilds constantly. Accessing it also kicks a
+    /// throttled background scan.
+    private var catalog: ShareCatalogStore {
+        get async {
+            await ShareCatalogRegistry.shared.store(
+                accountKey: session.server.id,
+                displayName: session.server.name,
+                host: host, port: port, share: share,
+                user: session.userName, password: session.accessToken
+            )
+        }
+    }
+
+    /// Force a fresh scan + enrichment of this share now (Settings "Scan now").
+    /// Touches `catalog` first so the store/scanner/enricher are registered even if
+    /// Home never queried this share yet, then forces a scan bypassing the throttle.
+    public func rescan() async {
+        _ = await catalog
+        await ShareCatalogRegistry.shared.rescan(accountKey: session.server.id)
+    }
+
     public func libraries() async throws -> [MediaLibrary] {
-        // Home aggregation calls this at launch, so it must be instant — no
-        // network. A share exposes exactly one browsable "library": its root
-        // folder. The actual directory listing happens lazily the first time the
-        // user opens the row (see `items(in:)` / `children(of:)`).
-        await store.libraries()
+        // Home aggregation calls this at launch, so it must be instant — SQLite
+        // reads only (no network) plus a fire-and-forget scan kick. Indexed
+        // Movies / TV Shows / Anime libraries appear ONLY once the scan has found
+        // content for them (no empty rows on a fresh share); the raw file-tree
+        // library (named after the share) is always present and browsed live.
+        let catalog = await catalog
+        let counts = await catalog.libraryCounts()
+        var result: [MediaLibrary] = []
+        if counts.movies > 0 {
+            result.append(MediaLibrary(id: ShareCatalogID.moviesLibrary, title: "Movies", kind: .movie))
+        }
+        if counts.tvSeries > 0 {
+            result.append(MediaLibrary(id: ShareCatalogID.tvLibrary, title: "TV Shows", kind: .series))
+        }
+        if counts.animeSeries > 0 {
+            result.append(MediaLibrary(id: ShareCatalogID.animeLibrary, title: "Anime", kind: .series))
+        }
+        // The raw browsable file tree, named after the share (not "Files").
+        result.append(contentsOf: await store.libraries())
+        return result
     }
 
     public func continueWatching(limit: Int) async throws -> [MediaItem] {
@@ -73,12 +111,22 @@ public struct ShareProvider: MediaProvider {
     }
 
     public func latest(limit: Int) async throws -> [MediaItem] {
-        // Home-path method — must NOT touch the network (would block Home). A
-        // "recently added" row from shares comes in a later phase.
-        []
+        // Recently Added, served from the catalog by first-discovery date — no
+        // network, safe on the Home hot path. Empty until the first scan populates.
+        let items = await catalog.latest(limit: limit)
+        return await stampWatchState(items)
     }
 
     public func item(id: String) async throws -> MediaItem {
+        // Indexed items (movies/series/seasons/episodes) resolve from the catalog;
+        // raw file-tree ids (`share:root`, `d:`) fall back to the live browser.
+        if let indexed = await catalog.item(id: id) {
+            // A user just opened this — fast-track its enrichment ahead of the
+            // background backlog so its hero/poster/overview persist promptly. Fire-
+            // and-forget (no added latency); a no-op once the item is enriched.
+            await ShareCatalogRegistry.shared.enrichItem(accountKey: session.server.id, itemID: id)
+            return await stampWatchState(indexed)
+        }
         guard let item = await store.item(id: id) else {
             throw AppError.unknown("Item not found on share: \(id)")
         }
@@ -86,13 +134,43 @@ public struct ShareProvider: MediaProvider {
     }
 
     public func children(of itemID: String) async throws -> [MediaItem] {
-        // A folder's children are just that directory's listing.
+        // Series → seasons, season → episodes (from the catalog); a raw folder's
+        // children are that directory's live listing.
+        if ShareCatalogID.isSeries(itemID), let key = ShareCatalogID.seriesKey(forSeriesID: itemID) {
+            return await stampWatchState(await catalog.seasons(seriesKey: key))
+        }
+        if let (key, season) = ShareCatalogID.seasonComponents(forSeasonID: itemID) {
+            return await stampWatchState(await catalog.episodes(seriesKey: key, season: season))
+        }
         let entries = try await store.entries(forContainerID: itemID)
         return await stampWatchState(entries)
     }
 
     public func items(in containerID: String, kind: MediaItemKind, page: PageRequest) async throws -> MediaPage {
-        // Browsing the root library (or any folder) lists exactly that directory.
+        // Indexed library grids page from the catalog; series/season containers are
+        // small (delegate to `children`); the raw file tree lists the directory.
+        if let library = ShareCatalogID.catalogLibrary(forID: containerID) {
+            let catalog = await catalog
+            let items: [MediaItem]
+            switch library {
+            case .movies:
+                items = await catalog.movies(offset: page.startIndex, limit: page.limit)
+            case .tv, .anime:
+                items = await catalog.series(in: library, offset: page.startIndex, limit: page.limit)
+            }
+            let stamped = await stampWatchState(items)
+            // A short page means the end; otherwise report an open-ended total so
+            // the grid keeps paging (no cheap exact total available here).
+            let total = page.startIndex + stamped.count + (stamped.count < page.limit ? 0 : page.limit)
+            return MediaPage(items: stamped, startIndex: page.startIndex, totalCount: total)
+        }
+        if ShareCatalogID.isSeries(containerID) || ShareCatalogID.isSeason(containerID) {
+            let all = try await children(of: containerID)
+            let start = min(page.startIndex, all.count)
+            let end = min(start + page.limit, all.count)
+            return MediaPage(items: Array(all[start..<end]), startIndex: start, totalCount: all.count)
+        }
+        // Browsing the raw file tree lists exactly that directory.
         let all = try await store.entries(forContainerID: containerID)
         let start = min(page.startIndex, all.count)
         let end = min(start + page.limit, all.count)
@@ -103,7 +181,8 @@ public struct ShareProvider: MediaProvider {
     // MARK: Search
 
     public func search(query: String, limit: Int) async throws -> [MediaItem] {
-        try await store.search(query: query, limit: limit)
+        // Indexed search over the catalog; empty until the first scan populates.
+        await stampWatchState(await catalog.search(query: query, limit: limit))
     }
 
     // MARK: Playback
@@ -152,7 +231,14 @@ public struct ShareProvider: MediaProvider {
     /// Overlay saved resume/played state onto a freshly-built item so the detail
     /// Play button shows "Resume" and cards show a checkmark / progress.
     private func stampWatchState(_ item: MediaItem) async -> MediaItem {
-        guard item.kind != .folder, item.kind != .collection else { return item }
+        // Only leaf playables carry watch state; containers (folders, series,
+        // seasons, collections) have no resume/played record, so skip the lookup.
+        switch item.kind {
+        case .folder, .collection, .series, .season:
+            return item
+        default:
+            break
+        }
         let record = await watchStore.record(for: item.id)
         return Self.stamped(item, with: record)
     }
@@ -248,6 +334,12 @@ extension ShareProvider: ProviderTeardown {
     public func teardown() async {
         await store.close()
     }
+}
+
+extension ShareProvider: CapabilityReporting {
+    /// A media share is video-only: no music library, no server-backed remote
+    /// subtitle search. Advertised explicitly so capability-gated UI is correct.
+    public var capabilities: ProviderCapability { .video }
 }
 
 extension ShareProvider: WatchStateProviding {

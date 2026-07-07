@@ -21,6 +21,10 @@ the rationale for "keyless per-IP scales infinitely, shared-key doesn't".
   - **AniList** (GraphQL) — anime hero / poster / score.
   - **Kitsu** (JSON:API) — anime fallback.
   - **TVmaze** — western-TV per-episode stills + posters.
+  - **TheTVDB** (`TVDBArtworkProvider` / `TVDBClient`) — bundled keyed tier
+    for movie/TV posters + wide backdrops + ids/overview (the one bundled
+    source of movie posters). Attribution required — see the app's
+    Settings → Attributions & Licenses and the repo README.
   - **Wikidata / Wikipedia** — cross-domain image lookups, used as last-mile
     backstop and to resolve canonical ids.
   - **Music artwork** (`MusicArtworkProviders`) — Deezer artist

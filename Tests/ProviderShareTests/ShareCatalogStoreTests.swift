@@ -1,0 +1,185 @@
+import XCTest
+@testable import ProviderShare
+import CoreModels
+
+/// Coverage for the SQLite-backed share catalog — the index that makes a share's
+/// Recently Added / Search / Movies-TV-Anime libraries work without a live SMB
+/// walk. These are the on-device questions a server never had to answer:
+/// does "date added" stay first-discovery across re-scans, does the index survive
+/// a relaunch, and do the id shapes resolve back to rich items?
+final class ShareCatalogStoreTests: XCTestCase {
+    private func tempDir() -> URL {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("plozz-share-catalog-tests-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    private func movie(_ path: String, title: String, year: Int?) -> CatalogAsset {
+        CatalogAsset(relPath: path, basename: (path as NSString).lastPathComponent, size: 1_000,
+                     modifiedAt: Date(), kind: .movie, library: .movies,
+                     title: title, year: year, seriesTitle: nil, seriesKey: nil, season: nil, episode: nil)
+    }
+
+    private func episode(_ path: String, series: String, season: Int, episode: Int, library: CatalogLibrary = .tv) -> CatalogAsset {
+        CatalogAsset(relPath: path, basename: (path as NSString).lastPathComponent, size: 1_000,
+                     modifiedAt: Date(), kind: .episode, library: library,
+                     title: "Episode \(episode)", year: nil,
+                     seriesTitle: series, seriesKey: ShareCatalogID.seriesKey(fromTitle: series),
+                     season: season, episode: episode)
+    }
+
+    func testEmptyUntilPopulated() async {
+        let store = ShareCatalogStore(accountKey: "a", directory: tempDir())
+        let empty = await store.isEmpty()
+        XCTAssertTrue(empty)
+        let counts = await store.libraryCounts()
+        XCTAssertEqual(counts.movies, 0)
+        XCTAssertEqual(counts.tvSeries, 0)
+        XCTAssertEqual(counts.animeSeries, 0)
+        let latest = await store.latest(limit: 10)
+        XCTAssertTrue(latest.isEmpty)
+    }
+
+    func testLatestOrdersByFirstSeenDescending() async {
+        let store = ShareCatalogStore(accountKey: "a", directory: tempDir())
+        let t1 = Date(timeIntervalSince1970: 1_000)
+        let t2 = Date(timeIntervalSince1970: 2_000)
+        await store.upsert([movie("Movies/A (2000).mkv", title: "A", year: 2000)], scanID: 1, now: t1)
+        await store.upsert([movie("Movies/B (2001).mkv", title: "B", year: 2001)], scanID: 1, now: t2)
+        let latest = await store.latest(limit: 10)
+        XCTAssertEqual(latest.map(\.title), ["B", "A"], "newest first-seen should lead Recently Added")
+    }
+
+    func testFirstSeenPreservedAcrossReUpsert() async {
+        let store = ShareCatalogStore(accountKey: "a", directory: tempDir())
+        let t1 = Date(timeIntervalSince1970: 1_000)
+        let t2 = Date(timeIntervalSince1970: 2_000)
+        let t3 = Date(timeIntervalSince1970: 3_000)
+        await store.upsert([movie("Movies/A (2000).mkv", title: "A", year: 2000)], scanID: 1, now: t1)
+        await store.upsert([movie("Movies/B (2001).mkv", title: "B", year: 2001)], scanID: 1, now: t2)
+        // Re-scan sees A again at t3 — its first_seen must NOT jump to t3.
+        await store.upsert([movie("Movies/A (2000).mkv", title: "A", year: 2000)], scanID: 2, now: t3)
+        let latest = await store.latest(limit: 10)
+        XCTAssertEqual(latest.map(\.title), ["B", "A"], "a re-seen file keeps its original date added")
+    }
+
+    func testSeriesGroupingSeasonsAndEpisodes() async {
+        let store = ShareCatalogStore(accountKey: "a", directory: tempDir())
+        let key = ShareCatalogID.seriesKey(fromTitle: "Breaking Bad")
+        await store.upsert([
+            episode("TV/Breaking Bad/S01/E01.mkv", series: "Breaking Bad", season: 1, episode: 1),
+            episode("TV/Breaking Bad/S01/E02.mkv", series: "Breaking Bad", season: 1, episode: 2),
+            episode("TV/Breaking Bad/S02/E01.mkv", series: "Breaking Bad", season: 2, episode: 1),
+        ], scanID: 1)
+
+        let series = await store.series(in: .tv, offset: 0, limit: 10)
+        XCTAssertEqual(series.count, 1)
+        XCTAssertEqual(series.first?.kind, .series)
+        XCTAssertEqual(series.first?.id, ShareCatalogID.series(key))
+
+        let seasons = await store.seasons(seriesKey: key)
+        XCTAssertEqual(seasons.map(\.seasonNumber), [1, 2])
+
+        let s1 = await store.episodes(seriesKey: key, season: 1)
+        XCTAssertEqual(s1.map(\.episodeNumber), [1, 2], "episodes in episode order")
+        XCTAssertTrue(s1.allSatisfy { $0.kind == .episode && $0.parentTitle == "Breaking Bad" })
+    }
+
+    func testAnimeAndTvLibrariesAreSeparate() async {
+        let store = ShareCatalogStore(accountKey: "a", directory: tempDir())
+        await store.upsert([
+            episode("TV/Show/E01.mkv", series: "Some Show", season: 1, episode: 1, library: .tv),
+            episode("Anime/Naruto/E01.mkv", series: "Naruto", season: 1, episode: 1, library: .anime),
+        ], scanID: 1)
+        let counts = await store.libraryCounts()
+        XCTAssertEqual(counts.tvSeries, 1)
+        XCTAssertEqual(counts.animeSeries, 1)
+        let tv = await store.series(in: .tv, offset: 0, limit: 10)
+        let anime = await store.series(in: .anime, offset: 0, limit: 10)
+        XCTAssertEqual(tv.map(\.title), ["Some Show"])
+        XCTAssertEqual(anime.map(\.title), ["Naruto"])
+    }
+
+    func testSearchFindsMoviesAndSeries() async {
+        let store = ShareCatalogStore(accountKey: "a", directory: tempDir())
+        await store.upsert([
+            movie("Movies/The Matrix (1999).mkv", title: "The Matrix", year: 1999),
+            episode("TV/Matrix Reloaded Show/E01.mkv", series: "Matrix Reloaded Show", season: 1, episode: 1),
+            movie("Movies/Unrelated (2001).mkv", title: "Unrelated", year: 2001),
+        ], scanID: 1)
+        let hits = await store.search(query: "matrix", limit: 20)
+        let titles = Set(hits.map(\.title))
+        XCTAssertTrue(titles.contains("The Matrix"))
+        XCTAssertTrue(titles.contains("Matrix Reloaded Show"))
+        XCTAssertFalse(titles.contains("Unrelated"))
+    }
+
+    func testItemResolvesEveryIdShape() async {
+        let store = ShareCatalogStore(accountKey: "a", directory: tempDir())
+        let key = ShareCatalogID.seriesKey(fromTitle: "The Show")
+        await store.upsert([
+            movie("Movies/Film (2020).mkv", title: "Film", year: 2020),
+            episode("TV/The Show/S01/E03.mkv", series: "The Show", season: 1, episode: 3),
+        ], scanID: 1)
+
+        let movieItem = await store.item(id: ShareCatalogID.file("Movies/Film (2020).mkv"))
+        XCTAssertEqual(movieItem?.kind, .movie)
+        XCTAssertEqual(movieItem?.productionYear, 2020)
+
+        let seriesItem = await store.item(id: ShareCatalogID.series(key))
+        XCTAssertEqual(seriesItem?.kind, .series)
+        XCTAssertEqual(seriesItem?.title, "The Show")
+
+        let seasonItem = await store.item(id: ShareCatalogID.season(key, 1))
+        XCTAssertEqual(seasonItem?.kind, .season)
+        XCTAssertEqual(seasonItem?.seasonNumber, 1)
+
+        let episodeItem = await store.item(id: ShareCatalogID.file("TV/The Show/S01/E03.mkv"))
+        XCTAssertEqual(episodeItem?.kind, .episode)
+        XCTAssertEqual(episodeItem?.episodeNumber, 3)
+        XCTAssertEqual(episodeItem?.seriesID, ShareCatalogID.series(key))
+
+        let unknown = await store.item(id: "share:root")
+        XCTAssertNil(unknown, "raw file-tree ids resolve via the browser, not the catalog")
+    }
+
+    func testPruneRemovesAssetsNotSeenInLatestScan() async {
+        let store = ShareCatalogStore(accountKey: "a", directory: tempDir())
+        await store.upsert([
+            movie("Movies/Keep (2000).mkv", title: "Keep", year: 2000),
+            movie("Movies/Gone (2001).mkv", title: "Gone", year: 2001),
+        ], scanID: 1)
+        // Next full scan only re-saw "Keep".
+        await store.upsert([movie("Movies/Keep (2000).mkv", title: "Keep", year: 2000)], scanID: 2)
+        await store.pruneNotSeen(inScan: 2)
+        let movies = await store.movies(offset: 0, limit: 10)
+        XCTAssertEqual(movies.map(\.title), ["Keep"])
+    }
+
+    func testCatalogSurvivesRelaunch() async {
+        let dir = tempDir()
+        let live = ShareCatalogStore(accountKey: "acct", directory: dir)
+        await live.upsert([movie("Movies/Persisted (2010).mkv", title: "Persisted", year: 2010)], scanID: 1)
+
+        // Fresh store on the same dir == a relaunch (only the DB file remains).
+        let reopened = ShareCatalogStore(accountKey: "acct", directory: dir)
+        let movies = await reopened.movies(offset: 0, limit: 10)
+        XCTAssertEqual(movies.map(\.title), ["Persisted"])
+    }
+
+    func testSeasonIdRoundTripsWithColonInKey() {
+        // seriesKey never contains a colon, but guard the decoder anyway.
+        let key = "breaking-bad"
+        let id = ShareCatalogID.season(key, 3)
+        let decoded = ShareCatalogID.seasonComponents(forSeasonID: id)
+        XCTAssertEqual(decoded?.seriesKey, key)
+        XCTAssertEqual(decoded?.season, 3)
+    }
+
+    func testSeriesKeyNormalizesPunctuationAndCase() {
+        XCTAssertEqual(ShareCatalogID.seriesKey(fromTitle: "Breaking Bad"),
+                       ShareCatalogID.seriesKey(fromTitle: "breaking.bad"))
+        XCTAssertEqual(ShareCatalogID.seriesKey(fromTitle: "Mr. Robot"), "mr-robot")
+    }
+}

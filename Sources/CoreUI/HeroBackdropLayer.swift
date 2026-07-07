@@ -140,28 +140,20 @@ public struct HeroBackdropLayer<Video: View>: View {
         )
     }
 
-    /// Always-keyless placeholder: blows up the item's own poster into a soft
-    /// cinematic wash so a title with only a poster still gets a rich coloured
-    /// hero. Falls back to a neutral fill when there is no poster at all.
-    @ViewBuilder
+    /// Fallback when no real wide backdrop exists. We deliberately do **not** blow
+    /// the poster up into a blurred wash — the hero is never blurred. A real
+    /// backdrop is resolved first through the async fallback chain (which now
+    /// includes the bundled TheTVDB fanart tier); this clean, mode-appropriate
+    /// ambient gradient shows only when a title genuinely has no landscape art.
     private var placeholder: some View {
-        if let poster = placeholderPosterURL {
-            AsyncImage(url: poster) { phase in
-                switch phase {
-                case .success(let image):
-                    image
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .blur(radius: 60)
-                        .scaleEffect(1.2)
-                        .overlay(Color.black.opacity(0.35))
-                default:
-                    Rectangle().fill(.tertiary)
-                }
-            }
-        } else {
-            Rectangle().fill(.tertiary)
-        }
+        LinearGradient(
+            colors: [
+                scrimTone.opacity(0.28),
+                scrimTone.opacity(0.10)
+            ],
+            startPoint: .top,
+            endPoint: .bottom
+        )
     }
 }
 

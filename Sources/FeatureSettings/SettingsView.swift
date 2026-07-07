@@ -97,6 +97,7 @@ public struct SettingsView: View {
     private let onDeleteProfile: (String) -> Void
     private let onAddAccount: () -> Void
     private let onRemoveAccount: (Account) -> Void
+    private let onRescanShare: (String) -> Void
     private let onSignOutAll: () -> Void
     private let onResetToFirstRun: () -> Void
     private let plexHomeUsersFetcher: (String) async -> [PlexHomeUser]
@@ -142,6 +143,7 @@ public struct SettingsView: View {
         onDeleteProfile: @escaping (String) -> Void,
         onAddAccount: @escaping () -> Void,
         onRemoveAccount: @escaping (Account) -> Void,
+        onRescanShare: @escaping (String) -> Void,
         onSignOutAll: @escaping () -> Void,
         onResetToFirstRun: @escaping () -> Void,
         plexHomeUsersFetcher: @escaping (String) async -> [PlexHomeUser],
@@ -186,6 +188,7 @@ public struct SettingsView: View {
         self.onDeleteProfile = onDeleteProfile
         self.onAddAccount = onAddAccount
         self.onRemoveAccount = onRemoveAccount
+        self.onRescanShare = onRescanShare
         self.onSignOutAll = onSignOutAll
         self.onResetToFirstRun = onResetToFirstRun
         self.plexHomeUsersFetcher = plexHomeUsersFetcher
@@ -217,6 +220,7 @@ public struct SettingsView: View {
             onDeleteProfile: onDeleteProfile,
             onAddAccount: onAddAccount,
             onRemoveAccount: onRemoveAccount,
+            onRescanShare: onRescanShare,
             onSignOutAll: onSignOutAll,
             plexHomeUsersFetcher: plexHomeUsersFetcher,
             onSelectPlexHomeUser: onSelectPlexHomeUser

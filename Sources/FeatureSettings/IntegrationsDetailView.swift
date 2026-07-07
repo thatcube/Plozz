@@ -558,6 +558,11 @@ struct AttributionsDetailView: View {
                     licenses: [.api()]
                 )
                 attribution(
+                    "TheTVDB",
+                    "Metadata and artwork are provided by TheTVDB. Please consider adding missing information or subscribing at thetvdb.com. Plozz uses the TheTVDB API but is not endorsed or certified by TheTVDB.",
+                    licenses: [.api()]
+                )
+                attribution(
                     "OMDb & AniList",
                     "Additional ratings are sourced from the OMDb API (omdbapi.com) and AniList (anilist.co). Neither endorses or is affiliated with Plozz.",
                     licenses: [.api()]

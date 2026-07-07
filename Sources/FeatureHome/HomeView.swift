@@ -791,7 +791,7 @@ private struct LibraryCardView: View {
                 ProgressView()
                     .progressViewStyle(.circular)
                     .controlSize(.large)
-                    .scaleEffect(1.5)
+                    .scaleEffect(1.1)
                     .tint(palette.secondaryText.opacity(0.7))
                     .transition(.opacity)
                     .accessibilityHidden(true)

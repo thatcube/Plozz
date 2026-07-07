@@ -147,9 +147,16 @@ struct ServerDetailView: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
                 HStack(spacing: 12) {
-                    if state?.isBusy == true {
-                        ProgressView().progressViewStyle(.circular).controlSize(.small)
-                        Text(state?.isScanning == true ? "Scanning…" : "Finding artwork & details…")
+                    if let state, state.isBusy {
+                        // Determinate ring while enriching (N of M known); spinner
+                        // while scanning (total unknown as it walks).
+                        if let fraction = state.enrichFraction {
+                            ProgressView(value: fraction).progressViewStyle(.circular).controlSize(.small)
+                        } else {
+                            ProgressView().progressViewStyle(.circular).controlSize(.small)
+                        }
+                        Text(Self.busyStatusText(state))
+                            .monospacedDigit()
                             .foregroundStyle(.secondary)
                     } else {
                         Image(systemName: "checkmark.circle")
@@ -171,6 +178,14 @@ struct ServerDetailView: View {
                 }
             }
         }
+    }
+
+    /// The live busy line: phase + any progress count, e.g. "Scanning · 1,234 items"
+    /// or "Finding artwork & details · 142 of 900".
+    private static func busyStatusText(_ state: ShareScanState) -> String {
+        let phase = state.isScanning ? "Scanning" : "Finding artwork & details"
+        if let detail = state.progressDetail { return "\(phase) · \(detail)" }
+        return "\(phase)…"
     }
 
     /// "Last scanned just now / 5m ago / …" or a first-run hint.

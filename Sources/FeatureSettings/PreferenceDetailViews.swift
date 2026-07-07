@@ -115,7 +115,7 @@ struct AppearanceDetailView: View {
                 SettingsSplitRow(
                     id: "watch-indicator",
                     title: "Watched Indicator",
-                    description: "Mark what you've finished with a check, or flag what you haven't started with a corner. In-progress items always show a progress bar.",
+                    description: "A check badge on watched items, or a corner flag on unwatched ones. In-progress items always show a progress bar.",
                 ) {
                     CompactWatchIndicatorPicker(selection: $watchStatusIndicator.indicator)
                 }

@@ -499,11 +499,16 @@ public struct PosterCardView: View {
         return percentage > 0.01 && percentage < 0.99
     }
 
-    /// Whether playback has *started* at all — the progress bar is showing, or a
-    /// resume position is saved. Used to keep the "unwatched" corner flag off any
-    /// item the viewer has already dipped into.
+    /// Whether playback has *started* at all — used to keep the "unwatched" corner
+    /// flag off any item the viewer has already dipped into. Intentionally broader
+    /// than `showsProgressBar`: it treats *any* positive progress as started (not
+    /// just the `(0.01, 0.99)` band the bar draws in) and also honours a saved
+    /// resume position, matching how the rest of the app defines "in progress"
+    /// (`SeriesResume.isInProgress`). So a barely-started or nearly-finished item
+    /// never wrongly shows an "unwatched" flag even if a provider reports progress
+    /// without a resume position.
     private var hasStartedPlayback: Bool {
-        if showsProgressBar { return true }
+        if let percentage = item.playedPercentage, percentage > 0 { return true }
         if let resume = item.resumePosition, resume > 0 { return true }
         return false
     }
@@ -556,6 +561,14 @@ public struct PosterCardView: View {
         if !item.isPlayed && !hasStartedPlayback && !hideThumbnail {
             TopTrailingCornerFlag()
                 .fill(ThemePalette.brandBlue)
+                // A very soft, wide dark shadow bleeding from the flag's diagonal
+                // edge into the poster — the same lift the in-progress bar uses,
+                // but broad and low-opacity so it's imperceptible on most posters
+                // and only quietly darkens the seam on bright (blue) artwork. Kept
+                // wide + faint rather than tight + dark so it reads as a gentle
+                // gradient, never a hard border; the card's outer `clipShape` trims
+                // anything past the artwork edges.
+                .shadow(color: .black.opacity(0.28), radius: 8)
                 .overlay(alignment: .topTrailing) {
                     // A fixed dark-blue hairline along the flag's diagonal edge so
                     // the seam always separates the flag from the artwork — even
@@ -563,7 +576,7 @@ public struct PosterCardView: View {
                     // same dark blue in every theme (not theme-derived) for a
                     // consistent edge, and dark enough to hold contrast blue-on-blue.
                     TopTrailingCornerFlagEdge()
-                        .stroke(ThemePalette.unwatchedFlagEdge, lineWidth: 1)
+                        .stroke(Color.black.opacity(0.3), lineWidth: 1)
                 }
                 .frame(width: 48, height: 48)
         }

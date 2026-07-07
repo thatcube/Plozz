@@ -275,6 +275,7 @@ public struct PreviewCard<Swatch: View>: View {
     private let isSelected: Bool
     private let accent: Color
     private let compact: Bool
+    private let swatchHeight: CGFloat?
     private let action: () -> Void
     private let swatch: () -> Swatch
 
@@ -284,6 +285,7 @@ public struct PreviewCard<Swatch: View>: View {
         isSelected: Bool,
         accent: Color,
         compact: Bool = false,
+        swatchHeight: CGFloat? = nil,
         action: @escaping () -> Void,
         @ViewBuilder swatch: @escaping () -> Swatch
     ) {
@@ -292,6 +294,7 @@ public struct PreviewCard<Swatch: View>: View {
         self.isSelected = isSelected
         self.accent = accent
         self.compact = compact
+        self.swatchHeight = swatchHeight
         self.action = action
         self.swatch = swatch
     }
@@ -300,7 +303,7 @@ public struct PreviewCard<Swatch: View>: View {
         Button(action: action) {
             VStack(spacing: compact ? 10 : 18) {
                 swatch()
-                    .frame(height: compact ? 124 : 200)
+                    .frame(height: swatchHeight ?? (compact ? 124 : 200))
 
                 VStack(spacing: compact ? 2 : 6) {
                     Text(title)

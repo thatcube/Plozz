@@ -35,8 +35,8 @@ public enum WatchStatusIndicator: String, CaseIterable, Identifiable, Codable, S
     /// Tiny line shown beneath the picker, updated live as focus moves.
     public var detail: String {
         switch self {
-        case .watched: return "A check marks what you've finished."
-        case .unwatched: return "A corner flags what you haven't started."
+        case .watched: return "Check badge on watched items."
+        case .unwatched: return "Corner flag on unwatched items."
         }
     }
 

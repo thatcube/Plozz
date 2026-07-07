@@ -9,7 +9,6 @@ import CoreModels
 private enum WatchIndicatorPreviewColors {
     static let bgTop = Color(red: 0.17, green: 0.17, blue: 0.19)
     static let bgBottom = Color(red: 0.10, green: 0.10, blue: 0.12)
-    static let titleAccent = ThemePalette.brandBlue
     static let titleSecondary = Color.white.opacity(0.28)
     static let tileBorder = Color.white.opacity(0.12)
     static let progressTrack = Color.white.opacity(0.28)
@@ -48,27 +47,40 @@ private struct WatchIndicatorMini: View {
             let pad = max(10, h * 0.11)
             let titleGap = h * 0.08
             let barH = max(3, h * 0.035)
-            let rowH = h - pad * 2 - barH - titleGap
-            let tileH = max(0, rowH)
-            let tileW = tileH * (2.0 / 3.0)
             let gap = max(6, w * 0.03)
+            // The tile is a 2:3 poster sized to fit BOTH the row's available height
+            // and its available width (three tiles + two gaps). Taking the smaller
+            // of the two keeps the mock row inside the card at any aspect — a short
+            // wide card is height-bound, a tall narrow one is width-bound — so the
+            // taller two-up watch picker never overflows its card.
+            let rowH = max(0, h - pad * 2 - barH - titleGap)
+            let contentW = max(0, w - pad * 2)
+            let widthBoundTileW = max(0, (contentW - gap * 2) / 3)
+            let tileW = min(rowH * (2.0 / 3.0), widthBoundTileW)
+            let tileH = tileW * (3.0 / 2.0)
+            // Exact width of the three-tile poster row; the title bar block is
+            // constrained to this and the whole thing is centred, so the bars'
+            // leading edge lines up with the posters' leading edge.
+            let rowWidth = tileW * 3 + gap * 2
 
             VStack(alignment: .leading, spacing: titleGap) {
-                // Faux title bar.
-                HStack(spacing: w * 0.025) {
-                    Capsule().fill(WatchIndicatorPreviewColors.titleAccent)
-                        .frame(width: w * 0.16, height: barH)
+                // Faux title bar — both bars a muted grey so they read as quiet
+                // placeholder chrome and don't compete with the posters.
+                HStack(spacing: rowWidth * 0.03) {
                     Capsule().fill(WatchIndicatorPreviewColors.titleSecondary)
-                        .frame(width: w * 0.26, height: barH)
+                        .frame(width: rowWidth * 0.30, height: barH)
+                    Capsule().fill(WatchIndicatorPreviewColors.titleSecondary)
+                        .frame(width: rowWidth * 0.46, height: barH)
                 }
-                // Three poster tiles, centred as a group.
+                // Three poster tiles.
                 HStack(spacing: gap) {
                     ForEach(Array(states.enumerated()), id: \.offset) { index, state in
                         posterTile(state: state, artIndex: index, width: tileW, height: tileH)
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .center)
             }
+            .frame(width: rowWidth)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             .padding(pad)
             .frame(width: w, height: h, alignment: .topLeading)
             .background(
@@ -92,6 +104,11 @@ private struct WatchIndicatorMini: View {
                     endPoint: .bottomTrailing
                 )
             )
+            // Dull the mock artwork — same hues, less vibrant — so the posters read
+            // as quiet stand-ins and the corner marks stay the focus. Applied only
+            // to the fill (before the overlays) so the brand-blue flag/check keep
+            // their full saturation.
+            .saturation(0.45)
             .overlay(alignment: .topTrailing) { cornerMark(for: state, tileWidth: width) }
             .overlay(alignment: .bottom) { progressBar(for: state, tileWidth: width, tileHeight: height) }
             .overlay(
@@ -121,9 +138,10 @@ private struct WatchIndicatorMini: View {
             let s = tileWidth * 0.56
             TopTrailingCornerFlag()
                 .fill(ThemePalette.brandBlue)
+                .shadow(color: .black.opacity(0.28), radius: s * 0.16)
                 .overlay(alignment: .topTrailing) {
                     TopTrailingCornerFlagEdge()
-                        .stroke(ThemePalette.unwatchedFlagEdge, lineWidth: 1)
+                        .stroke(Color.black.opacity(0.3), lineWidth: 1)
                 }
                 .frame(width: s, height: s)
         default:

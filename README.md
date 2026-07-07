@@ -54,7 +54,7 @@ app target generated with [XcodeGen](https://github.com/yonaskolb/XcodeGen).
 | [`ProviderJellyfin`](Sources/ProviderJellyfin/README.md) | Jellyfin REST client, DTOs, device profile, and a `MediaProvider` implementation. |
 | [`ProviderPlex`](Sources/ProviderPlex/README.md) | Plex client, DTOs, PIN/auth, connection resolver/selector, and a `MediaProvider` implementation. |
 | [`ProviderTrailers`](Sources/ProviderTrailers/README.md) | Synthetic `MediaProvider` for online (YouTube) trailers, with stream extraction via YouTubeKit. |
-| [`MetadataKit`](Sources/MetadataKit/README.md) | Keyless-first artwork & metadata enrichment (AniList, Kitsu, TVmaze, Deezer, MusicBrainz/CAA, Wikidata/Wikipedia) routed by content type with a persistent on-disk cache. Optional maintainer-hosted TMDb tier. |
+| [`MetadataKit`](Sources/MetadataKit/README.md) | Keyless-first artwork & metadata enrichment (AniList, Kitsu, TVmaze, Deezer, MusicBrainz/CAA, Wikidata/Wikipedia) routed by content type with a persistent on-disk cache. Bundled TheTVDB tier + optional maintainer-hosted TMDb tier. |
 | [`RatingsService`](Sources/RatingsService/README.md) | External ratings enrichment (OMDb optional key, keyless AniList) with on-disk cache. |
 | [`TraktService`](Sources/TraktService/README.md) | Optional Trakt OAuth, scrobbling, and watched/sync helpers. |
 | [`TopShelfKit`](Sources/TopShelfKit/README.md) | Domain-to-snapshot mapping for the Top Shelf extension; writes to the shared App Group container. |
@@ -152,6 +152,13 @@ by any of the services below.
   TMDB. TMDB's marks and logos are trademarks of TMDB.
 
   <a href="https://www.themoviedb.org"><img src="https://www.themoviedb.org/assets/2/v4/logos/v2/blue_short-8e7b30f73a4020692ccca9c88bafe5dcb6f8a62a4c6bc55cd9ba82bb2cd95f6c.svg" alt="The Movie Database (TMDB)" height="24" /></a>
+
+- **[TheTVDB](https://thetvdb.com)** — some metadata and artwork is provided by
+  TheTVDB. Please consider adding missing information or subscribing at
+  [thetvdb.com](https://thetvdb.com). This product uses the TheTVDB API but is
+  not endorsed or certified by TheTVDB.
+
+  <a href="https://thetvdb.com/subscribe"><img src="https://www.thetvdb.com/images/attribution/logo1.png" alt="TheTVDB" height="24" /></a>
 
 - **OMDb API** — optional IMDb ratings enrichment (requires your own OMDb key).
 - **AniList** — keyless community scores for anime titles.

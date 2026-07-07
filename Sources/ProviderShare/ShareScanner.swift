@@ -2,29 +2,42 @@ import Foundation
 import CoreModels
 import CoreNetworking
 
-/// Walks a share's directory tree once and populates a `ShareCatalogStore`, so the
+/// Walks a share's directory tree and populates a `ShareCatalogStore`, so the
 /// share can serve Recently Added / Search / indexed libraries without a live walk.
 ///
-/// **Design (per the media-share master plan):**
-///  * **Foreground, incremental, idempotent.** tvOS has no `BGProcessingTask` and
-///    `BGAppRefreshTask` is far too small/short for a NAS walk, so scanning runs
-///    while the app is foregrounded. A re-walk is safe: upserts preserve
-///    `first_seen_at`, so "date added" stays first-discovery and only genuinely new
-///    files get a fresh timestamp.
-///  * **Bounded memory.** One directory at a time (explicit DFS stack), committing
-///    that directory's files immediately — never the whole tree in memory.
+/// **Design (per the media-share master plan + SMB-perf research):**
+///  * **Parallel, pooled walk.** The `thatcube/SMBClient` library is strictly
+///    serial per connection (one in-flight request per `Connection` semaphore), so
+///    the ONLY way to parallelise is multiple independent connections. The scanner
+///    runs a pool of `concurrency` independent listers (each its own SMB
+///    connection) over a **level-by-level BFS** — media trees are wide at the
+///    show/season/file levels, so a small pool (default 4) yields ~Nx throughput.
+///  * **Foreground, incremental, idempotent.** tvOS has no `BGProcessingTask`, so
+///    scanning runs while foregrounded. A re-walk is safe: upserts preserve
+///    `first_seen_at`, so "date added" stays first-discovery.
+///  * **Bounded memory.** Only the current BFS level's directory listings are held
+///    (a few MB at most); each directory's files are committed immediately.
 ///  * **Cancellation-safe.** On cancel mid-walk it stops without pruning, so a
 ///    partial pass can't wipe still-present content; the next scan resumes coverage.
-///  * **Separate SMB session.** The lister here is backed by a *dedicated*
-///    `SMBShareBrowser` (not the interactive one), so a scan doesn't starve live
-///    folder browsing on the single-connection session.
+///  * **Separate SMB connections.** The pool's listers are dedicated to scanning
+///    (not the interactive browser), so a walk never starves live folder browsing.
 ///
-/// The directory lister is injected so the walk is unit-testable with a fake tree.
+/// The lister *factory* is injected so the walk is unit-testable with a fake tree
+/// (each pool slot gets its own lister; fakes can share a concurrency-safe tree).
 actor ShareScanner {
     typealias Lister = @Sendable (_ relPath: String) async throws -> [SMBShareBrowser.Entry]
 
+    /// One pool slot: an independent directory lister + its teardown. In production
+    /// each wraps a dedicated `SMBShareBrowser` (its own SMB connection); in tests a
+    /// closure over a shared fake tree with a no-op close.
+    struct ScanLister: Sendable {
+        let list: Lister
+        let close: @Sendable () async -> Void
+    }
+
     private let store: ShareCatalogStore
-    private let list: Lister
+    private let makeLister: @Sendable () -> ScanLister
+    private let concurrency: Int
     private let shareID: String
     private let name: String
     private var reporter: ShareScanReporter
@@ -39,12 +52,14 @@ actor ShareScanner {
     ]
 
     init(store: ShareCatalogStore, shareID: String = "", name: String = "",
-         reporter: ShareScanReporter = .noop, list: @escaping Lister) {
+         reporter: ShareScanReporter = .noop, concurrency: Int = 4,
+         makeLister: @escaping @Sendable () -> ScanLister) {
         self.store = store
         self.shareID = shareID
         self.name = name
         self.reporter = reporter
-        self.list = list
+        self.concurrency = max(1, concurrency)
+        self.makeLister = makeLister
     }
 
     /// Re-point progress reporting after creation, so a scanner built before the
@@ -63,52 +78,70 @@ actor ShareScanner {
         await scan()
     }
 
-    /// Full depth-first walk from the share root. Idempotent.
+    /// Full breadth-first walk from the share root, using a pool of independent
+    /// connections to list `concurrency` directories at once. Idempotent.
     func scan() async {
         if isRunning { return }
         isRunning = true
         reporter.scanStarted(shareID, name)
-        // Clears the "scanning" indicator even on cancel/early return, so the
-        // Home banner never hangs.
-        defer { isRunning = false; reporter.scanFinished(shareID) }
+
+        // Pre-build the pool of independent listers (each its own SMB connection),
+        // and ensure they're all torn down when the scan ends (normal or cancel).
+        let listers = (0..<concurrency).map { _ in makeLister() }
+        defer {
+            isRunning = false
+            reporter.scanFinished(shareID)
+            let toClose = listers
+            Task { for lister in toClose { await lister.close() } }
+        }
 
         let scanID = await nextScanID()
-        PlozzLog.boot("share.scan begin scanID=\(scanID)")
+        PlozzLog.boot("share.scan begin scanID=\(scanID) concurrency=\(concurrency)")
 
-        var stack: [String] = [""] // "" == share root
+        var frontier: [String] = [""] // "" == share root
         var dirsWalked = 0
         var filesFound = 0
 
-        while let dir = stack.popLast() {
+        // Level-by-level BFS. Each level's directories are listed in parallel across
+        // the pool; a plain free-list of listers (managed here on the actor) bounds
+        // concurrency to the pool size with no locks/continuations.
+        while !frontier.isEmpty {
             if Task.isCancelled {
                 PlozzLog.boot("share.scan cancelled after \(dirsWalked) dirs, \(filesFound) files — no prune")
                 return
             }
-            let entries: [SMBShareBrowser.Entry]
-            do {
-                entries = try await list(dir)
-            } catch {
-                // A single failed directory shouldn't abort the whole scan; skip it.
-                PlozzLog.boot("share.scan skip dir \(dir.isEmpty ? "<root>" : dir) (\(error))")
-                continue
-            }
-            dirsWalked += 1
+            var nextFrontier: [String] = []
+            var free = listers                    // available connections this level
+            var index = 0                         // next directory in `frontier` to dispatch
 
-            var batch: [CatalogAsset] = []
-            for entry in entries {
-                let childPath = dir.isEmpty ? entry.name : "\(dir)/\(entry.name)"
-                if entry.isDirectory {
-                    if Self.excludedDirs.contains(entry.name.lowercased()) { continue }
-                    stack.append(childPath)
-                } else if ShareMediaParser.isVideoFile(entry.name), !Self.isSampleFile(entry.name) {
-                    batch.append(Self.asset(relPath: childPath, entry: entry))
+            await withTaskGroup(of: DirResult.self) { group in
+                func spawnNext() {
+                    guard index < frontier.count, let lister = free.popLast() else { return }
+                    let dir = frontier[index]
+                    index += 1
+                    group.addTask { await Self.processDirectory(dir, using: lister) }
+                }
+                // Fill the pool.
+                for _ in 0..<listers.count { spawnNext() }
+                // Drain results, committing each directory and launching the next.
+                while let result = await group.next() {
+                    free.append(result.lister)     // return the connection to the pool
+                    dirsWalked += 1
+                    nextFrontier.append(contentsOf: result.subdirs)
+                    if !result.assets.isEmpty {
+                        filesFound += result.assets.count
+                        await store.upsert(result.assets, scanID: scanID)
+                        reporter.scanProgress(shareID, filesFound)
+                    }
+                    if Task.isCancelled { continue }   // stop dispatching; let in-flight drain
+                    spawnNext()
                 }
             }
-            if !batch.isEmpty {
-                filesFound += batch.count
-                await store.upsert(batch, scanID: scanID)
-                reporter.scanProgress(shareID, filesFound)
+            if Task.isCancelled {
+                PlozzLog.boot("share.scan cancelled after \(dirsWalked) dirs, \(filesFound) files — no prune")
+                return
             }
+            frontier = nextFrontier
         }
 
         // Completed a full pass: drop assets no longer on the share, and stamp the
@@ -116,6 +149,39 @@ actor ShareScanner {
         await store.pruneNotSeen(inScan: scanID)
         await store.setMeta("last_full_scan_at", String(Date().timeIntervalSince1970))
         PlozzLog.boot("share.scan done scanID=\(scanID) dirs=\(dirsWalked) files=\(filesFound)")
+    }
+
+    /// Result of listing one directory: the connection it used (returned to the
+    /// pool), the sub-directories discovered, and the playable assets parsed.
+    private struct DirResult: Sendable {
+        let lister: ScanLister
+        let subdirs: [String]
+        let assets: [CatalogAsset]
+    }
+
+    /// List + classify one directory off the actor (pure I/O + parsing, no shared
+    /// state), so the pooled listings run truly in parallel. A per-directory error
+    /// is swallowed to an empty result so one bad folder never aborts the walk.
+    private static func processDirectory(_ dir: String, using lister: ScanLister) async -> DirResult {
+        let entries: [SMBShareBrowser.Entry]
+        do {
+            entries = try await lister.list(dir)
+        } catch {
+            PlozzLog.boot("share.scan skip dir \(dir.isEmpty ? "<root>" : dir) (\(error))")
+            return DirResult(lister: lister, subdirs: [], assets: [])
+        }
+        var subdirs: [String] = []
+        var assets: [CatalogAsset] = []
+        for entry in entries {
+            let childPath = dir.isEmpty ? entry.name : "\(dir)/\(entry.name)"
+            if entry.isDirectory {
+                if excludedDirs.contains(entry.name.lowercased()) { continue }
+                subdirs.append(childPath)
+            } else if ShareMediaParser.isVideoFile(entry.name), !isSampleFile(entry.name) {
+                assets.append(asset(relPath: childPath, entry: entry))
+            }
+        }
+        return DirResult(lister: lister, subdirs: subdirs, assets: assets)
     }
 
     // MARK: - Parse one file into a catalog asset

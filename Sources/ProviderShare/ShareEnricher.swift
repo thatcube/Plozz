@@ -27,7 +27,7 @@ actor ShareEnricher {
     private var isRunning = false
 
     init(store: ShareCatalogStore, resolver: ShareMetadataResolving, shareID: String = "",
-         reporter: ShareScanReporter = .noop, concurrency: Int = 4, maxPerRun: Int = 400) {
+         reporter: ShareScanReporter = .noop, concurrency: Int = 6, maxPerRun: Int = 400) {
         self.store = store
         self.resolver = resolver
         self.shareID = shareID

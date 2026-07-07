@@ -51,11 +51,21 @@ actor ShareCatalogRegistry {
         }()
 
         if scanners[accountKey] == nil {
-            let browser = SMBShareBrowser(host: host, port: port, share: share, user: user, password: password)
-            let scanner = ShareScanner(store: store, shareID: accountKey, name: displayName, reporter: reporter) { relPath in
-                try await browser.listDirectory(relPath)
+            // A factory of independent scan connections: the SMB library is serial
+            // per connection, so parallelism comes from N separate SMBShareBrowsers
+            // (each its own socket), dedicated to scanning so a walk never starves
+            // live browsing. The scanner builds `concurrency` of them per scan.
+            let makeLister: @Sendable () -> ShareScanner.ScanLister = {
+                let browser = SMBShareBrowser(host: host, port: port, share: share, user: user, password: password)
+                return ShareScanner.ScanLister(
+                    list: { try await browser.listDirectory($0) },
+                    close: { await browser.close() }
+                )
             }
-            scanners[accountKey] = scanner
+            scanners[accountKey] = ShareScanner(
+                store: store, shareID: accountKey, name: displayName,
+                reporter: reporter, makeLister: makeLister
+            )
         }
         if enrichers[accountKey] == nil {
             // Use the bundled TheTVDB tier when a key is configured (adds movie ids

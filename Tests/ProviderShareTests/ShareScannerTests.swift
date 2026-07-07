@@ -52,10 +52,18 @@ final class ShareScannerTests: XCTestCase {
         ]
     }
 
+    /// Build a scanner whose pool of listers all read the shared (concurrency-safe)
+    /// fake tree — mirrors production, where each pool slot has its own connection.
+    private func makeScanner(store: ShareCatalogStore, fake: FakeShare, concurrency: Int = 4) -> ShareScanner {
+        ShareScanner(store: store, concurrency: concurrency, makeLister: {
+            ShareScanner.ScanLister(list: { await fake.list($0) }, close: {})
+        })
+    }
+
     func testScanBuildsIndexedLibraries() async {
         let store = ShareCatalogStore(accountKey: "a", directory: tempDir())
         let fake = FakeShare(standardTree())
-        let scanner = ShareScanner(store: store) { await fake.list($0) }
+        let scanner = makeScanner(store: store, fake: fake)
         await scanner.scan()
 
         let counts = await store.libraryCounts()
@@ -71,7 +79,7 @@ final class ShareScannerTests: XCTestCase {
     func testEpisodesGroupUnderSeriesInOrder() async {
         let store = ShareCatalogStore(accountKey: "a", directory: tempDir())
         let fake = FakeShare(standardTree())
-        let scanner = ShareScanner(store: store) { await fake.list($0) }
+        let scanner = makeScanner(store: store, fake: fake)
         await scanner.scan()
 
         let key = ShareCatalogID.seriesKey(fromTitle: "Breaking Bad")
@@ -84,7 +92,7 @@ final class ShareScannerTests: XCTestCase {
     func testAnimeFolderClassifiedAsAnime() async {
         let store = ShareCatalogStore(accountKey: "a", directory: tempDir())
         let fake = FakeShare(standardTree())
-        let scanner = ShareScanner(store: store) { await fake.list($0) }
+        let scanner = makeScanner(store: store, fake: fake)
         await scanner.scan()
 
         let anime = await store.series(in: .anime, offset: 0, limit: 10)
@@ -97,7 +105,7 @@ final class ShareScannerTests: XCTestCase {
     func testExcludedDirsAndSampleFilesSkipped() async {
         let store = ShareCatalogStore(accountKey: "a", directory: tempDir())
         let fake = FakeShare(standardTree())
-        let scanner = ShareScanner(store: store) { await fake.list($0) }
+        let scanner = makeScanner(store: store, fake: fake)
         await scanner.scan()
 
         // The Extras subtree is never entered, so its video isn't indexed.
@@ -111,7 +119,7 @@ final class ShareScannerTests: XCTestCase {
     func testRescanPrunesRemovedContent() async {
         let store = ShareCatalogStore(accountKey: "a", directory: tempDir())
         let fake1 = FakeShare(standardTree())
-        await ShareScanner(store: store) { await fake1.list($0) }.scan()
+        await makeScanner(store: store, fake: fake1).scan()
         let before = await store.libraryCounts()
         XCTAssertEqual(before.movies, 1)
 
@@ -119,7 +127,7 @@ final class ShareScannerTests: XCTestCase {
         var shrunk = standardTree()
         shrunk["Movies"] = []
         let fake2 = FakeShare(shrunk)
-        await ShareScanner(store: store) { await fake2.list($0) }.scan()
+        await makeScanner(store: store, fake: fake2).scan()
 
         let after = await store.libraryCounts()
         XCTAssertEqual(after.movies, 0, "a file removed from the share is pruned on the next full scan")
@@ -129,7 +137,7 @@ final class ShareScannerTests: XCTestCase {
     func testScanIfStaleThrottlesRepeatWalks() async {
         let store = ShareCatalogStore(accountKey: "a", directory: tempDir())
         let fake = FakeShare(standardTree())
-        let scanner = ShareScanner(store: store) { await fake.list($0) }
+        let scanner = makeScanner(store: store, fake: fake)
 
         await scanner.scanIfStale(minInterval: 600)
         let afterFirst = await fake.listCount
@@ -138,5 +146,51 @@ final class ShareScannerTests: XCTestCase {
         await scanner.scanIfStale(minInterval: 600)
         let afterSecond = await fake.listCount
         XCTAssertEqual(afterSecond, afterFirst, "a fresh scan just ran — the second call is throttled to a no-op")
+    }
+
+    /// A wide/deep tree: many shows, each with seasons + episodes, plus many movies.
+    /// Exercises the parallel BFS across multiple levels and pool reuse.
+    private func wideTree(shows: Int, seasonsPerShow: Int, episodesPerSeason: Int, movies: Int) -> [String: [SMBShareBrowser.Entry]] {
+        var tree: [String: [SMBShareBrowser.Entry]] = [:]
+        tree[""] = [dir("Movies"), dir("TV Shows")]
+        tree["Movies"] = (0..<movies).map { file("Movie \($0) (20\(String(format: "%02d", $0 % 100))).mkv") }
+        tree["TV Shows"] = (0..<shows).map { dir("Show \($0)") }
+        for s in 0..<shows {
+            let showPath = "TV Shows/Show \(s)"
+            tree[showPath] = (1...seasonsPerShow).map { dir("Season \(String(format: "%02d", $0))") }
+            for season in 1...seasonsPerShow {
+                let seasonPath = "\(showPath)/Season \(String(format: "%02d", season))"
+                tree[seasonPath] = (1...episodesPerSeason).map {
+                    file("Show \(s) - S\(String(format: "%02d", season))E\(String(format: "%02d", $0)).mkv")
+                }
+            }
+        }
+        return tree
+    }
+
+    func testParallelAndSerialWalksProduceIdenticalCatalogs() async {
+        let tree = wideTree(shows: 8, seasonsPerShow: 3, episodesPerSeason: 10, movies: 25)
+
+        // Serial (concurrency 1)
+        let serialStore = ShareCatalogStore(accountKey: "serial", directory: tempDir())
+        await makeScanner(store: serialStore, fake: FakeShare(tree), concurrency: 1).scan()
+        let serialCounts = await serialStore.libraryCounts()
+
+        // Parallel (concurrency 6)
+        let parallelStore = ShareCatalogStore(accountKey: "parallel", directory: tempDir())
+        await makeScanner(store: parallelStore, fake: FakeShare(tree), concurrency: 6).scan()
+        let parallelCounts = await parallelStore.libraryCounts()
+
+        XCTAssertEqual(serialCounts.movies, 25)
+        XCTAssertEqual(serialCounts.tvSeries, 8)
+        XCTAssertEqual(parallelCounts.movies, serialCounts.movies, "parallel walk must index the same movies")
+        XCTAssertEqual(parallelCounts.tvSeries, serialCounts.tvSeries, "parallel walk must index the same series")
+
+        // Every episode of every show made it in, regardless of concurrency.
+        let key = ShareCatalogID.seriesKey(fromTitle: "Show 3")
+        let s2Serial = await serialStore.episodes(seriesKey: key, season: 2)
+        let s2Parallel = await parallelStore.episodes(seriesKey: key, season: 2)
+        XCTAssertEqual(s2Serial.count, 10)
+        XCTAssertEqual(s2Parallel.map(\.episodeNumber), s2Serial.map(\.episodeNumber))
     }
 }

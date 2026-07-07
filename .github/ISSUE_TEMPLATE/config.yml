@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Join the TestFlight beta
+    url: https://testflight.apple.com/join/EKfReNMu
+    about: Install the latest Plozz beta on your Apple TV.
+  - name: Support Plozz
+    url: https://github.com/sponsors/thatcube
+    about: Plozz is free forever — donations toward upkeep are welcome (and optional).

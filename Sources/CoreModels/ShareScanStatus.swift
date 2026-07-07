@@ -46,12 +46,19 @@ public struct ShareScanState: Sendable, Equatable {
 
     /// The optional trailing progress detail (e.g. "1,234 items" while scanning,
     /// "142 of 900" while enriching), or `nil` when there's no count worth showing.
+    /// During enrichment the `done` value is left-padded (with figure spaces, which
+    /// share the tabular-digit width) to the width of `total`, so — paired with a
+    /// monospaced-digit font — the string stays a **fixed width** for the whole
+    /// pass and the pill never jitters as the counter flies up.
     public var progressDetail: String? {
         if isScanning {
             return itemsFound > 0 ? "\(Self.decimal(itemsFound)) items" : nil
         }
         if isEnriching, enrichTotal > 0 {
-            return "\(Self.decimal(min(enrichDone, enrichTotal))) of \(Self.decimal(enrichTotal))"
+            let totalStr = Self.decimal(enrichTotal)
+            let doneStr = Self.decimal(min(enrichDone, enrichTotal))
+            let pad = String(repeating: "\u{2007}", count: max(0, totalStr.count - doneStr.count))
+            return "\(pad)\(doneStr) of \(totalStr)"
         }
         return nil
     }

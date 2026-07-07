@@ -43,10 +43,30 @@ final class ShareScanStatusModelTests: XCTestCase {
         XCTAssertEqual(state?.enrichTotal, 200)
         XCTAssertEqual(state?.enrichFraction, 0.25)
         XCTAssertEqual(state?.phase, "Updating artwork")
-        XCTAssertEqual(state?.progressDetail, "50 of 200")
+        // `done` is left-padded (figure space) to the width of `total` for a stable
+        // pill width — 50 → "\u{2007}50" against a 3-digit total.
+        XCTAssertEqual(state?.progressDetail, "\u{2007}50 of 200")
 
         model.enrichFinished(shareID: "s1")
         XCTAssertNil(model.state(forShareID: "s1")?.enrichFraction, "finished clears the pass totals")
+    }
+
+    func testEnrichProgressDetailStaysFixedWidthAsCounterClimbs() {
+        // The whole point of the padding: every "N of M" string is the same length
+        // through a pass, so the pill can't jitter as the counter flies.
+        let model = ShareScanStatusModel()
+        model.scanStarted(shareID: "s1", name: "NAS")
+        model.scanFinished(shareID: "s1")
+        model.enrichStarted(shareID: "s1", total: 900)
+
+        var widths = Set<Int>()
+        for done in [1, 9, 42, 137, 900] {
+            model.enrichProgress(shareID: "s1", done: done)
+            if let detail = model.state(forShareID: "s1")?.progressDetail {
+                widths.insert(detail.count)
+            }
+        }
+        XCTAssertEqual(widths.count, 1, "every progress string is the same width for the pass")
     }
 
     func testBusyStatesAndSharedNameLookup() {

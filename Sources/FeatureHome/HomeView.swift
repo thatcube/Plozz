@@ -378,9 +378,14 @@ public struct HomeView: View {
                     if let detail = Self.pillSubtitle(primary, multi: multi) {
                         Text(detail)
                             .font(.caption2)
+                            .monospacedDigit()
                             .foregroundStyle(.secondary)
                     }
                 }
+                // The subtitle is padded to a fixed width per pass, so leading-align
+                // it and let it keep its own width — nothing reflows as the counter
+                // climbs.
+                .fixedSize(horizontal: true, vertical: false)
             }
             .padding(.horizontal, 18)
             .padding(.vertical, 10)
@@ -389,7 +394,12 @@ public struct HomeView: View {
             .allowsHitTesting(false)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(Self.pillAccessibilityLabel(status))
-            .animation(.easeInOut(duration: 0.25), value: primary)
+            // Animate ONLY on structural changes (phase, share, single↔multi), never
+            // on each progress tick — otherwise every count update animates the
+            // pill's width and it slides side to side. With the fixed-width digits
+            // above, count updates don't change the width at all.
+            .animation(.easeInOut(duration: 0.25), value: primary.phase)
+            .animation(.easeInOut(duration: 0.25), value: primary.name)
             .animation(.easeInOut(duration: 0.25), value: multi)
         }
     }

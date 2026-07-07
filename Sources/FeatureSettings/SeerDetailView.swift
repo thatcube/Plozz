@@ -2,6 +2,7 @@
 import SwiftUI
 import CoreModels
 import CoreUI
+import FeatureProfiles
 import SeerService
 
 /// Settings → This Apple TV → Seerr.
@@ -257,8 +258,9 @@ struct SeerDetailView: View {
         let mappedName: String? = profile.seerrUserID.flatMap { id in
             users.first(where: { $0.id == id })?.name ?? profile.seerrUserName
         }
-        return HStack {
-            Label(profile.name, systemImage: "person.crop.circle")
+        return HStack(spacing: 16) {
+            ProfileAvatarView(profile: profile, size: 40)
+            Text(profile.name)
             Spacer()
             Text(mappedName ?? "Admin — unrestricted")
                 .foregroundStyle(mappedName == nil ? .secondary : .primary)

@@ -10,14 +10,15 @@ actor ShareCatalogRegistry {
 
     private var stores: [String: ShareCatalogStore] = [:]
     private var scanners: [String: ShareScanner] = [:]
+    private var enrichers: [String: ShareEnricher] = [:]
     private var scanTasks: [String: Task<Void, Never>] = [:]
 
     private init() {}
 
     /// Return the shared catalog store for a share, creating it (and a dedicated
-    /// scan `SMBShareBrowser` + scanner) on first use, and kicking a throttled
-    /// background scan. The scan browser is separate from the interactive one so a
-    /// walk never starves live folder browsing.
+    /// scan `SMBShareBrowser` + scanner + enricher) on first use, and kicking a
+    /// throttled background scan followed by enrichment. The scan browser is
+    /// separate from the interactive one so a walk never starves live browsing.
     func store(
         accountKey: String,
         host: String,
@@ -39,17 +40,25 @@ actor ShareCatalogRegistry {
             }
             scanners[accountKey] = scanner
         }
+        if enrichers[accountKey] == nil {
+            enrichers[accountKey] = ShareEnricher(store: store, resolver: KeylessShareResolver())
+        }
         ensureScanning(accountKey)
         return store
     }
 
-    /// Spawn a throttled scan attempt unless one is already in flight for this
-    /// share. `ShareScanner.scanIfStale` additionally time-throttles the real work,
-    /// so a rapid burst of Home reloads collapses to at most one running scan.
+    /// Spawn a throttled scan attempt (then an enrichment pass) unless one is
+    /// already in flight for this share. `ShareScanner.scanIfStale` time-throttles
+    /// the real walk, so a rapid burst of Home reloads collapses to one run.
     private func ensureScanning(_ accountKey: String) {
-        guard scanTasks[accountKey] == nil, let scanner = scanners[accountKey] else { return }
+        guard scanTasks[accountKey] == nil,
+              let scanner = scanners[accountKey],
+              let enricher = enrichers[accountKey] else { return }
         scanTasks[accountKey] = Task { [weak self] in
             await scanner.scanIfStale()
+            // Enrich whatever the scan (and prior scans) indexed. Cheap no-op when
+            // nothing is pending.
+            await enricher.enrichPending()
             await self?.clearScanTask(accountKey)
         }
     }

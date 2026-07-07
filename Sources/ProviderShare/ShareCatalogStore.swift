@@ -81,6 +81,24 @@ actor ShareCatalogStore {
         exec("CREATE INDEX IF NOT EXISTS idx_assets_series ON assets(series_key, season, episode);")
         exec("CREATE INDEX IF NOT EXISTS idx_assets_added ON assets(first_seen_at DESC);")
         exec("CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT);")
+        // Per-logical-item enrichment (resolved at scan time by ShareEnricher and
+        // persisted): external ids for merge/ratings/Trakt, plus overview + artwork
+        // URLs so detail/cards are rich without a live lookup. Keyed by the item's
+        // catalog id ("f:<relpath>" for movies, "series:<key>" for series).
+        exec("""
+        CREATE TABLE IF NOT EXISTS enrichment(
+            item_id     TEXT PRIMARY KEY,
+            provider_ids_json TEXT,
+            overview    TEXT,
+            genres_json TEXT,
+            runtime     REAL,
+            poster_url  TEXT,
+            backdrop_url TEXT,
+            logo_url    TEXT,
+            enriched_at REAL NOT NULL,
+            enrich_version INTEGER NOT NULL
+        );
+        """)
     }
 
     // MARK: - Scan write path
@@ -166,6 +184,192 @@ actor ShareCatalogStore {
         return columnText(stmt, 0)
     }
 
+    // MARK: - Enrichment (scan-time metadata resolution, persisted)
+
+    /// One logical item awaiting enrichment (movie or series). `itemID` is the
+    /// catalog id the enrichment row is keyed by; `isAnime` reflects the current
+    /// (best-effort) library classification so the resolver can route.
+    struct PendingEnrichment: Sendable, Equatable {
+        var itemID: String
+        var title: String
+        var year: Int?
+        var isMovie: Bool
+        var isAnime: Bool
+    }
+
+    /// Resolved metadata to persist for one logical item.
+    struct EnrichmentRecord: Sendable, Equatable {
+        var providerIDs: [String: String] = [:]
+        var overview: String?
+        var genres: [String] = []
+        var runtime: TimeInterval?
+        var posterURL: URL?
+        var backdropURL: URL?
+        var logoURL: URL?
+    }
+
+    /// Logical items (movies + series) with no enrichment row at `version` yet,
+    /// oldest-discovered first so a fresh library fills in a sensible order.
+    func pendingEnrichment(version: Int, limit: Int) -> [PendingEnrichment] {
+        ensureOpen()
+        guard db != nil, limit > 0 else { return [] }
+        var out: [PendingEnrichment] = []
+
+        // Movies: one row per movie asset lacking a current-version enrichment.
+        query("""
+        SELECT a.rel_path, a.title, a.year FROM assets a
+        LEFT JOIN enrichment e ON e.item_id = 'f:' || a.rel_path AND e.enrich_version = ?
+        WHERE a.library='movies' AND a.kind='movie' AND e.item_id IS NULL
+        ORDER BY a.first_seen_at LIMIT ?;
+        """, bind: { sqlite3_bind_int64($0, 1, Int64(version)); sqlite3_bind_int64($0, 2, Int64(limit)) }) { stmt in
+            let relPath = self.columnText(stmt, 0) ?? ""
+            out.append(PendingEnrichment(
+                itemID: ShareCatalogID.file(relPath),
+                title: self.columnText(stmt, 1) ?? relPath,
+                year: self.columnOptInt(stmt, 2),
+                isMovie: true, isAnime: false
+            ))
+        }
+
+        // Series: one row per distinct series lacking a current-version enrichment.
+        let remaining = max(0, limit - out.count)
+        if remaining > 0 {
+            query("""
+            SELECT a.series_key, a.series_title, a.library, MAX(a.year) FROM assets a
+            LEFT JOIN enrichment e ON e.item_id = 'series:' || a.series_key AND e.enrich_version = ?
+            WHERE a.kind='episode' AND a.series_key IS NOT NULL AND e.item_id IS NULL
+            GROUP BY a.series_key ORDER BY MIN(a.first_seen_at) LIMIT ?;
+            """, bind: { sqlite3_bind_int64($0, 1, Int64(version)); sqlite3_bind_int64($0, 2, Int64(remaining)) }) { stmt in
+                guard let key = self.columnText(stmt, 0) else { return }
+                let lib = self.columnText(stmt, 2) ?? "tv"
+                out.append(PendingEnrichment(
+                    itemID: ShareCatalogID.series(key),
+                    title: self.columnText(stmt, 1) ?? key,
+                    year: self.columnOptInt(stmt, 3),
+                    isMovie: false, isAnime: lib == "anime"
+                ))
+            }
+        }
+        return out
+    }
+
+    /// Persist one item's enrichment. When strong anime ids (AniList/MAL) resolve
+    /// for a series currently filed under TV, reclassify all its assets to Anime —
+    /// this is the Phase-2 "anime confirmed once ids resolve" correction.
+    func saveEnrichment(itemID: String, _ record: EnrichmentRecord, version: Int, now: Date = Date()) {
+        ensureOpen()
+        guard db != nil else { return }
+        var stmt: OpaquePointer?
+        let sql = """
+        INSERT INTO enrichment
+          (item_id, provider_ids_json, overview, genres_json, runtime, poster_url, backdrop_url, logo_url, enriched_at, enrich_version)
+        VALUES (?,?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(item_id) DO UPDATE SET
+          provider_ids_json=excluded.provider_ids_json, overview=excluded.overview,
+          genres_json=excluded.genres_json, runtime=excluded.runtime,
+          poster_url=excluded.poster_url, backdrop_url=excluded.backdrop_url,
+          logo_url=excluded.logo_url, enriched_at=excluded.enriched_at,
+          enrich_version=excluded.enrich_version;
+        """
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
+        bindText(stmt, 1, itemID)
+        bindOptText(stmt, 2, encodeJSON(record.providerIDs.isEmpty ? nil : record.providerIDs))
+        bindOptText(stmt, 3, record.overview)
+        bindOptText(stmt, 4, encodeJSON(record.genres.isEmpty ? nil : record.genres))
+        if let rt = record.runtime { sqlite3_bind_double(stmt, 5, rt) } else { sqlite3_bind_null(stmt, 5) }
+        bindOptText(stmt, 6, record.posterURL?.absoluteString)
+        bindOptText(stmt, 7, record.backdropURL?.absoluteString)
+        bindOptText(stmt, 8, record.logoURL?.absoluteString)
+        sqlite3_bind_double(stmt, 9, now.timeIntervalSince1970)
+        sqlite3_bind_int64(stmt, 10, Int64(version))
+        _ = sqlite3_step(stmt)
+        sqlite3_finalize(stmt)
+
+        // Anime confirmation: an AniList/MAL id proves this series is anime.
+        if ShareCatalogID.isSeries(itemID),
+           let key = ShareCatalogID.seriesKey(forSeriesID: itemID),
+           record.providerIDs.keys.contains(where: { ["anilist", "mal", "myanimelist"].contains($0.lowercased()) }) {
+            reclassifySeriesToAnime(seriesKey: key)
+        }
+    }
+
+    private func reclassifySeriesToAnime(seriesKey: String) {
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "UPDATE assets SET library='anime' WHERE series_key=? AND kind='episode' AND library<>'anime';", -1, &stmt, nil) == SQLITE_OK else { return }
+        defer { sqlite3_finalize(stmt) }
+        bindText(stmt, 1, seriesKey)
+        _ = sqlite3_step(stmt)
+    }
+
+    /// Persisted enrichment for a catalog id (movie file id or `series:<key>`).
+    private func enrichmentRow(itemID: String) -> EnrichmentRecord? {
+        guard db != nil else { return nil }
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, """
+        SELECT provider_ids_json, overview, genres_json, runtime, poster_url, backdrop_url, logo_url
+        FROM enrichment WHERE item_id=?;
+        """, -1, &stmt, nil) == SQLITE_OK else { return nil }
+        defer { sqlite3_finalize(stmt) }
+        bindText(stmt, 1, itemID)
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
+        var rec = EnrichmentRecord()
+        rec.providerIDs = decodeJSON([String: String].self, columnText(stmt, 0)) ?? [:]
+        rec.overview = columnText(stmt, 1)
+        rec.genres = decodeJSON([String].self, columnText(stmt, 2)) ?? []
+        if sqlite3_column_type(stmt, 3) != SQLITE_NULL { rec.runtime = sqlite3_column_double(stmt, 3) }
+        rec.posterURL = columnText(stmt, 4).flatMap(URL.init(string:))
+        rec.backdropURL = columnText(stmt, 5).flatMap(URL.init(string:))
+        rec.logoURL = columnText(stmt, 6).flatMap(URL.init(string:))
+        return rec
+    }
+
+    /// Overlay persisted enrichment onto a freshly-built item. Movies/series use
+    /// their own id; episodes/seasons inherit their series' art + ids (so an
+    /// episode card shows the show art and carries the ids merge needs).
+    private func withEnrichment(_ item: MediaItem) -> MediaItem {
+        let key: String
+        switch item.kind {
+        case .series, .movie:
+            key = item.id
+        case .season, .episode:
+            guard let seriesID = item.seriesID else { return item }
+            key = seriesID
+        default:
+            return item
+        }
+        guard let rec = enrichmentRow(itemID: key) else { return item }
+        var copy = item
+        // Merge ids (don't clobber any already present).
+        if !rec.providerIDs.isEmpty {
+            var ids = copy.providerIDs
+            for (k, v) in rec.providerIDs where ids[k] == nil { ids[k] = v }
+            copy.providerIDs = ids
+        }
+        if (copy.overview?.isEmpty ?? true), item.kind != .episode { copy.overview = rec.overview }
+        if copy.genres.isEmpty { copy.genres = rec.genres }
+        if copy.runtime == nil, let rt = rec.runtime, item.kind == .movie { copy.runtime = rt }
+        if copy.posterURL == nil { copy.posterURL = rec.posterURL }
+        if copy.backdropURL == nil { copy.backdropURL = rec.backdropURL }
+        if copy.heroBackdropURL == nil { copy.heroBackdropURL = rec.backdropURL }
+        if copy.logoURL == nil { copy.logoURL = rec.logoURL }
+        // Episodes get the series art as a fallback, not as their own poster.
+        if item.kind == .episode {
+            if copy.seriesPosterURL == nil { copy.seriesPosterURL = rec.posterURL }
+            copy.posterURL = item.posterURL // keep episode's own (none yet) — series art via fallback field
+        }
+        return copy
+    }
+
+    private func encodeJSON<T: Encodable>(_ value: T?) -> String? {
+        guard let value else { return nil }
+        guard let data = try? JSONEncoder().encode(value) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+    private func decodeJSON<T: Decodable>(_ type: T.Type, _ json: String?) -> T? {
+        guard let json, let data = json.data(using: .utf8) else { return nil }
+        return try? JSONDecoder().decode(type, from: data)
+    }
+
     // MARK: - Read path (build MediaItems)
 
     /// Whether the catalog has any indexed content yet (false on a fresh share
@@ -216,7 +420,7 @@ actor ShareCatalogStore {
             out.append((self.columnDouble(stmt, 3), self.seriesItem(key: key, title: self.columnText(stmt, 1) ?? key, library: lib, year: self.columnOptInt(stmt, 4))))
         }
 
-        return out.sorted { $0.added > $1.added }.prefix(limit).map(\.item)
+        return out.sorted { $0.added > $1.added }.prefix(limit).map(\.item).map(withEnrichment)
     }
 
     /// Free-text search across movie/episode titles and series titles. `LIKE` is
@@ -256,7 +460,7 @@ actor ShareCatalogStore {
             out.append(self.seriesItem(key: key, title: self.columnText(stmt, 1) ?? key, library: lib, year: self.columnOptInt(stmt, 3)))
         }
 
-        return Array(out.prefix(limit))
+        return Array(out.prefix(limit)).map(withEnrichment)
     }
 
     /// Movie items for the Movies library grid (paged).
@@ -277,7 +481,7 @@ actor ShareCatalogStore {
                 libraryID: ShareCatalogID.moviesLibrary
             ))
         }
-        return out
+        return out.map(withEnrichment)
     }
 
     /// Distinct series items for a TV/Anime library, alphabetical.
@@ -296,7 +500,7 @@ actor ShareCatalogStore {
             guard let key = self.columnText(stmt, 0) else { return }
             out.append(self.seriesItem(key: key, title: self.columnText(stmt, 1) ?? key, library: library, year: self.columnOptInt(stmt, 2)))
         }
-        return out
+        return out.map(withEnrichment)
     }
 
     /// Season container items for a series (distinct season numbers; a `NULL`
@@ -325,7 +529,7 @@ actor ShareCatalogStore {
                 seriesID: ShareCatalogID.series(seriesKey),
                 libraryID: ShareCatalogID.library(library)
             )
-        }
+        }.map(withEnrichment)
     }
 
     /// Episode items for one season of a series, in episode order.
@@ -340,7 +544,7 @@ actor ShareCatalogStore {
         """, bind: { self.bindText($0, 1, seriesKey); sqlite3_bind_int64($0, 2, Int64(season)) }) { stmt in
             out.append(self.episodeItem(from: stmt, seriesKey: seriesKey))
         }
-        return out
+        return out.map(withEnrichment)
     }
 
     /// Resolve any catalog id to a rich `MediaItem`, or `nil` if unknown here
@@ -359,7 +563,7 @@ actor ShareCatalogStore {
                 library = CatalogLibrary(rawValue: self.columnText(stmt, 1) ?? "tv") ?? .tv
                 year = self.columnOptInt(stmt, 2)
             }
-            return found ? seriesItem(key: key, title: title, library: library, year: year) : nil
+            return found ? withEnrichment(seriesItem(key: key, title: title, library: library, year: year)) : nil
         }
         if let (key, season) = ShareCatalogID.seasonComponents(forSeasonID: id) {
             return seasons(seriesKey: key).first { $0.seasonNumber == season }
@@ -383,7 +587,7 @@ actor ShareCatalogStore {
                     )
                 }
             }
-            return result
+            return result.map(withEnrichment)
         }
         return nil
     }

@@ -109,6 +109,14 @@ public extension ThemePalette {
     /// own brand colour (Plozz's is BLUE, never Twozz's purple).
     static let brandBlue = Color(red: 0.0, green: 0.643, blue: 0.863) // #00A4DC
 
+    /// A deep, dark navy-blue used as a fixed hairline between the "unwatched"
+    /// corner flag and the artwork behind it. Deliberately **theme-independent**:
+    /// the same dark blue in Light, Dark and OLED so the flag's edge reads
+    /// consistently everywhere, and dark enough to hold contrast even when the
+    /// artwork right behind the flag is itself blue (the brand blue the flag is
+    /// filled with, or a blue poster).
+    static let unwatchedFlagEdge = Color(red: 0.02, green: 0.11, blue: 0.20) // #051C33
+
     /// Frosted-glass tone for the hairline rim around media thumbnails — the
     /// theme's lower background stop nudged 9% toward white, ported from Twozz's
     /// `mediaEdgeColor`. It blends with the surrounding card while quietly

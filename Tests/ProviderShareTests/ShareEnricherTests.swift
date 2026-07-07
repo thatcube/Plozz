@@ -57,6 +57,46 @@ final class ShareEnricherTests: XCTestCase {
         XCTAssertEqual(item?.logoURL?.absoluteString, "https://img/logo.png")
     }
 
+    func testEnrichmentReportsTotalAndProgress() async {
+        // The enricher advertises the pass total up front and reports progress per
+        // item attempted, so the Home pill can show "N of M".
+        final class Captured: @unchecked Sendable {
+            private let lock = NSLock()
+            private(set) var started = 0
+            private(set) var total = 0
+            private(set) var maxDone = 0
+            private(set) var finished = 0
+            func start(_ t: Int) { lock.lock(); started += 1; total = t; lock.unlock() }
+            func progress(_ d: Int) { lock.lock(); maxDone = max(maxDone, d); lock.unlock() }
+            func finish() { lock.lock(); finished += 1; lock.unlock() }
+        }
+        let cap = Captured()
+        let reporter = ShareScanReporter(
+            scanStarted: { _, _ in }, scanProgress: { _, _ in }, scanFinished: { _ in },
+            enrichStarted: { _, total in cap.start(total) },
+            enrichProgress: { _, done in cap.progress(done) },
+            enrichFinished: { _ in cap.finish() }
+        )
+        let store = ShareCatalogStore(accountKey: "a", directory: tempDir())
+        await store.upsert([
+            movie("Movies/A (2000).mkv", "A", 2000),
+            movie("Movies/B (2001).mkv", "B", 2001),
+            movie("Movies/C (2002).mkv", "C", 2002),
+        ], scanID: 1)
+        let rec = ShareCatalogStore.EnrichmentRecord(providerIDs: ["Tmdb": "1"])
+        let enricher = ShareEnricher(
+            store: store,
+            resolver: FakeResolver(byTitle: ["A": rec, "B": rec, "C": rec]),
+            reporter: reporter
+        )
+        await enricher.enrichPending()
+
+        XCTAssertEqual(cap.started, 1, "advertised once")
+        XCTAssertEqual(cap.total, 3, "pass total = pending count")
+        XCTAssertEqual(cap.maxDone, 3, "progress reached the total")
+        XCTAssertEqual(cap.finished, 1, "finished once")
+    }
+
     func testProviderIDsEnableCrossServerIdentity() async {
         // The whole point: a share item that gains a TMDb id now produces the same
         // MediaItemIdentity a Plex/Jellyfin twin would, so the merge engine fuses them.

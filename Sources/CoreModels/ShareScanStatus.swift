@@ -13,20 +13,62 @@ public struct ShareScanState: Sendable, Equatable {
     public var isEnriching: Bool
     /// Items discovered so far in the current/last scan (for optional detail).
     public var itemsFound: Int
+    /// Items enriched so far in the current enrichment pass.
+    public var enrichDone: Int
+    /// Total items in the current enrichment pass (0 until a pass advertises one).
+    public var enrichTotal: Int
     /// When the last full scan completed (nil until the first completes).
     public var lastScanAt: Date?
 
     public init(name: String, isScanning: Bool = false, isEnriching: Bool = false,
-                itemsFound: Int = 0, lastScanAt: Date? = nil) {
+                itemsFound: Int = 0, enrichDone: Int = 0, enrichTotal: Int = 0,
+                lastScanAt: Date? = nil) {
         self.name = name
         self.isScanning = isScanning
         self.isEnriching = isEnriching
         self.itemsFound = itemsFound
+        self.enrichDone = enrichDone
+        self.enrichTotal = enrichTotal
         self.lastScanAt = lastScanAt
     }
 
     /// Busy = actively scanning or enriching (the window the indicator shows).
     public var isBusy: Bool { isScanning || isEnriching }
+
+    /// A short human phase label — what the share is doing right now. Scanning wins
+    /// over enriching when (briefly) both are true, since the walk is the earlier,
+    /// more fundamental stage.
+    public var phase: String {
+        if isScanning { return "Scanning" }
+        if isEnriching { return "Updating artwork" }
+        return ""
+    }
+
+    /// The optional trailing progress detail (e.g. "1,234 items" while scanning,
+    /// "142 of 900" while enriching), or `nil` when there's no count worth showing.
+    public var progressDetail: String? {
+        if isScanning {
+            return itemsFound > 0 ? "\(Self.decimal(itemsFound)) items" : nil
+        }
+        if isEnriching, enrichTotal > 0 {
+            return "\(Self.decimal(min(enrichDone, enrichTotal))) of \(Self.decimal(enrichTotal))"
+        }
+        return nil
+    }
+
+    /// Enrichment completion in 0...1, or `nil` when no total is known (so the UI
+    /// can fall back to an indeterminate spinner during the scan phase).
+    public var enrichFraction: Double? {
+        guard isEnriching, enrichTotal > 0 else { return nil }
+        return min(1, Double(enrichDone) / Double(enrichTotal))
+    }
+
+    private static func decimal(_ n: Int) -> String {
+        Self.decimalFormatter.string(from: NSNumber(value: n)) ?? "\(n)"
+    }
+    private static let decimalFormatter: NumberFormatter = {
+        let f = NumberFormatter(); f.numberStyle = .decimal; return f
+    }()
 }
 
 /// App-level observable holding per-share scan status. The scanner (an actor in
@@ -62,7 +104,8 @@ public final class ShareScanStatusModel {
         case scanStarted(id: String, name: String)
         case scanProgress(id: String, items: Int)
         case scanFinished(id: String)
-        case enrichStarted(id: String)
+        case enrichStarted(id: String, total: Int)
+        case enrichProgress(id: String, done: Int)
         case enrichFinished(id: String)
     }
 
@@ -72,7 +115,8 @@ public final class ShareScanStatusModel {
         case let .scanStarted(id, name): scanStarted(shareID: id, name: name)
         case let .scanProgress(id, items): scanProgress(shareID: id, itemsFound: items)
         case let .scanFinished(id): scanFinished(shareID: id)
-        case let .enrichStarted(id): enrichStarted(shareID: id)
+        case let .enrichStarted(id, total): enrichStarted(shareID: id, total: total)
+        case let .enrichProgress(id, done): enrichProgress(shareID: id, done: done)
         case let .enrichFinished(id): enrichFinished(shareID: id)
         }
     }
@@ -87,7 +131,20 @@ public final class ShareScanStatusModel {
         byShare.values.filter(\.isBusy).map(\.name).filter { !$0.isEmpty }.sorted()
     }
 
+    /// Busy shares' full states (name + phase + progress), ordered by name — drives
+    /// the rich Home status pill.
+    public var busyStates: [ShareScanState] {
+        byShare.values.filter(\.isBusy).sorted { $0.name < $1.name }
+    }
+
     public func state(forShareID shareID: String) -> ShareScanState? { byShare[shareID] }
+
+    /// Whether a share with this display name is currently busy — lets a per-share
+    /// library card show its own updating indicator without knowing the share's id.
+    public func isBusy(shareNamed name: String) -> Bool {
+        guard !name.isEmpty else { return false }
+        return byShare.values.contains { $0.isBusy && $0.name == name }
+    }
 
     // MARK: - Mutations (called on the main actor via the reporter)
 
@@ -112,15 +169,27 @@ public final class ShareScanStatusModel {
         byShare[shareID] = state
     }
 
-    public func enrichStarted(shareID: String) {
-        guard var state = byShare[shareID] else { return }
+    public func enrichStarted(shareID: String, total: Int) {
+        // Create state if the enrich pass beat a (missed) scanStarted — the banner
+        // should still reflect in-flight enrichment.
+        var state = byShare[shareID] ?? ShareScanState(name: "")
         state.isEnriching = true
+        state.enrichTotal = total
+        state.enrichDone = 0
+        byShare[shareID] = state
+    }
+
+    public func enrichProgress(shareID: String, done: Int) {
+        guard var state = byShare[shareID] else { return }
+        state.enrichDone = done
         byShare[shareID] = state
     }
 
     public func enrichFinished(shareID: String) {
         guard var state = byShare[shareID] else { return }
         state.isEnriching = false
+        state.enrichDone = 0
+        state.enrichTotal = 0
         byShare[shareID] = state
     }
 
@@ -133,7 +202,8 @@ public final class ShareScanStatusModel {
             scanStarted: { id, name in c.yield(.scanStarted(id: id, name: name)) },
             scanProgress: { id, count in c.yield(.scanProgress(id: id, items: count)) },
             scanFinished: { id in c.yield(.scanFinished(id: id)) },
-            enrichStarted: { id in c.yield(.enrichStarted(id: id)) },
+            enrichStarted: { id, total in c.yield(.enrichStarted(id: id, total: total)) },
+            enrichProgress: { id, done in c.yield(.enrichProgress(id: id, done: done)) },
             enrichFinished: { id in c.yield(.enrichFinished(id: id)) }
         )
     }
@@ -146,26 +216,29 @@ public struct ShareScanReporter: Sendable {
     public var scanStarted: @Sendable (_ shareID: String, _ name: String) -> Void
     public var scanProgress: @Sendable (_ shareID: String, _ itemsFound: Int) -> Void
     public var scanFinished: @Sendable (_ shareID: String) -> Void
-    public var enrichStarted: @Sendable (_ shareID: String) -> Void
+    public var enrichStarted: @Sendable (_ shareID: String, _ total: Int) -> Void
+    public var enrichProgress: @Sendable (_ shareID: String, _ done: Int) -> Void
     public var enrichFinished: @Sendable (_ shareID: String) -> Void
 
     public init(
         scanStarted: @escaping @Sendable (String, String) -> Void,
         scanProgress: @escaping @Sendable (String, Int) -> Void,
         scanFinished: @escaping @Sendable (String) -> Void,
-        enrichStarted: @escaping @Sendable (String) -> Void,
+        enrichStarted: @escaping @Sendable (String, Int) -> Void,
+        enrichProgress: @escaping @Sendable (String, Int) -> Void,
         enrichFinished: @escaping @Sendable (String) -> Void
     ) {
         self.scanStarted = scanStarted
         self.scanProgress = scanProgress
         self.scanFinished = scanFinished
         self.enrichStarted = enrichStarted
+        self.enrichProgress = enrichProgress
         self.enrichFinished = enrichFinished
     }
 
     /// No-op sink (default when no status model is wired).
     public static let noop = ShareScanReporter(
         scanStarted: { _, _ in }, scanProgress: { _, _ in }, scanFinished: { _ in },
-        enrichStarted: { _ in }, enrichFinished: { _ in }
+        enrichStarted: { _, _ in }, enrichProgress: { _, _ in }, enrichFinished: { _ in }
     )
 }

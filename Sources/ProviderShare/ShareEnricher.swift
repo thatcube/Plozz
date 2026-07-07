@@ -35,6 +35,10 @@ actor ShareEnricher {
     /// replay `enrichStarted` to a reporter wired mid-pass without leaving the
     /// banner stuck when the pass was a no-op.
     private var isAdvertisingEnrich = false
+    /// Snapshot size + items attempted in the current pass, retained so a reporter
+    /// wired mid-pass can be replayed the live totals (see `setReporter`).
+    private var enrichTotal = 0
+    private var enrichDone = 0
 
     init(store: ShareCatalogStore, resolver: ShareMetadataResolving, shareID: String = "",
          reporter: ShareScanReporter = .noop, concurrency: Int = 6, maxPerRun: Int = .max) {
@@ -47,34 +51,46 @@ actor ShareEnricher {
     }
 
     /// Re-point progress reporting after creation (startup race — see ShareScanner).
-    /// Replay `enrichStarted` when a pass is currently advertising work, so a
-    /// reporter wired mid-pass still sees the in-flight enrichment (and its matching
-    /// `enrichFinished`).
+    /// Replay `enrichStarted` (+ the latest progress) when a pass is currently
+    /// advertising work, so a reporter wired mid-pass sees the in-flight enrichment
+    /// (and its matching `enrichFinished`).
     func setReporter(_ reporter: ShareScanReporter) {
         self.reporter = reporter
-        if isAdvertisingEnrich { reporter.enrichStarted(shareID) }
+        if isAdvertisingEnrich {
+            reporter.enrichStarted(shareID, enrichTotal)
+            if enrichDone > 0 { reporter.enrichProgress(shareID, enrichDone) }
+        }
     }
 
     /// Resolve + persist pending items until none remain (or the run cap / cancel).
     func enrichPending() async {
         if isRunning { return }
         isRunning = true
-        // Only advertise "enriching" when there's actually pending work, so the
-        // banner doesn't blink for a no-op pass.
-        let hasWork = !(await store.pendingEnrichment(version: Self.version, limit: 1)).isEmpty
-        isAdvertisingEnrich = hasWork
-        if hasWork { reporter.enrichStarted(shareID) }
-        defer { isRunning = false; isAdvertisingEnrich = false; if hasWork { reporter.enrichFinished(shareID) } }
 
-        // Process ONE snapshot of the currently-pending items, each exactly once.
-        // A re-query-from-the-top loop stalls once retry-eligible misses persist at
-        // the front of the ordering (and could spin forever if a write kept
-        // failing); a finite snapshot drains cleanly and always terminates. Items
-        // scanned in later are picked up by the next pass (kicked after each scan).
+        // Fetch the snapshot up front so we know the pass total (for the progress
+        // indicator) before advertising. An empty snapshot is a no-op pass — no
+        // banner blink.
         let snapshot = await store.pendingEnrichment(version: Self.version, limit: maxPerRun)
+        let total = snapshot.count
+        isAdvertisingEnrich = total > 0
+        enrichTotal = total
+        enrichDone = 0
+        if total > 0 { reporter.enrichStarted(shareID, total) }
+        defer {
+            isRunning = false
+            isAdvertisingEnrich = false
+            enrichTotal = 0
+            enrichDone = 0
+            if total > 0 { reporter.enrichFinished(shareID) }
+        }
         if snapshot.isEmpty { return }
 
+        // Process the snapshot exactly once. A re-query-from-the-top loop stalls once
+        // retry-eligible misses persist at the front of the ordering (and could spin
+        // forever if a write kept failing); a finite snapshot drains cleanly and
+        // always terminates. Items scanned in later are picked up by the next pass.
         var processed = 0
+        var attempted = 0
         await withTaskGroup(of: (String, ShareCatalogStore.EnrichmentRecord).self) { group in
             var iterator = snapshot.makeIterator()
             let resolver = self.resolver
@@ -95,6 +111,11 @@ actor ShareEnricher {
                 // isn't cached as a permanent blank. Count only durable writes.
                 let ok = await store.saveEnrichment(itemID: itemID, record, version: Self.version)
                 if ok { processed += 1 }
+                // Progress advances per item ATTEMPTED (misses included) so the bar
+                // reflects queue position, not just successful writes.
+                attempted += 1
+                enrichDone = attempted
+                reporter.enrichProgress(shareID, attempted)
                 if Task.isCancelled { break }
                 _ = addNext()
             }

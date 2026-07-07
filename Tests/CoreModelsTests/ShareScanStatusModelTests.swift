@@ -25,10 +25,42 @@ final class ShareScanStatusModelTests: XCTestCase {
         model.scanFinished(shareID: "s1")
         XCTAssertFalse(model.isAnyBusy)
 
-        model.enrichStarted(shareID: "s1")
+        model.enrichStarted(shareID: "s1", total: 100)
         XCTAssertTrue(model.isAnyBusy, "enrichment keeps the indicator up (art/details still resolving)")
         model.enrichFinished(shareID: "s1")
         XCTAssertFalse(model.isAnyBusy)
+    }
+
+    func testEnrichProgressTracksDoneAndFraction() {
+        let model = ShareScanStatusModel()
+        model.scanStarted(shareID: "s1", name: "NAS")
+        model.scanFinished(shareID: "s1")
+        model.enrichStarted(shareID: "s1", total: 200)
+        model.enrichProgress(shareID: "s1", done: 50)
+
+        let state = model.state(forShareID: "s1")
+        XCTAssertEqual(state?.enrichDone, 50)
+        XCTAssertEqual(state?.enrichTotal, 200)
+        XCTAssertEqual(state?.enrichFraction, 0.25)
+        XCTAssertEqual(state?.phase, "Updating artwork")
+        XCTAssertEqual(state?.progressDetail, "50 of 200")
+
+        model.enrichFinished(shareID: "s1")
+        XCTAssertNil(model.state(forShareID: "s1")?.enrichFraction, "finished clears the pass totals")
+    }
+
+    func testBusyStatesAndSharedNameLookup() {
+        let model = ShareScanStatusModel()
+        model.scanStarted(shareID: "s1", name: "Brando NAS")
+        model.scanProgress(shareID: "s1", itemsFound: 1234)
+        XCTAssertEqual(model.busyStates.map(\.name), ["Brando NAS"])
+        XCTAssertEqual(model.busyStates.first?.progressDetail, "1,234 items")
+        XCTAssertTrue(model.isBusy(shareNamed: "Brando NAS"))
+        XCTAssertFalse(model.isBusy(shareNamed: "Other"))
+        XCTAssertFalse(model.isBusy(shareNamed: ""), "an empty name never matches")
+
+        model.scanFinished(shareID: "s1")
+        XCTAssertFalse(model.isBusy(shareNamed: "Brando NAS"), "no longer busy once the scan finishes")
     }
 
     func testProgressUpdatesItemCount() {
@@ -66,7 +98,8 @@ final class ShareScanStatusModelTests: XCTestCase {
         r.scanStarted("s1", "NAS")
         r.scanProgress("s1", 10)
         r.scanFinished("s1")
-        r.enrichStarted("s1")
+        r.enrichStarted("s1", 30)
+        r.enrichProgress("s1", 15)
         r.enrichFinished("s1")
 
         var tries = 0

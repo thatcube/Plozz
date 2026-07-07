@@ -1,5 +1,6 @@
 #if canImport(SwiftUI)
 import SwiftUI
+import CoreUI
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -26,7 +27,7 @@ struct SettingsQRCode: View {
                     .interpolation(.none)
                     .scaledToFit()
                     .padding(12)
-                    .background(.white, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .background(.white, in: RoundedRectangle(cornerRadius: PlozzTheme.Metrics.Radius.control, style: .continuous))
                     .overlay {
                         if let centerMark {
                             Image(centerMark)
@@ -47,7 +48,7 @@ struct SettingsQRCode: View {
     }
 
     private var placeholder: some View {
-        RoundedRectangle(cornerRadius: 14, style: .continuous)
+        RoundedRectangle(cornerRadius: PlozzTheme.Metrics.Radius.control, style: .continuous)
             .fill(Color.secondary.opacity(0.2))
     }
 

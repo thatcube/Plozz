@@ -18,7 +18,7 @@ struct IntegrationsDetailView: View {
     let serverCount: Int
 
     var body: some View {
-        SettingsSplitLayout(title: "Trackers", sections: sections)
+        SettingsSplitLayout(title: "Integrations", sections: sections)
             .task {
                 // Load all statuses up front so the left list's value
                 // summaries are correct before any row is focused.
@@ -293,7 +293,7 @@ struct AniListTokenEntryView: View {
                     QRCodeView(authorizationURL)
                         .frame(width: 160, height: 160)
                         .padding(10)
-                        .background(.white, in: RoundedRectangle(cornerRadius: 14))
+                        .background(.white, in: RoundedRectangle(cornerRadius: PlozzTheme.Metrics.Radius.control))
 
                     VStack(alignment: .leading, spacing: 12) {
                         Text("plozz.app/anilist")
@@ -330,7 +330,7 @@ struct MALAuthorizationCodeEntryView: View {
                     QRCodeView(authorizationURL)
                         .frame(width: 160, height: 160)
                         .padding(10)
-                        .background(.white, in: RoundedRectangle(cornerRadius: 14))
+                        .background(.white, in: RoundedRectangle(cornerRadius: PlozzTheme.Metrics.Radius.control))
 
                     VStack(alignment: .leading, spacing: 12) {
                         Text("plozz.app/myanimelist")
@@ -366,7 +366,7 @@ struct LastFmConnectingView: View {
             QRCodeView(authURL)
                 .frame(width: 180, height: 180)
                 .padding(12)
-                .background(.white, in: RoundedRectangle(cornerRadius: 16))
+                .background(.white, in: RoundedRectangle(cornerRadius: PlozzTheme.Metrics.Radius.control))
 
             VStack(alignment: .leading, spacing: 12) {
                 Text("Scan to connect Last.fm")
@@ -407,7 +407,7 @@ struct DeviceCodeConnectingView: View {
             QRCodeView(activationURL)
                 .frame(width: 180, height: 180)
                 .padding(12)
-                .background(.white, in: RoundedRectangle(cornerRadius: 16))
+                .background(.white, in: RoundedRectangle(cornerRadius: PlozzTheme.Metrics.Radius.control))
 
             Text("OR")
                 .font(.title3.weight(.bold))
@@ -421,7 +421,7 @@ struct DeviceCodeConnectingView: View {
                     .tracking(8)
                     .padding(.horizontal, 24)
                     .padding(.vertical, 12)
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: PlozzTheme.Metrics.Radius.control))
                 HStack(spacing: 14) {
                     TraktExpiryCountdown(expiresAt: expiresAt, lifetime: codeLifetime)
                         .frame(width: 64, height: 64)

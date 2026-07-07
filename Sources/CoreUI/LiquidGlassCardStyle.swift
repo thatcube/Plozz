@@ -164,7 +164,7 @@ public extension View {
     /// focus surface in place of tvOS's white `.card` focus plate, with the
     /// system focus effect disabled so no white halo remains.
     func plozzCardButton(
-        cornerRadius: CGFloat = PlozzTheme.Metrics.cornerRadius,
+        cornerRadius: CGFloat = PlozzTheme.Metrics.Radius.card,
         focusedScale: CGFloat = PlozzTheme.Metrics.mediumFocusedCardScale
     ) -> some View {
         buttonStyle(PlozzCardButtonStyle(cornerRadius: cornerRadius, focusedScale: focusedScale))

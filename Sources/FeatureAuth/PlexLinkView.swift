@@ -135,7 +135,7 @@ public struct PlexLinkView: View {
                             .minimumScaleFactor(0.6)
                             .padding(.horizontal, 48)
                             .padding(.vertical, 24)
-                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24))
+                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: PlozzTheme.Metrics.Radius.panel))
 
                         PlexExpiryCountdown(expiresAt: expiresAt, lifetime: viewModel.codeLifetime)
                     }

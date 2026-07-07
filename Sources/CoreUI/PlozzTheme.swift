@@ -160,6 +160,33 @@ public enum PlozzTheme {
         /// the aggressive rounding of Home's poster glass (`posterArtCornerRadius`
         /// + `cardInset` = 28) so panels read as part of the same card family.
         public static let mediumCardCornerRadius: CGFloat = 28
+
+        /// **Global corner-radius scale** — one shared vocabulary of radii so every
+        /// card, panel and nested surface reads with the same roundness, *regardless
+        /// of the Display Size setting* (radii never density-scale). Values are
+        /// aligned with the media-card family above so standalone panels and poster
+        /// cards look like one family.
+        ///
+        /// Concentric rule (same as the media cards): content nested inside a
+        /// `panel` with `inset` padding uses `content` (= `panel − inset`), so their
+        /// rounded corners stay concentric — a constant-width ring.
+        public enum Radius {
+            /// Outer radius for standalone cards & panels — settings/preview cards,
+            /// glass panels, the mini player. Matches Home's poster-glass family
+            /// (== `mediumCardCornerRadius`).
+            public static let panel: CGFloat = 28
+            /// Medium container radius — grouped list boxes, cards, overlays.
+            public static let card: CGFloat = 22
+            /// Content nested inside a `panel` with `inset` padding; stays
+            /// concentric with the panel (`panel − inset`). Matches poster artwork
+            /// (== `posterArtCornerRadius`).
+            public static let content: CGFloat = 16
+            /// Small controls / compact chips, buttons, rows, PIN & QR frames.
+            public static let control: CGFloat = 16
+            /// The concentric gap between a `panel` and its nested `content`
+            /// (`panel − content`; == `cardInset` base).
+            public static let inset: CGFloat = 12
+        }
         /// Optical clearance factor for a media card's caption: the title/metadata
         /// text is inset horizontally from the glass edge by this fraction of the
         /// card's *outer* corner radius, so left-aligned text clears the rounded

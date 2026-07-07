@@ -5,6 +5,9 @@ import CoreUI
 
 struct AppearanceDetailView: View {
     @Bindable var theme: ThemeSettingsModel
+    /// Circadian Mode (night-warming) settings, folded in as sections here — it's
+    /// a display concern, so it no longer earns its own top-level row.
+    @Bindable var nightShift: NightShiftSettingsModel
     @Environment(MusicPlayerSettingsModel.self) private var musicPlayer
     /// App-wide card presentation — scale + style — that applies across every row
     /// and grid in the app (not just Home), so it lives in Appearance rather than
@@ -29,6 +32,12 @@ struct AppearanceDetailView: View {
 
     var body: some View {
         SettingsSplitLayout(title: "Appearance", sections: sections)
+            // Circadian's day/night preview animates a model flag; make sure it
+            // never keeps running once you leave Appearance or turn Circadian off.
+            .onChange(of: nightShift.settings.isEnabled) { _, enabled in
+                if !enabled { nightShift.isPreviewing = false }
+            }
+            .onDisappear { nightShift.isPreviewing = false }
     }
 
     private var sections: [SettingsSplitSection] {
@@ -114,65 +123,54 @@ struct AppearanceDetailView: View {
                     )
                 }
             ])
-        ]
+        ] + CircadianSectionsBuilder(model: nightShift, primaryHeader: "Circadian Mode").sections
     }
 }
 
 struct SpoilersDetailView: View {
     @Bindable var spoilers: SpoilerSettingsModel
 
-    private var modeExplanation: String {
-        switch spoilers.settings.mode {
-        case .blur:
-            return "Episode thumbnails are blurred until watched. Titles and descriptions stay hidden until you finish the episode."
-        case .placeholder:
-            return "Episode thumbnails are replaced with generic series art and the episode number, so no real frame is ever shown. Titles and descriptions stay hidden until you finish the episode."
-        }
-    }
-
     var body: some View {
-        SettingsSplitLayout(title: "Spoilers", sections: sections)
+        SettingsSplitLayout(title: "Spoilers", sections: SpoilerSectionsBuilder(spoilers: spoilers).sections)
     }
+}
 
-    private var sections: [SettingsSplitSection] {
-        var rows: [SettingsSplitRow] = [
+/// Builds the Spoiler-protection settings section. Extracted from
+/// ``SpoilersDetailView`` so the same controls can appear folded into the Home
+/// settings page (the standalone top-level "Spoilers" row was retired — spoiler
+/// masking is a browsing concern, so it lives with Home).
+@MainActor
+struct SpoilerSectionsBuilder {
+    let spoilers: SpoilerSettingsModel
+
+    var sections: [SettingsSplitSection] {
+        @Bindable var spoilers = spoilers
+        return [SettingsSplitSection(id: "spoilers", header: nil, rows: [
             SettingsSplitRow(
-                id: "hide-spoilers",
-                title: "Hide spoilers for unwatched episodes",
-                description: "Blur or replace episode thumbnails and keep titles and descriptions hidden until you finish an episode.",
+                id: "spoilers",
+                title: "Spoilers",
+                description: "Keep unwatched episodes and ratings from spoiling you while you browse.",
             ) {
-                Toggle("Hide spoilers", isOn: $spoilers.settings.isEnabled)
-            }
-        ]
+                VStack(alignment: .leading, spacing: SettingsMetrics.sectionSpacing) {
+                    SettingsRevealSection(
+                        isOn: $spoilers.settings.isEnabled,
+                        masterLabel: "Hide spoilers for unwatched episodes"
+                    ) {
+                        SettingsDetailGroup(title: "Mode") {
+                            SpoilerModePicker(mode: $spoilers.settings.mode)
+                        }
+                    }
 
-        if spoilers.settings.isEnabled {
-            rows.append(
-                SettingsSplitRow(
-                    id: "spoiler-mode",
-                    title: "Mode",
-                    description: modeExplanation,
-                    indented: true
-                ) {
-                    SettingsOptionPicker(
-                        options: SpoilerSettings.Mode.allCases,
-                        selection: $spoilers.settings.mode,
-                        title: { $0.displayName }
-                    )
+                    SettingsDetailGroup(
+                        title: "Ratings",
+                        description: "Keeps IMDb, Rotten Tomatoes and other scores hidden on a movie or episode until you've finished it, so the ratings don't bias you beforehand. They appear once it's marked watched."
+                    ) {
+                        Toggle("Hide ratings until watched", isOn: $spoilers.settings.hideRatingsUntilWatched)
+                            .toggleStyle(SettingsSwitchToggleStyle())
+                    }
                 }
-            )
-        }
-
-        rows.append(
-            SettingsSplitRow(
-                id: "hide-ratings",
-                title: "Hide ratings until watched",
-                description: "Keeps IMDb, Rotten Tomatoes and other scores hidden on a movie or episode until you've finished it, so the ratings don't bias you beforehand. They appear once it's marked watched.",
-            ) {
-                Toggle("Hide ratings", isOn: $spoilers.settings.hideRatingsUntilWatched)
             }
-        )
-
-        return [SettingsSplitSection(id: "spoilers", header: "Spoiler Protection", rows: rows)]
+        ])]
     }
 }
 struct PlaybackDetailView: View {
@@ -315,6 +313,7 @@ struct PlaybackDetailView: View {
             audioSection,
             skipIntrosSection,
             skipIntervalsSection,
+            resumeSection,
             scrubbingSection,
             upNextSection
         ]
@@ -449,6 +448,29 @@ struct PlaybackDetailView: View {
                         )
                     }
                 }
+            }
+        ])
+    }
+
+    private var resumeSection: SettingsSplitSection {
+        SettingsSplitSection(id: "resume", header: "Resume", rows: [
+            SettingsSplitRow(
+                id: "resume-rewind",
+                title: "Rewind on resume",
+                description: "When you return to a partially-watched title, playback starts a little before where you left off. Set anywhere from 0 to 60 seconds.",
+            ) {
+                VStack(alignment: .leading, spacing: 20) {
+                    SettingsStepper(
+                        options: ResumeRewindInterval.allCases,
+                        selection: $playback.settings.resumeRewindInterval,
+                        title: { $0.title }
+                    )
+                    Text(playback.settings.resumeRewindInterval.effectDescription)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         ])
     }

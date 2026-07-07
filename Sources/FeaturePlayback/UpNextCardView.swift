@@ -159,11 +159,11 @@ private struct UpNextCardStyle: ButtonStyle {
         configuration.label
             .foregroundStyle(focused ? Color.black : Color.white)
             .background(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                RoundedRectangle(cornerRadius: PlozzTheme.Metrics.Radius.card, style: .continuous)
                     .fill(focused ? Color.white : Color.black.opacity(0.55))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                RoundedRectangle(cornerRadius: PlozzTheme.Metrics.Radius.card, style: .continuous)
                     .strokeBorder(Color.white.opacity(focused ? 0 : 0.5), lineWidth: 1.5)
             )
             .scaleEffect(configuration.isPressed ? 0.97 : (focused ? 1.04 : 1.0))

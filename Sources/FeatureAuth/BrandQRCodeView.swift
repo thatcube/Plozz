@@ -73,7 +73,7 @@ public struct BrandQRCodeView: View {
                     .resizable()
                     .scaledToFit()
             } else {
-                RoundedRectangle(cornerRadius: 16)
+                RoundedRectangle(cornerRadius: PlozzTheme.Metrics.Radius.control)
                     .fill(Color.white.opacity(0.06))
                     .overlay(ProgressView())
             }

@@ -23,11 +23,20 @@ struct CustomizeHomeDetailView: View {
     /// The per-profile Home/visibility model (merge switch, global-row + per-library
     /// row selection, library visibility).
     let homeVisibility: HomeLibraryVisibilityModel
+    /// Spoiler-protection settings, folded in as a section here — hiding unwatched
+    /// art/titles/ratings is a browsing concern, so it lives with Home rather than
+    /// as its own thin top-level row.
+    let spoilers: SpoilerSettingsModel
+    /// Whether a Seerr server is configured. The hero's **Featured** source is
+    /// sourced entirely from Seerr's trending feed, so without it that source has
+    /// nothing to show — we keep the row visible (so it's discoverable) but
+    /// disabled with a "Requires Seerr" note.
+    let seerConfigured: Bool
 
     @Environment(HeroSettingsModel.self) private var hero
 
     var body: some View {
-        SettingsSplitLayout(title: "Customize Home", sections: sections)
+        SettingsSplitLayout(title: "Home", sections: sections)
             // If the user unmerged BEFORE library discovery finished, the initial
             // seed (in the toggle setter) was a no-op on an empty seed list. Retry
             // once libraries are known — on appear and when discovery loads — so the
@@ -48,6 +57,7 @@ struct CustomizeHomeDetailView: View {
 
     private var sections: [SettingsSplitSection] {
         [layoutSection, homeRowsSection, heroSection]
+            + SpoilerSectionsBuilder(spoilers: spoilers).sections
     }
 
     // MARK: - Layout (merge switch)
@@ -196,110 +206,90 @@ struct CustomizeHomeDetailView: View {
         var id: String { row.rawValue }
     }
 
-    // MARK: - Hero (moved in from Home Display)
+    // MARK: - Hero (a single feature row: the whole hero form in one pane)
 
+    /// One master row — "Hero" — whose detail pane holds the entire hero form:
+    /// the on/off switch, then (revealed when on) Sources, Items, Random
+    /// Libraries and Auto-Advance as headed groups. Previously these were five
+    /// separate (mostly indented) master rows, which buried the feature; now Hero
+    /// reads as one dedicated space.
     private var heroSection: SettingsSplitSection {
-        @Bindable var hero = hero
-        var rows: [SettingsSplitRow] = [
+        SettingsSplitSection(id: "hero", header: nil, rows: [
             SettingsSplitRow(
-                id: "hero-enabled",
-                title: "Show on Home",
+                id: "hero",
+                title: "Hero",
                 description: "A cinematic, rotating spotlight at the top of Home, with a Continue Watching row tucked under its lower edge.",
             ) {
-                Toggle("Show the hero", isOn: $hero.settings.isEnabled)
-                    .toggleStyle(SettingsSwitchToggleStyle())
+                heroForm
             }
-        ]
-        if hero.settings.isEnabled {
-            rows.append(heroSourcesRow)
-            rows.append(heroItemsRow)
-            if hero.settings.isEnabled(.randomFromLibrary) {
-                rows.append(randomLibrariesRow)
-            }
-            rows.append(heroAutoAdvanceRow)
-            // Background Trailers is hidden until the feature ships. The setting
-            // (`heroTrailersRow` / `trailersEnabled`) is intentionally kept so a
-            // previously-saved choice survives and it can be re-listed later.
-        }
-        return SettingsSplitSection(id: "hero", header: "Hero", rows: rows)
+        ])
     }
 
-    private var heroSourcesRow: SettingsSplitRow {
-        SettingsSplitRow(
-            id: "hero-sources",
-            title: "Sources",
-            description: "Which content feeds the hero. Enabled sources are interleaved into one rotating set.",
-            indented: true,
-        ) {
-            VStack(alignment: .leading, spacing: 8) {
-                ForEach(HeroSourceKind.allCases) { source in
-                    Toggle(isOn: sourceBinding(source)) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Label(source.displayName, systemImage: source.symbolName)
-                            Text(source.detail)
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
+    @ViewBuilder private var heroForm: some View {
+        @Bindable var hero = hero
+        VStack(alignment: .leading, spacing: SettingsMetrics.sectionSpacing) {
+            Toggle("Show the hero on Home", isOn: $hero.settings.isEnabled)
+                .toggleStyle(SettingsSwitchToggleStyle())
+
+            if hero.settings.isEnabled {
+                SettingsDetailGroup(title: "Sources") {
+                    SettingsCheckList(
+                        options: orderedHeroSources,
+                        title: { $0.displayName },
+                        subtitle: { source in
+                            (source == .featured && !seerConfigured) ? "Requires Seerr" : nil
+                        },
+                        isEnabled: { source in
+                            source == .featured ? seerConfigured : true
+                        },
+                        isChecked: { source in
+                            // Without Seerr, Featured can't be active — show it
+                            // unchecked (and disabled) so it reads as unavailable,
+                            // not "on". Stored preference is untouched, so it
+                            // restores once Seerr is connected.
+                            source == .featured && !seerConfigured
+                                ? false
+                                : hero.settings.sources.contains(source)
+                        },
+                        onToggle: { toggleSource($0) }
+                    )
+                }
+
+                if hero.settings.isEnabled(.randomFromLibrary) {
+                    SettingsDetailGroup(
+                        title: "Random Libraries",
+                        description: "Leave all selected to use every library on Home."
+                    ) {
+                        randomLibrariesContent
+                    }
+                }
+
+                SettingsDetailGroup(title: "Rotation") {
+                    VStack(alignment: .leading, spacing: 24) {
+                        LabeledSettingRow("Items in rotation") {
+                            SettingsStepper(
+                                options: Array(HeroSettings.maxItemsRange),
+                                selection: $hero.settings.maxItems,
+                                title: { "\($0)" }
+                            )
+                        }
+                        Toggle("Rotate automatically", isOn: $hero.settings.autoAdvance)
+                            .toggleStyle(SettingsSwitchToggleStyle())
+                        if hero.settings.autoAdvance {
+                            LabeledSettingRow("Seconds per title") {
+                                SettingsStepper(
+                                    options: Array(HeroSettings.autoAdvanceRange),
+                                    selection: $hero.settings.autoAdvanceSeconds,
+                                    title: { "\($0)s" }
+                                )
+                            }
                         }
                     }
-                    .toggleStyle(SettingsSwitchToggleStyle())
                 }
             }
         }
-    }
-
-    private var heroItemsRow: SettingsSplitRow {
-        @Bindable var hero = hero
-        return SettingsSplitRow(
-            id: "hero-items",
-            title: "Items",
-            description: "How many titles rotate through the hero.",
-            indented: true,
-        ) {
-            LabeledSettingRow("Items in rotation") {
-                SettingsStepper(
-                    options: Array(HeroSettings.maxItemsRange),
-                    selection: $hero.settings.maxItems,
-                    title: { "\($0)" }
-                )
-            }
-        }
-    }
-
-    private var heroAutoAdvanceRow: SettingsSplitRow {
-        @Bindable var hero = hero
-        return SettingsSplitRow(
-            id: "hero-auto-advance",
-            title: "Auto-Advance",
-            description: "Automatically rotate to the next title after a few seconds. Rotation always pauses while the hero is focused.",
-            indented: true,
-        ) {
-            VStack(alignment: .leading, spacing: 24) {
-                Toggle("Rotate automatically", isOn: $hero.settings.autoAdvance)
-                    .toggleStyle(SettingsSwitchToggleStyle())
-                if hero.settings.autoAdvance {
-                    LabeledSettingRow("Seconds per title") {
-                        SettingsStepper(
-                            options: Array(HeroSettings.autoAdvanceRange),
-                            selection: $hero.settings.autoAdvanceSeconds,
-                            title: { "\($0)s" }
-                        )
-                    }
-                }
-            }
-        }
-    }
-
-    private var heroTrailersRow: SettingsSplitRow {
-        @Bindable var hero = hero
-        return SettingsSplitRow(
-            id: "hero-trailers",
-            title: "Background Trailers",
-            description: "Coming soon — play a muted trailer behind the hero when one is available. Fades in only once it's actually playing. Your choice is saved for when this lands.",
-            indented: true,
-        ) {
-            Toggle("Play trailers in the background", isOn: $hero.settings.trailersEnabled)
-                .toggleStyle(SettingsSwitchToggleStyle())
-        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .animation(.easeInOut(duration: 0.22), value: hero.settings.isEnabled)
     }
 
     // MARK: - Per-library row option identity
@@ -322,65 +312,55 @@ struct CustomizeHomeDetailView: View {
             }
     }
 
-    private var randomLibrariesRow: SettingsSplitRow {
+    @ViewBuilder private var randomLibrariesContent: some View {
         let libraries = randomEligibleLibraries
-        return SettingsSplitRow(
-            id: "hero-random-libraries",
-            title: "Random Libraries",
-            description: "Which libraries the Random source draws from. Leave all selected to use every library shown on Home.",
-            indented: true,
-        ) {
-            if libraries.isEmpty {
-                Text("No movie or TV libraries are shown on this profile's Home yet.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            } else {
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(libraries) { library in
-                        Toggle(isOn: randomLibraryBinding(for: library.key, universe: libraries)) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(library.library.title)
-                                Text(library.serverName)
-                                    .font(.footnote)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        .toggleStyle(SettingsSwitchToggleStyle())
-                    }
-                }
-            }
+        if libraries.isEmpty {
+            Text("No movie or TV libraries are shown on this profile's Home yet.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            SettingsCheckList(
+                options: libraries,
+                title: { $0.library.title },
+                subtitle: { $0.serverName },
+                isChecked: { isRandomLibraryOn($0.key, universe: libraries) },
+                onToggle: { toggleRandomLibrary($0.key, universe: libraries) }
+            )
         }
     }
 
-    private func sourceBinding(_ source: HeroSourceKind) -> Binding<Bool> {
-        Binding(
-            get: { hero.settings.sources.contains(source) },
-            set: { isOn in
-                let current = Set(hero.settings.sources)
-                var next = current
-                if isOn { next.insert(source) } else { next.remove(source) }
-                hero.settings.sources = HeroSourceKind.allCases.filter { next.contains($0) }
-            }
-        )
+    /// Hero sources in the order shown in Settings: the always-available,
+    /// library-sourced ones first, then **Featured** pinned last (it depends on
+    /// Seerr, so it reads as the "extra" that may be disabled). The stored
+    /// `sources` order is unaffected — `toggleSource` re-derives it from
+    /// `allCases`, so curation/interleaving order doesn't change.
+    private var orderedHeroSources: [HeroSourceKind] {
+        HeroSourceKind.allCases.filter { $0 != .featured } + [.featured]
     }
 
-    private func randomLibraryBinding(for key: String, universe: [AggregatedLibrary]) -> Binding<Bool> {
+    private func toggleSource(_ source: HeroSourceKind) {
+        // Featured can't be enabled without Seerr (it has no content otherwise).
+        guard source != .featured || seerConfigured else { return }
+        var next = Set(hero.settings.sources)
+        if next.contains(source) { next.remove(source) } else { next.insert(source) }
+        hero.settings.sources = HeroSourceKind.allCases.filter { next.contains($0) }
+    }
+
+    /// A library feeds the Random source when it's explicitly selected, or when
+    /// nothing is (empty == "all libraries").
+    private func isRandomLibraryOn(_ key: String, universe: [AggregatedLibrary]) -> Bool {
+        let keys = hero.settings.randomLibraryKeys
+        return keys.isEmpty || keys.contains(key)
+    }
+
+    private func toggleRandomLibrary(_ key: String, universe: [AggregatedLibrary]) {
         let allKeys = Set(universe.map(\.key))
-        return Binding(
-            get: {
-                let keys = hero.settings.randomLibraryKeys
-                return keys.isEmpty || keys.contains(key)
-            },
-            set: { isOn in
-                var keys = hero.settings.randomLibraryKeys.isEmpty
-                    ? allKeys
-                    : hero.settings.randomLibraryKeys
-                if isOn { keys.insert(key) } else { keys.remove(key) }
-                keys.formIntersection(allKeys)
-                hero.settings.randomLibraryKeys = (keys == allKeys) ? [] : keys
-            }
-        )
+        var keys = hero.settings.randomLibraryKeys.isEmpty ? allKeys : hero.settings.randomLibraryKeys
+        if keys.contains(key) { keys.remove(key) } else { keys.insert(key) }
+        keys.formIntersection(allKeys)
+        // Canonicalise "everything selected" back to empty.
+        hero.settings.randomLibraryKeys = (keys == allKeys) ? [] : keys
     }
 }
 
@@ -439,11 +419,11 @@ private struct HomeRowsGroupCard<Content: View>: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
+            RoundedRectangle(cornerRadius: PlozzTheme.Metrics.Radius.card, style: .continuous)
                 .fill(Color.primary.opacity(0.05))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
+            RoundedRectangle(cornerRadius: PlozzTheme.Metrics.Radius.card, style: .continuous)
                 .strokeBorder(Color.primary.opacity(0.12), lineWidth: 1)
         )
     }

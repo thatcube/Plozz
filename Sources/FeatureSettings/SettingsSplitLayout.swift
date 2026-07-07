@@ -2,6 +2,14 @@
 import SwiftUI
 import CoreUI
 
+/// Shared metrics for the Settings detail panes so spacing is consistent (and
+/// tunable in one place) across every feature form.
+enum SettingsMetrics {
+    /// Vertical gap between top-level sections within a detail pane (the enable
+    /// toggle and each headed group). Deliberately generous for the 10-foot UI.
+    static let sectionSpacing: CGFloat = 80
+}
+
 /// One row in a Settings master/detail split. The left list shows the row's
 /// `title`; focusing it live-updates the right detail pane, which renders the
 /// row's `description` and the row's existing `detail` control.
@@ -182,15 +190,14 @@ struct SettingsSplitLayout: View {
             // Exactly two children: the title/description block and the control.
             // The spacing is therefore the gap between the description and the
             // first toggle/checkmark/box below it.
-            VStack(alignment: .leading, spacing: 40) {
+            VStack(alignment: .leading, spacing: 44) {
                 if let row = selectedRow {
-                    VStack(alignment: .leading, spacing: 6) {
+                    VStack(alignment: .leading, spacing: 12) {
                         Text(row.title)
-                            .font(.title3.weight(.semibold))
+                            .settingsFeatureTitle()
                         if let description = row.description {
                             Text(description)
-                                .font(.callout)
-                                .foregroundStyle(.secondary)
+                                .settingsHelperText()
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }
@@ -301,12 +308,8 @@ struct SettingsRevealSection<Content: View>: View {
                 VStack(alignment: .leading, spacing: 16) {
                     if let revealedHeader {
                         Text(revealedHeader)
-                            .font(.subheadline.weight(.semibold))
-                            .textCase(.uppercase)
-                            .tracking(1.0)
-                            .foregroundStyle(.secondary)
+                            .settingsSectionHeader()
                             .padding(.top, 4)
-                            .padding(.horizontal, 4)
                     }
                     content()
                 }
@@ -316,6 +319,33 @@ struct SettingsRevealSection<Content: View>: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .animation(.easeInOut(duration: 0.22), value: isOn)
+    }
+}
+
+/// A headed group of related controls *inside* a single detail pane: a bold
+/// heading, optional helper text, then its control(s) stacked beneath. This is
+/// how a feature that owns several controls (e.g. Hero: Sources, Items,
+/// Auto-Advance) keeps them together in ONE master row's detail — instead of
+/// scattering them as separate (or indented) rows in the master list. The
+/// master list then stays one clean row per feature.
+struct SettingsDetailGroup<Content: View>: View {
+    let title: String
+    var description: String? = nil
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(title)
+                .settingsSectionHeader()
+            if let description {
+                Text(description)
+                    .settingsSectionDescription()
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            content()
+                .padding(.top, 4)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 #endif

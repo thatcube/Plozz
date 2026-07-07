@@ -184,4 +184,54 @@ public extension View {
     func settingsRowIcon() -> some View { modifier(SettingsRowIconStyle()) }
     func settingsRowGreenIndicator() -> some View { modifier(SettingsRowGreenIndicatorStyle()) }
 }
+
+// MARK: - Settings typography scale (10-foot UI)
+
+/// One shared type hierarchy for every Settings detail pane, so the levels never
+/// collide (the "section header looks like a control label" problem). Ranked
+/// biggest → smallest:
+///
+///  1. ``settingsFeatureTitle()`` — the pane's feature name (e.g. "Hero").
+///  2. ``settingsSectionHeader()`` — a group heading within the pane (e.g.
+///     "Sources", "Items"). Clearly larger than a control label so it reads as a
+///     header, not a row.
+///  3. control labels — a control's own text (toggle/checkmark/stepper label);
+///     use the component defaults (`.headline`), which now sit a step *below* the
+///     section header.
+///  4. ``settingsHelperText()`` — descriptive/helper copy under a title or header.
+///
+/// Defining these here (not ad-hoc per view) is what makes the hierarchy
+/// consistent across every settings screen.
+public extension View {
+    /// L1 — the detail pane's feature title (e.g. "Hero"). Matches the master
+    /// list's page title weight/size so the two column titles read as peers.
+    func settingsFeatureTitle() -> some View {
+        font(.title2.weight(.bold)).foregroundStyle(.primary)
+    }
+
+    /// L2 — a section header inside a detail pane (e.g. "SOURCES"). Uppercase,
+    /// tracked, bold and secondary — the classic grouped-list header idiom, so it
+    /// reads as a *header* and never collides with the sentence-case, primary
+    /// control labels beneath it, nor with its own (smaller, dimmer) description.
+    func settingsSectionHeader() -> some View {
+        font(.subheadline.weight(.bold))
+            .textCase(.uppercase)
+            .tracking(1.8)
+            .foregroundStyle(.secondary)
+    }
+
+    /// L3 — a **feature** description: the intro sentence under the pane's feature
+    /// title (e.g. under "Hero"). Readable but secondary.
+    func settingsHelperText() -> some View {
+        font(.callout).foregroundStyle(.secondary)
+    }
+
+    /// L4 — a **section** description: a small, dim note under a section header.
+    /// Deliberately smaller + dimmer than both the header and feature description
+    /// so it reads as a footnote and never competes with the header. Use sparingly
+    /// (only when the header + control aren't self-explanatory).
+    func settingsSectionDescription() -> some View {
+        font(.footnote).foregroundStyle(.tertiary)
+    }
+}
 #endif

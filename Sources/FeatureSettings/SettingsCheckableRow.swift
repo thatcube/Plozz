@@ -17,6 +17,10 @@ struct SettingsCheckableRow: View {
     var subtitle: String? = nil
     var icon: String? = nil
     let isChecked: Bool
+    /// When false the row is dimmed and pulled out of the focus order (can't be
+    /// selected). `SettingsFocusButtonStyle` ignores `\.isEnabled`, so `.disabled`
+    /// alone wouldn't dim it — the opacity below supplies the disabled look.
+    var isEnabled: Bool = true
     let action: () -> Void
 
     // ``SettingsRowLabel`` insets content by 12pt horizontally; cancel the leading
@@ -51,8 +55,10 @@ struct SettingsCheckableRow: View {
             .padding(.vertical, 14)
             .padding(.horizontal, labelInset)
             .contentShape(Rectangle())
+            .opacity(isEnabled ? 1 : 0.35)
         }
         .buttonStyle(SettingsFocusButtonStyle())
+        .disabled(!isEnabled)
         .padding(.leading, -labelInset)
         .accessibilityAddTraits(isChecked ? .isSelected : [])
     }

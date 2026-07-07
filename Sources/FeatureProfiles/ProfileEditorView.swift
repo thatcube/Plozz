@@ -496,22 +496,16 @@ public struct ProfileEditorView: View {
     private func deleteSection(_ onDelete: @escaping () -> Void) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             categoryHeader("Delete")
-            // Same theme-aware destructive row the rest of Settings uses (red on
-            // both idle and the inverted focus card), so it's always legible.
+            // Same construction as Settings ▸ Server's "Sign Out & Remove
+            // Server" row: a plain destructive Button with the default tvOS
+            // focus style (which inverts to a clearly-legible focused card),
+            // rather than a custom style + forced-red label that read poorly on
+            // focus.
             Button(role: .destructive, action: onDelete) {
-                HStack(spacing: 16) {
-                    Image(systemName: "trash")
-                        .font(.system(size: 22, weight: .regular))
-                        .frame(width: 30, height: 30)
-                    Text("Delete Profile").font(.callout.weight(.medium))
-                    Spacer()
-                }
-                .foregroundStyle(.red)
-                .padding(.vertical, 12)
-                .padding(.horizontal, 12)
-                .contentShape(Rectangle())
+                Label("Delete Profile", systemImage: "trash")
+                    .labelStyle(.titleAndIcon)
+                    .font(.callout.weight(.semibold))
             }
-            .buttonStyle(SettingsFocusButtonStyle())
             Text("Deleting a profile removes its preferences (theme, captions, spoilers, Trakt) and which servers it includes. Signed-in server accounts stay in the household pool.")
                 .font(.footnote)
                 .foregroundStyle(palette.secondaryText)

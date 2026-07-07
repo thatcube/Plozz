@@ -63,8 +63,14 @@ actor ShareScanner {
     }
 
     /// Re-point progress reporting after creation, so a scanner built before the
-    /// app wired its status reporter (a startup race) still drives the UI.
-    func setReporter(_ reporter: ShareScanReporter) { self.reporter = reporter }
+    /// app wired its status reporter (a startup race) still drives the UI. If a scan
+    /// is already in flight, replay `scanStarted` so the new reporter learns of it
+    /// (its `scanStarted` went to the previous `.noop` reporter and would otherwise
+    /// leave later progress/finish events with no state to update).
+    func setReporter(_ reporter: ShareScanReporter) {
+        self.reporter = reporter
+        if isRunning { reporter.scanStarted(shareID, name) }
+    }
 
     /// Run a scan unless one already ran within `minInterval` (or is running).
     /// Called fire-and-forget from the Home hot path, so it must be cheap to no-op.
@@ -101,6 +107,11 @@ actor ShareScanner {
         var frontier: [String] = [""] // "" == share root
         var dirsWalked = 0
         var filesFound = 0
+        // Set if ANY directory listing failed this pass (transient SMB timeout, auth
+        // hiccup, permission-denied folder). A failed listing looks like an empty
+        // folder, so pruning on a partial walk would delete still-present content and
+        // reset its "date added" on rediscovery — skip the prune when this is set.
+        var anyListingFailed = false
 
         // Level-by-level BFS. Each level's directories are listed in parallel across
         // the pool; a plain free-list of listers (managed here on the actor) bounds
@@ -126,6 +137,7 @@ actor ShareScanner {
                 // Drain results, committing each directory and launching the next.
                 while let result = await group.next() {
                     free.append(result.lister)     // return the connection to the pool
+                    if !result.ok { anyListingFailed = true }
                     dirsWalked += 1
                     nextFrontier.append(contentsOf: result.subdirs)
                     if !result.assets.isEmpty {
@@ -144,31 +156,41 @@ actor ShareScanner {
             frontier = nextFrontier
         }
 
-        // Completed a full pass: drop assets no longer on the share, and stamp the
-        // completion time so `scanIfStale` can throttle the next walk.
-        await store.pruneNotSeen(inScan: scanID)
+        // Completed a full pass. Only prune (drop assets no longer on the share) when
+        // EVERY directory listed cleanly — a partial walk (some listing failed) must
+        // not delete content that's merely temporarily unreachable. Still stamp the
+        // completion time either way so `scanIfStale` throttles the next walk (a
+        // permanently-inaccessible folder can't cause a perpetual re-scan); the next
+        // clean pass performs the deferred prune.
+        if !anyListingFailed {
+            await store.pruneNotSeen(inScan: scanID)
+        }
         await store.setMeta("last_full_scan_at", String(Date().timeIntervalSince1970))
-        PlozzLog.boot("share.scan done scanID=\(scanID) dirs=\(dirsWalked) files=\(filesFound)")
+        PlozzLog.boot("share.scan done scanID=\(scanID) dirs=\(dirsWalked) files=\(filesFound) pruned=\(!anyListingFailed)")
     }
 
     /// Result of listing one directory: the connection it used (returned to the
-    /// pool), the sub-directories discovered, and the playable assets parsed.
+    /// pool), the sub-directories discovered, the playable assets parsed, and
+    /// whether the listing actually succeeded (a failed listing must not let the
+    /// walk treat the folder as "empty" and prune its still-present content).
     private struct DirResult: Sendable {
         let lister: ScanLister
         let subdirs: [String]
         let assets: [CatalogAsset]
+        let ok: Bool
     }
 
     /// List + classify one directory off the actor (pure I/O + parsing, no shared
     /// state), so the pooled listings run truly in parallel. A per-directory error
-    /// is swallowed to an empty result so one bad folder never aborts the walk.
+    /// is swallowed to an empty result (so one bad folder never aborts the walk) but
+    /// is flagged `ok: false` so the caller can skip the global prune.
     private static func processDirectory(_ dir: String, using lister: ScanLister) async -> DirResult {
         let entries: [SMBShareBrowser.Entry]
         do {
             entries = try await lister.list(dir)
         } catch {
             PlozzLog.boot("share.scan skip dir \(dir.isEmpty ? "<root>" : dir) (\(error))")
-            return DirResult(lister: lister, subdirs: [], assets: [])
+            return DirResult(lister: lister, subdirs: [], assets: [], ok: false)
         }
         var subdirs: [String] = []
         var assets: [CatalogAsset] = []
@@ -181,7 +203,7 @@ actor ShareScanner {
                 assets.append(asset(relPath: childPath, entry: entry))
             }
         }
-        return DirResult(lister: lister, subdirs: subdirs, assets: assets)
+        return DirResult(lister: lister, subdirs: subdirs, assets: assets, ok: true)
     }
 
     // MARK: - Parse one file into a catalog asset

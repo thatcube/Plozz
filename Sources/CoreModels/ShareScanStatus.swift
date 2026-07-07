@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 
 /// Live status of a media share's background scan + enrichment, per share. Drives
 /// the "Updating library…" indicator on Home and the last-scanned line in Settings,
@@ -37,14 +38,53 @@ public final class ShareScanStatusModel {
     /// Keyed by the share's stable id (`server.id`).
     public private(set) var byShare: [String: ShareScanState] = [:]
 
-    public init() {}
+    public init() {
+        let (stream, continuation) = AsyncStream.makeStream(of: Event.self)
+        self.continuation = continuation
+        // A single main-actor pump applies events in stream order, so a late
+        // `scanProgress` can never re-open a finished scan and no event is lost to
+        // a scheduling reorder between the scanner's independent report tasks.
+        self.pump = Task { [weak self] in
+            for await event in stream { self?.apply(event) }
+        }
+    }
+
+    deinit { continuation.finish() }
+
+    /// Ordered delivery channel. The scanner/enricher run off-main and report from
+    /// independent tasks; funnelling every event through one continuation → one
+    /// pump makes application order deterministic and drop-free.
+    @ObservationIgnored private nonisolated let continuation: AsyncStream<Event>.Continuation
+    @ObservationIgnored private var pump: Task<Void, Never>?
+
+    /// One reported scan/enrich event (see `reporter()`).
+    enum Event: Sendable {
+        case scanStarted(id: String, name: String)
+        case scanProgress(id: String, items: Int)
+        case scanFinished(id: String)
+        case enrichStarted(id: String)
+        case enrichFinished(id: String)
+    }
+
+    /// Apply one event, in stream order, on the main actor.
+    private func apply(_ event: Event) {
+        switch event {
+        case let .scanStarted(id, name): scanStarted(shareID: id, name: name)
+        case let .scanProgress(id, items): scanProgress(shareID: id, itemsFound: items)
+        case let .scanFinished(id): scanFinished(shareID: id)
+        case let .enrichStarted(id): enrichStarted(shareID: id)
+        case let .enrichFinished(id): enrichFinished(shareID: id)
+        }
+    }
 
     /// Any share currently scanning or enriching.
     public var isAnyBusy: Bool { byShare.values.contains(where: { $0.isBusy }) }
 
-    /// Display names of shares currently busy (for the banner text).
+    /// Display names of shares currently busy (for the banner text). Nameless
+    /// states (a safety-net event applied before any named `scanStarted`) are
+    /// skipped so the banner never shows a blank entry.
     public var busyShareNames: [String] {
-        byShare.values.filter(\.isBusy).map(\.name).sorted()
+        byShare.values.filter(\.isBusy).map(\.name).filter { !$0.isEmpty }.sorted()
     }
 
     public func state(forShareID shareID: String) -> ShareScanState? { byShare[shareID] }
@@ -84,16 +124,17 @@ public final class ShareScanStatusModel {
         byShare[shareID] = state
     }
 
-    /// A reporter that forwards scanner events onto this model on the main actor.
-    /// Held by the scanner/enricher (which run off-main), so passing it across the
-    /// actor boundary is safe.
+    /// A reporter that forwards scanner events onto this model **in order** via the
+    /// serialized event stream (see `apply`). Held by the scanner/enricher (which
+    /// run off-main), so passing it across the actor boundary is safe.
     public nonisolated func reporter() -> ShareScanReporter {
-        ShareScanReporter(
-            scanStarted: { [weak self] id, name in Task { @MainActor in self?.scanStarted(shareID: id, name: name) } },
-            scanProgress: { [weak self] id, count in Task { @MainActor in self?.scanProgress(shareID: id, itemsFound: count) } },
-            scanFinished: { [weak self] id in Task { @MainActor in self?.scanFinished(shareID: id) } },
-            enrichStarted: { [weak self] id in Task { @MainActor in self?.enrichStarted(shareID: id) } },
-            enrichFinished: { [weak self] id in Task { @MainActor in self?.enrichFinished(shareID: id) } }
+        let c = continuation
+        return ShareScanReporter(
+            scanStarted: { id, name in c.yield(.scanStarted(id: id, name: name)) },
+            scanProgress: { id, count in c.yield(.scanProgress(id: id, items: count)) },
+            scanFinished: { id in c.yield(.scanFinished(id: id)) },
+            enrichStarted: { id in c.yield(.enrichStarted(id: id)) },
+            enrichFinished: { id in c.yield(.enrichFinished(id: id)) }
         )
     }
 }

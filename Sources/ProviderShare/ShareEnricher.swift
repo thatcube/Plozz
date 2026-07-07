@@ -22,14 +22,19 @@ actor ShareEnricher {
     /// How many items to resolve concurrently (each is a handful of small HTTP
     /// calls to keyless APIs — keep modest so a large library doesn't burst).
     private let concurrency: Int
-    /// Safety cap on items enriched per run. Defaults to "drain the whole backlog"
-    /// (`.max`): a partial cap left large libraries perpetually under-enriched — the
-    /// pass only re-triggers on the next scan/Home load, so heroes/cards stayed
-    /// blank for most of the library. Each processed item is marked done at the
-    /// current version, so the pending set strictly shrinks and the drain always
-    /// terminates. Tests pass a small cap to bound a single run.
+    /// Max items fetched into a single drain snapshot. Defaults to "the whole
+    /// backlog" (`.max`): a partial cap left large libraries perpetually under-
+    /// enriched — the pass only re-triggers on the next scan/Home load, so
+    /// heroes/cards stayed blank for most of the library. A pass processes a finite
+    /// snapshot exactly once, so it always terminates; usable results settle while
+    /// misses stay pending (bounded retries) for a later pass. Tests pass a small
+    /// cap to bound a single run.
     private let maxPerRun: Int
     private var isRunning = false
+    /// Whether this pass advertised "enriching" (had work). Lets `setReporter`
+    /// replay `enrichStarted` to a reporter wired mid-pass without leaving the
+    /// banner stuck when the pass was a no-op.
+    private var isAdvertisingEnrich = false
 
     init(store: ShareCatalogStore, resolver: ShareMetadataResolving, shareID: String = "",
          reporter: ShareScanReporter = .noop, concurrency: Int = 6, maxPerRun: Int = .max) {
@@ -42,7 +47,13 @@ actor ShareEnricher {
     }
 
     /// Re-point progress reporting after creation (startup race — see ShareScanner).
-    func setReporter(_ reporter: ShareScanReporter) { self.reporter = reporter }
+    /// Replay `enrichStarted` when a pass is currently advertising work, so a
+    /// reporter wired mid-pass still sees the in-flight enrichment (and its matching
+    /// `enrichFinished`).
+    func setReporter(_ reporter: ShareScanReporter) {
+        self.reporter = reporter
+        if isAdvertisingEnrich { reporter.enrichStarted(shareID) }
+    }
 
     /// Resolve + persist pending items until none remain (or the run cap / cancel).
     func enrichPending() async {
@@ -51,39 +62,44 @@ actor ShareEnricher {
         // Only advertise "enriching" when there's actually pending work, so the
         // banner doesn't blink for a no-op pass.
         let hasWork = !(await store.pendingEnrichment(version: Self.version, limit: 1)).isEmpty
+        isAdvertisingEnrich = hasWork
         if hasWork { reporter.enrichStarted(shareID) }
-        defer { isRunning = false; if hasWork { reporter.enrichFinished(shareID) } }
+        defer { isRunning = false; isAdvertisingEnrich = false; if hasWork { reporter.enrichFinished(shareID) } }
+
+        // Process ONE snapshot of the currently-pending items, each exactly once.
+        // A re-query-from-the-top loop stalls once retry-eligible misses persist at
+        // the front of the ordering (and could spin forever if a write kept
+        // failing); a finite snapshot drains cleanly and always terminates. Items
+        // scanned in later are picked up by the next pass (kicked after each scan).
+        let snapshot = await store.pendingEnrichment(version: Self.version, limit: maxPerRun)
+        if snapshot.isEmpty { return }
 
         var processed = 0
-        while !Task.isCancelled, processed < maxPerRun {
-            let batch = await store.pendingEnrichment(version: Self.version, limit: concurrency * 3)
-            if batch.isEmpty { break }
-
-            await withTaskGroup(of: (String, ShareCatalogStore.EnrichmentRecord).self) { group in
-                var iterator = batch.makeIterator()
-                let resolver = self.resolver
-                func addNext() -> Bool {
-                    guard let pending = iterator.next() else { return false }
-                    let request = ShareEnrichRequest(
-                        itemID: pending.itemID, title: pending.title, year: pending.year,
-                        isMovie: pending.isMovie, isAnime: pending.isAnime
-                    )
-                    group.addTask { (pending.itemID, await resolver.resolve(request)) }
-                    return true
-                }
-                for _ in 0..<concurrency { _ = addNext() }
-                while let (itemID, record) = await group.next() {
-                    // Persist even a sparse result: it marks the item done at this
-                    // version so a miss isn't retried every pass (a version bump or
-                    // manual refresh re-enriches). Keeps the pending set shrinking.
-                    await store.saveEnrichment(itemID: itemID, record, version: Self.version)
-                    processed += 1
-                    if Task.isCancelled { break }
-                    _ = addNext()
-                }
+        await withTaskGroup(of: (String, ShareCatalogStore.EnrichmentRecord).self) { group in
+            var iterator = snapshot.makeIterator()
+            let resolver = self.resolver
+            func addNext() -> Bool {
+                guard !Task.isCancelled, let pending = iterator.next() else { return false }
+                let request = ShareEnrichRequest(
+                    itemID: pending.itemID, title: pending.title, year: pending.year,
+                    isMovie: pending.isMovie, isAnime: pending.isAnime
+                )
+                group.addTask { (pending.itemID, await resolver.resolve(request)) }
+                return true
+            }
+            for _ in 0..<concurrency { _ = addNext() }
+            while let (itemID, record) = await group.next() {
+                // Persist the (merged) result. A usable result settles the item; an
+                // unusable miss bumps its attempt counter and stays pending for the
+                // next pass, up to the retry cap — so a transient rate-limit/timeout
+                // isn't cached as a permanent blank. Count only durable writes.
+                let ok = await store.saveEnrichment(itemID: itemID, record, version: Self.version)
+                if ok { processed += 1 }
+                if Task.isCancelled { break }
+                _ = addNext()
             }
         }
-        PlozzLog.boot("share.enrich pass done processed=\(processed) cancelled=\(Task.isCancelled)")
+        PlozzLog.boot("share.enrich pass done processed=\(processed)/\(snapshot.count) cancelled=\(Task.isCancelled)")
     }
 
     /// Resolve + persist ONE item immediately (the one a user just opened), jumping

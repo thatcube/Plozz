@@ -99,6 +99,11 @@ actor ShareCatalogStore {
             enrich_version INTEGER NOT NULL
         );
         """)
+        // Migration: bounded-retry attempt counter (added after first ship). Guarded
+        // so it runs at most once; `exec` ignores the "duplicate column" error too.
+        if !hasColumn(table: "enrichment", column: "attempts") {
+            exec("ALTER TABLE enrichment ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0;")
+        }
     }
 
     // MARK: - Scan write path
@@ -206,7 +211,30 @@ actor ShareCatalogStore {
         var posterURL: URL?
         var backdropURL: URL?
         var logoURL: URL?
+
+        /// Whether this record carries anything worth showing/merging. An *unusable*
+        /// result (no ids, overview, or artwork) is treated as a miss — usually a
+        /// transient rate-limit/timeout — and is retried across passes rather than
+        /// cached as a permanent blank.
+        var isUsable: Bool {
+            !providerIDs.isEmpty
+                || (overview?.isEmpty == false)
+                || posterURL != nil || backdropURL != nil || logoURL != nil
+        }
     }
+
+    /// How many enrichment passes a miss is retried before it's settled as a genuine
+    /// miss (bounded, not retried forever). Gives a transient rate-limit/timeout a
+    /// few chances across scans to recover before the item is left blank.
+    static let maxEnrichAttempts = 3
+    /// Sentinel-free retry model: an unusable (empty) enrichment row is stored at
+    /// the current `version` like any other, but this predicate (over a
+    /// `LEFT JOIN enrichment e`) keeps it *pending* — retried up to
+    /// `maxEnrichAttempts` — until it either resolves to something usable or is
+    /// settled as a genuine miss. Matches a row with no ids, overview, or artwork.
+    private static let unusableEnrichmentPredicate =
+        "e.provider_ids_json IS NULL AND e.overview IS NULL AND e.poster_url IS NULL "
+        + "AND e.backdrop_url IS NULL AND e.logo_url IS NULL"
 
     /// Logical items (movies + series) with no enrichment row at `version` yet,
     /// oldest-discovered first so a fresh library fills in a sensible order.
@@ -215,13 +243,19 @@ actor ShareCatalogStore {
         guard db != nil, limit > 0 else { return [] }
         var out: [PendingEnrichment] = []
 
-        // Movies: one row per movie asset lacking a current-version enrichment.
+        // Movies: a movie asset is pending when it has no current-version enrichment
+        // row, OR its row is an unusable miss still under the retry cap.
         query("""
         SELECT a.rel_path, a.title, a.year FROM assets a
         LEFT JOIN enrichment e ON e.item_id = 'f:' || a.rel_path AND e.enrich_version = ?
-        WHERE a.library='movies' AND a.kind='movie' AND e.item_id IS NULL
+        WHERE a.library='movies' AND a.kind='movie'
+          AND (e.item_id IS NULL OR (\(Self.unusableEnrichmentPredicate) AND e.attempts < ?))
         ORDER BY a.first_seen_at LIMIT ?;
-        """, bind: { sqlite3_bind_int64($0, 1, Int64(version)); sqlite3_bind_int64($0, 2, Int64(limit)) }) { stmt in
+        """, bind: {
+            sqlite3_bind_int64($0, 1, Int64(version))
+            sqlite3_bind_int64($0, 2, Int64(Self.maxEnrichAttempts))
+            sqlite3_bind_int64($0, 3, Int64(limit))
+        }) { stmt in
             let relPath = self.columnText(stmt, 0) ?? ""
             out.append(PendingEnrichment(
                 itemID: ShareCatalogID.file(relPath),
@@ -231,15 +265,20 @@ actor ShareCatalogStore {
             ))
         }
 
-        // Series: one row per distinct series lacking a current-version enrichment.
+        // Series: one row per distinct series pending under the same rule.
         let remaining = max(0, limit - out.count)
         if remaining > 0 {
             query("""
             SELECT a.series_key, a.series_title, a.library, MAX(a.year) FROM assets a
             LEFT JOIN enrichment e ON e.item_id = 'series:' || a.series_key AND e.enrich_version = ?
-            WHERE a.kind='episode' AND a.series_key IS NOT NULL AND e.item_id IS NULL
+            WHERE a.kind='episode' AND a.series_key IS NOT NULL
+              AND (e.item_id IS NULL OR (\(Self.unusableEnrichmentPredicate) AND e.attempts < ?))
             GROUP BY a.series_key ORDER BY MIN(a.first_seen_at) LIMIT ?;
-            """, bind: { sqlite3_bind_int64($0, 1, Int64(version)); sqlite3_bind_int64($0, 2, Int64(remaining)) }) { stmt in
+            """, bind: {
+                sqlite3_bind_int64($0, 1, Int64(version))
+                sqlite3_bind_int64($0, 2, Int64(Self.maxEnrichAttempts))
+                sqlite3_bind_int64($0, 3, Int64(remaining))
+            }) { stmt in
                 guard let key = self.columnText(stmt, 0) else { return }
                 let lib = self.columnText(stmt, 2) ?? "tv"
                 out.append(PendingEnrichment(
@@ -264,7 +303,7 @@ actor ShareCatalogStore {
         // Series → the enrichment row is keyed by `series:<key>`.
         if ShareCatalogID.isSeries(id), let key = ShareCatalogID.seriesKey(forSeriesID: id) {
             let itemID = ShareCatalogID.series(key)
-            if isEnriched(itemID: itemID, version: version) { return nil }
+            if hasUsableEnrichment(itemID: itemID, version: version) { return nil }
             var out: PendingEnrichment?
             query("SELECT series_title, library, MAX(year) FROM assets WHERE series_key=? AND kind='episode';",
                   bind: { self.bindText($0, 1, key) }) { stmt in
@@ -284,7 +323,7 @@ actor ShareCatalogStore {
         // through their series (above), so a bare episode file id is skipped here.
         if let relPath = ShareCatalogID.relPath(forFileID: id) {
             let itemID = ShareCatalogID.file(relPath)
-            if isEnriched(itemID: itemID, version: version) { return nil }
+            if hasUsableEnrichment(itemID: itemID, version: version) { return nil }
             var out: PendingEnrichment?
             query("SELECT title, year, kind FROM assets WHERE rel_path=?;",
                   bind: { self.bindText($0, 1, relPath) }) { stmt in
@@ -301,55 +340,115 @@ actor ShareCatalogStore {
         return nil
     }
 
-    /// Whether an enrichment row exists for `itemID` at the given version.
-    private func isEnriched(itemID: String, version: Int) -> Bool {
+    /// Whether `itemID` already has a **usable** enrichment row (any id / overview /
+    /// artwork) at `version`. An unusable miss row does NOT count — so the fast-track
+    /// path still re-attempts an item a user opens even after background retries
+    /// settled it as a miss.
+    private func hasUsableEnrichment(itemID: String, version: Int) -> Bool {
         guard db != nil else { return false }
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, "SELECT 1 FROM enrichment WHERE item_id=? AND enrich_version=? LIMIT 1;", -1, &stmt, nil) == SQLITE_OK else { return false }
+        guard sqlite3_prepare_v2(db, """
+        SELECT 1 FROM enrichment WHERE item_id=? AND enrich_version=?
+          AND (provider_ids_json IS NOT NULL OR overview IS NOT NULL OR poster_url IS NOT NULL
+               OR backdrop_url IS NOT NULL OR logo_url IS NOT NULL) LIMIT 1;
+        """, -1, &stmt, nil) == SQLITE_OK else { return false }
         defer { sqlite3_finalize(stmt) }
         bindText(stmt, 1, itemID)
         sqlite3_bind_int64(stmt, 2, Int64(version))
         return sqlite3_step(stmt) == SQLITE_ROW
     }
 
-    /// Persist one item's enrichment. When strong anime ids (AniList/MAL) resolve
-    /// for a series currently filed under TV, reclassify all its assets to Anime —
-    /// this is the Phase-2 "anime confirmed once ids resolve" correction.
-    func saveEnrichment(itemID: String, _ record: EnrichmentRecord, version: Int, now: Date = Date()) {
+    /// Persist one item's enrichment, **merging** onto any existing row so a later
+    /// sparse/transient result can never erase richer ids/art already stored (a
+    /// fast-track `enrichOne` racing the background drain, or a partial source
+    /// outage). An **unusable** resolve (no ids/overview/art — usually a transient
+    /// rate-limit or timeout) is NOT settled at `version`: it bumps an attempt
+    /// counter and is stored with a sentinel version so it stays pending and the
+    /// next pass retries it, up to `maxEnrichAttempts`, after which it's settled as
+    /// a genuine miss (bounded, never retried forever). A usable result settles
+    /// immediately. Returns `false` if the row could not be written.
+    ///
+    /// When strong anime ids (AniList/MAL) resolve for a series currently filed
+    /// under TV, all its assets are reclassified to Anime — the Phase-2 "anime
+    /// confirmed once ids resolve" correction.
+    @discardableResult
+    func saveEnrichment(itemID: String, _ record: EnrichmentRecord, version: Int, now: Date = Date()) -> Bool {
         ensureOpen()
-        guard db != nil else { return }
+        guard db != nil else { return false }
+
+        // Merge onto the existing row (if any) so a sparse write never clobbers
+        // richer data. An unusable (empty) resolve — usually a transient rate-limit
+        // or timeout — bumps an attempt counter but is still stored at `version`;
+        // `pendingEnrichment` keeps such rows pending until `attempts` reach the cap,
+        // so a miss is retried across passes and then settled, never cached as a
+        // permanent blank and never looped forever.
+        let merged = Self.merged(existing: enrichmentRow(itemID: itemID), new: record)
+        let attempts = merged.isUsable ? 0 : enrichmentAttempts(itemID: itemID) + 1
+
         var stmt: OpaquePointer?
         let sql = """
         INSERT INTO enrichment
-          (item_id, provider_ids_json, overview, genres_json, runtime, poster_url, backdrop_url, logo_url, enriched_at, enrich_version)
-        VALUES (?,?,?,?,?,?,?,?,?,?)
+          (item_id, provider_ids_json, overview, genres_json, runtime, poster_url, backdrop_url, logo_url, enriched_at, enrich_version, attempts)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(item_id) DO UPDATE SET
           provider_ids_json=excluded.provider_ids_json, overview=excluded.overview,
           genres_json=excluded.genres_json, runtime=excluded.runtime,
           poster_url=excluded.poster_url, backdrop_url=excluded.backdrop_url,
           logo_url=excluded.logo_url, enriched_at=excluded.enriched_at,
-          enrich_version=excluded.enrich_version;
+          enrich_version=excluded.enrich_version, attempts=excluded.attempts;
         """
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return false }
         bindText(stmt, 1, itemID)
-        bindOptText(stmt, 2, encodeJSON(record.providerIDs.isEmpty ? nil : record.providerIDs))
-        bindOptText(stmt, 3, record.overview)
-        bindOptText(stmt, 4, encodeJSON(record.genres.isEmpty ? nil : record.genres))
-        if let rt = record.runtime { sqlite3_bind_double(stmt, 5, rt) } else { sqlite3_bind_null(stmt, 5) }
-        bindOptText(stmt, 6, record.posterURL?.absoluteString)
-        bindOptText(stmt, 7, record.backdropURL?.absoluteString)
-        bindOptText(stmt, 8, record.logoURL?.absoluteString)
+        bindOptText(stmt, 2, encodeJSON(merged.providerIDs.isEmpty ? nil : merged.providerIDs))
+        bindOptText(stmt, 3, merged.overview)
+        bindOptText(stmt, 4, encodeJSON(merged.genres.isEmpty ? nil : merged.genres))
+        if let rt = merged.runtime { sqlite3_bind_double(stmt, 5, rt) } else { sqlite3_bind_null(stmt, 5) }
+        bindOptText(stmt, 6, merged.posterURL?.absoluteString)
+        bindOptText(stmt, 7, merged.backdropURL?.absoluteString)
+        bindOptText(stmt, 8, merged.logoURL?.absoluteString)
         sqlite3_bind_double(stmt, 9, now.timeIntervalSince1970)
         sqlite3_bind_int64(stmt, 10, Int64(version))
-        _ = sqlite3_step(stmt)
+        sqlite3_bind_int64(stmt, 11, Int64(attempts))
+        let ok = sqlite3_step(stmt) == SQLITE_DONE
         sqlite3_finalize(stmt)
 
-        // Anime confirmation: an AniList/MAL id proves this series is anime.
-        if ShareCatalogID.isSeries(itemID),
+        // Anime confirmation: an AniList/MAL id (from either the new or existing
+        // record) proves this series is anime.
+        if ok, ShareCatalogID.isSeries(itemID),
            let key = ShareCatalogID.seriesKey(forSeriesID: itemID),
-           record.providerIDs.keys.contains(where: { ["anilist", "mal", "myanimelist"].contains($0.lowercased()) }) {
+           merged.providerIDs.keys.contains(where: { ["anilist", "mal", "myanimelist"].contains($0.lowercased()) }) {
             reclassifySeriesToAnime(seriesKey: key)
         }
+        return ok
+    }
+
+    /// Merge a freshly-resolved record onto the existing one: prefer a new non-empty
+    /// value for each field, keep the existing otherwise, and UNION provider ids
+    /// (so a sparse pass can never drop ids another pass found).
+    private static func merged(existing: EnrichmentRecord?, new: EnrichmentRecord) -> EnrichmentRecord {
+        guard let existing else { return new }
+        var out = existing
+        if !new.providerIDs.isEmpty {
+            var ids = existing.providerIDs
+            for (k, v) in new.providerIDs where !v.isEmpty { ids[k] = v }
+            out.providerIDs = ids
+        }
+        if let o = new.overview, !o.isEmpty { out.overview = o }
+        if !new.genres.isEmpty { out.genres = new.genres }
+        if let r = new.runtime { out.runtime = r }
+        if let p = new.posterURL { out.posterURL = p }
+        if let b = new.backdropURL { out.backdropURL = b }
+        if let l = new.logoURL { out.logoURL = l }
+        return out
+    }
+
+    /// How many times enrichment has been attempted for `itemID` (0 when no row).
+    private func enrichmentAttempts(itemID: String) -> Int {
+        var n = 0
+        query("SELECT attempts FROM enrichment WHERE item_id=?;", bind: { self.bindText($0, 1, itemID) }) { stmt in
+            n = Int(sqlite3_column_int64(stmt, 0))
+        }
+        return n
     }
 
     private func reclassifySeriesToAnime(seriesKey: String) {
@@ -731,6 +830,17 @@ actor ShareCatalogStore {
     private func exec(_ sql: String) {
         guard let db else { return }
         sqlite3_exec(db, sql, nil, nil, nil)
+    }
+
+    /// Whether `table` already has `column` — drives one-shot column migrations.
+    /// `table`/`column` are compile-time literals at every call site, so the
+    /// interpolation into the PRAGMA carries no injection risk.
+    private func hasColumn(table: String, column: String) -> Bool {
+        var found = false
+        query("PRAGMA table_info(\(table));") { stmt in
+            if self.columnText(stmt, 1) == column { found = true }
+        }
+        return found
     }
 
     private func query(_ sql: String, bind: (OpaquePointer?) -> Void = { _ in }, row: (OpaquePointer?) -> Void) {

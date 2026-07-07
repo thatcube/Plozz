@@ -115,18 +115,64 @@ final class ShareEnricherTests: XCTestCase {
         XCTAssertEqual(afterSecond, 1, "an already-enriched item is not resolved again")
     }
 
-    func testPendingShrinksAsItemsAreEnriched() async {
+    func testMissIsRetriedAcrossPassesThenSettled() async {
+        // An empty (unusable) resolve is a likely-transient miss (rate-limit/timeout):
+        // it stays pending and is retried across passes, then settled after the
+        // attempt cap — never cached as a permanent blank, never retried forever.
         let store = ShareCatalogStore(accountKey: "a", directory: tempDir())
         await store.upsert([
             movie("Movies/A (2000).mkv", "A", 2000),
             movie("Movies/B (2001).mkv", "B", 2001),
         ], scanID: 1)
-        let before = await store.pendingEnrichment(version: ShareEnricher.version, limit: 10)
-        XCTAssertEqual(before.count, 2)
+        let enricher = ShareEnricher(store: store, resolver: FakeResolver(byTitle: [:]))
+
+        // First pass attempts both but resolves nothing → still pending (retry).
+        await enricher.enrichPending()
+        let afterOne = await store.pendingEnrichment(version: ShareEnricher.version, limit: 10)
+        XCTAssertEqual(afterOne.count, 2, "an empty (transient-looking) miss stays pending for retry")
+
+        // Exhaust the remaining retry budget → settled as a genuine miss.
+        for _ in 1..<ShareCatalogStore.maxEnrichAttempts { await enricher.enrichPending() }
+        let afterCap = await store.pendingEnrichment(version: ShareEnricher.version, limit: 10)
+        XCTAssertTrue(afterCap.isEmpty, "after the attempt cap a persistent miss is settled")
+    }
+
+    func testUsableResultRecoversAPreviouslyMissedItem() async {
+        // A miss that later resolves to real data must recover (not stay blank).
+        let store = ShareCatalogStore(accountKey: "a", directory: tempDir())
+        await store.upsert([movie("Movies/A (2000).mkv", "A", 2000)], scanID: 1)
 
         await ShareEnricher(store: store, resolver: FakeResolver(byTitle: [:])).enrichPending()
-        let after = await store.pendingEnrichment(version: ShareEnricher.version, limit: 10)
-        XCTAssertTrue(after.isEmpty, "every pending item was attempted and marked at the current version")
+        let stillPending = await store.pendingEnrichment(version: ShareEnricher.version, limit: 10)
+        XCTAssertEqual(stillPending.count, 1)
+
+        let rec = ShareCatalogStore.EnrichmentRecord(providerIDs: ["Tmdb": "1"])
+        await ShareEnricher(store: store, resolver: FakeResolver(byTitle: ["A": rec])).enrichPending()
+        let item = await store.item(id: ShareCatalogID.file("Movies/A (2000).mkv"))
+        XCTAssertEqual(item?.providerID(.tmdb), "1")
+        let afterRecover = await store.pendingEnrichment(version: ShareEnricher.version, limit: 10)
+        XCTAssertTrue(afterRecover.isEmpty, "a now-usable item settles out of the pending set")
+    }
+
+    func testSparseWriteDoesNotClobberRicherEnrichment() async {
+        // A later sparse/transient result (e.g. enrichOne racing the drain) must not
+        // erase ids/art an earlier pass already resolved.
+        let store = ShareCatalogStore(accountKey: "a", directory: tempDir())
+        await store.upsert([movie("Movies/A (2000).mkv", "A", 2000)], scanID: 1)
+        let id = ShareCatalogID.file("Movies/A (2000).mkv")
+
+        await store.saveEnrichment(itemID: id, .init(
+            providerIDs: ["Tmdb": "1"],
+            posterURL: URL(string: "https://img/p.jpg"),
+            backdropURL: URL(string: "https://img/b.jpg")
+        ), version: ShareEnricher.version)
+        // A subsequent empty write must merge, not clobber.
+        await store.saveEnrichment(itemID: id, .init(), version: ShareEnricher.version)
+
+        let item = await store.item(id: id)
+        XCTAssertEqual(item?.providerID(.tmdb), "1", "ids survive a later sparse write")
+        XCTAssertEqual(item?.posterURL?.absoluteString, "https://img/p.jpg", "poster survives")
+        XCTAssertEqual(item?.backdropURL?.absoluteString, "https://img/b.jpg", "backdrop survives")
     }
 
     func testSingleItemPendingLookupTargetsTheOpenedItem() async {

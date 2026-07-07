@@ -134,6 +134,36 @@ final class ShareScannerTests: XCTestCase {
         XCTAssertEqual(after.tvSeries, 1, "still-present content is retained")
     }
 
+    func testPartialScanFailureDoesNotPrune() async {
+        struct ListError: Error {}
+        let store = ShareCatalogStore(accountKey: "a", directory: tempDir())
+
+        // First scan indexes everything cleanly.
+        await makeScanner(store: store, fake: FakeShare(standardTree())).scan()
+        let before = await store.libraryCounts()
+        XCTAssertEqual(before.movies, 1)
+        XCTAssertEqual(before.tvSeries, 1)
+
+        // Second scan: listing the Movies folder throws (a transient SMB error). The
+        // walk must NOT prune, so the still-present Inception survives rather than
+        // being deleted (and its "date added" reset) on the next rediscovery.
+        let fake = FakeShare(standardTree())
+        let scanner = ShareScanner(store: store, concurrency: 4, makeLister: {
+            ShareScanner.ScanLister(
+                list: { path in
+                    if path == "Movies" { throw ListError() }
+                    return await fake.list(path)
+                },
+                close: {}
+            )
+        })
+        await scanner.scan()
+
+        let after = await store.libraryCounts()
+        XCTAssertEqual(after.movies, 1, "a transient listing failure must not prune still-present content")
+        XCTAssertEqual(after.tvSeries, 1)
+    }
+
     func testScanIfStaleThrottlesRepeatWalks() async {
         let store = ShareCatalogStore(accountKey: "a", directory: tempDir())
         let fake = FakeShare(standardTree())

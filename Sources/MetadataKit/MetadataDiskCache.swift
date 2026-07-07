@@ -34,8 +34,10 @@ public actor MetadataDiskCache {
     /// new provider existed would otherwise keep showing nothing until the entry
     /// expired. A version bump starts a fresh file, giving the new providers a
     /// clean shot immediately on every device. (v2: added keyless Wikidata +
-    /// Wikipedia artwork providers.)
-    private static let cacheFileName = "plozz-metadata-cache-v2.json"
+    /// Wikipedia artwork providers. v3: added the bundled TheTVDB backdrop + poster
+    /// tiers to the hero/poster chains — without this bump, negatives cached before
+    /// TheTVDB existed would suppress it for up to the 3-day negative TTL.)
+    private static let cacheFileName = "plozz-metadata-cache-v3.json"
     /// Matches every versioned cache file (current and superseded) so a bump can
     /// delete its predecessors instead of orphaning them on disk.
     private static let cacheFilePrefix = "plozz-metadata-cache"

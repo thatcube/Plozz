@@ -56,4 +56,26 @@ final class ShareScanStatusModelTests: XCTestCase {
         XCTAssertTrue(model.isAnyBusy)
         XCTAssertEqual(model.state(forShareID: "s1")?.name, "NAS")
     }
+
+    func testReporterDeliversFullLifecycleInOrder() async {
+        // Every event routes through one serialized stream, so a whole
+        // scan→enrich lifecycle applies in order and ends cleanly (no stuck banner,
+        // last-scanned stamped) even though the events are fired back-to-back.
+        let model = ShareScanStatusModel()
+        let r = model.reporter()
+        r.scanStarted("s1", "NAS")
+        r.scanProgress("s1", 10)
+        r.scanFinished("s1")
+        r.enrichStarted("s1")
+        r.enrichFinished("s1")
+
+        var tries = 0
+        while tries < 200, model.isAnyBusy || model.state(forShareID: "s1")?.lastScanAt == nil {
+            await Task.yield(); tries += 1
+        }
+        let s = model.state(forShareID: "s1")
+        XCTAssertEqual(s?.itemsFound, 10, "progress applied")
+        XCTAssertNotNil(s?.lastScanAt, "finish stamped a last-scanned time")
+        XCTAssertFalse(model.isAnyBusy, "enrich finish applied — indicator cleared")
+    }
 }

@@ -460,7 +460,7 @@ public struct SettingsView: View {
                 // trending row + requests for everyone on this Apple TV, so it's
                 // a household concern — not a per-profile tracker. The per-profile
                 // "requests are made as" mapping is managed inside its page.
-                navRow("Seerr", icon: "sparkles.tv",
+                navRow("Seerr", icon: "sparkles.tv", assetIcon: "SeerrIcon",
                        value: seerrRowValue,
                        route: .seerr)
             }
@@ -791,10 +791,11 @@ public struct SettingsView: View {
     private func navRow(
         _ title: String,
         icon: String,
+        assetIcon: String? = nil,
         value: String?,
         route: SettingsRoute
     ) -> some View {
-        navRow(title, icon: icon, value: value, route: route) { EmptyView() }
+        navRow(title, icon: icon, assetIcon: assetIcon, value: value, route: route) { EmptyView() }
     }
 
     /// Two-line variant: `secondary` renders a second line beneath the title
@@ -804,12 +805,13 @@ public struct SettingsView: View {
     private func navRow<Secondary: View>(
         _ title: String,
         icon: String,
+        assetIcon: String? = nil,
         value: String?,
         route: SettingsRoute,
         @ViewBuilder secondary: () -> Secondary
     ) -> some View {
         NavigationLink(value: route) {
-            SettingsRowLabel(icon: icon, title: title, secondary: secondary) {
+            SettingsRowLabel(icon: icon, assetIcon: assetIcon, title: title, secondary: secondary) {
                 HStack(spacing: 16) {
                     if let value {
                         Text(value)

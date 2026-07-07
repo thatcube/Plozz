@@ -41,17 +41,20 @@ private extension VerticalAlignment {
 /// `.settingsRowSecondary()` so it inverts against the focus card.
 struct SettingsRowLabel<Secondary: View, Trailing: View>: View {
     private let icon: String?
+    private let assetIcon: String?
     private let title: String
     private let secondary: Secondary
     private let trailing: Trailing
 
     init(
         icon: String?,
+        assetIcon: String? = nil,
         title: String,
         @ViewBuilder secondary: () -> Secondary = { EmptyView() },
         @ViewBuilder trailing: () -> Trailing = { EmptyView() }
     ) {
         self.icon = icon
+        self.assetIcon = assetIcon
         self.title = title
         self.secondary = secondary()
         self.trailing = trailing()
@@ -64,7 +67,21 @@ struct SettingsRowLabel<Secondary: View, Trailing: View>: View {
             // the outer HStack (default center), so the chevron keeps centering on
             // the full row height.
             HStack(alignment: .rowTitleIcon, spacing: 16) {
-                if let icon {
+                if let assetIcon {
+                    // Custom (non–SF Symbol) glyph from the asset catalog. It's
+                    // rendered as a TEMPLATE so it inherits the same tint / focus
+                    // inversion as the SF Symbols, and sized to ~22pt (the symbols'
+                    // optical size) inside the shared 30×30 alignment box so a
+                    // full-bleed vector doesn't read heavier than its neighbors.
+                    Image(assetIcon)
+                        .renderingMode(.template)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 22, height: 22)
+                        .frame(width: 30, height: 30)
+                        .settingsRowIcon()
+                        .alignmentGuide(.rowTitleIcon) { $0[VerticalAlignment.center] }
+                } else if let icon {
                     Image(systemName: icon)
                         .font(.system(size: 22, weight: .regular))
                         .frame(width: 30, height: 30)

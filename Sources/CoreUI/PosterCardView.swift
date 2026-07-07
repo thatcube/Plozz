@@ -557,11 +557,14 @@ public struct PosterCardView: View {
             TopTrailingCornerFlag()
                 .fill(ThemePalette.brandBlue)
                 .overlay(alignment: .topTrailing) {
-                    // A theme-dependent border along the flag's diagonal edge, so
-                    // the seam between artwork and flag reads as the same clean
-                    // glass edge every thumbnail carries (`mediaEdgeColor`).
+                    // A theme-dependent hairline along the flag's diagonal edge so
+                    // the seam always separates the flag from the artwork — even
+                    // when the artwork behind it is the same brand blue. Kept thin
+                    // (1pt) and slightly translucent so it reads as a quiet edge,
+                    // not a loud outline; the theme-derived `mediaEdgeColor` (not a
+                    // flat white) is what guarantees contrast against blue-on-blue.
                     TopTrailingCornerFlagEdge()
-                        .stroke(palette.mediaEdgeColor, lineWidth: 2)
+                        .stroke(palette.mediaEdgeColor.opacity(0.75), lineWidth: 1)
                 }
                 .frame(width: 48, height: 48)
         }

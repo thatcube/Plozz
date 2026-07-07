@@ -123,7 +123,7 @@ private struct WatchIndicatorMini: View {
                 .fill(ThemePalette.brandBlue)
                 .overlay(alignment: .topTrailing) {
                     TopTrailingCornerFlagEdge()
-                        .stroke(Color.white.opacity(0.45), lineWidth: 2)
+                        .stroke(Color.white.opacity(0.35), lineWidth: 1)
                 }
                 .frame(width: s, height: s)
         default:

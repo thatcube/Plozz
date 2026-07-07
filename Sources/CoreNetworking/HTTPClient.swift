@@ -9,9 +9,25 @@ public protocol HTTPClient: Sendable {
     /// Sends `endpoint` against `baseURL`, returning raw data + response.
     /// Throws `AppError` for transport/status failures (non-2xx → mapped).
     func send(_ endpoint: Endpoint, baseURL: URL) async throws -> (Data, HTTPURLResponse)
+
+    /// Like `send`, but does **not** throw on a non-2xx HTTP status — it returns
+    /// `(data, response)` so the caller can inspect the status code *and the
+    /// error body*. Still throws for transport failures (unreachable/cancelled).
+    ///
+    /// Used where the server's error payload carries meaning the status code
+    /// alone doesn't (e.g. Overseerr's request errors: "no default server",
+    /// "quota exceeded", "no permission"). Has a default that falls back to
+    /// `send`; conformers that need error-body access override it.
+    func sendRaw(_ endpoint: Endpoint, baseURL: URL) async throws -> (Data, HTTPURLResponse)
 }
 
 public extension HTTPClient {
+    /// Default: no distinct raw path — reuse `send` (which throws on non-2xx, so
+    /// the error body is unavailable to conformers that don't override this).
+    func sendRaw(_ endpoint: Endpoint, baseURL: URL) async throws -> (Data, HTTPURLResponse) {
+        try await send(endpoint, baseURL: baseURL)
+    }
+
     /// Sends and decodes a JSON `Decodable`, mapping failures to `AppError`.
     func decode<T: Decodable>(
         _ type: T.Type,
@@ -38,6 +54,25 @@ public struct URLSessionHTTPClient: HTTPClient {
     }
 
     public func send(_ endpoint: Endpoint, baseURL: URL) async throws -> (Data, HTTPURLResponse) {
+        let (data, http) = try await sendRaw(endpoint, baseURL: baseURL)
+        switch http.statusCode {
+        case 200...299:
+            return (data, http)
+        case 401, 403:
+            throw AppError.unauthorized
+        case 404:
+            throw AppError.notFound
+        case 409:
+            throw AppError.conflict
+        default:
+            throw AppError.invalidResponse
+        }
+    }
+
+    /// Transport path shared by `send`: performs the request and returns
+    /// `(data, response)` for **every** HTTP status (only transport failures
+    /// throw), so callers that need the error body/status can inspect them.
+    public func sendRaw(_ endpoint: Endpoint, baseURL: URL) async throws -> (Data, HTTPURLResponse) {
         let request = try Self.makeRequest(endpoint, baseURL: baseURL)
 
         PlozzLog.networking.debug(
@@ -61,19 +96,7 @@ public struct URLSessionHTTPClient: HTTPClient {
         }
 
         PlozzLog.networking.debug("← \(http.statusCode)")
-
-        switch http.statusCode {
-        case 200...299:
-            return (data, http)
-        case 401, 403:
-            throw AppError.unauthorized
-        case 404:
-            throw AppError.notFound
-        case 409:
-            throw AppError.conflict
-        default:
-            throw AppError.invalidResponse
-        }
+        return (data, http)
     }
 
     static func makeRequest(_ endpoint: Endpoint, baseURL: URL) throws -> URLRequest {

@@ -24,12 +24,15 @@ struct SeerClient: Sendable {
         config.baseURL ?? URL(string: "https://invalid.invalid")!
     }
 
-    private func headers() -> [String: String] {
+    /// Auth headers. `actingUserID` (or the legacy `config.userId`) is sent as
+    /// `X-API-User` so the call runs *as that Seerr user*; pass `nil` for the
+    /// admin identity (browse/status/user-list calls).
+    private func headers(actingUserID: Int? = nil) -> [String: String] {
         var headers = [
             "Content-Type": "application/json",
             "X-Api-Key": config.apiKey ?? ""
         ]
-        if let userId = config.userId {
+        if let userId = actingUserID ?? config.userId {
             headers["X-API-User"] = String(userId)
         }
         return headers
@@ -97,6 +100,21 @@ struct SeerClient: Sendable {
         return try await http.decode(SeerMediaDetails.self, from: endpoint, baseURL: baseURL)
     }
 
+    /// `GET /api/v1/user` — one page of Seerr users. `take`/`skip` page the list;
+    /// Overseerr caps `take` at 100.
+    func users(take: Int = 100, skip: Int = 0) async throws -> SeerUserPage {
+        let endpoint = Endpoint(
+            method: .get,
+            path: "/api/v1/user",
+            queryItems: [
+                URLQueryItem(name: "take", value: String(take)),
+                URLQueryItem(name: "skip", value: String(skip))
+            ],
+            headers: headers()
+        )
+        return try await http.decode(SeerUserPage.self, from: endpoint, baseURL: baseURL)
+    }
+
     // MARK: - Radarr / Sonarr defaults
 
     /// `GET /api/v1/service/radarr` — configured Radarr servers (for defaults).
@@ -113,13 +131,28 @@ struct SeerClient: Sendable {
 
     // MARK: - Requests
 
-    /// `POST /api/v1/request` — create a request. Decodes the result when the
-    /// server returns one (201); a 202 "nothing to request" body may not decode,
-    /// so decoding failures are swallowed to `nil` (the send itself succeeded).
-    func createRequest(_ body: SeerRequestBody) async throws -> SeerRequestResponse? {
-        let endpoint = try Endpoint(method: .post, path: "/api/v1/request", headers: headers())
+    /// The low-level result of `POST /api/v1/request`: either created (2xx, with
+    /// the decoded response when present) or a server-rejected status + message.
+    /// Transport failures throw instead (the caller maps those to `.unreachable`).
+    enum CreateRequestResult {
+        case created(SeerRequestResponse?)
+        case failed(status: Int, message: String?)
+    }
+
+    /// `POST /api/v1/request` — create a request **as** `actingUserID` (its own
+    /// quota / approval / default profile). Uses `sendRaw` so a non-2xx status is
+    /// inspected rather than thrown, capturing Overseerr's `{ message }` body so
+    /// the caller can produce a specific ``SeerRequestFailure``.
+    func createRequest(_ body: SeerRequestBody, actingUserID: Int?) async throws -> CreateRequestResult {
+        let endpoint = try Endpoint(method: .post, path: "/api/v1/request", headers: headers(actingUserID: actingUserID))
             .jsonBody(body)
-        let (data, _) = try await http.send(endpoint, baseURL: baseURL)
-        return try? JSONDecoder.plozz.decode(SeerRequestResponse.self, from: data)
+        let (data, response) = try await http.sendRaw(endpoint, baseURL: baseURL)
+        if (200...299).contains(response.statusCode) {
+            // A 201 carries the request; a 202 "nothing to request" body may not
+            // decode — swallow that to nil (the send itself succeeded).
+            return .created(try? JSONDecoder.plozz.decode(SeerRequestResponse.self, from: data))
+        }
+        let message = (try? JSONDecoder.plozz.decode(SeerErrorBody.self, from: data))?.message
+        return .failed(status: response.statusCode, message: message)
     }
 }

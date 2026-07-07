@@ -39,23 +39,27 @@ final class SeerRecordingHTTPClient: HTTPClient, @unchecked Sendable {
     }
 
     func send(_ endpoint: Endpoint, baseURL: URL) async throws -> (Data, HTTPURLResponse) {
-        lock.lock()
-        sent.append(Sent(path: endpoint.path, headers: endpoint.headers, body: endpoint.body))
-        if let error { lock.unlock(); throw error }
-        let match = responses.first { endpoint.path.hasSuffix($0.key) }?.value
-        guard let stub = match else {
-            lock.unlock()
-            throw AppError.notFound
-        }
-        lock.unlock()
-
-        switch stub.status {
-        case 200...299:
-            return (stub.body, HTTPURLResponse(url: baseURL, statusCode: stub.status, httpVersion: nil, headerFields: nil)!)
+        let (data, response) = try await sendRaw(endpoint, baseURL: baseURL)
+        switch response.statusCode {
+        case 200...299: return (data, response)
         case 401, 403: throw AppError.unauthorized
         case 404: throw AppError.notFound
         case 409: throw AppError.conflict
         default: throw AppError.invalidResponse
         }
+    }
+
+    /// Records the request, then returns the stubbed `(data, response)` for **any**
+    /// status (only an injected transport `error` or a missing stub throws) — so
+    /// createRequest can inspect the status code + error body.
+    func sendRaw(_ endpoint: Endpoint, baseURL: URL) async throws -> (Data, HTTPURLResponse) {
+        lock.lock()
+        sent.append(Sent(path: endpoint.path, headers: endpoint.headers, body: endpoint.body))
+        if let error { lock.unlock(); throw error }
+        let match = responses.first { endpoint.path.hasSuffix($0.key) }?.value
+        lock.unlock()
+        guard let stub = match else { throw AppError.notFound }
+        let response = HTTPURLResponse(url: baseURL, statusCode: stub.status, httpVersion: nil, headerFields: nil)!
+        return (stub.body, response)
     }
 }

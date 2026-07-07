@@ -35,20 +35,33 @@ public final class SeerService {
     public private(set) var phase: SeerConnectionPhase = .unknown
 
     @ObservationIgnored private var config: SeerConfig
-    @ObservationIgnored private let credentialStore: SeerCredentialStoring
+    /// The shared **household** connection store (URL + admin key), backed in
+    /// production by the user-independent Keychain so every tvOS system user and
+    /// every profile requests against the same server. The acting Seerr user is
+    /// NOT stored here — it's passed per request from the active profile.
+    @ObservationIgnored private let connectionStore: SeerConnectionStoring
+    /// Legacy per-profile credential store, used ONLY to migrate an existing
+    /// per-profile connection into the household slot on first launch. `nil` in
+    /// contexts with nothing to migrate (tests/previews).
+    @ObservationIgnored private let legacyCredentialStore: SeerCredentialStoring?
     @ObservationIgnored private let http: HTTPClient
 
-    /// Cached default Radarr/Sonarr servers (fetched lazily on first request so a
-    /// one-tap request can seed `serverId`/`profileId`/`rootFolder`). The double
-    /// optional distinguishes "not fetched" (`nil`) from "fetched, none found"
-    /// (`.some(nil)`).
+    /// Cached default Radarr/Sonarr servers, used ONLY by the admin (unmapped)
+    /// request path to seed `serverId`/`profileId`/`rootFolder` (a mapped user
+    /// lets Overseerr apply their own defaults). The double optional distinguishes
+    /// "not fetched" (`nil`) from "fetched, none found" (`.some(nil)`).
     @ObservationIgnored private var cachedRadarr: SeerServiceServer??
     @ObservationIgnored private var cachedSonarr: SeerServiceServer??
 
-    public init(credentialStore: SeerCredentialStoring, http: HTTPClient = URLSessionHTTPClient()) {
-        self.credentialStore = credentialStore
+    public init(
+        connectionStore: SeerConnectionStoring,
+        legacyCredentialStore: SeerCredentialStoring? = nil,
+        http: HTTPClient = URLSessionHTTPClient()
+    ) {
+        self.connectionStore = connectionStore
+        self.legacyCredentialStore = legacyCredentialStore
         self.http = http
-        self.config = Self.loadConfig(from: credentialStore)
+        self.config = Self.loadConfig(from: connectionStore)
     }
 
     /// Whether a server URL + API key are saved (feature is set up). The hero
@@ -64,37 +77,58 @@ public final class SeerService {
 
     private var client: SeerClient { SeerClient(config: config, http: http) }
 
-    private static func loadConfig(from store: SeerCredentialStoring) -> SeerConfig {
-        guard let creds = store.load() else { return SeerConfig() }
-        return SeerConfig(baseURL: creds.baseURL, apiKey: creds.apiKey, userId: creds.userId)
+    private static func loadConfig(from store: SeerConnectionStoring) -> SeerConfig {
+        guard let connection = store.load() else { return SeerConfig() }
+        // Acting user is per-request now, never baked into the connection config.
+        return SeerConfig(baseURL: connection.baseURL, apiKey: connection.apiKey, userId: nil)
     }
 
     // MARK: - Lifecycle
 
-    /// Switches to a household profile's own Seerr connection. Each profile
-    /// connects independently; the default profile uses `nil` (legacy
-    /// un-namespaced storage). Reloads credentials, then re-resolves status.
+    /// Called when the active household profile changes. The Seerr **connection**
+    /// is household-wide (one shared slot), so switching profiles does NOT reload
+    /// or re-namespace it — only the acting user changes, and that is read
+    /// per-request from the active profile. This just re-probes reachability so
+    /// the Settings row / hero gating stay fresh.
     public func setActiveProfile(namespace: String?) async {
-        credentialStore.setNamespace(namespace)
-        config = Self.loadConfig(from: credentialStore)
-        cachedRadarr = nil
-        cachedSonarr = nil
-        phase = .unknown
         await refreshStatus()
     }
 
-    /// Resolves the current status: probes `/api/v1/status` when credentials are
+    /// One-time migration of a legacy per-profile Seerr connection into the shared
+    /// household slot. Pass `[nil] + household profile ids` (nil = default/primary
+    /// profile). Promotes the first configured connection found; no-op once the
+    /// household slot is set. Reloads config + status after a promotion so the app
+    /// reflects the now-shared connection immediately.
+    @discardableResult
+    public func migrateLegacyConnectionIfNeeded(namespaces: [String?]) async -> SeerConnectionMigrationResult {
+        guard let legacyCredentialStore else {
+            return SeerConnectionMigrationResult(connection: connectionStore.load(), didPromote: false)
+        }
+        let result = SeerConnectionMigration.migrateIfNeeded(
+            into: connectionStore,
+            legacy: legacyCredentialStore,
+            namespaces: namespaces
+        )
+        if result.didPromote {
+            config = Self.loadConfig(from: connectionStore)
+            await refreshStatus()
+        }
+        return result
+    }
+
+    /// Resolves the current status: probes `/api/v1/status` when a connection is
     /// saved (so the Settings row reflects reachability). Safe to call repeatedly.
     public func refreshStatus() async {
         guard config.isConfigured else { phase = .unconfigured; return }
         await probe()
     }
 
-    /// Validates + saves an entered configuration ("Connect / Test"). Probes the
-    /// server first and only persists the credentials when it responds; a bad URL
-    /// or key surfaces as `.failed` and nothing is stored.
+    /// Validates + saves the household connection ("Connect / Test"). Probes the
+    /// server first and only persists when it responds; a bad URL/key surfaces as
+    /// `.failed` and nothing is stored. (`userId` is ignored — acting user is
+    /// per-profile now; the parameter is kept for source compatibility.)
     public func connect(baseURL: URL, apiKey: String, userId: Int? = nil) async {
-        let trial = SeerConfig(baseURL: baseURL, apiKey: apiKey, userId: userId)
+        let trial = SeerConfig(baseURL: baseURL, apiKey: apiKey, userId: nil)
         guard trial.isConfigured else {
             phase = .failed("Enter both a server address and an API key.")
             return
@@ -102,9 +136,9 @@ public final class SeerService {
         phase = .connecting
         do {
             let status = try await SeerClient(config: trial, http: http).status()
-            // Reachable — persist and adopt.
-            let creds = SeerCredentials(baseURL: baseURL, apiKey: trial.apiKey ?? apiKey, userId: userId)
-            try? credentialStore.save(creds)
+            // Reachable — persist to the shared household slot and adopt.
+            let connection = SeerConnection(baseURL: baseURL, apiKey: trial.apiKey ?? apiKey)
+            try? connectionStore.save(connection)
             config = trial
             cachedRadarr = nil
             cachedSonarr = nil
@@ -114,9 +148,10 @@ public final class SeerService {
         }
     }
 
-    /// Disconnects: clears the saved credentials and resets to unconfigured.
+    /// Disconnects: clears the shared household connection and resets to
+    /// unconfigured (for the whole household).
     public func disconnect() {
-        try? credentialStore.clear()
+        try? connectionStore.clear()
         config = SeerConfig()
         cachedRadarr = nil
         cachedSonarr = nil
@@ -183,28 +218,72 @@ public final class SeerService {
         return (status, progress)
     }
 
+    // MARK: - Users
+
+    /// All Seerr users, for the "requests are made as" mapping in Settings.
+    /// Fetched as **admin** (the acting user only matters for `request`), paged to
+    /// completion, and sorted by display name. Returns `[]` when unconfigured.
+    public func users() async throws -> [SeerUser] {
+        guard config.isConfigured else { return [] }
+        var collected: [SeerUserDTO] = []
+        var skip = 0
+        let take = 100
+        while true {
+            let page = try await client.users(take: take, skip: skip)
+            collected.append(contentsOf: page.results)
+            skip += page.results.count
+            // Terminate on an empty/short page always. When the server reports a
+            // total (`pageInfo.results`), also stop once we've collected it. Do NOT
+            // fall back to `collected.count` as the total — that would make the
+            // "collected >= total" check trivially true and stop after page one for
+            // any payload missing `pageInfo`.
+            if page.results.isEmpty || page.results.count < take { break }
+            if let total = page.pageInfo?.results, collected.count >= total { break }
+            if skip > 5000 { break } // safety cap for pathological instances
+        }
+        let base = config.baseURL
+        return collected
+            .map { SeerUser.from($0, baseURL: base) }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
     // MARK: - Requests
 
-    /// One-tap request for a title that isn't yet in the library. Derives the
-    /// media type + TMDB id from the item, seeds the default Radarr/Sonarr server
-    /// (Seerr doesn't apply defaults for an omitted body), requests **all**
-    /// seasons for TV, and returns the resulting availability status so the UI
-    /// can flip to Pending/Processing.
+    /// One-tap request for a not-in-library title, made **as** `actingUserID`
+    /// (that Seerr user's quota / approval flow / default quality profile), or as
+    /// admin when `nil`.
     ///
-    /// - Throws: `AppError.invalidResponse` if the item carries no TMDB id,
-    ///   `AppError.conflict` if it was already requested, or transport errors.
+    /// - **Mapped user:** omits `serverId`/`profileId`/`rootFolder` so Overseerr
+    ///   applies *that user's* defaults (never silently seeds the admin default —
+    ///   that would file under the user with the admin's server/profile).
+    /// - **Admin (unmapped):** seeds the default Radarr/Sonarr server itself, since
+    ///   Seerr won't apply defaults for an omitted body with no user context.
+    ///
+    /// Returns a ``SeerRequestOutcome`` — success carries the resulting
+    /// availability (`.pending` = created, awaiting approval), failure a specific
+    /// user-facing reason. Never throws; transport errors map to `.unreachable`.
     @discardableResult
-    public func request(_ item: MediaItem) async throws -> MediaAvailabilityStatus {
-        guard config.isConfigured else { throw AppError.unauthorized }
+    public func request(_ item: MediaItem, actingUserID: Int? = nil) async -> SeerRequestOutcome {
+        guard config.isConfigured else { return .failure(.unknown("Seerr isn’t connected.")) }
         guard let mediaType = SeerMapper.requestMediaType(for: item),
               let tmdbID = SeerMapper.tmdbID(for: item)
-        else { throw AppError.invalidResponse }
+        else { return .failure(.unknown("This title can’t be requested.")) }
 
         let isTV = mediaType == "tv"
-        // Seerr does NOT apply Radarr/Sonarr defaults for an omitted body, so we
-        // seed them ourselves. A best-effort fetch failure just omits them (the
-        // request still gets created); a later request retries the lookup.
-        let server = isTV ? await defaultSonarr() : await defaultRadarr()
+        // Snapshot the connection at call start so this request is internally
+        // consistent: a reconnect/disconnect that reentrantly changes `config`
+        // across the default-lookup await can't make us fetch defaults from one
+        // Seerr and POST the request to another. Everything below uses this one
+        // client + config snapshot.
+        let activeConfig = config
+        let activeClient = SeerClient(config: activeConfig, http: http)
+
+        // Only the admin (unmapped) path seeds a server; a mapped user lets
+        // Overseerr resolve their own defaults from the omitted body.
+        let server: SeerServiceServer? = actingUserID == nil
+            ? (isTV ? await defaultSonarr(using: activeClient, configSnapshot: activeConfig)
+                    : await defaultRadarr(using: activeClient, configSnapshot: activeConfig))
+            : nil
 
         let body = SeerRequestBody(
             mediaType: mediaType,
@@ -217,17 +296,26 @@ public final class SeerService {
             languageProfileId: isTV ? server?.activeLanguageProfileId : nil
         )
 
-        let response = try await client.createRequest(body)
-        if let raw = response?.media?.status,
-           let status = MediaAvailabilityStatus(rawValue: raw) {
-            return status
+        do {
+            let result = try await activeClient.createRequest(body, actingUserID: actingUserID)
+            switch result {
+            case let .created(response):
+                if let raw = response?.media?.status,
+                   let status = MediaAvailabilityStatus(rawValue: raw) {
+                    return .success(status)
+                }
+                // No decodable media status (e.g. a 202) — a fresh request is
+                // pending by definition.
+                return .success(.pending)
+            case let .failed(status, message):
+                return .failure(.classify(status: status, message: message, actingUserSent: actingUserID != nil))
+            }
+        } catch {
+            return .failure(.unreachable)
         }
-        // No decodable media status (e.g. a 202) — a freshly created request is
-        // pending by definition.
-        return .pending
     }
 
-    private func defaultRadarr() async -> SeerServiceServer? {
+    private func defaultRadarr(using client: SeerClient, configSnapshot: SeerConfig) async -> SeerServiceServer? {
         if let cached = cachedRadarr { return cached }
         // Only cache a *successful* fetch. A transient failure (timeout, 401,
         // network blip) must stay uncached so the next request retries — caching
@@ -235,15 +323,17 @@ public final class SeerService {
         // serverId/profileId/rootFolder for the rest of the session.
         guard let resolved = try? await client.radarrServers() else { return nil }
         let chosen = Self.pickDefault(resolved)
-        cachedRadarr = .some(chosen)
+        // Don't pollute the cache with a snapshot that no longer matches the live
+        // connection (a reconnect during the fetch already cleared the cache).
+        if config == configSnapshot { cachedRadarr = .some(chosen) }
         return chosen
     }
 
-    private func defaultSonarr() async -> SeerServiceServer? {
+    private func defaultSonarr(using client: SeerClient, configSnapshot: SeerConfig) async -> SeerServiceServer? {
         if let cached = cachedSonarr { return cached }
         guard let resolved = try? await client.sonarrServers() else { return nil }
         let chosen = Self.pickDefault(resolved)
-        cachedSonarr = .some(chosen)
+        if config == configSnapshot { cachedSonarr = .some(chosen) }
         return chosen
     }
 
@@ -260,21 +350,26 @@ public final class SeerService {
     }
 }
 
-/// Builds the app's `SeerService`, choosing a Keychain-backed credential store on
-/// Apple platforms and an in-memory one elsewhere.
+/// Builds the app's `SeerService`. In production `AppState` injects the shared
+/// household connection store (user-independent Keychain); the in-memory default
+/// here is only for tests/previews.
 public enum SeerServiceFactory {
     @MainActor
     public static func make(
         http: HTTPClient = URLSessionHTTPClient(),
-        credentialStore: SeerCredentialStoring? = nil,
-        namespace: String? = nil
+        connectionStore: SeerConnectionStoring? = nil,
+        legacyCredentialStore: SeerCredentialStoring? = nil
     ) -> SeerService {
-        let store = credentialStore ?? defaultCredentialStore()
-        store.setNamespace(namespace)
-        return SeerService(credentialStore: store, http: http)
+        SeerService(
+            connectionStore: connectionStore ?? InMemorySeerConnectionStore(),
+            legacyCredentialStore: legacyCredentialStore ?? defaultLegacyCredentialStore(),
+            http: http
+        )
     }
 
-    public static func defaultCredentialStore() -> SeerCredentialStoring {
+    /// Legacy per-profile credential store, used ONLY for the one-time migration
+    /// of an existing connection into the shared household slot.
+    public static func defaultLegacyCredentialStore() -> SeerCredentialStoring {
         #if canImport(Security)
         return KeychainSeerCredentialStore()
         #else

@@ -102,6 +102,7 @@ public struct SettingsView: View {
     private let onResetToFirstRun: () -> Void
     private let plexHomeUsersFetcher: (String) async -> [PlexHomeUser]
     private let onSelectPlexHomeUser: (String, PlexHomeUser?) -> Void
+    private let onSetSeerrUser: (String, SeerUser?) -> Void
 
     public init(
         subtitleBehavior: SubtitleBehaviorModel,
@@ -146,7 +147,8 @@ public struct SettingsView: View {
         onSignOutAll: @escaping () -> Void,
         onResetToFirstRun: @escaping () -> Void,
         plexHomeUsersFetcher: @escaping (String) async -> [PlexHomeUser],
-        onSelectPlexHomeUser: @escaping (String, PlexHomeUser?) -> Void
+        onSelectPlexHomeUser: @escaping (String, PlexHomeUser?) -> Void,
+        onSetSeerrUser: @escaping (String, SeerUser?) -> Void = { _, _ in }
     ) {
         self.subtitleBehavior = subtitleBehavior
         self.spoilers = spoilers
@@ -191,6 +193,7 @@ public struct SettingsView: View {
         self.onResetToFirstRun = onResetToFirstRun
         self.plexHomeUsersFetcher = plexHomeUsersFetcher
         self.onSelectPlexHomeUser = onSelectPlexHomeUser
+        self.onSetSeerrUser = onSetSeerrUser
     }
 
     private var context: SettingsContext {
@@ -392,7 +395,7 @@ public struct SettingsView: View {
             navRow("Integrations", icon: "link",
                    value: nil,
                    route: .integrations) {
-                Text("Trakt, Simkl, AniList, MyAnimeList, Last.fm, Seerr")
+                Text("Trakt, Simkl, AniList, MyAnimeList, Last.fm")
                     .font(.footnote)
                     .settingsRowSecondary()
                     .lineLimit(2)
@@ -451,6 +454,14 @@ public struct SettingsView: View {
                     enableProfilesRow
                         .prefersDefaultFocus(in: rootFocusScope)
                 }
+
+                // Seerr is one shared admin connection powering the Home hero's
+                // trending row + requests for everyone on this Apple TV, so it's
+                // a household concern — not a per-profile tracker. The per-profile
+                // "requests are made as" mapping is managed inside its page.
+                navRow("Seerr", icon: "sparkles.tv", assetIcon: "SeerrIcon",
+                       value: seerrRowValue,
+                       route: .seerr)
             }
             .padding(.horizontal, 28)
             .padding(.top, 16)
@@ -581,7 +592,13 @@ public struct SettingsView: View {
         case .spoilers:
             SpoilersDetailView(spoilers: spoilers)
         case .integrations:
-            IntegrationsDetailView(trakt: trakt, simkl: simkl, seer: seer, anilist: anilist, mal: mal, lastfm: lastfm, playback: playback, serverCount: activeProfileServerCount, knownServerHosts: knownServerHosts)
+            IntegrationsDetailView(trakt: trakt, simkl: simkl, anilist: anilist, mal: mal, lastfm: lastfm, playback: playback, serverCount: activeProfileServerCount)
+        case .seerr:
+            SeerDetailView(seer: seer, knownServerHosts: knownServerHosts, profiles: profiles, onSetSeerrUser: onSetSeerrUser)
+        case let .seerUserPicker(profileID):
+            if let profile = profiles.first(where: { $0.id == profileID }) {
+                SeerUserPickerView(seer: seer, profile: profile, onSelect: { onSetSeerrUser(profileID, $0) })
+            }
         case .attributions:
             AttributionsDetailView()
         case .help:
@@ -757,6 +774,14 @@ public struct SettingsView: View {
         return hosts
     }
 
+    /// Right-hand summary for the This Apple TV › Seerr row. `savedBaseURLString`
+    /// is loaded synchronously from the stored config at launch and cleared on
+    /// disconnect, so it's a reliable "is a server configured?" signal without
+    /// waiting on an async status refresh.
+    private var seerrRowValue: String {
+        seer.savedBaseURLString == nil ? "Not connected" : "Connected"
+    }
+
     /// Shared leading icon for every Settings row. Explicit point size +
     /// fixed square frame so glyphs of different widths optically align with
     /// the row title and stay consistent across rows.
@@ -771,10 +796,11 @@ public struct SettingsView: View {
     private func navRow(
         _ title: String,
         icon: String,
+        assetIcon: String? = nil,
         value: String?,
         route: SettingsRoute
     ) -> some View {
-        navRow(title, icon: icon, value: value, route: route) { EmptyView() }
+        navRow(title, icon: icon, assetIcon: assetIcon, value: value, route: route) { EmptyView() }
     }
 
     /// Two-line variant: `secondary` renders a second line beneath the title
@@ -784,12 +810,13 @@ public struct SettingsView: View {
     private func navRow<Secondary: View>(
         _ title: String,
         icon: String,
+        assetIcon: String? = nil,
         value: String?,
         route: SettingsRoute,
         @ViewBuilder secondary: () -> Secondary
     ) -> some View {
         NavigationLink(value: route) {
-            SettingsRowLabel(icon: icon, title: title, secondary: secondary) {
+            SettingsRowLabel(icon: icon, assetIcon: assetIcon, title: title, secondary: secondary) {
                 HStack(spacing: 16) {
                     if let value {
                         Text(value)

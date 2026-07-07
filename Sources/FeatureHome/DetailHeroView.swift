@@ -99,6 +99,11 @@ struct DetailHeroView: View {
     /// (with any just-tapped optimistic override already applied by the parent).
     /// Ignored unless ``isDiscoveryItem`` is `true`.
     var requestCTA: HeroCTA = .play
+    /// Display name of the Seerr user the request will be made as, when the active
+    /// profile is mapped. When set and the CTA is `.request`, the pill reads
+    /// "Request as <name>" so the acting identity is visible before the press.
+    /// `nil` = plain "Request" (admin).
+    var requestActingName: String? = nil
     /// One-tap request action, invoked when the user activates the "Request" pill.
     /// `nil` disables requesting (e.g. Seerr disconnected), leaving the pill inert.
     var onRequest: (() -> Void)? = nil
@@ -573,12 +578,13 @@ struct DetailHeroView: View {
     private func requestPill() -> some View {
         switch requestCTA {
         case .request:
+            let label = requestActingName.map { "Request as \($0)" } ?? "Request"
             Button { onRequest?() } label: {
-                Label("Request", systemImage: "plus.circle")
+                Label(label, systemImage: "plus.circle")
             }
             .modifier(HeroActionButtonStyle(prominent: true))
             .prefersDefaultFocus(true, in: heroActionsScope)
-            .accessibilityLabel("Request")
+            .accessibilityLabel(label)
         case let .downloading(progress):
             let percent = Int((progress * 100).rounded())
             Button {} label: {

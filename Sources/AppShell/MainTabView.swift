@@ -172,6 +172,9 @@ struct MainTabView: View {
     let onResetToFirstRun: () -> Void
     let plexHomeUsersFetcher: (String) async -> [PlexHomeUser]
     let onSelectPlexHomeUser: (String, PlexHomeUser?) -> Void
+    /// Maps a household profile to a Seerr user (or clears it) — forwarded to the
+    /// Settings "requests are made as" list.
+    var onSetSeerrUser: (String, SeerUser?) -> Void = { _, _ in }
     /// The shared source-of-truth lookup: a title → its full cross-server source
     /// set from the eager identity index. Threaded into Home/Search/Browse merging,
     /// the detail picker and the watch fan-out so all read one consistent set.
@@ -238,6 +241,9 @@ struct MainTabView: View {
             HomeTab(
                 accounts: accounts,
                 seer: seer,
+                activeSeerrUserID: activeProfile.seerrUserID,
+                activeSeerrUserName: activeProfile.seerrUserName,
+                confirmAdminRequest: profiles.count > 1,
                 homeVisibility: homeVisibility,
                 homeLayoutStore: homeLayoutStore,
                 homeContentStore: homeContentStore,
@@ -270,6 +276,9 @@ struct MainTabView: View {
             SearchTab(
                 accounts: accounts,
                 seer: seer,
+                activeSeerrUserID: activeProfile.seerrUserID,
+                activeSeerrUserName: activeProfile.seerrUserName,
+                confirmAdminRequest: profiles.count > 1,
                 homeVisibility: homeVisibility,
                 behavior: subtitleBehaviorModel.settings,
                 style: subtitleStyleModel.style,
@@ -360,7 +369,8 @@ struct MainTabView: View {
                 onSignOutAll: onSignOutAll,
                 onResetToFirstRun: onResetToFirstRun,
                 plexHomeUsersFetcher: plexHomeUsersFetcher,
-                onSelectPlexHomeUser: onSelectPlexHomeUser
+                onSelectPlexHomeUser: onSelectPlexHomeUser,
+                onSetSeerrUser: onSetSeerrUser
             )
             }
         }
@@ -508,6 +518,53 @@ private func resolveOptionalProvider(_ accountID: String, in accounts: [Resolved
 private func makeHeroFeaturedProvider(seer: SeerService) -> FeaturedContentProviding {
     { limit in
         (try? await seer.trending(limit: limit)) ?? []
+    }
+}
+
+/// Maps a `SeerRequestOutcome` to the provider-agnostic `MediaRequestActionResult`
+/// the detail page consumes, translating failure reasons into TV-friendly copy
+/// (with the acting user's name where it clarifies *whose* limit/permission).
+/// `actingName` is the mapped Seerr user, or `nil` when requesting as admin.
+private func seerRequestResult(_ outcome: SeerRequestOutcome, actingName: String?) -> MediaRequestActionResult {
+    switch outcome {
+    case let .success(status):
+        return .success(status)
+    case let .failure(reason):
+        let who = actingName ?? "This account"
+        switch reason {
+        case .noDefaults:
+            return .failure(
+                title: "No Default Server",
+                message: "\(actingName ?? "Your Seerr user") has no default quality profile or server set. Set one in the Seerr web app, then try again."
+            )
+        case .noPermission:
+            return .failure(
+                title: "Not Allowed",
+                message: "\(who) doesn’t have permission to request this. Check the user’s permissions in Seerr."
+            )
+        case .quotaExceeded:
+            return .failure(
+                title: "Request Limit Reached",
+                message: "\(who) has reached the request limit. Try again later or adjust the quota in Seerr."
+            )
+        case .alreadyRequested:
+            return .failure(
+                title: "Already Requested",
+                message: "This title has already been requested."
+            )
+        case .invalidActingUser:
+            return .failure(
+                title: "Seerr User Not Found",
+                message: "The linked Seerr user no longer exists. Re-link this profile in Settings ▸ This Apple TV ▸ Seerr."
+            )
+        case .unreachable:
+            return .failure(
+                title: "Can’t Reach Seerr",
+                message: "Couldn’t reach the Seerr server. Check your connection and try again."
+            )
+        case let .unknown(message):
+            return .failure(title: "Request Failed", message: message)
+        }
     }
 }
 
@@ -1278,6 +1335,15 @@ private struct HomeTab: View {
     let accounts: [ResolvedAccount]
     /// Seerr discovery service backing the hero's featured content seam.
     let seer: SeerService
+    /// The active profile's linked Seerr user (`X-API-User`) for requests, or
+    /// `nil` to request as admin. Read at request time from the current profile.
+    let activeSeerrUserID: Int?
+    /// Display name of the active profile's linked Seerr user, for the pre-press
+    /// "Request as <name>" label. `nil` when requesting as admin.
+    let activeSeerrUserName: String?
+    /// Whether an unmapped (admin) request should confirm first — true in a
+    /// multi-profile household.
+    let confirmAdminRequest: Bool
     let homeVisibility: HomeLibraryVisibilityModel
     let homeLayoutStore: HomeLayoutStoring
     /// Per-profile store for the last successful Home content snapshot (instant
@@ -1341,7 +1407,11 @@ private struct HomeTab: View {
                 heroFeaturedProvider: makeHeroFeaturedProvider(seer: seer),
                 heroRandomProvider: makeHeroRandomProvider(accounts: accounts),
                 seerConnected: seer.isConfigured,
-                onRequestItem: { try? await seer.request($0) },
+                onRequestItem: { item in
+                    let outcome = await seer.request(item, actingUserID: activeSeerrUserID)
+                    if case let .success(status) = outcome { return status }
+                    return nil
+                },
                 navigationStyle: navigationStyle,
                 onSelectItem: { navigate(bestSourcePlayItem($0, accounts: accounts, identitySources: identitySources)) },
                 onPlayItem: { requestPlay($0) },
@@ -1500,7 +1570,12 @@ private struct HomeTab: View {
             initialSeasonID: item.seasonID,
             isDiscoveryItem: isDiscovery,
             seerConnected: seer.isConfigured,
-            onRequest: { try? await seer.request($0) }
+            onRequest: { item in
+                let outcome = await seer.request(item, actingUserID: activeSeerrUserID)
+                return seerRequestResult(outcome, actingName: activeSeerrUserName)
+            },
+            requestActingName: activeSeerrUserName,
+            confirmAdminRequest: confirmAdminRequest
         )
     }
 
@@ -1711,6 +1786,14 @@ private struct SearchTab: View {
     /// Seerr discovery service, backing the "Not in Your Library" search section
     /// and the discovery detail page's one-tap Request.
     let seer: SeerService
+    /// The active profile's linked Seerr user (`X-API-User`) for requests, or
+    /// `nil` to request as admin.
+    let activeSeerrUserID: Int?
+    /// Display name of the active profile's linked Seerr user, for "Request as
+    /// <name>". `nil` when requesting as admin.
+    let activeSeerrUserName: String?
+    /// Whether an unmapped (admin) request should confirm first (multi-profile).
+    let confirmAdminRequest: Bool
     let homeVisibility: HomeLibraryVisibilityModel
     let behavior: SubtitleBehavior
     let style: SubtitleStyle
@@ -1777,7 +1860,12 @@ private struct SearchTab: View {
                     initialSeasonID: item.seasonID,
                     isDiscoveryItem: isDiscovery,
                     seerConnected: seer.isConfigured,
-                    onRequest: { try? await seer.request($0) }
+                    onRequest: { item in
+                        let outcome = await seer.request(item, actingUserID: activeSeerrUserID)
+                        return seerRequestResult(outcome, actingName: activeSeerrUserName)
+                    },
+                    requestActingName: activeSeerrUserName,
+                    confirmAdminRequest: confirmAdminRequest
                 )
             }
             .navigationDestination(for: EpisodeContextRoute.self) { route in

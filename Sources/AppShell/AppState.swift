@@ -939,8 +939,9 @@ public final class AppState {
         self.traktService = traktService ?? TraktServiceFactory.make(namespace: ns)
         // Seed other trackers with the same profile namespace.
         self.simklService = simklService ?? SimklServiceFactory.make(namespace: ns)
-        // Seerr discovery is per-profile too (each profile links its own server).
-        self.seerService = seerService ?? SeerServiceFactory.make(namespace: ns)
+        // Seerr uses ONE shared household connection (user-independent Keychain);
+        // profiles differ only by which Seerr user they request as (per request).
+        self.seerService = seerService ?? Self.makeDefaultSeerService()
         self.anilistService = anilistService ?? AniListServiceFactory.make(namespace: ns)
         self.malService = malService ?? MALServiceFactory.make(namespace: ns)
         // Last.fm is user-scoped like the trackers; seed it with the active
@@ -1004,6 +1005,20 @@ public final class AppState {
         return AccountStore(secureStore: KeychainStore())
         #else
         return AccountStore(secureStore: InMemorySecureStore())
+        #endif
+    }
+
+    /// Builds the shared-household `SeerService`. The connection (URL + admin key)
+    /// is persisted via the **user-independent household Keychain** (same store as
+    /// the profile set) so every Apple TV system user shares one Seerr connection;
+    /// the acting Seerr user is per-profile and applied per request.
+    @MainActor
+    private static func makeDefaultSeerService() -> SeerService {
+        #if canImport(Security)
+        let store = HouseholdSeerConnectionStore(secureStore: KeychainStore(service: "com.plozz.app.household"))
+        return SeerServiceFactory.make(connectionStore: store)
+        #else
+        return SeerServiceFactory.make()
         #endif
     }
 
@@ -1081,6 +1096,19 @@ public final class AppState {
         // picks instead.
         if !isChoosingProfile {
             ensurePlexIdentityForActiveProfile()
+        }
+
+        // One-time migration of any legacy per-profile Seerr connection into the
+        // shared household slot, then an initial reachability probe. Runs on the
+        // main actor (inherited); safe because migration no-ops once the household
+        // slot is set. The result's `promotedUserID` is intentionally not applied:
+        // the legacy per-profile `userId` was off-by-default and never set by the
+        // connect UI, so it's always nil in practice; per-profile acting users are
+        // established via the (upcoming) Settings mapping, not migration.
+        let seerNamespaces: [String?] = [nil] + profilesModel.profiles.map { $0.id }
+        Task { [seerService] in
+            await seerService.migrateLegacyConnectionIfNeeded(namespaces: seerNamespaces)
+            await seerService.refreshStatus()
         }
     }
 
@@ -1196,6 +1224,22 @@ public final class AppState {
         let updated = profile.settingHomeUserBinding(binding, forPlexAccount: accountID)
         profilesModel.update(updated)
         ensurePlexIdentityForActiveProfile()
+    }
+
+    /// Maps a household **profile** to a Seerr user (or clears the mapping when
+    /// `user` is `nil`, reverting to requesting as admin). Non-secret metadata,
+    /// persisted on the profile — mirrors `setPlexHomeUserForActiveProfile`, but
+    /// operates on any profile by id so the Settings list can map every member.
+    /// No re-probe needed: the acting user is read per-request from the active
+    /// profile, so a mapping change takes effect on the next request.
+    public func setSeerrUserForProfile(profileID: String, user: SeerUser?) {
+        guard let profile = profilesModel.profiles.first(where: { $0.id == profileID }) else { return }
+        let updated = profile.settingSeerrUser(
+            id: user?.id,
+            name: user?.name,
+            avatarURL: user?.avatarURL?.absoluteString
+        )
+        profilesModel.update(updated)
     }
 
     /// Submits a PIN for the outstanding Plex Home-user switch.

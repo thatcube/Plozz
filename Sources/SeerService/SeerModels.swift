@@ -239,3 +239,106 @@ struct SeerRequestResponse: Decodable {
     var id: Int?
     var media: SeerMediaInfo?
 }
+
+// MARK: - Users (request-as / per-user requests)
+
+/// A page of Seerr users from `GET /api/v1/user`.
+struct SeerUserPage: Decodable {
+    var pageInfo: SeerPageInfo?
+    var results: [SeerUserDTO]
+
+    init(pageInfo: SeerPageInfo? = nil, results: [SeerUserDTO] = []) {
+        self.pageInfo = pageInfo
+        self.results = results
+    }
+
+    enum CodingKeys: String, CodingKey { case pageInfo, results }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        pageInfo = try c.decodeIfPresent(SeerPageInfo.self, forKey: .pageInfo)
+        results = try c.decodeIfPresent([SeerUserDTO].self, forKey: .results) ?? []
+    }
+}
+
+/// Overseerr/Jellyseerr pagination envelope (`pageInfo`), used to page the user
+/// list. Everything optional/lenient so a partial payload never fails the decode.
+struct SeerPageInfo: Decodable {
+    var pages: Int?
+    var page: Int?
+    var results: Int?
+
+    init(pages: Int? = nil, page: Int? = nil, results: Int? = nil) {
+        self.pages = pages
+        self.page = page
+        self.results = results
+    }
+
+    enum CodingKeys: String, CodingKey { case pages, page, results }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        pages = try c.decodeIfPresent(Int.self, forKey: .pages)
+        page = try c.decodeIfPresent(Int.self, forKey: .page)
+        results = try c.decodeIfPresent(Int.self, forKey: .results)
+    }
+}
+
+/// One Seerr user as returned by `GET /api/v1/user`. Overseerr computes a
+/// `displayName`; the various `*username` fields are fallbacks. Lenient decode —
+/// only `id` is required.
+struct SeerUserDTO: Decodable {
+    var id: Int
+    var displayName: String?
+    var username: String?
+    var plexUsername: String?
+    var jellyfinUsername: String?
+    var email: String?
+    var avatar: String?
+
+    init(
+        id: Int,
+        displayName: String? = nil,
+        username: String? = nil,
+        plexUsername: String? = nil,
+        jellyfinUsername: String? = nil,
+        email: String? = nil,
+        avatar: String? = nil
+    ) {
+        self.id = id
+        self.displayName = displayName
+        self.username = username
+        self.plexUsername = plexUsername
+        self.jellyfinUsername = jellyfinUsername
+        self.email = email
+        self.avatar = avatar
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, displayName, username, plexUsername, jellyfinUsername, email, avatar
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(Int.self, forKey: .id)
+        displayName = try c.decodeIfPresent(String.self, forKey: .displayName)
+        username = try c.decodeIfPresent(String.self, forKey: .username)
+        plexUsername = try c.decodeIfPresent(String.self, forKey: .plexUsername)
+        jellyfinUsername = try c.decodeIfPresent(String.self, forKey: .jellyfinUsername)
+        email = try c.decodeIfPresent(String.self, forKey: .email)
+        avatar = try c.decodeIfPresent(String.self, forKey: .avatar)
+    }
+}
+
+/// Overseerr's JSON error envelope (`{ "message": "..." }`), decoded from a
+/// non-2xx request response so we can turn it into a specific ``SeerRequestFailure``.
+struct SeerErrorBody: Decodable {
+    var message: String?
+
+    enum CodingKeys: String, CodingKey { case message }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        message = try c.decodeIfPresent(String.self, forKey: .message)
+    }
+}

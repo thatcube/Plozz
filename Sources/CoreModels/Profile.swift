@@ -71,6 +71,25 @@ public struct Profile: Codable, Hashable, Identifiable, Sendable {
     /// so older profile JSON without this field migrates to `nil` cleanly.
     public var avatarImageURL: String?
 
+    /// The **Seerr** (Overseerr / Jellyseerr) user this profile requests as.
+    /// When set, requests made while this profile is active run under that
+    /// Seerr user (`X-API-User`) on the shared household admin connection — so
+    /// each household member gets their own request quota, approval flow,
+    /// notifications, and default quality profile. `nil` = requests run as the
+    /// admin ("Admin — unrestricted").
+    ///
+    /// This is **non-secret** (an integer id + cached display fields), exactly
+    /// like the Plex Home-user mapping above; the admin API key never lives on
+    /// a `Profile`. Independent of `plexHomeUserID`/`linkedAccountID`: a Seerr
+    /// user is a separate identity from Plex/Jellyfin playback.
+    public var seerrUserID: Int?
+    /// Cached Seerr display name, so Settings can label the mapping without a
+    /// network fetch. May go stale if the user is renamed/deleted in Seerr;
+    /// the settings screen refreshes and re-validates on open.
+    public var seerrUserName: String?
+    /// Cached Seerr avatar URL for inline display in Settings.
+    public var seerrUserAvatarURL: String?
+
     public init(
         id: String = UUID().uuidString,
         name: String,
@@ -84,7 +103,10 @@ public struct Profile: Codable, Hashable, Identifiable, Sendable {
         plexHomeUserRequiresPIN: Bool? = nil,
         plexHomeUserAvatarURL: String? = nil,
         plexHomeUserBindings: [String: PlexHomeUserBinding]? = nil,
-        avatarImageURL: String? = nil
+        avatarImageURL: String? = nil,
+        seerrUserID: Int? = nil,
+        seerrUserName: String? = nil,
+        seerrUserAvatarURL: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -99,6 +121,9 @@ public struct Profile: Codable, Hashable, Identifiable, Sendable {
         self.plexHomeUserAvatarURL = plexHomeUserAvatarURL
         self.plexHomeUserBindings = plexHomeUserBindings
         self.avatarImageURL = avatarImageURL
+        self.seerrUserID = seerrUserID
+        self.seerrUserName = seerrUserName
+        self.seerrUserAvatarURL = seerrUserAvatarURL
     }
 
     /// Stable namespace used to scope this profile's settings stores. The
@@ -141,6 +166,19 @@ extension Profile: CustomStringConvertible {
     /// Profiles carry no secret; keep logging terse and stable.
     public var description: String {
         "Profile(id: \(id), name: \(name))"
+    }
+}
+
+extension Profile {
+    /// Returns a copy of this profile mapped to the given Seerr user (its id +
+    /// cached display fields), or with the mapping cleared when `id` is `nil`
+    /// (reverts to requesting as admin). Non-secret metadata only.
+    public func settingSeerrUser(id: Int?, name: String? = nil, avatarURL: String? = nil) -> Profile {
+        var copy = self
+        copy.seerrUserID = id
+        copy.seerrUserName = id == nil ? nil : name
+        copy.seerrUserAvatarURL = id == nil ? nil : avatarURL
+        return copy
     }
 }
 

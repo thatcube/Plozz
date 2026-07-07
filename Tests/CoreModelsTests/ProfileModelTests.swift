@@ -59,4 +59,59 @@ final class ProfileModelTests: XCTestCase {
         XCTAssertNil(decoded.seerrUserID)
         XCTAssertNil(decoded.seerrUserName)
     }
+
+    // MARK: Avatar symbols
+
+    func testDefaultAvatarSymbolIsStablePerson() {
+        // Several call sites use `defaultAvatarSymbols[0]` as the app-wide
+        // default avatar — keep it the person crop circle.
+        XCTAssertEqual(Profile.defaultAvatarSymbols.first, "person.crop.circle.fill")
+    }
+
+    func testDefaultAvatarSymbolsAreTheFlattenedCategories() {
+        XCTAssertEqual(
+            Profile.defaultAvatarSymbols,
+            Profile.avatarSymbolCategories.flatMap(\.symbols)
+        )
+    }
+
+    func testAvatarSymbolsHaveNoDuplicates() {
+        let all = Profile.defaultAvatarSymbols
+        XCTAssertEqual(all.count, Set(all).count, "Avatar symbols should be unique")
+    }
+
+    func testAvatarSymbolCategoriesAreNonEmpty() {
+        XCTAssertFalse(Profile.avatarSymbolCategories.isEmpty)
+        for category in Profile.avatarSymbolCategories {
+            XCTAssertFalse(category.title.isEmpty)
+            XCTAssertFalse(category.symbols.isEmpty, "\(category.title) has no symbols")
+        }
+    }
+
+    // MARK: Suggested colour for new profiles
+
+    func testSuggestedColorIndexPicksFirstUnused() {
+        XCTAssertEqual(Profile.suggestedColorIndex(existingColorIndices: []), 0)
+        XCTAssertEqual(Profile.suggestedColorIndex(existingColorIndices: [0]), 1)
+        XCTAssertEqual(Profile.suggestedColorIndex(existingColorIndices: [0, 1, 2]), 3)
+        // Order/gaps don't matter — it fills the lowest free slot.
+        XCTAssertEqual(Profile.suggestedColorIndex(existingColorIndices: [2, 0]), 1)
+    }
+
+    func testSuggestedColorIndexNormalizesOutOfRange() {
+        // An out-of-range existing index still marks its wrapped slot as used.
+        XCTAssertEqual(
+            Profile.suggestedColorIndex(existingColorIndices: [Profile.tileColorCount]), // wraps to 0
+            1
+        )
+    }
+
+    func testSuggestedColorIndexRotatesWhenAllUsed() {
+        let all = Array(0..<Profile.tileColorCount)
+        // Every colour taken → rotate by how many profiles exist.
+        XCTAssertEqual(
+            Profile.suggestedColorIndex(existingColorIndices: all),
+            all.count % Profile.tileColorCount
+        )
+    }
 }

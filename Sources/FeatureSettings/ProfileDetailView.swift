@@ -69,6 +69,7 @@ struct ProfileDetailView: View {
                 ProfileEditorView(
                     canDelete: false,
                     photoSourceAccounts: context.accounts,
+                    existingColorIndices: context.profiles.map(\.colorIndex),
                     plexHomeUsersFetcher: context.plexHomeUsersFetcher,
                     onSave: { draft in
                         context.onSaveProfile(draft)

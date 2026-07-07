@@ -27,16 +27,20 @@ public struct ProfilePhotoCandidate: Identifiable, Hashable, Sendable {
 
     /// Builds the photo-borrow list from the household's accounts plus the
     /// already-fetched Plex Home users per Plex account. Filters out any
-    /// source that has no avatar URL — there's nothing to borrow.
+    /// source that has no avatar URL — there's nothing to borrow — and any
+    /// source whose avatar is a recognizable *default* placeholder (a generic
+    /// silhouette / gravatar "mystery man"), since borrowing one of those as a
+    /// "photo" just yields an icon-looking image the profile's own symbol does
+    /// better (see `isLikelyDefaultAvatar`).
     public static func make(
         accounts: [Account],
         plexHomeUsersByAccount: [String: [PlexHomeUser]]
     ) -> [ProfilePhotoCandidate] {
         var out: [ProfilePhotoCandidate] = []
 
-        // Jellyfin: one candidate per signed-in user with an avatar.
+        // Jellyfin: one candidate per signed-in user with a *real* avatar.
         for account in accounts where account.server.provider == .jellyfin {
-            guard let url = account.avatarURL else { continue }
+            guard let url = account.avatarURL, !isLikelyDefaultAvatar(url) else { continue }
             out.append(ProfilePhotoCandidate(
                 providerLabel: "Jellyfin",
                 detailLabel: "\(account.userName) on \(account.server.name)",
@@ -45,12 +49,12 @@ public struct ProfilePhotoCandidate: Identifiable, Hashable, Sendable {
             ))
         }
 
-        // Plex: one candidate per Home user with an avatar, across all
+        // Plex: one candidate per Home user with a *real* avatar, across all
         // signed-in Plex accounts.
         for account in accounts where account.server.provider == .plex {
             let users = plexHomeUsersByAccount[account.id] ?? []
             for user in users {
-                guard let url = user.avatarURL else { continue }
+                guard let url = user.avatarURL, !isLikelyDefaultAvatar(url) else { continue }
                 out.append(ProfilePhotoCandidate(
                     providerLabel: "Plex",
                     detailLabel: "\(user.name) on \(account.server.name)",
@@ -61,6 +65,43 @@ public struct ProfilePhotoCandidate: Identifiable, Hashable, Sendable {
         }
 
         return out
+    }
+
+    /// Whether an avatar URL is very likely a provider **default/placeholder**
+    /// rather than a real uploaded photo, so we don't offer it as a borrowable
+    /// picture. Deliberately conservative — it only matches signals that are
+    /// unambiguous defaults, so a genuine custom photo is never hidden:
+    ///
+    /// - **Gravatar fallbacks:** a `d=`/`default=` query of `mm`/`mp`
+    ///   (mystery-person), `blank`, or `404` — the values Gravatar serves when a
+    ///   user has no image of their own. (An `identicon`/`retro`/`robohash`
+    ///   fallback is left in; those are at least distinctive per-user.)
+    /// - **Plex's built-in silhouette assets** shipped under `plex.tv`'s static
+    ///   asset paths (e.g. `/assets/.../avatar` defaults), which every account
+    ///   without a custom photo shares.
+    ///
+    /// Anything else is treated as a real photo. Tune here if a provider default
+    /// slips through in practice.
+    public static func isLikelyDefaultAvatar(_ url: URL) -> Bool {
+        let host = url.host?.lowercased() ?? ""
+        let path = url.path.lowercased()
+        let query = url.query?.lowercased() ?? ""
+
+        if host.contains("gravatar.com") {
+            // Gravatar's "no custom image" fallbacks.
+            for marker in ["d=mm", "d=mp", "d=blank", "d=404", "default=mm", "default=mp", "default=blank", "default=404"] {
+                if query.contains(marker) { return true }
+            }
+        }
+
+        // Plex ships generic silhouette avatars from its static asset host; a
+        // user's own upload never lives under `/assets/`.
+        if host.contains("plex.tv") || host.contains("plex.direct") {
+            if path.contains("/assets/") && path.contains("avatar") { return true }
+            if path.hasSuffix("/avatar/default") { return true }
+        }
+
+        return false
     }
 }
 #endif

@@ -134,22 +134,86 @@ public struct Profile: Codable, Hashable, Identifiable, Sendable {
     }
 }
 
+/// A named group of avatar SF Symbols shown as one labelled section in the
+/// profile editor's symbol picker, so the (deliberately large) set stays
+/// browsable — "find a fun one for a kid / a nerd / grandma" — instead of an
+/// undifferentiated wall of glyphs.
+public struct AvatarSymbolCategory: Hashable, Sendable, Identifiable {
+    public var id: String { title }
+    public let title: String
+    public let symbols: [String]
+
+    public init(title: String, symbols: [String]) {
+        self.title = title
+        self.symbols = symbols
+    }
+}
+
 extension Profile {
-    /// Curated, tvOS-friendly SF Symbols offered as profile avatars.
-    public static let defaultAvatarSymbols: [String] = [
-        "person.crop.circle.fill",
-        "person.fill",
-        "figure.child.circle.fill",
-        "star.circle.fill",
-        "heart.circle.fill",
-        "gamecontroller.fill",
-        "music.note",
-        "film.fill",
-        "sparkles",
-        "leaf.fill",
-        "pawprint.fill",
-        "moon.stars.fill"
+    /// Curated, tvOS-friendly SF Symbols offered as profile avatars, grouped so
+    /// the picker can present browsable sections. Every symbol here is available
+    /// on tvOS 17 (SF Symbols 5). The very first symbol of the first category is
+    /// the app-wide default avatar (`defaultAvatarSymbols[0]`), so keep
+    /// `person.crop.circle.fill` leading — several call sites rely on it.
+    public static let avatarSymbolCategories: [AvatarSymbolCategory] = [
+        AvatarSymbolCategory(title: "People", symbols: [
+            "person.crop.circle.fill",
+            "person.fill",
+            "person.2.fill",
+            "figure.child.circle.fill",
+            "figure.and.child.holdinghands",
+            "figure.walk",
+            "graduationcap.fill",
+            "eyeglasses",
+            "mustache.fill"
+        ]),
+        AvatarSymbolCategory(title: "Faces & Fun", symbols: [
+            "face.smiling.inverse",
+            "star.circle.fill",
+            "heart.circle.fill",
+            "sparkles",
+            "crown.fill",
+            "party.popper.fill",
+            "balloon.fill",
+            "flame.fill"
+        ]),
+        AvatarSymbolCategory(title: "Hobbies", symbols: [
+            "gamecontroller.fill",
+            "music.note",
+            "headphones",
+            "film.fill",
+            "book.fill",
+            "paintbrush.fill",
+            "camera.fill",
+            "guitars.fill"
+        ]),
+        AvatarSymbolCategory(title: "Tech & Space", symbols: [
+            "desktopcomputer",
+            "laptopcomputer",
+            "brain.head.profile",
+            "atom",
+            "bolt.fill",
+            "moon.stars.fill",
+            "sun.max.fill",
+            "globe.americas.fill"
+        ]),
+        AvatarSymbolCategory(title: "Animals & Nature", symbols: [
+            "pawprint.fill",
+            "leaf.fill",
+            "tortoise.fill",
+            "hare.fill",
+            "ladybug.fill",
+            "ant.fill",
+            "fish.fill",
+            "bird.fill"
+        ])
     ]
+
+    /// Flattened superset of every offered avatar symbol, in category order.
+    /// `[0]` remains `person.crop.circle.fill` — the default avatar used when
+    /// none is chosen (see the `init` defaults and `ProfileStore.add`).
+    public static let defaultAvatarSymbols: [String] =
+        avatarSymbolCategories.flatMap(\.symbols)
 
     /// Palette indices for `colorIndex`. Resolved to concrete colors in the UI
     /// layer so `CoreModels` stays Foundation-only.
@@ -159,6 +223,23 @@ extension Profile {
     public var clampedColorIndex: Int {
         guard Profile.tileColorCount > 0 else { return 0 }
         return ((colorIndex % Profile.tileColorCount) + Profile.tileColorCount) % Profile.tileColorCount
+    }
+
+    /// Picks a sensible default `colorIndex` for a **new** profile so freshly
+    /// created people don't all end up the same colour (the editor otherwise
+    /// always pre-selected index 0 / blue). Returns the lowest palette index not
+    /// already in use; once every colour is taken it rotates by how many
+    /// profiles exist so growth stays evenly spread rather than clumping on 0.
+    ///
+    /// Pure + Foundation-only so it's unit-testable and usable anywhere a new
+    /// profile is minted, not just the editor.
+    public static func suggestedColorIndex(existingColorIndices: [Int]) -> Int {
+        guard tileColorCount > 0 else { return 0 }
+        let used = Set(existingColorIndices.map { ((($0 % tileColorCount) + tileColorCount) % tileColorCount) })
+        for index in 0..<tileColorCount where !used.contains(index) {
+            return index
+        }
+        return existingColorIndices.count % tileColorCount
     }
 }
 

@@ -37,4 +37,65 @@ final class ProfileDraftTests: XCTestCase {
         XCTAssertEqual(Set(draft.activeAccountIDs), ["plex-1", "jelly-1"])
     }
 }
+
+final class ProfilePhotoCandidateTests: XCTestCase {
+    private func url(_ s: String) -> URL { URL(string: s)! }
+
+    func testGravatarDefaultsAreRecognized() {
+        XCTAssertTrue(ProfilePhotoCandidate.isLikelyDefaultAvatar(
+            url("https://www.gravatar.com/avatar/abc123?s=200&d=mm")))
+        XCTAssertTrue(ProfilePhotoCandidate.isLikelyDefaultAvatar(
+            url("https://gravatar.com/avatar/abc?d=404")))
+        XCTAssertTrue(ProfilePhotoCandidate.isLikelyDefaultAvatar(
+            url("https://gravatar.com/avatar/abc?default=blank")))
+    }
+
+    func testPlexDefaultSilhouetteIsRecognized() {
+        XCTAssertTrue(ProfilePhotoCandidate.isLikelyDefaultAvatar(
+            url("https://plex.tv/assets/images/avatar/default")))
+    }
+
+    func testRealPhotosAreNotFiltered() {
+        // A custom gravatar (identicon fallback, or a real uploaded image) and a
+        // Plex user thumb are genuine photos and must be kept.
+        XCTAssertFalse(ProfilePhotoCandidate.isLikelyDefaultAvatar(
+            url("https://www.gravatar.com/avatar/abc123?s=200&d=identicon")))
+        XCTAssertFalse(ProfilePhotoCandidate.isLikelyDefaultAvatar(
+            url("https://plex.tv/users/abcdef/avatar?c=1700000000")))
+        XCTAssertFalse(ProfilePhotoCandidate.isLikelyDefaultAvatar(
+            url("https://jelly.example.com/Users/1/Images/Primary")))
+    }
+
+    func testMakeDropsDefaultPlexHomeUserAvatars() {
+        let account = Account(
+            id: "plex-1",
+            server: MediaServer(
+                id: "srv",
+                name: "Home",
+                baseURL: URL(string: "https://plex.host:32400")!,
+                provider: .plex
+            ),
+            userID: "u",
+            userName: "Owner",
+            deviceID: "dev"
+        )
+        let realUser = PlexHomeUser(
+            id: "real",
+            name: "Mom",
+            requiresPIN: false,
+            avatarURL: URL(string: "https://plex.tv/users/mom/avatar?c=1")
+        )
+        let defaultUser = PlexHomeUser(
+            id: "default",
+            name: "Kid",
+            requiresPIN: false,
+            avatarURL: URL(string: "https://www.gravatar.com/avatar/xyz?d=mm")
+        )
+        let candidates = ProfilePhotoCandidate.make(
+            accounts: [account],
+            plexHomeUsersByAccount: ["plex-1": [realUser, defaultUser]]
+        )
+        XCTAssertEqual(candidates.map(\.detailLabel), ["Mom on Home"])
+    }
+}
 #endif

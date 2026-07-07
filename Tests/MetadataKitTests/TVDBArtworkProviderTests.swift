@@ -18,14 +18,17 @@ final class TVDBArtworkProviderTests: XCTestCase {
         XCTAssertNil(hero, "no key → no lookup, no crash")
     }
 
-    func testOnlyServesHero() async {
-        // Even configured, non-hero kinds are declined (posters/logos stay with the
-        // existing providers). Unconfigured client makes this a pure routing check.
+    func testServesHeroAndPosterButNotLogoOrThumbnail() async {
+        // hero (backdrop) + poster are served; logos/stills stay with other
+        // providers. Unconfigured client keeps this a pure routing check.
         let provider = TVDBArtworkProvider(client: TVDBClient(config: TVDBConfig(apiKey: nil)))
-        for kind in [ArtworkKind.poster, .logo, .thumbnail] {
+        for kind in [ArtworkKind.logo, .thumbnail] {
             let url = await provider.artworkURL(kind, for: query(.tvShow))
-            XCTAssertNil(url, "\(kind) must be declined by the TVDB backdrop provider")
+            XCTAssertNil(url, "\(kind) must be declined by the TVDB provider")
         }
+        // hero/poster route to the client (nil here only because it's unconfigured).
+        _ = await provider.artworkURL(.hero, for: query(.tvShow))
+        _ = await provider.artworkURL(.poster, for: query(.movie, kind: .movie))
     }
 
     func testSkipsAnimeAndMusic() async {

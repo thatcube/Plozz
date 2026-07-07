@@ -85,21 +85,21 @@ public actor ArtworkRouter {
         case .tvShow:
             switch kind {
             case .hero: return [tvdb, tmdb, wikidata, wikipedia]
-            case .poster: return [tmdb, tvmaze, wikidata, wikipedia]
+            case .poster: return [tmdb, tvmaze, tvdb, wikidata, wikipedia]
             case .thumbnail: return [tmdb, tvmaze]
             case .logo: return [tmdb, wikidata, wikipedia]
             }
         case .movie:
             switch kind {
             case .hero: return [tvdb, tmdb, wikidata, wikipedia]
-            case .poster: return [tmdb, wikidata, wikipedia]
+            case .poster: return [tmdb, tvdb, wikidata, wikipedia]
             case .thumbnail: return [tmdb]
             case .logo: return [tmdb, wikidata, wikipedia]
             }
         case .unknown:
             switch kind {
             case .hero: return [tvdb, tmdb, wikidata, wikipedia]
-            case .poster: return [tmdb, wikidata, wikipedia]
+            case .poster: return [tmdb, tvdb, wikidata, wikipedia]
             case .thumbnail: return [tmdb]
             case .logo: return [tmdb, wikidata, wikipedia]
             }

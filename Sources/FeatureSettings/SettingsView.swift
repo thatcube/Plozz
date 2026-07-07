@@ -594,6 +594,10 @@ public struct SettingsView: View {
             IntegrationsDetailView(trakt: trakt, simkl: simkl, anilist: anilist, mal: mal, lastfm: lastfm, playback: playback, serverCount: activeProfileServerCount)
         case .seerr:
             SeerDetailView(seer: seer, knownServerHosts: knownServerHosts, profiles: profiles, onSetSeerrUser: onSetSeerrUser)
+        case let .seerUserPicker(profileID):
+            if let profile = profiles.first(where: { $0.id == profileID }) {
+                SeerUserPickerView(seer: seer, profile: profile, onSelect: { onSetSeerrUser(profileID, $0) })
+            }
         case .attributions:
             AttributionsDetailView()
         case .help:

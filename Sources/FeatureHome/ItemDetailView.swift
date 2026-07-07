@@ -69,6 +69,12 @@ public struct ItemDetailView: View {
     @State private var requestFailure: RequestFailureAlert?
     /// Drives the "Request as Admin?" confirmation dialog for the unmapped case.
     @State private var showingAdminConfirm = false
+    /// One-time acknowledgement of the "requests as unrestricted admin" explainer.
+    /// Device-wide (shared with any other request surface via this key): once the
+    /// user has confirmed an admin request once, we don't nag on every subsequent
+    /// request — intentionally requesting as admin is a legitimate choice. Mapping
+    /// a profile to a Seerr user avoids the admin path (and this prompt) entirely.
+    @AppStorage("seerr.adminRequestAcknowledged") private var adminRequestAcknowledged = false
 
     /// A user-facing request failure, wrapped for `.alert(item:)`.
     private struct RequestFailureAlert: Identifiable {
@@ -216,7 +222,10 @@ public struct ItemDetailView: View {
             isPresented: $showingAdminConfirm,
             titleVisibility: .visible
         ) {
-            Button("Request as Admin") { performRequest(detail.item) }
+            Button("Request as Admin") {
+                adminRequestAcknowledged = true
+                performRequest(detail.item)
+            }
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("This profile isn’t linked to a Seerr user, so the request is made as the unrestricted admin. Link a user in Settings to track requests per person.")
@@ -230,10 +239,14 @@ public struct ItemDetailView: View {
         }
     }
 
-    /// Handles a Request tap: confirm first for the unmapped admin case in a
-    /// household (see `confirmAdminRequest`), otherwise request immediately.
+    /// Handles a Request tap: confirm ONCE for the unmapped admin case in a
+    /// household (see `confirmAdminRequest`) so a member on an unmapped profile is
+    /// told their request goes as the unrestricted admin — but only until they've
+    /// acknowledged it once (intentional admin use shouldn't nag every time).
+    /// Mapped requests, and everything after the one-time acknowledgement, fire
+    /// directly.
     private func requestTapped(_ item: MediaItem) {
-        if confirmAdminRequest && requestActingName == nil {
+        if confirmAdminRequest && requestActingName == nil && !adminRequestAcknowledged {
             showingAdminConfirm = true
         } else {
             performRequest(item)

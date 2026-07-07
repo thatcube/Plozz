@@ -549,7 +549,7 @@ private func seerRequestResult(_ outcome: SeerRequestOutcome, actingName: String
         case .invalidActingUser:
             return .failure(
                 title: "Seerr User Not Found",
-                message: "The linked Seerr user no longer exists. Re-link this profile in Settings ▸ Integrations ▸ Seerr."
+                message: "The linked Seerr user no longer exists. Re-link this profile in Settings ▸ This Apple TV ▸ Seerr."
             )
         case .unreachable:
             return .failure(

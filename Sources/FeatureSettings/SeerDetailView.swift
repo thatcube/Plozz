@@ -229,14 +229,7 @@ struct SeerDetailView: View {
                 case let .loaded(list):
                     VStack(spacing: 14) {
                         ForEach(profiles) { profile in
-                            NavigationLink {
-                                SeerUserPickerView(
-                                    profileName: profile.name,
-                                    users: list,
-                                    selectedUserID: profile.seerrUserID,
-                                    onSelect: { onSetSeerrUser(profile.id, $0) }
-                                )
-                            } label: {
+                            NavigationLink(value: SettingsRoute.seerUserPicker(profileID: profile.id)) {
                                 profileMappingRow(profile: profile, users: list)
                             }
                             .buttonStyle(SettingsFocusButtonStyle())
@@ -303,13 +296,22 @@ struct SeerDetailView: View {
 /// page whose focusable rows live in a shared ``SettingsPanel``, with
 /// "Admin — unrestricted" first, then each Seerr user; the current selection
 /// is checkmarked. Selecting a row writes the mapping and pops back.
-private struct SeerUserPickerView: View {
-    let profileName: String
-    let users: [SeerUser]
-    let selectedUserID: Int?
+///
+/// Pushed via a value-based ``SettingsRoute`` from the root `NavigationStack`
+/// (see `SettingsView.destination(for:)`) rather than a closure-based
+/// `NavigationLink(destination:)`, which on tvOS can host the destination
+/// outside the stack and make Menu/Back quit the app. It loads its own users
+/// fresh each time it opens, so a reconnect can never surface a stale list.
+struct SeerUserPickerView: View {
+    let seer: SeerService
+    let profile: Profile
     let onSelect: (SeerUser?) -> Void
 
+    @State private var users: LoadState<[SeerUser]> = .idle
     @Environment(\.dismiss) private var dismiss
+
+    private var profileName: String { profile.name }
+    private var selectedUserID: Int? { profile.seerrUserID }
 
     var body: some View {
         ScrollView {
@@ -328,24 +330,48 @@ private struct SeerUserPickerView: View {
                             dismiss()
                         }
 
-                        if !users.isEmpty {
+                        switch users {
+                        case .idle, .loading:
+                            HStack(spacing: 12) {
+                                ProgressView().controlSize(.small)
+                                Text("Loading Seerr users…").font(.callout).foregroundStyle(.secondary)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.top, 6)
+                        case .failed:
+                            VStack(alignment: .leading, spacing: 8) {
+                                Label("Couldn’t load Seerr users.", systemImage: "exclamationmark.triangle.fill")
+                                    .font(.callout)
+                                    .foregroundStyle(.orange)
+                                Button { Task { await loadUsers() } } label: {
+                                    Label("Retry", systemImage: "arrow.clockwise")
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.top, 6)
+                        case let .loaded(list):
                             Text("Seerr users")
                                 .font(.caption.weight(.semibold))
                                 .textCase(.uppercase)
                                 .foregroundStyle(.secondary)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(.top, 6)
-                        }
-
-                        ForEach(users) { user in
-                            row(
-                                title: user.name,
-                                subtitle: user.subtitle,
-                                isSelected: user.id == selectedUserID
-                            ) {
-                                onSelect(user)
-                                dismiss()
+                            ForEach(list) { user in
+                                row(
+                                    title: user.name,
+                                    subtitle: user.subtitle,
+                                    isSelected: user.id == selectedUserID
+                                ) {
+                                    onSelect(user)
+                                    dismiss()
+                                }
                             }
+                        case .empty:
+                            Text("No Seerr users found.")
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.top, 6)
                         }
                     }
                 }
@@ -356,6 +382,20 @@ private struct SeerUserPickerView: View {
             .padding(.vertical, 24)
         }
         .scrollClipDisabled()
+        .task {
+            if case .loaded = users { return }
+            await loadUsers()
+        }
+    }
+
+    private func loadUsers() async {
+        users = .loading
+        do {
+            let list = try await seer.users()
+            users = list.isEmpty ? .empty : .loaded(list)
+        } catch {
+            users = .failed((error as? AppError) ?? .unknown(""))
+        }
     }
 
     @ViewBuilder

@@ -168,12 +168,18 @@ public struct ProfileEditorView: View {
             ZStack {
                 AppBackground(palette: palette).ignoresSafeArea()
 
-                HStack(alignment: .top, spacing: 56) {
+                HStack(alignment: .top, spacing: 48) {
                     previewColumn
+                    // Full-height hairline separating the fixed preview/colour
+                    // column from the scrolling picker.
+                    Rectangle()
+                        .fill(palette.cardBorder)
+                        .frame(width: 1)
+                        .frame(maxHeight: .infinity)
                     pickerColumn
                 }
                 .padding(.horizontal, 72)
-                .padding(.top, 24)
+                .padding(.vertical, 24)
             }
             .navigationTitle(isEditing ? "Edit Profile" : "New Profile")
             .toolbar {
@@ -409,7 +415,18 @@ public struct ProfileEditorView: View {
                 .frame(width: diameter, height: diameter)
                 // Hairline so pale swatches still read against the surface.
                 .overlay { Circle().strokeBorder(palette.cardBorder, lineWidth: 1) }
-                .overlay(alignment: .bottomTrailing) { selectionBadge(isSelected) }
+                // A swatch IS its content, so the selected mark sits centred on
+                // it (the standard colour-picker idiom) rather than in a corner
+                // like the symbol/photo tiles. Shadow keeps the white check
+                // legible on the paler swatches.
+                .overlay {
+                    if isSelected {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 34, weight: .heavy))
+                            .foregroundStyle(.white)
+                            .shadow(color: .black.opacity(0.35), radius: 3, y: 1)
+                    }
+                }
         }
         .buttonStyle(CircularSelectionButtonStyle(diameter: diameter))
         .focusEffectDisabled()

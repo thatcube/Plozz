@@ -135,7 +135,7 @@ private struct WatchIndicatorMini: View {
                 .overlay(Circle().strokeBorder(Color.white.opacity(0.4), lineWidth: 1))
                 .padding(tileWidth * 0.09)
         case (.unwatched, .new):
-            let s = tileWidth * 0.56
+            let s = tileWidth * 0.62
             TopTrailingCornerFlag()
                 .fill(ThemePalette.brandBlue)
                 .shadow(color: .black.opacity(0.28), radius: s * 0.16)

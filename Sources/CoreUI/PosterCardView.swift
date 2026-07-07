@@ -554,8 +554,10 @@ public struct PosterCardView: View {
     /// — the Infuse / classic-Plex "unwatched" style. Only fully-unstarted items
     /// qualify: anything played or in-progress is left unmarked (in-progress items
     /// still show their progress bar). Flush to the corner so the card's rounded
-    /// `clipShape` trims it to match the artwork's radius. Hidden under spoiler
-    /// masking, matching the watched badge.
+    /// `clipShape` trims it to match the artwork's radius. Its size is
+    /// density-scaled (`metrics.unwatchedFlagSize`) with a floor so it grows with
+    /// the card yet stays visible on tiny ones. Hidden under spoiler masking,
+    /// matching the watched badge.
     @ViewBuilder
     private func unwatchedCorner() -> some View {
         if !item.isPlayed && !hasStartedPlayback && !hideThumbnail {
@@ -570,15 +572,14 @@ public struct PosterCardView: View {
                 // anything past the artwork edges.
                 .shadow(color: .black.opacity(0.28), radius: 8)
                 .overlay(alignment: .topTrailing) {
-                    // A fixed dark-blue hairline along the flag's diagonal edge so
+                    // A translucent-black hairline along the flag's diagonal edge so
                     // the seam always separates the flag from the artwork — even
-                    // when the artwork behind it is the same brand blue. Kept the
-                    // same dark blue in every theme (not theme-derived) for a
-                    // consistent edge, and dark enough to hold contrast blue-on-blue.
+                    // when the artwork behind it is itself blue. Black (not
+                    // theme-derived) reads consistently in every theme.
                     TopTrailingCornerFlagEdge()
                         .stroke(Color.black.opacity(0.3), lineWidth: 1)
                 }
-                .frame(width: 48, height: 48)
+                .frame(width: metrics.unwatchedFlagSize, height: metrics.unwatchedFlagSize)
         }
     }
 

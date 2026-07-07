@@ -268,6 +268,16 @@ public enum PlozzTheme {
         /// legible at the smallest display-size settings.
         public static let progressBarMinHeight: CGFloat = 9
 
+        /// Base leg length of the "unwatched" corner flag (the right-triangle in a
+        /// card's top-trailing corner). Density-scaled (with a floor at
+        /// `unwatchedFlagMinSize`) in `PlozzMetrics`, so the flag grows/shrinks
+        /// with the display-size setting like the rest of the card instead of
+        /// staying a fixed pixel size.
+        public static let unwatchedFlagSize: CGFloat = 56
+        /// Smallest the density-scaled unwatched flag is allowed to get, so it
+        /// stays clearly visible even on the tiniest (micro-density) cards.
+        public static let unwatchedFlagMinSize: CGFloat = 42
+
         // MARK: Detail
 
         /// Leading inset for the detail hero's title/metadata block, shared by the

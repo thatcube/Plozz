@@ -462,12 +462,7 @@ public struct SettingsView: View {
                 // "requests are made as" mapping is managed inside its page.
                 navRow("Seerr", icon: "sparkles.tv",
                        value: seerrRowValue,
-                       route: .seerr) {
-                    Text("Discover & request movies, shows and anime")
-                        .font(.footnote)
-                        .settingsRowSecondary()
-                        .lineLimit(2)
-                }
+                       route: .seerr)
             }
             .padding(.horizontal, 28)
             .padding(.top, 16)

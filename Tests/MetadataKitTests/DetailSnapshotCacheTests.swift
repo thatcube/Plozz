@@ -73,6 +73,11 @@ final class DetailSnapshotCacheTests: XCTestCase {
             )
             await cache.store(snap, for: "key-\(index)")
         }
+        // `store` runs the LRU prune off the write path on a separate serial queue,
+        // so the directory isn't guaranteed pruned the instant the last `store`
+        // returns. Await the pending prune deterministically (a sentinel on that
+        // serial queue runs after every enqueued prune) instead of racing it.
+        await cache.awaitPendingPrune()
         let files = (try? FileManager.default.contentsOfDirectory(
             at: dir.appendingPathComponent("plozz-detail-cache-v2"),
             includingPropertiesForKeys: nil

@@ -166,6 +166,30 @@ public final class DetailSnapshotCache: Sendable {
         return directory.appendingPathComponent(safe).appendingPathExtension("json")
     }
 
+#if DEBUG
+    /// Test-only: awaits any LRU prune already scheduled by ``store(_:for:)``.
+    ///
+    /// `store` deliberately dispatches ``pruneIfNeeded()`` onto the serial
+    /// ``pruneQueue`` *off* the write path (so a slow directory scan never blocks
+    /// a write or a concurrent read — see the type header). That makes the prune
+    /// asynchronous relative to `store`'s completion, so a test that inspects the
+    /// cache directory immediately after storing races the prune and can observe
+    /// the pre-prune file count.
+    ///
+    /// This is the deterministic join point. By the time an `await store(…)` has
+    /// returned, its ``writeSnapshot(_:for:)`` has *already* enqueued that write's
+    /// prune onto ``pruneQueue`` (the enqueue happens before the write's
+    /// continuation resumes). Because ``pruneQueue`` is **serial**, a sentinel
+    /// enqueued here runs strictly after every prune queued by prior completed
+    /// stores — so awaiting it observes the settled, post-prune directory. Compiled
+    /// only into test/debug builds; it changes no production behaviour.
+    func awaitPendingPrune() async {
+        await withCheckedContinuation { continuation in
+            pruneQueue.async { continuation.resume() }
+        }
+    }
+#endif
+
     private func pruneIfNeeded() {
         guard let directory else { return }
         let keys: [URLResourceKey] = [.contentModificationDateKey]

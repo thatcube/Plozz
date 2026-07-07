@@ -535,6 +535,15 @@ final class SearchViewModelDedupTests: XCTestCase {
     }
 
     func testSeriesWithSharedExternalIDShowsOneCardAndTwoSources() async {
+        // The SAME series hosted on both a Plex and a Jellyfin server: it shares a
+        // strong external id (Tmdb 37854 — the One Piece anime) AND the same debut
+        // year, because two copies of one show report the same production year.
+        // That pair must collapse to one card carrying both sources for the server
+        // picker. (A large production-year gap here — e.g. the 1999 anime vs the
+        // 2023 live-action sharing one mis-scraped id — is a *different* scenario
+        // the merge split-guard deliberately keeps as two cards; see
+        // CrossServerMergeEdgeTests. Keep both years equal so this test exercises
+        // the genuine same-show twin, not that false-merge case.)
         let plexSeries = MediaItem(
             id: "plex-one-piece",
             title: "One Piece",
@@ -546,7 +555,7 @@ final class SearchViewModelDedupTests: XCTestCase {
             id: "jelly-one-piece",
             title: "One Piece",
             kind: .series,
-            productionYear: 2023,
+            productionYear: 1999,
             providerIDs: ["Tmdb": "37854"]
         )
         let plex = SearchStubProvider(results: [plexSeries], providerKind: .plex, accountID: "acct-plex")

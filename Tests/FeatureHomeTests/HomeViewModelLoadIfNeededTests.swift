@@ -14,7 +14,7 @@ import CoreModels
 final class HomeViewModelLoadIfNeededTests: XCTestCase {
     private func makeViewModel(
         provider: FakeMediaProvider,
-        currentExcluded: @escaping () -> Set<String>
+        currentDisabled: @escaping () -> Set<String>
     ) -> HomeViewModel {
         let server = MediaServer(id: "srv", name: "Home", baseURL: URL(string: "http://host")!, provider: .jellyfin)
         let account = Account(id: "a", server: server, userID: "u", userName: "Me", deviceID: "d")
@@ -22,7 +22,7 @@ final class HomeViewModelLoadIfNeededTests: XCTestCase {
         return HomeViewModel(
             accounts: [resolved],
             layoutStore: InMemoryHomeLayoutStore(),
-            currentVisibility: { HomeLibraryVisibility(excludedKeys: currentExcluded()) }
+            currentVisibility: { HomeLibraryVisibility(disabledKeys: currentDisabled()) }
         )
     }
 
@@ -31,31 +31,31 @@ final class HomeViewModelLoadIfNeededTests: XCTestCase {
         let vm = makeViewModel(provider: provider) { [] }
 
         // First appearance: aggregates once.
-        await vm.loadIfNeeded(for: HomeLibraryVisibility(excludedKeys: []))
+        await vm.loadIfNeeded(for: HomeLibraryVisibility(disabledKeys: []))
         XCTAssertEqual(provider.librariesCallCount, 1)
 
         // Two more "reappearances" (back-navigation re-fires the task) with the
         // same visibility snapshot must be no-ops — no re-aggregation.
-        await vm.loadIfNeeded(for: HomeLibraryVisibility(excludedKeys: []))
-        await vm.loadIfNeeded(for: HomeLibraryVisibility(excludedKeys: []))
+        await vm.loadIfNeeded(for: HomeLibraryVisibility(disabledKeys: []))
+        await vm.loadIfNeeded(for: HomeLibraryVisibility(disabledKeys: []))
         XCTAssertEqual(provider.librariesCallCount, 1)
     }
 
     func testVisibilityChangeTriggersReload() async {
-        var excluded: Set<String> = []
+        var disabled: Set<String> = []
         let provider = FakeMediaProvider(allItems: [])
-        let vm = makeViewModel(provider: provider) { excluded }
+        let vm = makeViewModel(provider: provider) { disabled }
 
-        await vm.loadIfNeeded(for: HomeLibraryVisibility(excludedKeys: excluded))
+        await vm.loadIfNeeded(for: HomeLibraryVisibility(disabledKeys: disabled))
         XCTAssertEqual(provider.librariesCallCount, 1)
 
         // The user hides a library: the set changes, so Home re-aggregates.
-        excluded = ["a:lib1"]
-        await vm.loadIfNeeded(for: HomeLibraryVisibility(excludedKeys: excluded))
+        disabled = ["a:lib1"]
+        await vm.loadIfNeeded(for: HomeLibraryVisibility(disabledKeys: disabled))
         XCTAssertEqual(provider.librariesCallCount, 2)
 
         // Reappearance with the new set is again a no-op.
-        await vm.loadIfNeeded(for: HomeLibraryVisibility(excludedKeys: excluded))
+        await vm.loadIfNeeded(for: HomeLibraryVisibility(disabledKeys: disabled))
         XCTAssertEqual(provider.librariesCallCount, 2)
     }
 

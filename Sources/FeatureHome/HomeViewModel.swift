@@ -170,7 +170,7 @@ public final class HomeViewModel {
     /// from a mere view reappearance — tvOS restarts a `.task(id:)` every time Home
     /// returns from a pushed detail, so an unguarded reload would re-fetch (flashing
     /// the skeleton) and rebuild the rows (yanking focus to the top) on every
-    /// back-navigation. Comparing the whole value (not just `excludedKeys`) means a
+    /// back-navigation. Comparing the whole value (not just `disabledKeys`) means a
     /// disable/enable or a merged↔unmerged flip correctly forces a re-aggregation,
     /// since both change what Home fetches and renders.
     private var lastLoadedVisibility: HomeLibraryVisibility?
@@ -274,12 +274,11 @@ public final class HomeViewModel {
         let identitySources = self.identitySources
         let visibility = currentVisibility()
 
-        // Watchlist policy: an explicit user save is exempt from *Home-hidden*
-        // (`excludedKeys`) — hiding a library from Home never drops a title the user
-        // watchlisted. But an **app-wide disabled** library is hidden everywhere, so
-        // a watchlisted title whose libraries are ALL disabled is dropped. Items
-        // with no resolvable library stay (fail-open). Applied here so it also
-        // governs the hero (which seeds from the watchlist), not just the row.
+        // Watchlist policy: an explicit user save is dropped only when its
+        // library is **disabled** (off everywhere). A watchlisted title whose
+        // libraries are ALL disabled is dropped; items with no resolvable library
+        // stay (fail-open). Applied here so it also governs the hero (which seeds
+        // from the watchlist), not just the row.
         let keepWatchlisted: (MediaItem) -> Bool = { item in
             item.isVisibleOnHome(isLibraryVisible: { visibility.isEnabled($0) })
         }

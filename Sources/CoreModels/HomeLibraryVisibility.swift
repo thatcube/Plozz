@@ -9,10 +9,9 @@ import Foundation
 /// - `mergeLibrariesOnHome` — the all-or-nothing "merge every library's content
 ///   into unified cross-server rows" switch. `true` (the default) is the classic
 ///   behaviour; `false` lets each library contribute its own opt-in rows.
-/// - `disabledKeys` — libraries turned **off app-wide** (hidden everywhere: Home,
-///   Search, Music, browse).
-/// - `excludedKeys` — libraries hidden from **Home only** (the merged-mode
-///   "show on Home" opt-out; still available in Search / Music / browse).
+/// - `disabledKeys` — libraries turned **off** (hidden everywhere: Home, Search,
+///   Music, browse). A library is either on or off; a video library that's on
+///   shows on Home + search, a music library that's on shows in the Music tab.
 /// - `disabledGlobalHomeRows` — the global Home rows (Continue Watching / Watchlist
 ///   / Recently Added) the user has turned **off** (opt-out; default all on). The
 ///   hero's on/off lives in `HeroSettings`, not here.
@@ -23,24 +22,20 @@ import Foundation
 /// Library keys are `AggregatedLibrary.key` (`"accountID:libraryID"`).
 ///
 /// ### Predicate vocabulary (read before touching callers)
-/// - ``isEnabled(_:)`` — app-wide availability (`!disabledKeys`).
-/// - ``isShownOnHome(_:)`` — the Home-only bit (`!excludedKeys`), independent of
-///   enabled so re-enabling a library restores its previous Home choice.
-/// - ``isVisibleOnHome(_:)`` — enabled **and** shown; what Home rendering /
-///   aggregation use. ``isVisible(_:)`` is a compatibility alias.
+/// - ``isEnabled(_:)`` — whether the library is on (`!disabledKeys`).
+/// - ``isVisibleOnHome(_:)`` — whether it appears on Home. Now simply an alias
+///   for ``isEnabled(_:)`` (an enabled video library is on Home; there is no
+///   separate Home-only opt-out). ``isVisible(_:)`` is a further alias, kept so
+///   existing Home rendering / aggregation callers stay unchanged.
 public struct HomeLibraryVisibility: Codable, Equatable, Sendable {
     /// Whether Home merges every library's content into unified cross-server rows
     /// (`true`, the classic behaviour) or lets each library contribute its own
     /// opt-in rows (`false`).
     public var mergeLibrariesOnHome: Bool
 
-    /// Keys of libraries turned off **app-wide** — hidden from Home, Search, Music
-    /// and browse alike.
+    /// Keys of libraries turned **off** — hidden from Home, Search, Music and
+    /// browse alike.
     public var disabledKeys: Set<String>
-
-    /// Keys of libraries hidden from **Home only** (merged-mode opt-out). Still
-    /// available everywhere else.
-    public var excludedKeys: Set<String>
 
     /// Raw values of the global Home rows the user has turned **off** (opt-out, so
     /// the default empty set = every global row on). See ``HomeGlobalRow``.
@@ -61,14 +56,12 @@ public struct HomeLibraryVisibility: Codable, Equatable, Sendable {
     public init(
         mergeLibrariesOnHome: Bool = true,
         disabledKeys: Set<String> = [],
-        excludedKeys: Set<String> = [],
         disabledGlobalHomeRows: Set<String> = [],
         enabledLibraryHomeRows: Set<String> = [],
         hasSeededLibraryRows: Bool = false
     ) {
         self.mergeLibrariesOnHome = mergeLibrariesOnHome
         self.disabledKeys = disabledKeys
-        self.excludedKeys = excludedKeys
         self.disabledGlobalHomeRows = disabledGlobalHomeRows
         self.enabledLibraryHomeRows = enabledLibraryHomeRows
         self.hasSeededLibraryRows = hasSeededLibraryRows
@@ -80,19 +73,17 @@ public struct HomeLibraryVisibility: Codable, Equatable, Sendable {
 
     // MARK: - Library availability predicates
 
-    /// Whether the library with `key` is available **app-wide** (not disabled).
+    /// Whether the library with `key` is on (not disabled).
     public func isEnabled(_ key: String) -> Bool {
         !disabledKeys.contains(key)
     }
 
-    /// The Home-only visibility bit (merged mode), independent of enabled.
-    public func isShownOnHome(_ key: String) -> Bool {
-        !excludedKeys.contains(key)
-    }
-
-    /// Whether the library appears on Home: enabled **and** shown.
+    /// Whether the library appears on Home. An enabled video library is on Home;
+    /// there is no separate Home-only opt-out, so this is just ``isEnabled(_:)``.
+    /// (A music library is never on Home regardless — the Home aggregator excludes
+    /// `isMusic` — so this predicate is only consulted for non-music libraries.)
     public func isVisibleOnHome(_ key: String) -> Bool {
-        isEnabled(key) && isShownOnHome(key)
+        isEnabled(key)
     }
 
     /// Compatibility alias for ``isVisibleOnHome(_:)``.
@@ -102,27 +93,13 @@ public struct HomeLibraryVisibility: Codable, Equatable, Sendable {
 
     // MARK: - Library availability mutation
 
-    /// Turns a library on/off **app-wide** (leaves the Home-only choice intact).
+    /// Turns a library on/off.
     public mutating func setEnabled(_ enabled: Bool, for key: String) {
         if enabled {
             disabledKeys.remove(key)
         } else {
             disabledKeys.insert(key)
         }
-    }
-
-    /// Sets whether a library is shown on **Home only** (merged-mode opt-out).
-    public mutating func setShownOnHome(_ shown: Bool, for key: String) {
-        if shown {
-            excludedKeys.remove(key)
-        } else {
-            excludedKeys.insert(key)
-        }
-    }
-
-    /// Compatibility alias for ``setShownOnHome(_:for:)``.
-    public mutating func setVisible(_ visible: Bool, for key: String) {
-        setShownOnHome(visible, for: key)
     }
 
     // MARK: - Global Home rows (opt-out)
@@ -191,22 +168,22 @@ public struct HomeLibraryVisibility: Codable, Equatable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case mergeLibrariesOnHome
         case disabledKeys
-        case excludedKeys
         case disabledGlobalHomeRows
         case enabledLibraryHomeRows
         case hasSeededLibraryRows
     }
 
-    /// Decodes leniently so a pre-existing blob (which had only `excludedKeys`, or
-    /// later `mergeLibrariesOnHome`/`disabledKeys`) still loads: missing fields
-    /// fall back to the defaults (merge on, every global row on, no per-library
-    /// rows), so an upgrading install sees zero Home behaviour change until it opts
-    /// in. A since-removed `mergeContinueWatchingOnHome` key is simply ignored.
+    /// Decodes leniently so a pre-existing blob still loads: missing fields fall
+    /// back to the defaults (merge on, every global row on, no per-library rows),
+    /// so an upgrading install sees zero Home behaviour change until it opts in. A
+    /// since-removed `excludedKeys` (the old Home-only "hide" opt-out) and
+    /// `mergeContinueWatchingOnHome` key are simply ignored — dropping
+    /// `excludedKeys` means any library that was excluded-but-enabled now simply
+    /// shows on Home again (the axis is retired; use enable/disable instead).
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.mergeLibrariesOnHome = try container.decodeIfPresent(Bool.self, forKey: .mergeLibrariesOnHome) ?? true
         self.disabledKeys = try container.decodeIfPresent(Set<String>.self, forKey: .disabledKeys) ?? []
-        self.excludedKeys = try container.decodeIfPresent(Set<String>.self, forKey: .excludedKeys) ?? []
         self.disabledGlobalHomeRows = try container.decodeIfPresent(Set<String>.self, forKey: .disabledGlobalHomeRows) ?? []
         self.enabledLibraryHomeRows = try container.decodeIfPresent(Set<String>.self, forKey: .enabledLibraryHomeRows) ?? []
         // Migration: a blob predating this flag that already has opted-in rows was
@@ -220,7 +197,6 @@ public struct HomeLibraryVisibility: Codable, Equatable, Sendable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(mergeLibrariesOnHome, forKey: .mergeLibrariesOnHome)
         try container.encode(disabledKeys, forKey: .disabledKeys)
-        try container.encode(excludedKeys, forKey: .excludedKeys)
         try container.encode(disabledGlobalHomeRows, forKey: .disabledGlobalHomeRows)
         try container.encode(enabledLibraryHomeRows, forKey: .enabledLibraryHomeRows)
         try container.encode(hasSeededLibraryRows, forKey: .hasSeededLibraryRows)

@@ -14,7 +14,7 @@ final class HomeAggregatorUnmergedTests: XCTestCase {
                      merge: Bool = false,
                      disabled: Set<String> = [],
                      excluded: Set<String> = []) -> HomeLibraryVisibility {
-        var v = HomeLibraryVisibility(mergeLibrariesOnHome: merge, disabledKeys: disabled, excludedKeys: excluded)
+        var v = HomeLibraryVisibility(mergeLibrariesOnHome: merge, disabledKeys: disabled.union(excluded))
         for (key, kind) in rows { v.setLibraryRowEnabled(true, libraryKey: key, kind: kind) }
         return v
     }

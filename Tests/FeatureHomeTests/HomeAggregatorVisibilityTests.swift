@@ -34,7 +34,7 @@ final class HomeAggregatorVisibilityTests: XCTestCase {
             latest: [item("l1")]
         )
         let accounts = [resolved("acct", provider: stub)]
-        let visibility = HomeLibraryVisibility(excludedKeys: ["acct:L2"])
+        let visibility = HomeLibraryVisibility(disabledKeys: ["acct:L2"])
 
         _ = await HomeAggregator().content(from: accounts, visibility: visibility)
 
@@ -52,7 +52,7 @@ final class HomeAggregatorVisibilityTests: XCTestCase {
             resolved("acct-hidden", provider: hidden),
             resolved("acct-other", provider: untouched)
         ]
-        let visibility = HomeLibraryVisibility(excludedKeys: ["acct-hidden:L2"])
+        let visibility = HomeLibraryVisibility(disabledKeys: ["acct-hidden:L2"])
 
         _ = await HomeAggregator().content(from: accounts, visibility: visibility)
 

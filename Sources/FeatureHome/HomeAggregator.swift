@@ -405,17 +405,16 @@ public struct HomeAggregator: Sendable {
         let provider = resolved.provider
 
         // Take the library-scoped fetch path when either:
-        //  - the account has a library that is NOT visible on Home (hidden OR
-        //    disabled) — scoping excludes it at the source and stamps `libraryID`
-        //    so an unscoped Jellyfin feed can't leak it via the fail-open filter; or
+        //  - the account has a library that is disabled (not on Home) — scoping
+        //    excludes it at the source and stamps `libraryID` so an unscoped
+        //    Jellyfin feed can't leak it via the fail-open filter; or
         //  - `forceLibraryScoping` is set (unmerged Home), so EVERY provider's feed
         //    is library-attributed even when nothing is hidden — otherwise Jellyfin
         //    Continue Watching items (no `libraryID` on the unscoped feed) couldn't
         //    be sliced into their per-library rows.
-        // When nothing is hidden and scoping isn't forced we keep the original
+        // When nothing is disabled and scoping isn't forced we keep the original
         // single-shot, fully-concurrent fetch (zero behaviour/performance change).
-        let accountHasHidden = visibility.excludedKeys
-            .union(visibility.disabledKeys)
+        let accountHasHidden = visibility.disabledKeys
             .contains { $0.hasPrefix("\(accountID):") }
         let scopeToVisibleLibraries = forceLibraryScoping || accountHasHidden
 

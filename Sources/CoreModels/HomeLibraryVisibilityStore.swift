@@ -104,18 +104,13 @@ public final class HomeLibraryVisibilityModel {
 
     // MARK: - Per-library predicates
 
-    /// Whether the library is available **app-wide** (not disabled).
+    /// Whether the library is on (not disabled).
     public func isEnabled(_ key: String) -> Bool {
         visibility.isEnabled(key)
     }
 
-    /// The Home-only bit (what the "Show on Home" toggle reflects), independent of
-    /// whether the library is enabled.
-    public func isShownOnHome(_ key: String) -> Bool {
-        visibility.isShownOnHome(key)
-    }
-
-    /// Whether the library actually appears on Home (enabled **and** shown).
+    /// Whether the library appears on Home (now just ``isEnabled(_:)`` — the
+    /// separate Home-only opt-out was retired).
     public func isVisibleOnHome(_ key: String) -> Bool {
         visibility.isVisibleOnHome(key)
     }
@@ -127,20 +122,9 @@ public final class HomeLibraryVisibilityModel {
 
     // MARK: - Per-library mutation
 
-    /// Turns a library on/off app-wide and persists immediately.
+    /// Turns a library on/off and persists immediately.
     public func setEnabled(_ enabled: Bool, for key: String) {
         visibility.setEnabled(enabled, for: key)
         store.save(visibility)
-    }
-
-    /// Toggles a library's Home-only visibility and persists immediately.
-    public func setShownOnHome(_ shown: Bool, for key: String) {
-        visibility.setShownOnHome(shown, for: key)
-        store.save(visibility)
-    }
-
-    /// Compatibility alias for ``setShownOnHome(_:for:)``.
-    public func setVisible(_ visible: Bool, for key: String) {
-        setShownOnHome(visible, for: key)
     }
 }

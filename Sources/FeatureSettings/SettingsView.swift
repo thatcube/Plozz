@@ -373,10 +373,10 @@ public struct SettingsView: View {
                    route: .myLibraries) {
                 signedInStrip
             }
-            navRow("Home", icon: "rectangle.on.rectangle.angled",
+            navRow("Home Page", icon: "rectangle.on.rectangle.angled",
                    value: nil,
                    route: .customizeHome) {
-                Text("Rows, libraries, the hero & spoilers")
+                Text("Combine libraries, rows & the hero")
                     .font(.footnote)
                     .settingsRowSecondary()
                     .lineLimit(2)
@@ -387,7 +387,7 @@ public struct SettingsView: View {
             navRow("Appearance", icon: "paintpalette",
                    value: nil,
                    route: .appearance) {
-                Text("Theme, display size, cards & Circadian Mode")
+                Text("Theme, display size, cards, spoilers & Circadian")
                     .font(.footnote)
                     .settingsRowSecondary()
                     .lineLimit(2)
@@ -577,12 +577,11 @@ public struct SettingsView: View {
         case .myLibraries:
             MyLibrariesDetailView(context: context)
         case .appearance:
-            AppearanceDetailView(theme: theme, nightShift: nightShift)
+            AppearanceDetailView(theme: theme, nightShift: nightShift, spoilers: spoilers)
         case .customizeHome:
             CustomizeHomeDetailView(
                 discoveredLibraries: librariesStore.state,
                 homeVisibility: homeVisibility,
-                spoilers: spoilers,
                 seerConfigured: seer.isConfigured
             )
         case .nightShift:

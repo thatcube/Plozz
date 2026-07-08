@@ -5,104 +5,94 @@ final class HomeLibraryVisibilityTests: XCTestCase {
     func testDefaultShowsEverything() {
         let visibility = HomeLibraryVisibility.default
         XCTAssertTrue(visibility.isVisible("acct:anything"))
-        XCTAssertTrue(visibility.excludedKeys.isEmpty)
+        XCTAssertTrue(visibility.disabledKeys.isEmpty)
     }
 
-    func testHidingAndShowingAKey() {
+    func testDisablingAndEnablingAKey() {
         var visibility = HomeLibraryVisibility.default
-        visibility.setVisible(false, for: "acct:movies")
+        visibility.setEnabled(false, for: "acct:movies")
 
         XCTAssertFalse(visibility.isVisible("acct:movies"))
-        XCTAssertTrue(visibility.isVisible("acct:shows"), "Other libraries stay visible (opt-out)")
+        XCTAssertTrue(visibility.isVisible("acct:shows"), "Other libraries stay on (opt-out)")
 
-        visibility.setVisible(true, for: "acct:movies")
+        visibility.setEnabled(true, for: "acct:movies")
         XCTAssertTrue(visibility.isVisible("acct:movies"))
-        XCTAssertTrue(visibility.excludedKeys.isEmpty)
+        XCTAssertTrue(visibility.disabledKeys.isEmpty)
     }
 
-    func testNewlyDiscoveredLibraryIsVisibleByDefault() {
+    func testNewlyDiscoveredLibraryIsEnabledByDefault() {
         var visibility = HomeLibraryVisibility.default
-        visibility.setVisible(false, for: "acct:movies")
-        // A library the user has never toggled is visible automatically.
+        visibility.setEnabled(false, for: "acct:movies")
+        // A library the user has never toggled is on automatically.
         XCTAssertTrue(visibility.isVisible("acct:newly-added"))
     }
 
-    func testCodableRoundTripPreservesExclusions() throws {
+    func testCodableRoundTripPreservesDisabledKeys() throws {
         var visibility = HomeLibraryVisibility.default
-        visibility.setVisible(false, for: "a:1")
-        visibility.setVisible(false, for: "b:2")
+        visibility.setEnabled(false, for: "a:1")
+        visibility.setEnabled(false, for: "b:2")
 
         let data = try JSONEncoder().encode(visibility)
         let decoded = try JSONDecoder().decode(HomeLibraryVisibility.self, from: data)
 
-        XCTAssertEqual(decoded.excludedKeys, ["a:1", "b:2"])
+        XCTAssertEqual(decoded.disabledKeys, ["a:1", "b:2"])
         XCTAssertFalse(decoded.isVisible("a:1"))
         XCTAssertTrue(decoded.isVisible("a:3"))
     }
 
-    // MARK: - Two-level enabled / show-on-home semantics
+    // MARK: - Single on/off axis (the Home-only opt-out was retired)
 
     func testDefaultsMergeOnNothingDisabled() {
         let v = HomeLibraryVisibility.default
         XCTAssertTrue(v.mergeLibrariesOnHome)
         XCTAssertTrue(v.disabledKeys.isEmpty)
         XCTAssertTrue(v.isEnabled("acct:anything"))
-        XCTAssertTrue(v.isShownOnHome("acct:anything"))
         XCTAssertTrue(v.isVisibleOnHome("acct:anything"))
     }
 
-    func testEnabledAndShownOnHomeAreIndependent() {
+    func testVisibleOnHomeIsJustEnabled() {
         var v = HomeLibraryVisibility.default
-        // Hidden from Home only: still enabled (available in Search/Music), just
-        // not on Home.
-        v.setShownOnHome(false, for: "acct:movies")
-        XCTAssertTrue(v.isEnabled("acct:movies"))
-        XCTAssertFalse(v.isShownOnHome("acct:movies"))
-        XCTAssertFalse(v.isVisibleOnHome("acct:movies"))
-    }
-
-    func testDisablingHidesEverywhereButPreservesHomeChoice() {
-        var v = HomeLibraryVisibility.default
-        v.setShownOnHome(true, for: "acct:movies") // explicitly on Home
-        v.setEnabled(false, for: "acct:movies")    // disable app-wide
-
+        // There is no separate Home-only opt-out anymore: on Home == enabled.
+        XCTAssertTrue(v.isVisibleOnHome("acct:movies"))
+        v.setEnabled(false, for: "acct:movies")
         XCTAssertFalse(v.isEnabled("acct:movies"))
-        // The Home-only bit is preserved (still "shown") so re-enabling restores it…
-        XCTAssertTrue(v.isShownOnHome("acct:movies"))
-        // …but while disabled it is not visible on Home.
         XCTAssertFalse(v.isVisibleOnHome("acct:movies"))
         XCTAssertFalse(v.isVisible("acct:movies"), "isVisible aliases isVisibleOnHome")
+    }
+
+    func testDisablingHidesEverywhereAndReEnablingRestores() {
+        var v = HomeLibraryVisibility.default
+        v.setEnabled(false, for: "acct:movies")
+        XCTAssertFalse(v.isEnabled("acct:movies"))
+        XCTAssertFalse(v.isVisibleOnHome("acct:movies"))
 
         v.setEnabled(true, for: "acct:movies")
-        XCTAssertTrue(v.isVisibleOnHome("acct:movies"), "re-enabling restores the prior Home choice")
+        XCTAssertTrue(v.isVisibleOnHome("acct:movies"))
     }
 
     func testCodableRoundTripPreservesAllFields() throws {
         var v = HomeLibraryVisibility.default
         v.mergeLibrariesOnHome = false
         v.setEnabled(false, for: "a:1")
-        v.setShownOnHome(false, for: "b:2")
 
         let data = try JSONEncoder().encode(v)
         let decoded = try JSONDecoder().decode(HomeLibraryVisibility.self, from: data)
 
         XCTAssertFalse(decoded.mergeLibrariesOnHome)
         XCTAssertEqual(decoded.disabledKeys, ["a:1"])
-        XCTAssertEqual(decoded.excludedKeys, ["b:2"])
     }
 
-    func testLegacyBlobDecodesWithMergeOnAndNothingDisabled() throws {
-        // A pre-feature blob only ever carried `excludedKeys`. It must decode with
-        // merge ON (classic behaviour) and nothing disabled, so upgrading installs
-        // see zero Home change until they opt in.
+    func testLegacyExcludedKeysBlobDecodesAsShown() throws {
+        // A pre-retirement blob carried the old Home-only `excludedKeys` opt-out.
+        // It must still decode (merge ON, nothing disabled), and the retired axis
+        // is dropped — an excluded-but-enabled library now simply shows on Home.
         let legacy = #"{"excludedKeys":["acct:movies"]}"#
         let decoded = try JSONDecoder().decode(HomeLibraryVisibility.self, from: Data(legacy.utf8))
 
         XCTAssertTrue(decoded.mergeLibrariesOnHome)
         XCTAssertTrue(decoded.disabledKeys.isEmpty)
-        XCTAssertEqual(decoded.excludedKeys, ["acct:movies"])
-        XCTAssertFalse(decoded.isVisibleOnHome("acct:movies"))
         XCTAssertTrue(decoded.isEnabled("acct:movies"))
+        XCTAssertTrue(decoded.isVisibleOnHome("acct:movies"), "retired opt-out folds to shown")
         // New row-selection fields also default sensibly: every global row on, no
         // per-library rows opted in.
         XCTAssertTrue(decoded.isGlobalRowEnabled(.continueWatching))
@@ -158,12 +148,12 @@ final class HomeLibraryVisibilityStoreTests: XCTestCase {
         let defaults = makeDefaults()
         let store = HomeLibraryVisibilityStore(defaults: defaults, namespace: nil)
         var v = HomeLibraryVisibility.default
-        v.setVisible(false, for: "acct:movies")
+        v.setEnabled(false, for: "acct:movies")
         store.save(v)
 
         // Persisted under the un-suffixed key so upgrading installs inherit it.
         XCTAssertNotNil(defaults.data(forKey: "com.plozz.homeLibraryVisibility"))
-        XCTAssertEqual(store.load().excludedKeys, ["acct:movies"])
+        XCTAssertEqual(store.load().disabledKeys, ["acct:movies"])
     }
 
     func testProfilesGetIsolatedVisibility() {
@@ -172,12 +162,12 @@ final class HomeLibraryVisibilityStoreTests: XCTestCase {
         let bob = HomeLibraryVisibilityStore(defaults: defaults, namespace: "profile-bob")
 
         var aliceV = alice.load()
-        aliceV.setVisible(false, for: "acct:movies")
+        aliceV.setEnabled(false, for: "acct:movies")
         alice.save(aliceV)
 
         // Bob's scope is untouched by Alice's choice.
-        XCTAssertEqual(alice.load().excludedKeys, ["acct:movies"])
-        XCTAssertTrue(bob.load().excludedKeys.isEmpty)
+        XCTAssertEqual(alice.load().disabledKeys, ["acct:movies"])
+        XCTAssertTrue(bob.load().disabledKeys.isEmpty)
         XCTAssertTrue(bob.load().isVisible("acct:movies"))
     }
 }
@@ -200,14 +190,16 @@ final class HomeLibraryVisibilityModelTests: XCTestCase {
     }
 
     @MainActor
-    func testSetEnabledIsIndependentOfShownOnHome() {
+    func testSetEnabledControlsVisibility() {
         let model = makeModel()
-        model.setShownOnHome(true, for: "acct:movies")
+        XCTAssertTrue(model.isVisibleOnHome("acct:movies"))
         model.setEnabled(false, for: "acct:movies")
 
         XCTAssertFalse(model.isEnabled("acct:movies"))
-        XCTAssertTrue(model.isShownOnHome("acct:movies"))
         XCTAssertFalse(model.isVisibleOnHome("acct:movies"))
+
+        model.setEnabled(true, for: "acct:movies")
+        XCTAssertTrue(model.isVisibleOnHome("acct:movies"))
     }
 }
 

@@ -8,6 +8,10 @@ struct AppearanceDetailView: View {
     /// Circadian Mode (night-warming) settings, folded in as sections here — it's
     /// a display concern, so it no longer earns its own top-level row.
     @Bindable var nightShift: NightShiftSettingsModel
+    /// Spoiler-protection (hide unwatched episode art/titles/ratings). It's a
+    /// content-protection concern that applies wherever you browse — not
+    /// Home-specific — so it lives here in Appearance rather than folded into Home.
+    @Bindable var spoilers: SpoilerSettingsModel
     @Environment(MusicPlayerSettingsModel.self) private var musicPlayer
     /// App-wide card presentation — scale + style — that applies across every row
     /// and grid in the app (not just Home), so it lives in Appearance rather than
@@ -133,6 +137,7 @@ struct AppearanceDetailView: View {
                 }
             ])
         ] + CircadianSectionsBuilder(model: nightShift, primaryHeader: "Circadian Mode").sections
+            + SpoilerSectionsBuilder(spoilers: spoilers).sections
     }
 }
 
@@ -145,9 +150,9 @@ struct SpoilersDetailView: View {
 }
 
 /// Builds the Spoiler-protection settings section. Extracted from
-/// ``SpoilersDetailView`` so the same controls can appear folded into the Home
-/// settings page (the standalone top-level "Spoilers" row was retired — spoiler
-/// masking is a browsing concern, so it lives with Home).
+/// ``SpoilersDetailView`` so the same controls can appear folded into the
+/// Appearance settings page (spoiler masking is a browsing concern that applies
+/// everywhere, so it lives in Appearance rather than Home or its own row).
 @MainActor
 struct SpoilerSectionsBuilder {
     let spoilers: SpoilerSettingsModel

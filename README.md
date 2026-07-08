@@ -128,8 +128,20 @@ is auto-incremented from the latest TestFlight build at archive time — never e
 it manually.
 
 tvOS **Brand Assets** (app icon + Top Shelf images) live under
-`App/Resources/Assets.xcassets/…brandassets` and are required for any upload. The
-current art is a placeholder — replace it before a public App Store release.
+`App/Resources/Assets.xcassets/App Icon & Top Shelf Image.brandassets` and are
+required for any upload. They're generated in-repo — no separate tooling or the
+plozz-website repo needed. The source art is the pixel-art TV logo at
+`App/Resources/Assets.xcassets/PlozzLogo.imageset/plozz_logo.svg`; to change the
+icon, edit that SVG and re-run:
+
+```bash
+python3 tools/generate_brand_assets.py   # needs cairosvg, numpy, Pillow
+```
+
+This writes all 13 PNGs and their `Contents.json` into the `.brandassets`
+bundle: both layered (parallax) app-icon stacks plus the Top Shelf and Top Shelf
+Wide images, over a grey pixel-textured background tinted from the logo's own
+blues.
 
 ## Roadmap
 - Dedicated iOS music app (Mozz)

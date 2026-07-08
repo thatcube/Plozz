@@ -160,7 +160,13 @@ public struct ProfileEditorView: View {
         let startPhoto = editingProfile?.avatarImageURL
         let normalizedPhoto = (startPhoto?.isEmpty == false) ? startPhoto : nil
         let startEmoji = editingProfile?.avatarEmoji
-        let normalizedEmoji = (startEmoji?.isEmpty == false) ? startEmoji : nil
+        var normalizedEmoji = (startEmoji?.isEmpty == false) ? startEmoji : nil
+        // A brand-new profile starts on a fun *random* emoji, so simply hitting
+        // Create (without opening the picker) still yields an emoji avatar
+        // rather than a plain symbol.
+        if editingProfile == nil, normalizedEmoji == nil {
+            normalizedEmoji = Profile.randomAvatarEmoji()
+        }
         let startEmojiColor = editingProfile?.avatarEmojiColorIndex
 
         // Open in the mode that matches the profile's current avatar. A NEW
@@ -456,20 +462,20 @@ public struct ProfileEditorView: View {
             // A clear, legible mode switch — so it's obvious emoji and photo are
             // even options — instead of the old low-contrast segmented control.
             SettingsOptionPicker(
-                options: [AvatarMode.symbol, AvatarMode.emoji, AvatarMode.photo],
+                options: [AvatarMode.emoji, AvatarMode.photo, AvatarMode.symbol],
                 selection: $avatarMode,
                 icon: { mode in
                     switch mode {
-                    case .symbol: return "face.smiling"
                     case .emoji: return "face.dashed"
                     case .photo: return "photo.fill"
+                    case .symbol: return "face.smiling"
                     }
                 },
                 title: { mode in
                     switch mode {
-                    case .symbol: return "Symbol"
                     case .emoji: return "Emoji"
                     case .photo: return "Photo"
+                    case .symbol: return "Symbol"
                     }
                 }
             )
@@ -636,11 +642,11 @@ public struct ProfileEditorView: View {
     // MARK: Colors
 
     private var colorSection: some View {
-        let columns = [GridItem(.adaptive(minimum: 84, maximum: 100), spacing: 20)]
+        let columns = [GridItem(.adaptive(minimum: 44, maximum: 54), spacing: 14)]
         let emojiMode = avatarMode == .emoji
         return VStack(alignment: .leading, spacing: 16) {
             sectionHeader("Color")
-            LazyVGrid(columns: columns, spacing: 20) {
+            LazyVGrid(columns: columns, spacing: 14) {
                 // Emoji avatars default to a neutral disc (colours often clash
                 // with a multicolour emoji), so Emoji mode leads with a Neutral
                 // swatch. Symbols always need a colour, so they skip it.
@@ -658,7 +664,7 @@ public struct ProfileEditorView: View {
     /// to `emojiColorIndex == nil`.
     private var neutralSwatch: some View {
         let isSelected = emojiColorIndex == nil
-        let diameter: CGFloat = 84
+        let diameter: CGFloat = 42
         return Button {
             emojiColorIndex = nil
         } label: {
@@ -669,12 +675,12 @@ public struct ProfileEditorView: View {
                 .overlay {
                     if isSelected {
                         Image(systemName: "checkmark")
-                            .font(.system(size: 34, weight: .heavy))
+                            .font(.system(size: 18, weight: .heavy))
                             .foregroundStyle(.white)
                             .shadow(color: .black.opacity(0.35), radius: 3, y: 1)
                     } else {
                         Image(systemName: "slash.circle")
-                            .font(.system(size: 30, weight: .semibold))
+                            .font(.system(size: 16, weight: .semibold))
                             .foregroundStyle(palette.secondaryText)
                     }
                 }
@@ -689,7 +695,7 @@ public struct ProfileEditorView: View {
         // In emoji mode the colour choice writes emojiColorIndex; for symbols it
         // writes colorIndex.
         let isSelected = emojiMode ? (emojiColorIndex == index) : (index == colorIndex)
-        let diameter: CGFloat = 84
+        let diameter: CGFloat = 42
         return Button {
             if emojiMode { emojiColorIndex = index } else { colorIndex = index }
         } label: {
@@ -705,7 +711,7 @@ public struct ProfileEditorView: View {
                 .overlay {
                     if isSelected {
                         Image(systemName: "checkmark")
-                            .font(.system(size: 34, weight: .heavy))
+                            .font(.system(size: 18, weight: .heavy))
                             .foregroundStyle(.white)
                             .shadow(color: .black.opacity(0.35), radius: 3, y: 1)
                     }

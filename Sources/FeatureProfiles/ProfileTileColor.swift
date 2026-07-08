@@ -7,21 +7,46 @@ import CoreModels
 /// Lives in the UI layer so `CoreModels` stays Foundation-only. The palette is
 /// deliberately vivid and high-contrast for the 10-foot tvOS experience.
 public enum ProfileTileColor {
+    /// Vivid, high-contrast tile colours for the 10-foot tvOS UI, ordered by
+    /// hue so like colours sit together (reds → oranges → yellows → greens →
+    /// teals → blues → purples → pinks → neutrals). Keep `Profile.tileColorCount`
+    /// in sync with this count.
     public static let palette: [Color] = [
-        Color(red: 0.20, green: 0.55, blue: 0.95), // blue
-        Color(red: 0.95, green: 0.35, blue: 0.45), // red
-        Color(red: 0.40, green: 0.78, blue: 0.45), // green
-        Color(red: 0.95, green: 0.65, blue: 0.20), // amber
-        Color(red: 0.62, green: 0.40, blue: 0.92), // purple
-        Color(red: 0.20, green: 0.75, blue: 0.78), // teal
-        Color(red: 0.95, green: 0.45, blue: 0.75), // pink
-        Color(red: 0.55, green: 0.60, blue: 0.68), // slate
-        Color(red: 0.98, green: 0.50, blue: 0.30), // orange
-        Color(red: 0.30, green: 0.45, blue: 0.85), // indigo
-        Color(red: 0.55, green: 0.80, blue: 0.30), // lime
-        Color(red: 0.90, green: 0.30, blue: 0.55), // magenta
-        Color(red: 0.40, green: 0.68, blue: 0.95), // sky
-        Color(red: 0.75, green: 0.55, blue: 0.40)  // clay
+        // Reds
+        Color(red: 0.92, green: 0.26, blue: 0.30),
+        Color(red: 0.95, green: 0.35, blue: 0.45),
+        // Oranges
+        Color(red: 0.98, green: 0.48, blue: 0.28),
+        Color(red: 0.97, green: 0.60, blue: 0.24),
+        // Amber / yellow
+        Color(red: 0.96, green: 0.72, blue: 0.20),
+        Color(red: 0.92, green: 0.82, blue: 0.32),
+        // Lime
+        Color(red: 0.66, green: 0.80, blue: 0.28),
+        Color(red: 0.48, green: 0.78, blue: 0.35),
+        // Greens
+        Color(red: 0.30, green: 0.74, blue: 0.44),
+        Color(red: 0.20, green: 0.72, blue: 0.55),
+        // Teal / cyan
+        Color(red: 0.18, green: 0.74, blue: 0.74),
+        Color(red: 0.24, green: 0.68, blue: 0.86),
+        // Blues
+        Color(red: 0.26, green: 0.56, blue: 0.95),
+        Color(red: 0.20, green: 0.45, blue: 0.90),
+        // Indigo
+        Color(red: 0.36, green: 0.40, blue: 0.86),
+        Color(red: 0.48, green: 0.42, blue: 0.92),
+        // Purple
+        Color(red: 0.62, green: 0.40, blue: 0.92),
+        Color(red: 0.74, green: 0.42, blue: 0.88),
+        // Magenta / pink
+        Color(red: 0.88, green: 0.36, blue: 0.78),
+        Color(red: 0.95, green: 0.40, blue: 0.68),
+        Color(red: 0.96, green: 0.52, blue: 0.66),
+        // Neutrals
+        Color(red: 0.60, green: 0.62, blue: 0.68), // slate
+        Color(red: 0.75, green: 0.55, blue: 0.42), // clay
+        Color(red: 0.48, green: 0.50, blue: 0.55)  // graphite
     ]
 
     public static func color(for profile: Profile) -> Color {

@@ -247,7 +247,11 @@ public final class ProfileStore: ProfilePersisting, @unchecked Sendable {
         let profile = Profile(
             id: Self.defaultProfileID,
             name: defaultName,
-            createdAt: Date(timeIntervalSince1970: 0) // sorts first, ahead of any later profile
+            createdAt: Date(timeIntervalSince1970: 0), // sorts first, ahead of any later profile
+            // A fresh household's first profile gets a fun random emoji rather
+            // than a plain symbol (a signed-in account photo, when present, is
+            // layered on later by `seedDefaultProfileIdentity` and wins).
+            avatarEmoji: Profile.randomAvatarEmoji()
         )
         saveProfilesLocked([profile])
         // Intentionally does *not* persist `activeProfileIDKey`: creating the

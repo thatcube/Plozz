@@ -128,6 +128,16 @@ final class ProfileModelTests: XCTestCase {
         XCTAssertEqual(cat.availableEmojis(osMajor: 18, osMinor: 4).map(\.value), ["😎", "🫩"])
     }
 
+    func testRandomAvatarEmojiIsFromUngatedPool() {
+        let ungated = Set(
+            Profile.avatarEmojiCategories.flatMap(\.emojis).filter { $0.minMajor == 0 }.map(\.value)
+        )
+        XCTAssertFalse(ungated.isEmpty)
+        for _ in 0..<50 {
+            XCTAssertTrue(ungated.contains(Profile.randomAvatarEmoji()))
+        }
+    }
+
     func testAvatarEmojiRoundTripsAndDefaultsNil() throws {
         XCTAssertNil(Profile(name: "A").avatarEmoji)
         XCTAssertNil(Profile(name: "A").avatarEmojiColorIndex)

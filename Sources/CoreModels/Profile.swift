@@ -403,10 +403,19 @@ extension Profile {
         ])
     ]
 
+    /// A random fun emoji for a brand-new profile, so auto-created / lazily
+    /// created profiles get a playful emoji avatar instead of a plain symbol.
+    /// Drawn only from the ungated (always-renderable) emoji so it's safe on any
+    /// supported OS.
+    public static func randomAvatarEmoji() -> String {
+        let pool = avatarEmojiCategories.flatMap(\.emojis).filter { $0.minMajor == 0 }
+        return pool.randomElement()?.value ?? "😎"
+    }
+
     /// Palette indices for `colorIndex`. Resolved to concrete colors in the UI
     /// layer so `CoreModels` stays Foundation-only. Keep in sync with
     /// `ProfileTileColor.palette` (the UI palette has this many colours).
-    public static let tileColorCount = 14
+    public static let tileColorCount = 24
 
     /// A clamped, valid color index for `colorIndex`.
     public var clampedColorIndex: Int {

@@ -19,6 +19,22 @@ final class ProfileTileColorTests: XCTestCase {
     func testPaletteCoversTileColorCount() {
         XCTAssertGreaterThanOrEqual(ProfileTileColor.palette.count, Profile.tileColorCount)
     }
+
+    func testLegibleForegroundContrastsWithTile() {
+        // White tile (index of the white swatch) must take a dark glyph; the
+        // black tile a white one. Find them by luminance extremes.
+        let rgb = ProfileTileColor.paletteRGB
+        let whiteIndex = rgb.firstIndex { $0.r > 0.98 && $0.g > 0.98 && $0.b > 0.98 }
+        let blackIndex = rgb.firstIndex { $0.r < 0.15 && $0.g < 0.15 && $0.b < 0.15 }
+        XCTAssertNotNil(whiteIndex, "palette should include a white")
+        XCTAssertNotNil(blackIndex, "palette should include a black")
+        if let w = whiteIndex {
+            XCTAssertEqual(ProfileTileColor.legibleForeground(forIndex: w), .black)
+        }
+        if let b = blackIndex {
+            XCTAssertEqual(ProfileTileColor.legibleForeground(forIndex: b), .white)
+        }
+    }
 }
 
 final class ProfileDraftTests: XCTestCase {

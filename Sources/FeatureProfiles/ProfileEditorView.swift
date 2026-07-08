@@ -546,7 +546,12 @@ public struct ProfileEditorView: View {
                     : AnyShapeStyle(palette.cardSurface))
                 Image(systemName: symbol)
                     .font(.system(size: 46, weight: .semibold))
-                    .foregroundStyle(isSelected ? Color.white : palette.primaryText)
+                    // On the selected coloured disc the glyph adapts to the
+                    // colour (dark on white/yellow, white on dark) so it stays
+                    // legible; unselected uses the theme's primary text.
+                    .foregroundStyle(isSelected
+                        ? ProfileTileColor.legibleForeground(forIndex: colorIndex)
+                        : palette.primaryText)
             }
             .frame(width: diameter, height: diameter)
             .overlay { Circle().strokeBorder(palette.cardBorder, lineWidth: 1) }
@@ -721,8 +726,10 @@ public struct ProfileEditorView: View {
                     if isSelected {
                         Image(systemName: "checkmark")
                             .font(.system(size: 18, weight: .heavy))
-                            .foregroundStyle(.white)
-                            .shadow(color: .black.opacity(0.35), radius: 3, y: 1)
+                            // Legible on any swatch (dark check on white/pale,
+                            // white check on dark).
+                            .foregroundStyle(ProfileTileColor.legibleForeground(forIndex: index))
+                            .shadow(color: .black.opacity(0.2), radius: 2, y: 1)
                     }
                 }
         }

@@ -415,7 +415,7 @@ extension Profile {
     /// Palette indices for `colorIndex`. Resolved to concrete colors in the UI
     /// layer so `CoreModels` stays Foundation-only. Keep in sync with
     /// `ProfileTileColor.palette` (the UI palette has this many colours).
-    public static let tileColorCount = 32
+    public static let tileColorCount = 40
 
     /// A clamped, valid color index for `colorIndex`.
     public var clampedColorIndex: Int {

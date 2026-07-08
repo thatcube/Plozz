@@ -84,13 +84,15 @@ public struct ProfileAvatarView: View {
     }
 
     /// Symbol on colored tile — the original avatar style. Also used as the
-    /// fallback when a borrowed photo URL fails to load.
+    /// fallback when a borrowed photo URL fails to load. The glyph colour adapts
+    /// to the tile so it stays legible on light backgrounds (e.g. a white or
+    /// yellow tile gets a dark glyph instead of an invisible white one).
     private var symbolFallback: some View {
         ZStack {
             Circle().fill(ProfileTileColor.color(for: profile))
             Image(systemName: profile.avatarSymbol)
                 .font(.system(size: size * 0.5, weight: .semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(ProfileTileColor.legibleForeground(for: profile))
         }
     }
 }

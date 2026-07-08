@@ -317,7 +317,19 @@ public struct ItemDetailView: View {
                         selectedSourceAccountID: effectiveSource?.accountID,
                         onSelectSource: serverChoices.count > 1 ? { id in selectSource(id) } : nil,
                         fallbackTechnicalBadges: detail.children.representativeTechnicalBadges,
-                        playButtonFocus: $playFocused
+                        playButtonFocus: $playFocused,
+                        // Whenever focus lands on (or moves between) any hero action
+                        // button, re-pin the page to the hero top. The row is
+                        // bottom-anchored in a full-height hero (childless movie),
+                        // so tvOS auto-scrolls the page down to reveal a focused
+                        // button; this snaps it back — for every button, not just
+                        // Play — killing the horizontal-navigation drift. Same
+                        // animation as the Play-regains-focus case below.
+                        onHeroActionFocused: {
+                            withAnimation(.easeInOut(duration: 0.4)) {
+                                proxy.scrollTo(Self.topAnchorID, anchor: .top)
+                            }
+                        }
                     )
                     .id(Self.topAnchorID)
                     if !detail.children.isEmpty {

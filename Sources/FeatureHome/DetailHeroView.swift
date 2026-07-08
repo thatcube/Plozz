@@ -88,6 +88,15 @@ struct DetailHeroView: View {
     /// opened targeting a specific episode so focus lands on Play at the top
     /// rather than down in the episode row.
     var playButtonFocus: FocusState<Bool>.Binding? = nil
+    /// Invoked whenever focus lands on (or moves between) *any* button in the hero
+    /// action row — Play, Trailer, watchlist, watched, Refresh, the "…" menu, or
+    /// the discovery request pill. The parent uses this to re-pin the page to the
+    /// hero top, so horizontal navigation across the bottom-anchored row can't let
+    /// tvOS's focus-reveal auto-scroll drift the whole page down. Fires on every
+    /// intra-row focus change (not just on entering the row), because tvOS re-nudges
+    /// the scroll for each newly-focused button. `nil` leaves scroll behaviour
+    /// untouched.
+    var onHeroActionFocused: (() -> Void)? = nil
 
     /// Marks this hero as presenting a **discovery** (Seerr) title that isn't in
     /// the library. When `true` the library-only action buttons (Play, Trailer,
@@ -135,6 +144,22 @@ struct DetailHeroView: View {
     /// is *not* set on first appearance (only on change), so it never steals the
     /// initial focus that Play should have when the page opens.
     @FocusState private var moreMenuFocused: Bool
+
+    /// Identifies each focusable control in the hero action row. A single
+    /// `@FocusState` bound to this enum funnels every action button through one
+    /// signal, so the parent can be told the instant focus lands on — or moves
+    /// between — any of them. This exists purely to drive the "keep the row pinned
+    /// to the hero top" correction (see ``onHeroActionFocused``); the per-button
+    /// bool focus states above still own their local colour/behaviour tweaks.
+    private enum HeroRowAction: Hashable {
+        case play, trailer, watchlist, watched, refresh, more, request
+    }
+
+    /// The action-row control that currently holds focus, or `nil` when focus is
+    /// outside the row. Every button in the row binds to this via
+    /// `.focused($heroActionRowFocus, equals:)`; a non-nil change fires
+    /// ``onHeroActionFocused``.
+    @FocusState private var heroActionRowFocus: HeroRowAction?
 
     /// Scopes the hero action row (Play, Trailer, …) so the Play button can be its
     /// preferred default focus. When focus moves UP into this section from a season
@@ -410,6 +435,7 @@ struct DetailHeroView: View {
                             Label("Trailer", systemImage: "film.fill")
                         }
                         .modifier(HeroActionButtonStyle(prominent: false))
+                        .focused($heroActionRowFocus, equals: .trailer)
                     }
                     if let heroWatchlistAction {
                         watchlistButton(action: heroWatchlistAction)
@@ -445,6 +471,16 @@ struct DetailHeroView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .focusScope(heroActionsScope)
                 .focusSection()
+                // Keep the whole action row pinned to the hero top: this row is
+                // bottom-anchored in a hero that is full-screen-height for a
+                // childless movie, so when focus lands on any button tvOS
+                // auto-scrolls the page down to reveal it. Firing on every non-nil
+                // change (not just row entry) corrects the drift for horizontal
+                // moves *within* the row too, since tvOS re-nudges the scroll for
+                // each newly-focused button.
+                .onChange(of: heroActionRowFocus) { _, focus in
+                    if focus != nil { onHeroActionFocused?() }
+                }
             }
         }
         .padding(.top, PlozzTheme.Metrics.screenPadding)
@@ -551,6 +587,7 @@ struct DetailHeroView: View {
         }
         .modifier(HeroActionButtonStyle(prominent: true))
         .focused($playButtonHasFocus)
+        .focused($heroActionRowFocus, equals: .play)
         .onChange(of: liveResumeText) { _, new in
             if let new { reservedResumeText = new }
         }
@@ -584,6 +621,7 @@ struct DetailHeroView: View {
             }
             .modifier(HeroActionButtonStyle(prominent: true))
             .prefersDefaultFocus(true, in: heroActionsScope)
+            .focused($heroActionRowFocus, equals: .request)
             .accessibilityLabel(label)
         case let .downloading(progress):
             let percent = Int((progress * 100).rounded())
@@ -597,6 +635,7 @@ struct DetailHeroView: View {
             .modifier(HeroActionButtonStyle(prominent: false))
             .focused($requestPillHasFocus)
             .prefersDefaultFocus(true, in: heroActionsScope)
+            .focused($heroActionRowFocus, equals: .request)
             .accessibilityLabel("Downloading \(percent) percent")
         case .requested:
             Button {} label: {
@@ -604,6 +643,7 @@ struct DetailHeroView: View {
             }
             .modifier(HeroActionButtonStyle(prominent: false))
             .prefersDefaultFocus(true, in: heroActionsScope)
+            .focused($heroActionRowFocus, equals: .request)
             .accessibilityLabel("Requested")
         case .play, .unavailable:
             EmptyView()
@@ -682,6 +722,7 @@ struct DetailHeroView: View {
         .equatable()
         .modifier(HeroActionButtonStyle(prominent: false))
         .focused($moreMenuFocused)
+        .focused($heroActionRowFocus, equals: .more)
         .accessibilityLabel("Server and version options")
     }
 
@@ -702,6 +743,7 @@ struct DetailHeroView: View {
         }
         .modifier(HeroActionButtonStyle(prominent: false))
         .animation(.easeInOut(duration: 0.2), value: item.isFavorite)
+        .focused($heroActionRowFocus, equals: .watchlist)
         .accessibilityLabel(action.title)
         .accessibilityValue(item.isFavorite ? "On your watchlist" : "Not on your watchlist")
     }
@@ -748,6 +790,7 @@ struct DetailHeroView: View {
             .animation(.easeOut(duration: 0.18), value: item.isPlayed)
         }
         .modifier(HeroActionButtonStyle(prominent: false))
+        .focused($heroActionRowFocus, equals: .watched)
         .accessibilityLabel(action.title)
         .accessibilityValue(item.isPlayed ? "Watched" : "Not watched")
     }
@@ -774,6 +817,7 @@ struct DetailHeroView: View {
         }
         .modifier(HeroActionButtonStyle(prominent: false))
         .focused($refreshButtonHasFocus)
+        .focused($heroActionRowFocus, equals: .refresh)
         .accessibilityLabel(MediaItemAction.refreshMetadata.title)
     }
 

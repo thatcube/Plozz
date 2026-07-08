@@ -117,6 +117,9 @@ struct CustomizeHomeDetailView: View {
                 Text("Show each library's own rows")
             }
             .toggleStyle(SettingsSwitchToggleStyle())
+            // Extra separation above the toggle so the always-on "Shared rows" card
+            // reads as its own block, set apart from this optional add-on.
+            .padding(.top, 16)
 
             if !homeVisibility.mergeLibrariesOnHome {
                 let libraries = homeVisibleLibraries

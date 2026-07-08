@@ -378,26 +378,21 @@ public struct SettingsView: View {
                    route: .myLibraries) {
                 signedInStrip
             }
-            navRow("Home", icon: "rectangle.on.rectangle.angled",
+            navRow("Customize Home", icon: "house",
                    value: nil,
-                   route: .customizeHome) {
-                Text("Rows, libraries, the hero & spoilers")
-                    .font(.footnote)
-                    .settingsRowSecondary()
-                    .lineLimit(2)
-            }
+                   route: .customizeHome)
             navRow("Playback", icon: "play.rectangle",
                    value: nil,
                    route: .playback)
             navRow("Appearance", icon: "paintpalette",
                    value: nil,
                    route: .appearance) {
-                Text("Theme, display size, cards & Circadian Mode")
+                Text("Theme, display size, cards, spoilers & Circadian")
                     .font(.footnote)
                     .settingsRowSecondary()
                     .lineLimit(2)
             }
-            navRow("Integrations", icon: "link",
+            navRow("Trackers", icon: "link",
                    value: nil,
                    route: .integrations) {
                 Text("Trakt, Simkl, AniList, MyAnimeList, Last.fm")
@@ -582,12 +577,11 @@ public struct SettingsView: View {
         case .myLibraries:
             MyLibrariesDetailView(context: context)
         case .appearance:
-            AppearanceDetailView(theme: theme, nightShift: nightShift)
+            AppearanceDetailView(theme: theme, nightShift: nightShift, spoilers: spoilers)
         case .customizeHome:
             CustomizeHomeDetailView(
                 discoveredLibraries: librariesStore.state,
                 homeVisibility: homeVisibility,
-                spoilers: spoilers,
                 seerConfigured: seer.isConfigured
             )
         case .nightShift:

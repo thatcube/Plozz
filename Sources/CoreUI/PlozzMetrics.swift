@@ -62,6 +62,11 @@ public struct PlozzMetrics: Equatable, Sendable {
     /// setting without ever shrinking to an illegible sliver.
     public let progressBarHeight: CGFloat
 
+    /// Leg length of the "unwatched" corner flag, density-scaled and floored at
+    /// `PlozzTheme.Metrics.unwatchedFlagMinSize` so it grows with the display-size
+    /// setting yet never shrinks below a clearly-visible minimum on tiny cards.
+    public let unwatchedFlagSize: CGFloat
+
     // MARK: Media spacing (scaled)
 
     /// Gap between adjacent media cards in a rail and gutter in a poster grid —
@@ -207,6 +212,10 @@ public struct PlozzMetrics: Equatable, Sendable {
         self.progressBarHeight = max(
             step(PlozzTheme.Metrics.progressBarHeight),
             PlozzTheme.Metrics.progressBarMinHeight
+        )
+        self.unwatchedFlagSize = max(
+            step(PlozzTheme.Metrics.unwatchedFlagSize),
+            PlozzTheme.Metrics.unwatchedFlagMinSize
         )
 
         self.cardSpacing = step(PlozzTheme.Metrics.cardSpacing)

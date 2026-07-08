@@ -5,9 +5,11 @@ import CoreUI
 
 /// "Choose your libraries" — shown right after one or more servers are added
 /// (both first run and later adds). It lists the just-added servers' libraries
-/// as Hide-Spoilers-style toggles, all on by default (Home visibility is
-/// opt-out), so the user can uncheck anything they don't want on their Home
-/// before continuing. Writes straight through to `HomeLibraryVisibilityModel`.
+/// as toggles, all **on** by default, so the user can turn off any library they
+/// don't want before continuing. Each toggle is the library's **Enabled** switch
+/// (the same on/off shown later in Settings › Your Libraries) — off hides the
+/// library everywhere (Home, Search, Music, browse). Writes straight through to
+/// `HomeLibraryVisibilityModel`.
 ///
 /// Mirrors `PlexUserSelectionView`'s layout: a pinned header + footer with a
 /// clipped scroll between them, and inner gutters so the focus fill/shadow
@@ -128,8 +130,8 @@ struct SelectLibrariesView: View {
 
                                 ForEach(group.libraries) { library in
                                     Toggle(isOn: Binding(
-                                        get: { appState.homeLibraryVisibilityModel.isShownOnHome(library.key) },
-                                        set: { appState.homeLibraryVisibilityModel.setShownOnHome($0, for: library.key) }
+                                        get: { appState.homeLibraryVisibilityModel.isEnabled(library.key) },
+                                        set: { appState.homeLibraryVisibilityModel.setEnabled($0, for: library.key) }
                                     )) {
                                         Text(library.library.title)
                                     }

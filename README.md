@@ -22,11 +22,16 @@
 
 Plozz is in **public beta** on TestFlight. [**Join the beta**](https://testflight.apple.com/join/EKfReNMu) to install it on your Apple TV right now.
 
+## Reporting bugs & requesting features
+
+Found a bug or have an idea? [**Open an issue**](https://github.com/thatcube/Plozz/issues/new/choose) and pick a template — 🐞 **Bug report** or ✨ **Feature request**. For the full contribution flow (the file-an-issue-then-fix habit, dev setup, and the dual-provider expectation), see [**CONTRIBUTING.md**](CONTRIBUTING.md).
+
 ## Unique Features
 
 - **Multiple servers, one library.** Merge all of your content into one library across plex, jellyfin and local share (SMB only) servers.
 - **Sync watch history across all servers** - Optionally sync your watch history across every server that's connected. Watch it on Plex, it will sync that same watch status to Jellyfin (if Jellyfin has the same title).
 - **Mark as watched** - Mark an entire season as watched or "up to here" to quickly update watch history.
+- **Watched & unwatched indicators** — Choose a watched checkmark or an unwatched corner badge (Infuse / classic-Plex style) on your posters, across Plex, Jellyfin and SMB shares.
 - **Trakt, AniList, MyAnimeList, Simkl, and Last.fm** - Full support for every tracker across your movies, tv, anime, and music.
 - **Seerr integration** - Connect a seerr account and request media from directly within the search or hero of the app.
 - **Highly customizable interface** - Change the theme of the entire app (light, dark, OLED). Change the density of media, optionally show hero content, change the navigation style. 

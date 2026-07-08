@@ -88,6 +88,11 @@ public final class AppState {
     /// `uiDensityModel`, and rebuilt on profile switch like the other per-profile
     /// models.
     public private(set) var cardStyleModel: CardStyleSettingsModel
+    /// The active profile's watch-status indicator (a "watched" check badge vs an
+    /// "unwatched" corner flag on media cards). Injected into the environment at
+    /// the app root like `cardStyleModel`, and rebuilt on profile switch like the
+    /// other per-profile models.
+    public private(set) var watchStatusIndicatorModel: WatchStatusIndicatorSettingsModel
     /// The active profile's Home hero (featured carousel) settings: which sources
     /// feed it, how many items, Random library scope, trailers, and auto-advance.
     /// Scoped per profile (rebuilt on profile switch) like `cardStyleModel`.
@@ -905,6 +910,7 @@ public final class AppState {
         homeLibraryVisibilityModel: HomeLibraryVisibilityModel? = nil,
         uiDensityModel: UIDensitySettingsModel? = nil,
         cardStyleModel: CardStyleSettingsModel? = nil,
+        watchStatusIndicatorModel: WatchStatusIndicatorSettingsModel? = nil,
         nightShiftModel: NightShiftSettingsModel? = nil,
         ratingsProvider: (any ExternalRatingsProviding)? = nil,
         traktService: TraktService? = nil,
@@ -931,6 +937,7 @@ public final class AppState {
             || homeLibraryVisibilityModel != nil || musicPlayerModel != nil
             || uiDensityModel != nil
             || cardStyleModel != nil
+            || watchStatusIndicatorModel != nil
             || nightShiftModel != nil
         self.usesInjectedModels = injected
         let ns = (profilesModel ?? self.profilesModel).activeNamespace
@@ -962,6 +969,8 @@ public final class AppState {
             ?? UIDensitySettingsModel(store: UIDensitySettingsStore(namespace: ns))
         self.cardStyleModel = cardStyleModel
             ?? CardStyleSettingsModel(store: CardStyleSettingsStore(namespace: ns))
+        self.watchStatusIndicatorModel = watchStatusIndicatorModel
+            ?? WatchStatusIndicatorSettingsModel(store: WatchStatusIndicatorSettingsStore(namespace: ns))
         self.heroSettingsModel = HeroSettingsModel(store: HeroSettingsStore(namespace: ns))
         self.nightShiftModel = nightShiftModel
             ?? NightShiftSettingsModel(store: NightShiftSettingsStore(namespace: ns))
@@ -2059,6 +2068,7 @@ public final class AppState {
         homeLibraryVisibilityModel = HomeLibraryVisibilityModel(store: HomeLibraryVisibilityStore(namespace: ns))
         uiDensityModel = UIDensitySettingsModel(store: UIDensitySettingsStore(namespace: ns))
         cardStyleModel = CardStyleSettingsModel(store: CardStyleSettingsStore(namespace: ns))
+        watchStatusIndicatorModel = WatchStatusIndicatorSettingsModel(store: WatchStatusIndicatorSettingsStore(namespace: ns))
         heroSettingsModel = HeroSettingsModel(store: HeroSettingsStore(namespace: ns))
         nightShiftModel = NightShiftSettingsModel(store: NightShiftSettingsStore(namespace: ns))
     }

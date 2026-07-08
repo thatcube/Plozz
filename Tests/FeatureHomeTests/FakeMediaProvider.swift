@@ -3,9 +3,30 @@ import CoreModels
 
 /// In-memory `MediaProvider` for testing feature view models without a network.
 /// Only `items(in:page:)` is meaningfully implemented; other methods are stubs.
+///
+/// Thread-safety: a single fake is deliberately shared across several
+/// `MediaProvider` roles in the concurrency tests (e.g.
+/// `alternateProviderResolver: { _ in provider }`), so its methods are invoked
+/// **concurrently** — the main-actor `load()`/`reload()` path and the view
+/// model's background alternate-source fan-out (`.utility` task group) both call
+/// `item(id:)`/`children(of:)` at once. Real providers (URLSession-backed) are
+/// safe under concurrent requests; this double must be too. The call-counter
+/// state that those methods mutate during execution is therefore guarded by
+/// `stateLock`. (Production resolves a *distinct* provider per account, so this
+/// sharing — and the race it exposes — is unique to the tests.) The lock is
+/// never held across an `await`.
 final class FakeMediaProvider: MediaProvider, @unchecked Sendable {
     let kind: ProviderKind = .jellyfin
     let session: UserSession
+
+    /// Serializes mutation/reads of the call-counter state touched concurrently by
+    /// `item(id:)`, `children(of:)`, `libraries()`, and `items(in:page:)`.
+    private let stateLock = NSLock()
+    private func withLock<T>(_ body: () -> T) -> T {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return body()
+    }
 
     /// Full backing list a container pages through.
     var allItems: [MediaItem]
@@ -13,10 +34,12 @@ final class FakeMediaProvider: MediaProvider, @unchecked Sendable {
     /// behaviour (return `allItems`) is preserved for existing tests.
     var childrenByParent: [String: [MediaItem]]?
     /// How many times `children(of:)` was called for each parent id.
-    private(set) var childrenCallCount: [String: Int] = [:]
+    private var _childrenCallCount: [String: Int] = [:]
+    var childrenCallCount: [String: Int] { withLock { _childrenCallCount } }
     /// How many times `item(id:)` was called for each item id.
-    private(set) var itemCallCounts: [String: Int] = [:]
-    func itemCallCount(for id: String) -> Int { itemCallCounts[id, default: 0] }
+    private var _itemCallCounts: [String: Int] = [:]
+    var itemCallCounts: [String: Int] { withLock { _itemCallCounts } }
+    func itemCallCount(for id: String) -> Int { withLock { _itemCallCounts[id, default: 0] } }
     /// Optional per-item trailers for `trailers(of:)`. Inherits the protocol's
     /// empty default when `nil`.
     var trailersByItem: [String: [MediaItem]]?
@@ -27,14 +50,16 @@ final class FakeMediaProvider: MediaProvider, @unchecked Sendable {
     /// When `true`, every `items(in:page:)` call throws — simulates a server that
     /// is offline for the whole browse session.
     var alwaysFail = false
-    private(set) var requestedPages: [PageRequest] = []
+    private var _requestedPages: [PageRequest] = []
+    var requestedPages: [PageRequest] { withLock { _requestedPages } }
     /// Optional hook called as soon as `items(in:page:)` is requested.
     var onItemsRequest: (@Sendable (PageRequest) -> Void)?
     /// Optional per-page async hook that runs before the page response is returned.
     /// Useful for tests that need to hold/cancel a page load while it is in-flight.
     var pageHooks: [Int: @Sendable () async throws -> Void] = [:]
     /// Start indices whose page request was cancelled while awaiting `pageHooks`.
-    private(set) var cancelledPageStartIndices: [Int] = []
+    private var _cancelledPageStartIndices: [Int] = []
+    var cancelledPageStartIndices: [Int] { withLock { _cancelledPageStartIndices } }
 
     init(allItems: [MediaItem]) {
         self.allItems = allItems
@@ -45,19 +70,20 @@ final class FakeMediaProvider: MediaProvider, @unchecked Sendable {
     }
 
     func libraries() async throws -> [MediaLibrary] {
-        librariesCallCount += 1
+        withLock { _librariesCallCount += 1 }
         return []
     }
     /// How many times `libraries()` was called — lets a test prove whether the
     /// Home aggregator re-ran (e.g. that a redundant reload was skipped).
-    private(set) var librariesCallCount = 0
+    private var _librariesCallCount = 0
+    var librariesCallCount: Int { withLock { _librariesCallCount } }
     /// Items returned by `continueWatching(limit:)` — empty by default so existing
     /// tests are unaffected; a test that exercises the Continue Watching row sets it.
     var continueWatchingItems: [MediaItem] = []
     func continueWatching(limit: Int) async throws -> [MediaItem] { Array(continueWatchingItems.prefix(limit)) }
     func latest(limit: Int) async throws -> [MediaItem] { [] }
     func item(id: String) async throws -> MediaItem {
-        itemCallCounts[id, default: 0] += 1
+        withLock { _itemCallCounts[id, default: 0] += 1 }
         if let gate = itemGate?[id] {
             await gate()
         }
@@ -70,7 +96,7 @@ final class FakeMediaProvider: MediaProvider, @unchecked Sendable {
     var childrenGate: [String: @Sendable () async -> Void]?
 
     func children(of itemID: String) async throws -> [MediaItem] {
-        childrenCallCount[itemID, default: 0] += 1
+        withLock { _childrenCallCount[itemID, default: 0] += 1 }
         if let gate = childrenGate?[itemID] {
             await gate()
         }
@@ -86,7 +112,7 @@ final class FakeMediaProvider: MediaProvider, @unchecked Sendable {
     }
 
     func items(in containerID: String, kind: MediaItemKind, page: PageRequest) async throws -> MediaPage {
-        requestedPages.append(page)
+        withLock { _requestedPages.append(page) }
         if alwaysFail { throw AppError.serverUnreachable }
         onItemsRequest?(page)
         do {
@@ -94,13 +120,17 @@ final class FakeMediaProvider: MediaProvider, @unchecked Sendable {
                 try await hook()
             }
         } catch is CancellationError {
-            cancelledPageStartIndices.append(page.startIndex)
+            withLock { _cancelledPageStartIndices.append(page.startIndex) }
             throw CancellationError()
         }
-        if let failAt = failAtStartIndex, failAt == page.startIndex {
-            failAtStartIndex = nil
-            throw AppError.serverUnreachable
+        let shouldFail: Bool = withLock {
+            if let failAt = failAtStartIndex, failAt == page.startIndex {
+                failAtStartIndex = nil
+                return true
+            }
+            return false
         }
+        if shouldFail { throw AppError.serverUnreachable }
         let start = min(page.startIndex, allItems.count)
         let end = min(start + page.limit, allItems.count)
         return MediaPage(

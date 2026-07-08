@@ -203,7 +203,17 @@ struct SeriesDetailView: View {
                         selectedSourceAccountID: series.sourceAccountID,
                         onSelectSource: serverPickerAction,
                         fallbackTechnicalBadges: representativeTechnicalBadges,
-                        playButtonFocus: $playFocused
+                        playButtonFocus: $playFocused,
+                        // Keep the whole hero action row pinned to the top for every
+                        // button, not just Play — moving right to Trailer / the "…"
+                        // menu / Refresh otherwise lets tvOS's focus-reveal auto-
+                        // scroll drift the page down. Same animation as the
+                        // Play-regains-focus case below.
+                        onHeroActionFocused: {
+                            withAnimation(.easeInOut(duration: 0.4)) {
+                                proxy.scrollTo(Self.topAnchorID, anchor: .top)
+                            }
+                        }
                     )
                     .id(Self.topAnchorID)
                     // Episodes are seeded from the season's `/children` listing,

@@ -1,0 +1,40 @@
+name: Feature request
+description: Suggest an idea or improvement for Plozz.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / motivation
+      description: What are you trying to do, and what's getting in the way?
+      placeholder: I can't easily...
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: What would you like Plozz to do?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Any workarounds or other approaches you've thought about.
+    validations:
+      required: false
+  - type: dropdown
+    id: backend
+    attributes:
+      label: Affected backend(s)
+      description: Which backend(s) would this touch? Plozz keeps Jellyfin and Plex co-equal.
+      options:
+        - Jellyfin
+        - Plex
+        - SMB share
+        - All backends
+        - Not applicable / not sure
+    validations:
+      required: false

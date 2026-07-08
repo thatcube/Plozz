@@ -8,12 +8,17 @@ struct AppearanceDetailView: View {
     /// Circadian Mode (night-warming) settings, folded in as sections here — it's
     /// a display concern, so it no longer earns its own top-level row.
     @Bindable var nightShift: NightShiftSettingsModel
+    /// Spoiler-protection (hide unwatched episode art/titles/ratings). It's a
+    /// content-protection concern that applies wherever you browse — not
+    /// Home-specific — so it lives here in Appearance rather than folded into Home.
+    @Bindable var spoilers: SpoilerSettingsModel
     @Environment(MusicPlayerSettingsModel.self) private var musicPlayer
     /// App-wide card presentation — scale + style — that applies across every row
     /// and grid in the app (not just Home), so it lives in Appearance rather than
     /// Customize Home.
     @Environment(UIDensitySettingsModel.self) private var density
     @Environment(CardStyleSettingsModel.self) private var cardStyle
+    @Environment(WatchStatusIndicatorSettingsModel.self) private var watchStatusIndicator
     /// App-wide (global) — persists across all profiles. Same un-namespaced
     /// `@AppStorage` key RootView reads. Do not move into a per-profile store.
     /// See AGENTS.local.md ("Per-profile vs app-wide settings").
@@ -44,6 +49,7 @@ struct AppearanceDetailView: View {
         @Bindable var musicPlayer = musicPlayer
         @Bindable var density = density
         @Bindable var cardStyle = cardStyle
+        @Bindable var watchStatusIndicator = watchStatusIndicator
         let transparencyBinding = Binding(
             get: { transparencyPreference },
             set: { transparencyPreferenceRaw = $0.rawValue }
@@ -109,6 +115,13 @@ struct AppearanceDetailView: View {
                         title: { $0.displayName },
                         detail: { $0.detail }
                     )
+                },
+                SettingsSplitRow(
+                    id: "watch-indicator",
+                    title: "Watched Indicator",
+                    description: "A check badge on watched items, or a corner flag on unwatched ones. In-progress items always show a progress bar.",
+                ) {
+                    CompactWatchIndicatorPicker(selection: $watchStatusIndicator.indicator)
                 }
             ]),
             SettingsSplitSection(id: "music", header: "Music Player", rows: [
@@ -124,6 +137,7 @@ struct AppearanceDetailView: View {
                 }
             ])
         ] + CircadianSectionsBuilder(model: nightShift, primaryHeader: "Circadian Mode").sections
+            + SpoilerSectionsBuilder(spoilers: spoilers).sections
     }
 }
 
@@ -136,9 +150,9 @@ struct SpoilersDetailView: View {
 }
 
 /// Builds the Spoiler-protection settings section. Extracted from
-/// ``SpoilersDetailView`` so the same controls can appear folded into the Home
-/// settings page (the standalone top-level "Spoilers" row was retired — spoiler
-/// masking is a browsing concern, so it lives with Home).
+/// ``SpoilersDetailView`` so the same controls can appear folded into the
+/// Appearance settings page (spoiler masking is a browsing concern that applies
+/// everywhere, so it lives in Appearance rather than Home or its own row).
 @MainActor
 struct SpoilerSectionsBuilder {
     let spoilers: SpoilerSettingsModel
@@ -363,16 +377,6 @@ struct PlaybackDetailView: View {
                 description: "When you change the subtitle track while watching a series, reuse that choice for the rest of the series.",
             ) {
                 Toggle("Remember per series", isOn: $playback.settings.rememberSubtitleTrackPerSeries)
-            },
-            SettingsSplitRow(
-                id: "subtitle-style-note",
-                title: "Subtitle appearance",
-                description: "Font, size, colour, position and background are adjusted from the player while you watch — open the subtitle menu during playback to fine-tune the look with a live preview.",
-            ) {
-                Text("Adjust subtitle appearance from the player while watching, so you can see every change against the video in real time.")
-                    .font(.body)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
             }
         ])
     }

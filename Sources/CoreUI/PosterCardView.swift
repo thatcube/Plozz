@@ -27,6 +27,9 @@ public struct PosterCardView: View {
     @Environment(\.plozzMetrics) private var metrics
     /// Per-profile card presentation (framed glass card vs borderless artwork).
     @Environment(\.plozzCardStyle) private var cardStyle
+    /// Per-profile watch-status indicator (a "watched" check badge vs an
+    /// "unwatched" corner flag). Drives which corner mark, if any, a card paints.
+    @Environment(\.plozzWatchStatusIndicator) private var watchStatusIndicator
 
     public init(
         item: MediaItem,
@@ -92,7 +95,7 @@ public struct PosterCardView: View {
                 .aspectRatio(2.0 / 3.0, contentMode: .fit)
                 .frame(maxWidth: .infinity)
                 .overlay { artwork }
-                .overlay(alignment: .topTrailing) { watchedBadge(inset: 8) }
+                .overlay(alignment: .topTrailing) { statusIndicator(inset: 8) }
                 .overlay(alignment: .bottom) { progressBar(height: 12, hInset: 16, bottomInset: 16) }
                 .clipShape(RoundedRectangle(cornerRadius: PlozzTheme.Metrics.posterArtCornerRadius, style: .continuous))
                 .plozzMediaEdge(cornerRadius: PlozzTheme.Metrics.posterArtCornerRadius)
@@ -131,7 +134,7 @@ public struct PosterCardView: View {
         VStack(alignment: .leading, spacing: metrics.landscapeCaptionTopSpacing) {
             artwork
                 .frame(width: size.width, height: size.height)
-                .overlay(alignment: .topTrailing) { watchedBadge(inset: 8) }
+                .overlay(alignment: .topTrailing) { statusIndicator(inset: 8) }
                 .overlay(alignment: .bottom) { progressBar(height: 12, hInset: 16, bottomInset: 16) }
                 .clipShape(RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius, style: .continuous))
                 .plozzMediaEdge(cornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius)
@@ -205,7 +208,7 @@ public struct PosterCardView: View {
             .aspectRatio(borderlessAspectRatio, contentMode: .fit)
             .frame(maxWidth: .infinity)
             .overlay { artwork }
-            .overlay(alignment: .topTrailing) { watchedBadge(inset: borderlessBadgeInset) }
+            .overlay(alignment: .topTrailing) { statusIndicator(inset: borderlessBadgeInset) }
             .overlay(alignment: .bottom) {
                 progressBar(
                     height: metrics.progressBarHeight,
@@ -269,10 +272,10 @@ public struct PosterCardView: View {
     }
 
     /// Inset that keeps the watched badge concentric with the borderless card's
-    /// rounded corner. The badge is a 30pt circle (radius 15), so its inset is
-    /// `outerRadius − 15`, matching the progress bar's even spacing.
+    /// rounded corner. The badge is a 38pt circle (radius 19), so its inset is
+    /// `outerRadius − 19`, matching the progress bar's even spacing.
     private var borderlessBadgeInset: CGFloat {
-        max(borderlessCornerRadius - 15, 8)
+        max(borderlessCornerRadius - 19, 8)
     }
 
     /// Aspect ratio for the borderless full-bleed image.
@@ -484,16 +487,58 @@ public struct PosterCardView: View {
 
     // MARK: Progress
 
+    /// The single source of truth for "this card is mid-playback": a partial
+    /// `playedPercentage` strictly inside `(0.01, 0.99)`. When true the card shows
+    /// the in-progress bar (see `progressBar`), and — crucially — the "watched"
+    /// check is suppressed even if the server also flags the item `isPlayed`.
+    /// Some servers report an item as *both* played and partially watched; once
+    /// you're mid-way through, in-progress wins, so a card never shows both the
+    /// progress bar and the watched check at the same time.
+    private var showsProgressBar: Bool {
+        guard let percentage = item.playedPercentage else { return false }
+        return percentage > 0.01 && percentage < 0.99
+    }
+
+    /// Whether playback has *started* at all — used to keep the "unwatched" corner
+    /// flag off any item the viewer has already dipped into. Intentionally broader
+    /// than `showsProgressBar`: it treats *any* positive progress as started (not
+    /// just the `(0.01, 0.99)` band the bar draws in) and also honours a saved
+    /// resume position, matching how the rest of the app defines "in progress"
+    /// (`SeriesResume.isInProgress`). So a barely-started or nearly-finished item
+    /// never wrongly shows an "unwatched" flag even if a provider reports progress
+    /// without a resume position.
+    private var hasStartedPlayback: Bool {
+        if let percentage = item.playedPercentage, percentage > 0 { return true }
+        if let resume = item.resumePosition, resume > 0 { return true }
+        return false
+    }
+
+    /// The corner watch-status mark, chosen by the per-profile
+    /// `WatchStatusIndicator` setting: a "watched" check on finished items, or an
+    /// "unwatched" flag on not-yet-started ones. Both are hidden under spoiler
+    /// thumbnail-masking so neither reveals the played/unplayed state of an
+    /// episode whose art is deliberately obscured.
+    @ViewBuilder
+    private func statusIndicator(inset: CGFloat) -> some View {
+        switch watchStatusIndicator {
+        case .watched:
+            watchedBadge(inset: inset)
+        case .unwatched:
+            unwatchedCorner()
+        }
+    }
+
     /// A "watched" check shown in the artwork's top corner once an item is fully
-    /// played. Hidden under spoiler thumbnail-masking so it never reveals that an
-    /// unseen episode exists. Mirrors the watched state the context menu toggles.
+    /// played. Hidden while the item is mid-playback (in-progress wins) and under
+    /// spoiler thumbnail-masking so it never reveals that an unseen episode
+    /// exists. Mirrors the watched state the context menu toggles.
     @ViewBuilder
     private func watchedBadge(inset: CGFloat) -> some View {
-        if item.isPlayed && !hideThumbnail {
+        if item.isPlayed && !showsProgressBar && !hideThumbnail {
             Image(systemName: "checkmark")
-                .font(.system(size: 16, weight: .bold))
+                .font(.system(size: 20, weight: .bold))
                 .foregroundStyle(.white)
-                .frame(width: 30, height: 30)
+                .frame(width: 38, height: 38)
                 .background(Circle().fill(ThemePalette.brandBlue))
                 .overlay {
                     Circle()
@@ -502,6 +547,39 @@ public struct PosterCardView: View {
                 }
                 .padding(inset)
                 .shadow(color: .black.opacity(0.4), radius: 3, y: 1)
+        }
+    }
+
+    /// A solid brand-blue corner flag shown on items the viewer *hasn't started*
+    /// — the Infuse / classic-Plex "unwatched" style. Only fully-unstarted items
+    /// qualify: anything played or in-progress is left unmarked (in-progress items
+    /// still show their progress bar). Flush to the corner so the card's rounded
+    /// `clipShape` trims it to match the artwork's radius. Its size is
+    /// density-scaled (`metrics.unwatchedFlagSize`) with a floor so it grows with
+    /// the card yet stays visible on tiny ones. Hidden under spoiler masking,
+    /// matching the watched badge.
+    @ViewBuilder
+    private func unwatchedCorner() -> some View {
+        if !item.isPlayed && !hasStartedPlayback && !hideThumbnail {
+            TopTrailingCornerFlag()
+                .fill(ThemePalette.brandBlue)
+                // A very soft, wide dark shadow bleeding from the flag's diagonal
+                // edge into the poster — the same lift the in-progress bar uses,
+                // but broad and low-opacity so it's imperceptible on most posters
+                // and only quietly darkens the seam on bright (blue) artwork. Kept
+                // wide + faint rather than tight + dark so it reads as a gentle
+                // gradient, never a hard border; the card's outer `clipShape` trims
+                // anything past the artwork edges.
+                .shadow(color: .black.opacity(0.28), radius: 8)
+                .overlay(alignment: .topTrailing) {
+                    // A translucent-black hairline along the flag's diagonal edge so
+                    // the seam always separates the flag from the artwork — even
+                    // when the artwork behind it is itself blue. Black (not
+                    // theme-derived) reads consistently in every theme.
+                    TopTrailingCornerFlagEdge()
+                        .stroke(Color.black.opacity(0.3), lineWidth: 1)
+                }
+                .frame(width: metrics.unwatchedFlagSize, height: metrics.unwatchedFlagSize)
         }
     }
 
@@ -515,7 +593,7 @@ public struct PosterCardView: View {
 
     @ViewBuilder
     private func progressBar(height: CGFloat, hInset: CGFloat, bottomInset: CGFloat) -> some View {
-        if let percentage = item.playedPercentage, percentage > 0.01, percentage < 0.99 {
+        if showsProgressBar, let percentage = item.playedPercentage {
             // Everything here scales with the (density-driven) bar `height` so the
             // indicator stays proportionate at every display size instead of feeling
             // heavy at the smallest one: the scrim's reach, the fill's drop shadow,

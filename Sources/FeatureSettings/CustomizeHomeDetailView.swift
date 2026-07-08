@@ -69,7 +69,6 @@ struct CustomizeHomeDetailView: View {
             SettingsSplitRow(
                 id: "home-rows-all",
                 title: "Rows on Home",
-                description: "Which rows appear on Home.",
             ) {
                 homeRowsDetail
             }

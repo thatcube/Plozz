@@ -373,14 +373,9 @@ public struct SettingsView: View {
                    route: .myLibraries) {
                 signedInStrip
             }
-            navRow("Home Page", icon: "rectangle.on.rectangle.angled",
+            navRow("Customize Home", icon: "house",
                    value: nil,
-                   route: .customizeHome) {
-                Text("Combine libraries, rows & the hero")
-                    .font(.footnote)
-                    .settingsRowSecondary()
-                    .lineLimit(2)
-            }
+                   route: .customizeHome)
             navRow("Playback", icon: "play.rectangle",
                    value: nil,
                    route: .playback)

@@ -33,7 +33,7 @@ struct CustomizeHomeDetailView: View {
     @Environment(HeroSettingsModel.self) private var hero
 
     var body: some View {
-        SettingsSplitLayout(title: "Home Page", sections: sections)
+        SettingsSplitLayout(title: "Customize Home", sections: sections)
             // If the user unmerged BEFORE library discovery finished, the initial
             // seed (in the toggle setter) was a no-op on an empty seed list. Retry
             // once libraries are known — on appear and when discovery loads — so the

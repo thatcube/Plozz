@@ -20,15 +20,17 @@
 #   * No "move Plozz.xcodeproj aside / regenerate" dance is needed — run-tests.sh
 #     runs a per-module scheme on the simulator with the project in place.
 #   * Pure-logic suites (CoreModels, providers, networking, metadata) run in
-#     ~5-20s each. FeatureHomeTests is QUARANTINED from auto-selection because it
-#     currently hangs ~600s on a simulator watchdog (leaked Task.detached work)
-#     and has failing assertions on main — run it explicitly once that's fixed.
+#     ~5-20s each. FeatureHomeTests was previously quarantined (a data race in the
+#     shared test double crashed the xctest host, forcing relaunches + a ~600s
+#     watchdog hang); that is now fixed, so it runs by default like any other
+#     fast suite (~3s exec).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 # Suites currently too slow/broken for the inner loop. Auto-selection skips them
-# (with a warning); pass the name explicitly to force-run.
-QUARANTINE=(FeatureHomeTests)
+# (with a warning); pass the name explicitly to force-run. Empty = nothing
+# quarantined (FeatureHomeTests un-quarantined once its data-race crash was fixed).
+QUARANTINE=()
 
 # Foundational modules: a change here can affect many suites. We run a broad set
 # of FAST suites (everything except quarantined) rather than the whole sweep.
@@ -38,7 +40,7 @@ ALL_FAST_SUITES=(
   CoreModelsTests CoreNetworkingTests CoreUITests MetadataKitTests
   FeatureDiscoveryTests ProviderJellyfinTests ProviderPlexTests
   ProviderTrailersTests RatingsServiceTests TraktServiceTests
-  FeatureAuthTests FeatureSearchTests FeatureProfilesTests
+  FeatureAuthTests FeatureHomeTests FeatureSearchTests FeatureProfilesTests
   FeatureMusicTests FeaturePlaybackTests
 )
 

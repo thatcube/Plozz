@@ -15,7 +15,7 @@ On an Apple TV 4K simulator (tvOS 27.0), warm DerivedData:
 | Full `Plozz-Package` suite (warm) | 627s | ~11s CPU; rest is sim orchestration |
 | `CoreModelsTests` (483 tests) | 5.5s | exec 0.36s |
 | `ProviderJellyfinTests` (107) | 5.5s | exec 0.14s |
-| `FeatureHomeTests` (120) | 606s | exec 1.14s + ~600s sim watchdog; 23 failing |
+| `FeatureHomeTests` (234) | ~9s | exec ~2.8s (was 606s / 23 failing before the data-race fix) |
 | `run-tests.sh CoreNetworkingTests` | 19.5s | no "xcodeproj aside" dance needed |
 
 All 1068 tests *execute* in under 1 second of CPU. Nearly all wall-clock cost is
@@ -39,7 +39,7 @@ test target: `FeatureSettings`, `AppShell`, `TopShelfKit`.
 | RatingsService | RatingsServiceTests | 11 | ⚡ |
 | TraktService | TraktServiceTests | 16 | ⚡ |
 | FeatureAuth | FeatureAuthTests | 35 | ⚡ |
-| FeatureHome | FeatureHomeTests | 120 | 🐌 QUARANTINED (see below) |
+| FeatureHome | FeatureHomeTests | 234 | ⚡ ~9s |
 | FeatureSearch | FeatureSearchTests | 23 | ⚡ |
 | FeatureProfiles | FeatureProfilesTests | 4 | ⚡ |
 | FeatureMusic | FeatureMusicTests | 7 | ⚡ |
@@ -58,8 +58,9 @@ suites (handled automatically by `tools/test-fast.sh`).
 2. **Pre-integration (handing a branch off):** run the fast suites for every
    module you touched plus their foundational deps. `tools/test-fast.sh` already
    expands foundational changes.
-3. **Pre-merge (before merging to main):** full sweep `tools/run-tests.sh` — but
-   first fix/quarantine the slow suite so the sweep isn't 10 minutes of watchdog.
+3. **Pre-merge (before merging to main):** full sweep `tools/run-tests.sh`. All
+   suites (FeatureHomeTests included) now run promptly, so the sweep is bounded by
+   compile + simulator orchestration rather than a watchdog hang.
 
 ## Notes / gotchas
 
@@ -96,14 +97,24 @@ suites (handled automatically by `tools/test-fast.sh`).
   (or fix the behaviour if it regressed) — do **not** weaken assertions to hide
   them. **If you are working on subtitles/playback/settings and see exactly these
   21, they are not your regression — carry on.**
-- **FeatureHomeTests:** 23 assertions fail on clean `main`
-  (`ItemDetailViewModelTests` — trailer resolution / alternate-source
-  enrichment / "Condition not met before timeout"). The suite also hangs the
-  xctest process ~600s: `ItemDetailViewModel`/`HomeViewModel` spawn unstructured
-  `Task.detached` background work (snapshot writes, enrichment with 0.4–2.5s
-  sleeps) that isn't cancelled at teardown, so the host lives until the ~600s
-  CoreSimulator watchdog kills it. Fix = cancel those tasks on teardown/deinit,
-  then triage the 23 failures. Quarantined from `test-fast.sh` until fixed.
+- **FeatureHomeTests:** ✅ **Fixed & un-quarantined** (issue #4). The suite used to
+  crash the xctest host and then hang ~600s (CoreSimulator watchdog), with ~23
+  "downstream" assertion failures. Real root cause was **not** leaked
+  `Task.detached` in the view models (those are already tracked + cancelled on
+  `deinit`): it was a **data race in the shared test double**. `FakeMediaProvider`
+  was `@unchecked Sendable` but mutated its call-counter dictionaries
+  (`itemCallCounts`, …) without synchronization, and the view model legitimately
+  calls the provider **concurrently** — the main-actor `load()`/`reload()` path and
+  the background alternate-source fan-out (`.utility` task group) both hit the same
+  fake (tests share one instance via `alternateProviderResolver: { _ in provider }`).
+  Concurrent `Dictionary` mutation corrupted the buffer → an
+  `-[__NSTaggedDate count]` unrecognized-selector crash, which forced xctest to
+  relaunch and hang, and the crashed/congested run starved the async `waitUntil`
+  spins (hence the "23 failing"). Fix = guard the fake's counters with a lock (a
+  correct test-double fix; real providers are thread-safe, and production resolves
+  a distinct provider per account so the race is test-only). No assertions were
+  weakened — all 234 tests pass in ~2.8s exec, verified deterministic across
+  repeated runs.
 - The old "flaky Plex network-probe" tests are **already deterministic**
   (injected `HTTPClient` doubles, fake hosts). No action needed beyond dropping
   the "flaky" label.

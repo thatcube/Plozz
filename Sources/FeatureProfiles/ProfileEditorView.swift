@@ -124,6 +124,7 @@ public struct ProfileEditorView: View {
     @State private var avatarMode: AvatarMode
     @State private var photoCandidates: [ProfilePhotoCandidate] = []
     @State private var showDiscardConfirmation = false
+    @State private var showDeleteConfirmation = false
 
     private enum AvatarMode: Hashable { case symbol, emoji, photo }
 
@@ -299,6 +300,12 @@ public struct ProfileEditorView: View {
         } message: {
             Text("You've made changes that haven't been saved. Going back now will lose them.")
         }
+        .alert("Delete this profile?", isPresented: $showDeleteConfirmation) {
+            Button("Delete Profile", role: .destructive) { onDelete?() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Deleting removes this profile's preferences (theme, captions, spoilers, Trakt) and which servers it includes. Signed-in server accounts stay in the household pool.")
+        }
     }
 
     /// Title + the trailing actions. In auto-save mode: **Done** (just close —
@@ -307,6 +314,13 @@ public struct ProfileEditorView: View {
     /// (new profile / first-run): **Cancel** + **Save**. Scrolls with the page.
     private var headerRow: some View {
         HStack(alignment: .center, spacing: 20) {
+            // Delete lives here as a prominent, icon-only destructive action
+            // (only for profiles that can be removed — never the primary one),
+            // so it's discoverable without cluttering the picker and can't be
+            // hit while scrolling. It always confirms first.
+            if canDelete, onDelete != nil {
+                deleteButton
+            }
             Text(isEditing ? "Edit Profile" : "New Profile")
                 .font(.system(size: 44, weight: .bold))
                 .foregroundStyle(palette.primaryText)
@@ -329,6 +343,28 @@ public struct ProfileEditorView: View {
                     .disabled(!canSave)
             }
         }
+    }
+
+    /// Icon-only destructive trash button for the header. A red glyph on a
+    /// circular chip wearing the shared focus halo (same treatment as the
+    /// avatar tiles), so it reads as destructive and focuses consistently.
+    private var deleteButton: some View {
+        let diameter: CGFloat = 60
+        return Button {
+            showDeleteConfirmation = true
+        } label: {
+            ZStack {
+                Circle().fill(palette.cardSurface)
+                Image(systemName: "trash")
+                    .font(.system(size: 26, weight: .semibold))
+                    .foregroundStyle(.red)
+            }
+            .frame(width: diameter, height: diameter)
+            .overlay { Circle().strokeBorder(palette.cardBorder, lineWidth: 1) }
+        }
+        .buttonStyle(CircularSelectionButtonStyle(diameter: diameter))
+        .focusEffectDisabled()
+        .accessibilityLabel(Text("Delete Profile"))
     }
 
     // MARK: Exit / discard / revert
@@ -433,9 +469,6 @@ public struct ProfileEditorView: View {
                 headerRow
                 nameSection
                 avatarSection
-                if canDelete, let onDelete {
-                    deleteSection(onDelete)
-                }
             }
             // Breathing room so the tiles' focus halos + shadows are never
             // clipped by the scroll view's edges.
@@ -818,29 +851,6 @@ public struct ProfileEditorView: View {
                     .lineLimit(2)
             }
         }
-    }
-
-    // MARK: Delete
-
-    private func deleteSection(_ onDelete: @escaping () -> Void) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            sectionHeader("Delete")
-            // Same construction as Settings ▸ Server's "Sign Out & Remove
-            // Server" row: a plain destructive Button with the default tvOS
-            // focus style (which inverts to a clearly-legible focused card),
-            // rather than a custom style + forced-red label that read poorly on
-            // focus.
-            Button(role: .destructive, action: onDelete) {
-                Label("Delete Profile", systemImage: "trash")
-                    .labelStyle(.titleAndIcon)
-                    .font(.callout.weight(.semibold))
-            }
-            Text("Deleting a profile removes its preferences (theme, captions, spoilers, Trakt) and which servers it includes. Signed-in server accounts stay in the household pool.")
-                .font(.footnote)
-                .foregroundStyle(palette.secondaryText)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(.top, 8)
     }
 
     // MARK: Section headers

@@ -96,6 +96,31 @@ final class ProfileModelTests: XCTestCase {
         }
     }
 
+    // MARK: Emoji avatars
+
+    func testEmojiCategoriesAreEightWideAndNonEmpty() {
+        XCTAssertFalse(Profile.avatarEmojiCategories.isEmpty)
+        for category in Profile.avatarEmojiCategories {
+            XCTAssertFalse(category.title.isEmpty)
+            XCTAssertEqual(category.symbols.count, 8, "\(category.title) must hold exactly 8 emoji")
+        }
+    }
+
+    func testAvatarEmojiRoundTripsAndDefaultsNil() throws {
+        XCTAssertNil(Profile(name: "A").avatarEmoji)
+        let p = Profile(name: "Kid", avatarEmoji: "🦖")
+        let decoded = try JSONDecoder().decode(Profile.self, from: JSONEncoder().encode(p))
+        XCTAssertEqual(decoded.avatarEmoji, "🦖")
+        XCTAssertEqual(decoded, p)
+    }
+
+    func testLegacyProfileJSONWithoutAvatarEmojiDecodesToNil() throws {
+        // A profile encoded before avatarEmoji existed must decode cleanly.
+        let legacyJSON = #"{"id":"p9","name":"Dad","avatarSymbol":"person.fill","colorIndex":1,"createdAt":0}"#
+        let decoded = try JSONDecoder().decode(Profile.self, from: Data(legacyJSON.utf8))
+        XCTAssertNil(decoded.avatarEmoji)
+    }
+
     // MARK: Suggested colour for new profiles
 
     func testSuggestedColorIndexPicksFirstUnused() {

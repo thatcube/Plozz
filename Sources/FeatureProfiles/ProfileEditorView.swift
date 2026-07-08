@@ -37,6 +37,10 @@ public struct ProfileDraft: Equatable, Sendable {
     /// When non-nil the avatar renders this image; nil falls back to the
     /// symbol + color combination.
     public var avatarImageURL: String?
+    /// Optional emoji avatar (see `Profile.avatarEmoji`). When non-nil the
+    /// avatar renders this emoji on the colored tile; wins over the symbol but
+    /// loses to a photo.
+    public var avatarEmoji: String?
 
     public init(
         id: String?,
@@ -51,7 +55,8 @@ public struct ProfileDraft: Equatable, Sendable {
         plexHomeUserRequiresPIN: Bool? = nil,
         plexHomeUserAvatarURL: String? = nil,
         plexHomeUserBindings: [String: PlexHomeUserBinding]? = nil,
-        avatarImageURL: String? = nil
+        avatarImageURL: String? = nil,
+        avatarEmoji: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -66,6 +71,7 @@ public struct ProfileDraft: Equatable, Sendable {
         self.plexHomeUserAvatarURL = plexHomeUserAvatarURL
         self.plexHomeUserBindings = plexHomeUserBindings
         self.avatarImageURL = avatarImageURL
+        self.avatarEmoji = avatarEmoji
     }
 }
 
@@ -92,6 +98,7 @@ public struct ProfileEditorView: View {
     private let initialSymbol: String
     private let initialColorIndex: Int
     private let initialImageURL: String?
+    private let initialEmoji: String?
 
     @Environment(\.themePalette) private var palette
 
@@ -99,11 +106,12 @@ public struct ProfileEditorView: View {
     @State private var avatarSymbol: String
     @State private var colorIndex: Int
     @State private var avatarImageURL: String?
+    @State private var avatarEmoji: String?
     @State private var avatarMode: AvatarMode
     @State private var photoCandidates: [ProfilePhotoCandidate] = []
     @State private var showDiscardConfirmation = false
 
-    private enum AvatarMode: Hashable { case symbol, photo }
+    private enum AvatarMode: Hashable { case symbol, emoji, photo }
 
     public init(
         editingProfile: Profile? = nil,
@@ -131,17 +139,25 @@ public struct ProfileEditorView: View {
             ?? Profile.suggestedColorIndex(existingColorIndices: existingColorIndices)
         let startPhoto = editingProfile?.avatarImageURL
         let normalizedPhoto = (startPhoto?.isEmpty == false) ? startPhoto : nil
+        let startEmoji = editingProfile?.avatarEmoji
+        let normalizedEmoji = (startEmoji?.isEmpty == false) ? startEmoji : nil
 
         self.initialName = startName.trimmingCharacters(in: .whitespacesAndNewlines)
         self.initialSymbol = startSymbol
         self.initialColorIndex = startColor
         self.initialImageURL = normalizedPhoto
+        self.initialEmoji = normalizedEmoji
 
         _name = State(initialValue: startName)
         _avatarSymbol = State(initialValue: startSymbol)
         _colorIndex = State(initialValue: startColor)
         _avatarImageURL = State(initialValue: normalizedPhoto)
-        _avatarMode = State(initialValue: normalizedPhoto != nil ? .photo : .symbol)
+        _avatarEmoji = State(initialValue: normalizedEmoji)
+        // Open in the mode that matches the profile's current avatar: photo wins,
+        // then emoji, otherwise the classic symbol picker.
+        let startMode: AvatarMode = normalizedPhoto != nil ? .photo
+            : (normalizedEmoji != nil ? .emoji : .symbol)
+        _avatarMode = State(initialValue: startMode)
     }
 
     private var isEditing: Bool { editingProfile != nil }
@@ -149,10 +165,20 @@ public struct ProfileEditorView: View {
     private var canSave: Bool { !trimmedName.isEmpty }
 
     /// The photo URL that would actually be saved right now — only meaningful in
-    /// Photo mode (Symbol mode never persists a borrowed image).
+    /// Photo mode (other modes never persist a borrowed image).
     private var effectiveImageURL: String? {
         avatarMode == .photo ? avatarImageURL : nil
     }
+
+    /// The emoji that would actually be saved right now — only meaningful in
+    /// Emoji mode.
+    private var effectiveEmoji: String? {
+        avatarMode == .emoji ? avatarEmoji : nil
+    }
+
+    /// Whether the colour picker is relevant for the current mode. Symbol and
+    /// emoji avatars both sit on the coloured disc; a borrowed photo ignores it.
+    private var colorApplies: Bool { avatarMode != .photo }
 
     /// Whether any saveable field differs from what the editor opened with.
     /// Drives the "discard changes?" guard on Cancel / Menu.
@@ -161,6 +187,7 @@ public struct ProfileEditorView: View {
             || avatarSymbol != initialSymbol
             || colorIndex != initialColorIndex
             || effectiveImageURL != initialImageURL
+            || effectiveEmoji != initialEmoji
     }
 
     public var body: some View {
@@ -189,10 +216,6 @@ public struct ProfileEditorView: View {
         }
         .frame(minWidth: 1720, minHeight: 960)
         .task { await loadPhotoCandidates() }
-        .onChange(of: avatarMode) { _, newValue in
-            // Leaving Photo mode drops any borrowed image so the symbol shows.
-            if newValue == .symbol { avatarImageURL = nil }
-        }
         // Intercept the Menu/back press so unsaved edits aren't silently lost.
         .onExitCommand(perform: attemptCancel)
         .alert("Discard changes?", isPresented: $showDiscardConfirmation) {
@@ -261,10 +284,10 @@ public struct ProfileEditorView: View {
             .frame(maxWidth: .infinity)
 
             // Colour lives here — high up beside the live preview, not buried at
-            // the bottom of the scrolling symbol wall — so it reads as prominent
-            // and you can watch the avatar recolour as you pick. Only symbol
-            // avatars use a colour; a borrowed photo ignores it.
-            if avatarMode == .symbol {
+            // the bottom of the scrolling picker — so it reads as prominent and
+            // you can watch the avatar recolour as you pick. Symbol AND emoji
+            // avatars sit on the coloured disc; a borrowed photo ignores it.
+            if colorApplies {
                 colorSection
             }
         }
@@ -277,7 +300,8 @@ public struct ProfileEditorView: View {
             name: trimmedName,
             avatarSymbol: avatarSymbol,
             colorIndex: colorIndex,
-            avatarImageURL: effectiveImageURL
+            avatarImageURL: effectiveImageURL,
+            avatarEmoji: effectiveEmoji
         )
     }
 
@@ -286,10 +310,14 @@ public struct ProfileEditorView: View {
     }
 
     private var previewSubtitle: String {
-        if avatarMode == .photo {
+        switch avatarMode {
+        case .photo:
             return effectiveImageURL != nil ? "Borrowed photo" : "No photo chosen yet"
+        case .emoji:
+            return "Emoji avatar"
+        case .symbol:
+            return "Symbol avatar"
         }
-        return "Symbol avatar"
     }
 
     // MARK: Right column — scrolling editor
@@ -326,19 +354,31 @@ public struct ProfileEditorView: View {
     private var avatarSection: some View {
         VStack(alignment: .leading, spacing: 24) {
             sectionHeader("Avatar")
-            // A clear, legible mode switch — so it's obvious a photo is even an
-            // option — instead of the old low-contrast segmented control.
+            // A clear, legible mode switch — so it's obvious emoji and photo are
+            // even options — instead of the old low-contrast segmented control.
             SettingsOptionPicker(
-                options: [AvatarMode.symbol, AvatarMode.photo],
+                options: [AvatarMode.symbol, AvatarMode.emoji, AvatarMode.photo],
                 selection: $avatarMode,
-                icon: { $0 == .symbol ? "face.smiling" : "photo.fill" },
-                title: { $0 == .symbol ? "Symbol" : "Photo" }
+                icon: { mode in
+                    switch mode {
+                    case .symbol: return "face.smiling"
+                    case .emoji: return "face.dashed"
+                    case .photo: return "photo.fill"
+                    }
+                },
+                title: { mode in
+                    switch mode {
+                    case .symbol: return "Symbol"
+                    case .emoji: return "Emoji"
+                    case .photo: return "Photo"
+                    }
+                }
             )
 
-            if avatarMode == .symbol {
-                symbolCategoriesSection
-            } else {
-                photoSection
+            switch avatarMode {
+            case .symbol: symbolCategoriesSection
+            case .emoji: emojiCategoriesSection
+            case .photo: photoSection
             }
         }
     }
@@ -413,11 +453,67 @@ public struct ProfileEditorView: View {
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
     }
 
-    /// The one shared, theme-aware "this is selected" indicator used by every
-    /// tile (symbol, colour, photo) so selection reads identically everywhere
-    /// and never collides with the tile's own colour: an accent check badge in
-    /// the bottom-trailing corner. It persists regardless of focus (the focus
-    /// halo is a separate, also-shared treatment), so a choice stays visibly
+    // MARK: Emoji
+
+    private var emojiCategoriesSection: some View {
+        VStack(alignment: .leading, spacing: 28) {
+            ForEach(Profile.avatarEmojiCategories) { category in
+                VStack(alignment: .leading, spacing: 16) {
+                    categoryHeader(category.title)
+                    emojiRows(for: category.symbols)
+                }
+            }
+        }
+    }
+
+    /// Eager rows of 8 (same rationale as `symbolRows`: a lazy grid would blank
+    /// tiles out as they scroll near the dialog's top edge).
+    @ViewBuilder
+    private func emojiRows(for emojis: [String]) -> some View {
+        let perRow = 8
+        let rows = stride(from: 0, to: emojis.count, by: perRow).map {
+            Array(emojis[$0..<min($0 + perRow, emojis.count)])
+        }
+        VStack(spacing: 18) {
+            ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                HStack(spacing: 18) {
+                    ForEach(row, id: \.self) { emoji in
+                        emojiTile(emoji).frame(maxWidth: .infinity)
+                    }
+                    if row.count < perRow {
+                        ForEach(0..<(perRow - row.count), id: \.self) { _ in
+                            Color.clear.frame(maxWidth: .infinity)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func emojiTile(_ emoji: String) -> some View {
+        let isSelected = emoji == avatarEmoji
+        let diameter: CGFloat = 92
+        return Button {
+            avatarEmoji = emoji
+        } label: {
+            ZStack {
+                // The emoji sits on the chosen colour when selected (exactly how
+                // it renders as an avatar), otherwise a neutral themed disc.
+                Circle().fill(isSelected
+                    ? AnyShapeStyle(ProfileTileColor.color(forIndex: colorIndex))
+                    : AnyShapeStyle(palette.cardSurface))
+                Text(emoji)
+                    .font(.system(size: 44))
+            }
+            .frame(width: diameter, height: diameter)
+            .overlay { Circle().strokeBorder(palette.cardBorder, lineWidth: 1) }
+            .overlay(alignment: .bottomTrailing) { selectionBadge(isSelected) }
+        }
+        .buttonStyle(CircularSelectionButtonStyle(diameter: diameter))
+        .focusEffectDisabled()
+        .accessibilityLabel(Text("Emoji \(emoji)"))
+        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+    }
     /// selected after focus moves away.
     @ViewBuilder
     private func selectionBadge(_ isSelected: Bool) -> some View {
@@ -604,7 +700,8 @@ public struct ProfileEditorView: View {
             plexHomeUserRequiresPIN: editingProfile?.plexHomeUserRequiresPIN,
             plexHomeUserAvatarURL: editingProfile?.plexHomeUserAvatarURL,
             plexHomeUserBindings: editingProfile?.plexHomeUserBindings,
-            avatarImageURL: avatarMode == .photo ? avatarImageURL : nil
+            avatarImageURL: effectiveImageURL,
+            avatarEmoji: effectiveEmoji
         ))
     }
 }

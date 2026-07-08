@@ -71,6 +71,14 @@ public struct Profile: Codable, Hashable, Identifiable, Sendable {
     /// so older profile JSON without this field migrates to `nil` cleanly.
     public var avatarImageURL: String?
 
+    /// Optional emoji used as the profile avatar (opt-in). When non-nil the
+    /// avatar renders this emoji as text on the colored tile — native Apple
+    /// Color Emoji drawn by the system, so nothing is bundled or redistributed.
+    /// Takes precedence over `avatarSymbol` but sits below `avatarImageURL`
+    /// (a borrowed photo wins). Decoded with `decodeIfPresent` so older profile
+    /// JSON without this field migrates to `nil` cleanly.
+    public var avatarEmoji: String?
+
     /// The **Seerr** (Overseerr / Jellyseerr) user this profile requests as.
     /// When set, requests made while this profile is active run under that
     /// Seerr user (`X-API-User`) on the shared household admin connection — so
@@ -104,6 +112,7 @@ public struct Profile: Codable, Hashable, Identifiable, Sendable {
         plexHomeUserAvatarURL: String? = nil,
         plexHomeUserBindings: [String: PlexHomeUserBinding]? = nil,
         avatarImageURL: String? = nil,
+        avatarEmoji: String? = nil,
         seerrUserID: Int? = nil,
         seerrUserName: String? = nil,
         seerrUserAvatarURL: String? = nil
@@ -121,6 +130,7 @@ public struct Profile: Codable, Hashable, Identifiable, Sendable {
         self.plexHomeUserAvatarURL = plexHomeUserAvatarURL
         self.plexHomeUserBindings = plexHomeUserBindings
         self.avatarImageURL = avatarImageURL
+        self.avatarEmoji = avatarEmoji
         self.seerrUserID = seerrUserID
         self.seerrUserName = seerrUserName
         self.seerrUserAvatarURL = seerrUserAvatarURL
@@ -277,6 +287,40 @@ extension Profile {
     /// none is chosen (see the `init` defaults and `ProfileStore.add`).
     public static let defaultAvatarSymbols: [String] =
         avatarSymbolCategories.flatMap(\.symbols)
+
+    /// Curated, fun **native Apple emoji** offered as profile avatars, grouped
+    /// into browsable one-row (8-wide) sections. Rendered as *text* via the
+    /// system Color Emoji font — nothing is bundled or redistributed — so this
+    /// is legally clean on Apple platforms. Leans into the expressive /
+    /// internet-culture picks (💀 🗿 🤡 🐐 🧢 👀) people actually want, alongside
+    /// animals, food, play and fantasy. Every glyph here is standard Unicode
+    /// emoji available well before the app's tvOS floor.
+    public static let avatarEmojiCategories: [AvatarSymbolCategory] = [
+        AvatarSymbolCategory(title: "Reactions", symbols: [
+            "💀", "😭", "🤡", "🗿", "🤓", "🥴", "👀", "🫠"
+        ]),
+        AvatarSymbolCategory(title: "Smileys", symbols: [
+            "😀", "😂", "🥳", "😍", "😎", "🤪", "🙃", "😴"
+        ]),
+        AvatarSymbolCategory(title: "Vibes", symbols: [
+            "🔥", "💯", "🐐", "🧢", "🤙", "✌️", "🫡", "👑"
+        ]),
+        AvatarSymbolCategory(title: "Hearts", symbols: [
+            "❤️", "🧡", "💛", "💚", "💙", "💜", "🖤", "✨"
+        ]),
+        AvatarSymbolCategory(title: "Animals", symbols: [
+            "🐶", "🐱", "🦊", "🐸", "🐼", "🦄", "🦖", "🐙"
+        ]),
+        AvatarSymbolCategory(title: "Food", symbols: [
+            "🍕", "🌮", "🍔", "🍩", "🍦", "🍓", "🧋", "🍿"
+        ]),
+        AvatarSymbolCategory(title: "Play", symbols: [
+            "🎮", "🕹️", "🎲", "⚽", "🏀", "🎸", "🎧", "🎬"
+        ]),
+        AvatarSymbolCategory(title: "Space & Fantasy", symbols: [
+            "👽", "🤖", "👻", "🚀", "🛸", "🔮", "🧙", "🐉"
+        ])
+    ]
 
     /// Palette indices for `colorIndex`. Resolved to concrete colors in the UI
     /// layer so `CoreModels` stays Foundation-only.

@@ -1893,6 +1893,7 @@ public final class AppState {
                 profile.plexHomeUserAvatarURL = draft.plexHomeUserAvatarURL
                 profile.plexHomeUserBindings = draft.plexHomeUserBindings
                 profile.avatarImageURL = draft.avatarImageURL
+                profile.avatarEmoji = draft.avatarEmoji
                 profilesModel.update(profile)
             }
             if !draft.activeAccountIDs.isEmpty {
@@ -1917,7 +1918,8 @@ public final class AppState {
                 plexHomeUserRequiresPIN: draft.plexHomeUserRequiresPIN,
                 plexHomeUserAvatarURL: draft.plexHomeUserAvatarURL,
                 plexHomeUserBindings: draft.plexHomeUserBindings,
-                avatarImageURL: draft.avatarImageURL
+                avatarImageURL: draft.avatarImageURL,
+                avatarEmoji: draft.avatarEmoji
             )
             // Switch to the freshly created profile so the per-profile theme
             // picker edits *its* namespace, then present it. Mirrors

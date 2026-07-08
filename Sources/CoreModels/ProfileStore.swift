@@ -426,7 +426,8 @@ public final class ProfilesModel {
         plexHomeUserRequiresPIN: Bool? = nil,
         plexHomeUserAvatarURL: String? = nil,
         plexHomeUserBindings: [String: PlexHomeUserBinding]? = nil,
-        avatarImageURL: String? = nil
+        avatarImageURL: String? = nil,
+        avatarEmoji: String? = nil
     ) -> Profile {
         let profile = Profile(
             name: name,
@@ -439,7 +440,8 @@ public final class ProfilesModel {
             plexHomeUserRequiresPIN: plexHomeUserRequiresPIN,
             plexHomeUserAvatarURL: plexHomeUserAvatarURL,
             plexHomeUserBindings: plexHomeUserBindings,
-            avatarImageURL: avatarImageURL
+            avatarImageURL: avatarImageURL,
+            avatarEmoji: avatarEmoji
         )
         profiles.append(profile)
         profiles.sort { $0.createdAt < $1.createdAt }

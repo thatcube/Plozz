@@ -31,14 +31,39 @@ public struct ProfileAvatarView: View {
                 FallbackAsyncImage(urls: [url], variant: Self.variant(for: size)) {
                     // Shown only when the photo genuinely fails to load — keeps the
                     // tile recognizable instead of an empty circle.
-                    symbolFallback
+                    emojiOrSymbolFallback
                 }
             } else {
-                symbolFallback
+                emojiOrSymbolFallback
             }
         }
         .frame(width: size, height: size)
         .clipShape(Circle())
+    }
+
+    /// Emoji (if chosen) else the symbol tile. Used both as the primary
+    /// non-photo avatar and as the fallback when a borrowed photo URL fails.
+    @ViewBuilder
+    private var emojiOrSymbolFallback: some View {
+        if let emoji = profile.avatarEmoji?.trimmingCharacters(in: .whitespaces),
+           !emoji.isEmpty {
+            emojiTile(emoji)
+        } else {
+            symbolFallback
+        }
+    }
+
+    /// Native Apple emoji rendered as text on the profile's colored disc. The
+    /// system draws the Color Emoji glyph — nothing is bundled — and the tile
+    /// color still comes from `colorIndex`, so the palette stays meaningful for
+    /// emoji avatars too.
+    private func emojiTile(_ emoji: String) -> some View {
+        ZStack {
+            Circle().fill(ProfileTileColor.color(for: profile))
+            Text(emoji)
+                .font(.system(size: size * 0.55))
+                .minimumScaleFactor(0.5)
+        }
     }
 
     /// Picks a cache variant sized to the avatar: a crisp source for the large

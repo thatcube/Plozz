@@ -28,6 +28,8 @@ struct SettingsContext {
     let onDisableProfiles: () -> Void
     let onSwitchProfile: () -> Void
     let onSaveProfile: (ProfileDraft) -> Void
+    /// Live cosmetics-only persistence for editing an existing profile.
+    let onUpdateProfileCosmetics: (ProfileDraft) -> Void
     let onDeleteProfile: (String) -> Void
     let onAddAccount: () -> Void
     let onRemoveAccount: (Account) -> Void

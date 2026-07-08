@@ -59,6 +59,7 @@ struct ProfileDetailView: View {
                         context.onSaveProfile(draft)
                         editorContext = nil
                     },
+                    onLiveChange: { context.onUpdateProfileCosmetics($0) },
                     onDelete: {
                         context.onDeleteProfile(profile.id)
                         editorContext = nil

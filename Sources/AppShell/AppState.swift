@@ -1894,6 +1894,7 @@ public final class AppState {
                 profile.plexHomeUserBindings = draft.plexHomeUserBindings
                 profile.avatarImageURL = draft.avatarImageURL
                 profile.avatarEmoji = draft.avatarEmoji
+                profile.avatarEmojiColorIndex = draft.avatarEmojiColorIndex
                 profilesModel.update(profile)
             }
             if !draft.activeAccountIDs.isEmpty {
@@ -1919,7 +1920,8 @@ public final class AppState {
                 plexHomeUserAvatarURL: draft.plexHomeUserAvatarURL,
                 plexHomeUserBindings: draft.plexHomeUserBindings,
                 avatarImageURL: draft.avatarImageURL,
-                avatarEmoji: draft.avatarEmoji
+                avatarEmoji: draft.avatarEmoji,
+                avatarEmojiColorIndex: draft.avatarEmojiColorIndex
             )
             // Switch to the freshly created profile so the per-profile theme
             // picker edits *its* namespace, then present it. Mirrors
@@ -1935,6 +1937,32 @@ public final class AppState {
             isChoosingProfile = false
             isPickingThemeForNewProfile = true
         }
+    }
+
+    /// Persists ONLY a profile's cosmetic fields (name, avatar symbol/emoji,
+    /// colours, borrowed photo) — used by the editor's live auto-save while you
+    /// tweak an existing profile.
+    ///
+    /// Deliberately does **none** of `saveProfile`'s "the active profile's
+    /// substance changed" work — no `rebuildSettingsModels`, `reloadAccounts` or
+    /// `ensurePlexIdentityForActiveProfile`. Those re-scope which servers feed
+    /// Home and can raise a Plex PIN prompt; running them on every keystroke of a
+    /// cosmetic edit would reload/flicker Home and could pop a spurious PIN. A
+    /// name/avatar/colour change touches none of that, so we just write the
+    /// value through. No-op for an unknown id.
+    public func updateProfileCosmetics(_ draft: ProfileDraft) {
+        guard let id = draft.id,
+              var profile = profilesModel.profiles.first(where: { $0.id == id }) else { return }
+        let trimmed = draft.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Never persist a blank name (the field may be momentarily empty while
+        // retyping) — keep the last valid one.
+        if !trimmed.isEmpty { profile.name = draft.name }
+        profile.avatarSymbol = draft.avatarSymbol
+        profile.colorIndex = draft.colorIndex
+        profile.avatarImageURL = draft.avatarImageURL
+        profile.avatarEmoji = draft.avatarEmoji
+        profile.avatarEmojiColorIndex = draft.avatarEmojiColorIndex
+        profilesModel.update(profile)
     }
 
     /// Removes a profile (the default profile can't be removed). If it was

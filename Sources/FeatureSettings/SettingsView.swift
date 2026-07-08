@@ -94,6 +94,7 @@ public struct SettingsView: View {
     private let onDisableProfiles: () -> Void
     private let onSwitchProfile: () -> Void
     private let onSaveProfile: (ProfileDraft) -> Void
+    private let onUpdateProfileCosmetics: (ProfileDraft) -> Void
     private let onDeleteProfile: (String) -> Void
     private let onAddAccount: () -> Void
     private let onRemoveAccount: (Account) -> Void
@@ -140,6 +141,7 @@ public struct SettingsView: View {
         onDisableProfiles: @escaping () -> Void,
         onSwitchProfile: @escaping () -> Void,
         onSaveProfile: @escaping (ProfileDraft) -> Void,
+        onUpdateProfileCosmetics: @escaping (ProfileDraft) -> Void,
         onDeleteProfile: @escaping (String) -> Void,
         onAddAccount: @escaping () -> Void,
         onRemoveAccount: @escaping (Account) -> Void,
@@ -185,6 +187,7 @@ public struct SettingsView: View {
         self.onDisableProfiles = onDisableProfiles
         self.onSwitchProfile = onSwitchProfile
         self.onSaveProfile = onSaveProfile
+        self.onUpdateProfileCosmetics = onUpdateProfileCosmetics
         self.onDeleteProfile = onDeleteProfile
         self.onAddAccount = onAddAccount
         self.onRemoveAccount = onRemoveAccount
@@ -217,6 +220,7 @@ public struct SettingsView: View {
             onDisableProfiles: onDisableProfiles,
             onSwitchProfile: onSwitchProfile,
             onSaveProfile: onSaveProfile,
+            onUpdateProfileCosmetics: onUpdateProfileCosmetics,
             onDeleteProfile: onDeleteProfile,
             onAddAccount: onAddAccount,
             onRemoveAccount: onRemoveAccount,
@@ -293,6 +297,7 @@ public struct SettingsView: View {
                     onSaveProfile(draft)
                     editingProfile = nil
                 },
+                onLiveChange: { onUpdateProfileCosmetics($0) },
                 onDelete: {
                     onDeleteProfile(profile.id)
                     editingProfile = nil

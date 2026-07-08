@@ -15,7 +15,13 @@ public enum ProfileTileColor {
         Color(red: 0.62, green: 0.40, blue: 0.92), // purple
         Color(red: 0.20, green: 0.75, blue: 0.78), // teal
         Color(red: 0.95, green: 0.45, blue: 0.75), // pink
-        Color(red: 0.55, green: 0.60, blue: 0.68)  // slate
+        Color(red: 0.55, green: 0.60, blue: 0.68), // slate
+        Color(red: 0.98, green: 0.50, blue: 0.30), // orange
+        Color(red: 0.30, green: 0.45, blue: 0.85), // indigo
+        Color(red: 0.55, green: 0.80, blue: 0.30), // lime
+        Color(red: 0.90, green: 0.30, blue: 0.55), // magenta
+        Color(red: 0.40, green: 0.68, blue: 0.95), // sky
+        Color(red: 0.75, green: 0.55, blue: 0.40)  // clay
     ]
 
     public static func color(for profile: Profile) -> Color {

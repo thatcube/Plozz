@@ -163,6 +163,9 @@ struct MainTabView: View {
     let onEnableProfiles: () -> Void
     let onDisableProfiles: () -> Void
     let onSaveProfile: (ProfileDraft) -> Void
+    /// Live cosmetics-only persistence for editing an existing profile (see
+    /// `AppState.updateProfileCosmetics`), so the editor can auto-save.
+    let onUpdateProfileCosmetics: (ProfileDraft) -> Void
     let onDeleteProfile: (String) -> Void
     let onAddAccount: () -> Void
     let onRemoveAccount: (Account) -> Void
@@ -362,6 +365,7 @@ struct MainTabView: View {
                 onDisableProfiles: onDisableProfiles,
                 onSwitchProfile: onSwitchProfile,
                 onSaveProfile: onSaveProfile,
+                onUpdateProfileCosmetics: onUpdateProfileCosmetics,
                 onDeleteProfile: onDeleteProfile,
                 onAddAccount: onAddAccount,
                 onRemoveAccount: onRemoveAccount,

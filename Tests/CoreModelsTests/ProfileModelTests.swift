@@ -102,15 +102,39 @@ final class ProfileModelTests: XCTestCase {
         XCTAssertFalse(Profile.avatarEmojiCategories.isEmpty)
         for category in Profile.avatarEmojiCategories {
             XCTAssertFalse(category.title.isEmpty)
-            XCTAssertEqual(category.symbols.count, 8, "\(category.title) must hold exactly 8 emoji")
+            XCTAssertFalse(category.emojis.isEmpty, "\(category.title) has no emoji")
+            // Laid out 8 per row; a multiple of 8 keeps rows clean.
+            XCTAssertEqual(category.emojis.count % 8, 0, "\(category.title) should be a multiple of 8")
         }
+    }
+
+    func testAvatarEmojiAvailabilityGate() {
+        let safe = AvatarEmoji("😎")
+        let new = AvatarEmoji("🫩", minMajor: 18, minMinor: 4)
+        // Ungated is always available.
+        XCTAssertTrue(safe.isAvailable(osMajor: 18, osMinor: 0))
+        // Gated hides below its floor, shows at/above it.
+        XCTAssertFalse(new.isAvailable(osMajor: 18, osMinor: 0))
+        XCTAssertFalse(new.isAvailable(osMajor: 18, osMinor: 3))
+        XCTAssertTrue(new.isAvailable(osMajor: 18, osMinor: 4))
+        XCTAssertTrue(new.isAvailable(osMajor: 19, osMinor: 0))
+    }
+
+    func testAvailableEmojisFilterByOS() {
+        let cat = AvatarEmojiCategory(title: "T", emojis: [
+            AvatarEmoji("😎"), AvatarEmoji("🫩", minMajor: 18, minMinor: 4)
+        ])
+        XCTAssertEqual(cat.availableEmojis(osMajor: 18, osMinor: 0).map(\.value), ["😎"])
+        XCTAssertEqual(cat.availableEmojis(osMajor: 18, osMinor: 4).map(\.value), ["😎", "🫩"])
     }
 
     func testAvatarEmojiRoundTripsAndDefaultsNil() throws {
         XCTAssertNil(Profile(name: "A").avatarEmoji)
-        let p = Profile(name: "Kid", avatarEmoji: "🦖")
+        XCTAssertNil(Profile(name: "A").avatarEmojiColorIndex)
+        let p = Profile(name: "Kid", avatarEmoji: "🦖", avatarEmojiColorIndex: 3)
         let decoded = try JSONDecoder().decode(Profile.self, from: JSONEncoder().encode(p))
         XCTAssertEqual(decoded.avatarEmoji, "🦖")
+        XCTAssertEqual(decoded.avatarEmojiColorIndex, 3)
         XCTAssertEqual(decoded, p)
     }
 
@@ -119,6 +143,7 @@ final class ProfileModelTests: XCTestCase {
         let legacyJSON = #"{"id":"p9","name":"Dad","avatarSymbol":"person.fill","colorIndex":1,"createdAt":0}"#
         let decoded = try JSONDecoder().decode(Profile.self, from: Data(legacyJSON.utf8))
         XCTAssertNil(decoded.avatarEmoji)
+        XCTAssertNil(decoded.avatarEmojiColorIndex)
     }
 
     // MARK: Suggested colour for new profiles

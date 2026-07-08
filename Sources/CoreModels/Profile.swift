@@ -79,6 +79,14 @@ public struct Profile: Codable, Hashable, Identifiable, Sendable {
     /// JSON without this field migrates to `nil` cleanly.
     public var avatarEmoji: String?
 
+    /// Optional background colour index for an **emoji** avatar. `nil` (the
+    /// default) renders the emoji on a theme-neutral disc — colours often clash
+    /// with a multicolour emoji, so neutral is the sensible default (like
+    /// Memoji). A non-nil value paints the emoji on that palette colour for
+    /// people who want it. Only meaningful when `avatarEmoji` is set; symbols
+    /// always use `colorIndex`. Migration-safe (`decodeIfPresent`).
+    public var avatarEmojiColorIndex: Int?
+
     /// The **Seerr** (Overseerr / Jellyseerr) user this profile requests as.
     /// When set, requests made while this profile is active run under that
     /// Seerr user (`X-API-User`) on the shared household admin connection — so
@@ -113,6 +121,7 @@ public struct Profile: Codable, Hashable, Identifiable, Sendable {
         plexHomeUserBindings: [String: PlexHomeUserBinding]? = nil,
         avatarImageURL: String? = nil,
         avatarEmoji: String? = nil,
+        avatarEmojiColorIndex: Int? = nil,
         seerrUserID: Int? = nil,
         seerrUserName: String? = nil,
         seerrUserAvatarURL: String? = nil
@@ -131,6 +140,7 @@ public struct Profile: Codable, Hashable, Identifiable, Sendable {
         self.plexHomeUserBindings = plexHomeUserBindings
         self.avatarImageURL = avatarImageURL
         self.avatarEmoji = avatarEmoji
+        self.avatarEmojiColorIndex = avatarEmojiColorIndex
         self.seerrUserID = seerrUserID
         self.seerrUserName = seerrUserName
         self.seerrUserAvatarURL = seerrUserAvatarURL
@@ -156,6 +166,49 @@ public struct AvatarSymbolCategory: Hashable, Sendable, Identifiable {
     public init(title: String, symbols: [String]) {
         self.title = title
         self.symbols = symbols
+    }
+}
+
+/// One offered emoji avatar plus the minimum OS that renders it. Newer emoji
+/// (e.g. Emoji 16.0, which Apple first shipped in tvOS 18.4) would render as an
+/// empty "tofu" box on an older OS, so each entry carries the floor it needs;
+/// the picker filters to what the current device can actually draw. `0` means
+/// "available on the app's deployment floor" (no gating needed).
+public struct AvatarEmoji: Hashable, Sendable, Identifiable {
+    public var id: String { value }
+    /// The emoji character(s), rendered as native system Color Emoji.
+    public let value: String
+    public let minMajor: Int
+    public let minMinor: Int
+
+    public init(_ value: String, minMajor: Int = 0, minMinor: Int = 0) {
+        self.value = value
+        self.minMajor = minMajor
+        self.minMinor = minMinor
+    }
+
+    /// Whether this emoji renders on the given OS version. Ungated entries
+    /// (`minMajor == 0`) are always available.
+    public func isAvailable(osMajor: Int, osMinor: Int) -> Bool {
+        if minMajor == 0 { return true }
+        return (osMajor, osMinor) >= (minMajor, minMinor)
+    }
+}
+
+/// A labelled group of emoji avatars (one browsable section in the picker).
+public struct AvatarEmojiCategory: Hashable, Sendable, Identifiable {
+    public var id: String { title }
+    public let title: String
+    public let emojis: [AvatarEmoji]
+
+    public init(title: String, emojis: [AvatarEmoji]) {
+        self.title = title
+        self.emojis = emojis
+    }
+
+    /// The emoji in this category the given OS can actually render, in order.
+    public func availableEmojis(osMajor: Int, osMinor: Int) -> [AvatarEmoji] {
+        emojis.filter { $0.isAvailable(osMajor: osMajor, osMinor: osMinor) }
     }
 }
 
@@ -289,42 +342,71 @@ extension Profile {
         avatarSymbolCategories.flatMap(\.symbols)
 
     /// Curated, fun **native Apple emoji** offered as profile avatars, grouped
-    /// into browsable one-row (8-wide) sections. Rendered as *text* via the
-    /// system Color Emoji font — nothing is bundled or redistributed — so this
-    /// is legally clean on Apple platforms. Leans into the expressive /
-    /// internet-culture picks (💀 🗿 🤡 🐐 🧢 👀) people actually want, alongside
-    /// animals, food, play and fantasy. Every glyph here is standard Unicode
-    /// emoji available well before the app's tvOS floor.
-    public static let avatarEmojiCategories: [AvatarSymbolCategory] = [
-        AvatarSymbolCategory(title: "Reactions", symbols: [
-            "💀", "😭", "🤡", "🗿", "🤓", "🥴", "👀", "🫠"
+    /// into browsable 8-wide sections. Rendered as *text* via the system Color
+    /// Emoji font — nothing is bundled or redistributed — so this is legally
+    /// clean on Apple platforms. Personality-forward, from real
+    /// usage/PFP-culture research (💀 🗿 🤡 🦊 👽 🤖 🐉 …).
+    ///
+    /// Most entries are standard emoji safe on the app's tvOS floor. A few
+    /// cutting-edge ones (Emoji 16.0, first drawn by tvOS 18.4) are tagged with
+    /// the OS they need so the picker hides them on older systems instead of
+    /// showing an empty "tofu" box — see `AvatarEmoji`.
+    public static let avatarEmojiCategories: [AvatarEmojiCategory] = [
+        AvatarEmojiCategory(title: "Faces", emojis: [
+            AvatarEmoji("😎"), AvatarEmoji("🤠"), AvatarEmoji("😈"), AvatarEmoji("🤓"),
+            AvatarEmoji("🥴"), AvatarEmoji("🫠"), AvatarEmoji("🙃"), AvatarEmoji("🤨")
         ]),
-        AvatarSymbolCategory(title: "Smileys", symbols: [
-            "😀", "😂", "🥳", "😍", "😎", "🤪", "🙃", "😴"
+        AvatarEmojiCategory(title: "Meme Lords", emojis: [
+            AvatarEmoji("💀"), AvatarEmoji("🗿"), AvatarEmoji("🤡"), AvatarEmoji("👀"),
+            AvatarEmoji("🧢"), AvatarEmoji("😭"), AvatarEmoji("🫡"), AvatarEmoji("💯")
         ]),
-        AvatarSymbolCategory(title: "Vibes", symbols: [
-            "🔥", "💯", "🐐", "🧢", "🤙", "✌️", "🫡", "👑"
+        AvatarEmojiCategory(title: "Cute Animals", emojis: [
+            AvatarEmoji("🐱"), AvatarEmoji("🐶"), AvatarEmoji("🐼"), AvatarEmoji("🐨"),
+            AvatarEmoji("🐰"), AvatarEmoji("🐸"), AvatarEmoji("🐧"), AvatarEmoji("🦔")
         ]),
-        AvatarSymbolCategory(title: "Hearts", symbols: [
-            "❤️", "🧡", "💛", "💚", "💙", "💜", "🖤", "✨"
+        AvatarEmojiCategory(title: "Wild & Mythical", emojis: [
+            AvatarEmoji("🦊"), AvatarEmoji("🦁"), AvatarEmoji("🐺"), AvatarEmoji("🦅"),
+            AvatarEmoji("🐉"), AvatarEmoji("🦄"), AvatarEmoji("🦈"), AvatarEmoji("🦖")
         ]),
-        AvatarSymbolCategory(title: "Animals", symbols: [
-            "🐶", "🐱", "🦊", "🐸", "🐼", "🦄", "🦖", "🐙"
+        AvatarEmojiCategory(title: "Fantasy & Sci-Fi", emojis: [
+            AvatarEmoji("👽"), AvatarEmoji("🤖"), AvatarEmoji("👾"), AvatarEmoji("🧙"),
+            AvatarEmoji("🧛"), AvatarEmoji("🧟"), AvatarEmoji("🧚"), AvatarEmoji("👻")
         ]),
-        AvatarSymbolCategory(title: "Food", symbols: [
-            "🍕", "🌮", "🍔", "🍩", "🍦", "🍓", "🧋", "🍿"
+        AvatarEmojiCategory(title: "Food & Drink", emojis: [
+            AvatarEmoji("🍕"), AvatarEmoji("🍔"), AvatarEmoji("🍣"), AvatarEmoji("🌮"),
+            AvatarEmoji("🍦"), AvatarEmoji("🍩"), AvatarEmoji("🧋"), AvatarEmoji("🍿")
         ]),
-        AvatarSymbolCategory(title: "Play", symbols: [
-            "🎮", "🕹️", "🎲", "⚽", "🏀", "🎸", "🎧", "🎬"
+        AvatarEmojiCategory(title: "Play & Hobbies", emojis: [
+            AvatarEmoji("🎮"), AvatarEmoji("🏆"), AvatarEmoji("🎸"), AvatarEmoji("🎧"),
+            AvatarEmoji("⚽"), AvatarEmoji("🏀"), AvatarEmoji("🎲"), AvatarEmoji("🎬")
         ]),
-        AvatarSymbolCategory(title: "Space & Fantasy", symbols: [
-            "👽", "🤖", "👻", "🚀", "🛸", "🔮", "🧙", "🐉"
+        AvatarEmojiCategory(title: "Nature & Sky", emojis: [
+            AvatarEmoji("🌙"), AvatarEmoji("⭐"), AvatarEmoji("🌈"), AvatarEmoji("🪐"),
+            AvatarEmoji("☀️"), AvatarEmoji("⚡"), AvatarEmoji("🌊"), AvatarEmoji("🍄")
+        ]),
+        AvatarEmojiCategory(title: "Icons & Power", emojis: [
+            AvatarEmoji("👑"), AvatarEmoji("💎"), AvatarEmoji("🔮"), AvatarEmoji("🗡️"),
+            AvatarEmoji("🛡️"), AvatarEmoji("🏴‍☠️"), AvatarEmoji("🎭"), AvatarEmoji("🔥")
+        ]),
+        AvatarEmojiCategory(title: "Vibes", emojis: [
+            AvatarEmoji("💅"), AvatarEmoji("🧊"), AvatarEmoji("🫧"), AvatarEmoji("🤙"),
+            AvatarEmoji("💫"), AvatarEmoji("🪄"), AvatarEmoji("🥊"), AvatarEmoji("🌶️")
+        ]),
+        // Newest picks. The Emoji-16.0 ones (first drawn by tvOS 18.4) are gated
+        // so they simply don't appear on tvOS 18.0–18.3 rather than rendering as
+        // empty boxes; the 15.0/15.1 ones are safe on the floor and always show.
+        AvatarEmojiCategory(title: "New & Cool", emojis: [
+            AvatarEmoji("🐦‍🔥"), AvatarEmoji("🪼"), AvatarEmoji("🪿"), AvatarEmoji("🫎"),
+            AvatarEmoji("🩷"), AvatarEmoji("🫩", minMajor: 18, minMinor: 4),
+            AvatarEmoji("🫟", minMajor: 18, minMinor: 4),
+            AvatarEmoji("🪉", minMajor: 18, minMinor: 4)
         ])
     ]
 
     /// Palette indices for `colorIndex`. Resolved to concrete colors in the UI
-    /// layer so `CoreModels` stays Foundation-only.
-    public static let tileColorCount = 8
+    /// layer so `CoreModels` stays Foundation-only. Keep in sync with
+    /// `ProfileTileColor.palette` (the UI palette has this many colours).
+    public static let tileColorCount = 14
 
     /// A clamped, valid color index for `colorIndex`.
     public var clampedColorIndex: Int {

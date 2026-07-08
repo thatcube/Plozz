@@ -41,6 +41,9 @@ public struct ProfileDraft: Equatable, Sendable {
     /// avatar renders this emoji on the colored tile; wins over the symbol but
     /// loses to a photo.
     public var avatarEmoji: String?
+    /// Optional background colour for an emoji avatar (see
+    /// `Profile.avatarEmojiColorIndex`). `nil` = neutral disc (default).
+    public var avatarEmojiColorIndex: Int?
 
     public init(
         id: String?,
@@ -56,7 +59,8 @@ public struct ProfileDraft: Equatable, Sendable {
         plexHomeUserAvatarURL: String? = nil,
         plexHomeUserBindings: [String: PlexHomeUserBinding]? = nil,
         avatarImageURL: String? = nil,
-        avatarEmoji: String? = nil
+        avatarEmoji: String? = nil,
+        avatarEmojiColorIndex: Int? = nil
     ) {
         self.id = id
         self.name = name
@@ -72,6 +76,7 @@ public struct ProfileDraft: Equatable, Sendable {
         self.plexHomeUserBindings = plexHomeUserBindings
         self.avatarImageURL = avatarImageURL
         self.avatarEmoji = avatarEmoji
+        self.avatarEmojiColorIndex = avatarEmojiColorIndex
     }
 }
 
@@ -90,15 +95,22 @@ public struct ProfileEditorView: View {
     private let onSave: (ProfileDraft) -> Void
     private let onDelete: (() -> Void)?
     private let onCancel: () -> Void
+    /// When provided (and editing an existing profile), the editor **auto-saves**:
+    /// every cosmetic change is pushed here live, Cancel/Save is replaced with
+    /// Done + Revert, and backing out keeps the work. Hosts wire this to a
+    /// cosmetics-only persistence path. `nil` keeps the classic explicit-Save
+    /// flow (used for brand-new profiles and first-run setup).
+    private let onLiveChange: ((ProfileDraft) -> Void)?
 
-    // Snapshot of the values this editor opened with, so Cancel/Menu can tell
-    // whether anything actually changed and warn before discarding (issue: you
-    // could edit everything then accidentally back out and silently lose it).
+    // Snapshot of the values this editor opened with — drives Revert (and, in
+    // the explicit-Save flow, the discard warning).
     private let initialName: String
     private let initialSymbol: String
     private let initialColorIndex: Int
     private let initialImageURL: String?
     private let initialEmoji: String?
+    private let initialEmojiColorIndex: Int?
+    private let initialMode: AvatarMode
 
     @Environment(\.themePalette) private var palette
 
@@ -107,11 +119,17 @@ public struct ProfileEditorView: View {
     @State private var colorIndex: Int
     @State private var avatarImageURL: String?
     @State private var avatarEmoji: String?
+    /// nil = neutral disc behind the emoji (default); a value = palette colour.
+    @State private var emojiColorIndex: Int?
     @State private var avatarMode: AvatarMode
     @State private var photoCandidates: [ProfilePhotoCandidate] = []
     @State private var showDiscardConfirmation = false
 
     private enum AvatarMode: Hashable { case symbol, emoji, photo }
+
+    /// Current tvOS version, so the emoji picker can hide glyphs the device is
+    /// too old to render (they'd otherwise show as empty "tofu" boxes).
+    private let osVersion = ProcessInfo.processInfo.operatingSystemVersion
 
     public init(
         editingProfile: Profile? = nil,
@@ -120,6 +138,7 @@ public struct ProfileEditorView: View {
         existingColorIndices: [Int] = [],
         plexHomeUsersFetcher: @escaping (String) async -> [PlexHomeUser] = { _ in [] },
         onSave: @escaping (ProfileDraft) -> Void,
+        onLiveChange: ((ProfileDraft) -> Void)? = nil,
         onDelete: (() -> Void)? = nil,
         onCancel: @escaping () -> Void
     ) {
@@ -128,6 +147,7 @@ public struct ProfileEditorView: View {
         self.photoSourceAccounts = photoSourceAccounts
         self.plexHomeUsersFetcher = plexHomeUsersFetcher
         self.onSave = onSave
+        self.onLiveChange = onLiveChange
         self.onDelete = onDelete
         self.onCancel = onCancel
 
@@ -141,31 +161,47 @@ public struct ProfileEditorView: View {
         let normalizedPhoto = (startPhoto?.isEmpty == false) ? startPhoto : nil
         let startEmoji = editingProfile?.avatarEmoji
         let normalizedEmoji = (startEmoji?.isEmpty == false) ? startEmoji : nil
+        let startEmojiColor = editingProfile?.avatarEmojiColorIndex
+
+        // Open in the mode that matches the profile's current avatar. A NEW
+        // profile (nothing set yet) defaults to Emoji — the funnest, most
+        // expressive option and the one we want people to reach for first.
+        let startMode: AvatarMode
+        if normalizedPhoto != nil {
+            startMode = .photo
+        } else if normalizedEmoji != nil {
+            startMode = .emoji
+        } else if editingProfile != nil {
+            startMode = .symbol
+        } else {
+            startMode = .emoji
+        }
 
         self.initialName = startName.trimmingCharacters(in: .whitespacesAndNewlines)
         self.initialSymbol = startSymbol
         self.initialColorIndex = startColor
         self.initialImageURL = normalizedPhoto
         self.initialEmoji = normalizedEmoji
+        self.initialEmojiColorIndex = startEmojiColor
+        self.initialMode = startMode
 
         _name = State(initialValue: startName)
         _avatarSymbol = State(initialValue: startSymbol)
         _colorIndex = State(initialValue: startColor)
         _avatarImageURL = State(initialValue: normalizedPhoto)
         _avatarEmoji = State(initialValue: normalizedEmoji)
-        // Open in the mode that matches the profile's current avatar: photo wins,
-        // then emoji, otherwise the classic symbol picker.
-        let startMode: AvatarMode = normalizedPhoto != nil ? .photo
-            : (normalizedEmoji != nil ? .emoji : .symbol)
+        _emojiColorIndex = State(initialValue: startEmojiColor)
         _avatarMode = State(initialValue: startMode)
     }
 
     private var isEditing: Bool { editingProfile != nil }
+    /// Auto-save mode: an existing profile whose host wired a live-change hook.
+    private var autoSaves: Bool { isEditing && onLiveChange != nil }
     private var trimmedName: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var canSave: Bool { !trimmedName.isEmpty }
 
     /// The photo URL that would actually be saved right now — only meaningful in
-    /// Photo mode (other modes never persist a borrowed image).
+    /// Photo mode.
     private var effectiveImageURL: String? {
         avatarMode == .photo ? avatarImageURL : nil
     }
@@ -176,18 +212,46 @@ public struct ProfileEditorView: View {
         avatarMode == .emoji ? avatarEmoji : nil
     }
 
+    /// The emoji background colour that would be saved — only meaningful for an
+    /// emoji avatar; nil = the neutral disc.
+    private var effectiveEmojiColorIndex: Int? {
+        avatarMode == .emoji ? emojiColorIndex : nil
+    }
+
     /// Whether the colour picker is relevant for the current mode. Symbol and
-    /// emoji avatars both sit on the coloured disc; a borrowed photo ignores it.
+    /// emoji avatars both offer a colour (emoji adds a Neutral option); a
+    /// borrowed photo ignores it.
     private var colorApplies: Bool { avatarMode != .photo }
 
+    /// The draft the current UI state represents.
+    private var currentDraft: ProfileDraft {
+        ProfileDraft(
+            id: editingProfile?.id,
+            name: trimmedName,
+            avatarSymbol: avatarSymbol,
+            colorIndex: colorIndex,
+            linkedAccountID: editingProfile?.linkedAccountID,
+            activeAccountIDs: [],
+            plexHomeUserID: editingProfile?.plexHomeUserID,
+            plexHomeUserName: editingProfile?.plexHomeUserName,
+            plexHomeUserAccountID: editingProfile?.plexHomeUserAccountID,
+            plexHomeUserRequiresPIN: editingProfile?.plexHomeUserRequiresPIN,
+            plexHomeUserAvatarURL: editingProfile?.plexHomeUserAvatarURL,
+            plexHomeUserBindings: editingProfile?.plexHomeUserBindings,
+            avatarImageURL: effectiveImageURL,
+            avatarEmoji: effectiveEmoji,
+            avatarEmojiColorIndex: effectiveEmojiColorIndex
+        )
+    }
+
     /// Whether any saveable field differs from what the editor opened with.
-    /// Drives the "discard changes?" guard on Cancel / Menu.
     private var isDirty: Bool {
         trimmedName != initialName
             || avatarSymbol != initialSymbol
             || colorIndex != initialColorIndex
             || effectiveImageURL != initialImageURL
             || effectiveEmoji != initialEmoji
+            || effectiveEmojiColorIndex != initialEmojiColorIndex
     }
 
     public var body: some View {
@@ -216,8 +280,13 @@ public struct ProfileEditorView: View {
         }
         .frame(minWidth: 1720, minHeight: 960)
         .task { await loadPhotoCandidates() }
-        // Intercept the Menu/back press so unsaved edits aren't silently lost.
-        .onExitCommand(perform: attemptCancel)
+        // Live auto-save (existing profiles): push every cosmetic change through.
+        .onChange(of: currentDraft) { _, draft in
+            if autoSaves { onLiveChange?(draft) }
+        }
+        // Menu/back: in auto-save mode nothing is lost, so just close. In the
+        // explicit-Save flow, warn before discarding unsaved edits.
+        .onExitCommand(perform: handleExit)
         .alert("Discard changes?", isPresented: $showDiscardConfirmation) {
             Button("Discard", role: .destructive, action: onCancel)
             Button("Keep Editing", role: .cancel) {}
@@ -226,26 +295,42 @@ public struct ProfileEditorView: View {
         }
     }
 
-    /// Title + Cancel/Save, rendered in visible themed controls at the top of the
-    /// scrolling column (they used to live in the navigation toolbar, where they
-    /// rendered nearly invisible against the sheet). Scrolls with the page.
+    /// Title + the trailing actions. In auto-save mode: **Done** (just close —
+    /// everything is already saved) + **Revert All Changes** (one press restores
+    /// exactly how the profile was when you opened it). In explicit-Save mode
+    /// (new profile / first-run): **Cancel** + **Save**. Scrolls with the page.
     private var headerRow: some View {
         HStack(alignment: .center, spacing: 20) {
             Text(isEditing ? "Edit Profile" : "New Profile")
                 .font(.system(size: 44, weight: .bold))
                 .foregroundStyle(palette.primaryText)
             Spacer(minLength: 24)
-            Button("Cancel", action: attemptCancel)
-                .plozzGlassPillButton()
-                .focusEffectDisabled()
-            Button("Save", action: save)
-                .plozzGlassPillButton(isSelected: true)
-                .focusEffectDisabled()
-                .disabled(!canSave)
+            if autoSaves {
+                Button("Revert All Changes", action: revertAll)
+                    .plozzGlassPillButton()
+                    .focusEffectDisabled()
+                    .disabled(!isDirty)
+                Button("Done", action: onCancel)
+                    .plozzGlassPillButton(isSelected: true)
+                    .focusEffectDisabled()
+            } else {
+                Button("Cancel", action: attemptCancel)
+                    .plozzGlassPillButton()
+                    .focusEffectDisabled()
+                Button(isEditing ? "Save" : "Create", action: save)
+                    .plozzGlassPillButton(isSelected: true)
+                    .focusEffectDisabled()
+                    .disabled(!canSave)
+            }
         }
     }
 
-    // MARK: Cancel / discard
+    // MARK: Exit / discard / revert
+
+    private func handleExit() {
+        // Auto-save mode: work is already persisted, so backing out just closes.
+        if autoSaves { onCancel() } else { attemptCancel() }
+    }
 
     private func attemptCancel() {
         if isDirty {
@@ -253,6 +338,19 @@ public struct ProfileEditorView: View {
         } else {
             onCancel()
         }
+    }
+
+    /// Restore every field to the snapshot the editor opened with — a single,
+    /// all-at-once revert (not a step-by-step undo). In auto-save mode the
+    /// `onChange` above then persists the restored values.
+    private func revertAll() {
+        name = initialName
+        avatarSymbol = initialSymbol
+        colorIndex = initialColorIndex
+        avatarImageURL = initialImageURL
+        avatarEmoji = initialEmoji
+        emojiColorIndex = initialEmojiColorIndex
+        avatarMode = initialMode
     }
 
     // MARK: Left column — always-visible live preview + colour
@@ -301,7 +399,8 @@ public struct ProfileEditorView: View {
             avatarSymbol: avatarSymbol,
             colorIndex: colorIndex,
             avatarImageURL: effectiveImageURL,
-            avatarEmoji: effectiveEmoji
+            avatarEmoji: effectiveEmoji,
+            avatarEmojiColorIndex: effectiveEmojiColorIndex
         )
     }
 
@@ -458,9 +557,17 @@ public struct ProfileEditorView: View {
     private var emojiCategoriesSection: some View {
         VStack(alignment: .leading, spacing: 28) {
             ForEach(Profile.avatarEmojiCategories) { category in
-                VStack(alignment: .leading, spacing: 16) {
-                    categoryHeader(category.title)
-                    emojiRows(for: category.symbols)
+                // Hide glyphs the current tvOS is too old to draw (they'd render
+                // as empty boxes); skip a category that ends up empty.
+                let available = category.availableEmojis(
+                    osMajor: osVersion.majorVersion,
+                    osMinor: osVersion.minorVersion
+                ).map(\.value)
+                if !available.isEmpty {
+                    VStack(alignment: .leading, spacing: 16) {
+                        categoryHeader(category.title)
+                        emojiRows(for: available)
+                    }
                 }
             }
         }
@@ -497,11 +604,10 @@ public struct ProfileEditorView: View {
             avatarEmoji = emoji
         } label: {
             ZStack {
-                // The emoji sits on the chosen colour when selected (exactly how
-                // it renders as an avatar), otherwise a neutral themed disc.
-                Circle().fill(isSelected
-                    ? AnyShapeStyle(ProfileTileColor.color(forIndex: colorIndex))
-                    : AnyShapeStyle(palette.cardSurface))
+                // The picker keeps a calm neutral disc; the actual background
+                // (neutral or a chosen colour) is set in the Colour section and
+                // shown live in the preview.
+                Circle().fill(palette.cardSurface)
                 Text(emoji)
                     .font(.system(size: 44))
             }
@@ -531,21 +637,61 @@ public struct ProfileEditorView: View {
 
     private var colorSection: some View {
         let columns = [GridItem(.adaptive(minimum: 84, maximum: 100), spacing: 20)]
+        let emojiMode = avatarMode == .emoji
         return VStack(alignment: .leading, spacing: 16) {
             sectionHeader("Color")
             LazyVGrid(columns: columns, spacing: 20) {
+                // Emoji avatars default to a neutral disc (colours often clash
+                // with a multicolour emoji), so Emoji mode leads with a Neutral
+                // swatch. Symbols always need a colour, so they skip it.
+                if emojiMode {
+                    neutralSwatch
+                }
                 ForEach(0..<ProfileTileColor.palette.count, id: \.self) { index in
-                    colorSwatch(index)
+                    colorSwatch(index, emojiMode: emojiMode)
                 }
             }
         }
     }
 
-    private func colorSwatch(_ index: Int) -> some View {
-        let isSelected = index == colorIndex
+    /// The "no colour" option for emoji avatars — a theme neutral disc that maps
+    /// to `emojiColorIndex == nil`.
+    private var neutralSwatch: some View {
+        let isSelected = emojiColorIndex == nil
         let diameter: CGFloat = 84
         return Button {
-            colorIndex = index
+            emojiColorIndex = nil
+        } label: {
+            Circle()
+                .fill(Color.gray.opacity(0.35))
+                .frame(width: diameter, height: diameter)
+                .overlay { Circle().strokeBorder(palette.cardBorder, lineWidth: 1) }
+                .overlay {
+                    if isSelected {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 34, weight: .heavy))
+                            .foregroundStyle(.white)
+                            .shadow(color: .black.opacity(0.35), radius: 3, y: 1)
+                    } else {
+                        Image(systemName: "slash.circle")
+                            .font(.system(size: 30, weight: .semibold))
+                            .foregroundStyle(palette.secondaryText)
+                    }
+                }
+        }
+        .buttonStyle(CircularSelectionButtonStyle(diameter: diameter))
+        .focusEffectDisabled()
+        .accessibilityLabel(Text("Neutral background"))
+        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+    }
+
+    private func colorSwatch(_ index: Int, emojiMode: Bool) -> some View {
+        // In emoji mode the colour choice writes emojiColorIndex; for symbols it
+        // writes colorIndex.
+        let isSelected = emojiMode ? (emojiColorIndex == index) : (index == colorIndex)
+        let diameter: CGFloat = 84
+        return Button {
+            if emojiMode { emojiColorIndex = index } else { colorIndex = index }
         } label: {
             Circle()
                 .fill(ProfileTileColor.color(forIndex: index))
@@ -683,26 +829,10 @@ public struct ProfileEditorView: View {
     }
 
     private func save() {
-        // Carry through the existing non-cosmetic fields so callers that
-        // dispatch a single `saveProfile(draft)` path don't accidentally wipe
-        // server membership or Plex Home-user mapping when only cosmetics
-        // changed.
-        onSave(ProfileDraft(
-            id: editingProfile?.id,
-            name: trimmedName,
-            avatarSymbol: avatarSymbol,
-            colorIndex: colorIndex,
-            linkedAccountID: editingProfile?.linkedAccountID,
-            activeAccountIDs: [],
-            plexHomeUserID: editingProfile?.plexHomeUserID,
-            plexHomeUserName: editingProfile?.plexHomeUserName,
-            plexHomeUserAccountID: editingProfile?.plexHomeUserAccountID,
-            plexHomeUserRequiresPIN: editingProfile?.plexHomeUserRequiresPIN,
-            plexHomeUserAvatarURL: editingProfile?.plexHomeUserAvatarURL,
-            plexHomeUserBindings: editingProfile?.plexHomeUserBindings,
-            avatarImageURL: effectiveImageURL,
-            avatarEmoji: effectiveEmoji
-        ))
+        // `currentDraft` already carries the cosmetic values plus the preserved
+        // non-cosmetic fields (membership / Plex mapping), so callers on the
+        // single `saveProfile(draft)` path never wipe them.
+        onSave(currentDraft)
     }
 }
 

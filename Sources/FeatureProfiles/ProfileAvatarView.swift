@@ -53,17 +53,28 @@ public struct ProfileAvatarView: View {
         }
     }
 
-    /// Native Apple emoji rendered as text on the profile's colored disc. The
-    /// system draws the Color Emoji glyph — nothing is bundled — and the tile
-    /// color still comes from `colorIndex`, so the palette stays meaningful for
-    /// emoji avatars too.
+    /// Native Apple emoji rendered as text. By default it sits on a
+    /// theme-neutral disc (colours often clash with a multicolour emoji), but a
+    /// profile may opt into a palette colour via `avatarEmojiColorIndex` — so the
+    /// background is the chosen colour when set, otherwise a neutral surface.
     private func emojiTile(_ emoji: String) -> some View {
         ZStack {
-            Circle().fill(ProfileTileColor.color(for: profile))
+            if let index = profile.avatarEmojiColorIndex {
+                Circle().fill(ProfileTileColor.color(forIndex: index))
+            } else {
+                Circle().fill(Self.neutralEmojiBackground)
+            }
             Text(emoji)
                 .font(.system(size: size * 0.55))
                 .minimumScaleFactor(0.5)
         }
+    }
+
+    /// Theme-aware neutral disc behind an emoji avatar: a muted grey that reads
+    /// on both light and dark themes without competing with the emoji's own
+    /// colours.
+    private static var neutralEmojiBackground: Color {
+        Color.gray.opacity(0.35)
     }
 
     /// Picks a cache variant sized to the avatar: a crisp source for the large

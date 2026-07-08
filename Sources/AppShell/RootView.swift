@@ -238,6 +238,7 @@ public struct RootView: View {
                         onEnableProfiles: { appState.enableProfiles() },
                         onDisableProfiles: { appState.disableProfiles() },
                         onSaveProfile: { appState.saveProfile($0) },
+                        onUpdateProfileCosmetics: { appState.updateProfileCosmetics($0) },
                         onDeleteProfile: { appState.removeProfile(id: $0) },
                         onAddAccount: { appState.addAccount() },
                         onRemoveAccount: { appState.removeAccount(id: $0.id) },

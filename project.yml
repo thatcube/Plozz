@@ -53,6 +53,11 @@ targets:
         # MARKETING_VERSION build setting so the app and Top Shelf extension match.
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        # Export-compliance answer, baked in so App Store Connect never shows
+        # "Missing Compliance" and external TestFlight distribution isn't blocked.
+        # Plozz only uses standard/exempt encryption (HTTPS/TLS, SMB) and no
+        # custom cryptography, so it qualifies for the exemption (value NO).
+        ITSAppUsesNonExemptEncryption: false
         # Opt-in crash-reporting DSN, read at runtime by CrashReporting. Resolves
         # from the PLOZZ_SENTRY_DSN build setting (empty unless baked in), so
         # builds without a DSN never send anything.

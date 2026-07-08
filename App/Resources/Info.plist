@@ -33,6 +33,8 @@
 	</array>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>LastFmAPIKey</key>
 	<string>$(LASTFM_API_KEY)</string>
 	<key>LastFmSharedSecret</key>

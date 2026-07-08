@@ -31,6 +31,10 @@ OUTPUT_DIR     = "build"
 # tvOS apps are a distinct App Store "platform"; deliver/pilot default to iOS
 # unless told otherwise, so every upload must specify this explicitly.
 APP_PLATFORM   = "appletvos"
+# External TestFlight beta group builds are distributed to (created once in the
+# App Store Connect web UI). The internal group already has access to all builds
+# automatically, so `beta` only has to add + submit for this external one.
+EXTERNAL_GROUP = "Plozz External"
 
 # The host GitHub desktop/CLI app injects safe.bareRepository=explicit via
 # GIT_CONFIG_* env vars, which breaks Swift Package Manager's bare dependency
@@ -105,6 +109,19 @@ rescue => e
   1
 end
 
+# Release notes shown to testers as TestFlight's "What to Test". Sourced from the
+# PLOZZ_WHATS_NEW env var first (so agent/scripted runs can pass it inline), else
+# a repo-root WHAT_TO_TEST.txt file (gitignored scratch or committed notes). An
+# external beta must have notes, so `beta` errors clearly if both are empty.
+def whats_new
+  txt = ENV["PLOZZ_WHATS_NEW"]
+  if (txt.nil? || txt.strip.empty?)
+    path = File.expand_path("../WHAT_TO_TEST.txt", __dir__)
+    txt = File.read(path) if File.exist?(path)
+  end
+  (txt || "").strip
+end
+
 desc "Regenerate the Xcode project from project.yml via XcodeGen"
 lane :generate_project do
   # generate-project.sh runs xcodegen and bakes the build number (PLOZZ_BUILD_NUMBER
@@ -149,16 +166,36 @@ lane :build do |options|
   )
 end
 
-desc "Build and upload a new build to TestFlight"
+desc "Build and upload a new build to TestFlight (internal + external)"
 lane :beta do
   api_key = asc_api_key
+  # An external beta must ship with "What to Test" notes and passes Apple's beta
+  # review, so require the notes up front before spending minutes on the build.
+  notes = whats_new
+  if notes.empty?
+    UI.user_error!(
+      "No release notes for the external beta. Provide them before running `beta`:\n" \
+      "  • export PLOZZ_WHATS_NEW=\"...\"   (inline), or\n" \
+      "  • create WHAT_TO_TEST.txt at the repo root."
+    )
+  end
   build
   upload_to_testflight(
     api_key: api_key,
     app_identifier: APP_IDENTIFIER,
     app_platform: APP_PLATFORM,
-    skip_waiting_for_build_processing: true,
-    distribute_external: false
+    # Always distribute to external testers, not just the internal group. The
+    # internal "Testas" group already auto-receives every build.
+    distribute_external: true,
+    groups: [EXTERNAL_GROUP],
+    notify_external_testers: true,
+    # Sets TestFlight's "What to Test" natively (no separate ASC API call) and
+    # submits the build for Apple's beta review so external testers can get it.
+    changelog: notes,
+    submit_beta_review: true,
+    # Must wait for processing to finish so the build can be submitted for review
+    # and distributed — can't skip when distributing externally.
+    skip_waiting_for_build_processing: false
   )
 end
 

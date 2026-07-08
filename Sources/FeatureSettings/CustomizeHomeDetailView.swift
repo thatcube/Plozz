@@ -82,7 +82,7 @@ struct CustomizeHomeDetailView: View {
     @ViewBuilder private var homeRowsDetail: some View {
         VStack(alignment: .leading, spacing: 24) {
             HomeRowsGroupCard(
-                title: "Shared",
+                title: "Shared rows",
                 subtitle: "Combined across all your libraries",
                 systemIcon: "rectangle.stack.fill"
             ) {
@@ -101,29 +101,22 @@ struct CustomizeHomeDetailView: View {
             // rows") and bound to `!mergeLibrariesOnHome`, so turning it ON *adds*
             // the per-library cards below — the intuitive direction. The stored
             // flag stays `mergeLibrariesOnHome` (on == combined/shared-only).
-            VStack(alignment: .leading, spacing: 8) {
-                Toggle(isOn: Binding(
-                    get: { !homeVisibility.mergeLibrariesOnHome },
-                    set: { showPerLibrary in
-                        homeVisibility.setMergeLibrariesOnHome(!showPerLibrary)
-                        // Turning per-library rows ON is a clear "I want each
-                        // library's own rows" signal. Seed every applicable row for
-                        // every Home-visible library so it starts full (the user
-                        // pares it back), instead of empty. No-op once customized.
-                        if showPerLibrary {
-                            homeVisibility.seedLibraryRowsIfNeeded(defaultLibraryRowSeeds)
-                        }
+            Toggle(isOn: Binding(
+                get: { !homeVisibility.mergeLibrariesOnHome },
+                set: { showPerLibrary in
+                    homeVisibility.setMergeLibrariesOnHome(!showPerLibrary)
+                    // Turning per-library rows ON is a clear "I want each library's
+                    // own rows" signal. Seed every applicable row for every
+                    // Home-visible library so it starts full (the user pares it
+                    // back), instead of empty. No-op once customized.
+                    if showPerLibrary {
+                        homeVisibility.seedLibraryRowsIfNeeded(defaultLibraryRowSeeds)
                     }
-                )) {
-                    Text("Show each library's own rows")
                 }
-                .toggleStyle(SettingsSwitchToggleStyle())
-                Text("Add each library's own Recently Added and Recommended rows, on top of the Shared rows above.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            )) {
+                Text("Show each library's own rows")
             }
+            .toggleStyle(SettingsSwitchToggleStyle())
 
             if !homeVisibility.mergeLibrariesOnHome {
                 let libraries = homeVisibleLibraries

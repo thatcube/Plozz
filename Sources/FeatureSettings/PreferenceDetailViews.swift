@@ -377,16 +377,6 @@ struct PlaybackDetailView: View {
                 description: "When you change the subtitle track while watching a series, reuse that choice for the rest of the series.",
             ) {
                 Toggle("Remember per series", isOn: $playback.settings.rememberSubtitleTrackPerSeries)
-            },
-            SettingsSplitRow(
-                id: "subtitle-style-note",
-                title: "Subtitle appearance",
-                description: "Font, size, colour, position and background are adjusted from the player while you watch — open the subtitle menu during playback to fine-tune the look with a live preview.",
-            ) {
-                Text("Adjust subtitle appearance from the player while watching, so you can see every change against the video in real time.")
-                    .font(.body)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
             }
         ])
     }

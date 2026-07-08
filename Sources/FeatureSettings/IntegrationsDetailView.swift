@@ -18,7 +18,7 @@ struct IntegrationsDetailView: View {
     let serverCount: Int
 
     var body: some View {
-        SettingsSplitLayout(title: "Integrations", sections: sections)
+        SettingsSplitLayout(title: "Trackers", sections: sections)
             .task {
                 // Load all statuses up front so the left list's value
                 // summaries are correct before any row is focused.

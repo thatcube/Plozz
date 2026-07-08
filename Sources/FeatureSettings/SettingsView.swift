@@ -392,7 +392,7 @@ public struct SettingsView: View {
                     .settingsRowSecondary()
                     .lineLimit(2)
             }
-            navRow("Integrations", icon: "link",
+            navRow("Trackers", icon: "link",
                    value: nil,
                    route: .integrations) {
                 Text("Trakt, Simkl, AniList, MyAnimeList, Last.fm")

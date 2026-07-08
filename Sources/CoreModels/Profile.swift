@@ -342,15 +342,17 @@ extension Profile {
         avatarSymbolCategories.flatMap(\.symbols)
 
     /// Curated, fun **native Apple emoji** offered as profile avatars, grouped
-    /// into browsable 8-wide sections. Rendered as *text* via the system Color
-    /// Emoji font — nothing is bundled or redistributed — so this is legally
-    /// clean on Apple platforms. Personality-forward, from real
-    /// usage/PFP-culture research (💀 🗿 🤡 🦊 👽 🤖 🐉 …).
+    /// into browsable 8-wide sections (each category is exactly one row). Rendered
+    /// as *text* via the system Color Emoji font — nothing is bundled or
+    /// redistributed — so this is legally clean on Apple platforms.
+    /// Personality-forward but tightly themed, from real usage/PFP-culture
+    /// research (💀 🗿 🤡 🦊 👽 🤖 🐉 …).
     ///
-    /// Most entries are standard emoji safe on the app's tvOS floor. A few
-    /// cutting-edge ones (Emoji 16.0, first drawn by tvOS 18.4) are tagged with
-    /// the OS they need so the picker hides them on older systems instead of
-    /// showing an empty "tofu" box — see `AvatarEmoji`.
+    /// Every entry is Unicode Emoji ≤ 15.1, which Apple ships on the app's tvOS
+    /// floor, so none need version gating. The `AvatarEmoji` type still carries a
+    /// `minMajor`/`minMinor` so a future, newer glyph can be offered with an
+    /// automatic fallback (hidden on older systems) rather than showing an empty
+    /// "tofu" box.
     public static let avatarEmojiCategories: [AvatarEmojiCategory] = [
         AvatarEmojiCategory(title: "Faces", emojis: [
             AvatarEmoji("😎"), AvatarEmoji("🤠"), AvatarEmoji("😈"), AvatarEmoji("🤓"),
@@ -361,16 +363,16 @@ extension Profile {
             AvatarEmoji("🧢"), AvatarEmoji("😭"), AvatarEmoji("🫡"), AvatarEmoji("💯")
         ]),
         AvatarEmojiCategory(title: "Cute Animals", emojis: [
-            AvatarEmoji("🐱"), AvatarEmoji("🐶"), AvatarEmoji("🐼"), AvatarEmoji("🐨"),
-            AvatarEmoji("🐰"), AvatarEmoji("🐸"), AvatarEmoji("🐧"), AvatarEmoji("🦔")
+            AvatarEmoji("🐱"), AvatarEmoji("🐶"), AvatarEmoji("🐼"), AvatarEmoji("🦊"),
+            AvatarEmoji("🐰"), AvatarEmoji("🐧"), AvatarEmoji("🦔"), AvatarEmoji("🪿")
         ]),
         AvatarEmojiCategory(title: "Beasts", emojis: [
-            AvatarEmoji("🦊"), AvatarEmoji("🦁"), AvatarEmoji("🐺"), AvatarEmoji("🦅"),
-            AvatarEmoji("🐉"), AvatarEmoji("🦄"), AvatarEmoji("🦈"), AvatarEmoji("🦖")
+            AvatarEmoji("🦁"), AvatarEmoji("🐺"), AvatarEmoji("🦅"), AvatarEmoji("🦈"),
+            AvatarEmoji("🦖"), AvatarEmoji("🐉"), AvatarEmoji("🐦‍🔥"), AvatarEmoji("🫎")
         ]),
         AvatarEmojiCategory(title: "Fantasy & Sci-Fi", emojis: [
             AvatarEmoji("👽"), AvatarEmoji("🤖"), AvatarEmoji("👾"), AvatarEmoji("🧙"),
-            AvatarEmoji("🧛"), AvatarEmoji("🧟"), AvatarEmoji("🧚"), AvatarEmoji("👻")
+            AvatarEmoji("🧛"), AvatarEmoji("🧟"), AvatarEmoji("🦄"), AvatarEmoji("👻")
         ]),
         AvatarEmojiCategory(title: "Food & Drink", emojis: [
             AvatarEmoji("🍕"), AvatarEmoji("🍔"), AvatarEmoji("🍣"), AvatarEmoji("🌮"),
@@ -382,24 +384,19 @@ extension Profile {
         ]),
         AvatarEmojiCategory(title: "Nature & Sky", emojis: [
             AvatarEmoji("🌙"), AvatarEmoji("⭐"), AvatarEmoji("🌈"), AvatarEmoji("🪐"),
-            AvatarEmoji("☀️"), AvatarEmoji("⚡"), AvatarEmoji("🌊"), AvatarEmoji("🍄")
+            AvatarEmoji("☀️"), AvatarEmoji("⚡"), AvatarEmoji("🌊"), AvatarEmoji("🪼")
         ]),
         AvatarEmojiCategory(title: "Adventure", emojis: [
             AvatarEmoji("👑"), AvatarEmoji("💎"), AvatarEmoji("🔮"), AvatarEmoji("🗡️"),
-            AvatarEmoji("🛡️"), AvatarEmoji("🏴‍☠️"), AvatarEmoji("🎭"), AvatarEmoji("🔥")
+            AvatarEmoji("🛡️"), AvatarEmoji("🏴‍☠️"), AvatarEmoji("🔥"), AvatarEmoji("🧭")
         ]),
         AvatarEmojiCategory(title: "Flair", emojis: [
             AvatarEmoji("💅"), AvatarEmoji("🧊"), AvatarEmoji("🫧"), AvatarEmoji("🤙"),
-            AvatarEmoji("💫"), AvatarEmoji("🪄"), AvatarEmoji("🥊"), AvatarEmoji("🌶️")
+            AvatarEmoji("💫"), AvatarEmoji("🪄"), AvatarEmoji("💥"), AvatarEmoji("🎀")
         ]),
-        // Newest picks. The Emoji-16.0 ones (first drawn by tvOS 18.4) are gated
-        // so they simply don't appear on tvOS 18.0–18.3 rather than rendering as
-        // empty boxes; the 15.0/15.1 ones are safe on the floor and always show.
-        AvatarEmojiCategory(title: "Fresh", emojis: [
-            AvatarEmoji("🐦‍🔥"), AvatarEmoji("🪼"), AvatarEmoji("🪿"), AvatarEmoji("🫎"),
-            AvatarEmoji("🩷"), AvatarEmoji("🫩", minMajor: 18, minMinor: 4),
-            AvatarEmoji("🫟", minMajor: 18, minMinor: 4),
-            AvatarEmoji("🪉", minMajor: 18, minMinor: 4)
+        AvatarEmojiCategory(title: "Hearts", emojis: [
+            AvatarEmoji("❤️"), AvatarEmoji("🧡"), AvatarEmoji("💛"), AvatarEmoji("💚"),
+            AvatarEmoji("💙"), AvatarEmoji("💜"), AvatarEmoji("🖤"), AvatarEmoji("🩷")
         ])
     ]
 

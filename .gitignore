@@ -47,4 +47,6 @@ fastlane/report.xml
 fastlane/Preview.html
 fastlane/test_output/
 fastlane/README.md
+# TestFlight "What to Test" notes — local scratch the `beta` lane reads; recomposed per release
+WHAT_TO_TEST.txt
 Frameworks/

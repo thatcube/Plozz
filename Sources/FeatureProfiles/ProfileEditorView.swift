@@ -493,24 +493,28 @@ public struct ProfileEditorView: View {
                 .textContentType(.name)
                 .autocorrectionDisabled()
                 .font(.title3)
-                .foregroundStyle(palette.primaryText)
+                // tvOS gives a focused text field its own bright (near-white)
+                // capsule + focus ring, so on focus the text must go DARK to stay
+                // readable; unfocused it sits on our themed container and uses the
+                // theme's primary text.
+                .foregroundStyle(nameFieldFocused ? Color.black : palette.primaryText)
                 .focused($nameFieldFocused)
                 .padding(.horizontal, 24)
                 .padding(.vertical, 18)
                 .background {
                     // A visible themed input container so the field never
                     // disappears into the page (on OLED's pure black a bare
-                    // TextField shows nothing but the typed text). Fills with the
-                    // theme card surface and picks up an accent ring on focus.
+                    // TextField shows nothing but the typed text). On focus we
+                    // fade it out and let tvOS's own focus capsule + ring be the
+                    // single focus treatment — otherwise our fill/border fights
+                    // the system one (double outline, white-on-white text).
                     RoundedRectangle(cornerRadius: PlozzTheme.Metrics.Radius.control, style: .continuous)
                         .fill(palette.cardSurface)
                         .overlay {
                             RoundedRectangle(cornerRadius: PlozzTheme.Metrics.Radius.control, style: .continuous)
-                                .strokeBorder(
-                                    nameFieldFocused ? palette.accent : palette.cardBorder,
-                                    lineWidth: nameFieldFocused ? 4 : 1
-                                )
+                                .strokeBorder(palette.cardBorder, lineWidth: 1)
                         }
+                        .opacity(nameFieldFocused ? 0 : 1)
                 }
                 .animation(.easeOut(duration: 0.16), value: nameFieldFocused)
         }

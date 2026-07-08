@@ -75,40 +75,15 @@ struct CustomizeHomeDetailView: View {
         ])
     }
 
-    /// The grouped detail: the **Combine libraries** switch, then a "Shared" card
-    /// (global rows) followed by one bordered card per Home-visible library
-    /// (Combine off only).
+    /// The grouped detail: the always-available **Shared** rows card first, then
+    /// the **Show each library's own rows** toggle, then (when that's on) one
+    /// bordered card per Home-visible library. Reads top-to-bottom as base rows →
+    /// optional per-library add-ons.
     @ViewBuilder private var homeRowsDetail: some View {
         VStack(alignment: .leading, spacing: 24) {
-            // The row-composition mode. It only affects the groups below, so it
-            // leads this page rather than sitting in a separate "Layout" section.
-            VStack(alignment: .leading, spacing: 8) {
-                Toggle(isOn: Binding(
-                    get: { homeVisibility.mergeLibrariesOnHome },
-                    set: { merge in
-                        homeVisibility.setMergeLibrariesOnHome(merge)
-                        // Turning combine OFF is a clear "I want per-library rows"
-                        // signal. Seed every applicable row for every Home-visible
-                        // library so the unmerged Home starts full (the user pares
-                        // it back), instead of empty. No-op once they've customized.
-                        if !merge {
-                            homeVisibility.seedLibraryRowsIfNeeded(defaultLibraryRowSeeds)
-                        }
-                    }
-                )) {
-                    Text("Combine libraries")
-                }
-                .toggleStyle(SettingsSwitchToggleStyle())
-                Text("Unified rows across every library, or each library's own rows.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-
             HomeRowsGroupCard(
                 title: "Shared",
-                subtitle: "Combined across every library",
+                subtitle: "Combined across all your libraries",
                 systemIcon: "rectangle.stack.fill"
             ) {
                 SettingsCheckList(
@@ -122,6 +97,34 @@ struct CustomizeHomeDetailView: View {
                 )
             }
 
+            // The per-library add-on. Framed as ADDITIVE ("show each library's own
+            // rows") and bound to `!mergeLibrariesOnHome`, so turning it ON *adds*
+            // the per-library cards below — the intuitive direction. The stored
+            // flag stays `mergeLibrariesOnHome` (on == combined/shared-only).
+            VStack(alignment: .leading, spacing: 8) {
+                Toggle(isOn: Binding(
+                    get: { !homeVisibility.mergeLibrariesOnHome },
+                    set: { showPerLibrary in
+                        homeVisibility.setMergeLibrariesOnHome(!showPerLibrary)
+                        // Turning per-library rows ON is a clear "I want each
+                        // library's own rows" signal. Seed every applicable row for
+                        // every Home-visible library so it starts full (the user
+                        // pares it back), instead of empty. No-op once customized.
+                        if showPerLibrary {
+                            homeVisibility.seedLibraryRowsIfNeeded(defaultLibraryRowSeeds)
+                        }
+                    }
+                )) {
+                    Text("Show each library's own rows")
+                }
+                .toggleStyle(SettingsSwitchToggleStyle())
+                Text("Add each library's own Recently Added and Recommended rows, on top of the Shared rows above.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
             if !homeVisibility.mergeLibrariesOnHome {
                 let libraries = homeVisibleLibraries
                 if libraries.isEmpty {
@@ -129,7 +132,7 @@ struct CustomizeHomeDetailView: View {
                         title: "No libraries shown on Home",
                         systemIcon: "rectangle.on.rectangle.slash"
                     ) {
-                        Text("Enable a library on Your Libraries, or turn Combine libraries back on above.")
+                        Text("Enable a library on Your Libraries to give it its own rows.")
                             .font(.callout)
                             .foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, alignment: .leading)

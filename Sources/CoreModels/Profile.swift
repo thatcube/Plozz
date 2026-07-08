@@ -151,60 +151,124 @@ public struct AvatarSymbolCategory: Hashable, Sendable, Identifiable {
 
 extension Profile {
     /// Curated, tvOS-friendly SF Symbols offered as profile avatars, grouped so
-    /// the picker can present browsable sections. Every symbol here is available
-    /// on tvOS 17 (SF Symbols 5). The very first symbol of the first category is
-    /// the app-wide default avatar (`defaultAvatarSymbols[0]`), so keep
-    /// `person.crop.circle.fill` leading — several call sites rely on it.
+    /// the picker can present browsable sections. **Every symbol here is verified
+    /// available on tvOS 17.0 (SF Symbols 5.0)** against the SDK's
+    /// `name_availability.plist` — a blank tile means a bad name, so don't add a
+    /// symbol without confirming its tvOS 17.0 availability. The very first symbol
+    /// of the first category is the app-wide default avatar
+    /// (`defaultAvatarSymbols[0]`), so keep `person.crop.circle.fill` leading —
+    /// several call sites rely on it. Each category holds exactly 8 symbols so it
+    /// renders as one clean row in the editor.
     public static let avatarSymbolCategories: [AvatarSymbolCategory] = [
         AvatarSymbolCategory(title: "People", symbols: [
             "person.crop.circle.fill",
             "person.fill",
             "person.2.fill",
-            "figure.child.circle.fill",
-            "figure.and.child.holdinghands",
             "figure.walk",
+            "figure.and.child.holdinghands",
             "graduationcap.fill",
-            "eyeglasses"
+            "eyeglasses",
+            "mustache.fill"
         ]),
         AvatarSymbolCategory(title: "Faces & Fun", symbols: [
             "face.smiling.inverse",
-            "star.circle.fill",
-            "heart.circle.fill",
-            "sparkles",
+            "sunglasses.fill",
+            "heart.fill",
             "crown.fill",
+            "sparkles",
             "party.popper.fill",
-            "balloon.fill",
-            "flame.fill"
+            "flame.fill",
+            "wand.and.stars"
         ]),
-        AvatarSymbolCategory(title: "Hobbies", symbols: [
+        AvatarSymbolCategory(title: "Sports & Fitness", symbols: [
+            "figure.run",
+            "figure.basketball",
+            "figure.american.football",
+            "figure.boxing",
+            "figure.golf",
+            "dumbbell.fill",
+            "soccerball",
+            "trophy.fill"
+        ]),
+        AvatarSymbolCategory(title: "Gaming & Tech", symbols: [
             "gamecontroller.fill",
-            "music.note",
-            "headphones",
-            "film.fill",
-            "book.fill",
-            "paintbrush.fill",
-            "camera.fill",
-            "guitars.fill"
-        ]),
-        AvatarSymbolCategory(title: "Tech & Space", symbols: [
+            "dpad.fill",
+            "die.face.6",
+            "puzzlepiece.fill",
+            "keyboard.fill",
+            "cpu",
             "desktopcomputer",
-            "laptopcomputer",
-            "brain.head.profile",
-            "atom",
-            "bolt.fill",
+            "visionpro"
+        ]),
+        AvatarSymbolCategory(title: "Music & Audio", symbols: [
+            "music.note",
+            "music.mic",
+            "guitars.fill",
+            "headphones",
+            "waveform",
+            "radio.fill",
+            "speaker.wave.3.fill",
+            "tuningfork"
+        ]),
+        AvatarSymbolCategory(title: "Movies & TV", symbols: [
+            "film.fill",
+            "tv.fill",
+            "ticket.fill",
+            "theatermasks.fill",
+            "play.rectangle.fill",
+            "rectangle.stack.fill",
+            "star.fill",
+            "camera.fill"
+        ]),
+        AvatarSymbolCategory(title: "Food & Drink", symbols: [
+            "fork.knife",
+            "birthday.cake.fill",
+            "wineglass.fill",
+            "mug.fill",
+            "cup.and.saucer.fill",
+            "carrot.fill",
+            "takeoutbag.and.cup.and.straw.fill",
+            "popcorn.fill"
+        ]),
+        AvatarSymbolCategory(title: "Animals", symbols: [
+            "pawprint.fill",
+            "dog.fill",
+            "cat.fill",
+            "bird.fill",
+            "fish.fill",
+            "hare.fill",
+            "tortoise.fill",
+            "lizard.fill"
+        ]),
+        AvatarSymbolCategory(title: "Nature & Weather", symbols: [
+            "leaf.fill",
+            "tree.fill",
+            "mountain.2.fill",
+            "tent.fill",
+            "cloud.sun.fill",
+            "cloud.bolt.fill",
+            "snowflake",
+            "rainbow"
+        ]),
+        AvatarSymbolCategory(title: "Space & Science", symbols: [
             "moon.stars.fill",
             "sun.max.fill",
+            "atom",
+            "brain.head.profile",
+            "bolt.fill",
+            "laser.burst",
+            "antenna.radiowaves.left.and.right",
             "globe.americas.fill"
         ]),
-        AvatarSymbolCategory(title: "Animals & Nature", symbols: [
-            "pawprint.fill",
-            "leaf.fill",
-            "tortoise.fill",
-            "hare.fill",
-            "ladybug.fill",
-            "ant.fill",
-            "fish.fill",
-            "bird.fill"
+        AvatarSymbolCategory(title: "Travel & Hobbies", symbols: [
+            "airplane",
+            "car.fill",
+            "bicycle",
+            "tram.fill",
+            "map.fill",
+            "binoculars.fill",
+            "paintpalette.fill",
+            "book.fill"
         ])
     ]
 

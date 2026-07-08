@@ -88,6 +88,14 @@ final class ProfileModelTests: XCTestCase {
         }
     }
 
+    func testEveryAvatarCategoryHasEightSymbols() {
+        // The editor lays each category out as one row of 8; a category with a
+        // different count would orphan or wrap icons.
+        for category in Profile.avatarSymbolCategories {
+            XCTAssertEqual(category.symbols.count, 8, "\(category.title) must hold exactly 8 symbols")
+        }
+    }
+
     // MARK: Suggested colour for new profiles
 
     func testSuggestedColorIndexPicksFirstUnused() {

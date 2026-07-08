@@ -3,17 +3,18 @@ import SwiftUI
 import CoreModels
 import CoreUI
 
-/// **Customize Home** — the single place that controls what appears on the Home
+/// **Home Page** — the single place that controls what appears on the Home
 /// screen. Everything Home-only lives here (nothing else does):
-///  - **Combine libraries on Home** switch (the big mode decision — a *switch*).
-///  - **Global rows** — Continue Watching / Watchlist / Recently Added, each a
-///    *checkmark* (pick which appear).
+///  - **Rows on Home** — one entry whose detail leads with the **Combine
+///    libraries** *switch* (the big mode decision), then the row checklists: the
+///    **Global rows** (Continue Watching / Watchlist / Recently Added) and, when
+///    Combine is off, a **per-library rows** card per library (Recently Added,
+///    Recommended). Combine lives with the rows because it only changes what those
+///    row groups show.
 ///  - **Hero** — its on/off *switch* and all its settings (moved in from
 ///    the old Home Display page, since the hero is Home-only).
-///  - **Per-library rows** (only when merging is off) — a *checkmark* per library
-///    row you want promoted onto Home (Recently Added, Recommended rows).
 ///
-/// Control vocabulary (maintainer's rule): a **switch** is a big on/off (merge,
+/// Control vocabulary (maintainer's rule): a **switch** is a big on/off (combine,
 /// hero, whole feature); a **checkmark** is a granular sub-choice (which rows).
 /// Whole-library on/off lives on the separate **Your Libraries** screen.
 struct CustomizeHomeDetailView: View {
@@ -52,18 +53,39 @@ struct CustomizeHomeDetailView: View {
     }
 
     private var sections: [SettingsSplitSection] {
-        [layoutSection, homeRowsSection, heroSection]
+        [homeRowsSection, heroSection]
     }
 
-    // MARK: - Layout (merge switch)
+    // MARK: - Rows on Home (one entry, grouped detail — leads with the Combine switch)
 
-    private var layoutSection: SettingsSplitSection {
-        SettingsSplitSection(id: "layout", header: "Layout", rows: [
+    /// A SINGLE master row whose detail leads with the **Combine libraries** switch
+    /// (the row-composition mode) and then groups every Home row into bordered
+    /// containers: the "Shared" cross-library rows first, then — when Combine is
+    /// off — one card per Home-visible library, each headed by its name + provider
+    /// logo. Combine lives here (not a separate section) because it only changes
+    /// what these row groups show.
+    private var homeRowsSection: SettingsSplitSection {
+        SettingsSplitSection(id: "home-rows", header: "Rows", rows: [
             SettingsSplitRow(
-                id: "merge-libraries",
-                title: "Combine Libraries",
-                description: "On: every library's content is combined into unified rows (Continue Watching, Recently Added, and one Libraries row). Off: pick which of each library's own rows appear on Home below — you still browse any library from its tile.",
+                id: "home-rows-all",
+                title: "Rows on Home",
+                description: homeVisibility.mergeLibrariesOnHome
+                    ? "Combine every library into unified rows and pick which appear, or turn Combine off to also choose each library's own rows."
+                    : "Pick which rows appear on Home — the shared rows at the top, then each library's own rows, grouped below.",
             ) {
+                homeRowsDetail
+            }
+        ])
+    }
+
+    /// The grouped detail: the **Combine libraries** switch, then a "Shared" card
+    /// (global rows) followed by one bordered card per Home-visible library
+    /// (Combine off only).
+    @ViewBuilder private var homeRowsDetail: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            // The row-composition mode. It only affects the groups below, so it
+            // leads this page rather than sitting in a separate "Layout" section.
+            VStack(alignment: .leading, spacing: 8) {
                 Toggle(isOn: Binding(
                     get: { homeVisibility.mergeLibrariesOnHome },
                     set: { merge in
@@ -80,35 +102,15 @@ struct CustomizeHomeDetailView: View {
                     Text("Combine libraries on Home")
                 }
                 .toggleStyle(SettingsSwitchToggleStyle())
+                Text(homeVisibility.mergeLibrariesOnHome
+                    ? "Every library's content is combined into unified rows. Turn off to also choose each library's own rows below."
+                    : "Each library contributes its own rows below. Turn on to combine everything into unified rows instead.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
-        ])
-    }
 
-    // MARK: - Rows on Home (one entry, grouped detail)
-
-    /// A SINGLE master row whose detail groups every Home row into bordered
-    /// containers: the "Shared" cross-library rows first, then — when merging is
-    /// off — one card per Home-visible library, each headed by its name + provider
-    /// logo. This replaces the old scattered layout (a global "Rows on Home" row
-    /// plus a separate one repeated for every library), which read as disjointed.
-    private var homeRowsSection: SettingsSplitSection {
-        SettingsSplitSection(id: "home-rows", header: "Rows", rows: [
-            SettingsSplitRow(
-                id: "home-rows-all",
-                title: "Rows on Home",
-                description: homeVisibility.mergeLibrariesOnHome
-                    ? "Pick which of the combined rows appear on Home. Turn off Combine Libraries (under Layout) to also choose each library's own rows."
-                    : "Pick which rows appear on Home — the shared rows at the top, then each library's own rows, grouped below.",
-            ) {
-                homeRowsDetail
-            }
-        ])
-    }
-
-    /// The grouped detail: a "Shared" card (global rows) followed by one bordered
-    /// card per Home-visible library (unmerged only).
-    @ViewBuilder private var homeRowsDetail: some View {
-        VStack(alignment: .leading, spacing: 24) {
             HomeRowsGroupCard(
                 title: "Shared",
                 subtitle: "Combined across every library",
@@ -132,7 +134,7 @@ struct CustomizeHomeDetailView: View {
                         title: "No libraries shown on Home",
                         systemIcon: "rectangle.on.rectangle.slash"
                     ) {
-                        Text("Enable a library on Your Libraries, or turn Combine Libraries back on.")
+                        Text("Enable a library on Your Libraries, or turn Combine libraries back on above.")
                             .font(.callout)
                             .foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, alignment: .leading)

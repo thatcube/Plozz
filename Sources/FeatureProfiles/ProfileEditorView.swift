@@ -642,17 +642,26 @@ public struct ProfileEditorView: View {
     // MARK: Colors
 
     private var colorSection: some View {
-        let columns = [GridItem(.adaptive(minimum: 44, maximum: 54), spacing: 14)]
+        // Fixed 8-wide grid so rows are always even (32 colours = 4 clean rows),
+        // rather than an adaptive grid that leaves a ragged last row.
+        let columns = Array(repeating: GridItem(.flexible(), spacing: 12), count: 8)
         let emojiMode = avatarMode == .emoji
         return VStack(alignment: .leading, spacing: 16) {
             sectionHeader("Color")
-            LazyVGrid(columns: columns, spacing: 14) {
-                // Emoji avatars default to a neutral disc (colours often clash
-                // with a multicolour emoji), so Emoji mode leads with a Neutral
-                // swatch. Symbols always need a colour, so they skip it.
-                if emojiMode {
+            // Emoji avatars default to a neutral disc (colours often clash with a
+            // multicolour emoji), so Emoji mode offers a distinct "No color"
+            // option on its own line — kept out of the grid so the colour rows
+            // stay even.
+            if emojiMode {
+                HStack(spacing: 12) {
                     neutralSwatch
+                    Text("No color")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(palette.secondaryText)
+                    Spacer(minLength: 0)
                 }
+            }
+            LazyVGrid(columns: columns, spacing: 12) {
                 ForEach(0..<ProfileTileColor.palette.count, id: \.self) { index in
                     colorSwatch(index, emojiMode: emojiMode)
                 }

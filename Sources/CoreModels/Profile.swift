@@ -356,7 +356,7 @@ extension Profile {
             AvatarEmoji("😎"), AvatarEmoji("🤠"), AvatarEmoji("😈"), AvatarEmoji("🤓"),
             AvatarEmoji("🥴"), AvatarEmoji("🫠"), AvatarEmoji("🙃"), AvatarEmoji("🤨")
         ]),
-        AvatarEmojiCategory(title: "Meme Lords", emojis: [
+        AvatarEmojiCategory(title: "Reactions", emojis: [
             AvatarEmoji("💀"), AvatarEmoji("🗿"), AvatarEmoji("🤡"), AvatarEmoji("👀"),
             AvatarEmoji("🧢"), AvatarEmoji("😭"), AvatarEmoji("🫡"), AvatarEmoji("💯")
         ]),
@@ -364,7 +364,7 @@ extension Profile {
             AvatarEmoji("🐱"), AvatarEmoji("🐶"), AvatarEmoji("🐼"), AvatarEmoji("🐨"),
             AvatarEmoji("🐰"), AvatarEmoji("🐸"), AvatarEmoji("🐧"), AvatarEmoji("🦔")
         ]),
-        AvatarEmojiCategory(title: "Wild & Mythical", emojis: [
+        AvatarEmojiCategory(title: "Beasts", emojis: [
             AvatarEmoji("🦊"), AvatarEmoji("🦁"), AvatarEmoji("🐺"), AvatarEmoji("🦅"),
             AvatarEmoji("🐉"), AvatarEmoji("🦄"), AvatarEmoji("🦈"), AvatarEmoji("🦖")
         ]),
@@ -384,18 +384,18 @@ extension Profile {
             AvatarEmoji("🌙"), AvatarEmoji("⭐"), AvatarEmoji("🌈"), AvatarEmoji("🪐"),
             AvatarEmoji("☀️"), AvatarEmoji("⚡"), AvatarEmoji("🌊"), AvatarEmoji("🍄")
         ]),
-        AvatarEmojiCategory(title: "Icons & Power", emojis: [
+        AvatarEmojiCategory(title: "Adventure", emojis: [
             AvatarEmoji("👑"), AvatarEmoji("💎"), AvatarEmoji("🔮"), AvatarEmoji("🗡️"),
             AvatarEmoji("🛡️"), AvatarEmoji("🏴‍☠️"), AvatarEmoji("🎭"), AvatarEmoji("🔥")
         ]),
-        AvatarEmojiCategory(title: "Vibes", emojis: [
+        AvatarEmojiCategory(title: "Flair", emojis: [
             AvatarEmoji("💅"), AvatarEmoji("🧊"), AvatarEmoji("🫧"), AvatarEmoji("🤙"),
             AvatarEmoji("💫"), AvatarEmoji("🪄"), AvatarEmoji("🥊"), AvatarEmoji("🌶️")
         ]),
         // Newest picks. The Emoji-16.0 ones (first drawn by tvOS 18.4) are gated
         // so they simply don't appear on tvOS 18.0–18.3 rather than rendering as
         // empty boxes; the 15.0/15.1 ones are safe on the floor and always show.
-        AvatarEmojiCategory(title: "New & Cool", emojis: [
+        AvatarEmojiCategory(title: "Fresh", emojis: [
             AvatarEmoji("🐦‍🔥"), AvatarEmoji("🪼"), AvatarEmoji("🪿"), AvatarEmoji("🫎"),
             AvatarEmoji("🩷"), AvatarEmoji("🫩", minMajor: 18, minMinor: 4),
             AvatarEmoji("🫟", minMajor: 18, minMinor: 4),
@@ -415,7 +415,7 @@ extension Profile {
     /// Palette indices for `colorIndex`. Resolved to concrete colors in the UI
     /// layer so `CoreModels` stays Foundation-only. Keep in sync with
     /// `ProfileTileColor.palette` (the UI palette has this many colours).
-    public static let tileColorCount = 24
+    public static let tileColorCount = 32
 
     /// A clamped, valid color index for `colorIndex`.
     public var clampedColorIndex: Int {

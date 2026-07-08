@@ -771,18 +771,51 @@ public struct ProfileEditorView: View {
             let columns = [GridItem(.adaptive(minimum: 150, maximum: 184), spacing: 26)]
             LazyVGrid(columns: columns, spacing: 26) {
                 ForEach(photoCandidates) { candidate in
-                    Button {
-                        avatarImageURL = candidate.imageURL.absoluteString
-                    } label: {
-                        PhotoTileLabel(
-                            candidate: candidate,
-                            isSelected: avatarImageURL == candidate.imageURL.absoluteString,
-                            palette: palette
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    .focusEffectDisabled()
+                    photoTile(candidate)
                 }
+            }
+        }
+    }
+
+    /// A borrowable-photo tile: a round photo styled exactly like the symbol /
+    /// emoji / colour tiles (the shared `CircularSelectionButtonStyle`, which
+    /// owns focus and draws our single circular halo — no stray `.plain` tvOS
+    /// platter behind it), with the source labelled beneath the button.
+    private func photoTile(_ candidate: ProfilePhotoCandidate) -> some View {
+        let isSelected = avatarImageURL == candidate.imageURL.absoluteString
+        let diameter: CGFloat = 128
+        return VStack(spacing: 10) {
+            Button {
+                avatarImageURL = candidate.imageURL.absoluteString
+            } label: {
+                ZStack {
+                    Circle().fill(palette.cardSurface)
+                    FallbackAsyncImage(urls: [candidate.imageURL], variant: .posterCard) {
+                        Image(systemName: "person.fill")
+                            .font(.system(size: 40))
+                            .foregroundStyle(palette.secondaryText)
+                    }
+                    .frame(width: diameter, height: diameter)
+                    .clipShape(Circle())
+                }
+                .frame(width: diameter, height: diameter)
+                .overlay { Circle().strokeBorder(palette.cardBorder, lineWidth: 1) }
+                .overlay(alignment: .bottomTrailing) { selectionBadge(isSelected) }
+            }
+            .buttonStyle(CircularSelectionButtonStyle(diameter: diameter))
+            .focusEffectDisabled()
+            .accessibilityLabel(Text("Photo from \(candidate.detailLabel)"))
+            .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+
+            VStack(spacing: 2) {
+                Text(candidate.providerLabel)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(palette.primaryText)
+                Text(candidate.detailLabel)
+                    .font(.caption2)
+                    .foregroundStyle(palette.secondaryText)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
             }
         }
     }
@@ -884,64 +917,6 @@ private struct CircularSelectionButtonStyle: ButtonStyle {
                 )
                 .scaleEffect(configuration.isPressed ? 0.96 : 1)
                 .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
-        }
-    }
-}
-
-/// A borrowable-photo tile: the round photo wearing the shared focus halo (read
-/// off the enclosing button's `\.isFocused`) with the source labelled beneath.
-/// Only the circle gets the halo — the caption stays put — so focus reads as a
-/// clean ring around the photo, matching the symbol/colour tiles.
-private struct PhotoTileLabel: View {
-    let candidate: ProfilePhotoCandidate
-    let isSelected: Bool
-    let palette: ThemePalette
-    @Environment(\.isFocused) private var isFocused
-
-    private let diameter: CGFloat = 128
-
-    var body: some View {
-        VStack(spacing: 10) {
-            ZStack {
-                Circle().fill(palette.cardSurface)
-                FallbackAsyncImage(urls: [candidate.imageURL], variant: .posterCard) {
-                    Image(systemName: "person.fill")
-                        .font(.system(size: 40))
-                        .foregroundStyle(palette.secondaryText)
-                }
-                .frame(width: diameter, height: diameter)
-                .clipShape(Circle())
-            }
-            .frame(width: diameter, height: diameter)
-            .overlay { Circle().strokeBorder(palette.cardBorder, lineWidth: 1) }
-            // Same accent check badge the symbol/colour tiles use, so selection
-            // reads identically across all three.
-            .overlay(alignment: .bottomTrailing) {
-                if isSelected {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 34, weight: .bold))
-                        .symbolRenderingMode(.palette)
-                        .foregroundStyle(.white, palette.accent)
-                        .background(Circle().fill(.white).padding(5))
-                        .offset(x: 4, y: 4)
-                }
-            }
-            .plozzFocusHalo(
-                cornerRadius: diameter / 2,
-                focusScale: PlozzTheme.Metrics.mediumFocusedCardScale,
-                isFocused: isFocused
-            )
-
-            VStack(spacing: 2) {
-                Text(candidate.providerLabel)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(palette.primaryText)
-                Text(candidate.detailLabel)
-                    .font(.caption2)
-                    .foregroundStyle(palette.secondaryText)
-                    .multilineTextAlignment(.center)
-                    .lineLimit(2)
-            }
         }
     }
 }

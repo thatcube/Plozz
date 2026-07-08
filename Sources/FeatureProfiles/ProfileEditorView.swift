@@ -168,7 +168,13 @@ public struct ProfileEditorView: View {
             AppBackground(palette: palette).ignoresSafeArea()
 
             HStack(alignment: .top, spacing: 48) {
+                // Marking each column a focus SECTION makes Left/Right move
+                // between columns as a whole, instead of the focus engine
+                // hunting for the geometrically-nearest control. Without this,
+                // once you scroll deep into the symbol wall a Left press finds
+                // no colour swatch at that Y and focus just won't cross over.
                 previewColumn
+                    .focusSection()
                 // Full-height hairline separating the fixed preview/colour
                 // column from the scrolling picker.
                 Rectangle()
@@ -176,6 +182,7 @@ public struct ProfileEditorView: View {
                     .frame(width: 1)
                     .frame(maxHeight: .infinity)
                 pickerColumn
+                    .focusSection()
             }
             .padding(.horizontal, 72)
             .padding(.vertical, 24)

@@ -125,6 +125,7 @@ public struct ProfileEditorView: View {
     @State private var photoCandidates: [ProfilePhotoCandidate] = []
     @State private var showDiscardConfirmation = false
     @State private var showDeleteConfirmation = false
+    @FocusState private var nameFieldFocused: Bool
 
     private enum AvatarMode: Hashable { case symbol, emoji, photo }
 
@@ -286,6 +287,12 @@ public struct ProfileEditorView: View {
             .padding(.vertical, 24)
         }
         .frame(minWidth: 1720, minHeight: 960)
+        // A sheet doesn't inherit the colour scheme the app pushes down at the
+        // root, so semantic colours (.primary/.secondary, materials, the default
+        // TextField text) would render for the *system* scheme — invisible when
+        // it disagrees with the editor's own themed background. Re-assert the
+        // active theme's scheme here so everything resolves correctly.
+        .environment(\.colorScheme, palette.isLight ? .light : .dark)
         .task { await loadPhotoCandidates() }
         // Live auto-save (existing profiles): push every cosmetic change through.
         .onChange(of: currentDraft) { _, draft in
@@ -486,6 +493,26 @@ public struct ProfileEditorView: View {
                 .textContentType(.name)
                 .autocorrectionDisabled()
                 .font(.title3)
+                .foregroundStyle(palette.primaryText)
+                .focused($nameFieldFocused)
+                .padding(.horizontal, 24)
+                .padding(.vertical, 18)
+                .background {
+                    // A visible themed input container so the field never
+                    // disappears into the page (on OLED's pure black a bare
+                    // TextField shows nothing but the typed text). Fills with the
+                    // theme card surface and picks up an accent ring on focus.
+                    RoundedRectangle(cornerRadius: PlozzTheme.Metrics.Radius.control, style: .continuous)
+                        .fill(palette.cardSurface)
+                        .overlay {
+                            RoundedRectangle(cornerRadius: PlozzTheme.Metrics.Radius.control, style: .continuous)
+                                .strokeBorder(
+                                    nameFieldFocused ? palette.accent : palette.cardBorder,
+                                    lineWidth: nameFieldFocused ? 4 : 1
+                                )
+                        }
+                }
+                .animation(.easeOut(duration: 0.16), value: nameFieldFocused)
         }
     }
 
@@ -855,20 +882,24 @@ public struct ProfileEditorView: View {
 
     // MARK: Section headers
 
-    /// L1 section label — the app's shared uppercase settings section-header
-    /// style, so "Name / Avatar / Color / Delete" read as peers of the section
-    /// headers everywhere else in Settings and sit clearly below the page title.
+    /// L1 section label — uppercase, tracked, and secondary (the shared settings
+    /// section-header idiom) but with an explicit theme-aware colour so it stays
+    /// legible in every theme even inside a sheet (a bare `.secondary` resolves
+    /// to the wrong scheme here).
     private func sectionHeader(_ text: String) -> some View {
-        Text(text).settingsSectionHeader()
+        Text(text.uppercased())
+            .font(.subheadline.weight(.bold))
+            .tracking(1.8)
+            .foregroundStyle(palette.secondaryText)
     }
 
     /// L2 sub-group label (the symbol categories). Sentence-case and a step
     /// smaller than an L1 section header so it nests *under* "Avatar" instead of
-    /// competing with it.
+    /// competing with it. Theme-aware colour for the same sheet reason.
     private func categoryHeader(_ text: String) -> some View {
         Text(text)
             .font(.footnote.weight(.semibold))
-            .foregroundStyle(.secondary)
+            .foregroundStyle(palette.secondaryText)
     }
 
     private func loadPhotoCandidates() async {

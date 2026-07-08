@@ -69,9 +69,7 @@ struct CustomizeHomeDetailView: View {
             SettingsSplitRow(
                 id: "home-rows-all",
                 title: "Rows on Home",
-                description: homeVisibility.mergeLibrariesOnHome
-                    ? "Combine every library into unified rows and pick which appear, or turn Combine off to also choose each library's own rows."
-                    : "Pick which rows appear on Home — the shared rows at the top, then each library's own rows, grouped below.",
+                description: "Which rows appear on Home.",
             ) {
                 homeRowsDetail
             }
@@ -99,12 +97,10 @@ struct CustomizeHomeDetailView: View {
                         }
                     }
                 )) {
-                    Text("Combine libraries on Home")
+                    Text("Combine libraries")
                 }
                 .toggleStyle(SettingsSwitchToggleStyle())
-                Text(homeVisibility.mergeLibrariesOnHome
-                    ? "Every library's content is combined into unified rows. Turn off to also choose each library's own rows below."
-                    : "Each library contributes its own rows below. Turn on to combine everything into unified rows instead.")
+                Text("Unified rows across every library, or each library's own rows.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

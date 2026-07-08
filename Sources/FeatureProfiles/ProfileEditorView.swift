@@ -339,17 +339,39 @@ public struct ProfileEditorView: View {
     // MARK: Symbols
 
     private var symbolCategoriesSection: some View {
-        // Fixed 8-up grid: every category holds 8 symbols, so each renders as
-        // exactly one clean row — no orphan 1-or-2-icon line from an adaptive
-        // grid that only fit 7.
-        let columns = Array(repeating: GridItem(.flexible(), spacing: 18), count: 8)
-        return VStack(alignment: .leading, spacing: 28) {
+        VStack(alignment: .leading, spacing: 28) {
             ForEach(Profile.avatarSymbolCategories) { category in
                 VStack(alignment: .leading, spacing: 16) {
                     categoryHeader(category.title)
-                    LazyVGrid(columns: columns, spacing: 18) {
-                        ForEach(category.symbols, id: \.self) { symbol in
-                            symbolTile(symbol)
+                    symbolRows(for: category.symbols)
+                }
+            }
+        }
+    }
+
+    /// Renders a category's symbols as eager rows of 8. Deliberately NOT a
+    /// `LazyVGrid`: a lazy grid rebuilds cells as they enter/leave the viewport,
+    /// so a row would blank out ("disappear then reappear") as it scrolled near
+    /// the dialog's top edge. A plain `VStack`/`HStack` keeps every tile built,
+    /// and fixing 8 per row means each 8-symbol category is exactly one clean
+    /// line.
+    @ViewBuilder
+    private func symbolRows(for symbols: [String]) -> some View {
+        let perRow = 8
+        let rows = stride(from: 0, to: symbols.count, by: perRow).map {
+            Array(symbols[$0..<min($0 + perRow, symbols.count)])
+        }
+        VStack(spacing: 18) {
+            ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                HStack(spacing: 18) {
+                    ForEach(row, id: \.self) { symbol in
+                        symbolTile(symbol).frame(maxWidth: .infinity)
+                    }
+                    // Hold column width on a partial last row so its tiles keep
+                    // the same size as full rows instead of stretching.
+                    if row.count < perRow {
+                        ForEach(0..<(perRow - row.count), id: \.self) { _ in
+                            Color.clear.frame(maxWidth: .infinity)
                         }
                     }
                 }

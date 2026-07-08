@@ -164,8 +164,7 @@ extension Profile {
             "figure.and.child.holdinghands",
             "figure.walk",
             "graduationcap.fill",
-            "eyeglasses",
-            "mustache.fill"
+            "eyeglasses"
         ]),
         AvatarSymbolCategory(title: "Faces & Fun", symbols: [
             "face.smiling.inverse",

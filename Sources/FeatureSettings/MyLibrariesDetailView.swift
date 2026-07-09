@@ -3,46 +3,56 @@ import SwiftUI
 import CoreModels
 import CoreUI
 
-/// Settings → ‹Profile› → **Your Libraries**.
+/// Settings → ‹Profile› → **Your Servers & Libraries**.
 ///
 /// The per-profile half of the "mirror model". *This Apple TV › Servers*
 /// manages the household's sign-ins (the global inventory); this screen is
-/// personal. For each server THIS profile watches, it picks:
+/// personal. Every signed-in server appears here in one list, each with a
+/// **master on/off toggle** for this profile. When a server is on, its card
+/// expands to pick:
 ///  - **who it is** on that server ("Watching as" — a Plex Home user, or one of
 ///    the server's Jellyfin sign-ins), and
-///  - **which libraries** appear on its Home.
+///  - **which libraries** are on, as checkmark children of the master toggle.
 ///
-/// It shows only the profile's *subset* of the inventory — "Add a server" pulls
-/// in the ones it isn't watching yet. Nothing here is global: identity is a
-/// per-profile binding, "watching / not watching" is the profile's
-/// active-account set, and library visibility is profile-namespaced.
+/// Nothing here is global: the master toggle is the profile's active-account set
+/// (never a household sign-out), identity is a per-profile binding, and library
+/// visibility is profile-namespaced. "Sign in to another server" is the only
+/// action that touches the household — it adds a brand-new server for everyone.
 ///
-/// (The type + `.myLibraries` route keep their earlier names; the user-facing
-/// name is "Your Libraries".)
+/// (The type + `.myLibraries` route keep their earlier names.)
 struct MyLibrariesDetailView: View {
     let context: SettingsContext
 
     private var allGroups: [ServerAccountGroup] { serverGroups(from: context.accounts) }
-    private var watchedGroups: [ServerAccountGroup] { allGroups.filter(isWatching) }
-    private var availableGroups: [ServerAccountGroup] { allGroups.filter { !isWatching($0) } }
 
     private func isWatching(_ group: ServerAccountGroup) -> Bool {
         group.accounts.contains { context.isAccountIncludedInActiveProfile($0.id) }
     }
 
+    /// The server's master on/off for this profile: on ⇒ watch it (include a
+    /// sign-in), off ⇒ stop watching (drop all its sign-ins from the profile).
+    /// The server itself is never removed here — that's a household sign-out on
+    /// This Apple TV › Servers.
+    private func masterBinding(_ group: ServerAccountGroup) -> Binding<Bool> {
+        Binding(
+            get: { isWatching(group) },
+            set: { $0 ? startWatching(group) : stopWatching(group) }
+        )
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
+                SettingsPageHeader(
+                    "Your Servers & Libraries",
+                    subtitle: "Choose which servers and libraries this profile sees — and who you're signed in as on each."
+                )
                 if allGroups.isEmpty {
                     emptyInventoryState
-                } else if watchedGroups.isEmpty {
-                    notWatchingState
-                    addServerSection
                 } else {
-                    purposePanel
-                    ForEach(watchedGroups, id: \.serverKey) { serverCard($0) }
-                    addServerSection
+                    ForEach(allGroups, id: \.serverKey) { serverCard($0) }
                 }
+                addServerSection
             }
             .frame(maxWidth: PlozzTheme.Metrics.settingsContentMaxWidth, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .center)
@@ -53,31 +63,7 @@ struct MyLibrariesDetailView: View {
         .task { await context.reloadLibraries() }
     }
 
-    // MARK: - What this page does
-
-    /// One obvious explainer at the top instead of a caption repeated under every
-    /// toggle. Makes clear this screen is identity + whole-library on/off — NOT
-    /// Home-row customization (that's Customize Home).
-    private var purposePanel: some View {
-        SettingsPanel {
-            HStack(alignment: .top, spacing: 16) {
-                Image(systemName: "info.circle.fill")
-                    .font(.system(size: 26, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Show or hide libraries and change who you watch as")
-                        .font(.headline.weight(.semibold))
-                    Text("Turn a library off to hide it from this profile everywhere. Choose who you watch as for each library.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer(minLength: 0)
-            }
-        }
-    }
-
-    // MARK: - Empty states
+    // MARK: - Empty state
 
     private var emptyInventoryState: some View {
         SettingsPanel(
@@ -87,65 +73,61 @@ struct MyLibrariesDetailView: View {
         }
     }
 
-    private var notWatchingState: some View {
-        SettingsPanel(
-            footer: "You're signed in to servers, but this profile isn't watching any yet. Add one below."
-        ) {
-            Text("Not watching any servers.").font(.headline)
-        }
-    }
-
     // MARK: - Per-server card
 
+    /// One server, toggled on/off for this profile by its header switch. When on,
+    /// the card expands to who you watch as + its libraries; when off it collapses
+    /// to just the header, staying in the list so nothing reads as "removed".
     private func serverCard(_ group: ServerAccountGroup) -> some View {
         SettingsPanel {
             VStack(alignment: .leading, spacing: 18) {
-                HStack(spacing: 16) {
-                    ProviderBrandMark(provider: group.providerKind, size: 60, showsBackground: false).frame(width: 60)
-                    Text(group.serverName).font(.title3.weight(.semibold))
-                    Spacer()
+                // The whole header row is the master toggle: brand + server name on
+                // the left, the On/Off switch on the right.
+                Toggle(isOn: masterBinding(group)) {
+                    HStack(spacing: 16) {
+                        ProviderBrandMark(provider: group.providerKind, size: 48, showsBackground: false)
+                            .frame(width: 48)
+                        Text(group.serverName)
+                    }
                 }
+                .toggleStyle(SettingsSwitchToggleStyle())
 
-                watchingAs(group)
+                if isWatching(group) {
+                    // A media share has no watcher identity, so it skips "Watching
+                    // as" (and the divider that would head it) and shows libraries.
+                    if group.providerKind != .mediaShare {
+                        Divider()
+                        watchingAs(group)
+                    }
 
-                Divider()
+                    Divider()
 
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Libraries")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    librarySection(for: group)
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Libraries")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        librarySection(for: group)
+                    }
                 }
-
-                Divider()
-
-                Button(role: .destructive) {
-                    stopWatching(group)
-                } label: {
-                    Label("Stop watching on this profile", systemImage: "minus.circle")
-                        .font(.callout.weight(.medium))
-                }
-                .buttonStyle(SettingsFocusButtonStyle())
             }
         }
     }
 
     // MARK: - Watching as (identity)
 
+    /// Who this profile is on the server. Shown only while the server is on and
+    /// only when it has a watcher identity (Plex Home users / Jellyfin sign-ins) —
+    /// the card gates media shares out before calling this.
     @ViewBuilder
     private func watchingAs(_ group: ServerAccountGroup) -> some View {
-        // A media share has no watcher identity (no per-user login / Home users),
-        // so the "Watching as" row would show a meaningless "guest" avatar. Skip it.
-        if group.providerKind != .mediaShare {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Watching as")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                if group.providerKind == .plex {
-                    ForEach(group.accounts) { plexIdentityLink($0) }
-                } else {
-                    jellyfinIdentity(group)
-                }
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Watching as")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            if group.providerKind == .plex {
+                ForEach(group.accounts) { plexIdentityLink($0) }
+            } else {
+                jellyfinIdentity(group)
             }
         }
     }
@@ -216,32 +198,12 @@ struct MyLibrariesDetailView: View {
 
     private var addServerSection: some View {
         SettingsPanel(
-            footer: "Add a server this profile isn't watching yet. Signing in a brand-new server makes it available to every profile."
+            footer: "Signing in a new server makes it available to every profile on this Apple TV. Turn servers you're already signed in to on or off above."
         ) {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Add a server")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                ForEach(availableGroups, id: \.serverKey) { group in
-                    Button {
-                        startWatching(group)
-                    } label: {
-                        HStack(spacing: 14) {
-                            ProviderBrandMark(provider: group.providerKind, size: 46, showsBackground: false).frame(width: 46)
-                            Text(group.serverName).font(.callout.weight(.medium))
-                            Spacer()
-                            Label("Add", systemImage: "plus.circle").labelStyle(.titleAndIcon)
-                        }
-                        .padding(.vertical, 8).padding(.horizontal, 10)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(SettingsFocusButtonStyle())
-                }
-                Button(action: context.onAddAccount) {
-                    Label("Sign in to another server", systemImage: "plus.circle")
-                }
-                .buttonStyle(SettingsFocusButtonStyle())
+            Button(action: context.onAddAccount) {
+                Label("Sign in to another server", systemImage: "plus.circle")
             }
+            .buttonStyle(SettingsFocusButtonStyle())
         }
     }
 
@@ -286,19 +248,29 @@ struct MyLibrariesDetailView: View {
         }
     }
 
-    /// One library's whole-library **Enabled** switch (off ⇒ hidden everywhere:
-    /// Home, Search, Music, browse). The screen-level `purposePanel` explains what
-    /// on/off means, so the row itself is just the switch — no repeated caption.
+    /// One library as a **checkmark** child of its server's master toggle: checked
+    /// ⇒ on (shown everywhere — Home, Search, Music, browse), unchecked ⇒ hidden
+    /// from this profile. Checkmarks (not switches) read as "which of this server's
+    /// libraries count," reinforcing the server → libraries hierarchy.
     private func libraryRow(_ aggregated: AggregatedLibrary) -> some View {
         let key = aggregated.key
-        return Toggle(isOn: Binding(
-            get: { context.homeVisibility.isEnabled(key) },
-            set: { context.homeVisibility.setEnabled($0, for: key) }
-        )) {
-            Text(aggregated.library.title)
+        let enabled = context.homeVisibility.isEnabled(key)
+        return Button {
+            context.homeVisibility.setEnabled(!enabled, for: key)
+        } label: {
+            HStack(spacing: 14) {
+                Image(systemName: enabled ? "checkmark.circle.fill" : "circle")
+                    .font(.title3)
+                    .foregroundStyle(enabled ? Color.green : Color.secondary)
+                Text(aggregated.library.title)
+                    .font(.callout.weight(.medium))
+                Spacer()
+            }
+            .padding(.vertical, 8).padding(.horizontal, 10)
+            .contentShape(Rectangle())
         }
-        .toggleStyle(SettingsSwitchToggleStyle())
-        .padding(.bottom, 2)
+        .buttonStyle(SettingsFocusButtonStyle())
+        .accessibilityValue(enabled ? "On" : "Off")
     }
 
     private func libraries(for group: ServerAccountGroup, in all: [AggregatedLibrary]) -> [AggregatedLibrary] {

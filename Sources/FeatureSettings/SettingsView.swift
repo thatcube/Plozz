@@ -373,7 +373,7 @@ public struct SettingsView: View {
             // Per-profile "Your Libraries": who you watch as + what shows on THIS
             // profile's Home. The personal mirror of This Apple TV › Servers.
             // Its second line glances the household's server sign-ins.
-            navRow("Your Libraries", icon: "rectangle.stack",
+            navRow("Your Servers & Libraries", icon: "rectangle.stack",
                    value: nil,
                    route: .myLibraries) {
                 signedInStrip
@@ -656,27 +656,36 @@ public struct SettingsView: View {
         .padding(28)
     }
 
-    /// Compact, read-only glance of the household's server sign-ins, rendered as
-    /// the SECOND line of the "Your Libraries" row. The row title labels it, so no
-    /// caption is needed here. Uses `.settingsRowSecondary()` so it inverts with
-    /// the row on focus. Capped to three entries with a trailing "+N more" so a
-    /// busy household stays on one line.
+    /// Compact, read-only glance of the servers **this profile is watching**,
+    /// rendered as the SECOND line of the "Your Servers & Libraries" row. It
+    /// mirrors the page's master toggles, so turning a server off inside drops it
+    /// here too — the entry point is a truthful preview, not a household dump.
+    /// Server-forward (provider logo + server name) to match the redesigned cards;
+    /// capped to three with a trailing "+N more" so a busy profile stays on one
+    /// line. Shows a prompt when the profile watches nothing yet.
     @ViewBuilder
     private var signedInStrip: some View {
-        if !accounts.isEmpty {
+        if accounts.isEmpty {
+            Text("No servers yet")
+                .font(.footnote)
+                .settingsRowSecondary()
+        } else if watchedServerGroups.isEmpty {
+            Text("Choose what to watch")
+                .font(.footnote)
+                .settingsRowSecondary()
+        } else {
             HStack(alignment: .center, spacing: 8) {
-                let visible = Array(accounts.prefix(3))
-                let overflow = max(0, accounts.count - visible.count)
-                ForEach(Array(visible.enumerated()), id: \.element.id) { idx, account in
+                let visible = Array(watchedServerGroups.prefix(3))
+                let overflow = max(0, watchedServerGroups.count - visible.count)
+                ForEach(Array(visible.enumerated()), id: \.element.serverKey) { idx, group in
                     if idx > 0 {
                         Text("·")
                             .font(.subheadline.weight(.bold))
                             .settingsRowSecondary()
                     }
                     HStack(spacing: 6) {
-                        ProviderIcon(provider: account.server.provider, size: 24)
-                        AccountAvatar(name: account.userName, imageURL: account.avatarURL, size: 20)
-                        Text(signedInLabel(for: account))
+                        ProviderIcon(provider: group.providerKind, size: 24)
+                        Text(group.serverName)
                             .font(.footnote.weight(.medium))
                             .settingsRowSecondary()
                             .lineLimit(1)
@@ -692,11 +701,16 @@ public struct SettingsView: View {
         }
     }
 
-    private func signedInLabel(for account: Account) -> String {
-        let name = account.userName.trimmingCharacters(in: .whitespaces)
-        let providerName = account.server.provider.displayName
-        if name.isEmpty { return providerName }
-        return "\(name)'s \(providerName)"
+    /// Servers the active profile is watching, grouped like the detail page. When
+    /// profiles are on, "watching" = at least one of the server's sign-ins is in
+    /// the profile's active set; with profiles off the household watches every
+    /// server it's signed in to (mirrors ``activeProfileServerCount``).
+    private var watchedServerGroups: [ServerAccountGroup] {
+        serverGroups(from: accounts).filter { group in
+            profilesEnabled
+                ? group.accounts.contains { isAccountIncludedInActiveProfile($0.id) }
+                : true
+        }
     }
 
     private var soloHeader: some View {

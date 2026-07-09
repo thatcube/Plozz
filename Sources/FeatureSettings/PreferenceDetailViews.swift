@@ -101,10 +101,7 @@ struct AppearanceDetailView: View {
         @Bindable var transparency = transparency
         VStack(alignment: .leading, spacing: SettingsMetrics.sectionSpacing) {
             CompactThemePicker(selection: $theme.theme)
-            VStack(alignment: .leading, spacing: 14) {
-                Text("Liquid glass")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
+            SettingsDetailGroup(title: "Liquid Glass") {
                 DescribedSegmentedPicker(
                     options: TransparencyPreference.allCases,
                     selection: $transparency.preference,
@@ -117,22 +114,16 @@ struct AppearanceDetailView: View {
 
     /// The two media-card controls in one pane — style (framed vs poster) and the
     /// watched indicator — since both are "how a card looks". Shorter swatches so
-    /// the two preview rows sit together without heavy scrolling; a light caption
-    /// distinguishes each.
+    /// the two preview rows sit together without heavy scrolling; each headed by a
+    /// shared uppercase section header.
     @ViewBuilder private var cardsControls: some View {
         @Bindable var cardStyle = cardStyle
         @Bindable var watchStatusIndicator = watchStatusIndicator
         VStack(alignment: .leading, spacing: SettingsMetrics.sectionSpacing) {
-            VStack(alignment: .leading, spacing: 14) {
-                Text("Style")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
+            SettingsDetailGroup(title: "Style") {
                 CompactCardStylePicker(selection: $cardStyle.style, swatchHeight: 150)
             }
-            VStack(alignment: .leading, spacing: 14) {
-                Text("Watched indicator")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
+            SettingsDetailGroup(title: "Watched Indicator") {
                 CompactWatchIndicatorPicker(selection: $watchStatusIndicator.indicator, swatchHeight: 150)
             }
         }

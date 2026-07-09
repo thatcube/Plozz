@@ -493,7 +493,7 @@ struct PlaybackDetailView: View {
                 VStack(alignment: .leading, spacing: 24) {
                     Toggle("Show Up Next card", isOn: $playback.settings.showUpNextCard)
                     if playback.settings.showUpNextCard {
-                        LabeledSettingRow("Before the end", subtitle: "When credits can't be detected") {
+                        LabeledSettingRow("Time before the end", subtitle: "When credits can't be detected") {
                             SettingsStepper(
                                 options: PlaybackSettings.upNextLeadSecondsOptions,
                                 selection: $playback.settings.upNextLeadSeconds,

@@ -94,7 +94,13 @@ public struct PlozzGlassCardModifier: ViewModifier {
                 // brings its own tint + shadow. Skipped for `glassAtRest: false`.
                 .overlay {
                     if !isFocused && glassAtRest {
-                        shape.strokeBorder(palette.cardOpaqueBorder, lineWidth: 1)
+                        // Soften the edge on dark/OLED — the light hairline reads
+                        // stronger against a near-black page than the same value does
+                        // on a light one, so trim it there while leaving Light as-is.
+                        shape.strokeBorder(
+                            palette.cardOpaqueBorder.opacity(palette.isLight ? 1 : 0.55),
+                            lineWidth: 1
+                        )
                     }
                 }
                 .clipShape(shape)

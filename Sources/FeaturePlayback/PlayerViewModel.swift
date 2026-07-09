@@ -515,6 +515,7 @@ public final class PlayerViewModel {
             // Jellyfin (non-idempotent) next-episode prefetch fires once the
             // hand-off window opens; idempotent providers prefetch eagerly instead.
             self.maybeStartWindowedNextPrefetch()
+            self.logUpNextStateIfNearEnd()
             Task { await self.report(event: .progress, isPaused: false) }
         }
         engine.onFailure = { [weak self] error in
@@ -661,6 +662,23 @@ public final class PlayerViewModel {
             || (duration > 0 && remaining > 0 && remaining <= Self.windowedNextPrefetchLeadTime)
         guard windowOpen else { return }
         startNextEpisodePrefetch(trigger: "windowed")
+    }
+
+    /// Emits the Up Next card decision state on the progress cadence when we're
+    /// near the end (or the duration is unknown, which itself blocks the
+    /// time-based card). Diagnostic only (gated + throttled) — pinpoints why the
+    /// card does/doesn't appear on device (e.g. an SMB stream with duration 0).
+    private var lastUpNextDiagAt = Date.distantPast
+    private func logUpNextStateIfNearEnd() {
+        guard HandoffDiagnostics.isEnabled, nextEpisode != nil else { return }
+        let cDur = controls.duration
+        let cCur = controls.currentSeconds
+        let remaining = cDur - cCur
+        let durUnknown = !(cDur.isFinite && cDur > 0)
+        guard durUnknown || (remaining > 0 && remaining <= 60) else { return }
+        guard Date().timeIntervalSince(lastUpNextDiagAt) >= 8 else { return }
+        lastUpNextDiagAt = Date()
+        HandoffDiagnostics.emit("upnext-state cDur=\(Int(cDur)) cCur=\(Int(cCur)) eDur=\(Int(engine.duration)) remaining=\(Int(remaining)) card=\(controls.upNext != nil) show=\(playbackSettings.showUpNextCard) marker=\(controls.hasCreditsMarker) nearEndByTime=\(controls.isNearEndByTime) active=\(controls.upNextActive) presenting=\(controls.isPresentingUpNext) lead=\(Int(controls.upNextLeadSeconds))")
     }
 
     /// Hands the prefetched next-episode resolution to the incoming player and

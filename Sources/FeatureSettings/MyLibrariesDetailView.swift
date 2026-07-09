@@ -241,36 +241,22 @@ struct MyLibrariesDetailView: View {
             if libs.isEmpty {
                 Text("No libraries found on this server.").font(.footnote).foregroundStyle(.secondary)
             } else {
-                ForEach(libs) { aggregated in
-                    libraryRow(aggregated)
-                }
+                // The shared multi-select checklist (same `SettingsCheckableRow` +
+                // trailing checkmark as Customize Home / Theme / Display Size), so
+                // libraries read as consistent checkmark children of the master
+                // toggle — no one-off control. `bordered: false`: it already sits
+                // inside the server card under the "Libraries" caption.
+                SettingsCheckList(
+                    options: libs,
+                    title: { $0.library.title },
+                    bordered: false,
+                    isChecked: { context.homeVisibility.isEnabled($0.key) },
+                    onToggle: { lib in
+                        context.homeVisibility.setEnabled(!context.homeVisibility.isEnabled(lib.key), for: lib.key)
+                    }
+                )
             }
         }
-    }
-
-    /// One library as a **checkmark** child of its server's master toggle: checked
-    /// ⇒ on (shown everywhere — Home, Search, Music, browse), unchecked ⇒ hidden
-    /// from this profile. Checkmarks (not switches) read as "which of this server's
-    /// libraries count," reinforcing the server → libraries hierarchy.
-    private func libraryRow(_ aggregated: AggregatedLibrary) -> some View {
-        let key = aggregated.key
-        let enabled = context.homeVisibility.isEnabled(key)
-        return Button {
-            context.homeVisibility.setEnabled(!enabled, for: key)
-        } label: {
-            HStack(spacing: 14) {
-                Image(systemName: enabled ? "checkmark.circle.fill" : "circle")
-                    .font(.title3)
-                    .foregroundStyle(enabled ? Color.green : Color.secondary)
-                Text(aggregated.library.title)
-                    .font(.callout.weight(.medium))
-                Spacer()
-            }
-            .padding(.vertical, 8).padding(.horizontal, 10)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(SettingsFocusButtonStyle())
-        .accessibilityValue(enabled ? "On" : "Off")
     }
 
     private func libraries(for group: ServerAccountGroup, in all: [AggregatedLibrary]) -> [AggregatedLibrary] {

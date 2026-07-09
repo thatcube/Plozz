@@ -3,6 +3,13 @@ import SwiftUI
 import CoreModels
 import CoreUI
 
+/// Shared label-column width for every row in the Circadian pane (Location /
+/// Turns on-off / Fade / Darkness / Warmth / Preview), so their controls all line
+/// up in one column. Narrower than `LabeledSettingRow`'s 240 default because these
+/// labels are short — the wide default left a big, disconnected gap before each
+/// control.
+private let circadianRowLabelWidth: CGFloat = 160
+
 /// Night Shift: a warm, f.lux-style screen tint that fades in after sunset (or on
 /// a manual schedule) and out before sunrise. tvOS can't warm the system display,
 /// so this multiplies the app's own content (player included) via the window
@@ -68,7 +75,7 @@ private struct CircadianDetail: View {
                 // Fade governs only the on/off transition, so it's irrelevant when
                 // the tint is always on.
                 if model.settings.scheduleMode != .alwaysOn {
-                    LabeledSettingRow("Fade", subtitle: "How gradually the tint ramps on and off.") {
+                    LabeledSettingRow("Fade", labelWidth: circadianRowLabelWidth) {
                         SettingsStepper(
                             options: NightShiftSettingsModel.fadeOptions,
                             selection: Binding(
@@ -80,7 +87,7 @@ private struct CircadianDetail: View {
                     }
                 }
 
-                LabeledSettingRow("Darkness") {
+                LabeledSettingRow("Darkness", labelWidth: circadianRowLabelWidth) {
                     SettingsStepper(
                         options: NightShiftDimness.allCases,
                         selection: $model.settings.dimness,
@@ -89,7 +96,7 @@ private struct CircadianDetail: View {
                     )
                 }
 
-                LabeledSettingRow("Warmth") {
+                LabeledSettingRow("Warmth", labelWidth: circadianRowLabelWidth) {
                     SettingsStepper(
                         options: NightShiftWarmth.allCases,
                         selection: $model.settings.warmth,
@@ -98,7 +105,7 @@ private struct CircadianDetail: View {
                     )
                 }
 
-                LabeledSettingRow("Preview") {
+                LabeledSettingRow("Preview", labelWidth: circadianRowLabelWidth) {
                     HStack(spacing: 28) {
                         DayNightDial(
                             intensity: model.currentIntensity,
@@ -192,15 +199,15 @@ private struct NightShiftScheduleControl: View {
         case .off, .alwaysOn:
             EmptyView()
         case .auto:
-            LabeledSettingRow("Location", trailingAlignment: .trailing) { locationMenu }
+            LabeledSettingRow("Location", labelWidth: circadianRowLabelWidth) { locationMenu }
         case .manual:
             VStack(alignment: .leading, spacing: 20) {
-                LabeledSettingRow("Turns on") {
+                LabeledSettingRow("Turns on", labelWidth: circadianRowLabelWidth) {
                     timeStepper(minutes: model.settings.manualOnMinutes) {
                         model.settings.manualOnMinutes = $0
                     }
                 }
-                LabeledSettingRow("Turns off") {
+                LabeledSettingRow("Turns off", labelWidth: circadianRowLabelWidth) {
                     timeStepper(minutes: model.settings.manualOffMinutes) {
                         model.settings.manualOffMinutes = $0
                     }

@@ -72,7 +72,10 @@ public struct SkeletonCardView: View {
                 .padding([.horizontal, .bottom], metrics.posterCaptionInset)
         }
         .padding(metrics.cardInset)
-        .plozzGlassCard(cornerRadius: metrics.posterCardCornerRadius, isFocused: false)
+        // Match PosterCardView.posterCard: no live glass at rest (see that card's
+        // note — a grid of live-glass tiles storms the render server). Skeletons
+        // are never focused, so they draw the glass-free resting surface.
+        .plozzGlassCard(cornerRadius: metrics.posterCardCornerRadius, isFocused: false, glassAtRest: false)
         .shimmering()
     }
 
@@ -91,7 +94,9 @@ public struct SkeletonCardView: View {
                 .frame(width: metrics.landscapeWidth, alignment: .leading)
         }
         .padding(metrics.cardInset)
-        .plozzGlassCard(cornerRadius: metrics.landscapeCardCornerRadius, isFocused: false)
+        // Match PosterCardView.landscapeCard: glass-free at rest to avoid the
+        // render-server storm from a row of live-glass tiles.
+        .plozzGlassCard(cornerRadius: metrics.landscapeCardCornerRadius, isFocused: false, glassAtRest: false)
         .shimmering()
     }
 

@@ -161,7 +161,7 @@ struct SpoilerSectionsBuilder {
             SettingsSplitRow(
                 id: "spoilers",
                 title: "Spoilers",
-                description: "Keep unwatched episodes and ratings from spoiling you while you browse.",
+                description: "Hide unwatched episodes and ratings until you've seen them.",
             ) {
                 VStack(alignment: .leading, spacing: SettingsMetrics.sectionSpacing) {
                     SettingsRevealSection(
@@ -173,13 +173,8 @@ struct SpoilerSectionsBuilder {
                         }
                     }
 
-                    SettingsDetailGroup(
-                        title: "Ratings",
-                        description: "Keeps IMDb, Rotten Tomatoes and other scores hidden on a movie or episode until you've finished it, so the ratings don't bias you beforehand. They appear once it's marked watched."
-                    ) {
-                        Toggle("Hide ratings until watched", isOn: $spoilers.settings.hideRatingsUntilWatched)
-                            .toggleStyle(SettingsSwitchToggleStyle())
-                    }
+                    Toggle("Hide ratings until watched", isOn: $spoilers.settings.hideRatingsUntilWatched)
+                        .toggleStyle(SettingsSwitchToggleStyle())
                 }
             }
         ])]

@@ -303,8 +303,14 @@ struct DetailHeroView: View {
         // and can be richer than the version's flattened fields.
         if let selected = versions.first(where: { $0.id == selectedVersionID }) ?? versions.first,
            versions.count > 1 || selected.sourceMetadata != nil {
-            let versionBadges = selected.technicalBadges
-            if !versionBadges.isEmpty { return versionBadges }
+            // Reflect ONLY the selected version's own facts. If it carries none of
+            // its own (e.g. an SMB file whose header hasn't been probed yet), show
+            // nothing rather than falling back to `item.technicalBadges` — that's
+            // the merged/representative set borrowed from a DIFFERENT source or
+            // version of this title (a Plex/Jellyfin copy), which mislabels the
+            // selected file (e.g. a Dolby Vision file showing the 1080p SDR copy's
+            // "SDR"). Better to show nothing than the wrong thing.
+            return selected.technicalBadges
         }
         let ownTech = item.technicalBadges
         return ownTech.isEmpty ? fallbackTechnicalBadges : ownTech

@@ -202,19 +202,29 @@ public struct ShareProvider: MediaProvider {
         // Indexed library grids page from the catalog; series/season containers are
         // small (delegate to `children`); the raw file tree lists the directory.
         if let library = ShareCatalogID.catalogLibrary(forID: containerID) {
+            let t0 = Date()
             let catalog = await catalog
             let items: [MediaItem]
+            let total: Int
             switch library {
             case .movies:
                 items = await catalog.movies(offset: page.startIndex, limit: page.limit)
+                total = await catalog.movieCount()
             case .tv, .anime:
                 items = await catalog.series(in: library, offset: page.startIndex, limit: page.limit)
+                total = await catalog.seriesCount(in: library)
             }
             let stamped = await stampWatchState(items)
-            // A short page means the end; otherwise report an open-ended total so
-            // the grid keeps paging (no cheap exact total available here).
-            let total = page.startIndex + stamped.count + (stamped.count < page.limit ? 0 : page.limit)
-            return MediaPage(items: stamped, startIndex: page.startIndex, totalCount: total)
+            if ProcessInfo.processInfo.environment["PLZXPAGE"] == "1" {
+                HandoffDiagnostics.emit("SMBPAGE lib=\(library.rawValue) start=\(page.startIndex) limit=\(page.limit) count=\(stamped.count) total=\(total) took=\(Int(Date().timeIntervalSince(t0) * 1000))ms")
+            }
+            // Report the EXACT catalog count (not an open-ended estimate) so the grid
+            // sizes its sparse store once and can jump/random-access any page — the
+            // same experience as Plex (totalSize) / Jellyfin (TotalRecordCount).
+            // Guard against a page landing beyond a stale/mid-scan count so the grid
+            // still sees at least what we returned.
+            let reportedTotal = max(total, page.startIndex + stamped.count)
+            return MediaPage(items: stamped, startIndex: page.startIndex, totalCount: reportedTotal)
         }
         if ShareCatalogID.isSeries(containerID) || ShareCatalogID.isSeason(containerID) {
             let all = try await children(of: containerID)

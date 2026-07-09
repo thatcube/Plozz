@@ -717,6 +717,20 @@ actor ShareCatalogStore {
         return out
     }
 
+    /// Exact number of movies in the Movies library, for the grid's `totalCount`
+    /// so it can size its sparse backing store once and random-access any page
+    /// (jump-to-bottom), instead of paging sequentially against an open-ended
+    /// estimate. Cheap: COUNT over the (library, kind, sort_title) index.
+    func movieCount() -> Int {
+        count(where: "library='movies' AND kind='movie'")
+    }
+
+    /// Exact number of distinct series in a TV/Anime library, for the grid's
+    /// `totalCount`. Zero for the movies library (which has no series).
+    func seriesCount(in library: CatalogLibrary) -> Int {
+        library == .movies ? 0 : distinctSeriesCount(library: library)
+    }
+
     /// Season container items for a series (distinct season numbers; a `NULL`
     /// season is treated as season 1).
     func seasons(seriesKey: String) -> [MediaItem] {

@@ -56,22 +56,27 @@ public struct PlozzGlassCardModifier: ViewModifier {
                 .clipShape(shape)
         } else if Self.avoidsLiquidGlassCards {
             // tvOS 27 Liquid Glass crash workaround — see `avoidsLiquidGlassCards`.
-            // A stable `.ultraThinMaterial` keeps the translucent "glass" look
-            // without the crashing `.glassEffect`. Focus adds the same faint
-            // lightness wash the real glass path uses, leaning on the card's scale +
-            // shadow (applied by the card views) for the rest of the focus cue.
-            content
-                .background(.ultraThinMaterial, in: shape)
-                .overlay {
-                    shape.fill(isFocused ? palette.focusedCardGlassTint : Color.clear)
-                }
-                .overlay {
-                    shape.strokeBorder(
-                        isFocused ? Color.clear : palette.cardOpaqueBorder,
-                        lineWidth: 1
-                    )
-                }
-                .clipShape(shape)
+            // The crash needs a whole grid of live-glass tiles at once, so we split
+            // by focus: the single focused card (one live-glass layer, under the
+            // crash threshold) uses REAL Liquid Glass, while the resting grid falls
+            // back to the stable frosted `.ultraThinMaterial`.
+            if isFocused, #available(tvOS 26.0, *) {
+                content
+                    .glassEffect(.regular.tint(palette.focusedCardGlassTint), in: .rect(cornerRadius: cornerRadius))
+                    .background {
+                        // Light mode: opaque backing so the focus drop shadow can't
+                        // bleed through the glass (matches the tvOS 26 path).
+                        if palette.isLight { shape.fill(palette.cardOpaqueSurface) }
+                    }
+                    .clipShape(shape)
+            } else {
+                content
+                    .background(.ultraThinMaterial, in: shape)
+                    .overlay {
+                        shape.strokeBorder(palette.cardOpaqueBorder, lineWidth: 1)
+                    }
+                    .clipShape(shape)
+            }
         } else if #available(tvOS 26.0, *) {
             // Native Liquid Glass, matching Twozz 1:1: focus picks up a faint
             // theme-aware tint (dark/OLED brighten, light darkens) blended into

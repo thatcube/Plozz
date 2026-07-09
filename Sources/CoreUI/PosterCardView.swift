@@ -154,13 +154,7 @@ public struct PosterCardView: View {
             .frame(width: size.width, alignment: .leading)
         }
         .padding(metrics.cardInset)
-        // `glassAtRest: false` — like the poster card. A live `.glassEffect` on a
-        // focusable card, composited per-tile across a row/grid, storms the render
-        // server and hard-freezes the whole screen (the same combination the Music
-        // GenreCard avoids). Landscape rows (Continue Watching, Libraries, episode
-        // strips) render many of these at once, so resting cards must skip live
-        // glass; only the single focused card composites it.
-        .plozzGlassCard(cornerRadius: metrics.landscapeCardCornerRadius, isFocused: isFocused, glassAtRest: false)
+        .plozzGlassCard(cornerRadius: metrics.landscapeCardCornerRadius, isFocused: isFocused)
         .focusableCard(isFocused: $isFocused, cornerRadius: metrics.landscapeCardCornerRadius, action: action)
         .plozzCardRasterize(reduceTransparency: reduceTransparency)
         .shadow(color: .black.opacity(isFocused ? 0.36 : 0.15), radius: isFocused ? 20 : 8, y: isFocused ? 10 : 4)

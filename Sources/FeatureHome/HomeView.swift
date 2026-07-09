@@ -725,10 +725,7 @@ private struct LibraryCardView: View {
             .frame(width: metrics.landscapeWidth, alignment: .leading)
         }
         .padding(metrics.cardInset)
-        // `glassAtRest: false` — see PosterCardView.landscapeCard: a live
-        // `.glassEffect` on every focusable tile in a row storms the render server
-        // and freezes the screen. Only the focused tile composites glass.
-        .plozzGlassCard(cornerRadius: metrics.landscapeCardCornerRadius, isFocused: isFocused, glassAtRest: false)
+        .plozzGlassCard(cornerRadius: metrics.landscapeCardCornerRadius, isFocused: isFocused)
         .focusableCard(isFocused: $isFocused, cornerRadius: metrics.landscapeCardCornerRadius, action: action)
         .plozzCardRasterize(reduceTransparency: reduceTransparency)
         .shadow(color: .black.opacity(isFocused ? 0.36 : 0.15), radius: isFocused ? 20 : 8, y: isFocused ? 10 : 4)

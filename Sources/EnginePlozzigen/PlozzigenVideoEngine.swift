@@ -133,9 +133,11 @@ public final class PlozzigenVideoEngine: VideoEngine {
         guard trace || handoff else { return }
         EngineLog.handler = { line in
             if trace { PlaybackTrace.note("AE " + line) }
-            // Forward AetherEngine's load() phase timings to the hand-off telemetry
-            // stdout channel so time-to-first-frame is attributable on device.
-            if handoff, line.contains("[TTFF]") {
+            // Forward AetherEngine's load() phase timings AND display-criteria
+            // apply/reset lines to the hand-off telemetry stdout channel, so
+            // time-to-first-frame and the panel HDR/DV enter/exit are visible on
+            // device (e.g. confirm the panel resets to SDR when a title ends).
+            if handoff, line.contains("[TTFF]") || line.contains("[DisplayCriteria]") {
                 HandoffDiagnostics.emit("aether " + line)
             }
         }

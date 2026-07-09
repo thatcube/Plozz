@@ -2075,6 +2075,7 @@ public final class PlayerViewModel {
     /// resume point, then tear the engine down.
     public func stop(preserveDisplayMode: Bool = false) async {
         guard !didStop else { return }
+        HandoffDiagnostics.emit("stop preserveDisplayMode=\(preserveDisplayMode) contentMode=\(contentDisplayMode) (false ⇒ panel should reset to SDR)")
         PlaybackTrace.note("stop() teardown curr=\(String(format: "%.2f", engine.currentTime)) shouldDismiss=\(shouldDismiss) pendingNext=\(pendingNextEpisode != nil) isSeeking=\(controls.isSeeking)")
         didStop = true
         prefetchTask?.cancel()

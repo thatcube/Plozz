@@ -197,6 +197,13 @@ public protocol VideoEngine: AnyObject {
     /// vend it here so dropped frames / FPS aren't blank. Defaulted to `nil`.
     var liveTelemetry: EngineLiveTelemetry? { get }
 
+    /// Stream facts the engine read from its OWN probe (real dynamic range, audio
+    /// codec/layout, coded dimensions). Authoritative for sources with no provider
+    /// metadata — chiefly SMB shares, where there is no server to describe the
+    /// file. `nil` until the engine has probed, or for engines that don't expose
+    /// it (native/`AVPlayer`, whose facts come from provider metadata + the item).
+    var probedSourceFacts: EngineProbedSourceFacts? { get }
+
     // MARK: Tracks
 
     /// Selectable audio tracks for the active stream.
@@ -314,6 +321,10 @@ public extension VideoEngine {
     /// Default: native (`AVPlayer`) engines have no separate telemetry — the
     /// sampler reads the access log. Engines without an `AVPlayer` override this.
     var liveTelemetry: EngineLiveTelemetry? { nil }
+
+    /// Default: engines whose stream facts come from provider metadata (native)
+    /// don't publish an independent probe. Plozzigen overrides this.
+    var probedSourceFacts: EngineProbedSourceFacts? { nil }
 
     /// Default: a generic label for engines that don't name themselves.
     var displayName: String { "Player" }

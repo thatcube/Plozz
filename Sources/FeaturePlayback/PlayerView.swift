@@ -266,7 +266,8 @@ public struct PlayerView: View {
             sourceProvider: viewModel.sourceProvider,
             serverName: viewModel.serverName,
             streamURL: viewModel.diagnosticsStreamURL,
-            engineTelemetry: { viewModel.engineLiveTelemetry }
+            engineTelemetry: { viewModel.engineLiveTelemetry },
+            probedFacts: { viewModel.engineProbedFacts }
         )
     }
 }

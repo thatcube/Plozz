@@ -2153,6 +2153,11 @@ public final class PlayerViewModel {
     /// Plozzigen engines vend it so those fields aren't blank.
     public var engineLiveTelemetry: EngineLiveTelemetry? { engine.liveTelemetry }
 
+    /// Engine-probed source facts (real dynamic range / audio / dimensions),
+    /// authoritative for sources with no provider metadata (SMB). `nil` on the
+    /// native engine and until the engine has probed.
+    public var engineProbedFacts: EngineProbedSourceFacts? { engine.probedSourceFacts }
+
     /// A stable identity for the active player instance, so views can restart
     /// player-bound work (e.g. the diagnostics sampler) when the transcode
     /// fallback swaps in a new player.

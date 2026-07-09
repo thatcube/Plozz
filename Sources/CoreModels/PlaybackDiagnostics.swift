@@ -427,7 +427,7 @@ public extension PlaybackDiagnostics {
 
     /// Best display name for an audio track, preferring a descriptive spatial
     /// profile (Dolby Atmos, DTS:X) over the bare codec name.
-    static func friendlyAudioName(codec: String?, profile: String?) -> String? {
+    static public func friendlyAudioName(codec: String?, profile: String?) -> String? {
         if let profile = profile?.trimmingCharacters(in: .whitespaces), !profile.isEmpty {
             let lower = profile.lowercased()
             if lower.contains("atmos") { return "Dolby Atmos" }

@@ -32,6 +32,10 @@ public final class PlaybackDiagnosticsSampler {
     /// Live engine telemetry source (dropped frames / FPS / bitrate). Used to fill
     /// the per-tick metrics on engines with no `AVPlayer` access log (Plozzigen).
     private var engineTelemetry: (@MainActor () -> EngineLiveTelemetry?)?
+    /// Engine-probed source facts (real range/audio/dimensions). Fills the
+    /// diagnostics for sources with no provider metadata (SMB) where the engine's
+    /// own demux is the only source of truth.
+    private var probedFacts: (@MainActor () -> EngineProbedSourceFacts?)?
     private var timerTask: Task<Void, Never>?
 
     /// Last AVPlayer access-log stall count we logged, so a `remux-stall:` marker
@@ -74,11 +78,13 @@ public final class PlaybackDiagnosticsSampler {
         sourceProvider: ProviderKind? = nil,
         serverName: String? = nil,
         streamURL: URL? = nil,
-        engineTelemetry: (@MainActor () -> EngineLiveTelemetry?)? = nil
+        engineTelemetry: (@MainActor () -> EngineLiveTelemetry?)? = nil,
+        probedFacts: (@MainActor () -> EngineProbedSourceFacts?)? = nil
     ) {
         stop()
         self.player = player
         self.engineTelemetry = engineTelemetry
+        self.probedFacts = probedFacts
         self.lastLoggedStallCount = 0
         var base = PlaybackDiagnostics.base(
             from: metadata,
@@ -114,6 +120,7 @@ public final class PlaybackDiagnosticsSampler {
         timerTask = nil
         player = nil
         engineTelemetry = nil
+        probedFacts = nil
     }
 
     // MARK: Dynamic (per-tick) sampling
@@ -209,6 +216,31 @@ public final class PlaybackDiagnosticsSampler {
             }
         }
 
+        // Fill the authoritative stream facts from the engine's OWN probe when the
+        // provider gave us none (SMB shares have no server metadata). Only fill
+        // where the baseline is still empty/unknown, so real provider facts always
+        // win — and we assert a range ONLY when the engine actually knows one
+        // (better to show nothing than a defaulted "SDR").
+        if let f = probedFacts?() {
+            if diagnostics.hdr == .unknown, let r = f.range {
+                diagnostics.hdr = Self.hdrFormat(for: r)
+                if diagnostics.videoRangeType == nil {
+                    diagnostics.videoRangeType = Self.rangeToken(for: r)
+                }
+            }
+            if diagnostics.resolution == nil, let w = f.videoWidth, let h = f.videoHeight, w > 0, h > 0 {
+                diagnostics.resolution = .init(width: w, height: h)
+            }
+            if diagnostics.audioCodec == nil, let codec = f.audioCodec {
+                diagnostics.audioCodec = PlaybackDiagnostics.friendlyAudioName(
+                    codec: codec, profile: f.audioIsAtmos ? "atmos" : nil
+                )
+            }
+            if diagnostics.audioChannels == nil, let ch = f.audioChannels, ch > 0 {
+                diagnostics.audioChannels = ch
+            }
+        }
+
         // System metrics refresh on every engine so a leak is visible on the
         // Plozzigen (HDR/DoVi) path too.
         Self.fillSystemMetrics(into: &diagnostics)
@@ -223,6 +255,27 @@ public final class PlaybackDiagnosticsSampler {
         diagnostics.thermalState = currentThermalLevel()
         diagnostics.liveViewModels = PlaybackInstrumentation.count(.viewModel)
         diagnostics.liveNativeEngines = PlaybackInstrumentation.count(.nativeEngine)
+    }
+
+    private static func hdrFormat(for range: EngineProbedSourceFacts.DynamicRange) -> PlaybackDiagnostics.HDRFormat {
+        switch range {
+        case .sdr: return .sdr
+        case .hlg: return .hlg
+        case .hdr10, .hdr10Plus: return .hdr10
+        case .dolbyVision: return .dolbyVision
+        }
+    }
+
+    /// Provider-agnostic range token, matching the `videoRangeType` strings the
+    /// rest of the pipeline uses (Jellyfin's vocabulary).
+    private static func rangeToken(for range: EngineProbedSourceFacts.DynamicRange) -> String {
+        switch range {
+        case .sdr: return "SDR"
+        case .hlg: return "HLG"
+        case .hdr10: return "HDR10"
+        case .hdr10Plus: return "HDR10+"
+        case .dolbyVision: return "DOVI"
+        }
     }
 
     private static func currentThermalLevel() -> PlaybackDiagnostics.ThermalLevel {

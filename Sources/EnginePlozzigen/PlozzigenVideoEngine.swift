@@ -68,6 +68,37 @@ public final class PlozzigenVideoEngine: VideoEngine {
         )
     }
 
+    /// Surface AetherEngine's own probe (real dynamic range, audio, dimensions)
+    /// so SMB shares — which carry no provider metadata — still show accurate
+    /// diagnostics. Gated on the probe actually having run (`sourceVideoWidth > 0`)
+    /// so we publish nothing until it's known, rather than the `.sdr` default of
+    /// AetherEngine's `sourceVideoFormat` before a source is opened.
+    public var probedSourceFacts: EngineProbedSourceFacts? {
+        guard engine.sourceVideoWidth > 0 else { return nil }
+        let range: EngineProbedSourceFacts.DynamicRange = switch engine.sourceVideoFormat {
+        case .sdr: .sdr
+        case .hdr10: .hdr10
+        case .hdr10Plus: .hdr10Plus
+        case .hlg: .hlg
+        case .dolbyVision: .dolbyVision
+        }
+        let active = engine.activeAudioTrackIndex.flatMap { idx in
+            engine.audioTracks.first { $0.id == idx }
+        } ?? engine.audioTracks.first { $0.isDefault } ?? engine.audioTracks.first
+        let w = Int(engine.sourceVideoWidth)
+        let h = Int(engine.sourceVideoHeight)
+        return EngineProbedSourceFacts(
+            range: range,
+            videoWidth: w > 0 ? w : nil,
+            videoHeight: h > 0 ? h : nil,
+            videoDecoder: engine.activeVideoDecoder,
+            audioCodec: active?.codec,
+            audioChannels: active.map(\.channels).flatMap { $0 > 0 ? $0 : nil },
+            audioIsAtmos: active?.isAtmos ?? false,
+            audioDecoder: engine.activeAudioDecoder
+        )
+    }
+
     public var preventsDisplaySleep: Bool {
         engine.state == .playing
     }

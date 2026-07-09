@@ -23,6 +23,19 @@ public struct PlozzGlassCardModifier: ViewModifier {
         self.glassAtRest = glassAtRest
     }
 
+    /// tvOS 27 shipped a Liquid Glass regression: a native `.glassEffect` on a
+    /// **focusable card inside a scrollable / lazy container** hard-crashes the
+    /// render server the instant the card gains focus. (Single, non-scrolling
+    /// glass views — panels, HUDs, the odd standalone tile — are unaffected, which
+    /// is why the crash only hit the dense media grids.) Until Apple fixes it,
+    /// cards on that OS render a translucent surface with the *stable*
+    /// `.ultraThinMaterial` subsystem instead of native Liquid Glass — glassy, but
+    /// crash-free. tvOS 26 keeps real Liquid Glass.
+    static var avoidsLiquidGlassCards: Bool {
+        if #available(tvOS 27.0, *) { return true }
+        return false
+    }
+
     public func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
 
@@ -33,6 +46,24 @@ public struct PlozzGlassCardModifier: ViewModifier {
             content
                 .background {
                     shape.fill(isFocused ? palette.liftSurface : palette.cardOpaqueSurface)
+                }
+                .overlay {
+                    shape.strokeBorder(
+                        isFocused ? Color.clear : palette.cardOpaqueBorder,
+                        lineWidth: 1
+                    )
+                }
+                .clipShape(shape)
+        } else if Self.avoidsLiquidGlassCards {
+            // tvOS 27 Liquid Glass crash workaround — see `avoidsLiquidGlassCards`.
+            // A stable `.ultraThinMaterial` keeps the translucent "glass" look
+            // without the crashing `.glassEffect`. Focus adds the same faint
+            // lightness wash the real glass path uses, leaning on the card's scale +
+            // shadow (applied by the card views) for the rest of the focus cue.
+            content
+                .background(.ultraThinMaterial, in: shape)
+                .overlay {
+                    shape.fill(isFocused ? palette.focusedCardGlassTint : Color.clear)
                 }
                 .overlay {
                     shape.strokeBorder(

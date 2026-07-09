@@ -11,10 +11,11 @@ import CoreUI
 /// Select → advance to the next episode (`actions.playUpNext`, an in-place VM
 /// swap, never a seek-to-end, so the next episode never flashes the series
 /// page). Menu / swipe-up → dismiss without advancing (`actions.dismissUpNext`).
-/// The card only renders when `model.upNextActive` is true — a next episode is
-/// queued and the live position is inside the (seek-respecting) credits window —
-/// so it never collides with the Skip Credits button (they share this slot and
-/// are mutually exclusive by construction).
+/// The card only renders when `model.isPresentingUpNext` is true and no menu is
+/// open (`!controlBarVisible`) — i.e. the container has actually presented it
+/// during the (seek-respecting) credits window with a next episode queued — so
+/// it never draws over an open menu and never collides with the Skip Credits
+/// button (they share this slot and are mutually exclusive by construction).
 ///
 /// The thumbnail and title are run through the user's Spoiler settings up front
 /// (in the view model), so an unwatched next episode never leaks its frame.
@@ -31,7 +32,7 @@ struct UpNextCardView: View {
             Spacer()
             HStack {
                 Spacer()
-                if model.upNextActive, let info = model.upNext {
+                if model.isPresentingUpNext, !model.controlBarVisible, let info = model.upNext {
                     card(for: info)
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
@@ -42,7 +43,7 @@ struct UpNextCardView: View {
             .padding(.bottom, 200)
         }
         .ignoresSafeArea()
-        .animation(.spring(response: 0.32, dampingFraction: 0.82), value: model.upNextActive)
+        .animation(.spring(response: 0.32, dampingFraction: 0.82), value: model.isPresentingUpNext)
         .onAppear { focused = true }
     }
 

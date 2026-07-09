@@ -217,6 +217,13 @@ public final class PlayerControlsModel {
     /// segment, so it doesn't keep re-grabbing focus for the rest of that window.
     public var dismissedSegmentID: String?
 
+    /// Mirrors `CustomPlayerContainer.presentingSkipButton`: true only while the
+    /// container has actually *presented* the Skip button (focused or the passive
+    /// grace-seek present). The SwiftUI `SkipSegmentButton` renders on this — not
+    /// the raw `skipButtonVisible` — so it can never draw on top of an open menu
+    /// or steal the lower-right slot the container hasn't handed it.
+    public var isPresentingSkipButton: Bool = false
+
     /// Set when a committed seek lands inside a skippable segment, describing how
     /// the landing relates to that segment so the presentation layer can respect
     /// the seek: a *deep* landing (`isWithinGrace == false`) suppresses the Skip
@@ -234,6 +241,13 @@ public final class PlayerControlsModel {
     /// True once the user has dismissed the Up Next card for the current item, so
     /// it doesn't keep re-grabbing focus through the rest of the credits.
     public var dismissedUpNext: Bool = false
+    /// Mirrors `CustomPlayerContainer.presentingUpNext`: true only while the
+    /// container has actually *presented* the Up Next card (focused or the passive
+    /// grace-seek present). The SwiftUI `UpNextCardView` renders on this — not the
+    /// raw `upNextActive` — so it renders in lockstep with the container's focus
+    /// state and never draws on top of an open menu (the root cause of Back
+    /// exiting the whole player instead of dismissing the card).
+    public var isPresentingUpNext: Bool = false
     /// In `.autoDelay`, the playback position (seconds) at which the Up Next card
     /// auto-advances to the next episode. Drives the card's countdown ring; `nil`
     /// when not counting down.

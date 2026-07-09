@@ -77,6 +77,7 @@ public struct HeroBackdropLayer<Video: View>: View {
         FallbackAsyncImage(
             urls: urls,
             maxAspectRatio: 3.0,
+            variant: .heroBackdrop,
             asyncFallbackURL: asyncFallbackURL
         ) {
             placeholder

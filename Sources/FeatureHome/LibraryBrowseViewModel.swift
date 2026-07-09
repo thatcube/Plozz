@@ -21,7 +21,17 @@ public final class LibraryBrowseViewModel {
 
     /// Sparse, index-addressed backing store sized to `totalCount`. A `nil`
     /// slot is a not-yet-loaded item that renders as a placeholder tile.
-    public private(set) var loaded: [MediaItem?] = []
+    ///
+    /// Each slot is a small `@Observable` reference (``LibrarySlot``) rather than a
+    /// bare `MediaItem?` so that filling one page mutates only *those* slots'
+    /// `.item` — re-rendering just those cells — instead of touching this array
+    /// property and invalidating **every** visible cell that read it. With a fast
+    /// SMB library paging in every few milliseconds, whole-array observation churn
+    /// was re-diffing the entire visible grid on each page fill (the scroll
+    /// choppiness); per-slot observation confines each fill to its own cells. The
+    /// array itself is sized once to the library total and never reassigned during
+    /// paging, so reading it to subscript never registers a firing dependency.
+    public private(set) var loaded: [LibrarySlot] = []
     /// Total items reported by the server (0 until the first page loads).
     public private(set) var totalCount: Int = 0
     /// A non-fatal error from loading a follow-up page, if any. Surfaced for
@@ -112,11 +122,20 @@ public final class LibraryBrowseViewModel {
     /// The item at `index`, or `nil` if it hasn't been loaded yet (placeholder).
     public func item(at index: Int) -> MediaItem? {
         guard index >= 0, index < loaded.count else { return nil }
+        return loaded[index].item
+    }
+
+    /// The observable slot backing `index`, or `nil` when out of range. The grid
+    /// passes this into a per-cell view that observes only `slot.item`, so filling
+    /// one slot re-renders just that cell. Reading `loaded` here registers a
+    /// dependency on the (paging-stable) array, not on any slot's contents.
+    public func slot(at index: Int) -> LibrarySlot? {
+        guard index >= 0, index < loaded.count else { return nil }
         return loaded[index]
     }
 
     /// Number of items actually loaded so far (non-placeholder). Test/diagnostic.
-    public var loadedCount: Int { loaded.reduce(0) { $0 + ($1 == nil ? 0 : 1) } }
+    public var loadedCount: Int { loaded.reduce(0) { $0 + ($1.item == nil ? 0 : 1) } }
 
     /// Called when a cell leaves the visible viewport. Used to cancel stale,
     /// off-screen page loads so bandwidth/CPU goes to visible content.
@@ -168,7 +187,7 @@ public final class LibraryBrowseViewModel {
             )
             guard !Task.isCancelled, generation == loadGeneration else { return }
             totalCount = page.totalCount
-            loaded = Array(repeating: nil, count: page.totalCount)
+            loaded = Self.makeSlots(count: page.totalCount)
             fill(page)
             pagesLoaded.insert(0)
             state = page.totalCount == 0 ? .empty : .loaded(page.totalCount)
@@ -476,14 +495,16 @@ public final class LibraryBrowseViewModel {
         }
     }
 
-    /// Writes a fetched page's items into their absolute slots.
+    /// Writes a fetched page's items into their absolute slots. Mutates each
+    /// slot's `.item` (per-slot observation) rather than the `loaded` array, so a
+    /// fill re-renders only the affected cells — not the whole visible grid.
     private func fill(_ page: MediaPage) {
         guard !page.items.isEmpty else { return }
         if loaded.count < page.startIndex + page.items.count {
             resize(to: page.startIndex + page.items.count)
         }
         for (offset, item) in page.items.enumerated() {
-            loaded[page.startIndex + offset] = tagged(item)
+            loaded[page.startIndex + offset].item = tagged(item)
         }
     }
 
@@ -493,11 +514,31 @@ public final class LibraryBrowseViewModel {
         return item.taggingSource(sourceAccountID)
     }
 
+    /// A fresh array of `count` empty placeholder slots. Each is a distinct
+    /// instance (never `Array(repeating:)`, which would share one slot across
+    /// every index).
+    private static func makeSlots(count: Int) -> [LibrarySlot] {
+        guard count > 0 else { return [] }
+        return (0..<count).map { _ in LibrarySlot() }
+    }
+
     private func resize(to count: Int) {
         if count > loaded.count {
-            loaded.append(contentsOf: Array(repeating: nil, count: count - loaded.count))
+            loaded.append(contentsOf: Self.makeSlots(count: count - loaded.count))
         } else if count < loaded.count {
             loaded.removeLast(loaded.count - count)
         }
     }
+}
+
+/// One grid slot's contents: an `@Observable` box holding the loaded `MediaItem`
+/// (or `nil` while it's still a placeholder). Boxing each slot separately means a
+/// page fill mutates only the touched slots' `.item`, re-rendering just those
+/// cells instead of every cell that read the parent `loaded` array. See
+/// ``LibraryBrowseViewModel/loaded``.
+@MainActor
+@Observable
+public final class LibrarySlot {
+    public var item: MediaItem?
+    public init(_ item: MediaItem? = nil) { self.item = item }
 }

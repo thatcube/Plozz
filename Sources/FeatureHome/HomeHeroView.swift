@@ -1573,7 +1573,7 @@ struct HomeHeroView: View {
         guard let url = best else { return }
         resolvedBackdrop[item.id] = url
         #if canImport(UIKit)
-        ArtworkImageCache.shared.prefetch(url)
+        ArtworkImageCache.shared.prefetch(url, variant: .heroBackdrop)
         #endif
     }
 

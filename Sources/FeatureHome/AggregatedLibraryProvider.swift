@@ -186,6 +186,9 @@ public final class AggregatedLibraryProvider: MediaProvider, @unchecked Sendable
         let sourceIDs = sources.map(\.accountID)
         await cache.initialize(with: sourceIDs)
         let targetCount = page.startIndex + page.limit
+        let t0 = Date()
+        var fetchMs = 0
+        var mergeMs = 0
 
         // Serialize the fill: hold the single-flight gate across the whole
         // read-fetch-advance loop AND the merged-buffer snapshot so a concurrent
@@ -193,9 +196,13 @@ public final class AggregatedLibraryProvider: MediaProvider, @unchecked Sendable
         await cache.acquireFill()
         while await cache.mergedCount() < targetCount {
             if await cache.allExhausted(sourceIDs: sourceIDs) { break }
+            let tf = Date()
             let fetched = await fetchNextBatch(kind: kind, sort: page.sort, limit: page.limit)
+            fetchMs += Int(Date().timeIntervalSince(tf) * 1000)
             if fetched.isEmpty { break }
+            let tm = Date()
             await cache.appendMergedBatch(fetched)
+            mergeMs += Int(Date().timeIntervalSince(tm) * 1000)
         }
         let merged = await cache.mergedItems()
         let allExhausted = await cache.allExhausted(sourceIDs: sourceIDs)
@@ -209,6 +216,11 @@ public final class AggregatedLibraryProvider: MediaProvider, @unchecked Sendable
         // report an optimistic upper bound (sum of per-server totals) so the grid
         // keeps requesting pages, then settle on the exact merged count.
         let totalCount = allExhausted ? merged.count : max(merged.count, upperBound)
+
+        if ProcessInfo.processInfo.environment["PLZXPAGE"] == "1" {
+            let totalMs = Int(Date().timeIntervalSince(t0) * 1000)
+            HandoffDiagnostics.emit("PAGE start=\(page.startIndex) limit=\(page.limit) total=\(totalMs)ms fetch=\(fetchMs)ms merge=\(mergeMs)ms mergedCount=\(merged.count) sources=\(sourceIDs.count)")
+        }
 
         return MediaPage(items: pageItems, startIndex: page.startIndex, totalCount: totalCount)
     }

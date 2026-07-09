@@ -335,6 +335,14 @@ public struct PosterCardView: View {
             case .placeholder:
                 placeholderArtwork
             }
+        } else if artworkCandidates.isEmpty && asyncArtworkFallback == nil {
+            // No real art candidates and no last-resort resolver — e.g. an
+            // un-enriched SMB card in the browse grid (async fallback disabled).
+            // Render the neutral placeholder DIRECTLY instead of going through
+            // FilteredArtworkImage, which would spin up a per-card `.task` and flip
+            // gray→placeholder. On an SMB library with many unmatched items that
+            // removes a live task from every posterless cell during scroll.
+            neutralPlaceholder
         } else {
             realArtwork
         }

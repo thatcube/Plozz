@@ -62,10 +62,20 @@ public struct LibraryBrowseView: View {
                         header
                         LazyVGrid(columns: columns, spacing: metrics.gridSpacing) {
                             ForEach(0..<total, id: \.self) { index in
-                                cell(at: index)
-                                    // Explicit scroll identity so the rail's
-                                    // `scrollTo(startIndex)` lands on the right row.
-                                    .id(index)
+                                LibraryGridCell(
+                                    slot: viewModel.slot(at: index),
+                                    index: index,
+                                    spoilerSettings: spoilerSettings,
+                                    onSelect: onSelect,
+                                    onAppear: { idx in
+                                        await viewModel.itemAppeared(at: idx)
+                                        prefetchArtwork(aheadFrom: idx)
+                                    },
+                                    onDisappear: { viewModel.itemDisappeared(at: $0) }
+                                )
+                                // Explicit scroll identity so the rail's
+                                // `scrollTo(startIndex)` lands on the right row.
+                                .id(index)
                             }
                         }
                         .padding(.horizontal, HomeLayout.horizontalPadding)
@@ -124,6 +134,15 @@ public struct LibraryBrowseView: View {
         // dedicated destination with no navigation chrome pinned at the top.
         .toolbar(.hidden, for: .tabBar)
         .task { if viewModel.state.value == nil { await viewModel.loadFirstPage() } }
+        .task {
+            // Opt-in (PLZXMEM=1) memory/background-activity sampler. Fully inert
+            // when disabled — returns before starting any timer or keep-alive loop.
+            guard BrowseDiagnostics.isEnabled else { return }
+            let sampler = BrowseDiagnostics.startSampler(label: "browse")
+            defer { sampler?.cancel() }
+            // Keep alive for the lifetime of this view; cancelled on disappear.
+            while !Task.isCancelled { try? await Task.sleep(nanoseconds: 1_000_000_000) }
+        }
     }
 
     /// Whether the alphabet rail should currently be on screen: it must be
@@ -186,30 +205,6 @@ public struct LibraryBrowseView: View {
         )
     }
 
-    @ViewBuilder
-    private func cell(at index: Int) -> some View {
-        Group {
-            if let item = viewModel.item(at: index) {
-                // Shared poster card — identical to Home's "Recently Added" row.
-                PosterCardView(
-                    item: item,
-                    style: .poster,
-                    spoilerSettings: spoilerSettings,
-                    enablesAsyncArtworkFallback: false
-                ) {
-                    onSelect(item)
-                }
-            } else {
-                PosterPlaceholderView()
-            }
-        }
-        .task(id: index) {
-            await viewModel.itemAppeared(at: index)
-            prefetchArtwork(aheadFrom: index)
-        }
-        .onDisappear { viewModel.itemDisappeared(at: index) }
-    }
-
     /// Warms decoded poster art for a short forward window once a cell appears so
     /// rapid right-hold scrolling reuses ready thumbnails instead of flashing gray
     /// placeholders.
@@ -226,6 +221,40 @@ public struct LibraryBrowseView: View {
             }
         }
         #endif
+    }
+}
+
+/// One grid cell, bound to its observable ``LibrarySlot``. Reading `slot.item` in
+/// this view's own body is what confines a page fill's re-render to just the cells
+/// whose slots changed — mutating one slot invalidates only the cells observing
+/// it, not every cell that ever read the parent `loaded` array. That per-cell
+/// isolation is the fix for the fast-SMB-paging scroll churn.
+private struct LibraryGridCell: View {
+    let slot: LibrarySlot?
+    let index: Int
+    let spoilerSettings: SpoilerSettings
+    let onSelect: (MediaItem) -> Void
+    let onAppear: (Int) async -> Void
+    let onDisappear: (Int) -> Void
+
+    var body: some View {
+        Group {
+            if let item = slot?.item {
+                // Shared poster card — identical to Home's "Recently Added" row.
+                PosterCardView(
+                    item: item,
+                    style: .poster,
+                    spoilerSettings: spoilerSettings,
+                    enablesAsyncArtworkFallback: false
+                ) {
+                    onSelect(item)
+                }
+            } else {
+                PosterPlaceholderView()
+            }
+        }
+        .task(id: index) { await onAppear(index) }
+        .onDisappear { onDisappear(index) }
     }
 }
 

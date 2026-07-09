@@ -117,10 +117,14 @@ actor ShareCatalogRegistry {
               let scanner = scanners[accountKey],
               let enricher = enrichers[accountKey] else { return }
         scanTasks[accountKey] = Task { [weak self] in
+            ShareBackgroundActivity.scanStarted()
             await scanner.scanIfStale()
+            ShareBackgroundActivity.scanFinished()
             // Enrich whatever the scan (and prior scans) indexed. Cheap no-op when
             // nothing is pending.
+            ShareBackgroundActivity.enrichStarted()
             await enricher.enrichPending()
+            ShareBackgroundActivity.enrichFinished()
             await self?.clearScanTask(accountKey)
         }
     }

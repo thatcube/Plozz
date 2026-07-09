@@ -76,6 +76,20 @@ public final class ArtworkImageCache: @unchecked Sendable {
         // cache stays bounded on long seasons (NSCache evicts under memory pressure
         // regardless).
         cache.totalCostLimit = 96 * 1024 * 1024
+        // Belt-and-suspenders: NSCache already evicts under pressure, but a decoded
+        // poster/hero wall can spike the footprint faster than that fires. Purge the
+        // decoded cache on a real memory warning so we shed the biggest reclaimable
+        // allocation immediately instead of risking a jettison (tvOS limits are
+        // tight; a browse session that opens several 4K-source heroes can climb
+        // hundreds of MB before the OS reclaims). Bytes stay warm in `URLCache`, so
+        // re-decode is cheap.
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.didReceiveMemoryWarningNotification,
+            object: nil,
+            queue: nil
+        ) { [weak cache] _ in
+            cache?.removeAllObjects()
+        }
     }
 
     /// The decoded image for `url`+`variant` if one is already resident, read

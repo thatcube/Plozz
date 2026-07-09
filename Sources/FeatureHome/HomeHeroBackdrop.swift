@@ -463,7 +463,7 @@ private struct WipeImageView: UIViewRepresentable {
 
         private func firstUsableCached(_ urls: [URL]) -> (UIImage, URL)? {
             for url in urls {
-                guard let cached = ArtworkImageCache.shared.cachedImage(for: url) else { continue }
+                guard let cached = ArtworkImageCache.shared.cachedImage(for: url, variant: .heroBackdrop) else { continue }
                 if isUsable(cached) { return (cached, url) }
             }
             return nil
@@ -474,11 +474,11 @@ private struct WipeImageView: UIViewRepresentable {
             asyncFallbackURL: (@Sendable () async -> URL?)?
         ) async -> (UIImage, URL)? {
             for url in urls {
-                guard let loaded = await ArtworkImageCache.shared.image(for: url) else { continue }
+                guard let loaded = await ArtworkImageCache.shared.image(for: url, variant: .heroBackdrop) else { continue }
                 if isUsable(loaded) { return (loaded, url) }
             }
             if let asyncFallbackURL, let url = await asyncFallbackURL(),
-               let loaded = await ArtworkImageCache.shared.image(for: url), isUsable(loaded) {
+               let loaded = await ArtworkImageCache.shared.image(for: url, variant: .heroBackdrop), isUsable(loaded) {
                 return (loaded, url)
             }
             return nil

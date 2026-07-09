@@ -94,7 +94,7 @@ private struct CastMemberCard: View {
     @ViewBuilder
     private var avatar: some View {
         if let imageURL = person.imageURL {
-            FallbackAsyncImage(urls: [imageURL]) { placeholder }
+            FallbackAsyncImage(urls: [imageURL], variant: .personHeadshot) { placeholder }
         } else {
             placeholder
         }

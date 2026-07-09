@@ -514,22 +514,39 @@ struct SeriesDetailView: View {
     /// competes with the on-screen season's art. The currently selected season is
     /// skipped here because `prefetchSeasonStills` already owns it.
     private func prewarmAllSeasons() async {
-        // Defer the bulk all-seasons warm so it doesn't flood the (per-host capped)
-        // connection pool the instant the page opens and starve the hero backdrop /
-        // title logo and the *current* season's stills — the art the user is
-        // actually looking at. A long series (many seasons × many episodes) was
-        // otherwise firing dozens-to-hundreds of thumbnail fetches up front, which
-        // could leave the hero blank for many seconds even on a fast local server.
-        // The current season is already warmed promptly by `prefetchSeasonStills`.
+        // Defer the bulk warm so it doesn't flood the (per-host capped) connection
+        // pool the instant the page opens and starve the hero backdrop / title logo
+        // and the *current* season's stills — the art the user is actually looking
+        // at. The current season is already warmed promptly by
+        // `prefetchSeasonStills`.
         try? await Task.sleep(for: .seconds(2.5))
         if Task.isCancelled { return }
-        for season in seasons where season.id != selectedSeasonID {
+        // Only pre-warm a WINDOW of seasons nearest the selected one, warmed
+        // nearest-first. A long series (e.g. a 20+ season anime) otherwise decoded
+        // every season's stills up front — hundreds of landscape thumbnails — for
+        // seasons the user may never open, thrashing the decoded-image cache and
+        // burning CPU/network on a low-power Apple TV. Seasons outside the window
+        // still warm instantly on demand when selected (see `stillPrefetchKey`), so
+        // the only cost is a brief thumbnail fetch when jumping to a distant season.
+        let selectedIndex = seasons.firstIndex { $0.id == selectedSeasonID } ?? 0
+        let neighbors = seasons.enumerated()
+            .filter { $0.element.id != selectedSeasonID }
+            .sorted { abs($0.offset - selectedIndex) < abs($1.offset - selectedIndex) }
+            .prefix(Self.prewarmSeasonWindow)
+            .map(\.element)
+        for season in neighbors {
             if Task.isCancelled { return }
             await viewModel.loadEpisodes(for: season.id)
             await warmSeason(season.id)
             await Task.yield()
         }
     }
+
+    /// How many seasons (nearest the selected one) to pre-warm thumbnails for up
+    /// front. Small enough that even a very long series does a bounded amount of
+    /// decode work on open, large enough that adjacent-season switches stay
+    /// flash-free.
+    private static let prewarmSeasonWindow = 4
 
     /// Makes a season's episode thumbnails render with **no gray flash** when its
     /// rail appears, by guaranteeing each card can seed its image *synchronously*

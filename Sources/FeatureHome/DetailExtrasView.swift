@@ -196,7 +196,10 @@ private struct StudioLogoChip: View {
         guard
             let (data, response) = try? await ArtworkSession.shared.data(from: url),
             (response as? HTTPURLResponse).map({ (200...299).contains($0.statusCode) }) ?? true,
-            let loaded = UIImage(data: data)
+            // Studio tiles are ~180×135pt; a 400px thumbnail is crisp yet a
+            // fraction of a full-size company logo's bitmap. Falls back to a full
+            // decode only if the thumbnail path fails, so a logo never vanishes.
+            let loaded = ArtworkImageCache.downsample(data, maxPixelSize: 400) ?? UIImage(data: data)
         else {
             failed = true
             resolved = true

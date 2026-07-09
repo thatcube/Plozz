@@ -344,8 +344,18 @@ private actor HeroLogoPipeline {
         if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
             return nil
         }
-        guard let image = UIImage(data: data) else { return nil }
-        return image.preparedAsHeroLogo()
+        return decodeAndPrepare(data)
+    }
+
+    /// Downsample the logo to a hero-appropriate size before the halo/contrast
+    /// analysis, so a large source PNG (some providers ship 1000px+ wordmarks)
+    /// never inflates a full-size bitmap for a logo drawn at ~300–500pt. 900px is
+    /// crisp at hero size on a 4K panel while a fraction of the memory. Alpha is
+    /// preserved by the ImageIO thumbnail path; a decode failure falls back to a
+    /// full decode so a logo never silently vanishes.
+    private static func decodeAndPrepare(_ data: Data) -> PreparedLogo? {
+        let image = ArtworkImageCache.downsample(data, maxPixelSize: 900) ?? UIImage(data: data)
+        return image?.preparedAsHeroLogo()
     }
 }
 

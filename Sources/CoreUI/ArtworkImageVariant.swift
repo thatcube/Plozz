@@ -38,6 +38,11 @@ public enum ArtworkImageVariant: String, Sendable, CaseIterable {
     /// decoded bitmap tiny, so a long playlist (thousands of rows) can prefetch
     /// upcoming art ahead of scroll without retaining large bitmaps.
     case musicThumbnail
+    /// Circular cast/crew headshots in the detail-page people row. Shown at
+    /// roughly a 150–200pt circle, so ~400px at 2x is plenty; a cast of 30–50
+    /// people would otherwise decode 30–50 full-size (multi-MB) profile images —
+    /// hundreds of MB — for tiny circles. Capped small keeps a full cast cheap.
+    case personHeadshot
 
     /// Longest-edge cap (in pixels) applied when decoding, or `nil` to decode at the
     /// source's native size. The cap never *upscales*: a source smaller than the cap
@@ -46,6 +51,7 @@ public enum ArtworkImageVariant: String, Sendable, CaseIterable {
         switch self {
         case .original: return nil
         case .musicThumbnail: return 256
+        case .personHeadshot: return 400
         case .posterCard: return 960
         case .landscapeCard: return 1_200
         case .heroBackdrop: return 2_000

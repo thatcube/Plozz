@@ -120,7 +120,7 @@ struct UpNextCardView: View {
         Color.clear
             .frame(width: mediaHeight * 16.0 / 9.0, height: mediaHeight)
             .overlay {
-                FallbackAsyncImage(urls: info.thumbnailURLs) {
+                FallbackAsyncImage(urls: info.thumbnailURLs, variant: .landscapeCard) {
                     ZStack {
                         Rectangle().fill(Color.white.opacity(0.08))
                         Image(systemName: "play.rectangle.fill")

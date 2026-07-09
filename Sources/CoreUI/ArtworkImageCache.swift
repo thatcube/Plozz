@@ -227,5 +227,14 @@ public final class ArtworkImageCache: @unchecked Sendable {
         guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
         return UIImage(cgImage: cgImage)
     }
+
+    /// Shared ImageIO downsample for callers that decode outside the cache but
+    /// still must not inflate a full-size bitmap (e.g. the hero logo pipeline,
+    /// which needs the pixels for its own halo/contrast analysis). Decodes only a
+    /// thumbnail whose longest edge is `maxPixelSize`, preserving alpha. Never
+    /// upscales. Returns `nil` if the data isn't a decodable image.
+    public static func downsample(_ data: Data, maxPixelSize: Int) -> UIImage? {
+        downsampledImage(from: data, maxPixelSize: maxPixelSize)
+    }
 }
 #endif

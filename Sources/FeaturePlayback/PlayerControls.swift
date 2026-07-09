@@ -966,7 +966,7 @@ struct PlayerControls: View {
         Color.clear
             .frame(width: height * 16.0 / 9.0, height: height)
             .overlay {
-                FallbackAsyncImage(urls: model.artworkURLs) {
+                FallbackAsyncImage(urls: model.artworkURLs, variant: .landscapeCard) {
                     Rectangle().fill(Color.white.opacity(0.08))
                         .overlay(
                             Image(systemName: "photo")

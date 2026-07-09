@@ -45,7 +45,7 @@ struct MyLibrariesDetailView: View {
             VStack(alignment: .leading, spacing: 28) {
                 SettingsPageHeader(
                     "Your Servers & Libraries",
-                    subtitle: "Choose which servers and libraries this profile sees — and who you're signed in as on each."
+                    subtitle: "Turn servers and libraries on or off, and pick who you watch as."
                 )
                 if allGroups.isEmpty {
                     emptyInventoryState
@@ -229,14 +229,20 @@ struct MyLibrariesDetailView: View {
 
     // MARK: - Add a server
 
+    /// Adding a server is a device-wide action (it affects every profile), so it
+    /// lives canonically on This Apple TV › Servers; this mirror of it is styled
+    /// identically to that page's "Add Server" row and says "this Apple TV" to
+    /// make the device scope obvious next to the per-profile toggles above.
     private var addServerSection: some View {
-        SettingsPanel(
-            footer: "Signing in a new server makes it available to every profile on this Apple TV. Turn servers you're already signed in to on or off above."
-        ) {
+        SettingsPanel {
             Button(action: context.onAddAccount) {
-                Label("Sign in to another server", systemImage: "plus.circle")
+                Label("Add Server to This Apple TV", systemImage: "plus.circle")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 14)
+                    .padding(.horizontal, 14)
+                    .contentShape(Rectangle())
             }
-            .buttonStyle(SettingsFocusButtonStyle())
+            .buttonStyle(SettingsFocusButtonStyle(size: .prominent))
         }
     }
 

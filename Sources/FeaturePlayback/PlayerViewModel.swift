@@ -1137,6 +1137,9 @@ public final class PlayerViewModel {
             PlozzLog.playback.info("SMB share source; routing to Plozzigen (AVPlayer can't open smb://)")
             kind = .plozzigen
         }
+
+        let v = request.sourceMetadata?.video
+        HandoffDiagnostics.emit("route kind=\(kind.rawValue) container=\(request.sourceMetadata?.container ?? "-") vcodec=\(v?.codec ?? "-") tag=\(v?.codecTag ?? "-") range=\(v?.videoRange ?? "-") rangeType=\(v?.videoRangeType ?? "-") transfer=\(v?.colorTransfer ?? "-") profile=\(v?.profile ?? "-")")
         return kind
     }
 

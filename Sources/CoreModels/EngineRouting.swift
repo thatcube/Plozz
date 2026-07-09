@@ -84,14 +84,17 @@ public enum EngineRouter {
         // No source facts → ambiguous → native (safety net handles surprises).
         guard let source else { return .native }
 
-        // Dolby Vision is best on AVPlayer (the only engine that renders DoVi with
-        // full dynamic metadata on tvOS) — but ONLY when it can actually reach
-        // AVPlayer. AVPlayer cannot demux Matroska, and a server transcode of DoVi
-        // is unreliable (and outright fails on many servers), so DoVi *in an MKV*
-        // is decoded on-device instead: the engine decodes the HEVC base layer
-        // (HDR10/HLG/SDR for Profile 8, tone-mapped for Profile 5), exactly as
-        // Infuse does. DoVi in an Apple container still goes native.
-        if isDolbyVision(source.video), !isHybridContainer(source.container) { return .native }
+        // Dolby Vision: always decode on the on-device engine. AVPlayer's native
+        // DoVi path is unreliable across servers/containers on tvOS — e.g. a
+        // Plex-served DoVi Profile 8.1 (DOVIWithHDR10) in an MP4 (HEVC Main 10,
+        // hvc1/untagged) plays audio over a fully BLACK screen: AVPlayer produces no
+        // video frames from that muxing. The on-device engine (FFmpeg demux → HLS-fMP4
+        // remux → dvh1 tag → DoVi panel switch) renders every DoVi profile correctly,
+        // exactly as the same title plays from a hybrid (MKV) container. Reliability
+        // beats AVPlayer's theoretical full-dynamic-metadata advantage, so route all
+        // DoVi on-device rather than gambling on the native path. (`hybridAvailable`
+        // is guaranteed above; if it weren't, the guard there already forced native.)
+        if isDolbyVision(source.video) { return .hybrid }
 
         // AVPlayer cannot demux hybrid-only containers (Matroska/WebM and
         // transport-stream variants); the hybrid engine can.

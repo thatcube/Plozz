@@ -90,11 +90,14 @@ final class EngineRoutingTests: XCTestCase {
         XCTAssertEqual(route(mp4, isTranscoding: true), .native)
     }
 
-    // MARK: Dolby Vision in an Apple container → native; DoVi in an MKV → hybrid
+    // MARK: Dolby Vision → always on-device (hybrid); HDR10/HLG in an Apple container → native
 
-    func testDolbyVisionMP4IsNative() {
+    func testDolbyVisionMP4IsHybrid() {
+        // AVPlayer's native DoVi path is unreliable across servers/containers on
+        // tvOS (e.g. a Plex DoVi P8.1 MP4 plays audio over a black screen), so ALL
+        // Dolby Vision is decoded on-device regardless of container.
         let mp4 = source(container: "mp4", videoCodec: "hevc", videoRangeType: "DOVIWithHDR10", audioCodec: "eac3")
-        XCTAssertEqual(route(mp4), .native)
+        XCTAssertEqual(route(mp4), .hybrid)
     }
 
     func testHDR10MP4IsNative() {

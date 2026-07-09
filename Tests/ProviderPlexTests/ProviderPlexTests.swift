@@ -774,6 +774,32 @@ final class PlexProviderMappingTests: XCTestCase {
         XCTAssertFalse(labels.contains("SDR"))
     }
 
+    func testDolbyVisionProfile5ShowsNoHDR10Badge() async throws {
+        // DoVi Profile 5 is single-layer with NO HDR10 base (DOVIBLCompatID=0). It
+        // is PQ-encoded and has a base layer present, but neither implies an HDR10
+        // fallback — the compat ID is the authoritative signal. Regression for the
+        // bug where every P5 file showed a bogus "HDR10" badge alongside DoVi.
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/library/metadata/7043", json: """
+        {"MediaContainer":{"Metadata":[
+          {"ratingKey":"7043","type":"movie","title":"The Batman",
+           "Media":[{"id":1,"container":"mkv","videoCodec":"hevc","audioCodec":"eac3",
+             "videoResolution":"4k","width":3840,"height":2160,"audioChannels":8,
+             "Part":[{"id":2,"key":"/p","container":"mkv","Stream":[
+               {"id":10,"streamType":1,"default":1,"selected":1,"codec":"hevc",
+                "width":3840,"height":2160,"colorTrc":"smpte2084","bitDepth":10,
+                "DOVIPresent":1,"DOVIBLPresent":1,"DOVIBLCompatID":0,"DOVIProfile":5,
+                "DOVIRPUPresent":1,"DOVILevel":6},
+               {"id":11,"streamType":2,"selected":1,"codec":"eac3","channels":8,"audioChannelLayout":"7.1"}
+             ]}]}]}
+        ]}}
+        """)
+        let provider = PlexProvider(session: makeSession(), http: stub)
+        let item = try await provider.item(id: "7043")
+        XCTAssertEqual(item.mediaInfo?.dynamicRangeBadges.map(\.label), ["Dolby Vision"])
+        XCTAssertFalse(item.technicalBadges.map(\.label).contains("HDR10"))
+    }
+
     func testEpisodeAtmosDetectedFromMediaLevelAudioProfile() async throws {
         // Real-world Plex Fallout-episode shape: Atmos is signalled ONLY at the
         // Media level (`audioProfile="dolby digital plus + dolby atmos"`). The

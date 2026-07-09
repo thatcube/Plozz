@@ -85,6 +85,7 @@ private struct CircadianDetail: View {
                             title: { NightShiftSettingsModel.fadeLabel(minutes: $0) }
                         )
                     }
+                    .focusSection()
                 }
 
                 LabeledSettingRow("Darkness", labelWidth: circadianRowLabelWidth) {
@@ -95,6 +96,7 @@ private struct CircadianDetail: View {
                         title: { $0.displayName }
                     )
                 }
+                .focusSection()
 
                 LabeledSettingRow("Warmth", labelWidth: circadianRowLabelWidth) {
                     SettingsStepper(
@@ -104,6 +106,7 @@ private struct CircadianDetail: View {
                         title: { $0.displayName }
                     )
                 }
+                .focusSection()
 
                 LabeledSettingRow("Preview", labelWidth: circadianRowLabelWidth) {
                     HStack(spacing: 28) {
@@ -116,6 +119,7 @@ private struct CircadianDetail: View {
                         Spacer(minLength: 0)
                     }
                 }
+                .focusSection()
             }
         }
         // Leaving the pane (focus moves to another row, or the page closes) must
@@ -173,6 +177,7 @@ private struct NightShiftScheduleControl: View {
                 title: { $0.title },
                 onFocusedOptionChange: { focusedMode = $0 }
             )
+            .focusSection()
 
             Text(describedMode.detail)
                 .font(.callout)
@@ -200,6 +205,7 @@ private struct NightShiftScheduleControl: View {
             EmptyView()
         case .auto:
             LabeledSettingRow("Location", labelWidth: circadianRowLabelWidth) { locationMenu }
+                .focusSection()
         case .manual:
             VStack(alignment: .leading, spacing: 20) {
                 LabeledSettingRow("Turns on", labelWidth: circadianRowLabelWidth) {
@@ -207,11 +213,13 @@ private struct NightShiftScheduleControl: View {
                         model.settings.manualOnMinutes = $0
                     }
                 }
+                .focusSection()
                 LabeledSettingRow("Turns off", labelWidth: circadianRowLabelWidth) {
                     timeStepper(minutes: model.settings.manualOffMinutes) {
                         model.settings.manualOffMinutes = $0
                     }
                 }
+                .focusSection()
             }
         }
     }

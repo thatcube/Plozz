@@ -100,7 +100,12 @@ struct UpNextCardView: View {
                     .foregroundStyle(.white.opacity(0.35))
             }
         }
-        .frame(width: 176, height: 99)
+        // Fill the card's content height (driven by the eyebrow/title/subtitle
+        // column) and derive the width from that height at 16:9, so the artwork
+        // spans top-to-bottom with equidistant borders instead of floating at a
+        // fixed 99pt with dead space above and below it.
+        .aspectRatio(16.0 / 9.0, contentMode: .fit)
+        .frame(maxHeight: .infinity)
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         .blur(radius: info.blurThumbnail ? 18 : 0)
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))

@@ -136,16 +136,22 @@ private struct NavigationStyleMini: View {
 
     // MARK: Shared page content
 
-    /// A leading-aligned row of neutral mock poster tiles filling the content
-    /// region — identical in both variants.
+    /// A row of neutral mock poster tiles that fills the whole content width
+    /// (even gaps, flush to both edges) so the page reads as balanced — identical
+    /// in both variants.
     private func posterRow() -> some View {
         GeometryReader { geo in
-            let regionH = geo.size.height
             let regionW = geo.size.width
-            let tileH = regionH
-            let tileW = tileH * (2.0 / 3.0)
-            let gap = max(5, tileW * 0.14)
-            let count = max(1, min(3, Int((regionW + gap) / (tileW + gap))))
+            let regionH = geo.size.height
+            let gap = regionW * 0.045
+            // Pick a tile count that keeps each poster close to a 2:3 shape while
+            // still filling the full width, so neither the wide top-bar area nor
+            // the narrower sidebar content area is left with a lop-sided trailing
+            // gap.
+            let ratio = regionH > 0 ? regionW / (regionH * (2.0 / 3.0)) : 1
+            let count = max(1, min(4, Int(ratio.rounded())))
+            let tileW = (regionW - gap * CGFloat(count - 1)) / CGFloat(max(1, count))
+            let tileH = min(regionH, tileW * 1.5)
             let corner = tileW * 0.12
 
             HStack(spacing: gap) {
@@ -165,7 +171,7 @@ private struct NavigationStyleMini: View {
                         .frame(width: tileW, height: tileH)
                 }
             }
-            .frame(width: regionW, height: regionH, alignment: .leading)
+            .frame(width: regionW, height: regionH, alignment: .center)
         }
     }
 }

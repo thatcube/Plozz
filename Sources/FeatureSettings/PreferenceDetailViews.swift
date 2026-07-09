@@ -64,7 +64,7 @@ struct AppearanceDetailView: View {
                 SettingsSplitRow(
                     id: "navigation",
                     title: "Navigation",
-                    description: "Tabs in a pill across the top of every page, or a collapsible left sidebar that expands on focus. The pages themselves are identical either way.",
+                    description: "Horizontal tabs across the top, or a collapsible left sidebar. Shared across every profile on this Apple TV.",
                 ) {
                     CompactNavigationPicker(selection: navigationBinding)
                 },

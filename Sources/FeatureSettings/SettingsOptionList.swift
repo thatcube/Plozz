@@ -82,9 +82,12 @@ struct SettingsOptionList<Option: Hashable>: View {
 /// A vertical, checkable list of **independent** options — each row toggles on/off
 /// on its own (multi-select), unlike ``SettingsOptionList``'s single selection.
 ///
-/// Used by the Customize Home screen to pick which rows appear on Home. Reuses
-/// ``SettingsCheckableRow`` so the checkmark and focus card match Display Size /
-/// Theme exactly (maintainer's "share checkmarks" direction).
+/// Used by the Customize Home screen (and Your Servers & Libraries) to pick which
+/// rows / libraries are on. Reuses ``SettingsCheckableRow`` so the checkmark and
+/// focus card match Display Size / Theme exactly (maintainer's "share checkmarks"
+/// direction), but defaults to `.secondary` prominence: these lists are the
+/// **children** of a master toggle, so they read a step lighter than the
+/// primary single-select pickers.
 struct SettingsCheckList<Option: Hashable & Identifiable>: View {
     let options: [Option]
     var title: (Option) -> String
@@ -97,6 +100,10 @@ struct SettingsCheckList<Option: Hashable & Identifiable>: View {
     /// `false` when the list already sits inside another container (e.g. a
     /// Customize Home group card that provides its own border + header).
     var bordered: Bool = true
+    /// Row weight. Defaults to `.secondary` because a multi-select list is a
+    /// sub-section under a master toggle; override to `.primary` for a rare
+    /// top-level multi-select.
+    var prominence: SettingsRowProminence = .secondary
     var isChecked: (Option) -> Bool
     var onToggle: (Option) -> Void
 
@@ -109,6 +116,7 @@ struct SettingsCheckList<Option: Hashable & Identifiable>: View {
                     icon: icon(option),
                     isChecked: isChecked(option),
                     isEnabled: isEnabled(option),
+                    prominence: prominence,
                     action: { onToggle(option) }
                 )
             }

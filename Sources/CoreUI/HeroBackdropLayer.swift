@@ -85,7 +85,12 @@ public struct HeroBackdropLayer<Video: View>: View {
         .frame(height: height)
         .frame(maxWidth: .infinity)
         .clipped()
-        .blur(radius: blursImage ? 40 : 0)
+        // Apply the blur ONLY when actually hiding a spoiler. `.blur(radius: 0)`
+        // still forces a full-screen offscreen render pass (a ~33MB 4K RGBA
+        // buffer on this panel) every time the modifier is present, even at
+        // radius 0 — so on the common non-spoiler path we omit the modifier
+        // entirely rather than paying for a no-op blur surface on every hero.
+        .modifier(ConditionalBlur(radius: blursImage ? 40 : nil))
         // Trailer slot: overlays the still (and so inherits the scrim + dissolve
         // below). Empty today — no layout or visual effect on the image-only path.
         .overlay { backgroundVideo() }
@@ -166,6 +171,20 @@ private struct OverscanBreakout: ViewModifier {
     func body(content: Content) -> some View {
         if enabled {
             content.ignoresSafeArea(edges: [.top, .horizontal])
+        } else {
+            content
+        }
+    }
+}
+
+/// Applies `.blur` only when a radius is supplied. A `nil` radius omits the
+/// modifier entirely so no offscreen blur buffer is allocated — unlike
+/// `.blur(radius: 0)`, which still forces a full-screen offscreen render pass.
+private struct ConditionalBlur: ViewModifier {
+    let radius: CGFloat?
+    func body(content: Content) -> some View {
+        if let radius {
+            content.blur(radius: radius)
         } else {
             content
         }

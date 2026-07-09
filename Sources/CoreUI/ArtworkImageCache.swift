@@ -16,7 +16,7 @@ import CoreModels
 ///
 /// Images are force-decoded off the main thread (`preparingForDisplay`) before
 /// being stored, so handing one to SwiftUI never triggers a main-thread decode.
-public final class ArtworkImageCache: @unchecked Sendable {
+public final class ArtworkImageCache: NSObject, @unchecked Sendable {
     public static let shared = ArtworkImageCache()
 
     private struct CacheKey: Hashable {
@@ -30,6 +30,28 @@ public final class ArtworkImageCache: @unchecked Sendable {
 
     private let cache = NSCache<NSString, UIImage>()
     private let lock = NSLock()
+
+    /// Live decoded-cache accounting (diagnostic). Tracks resident image count and
+    /// approximate decoded byte cost so the browse memory sampler can separate
+    /// "the decoded-image cache is growing" from "render surfaces / view backing
+    /// stores are growing" — the two have completely different fixes. Updated on
+    /// store (+) and on NSCache eviction (via `NSCacheDelegate`, -).
+    nonisolated(unsafe) private static var liveCount = 0
+    nonisolated(unsafe) private static var liveCostBytes = 0
+    private static let statsLock = NSLock()
+    public struct CacheStats: Sendable { public let count: Int; public let costMB: Double }
+    public static func cacheStats() -> CacheStats {
+        statsLock.lock(); defer { statsLock.unlock() }
+        return CacheStats(count: liveCount, costMB: Double(liveCostBytes) / (1024 * 1024))
+    }
+    /// Instance convenience for callers holding `.shared`.
+    public func currentStats() -> CacheStats { Self.cacheStats() }
+    private static func noteStored(cost: Int) {
+        statsLock.lock(); liveCount += 1; liveCostBytes += cost; statsLock.unlock()
+    }
+    private static func noteEvicted(cost: Int) {
+        statsLock.lock(); liveCount = max(0, liveCount - 1); liveCostBytes = max(0, liveCostBytes - cost); statsLock.unlock()
+    }
     /// Dedicated, bounded queue for the *synchronous* image decode
     /// (`CGImageSourceCreateThumbnailAtIndex` / `preparingForDisplay`). This work
     /// is CPU-bound, and running it inside `Task.detached` executes it directly on
@@ -71,7 +93,9 @@ public final class ArtworkImageCache: @unchecked Sendable {
     /// rail's prefetch never decode the same target twice.
     private var inFlight: [CacheKey: ImageLoad] = [:]
 
-    private init() {
+    private override init() {
+        super.init()
+        cache.delegate = self
         // Decoded landscape/poster thumbnails are small; cap retained pixels so the
         // cache stays bounded on long seasons (NSCache evicts under memory pressure
         // regardless).
@@ -169,8 +193,9 @@ public final class ArtworkImageCache: @unchecked Sendable {
 
     private func store(_ image: UIImage, for key: CacheKey) {
         let scale = image.scale
-        let cost = Int(image.size.width * scale * image.size.height * scale * 4)
-        cache.setObject(image, forKey: key.cacheKey, cost: max(cost, 1))
+        let cost = max(Int(image.size.width * scale * image.size.height * scale * 4), 1)
+        cache.setObject(image, forKey: key.cacheKey, cost: cost)
+        Self.noteStored(cost: cost)
     }
 
     private func clearInFlight(_ key: CacheKey, ifMatches load: ImageLoad?) {
@@ -235,6 +260,19 @@ public final class ArtworkImageCache: @unchecked Sendable {
     /// upscales. Returns `nil` if the data isn't a decodable image.
     public static func downsample(_ data: Data, maxPixelSize: Int) -> UIImage? {
         downsampledImage(from: data, maxPixelSize: maxPixelSize)
+    }
+}
+
+extension ArtworkImageCache: NSCacheDelegate {
+    /// NSCache is about to drop `obj` (cost-limit or memory-pressure eviction).
+    /// Decrement the live accounting by the same cost formula `store` used, so the
+    /// diagnostic count/cost track the real resident set. Also fires for
+    /// `removeAllObjects()` (the memory-warning flush).
+    public func cache(_ cache: NSCache<AnyObject, AnyObject>, willEvictObject obj: Any) {
+        guard let image = obj as? UIImage else { return }
+        let scale = image.scale
+        let cost = max(Int(image.size.width * scale * image.size.height * scale * 4), 1)
+        Self.noteEvicted(cost: cost)
     }
 }
 #endif

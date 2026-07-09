@@ -44,7 +44,16 @@ public enum BrowseDiagnostics {
     /// Runs a fixed-interval sampler until the returned task is cancelled (call
     /// `.cancel()` in the browse view's `onDisappear`). No-op — returns `nil` —
     /// when disabled, so callers add nothing when the flag is off.
-    public static func startSampler(interval: TimeInterval = 2, label: String) -> Task<Void, Never>? {
+    ///
+    /// `artworkCacheStats` (optional) lets a caller with access to the decoded
+    /// image cache (which lives above this module) report its live count + cost so
+    /// a memory climb can be attributed to the cache vs. render surfaces / view
+    /// backing stores — the two have different fixes.
+    public static func startSampler(
+        interval: TimeInterval = 2,
+        label: String,
+        artworkCacheStats: (@Sendable () -> (count: Int, costMB: Double))? = nil
+    ) -> Task<Void, Never>? {
         guard isEnabled else { return nil }
         return Task.detached(priority: .utility) {
             let start = Date()
@@ -54,9 +63,11 @@ public enum BrowseDiagnostics {
                 let vms = PlaybackInstrumentation.count(.viewModel)
                 let eng = PlaybackInstrumentation.count(.nativeEngine)
                 let share = ShareBackgroundActivity.snapshot()
+                let art = artworkCacheStats?()
+                let artStr = art.map { String(format: " artCount=%d artMB=%.1f", $0.count, $0.costMB) } ?? ""
                 emit(String(
-                    format: "sample %@ t=%.0fs mem=%.1fMB vms=%d nativeEng=%d smbScan=%d smbEnrich=%d",
-                    label, Date().timeIntervalSince(start), mem, vms, eng, share.scans, share.enrichPasses
+                    format: "sample %@ t=%.0fs mem=%.1fMB vms=%d nativeEng=%d smbScan=%d smbEnrich=%d%@",
+                    label, Date().timeIntervalSince(start), mem, vms, eng, share.scans, share.enrichPasses, artStr
                 ))
                 tick += 1
                 try? await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))

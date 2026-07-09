@@ -86,6 +86,17 @@ public struct PlozzGlassCardModifier: ViewModifier {
                         shape.fill(.ultraThinMaterial)
                     }
                 }
+                // A hairline edge so a resting card reads on any theme: the frosted
+                // `.ultraThinMaterial` is translucent, so on a dark/OLED page it
+                // darkens to near-invisible and the card loses its edge. The
+                // theme-aware `cardOpaqueBorder` (light on dark/OLED, dark on light)
+                // defines that edge; drawn only at rest, since the focused glass
+                // brings its own tint + shadow. Skipped for `glassAtRest: false`.
+                .overlay {
+                    if !isFocused && glassAtRest {
+                        shape.strokeBorder(palette.cardOpaqueBorder, lineWidth: 1)
+                    }
+                }
                 .clipShape(shape)
         } else {
             // Pre-Liquid-Glass fallback: opaque lift on focus, light translucent

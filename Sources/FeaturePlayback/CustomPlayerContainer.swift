@@ -593,6 +593,7 @@ final class PlayerInputViewController: UIViewController {
 
     private func enterSkipButton(stealFocus: Bool = true) {
         presentingSkipButton = true
+        model.isPresentingSkipButton = true
         guard stealFocus else {
             // Passive present (a grace-window seek landed here): the button is
             // visible but the scrub surface keeps focus and stays fully
@@ -617,6 +618,7 @@ final class PlayerInputViewController: UIViewController {
     /// dismissed, or its segment window passes.
     private func exitSkipButton() {
         presentingSkipButton = false
+        model.isPresentingSkipButton = false
         autoSkipAtSeconds = nil
         model.autoSkipAtSeconds = nil
         skipButtonHost?.view.isUserInteractionEnabled = false
@@ -703,6 +705,7 @@ final class PlayerInputViewController: UIViewController {
 
     private func enterUpNext(stealFocus: Bool = true) {
         presentingUpNext = true
+        model.isPresentingUpNext = true
         guard stealFocus else {
             // Passive present (a grace-window seek landed in credits): the card is
             // visible but the scrub surface keeps focus, so the seek is never
@@ -722,6 +725,7 @@ final class PlayerInputViewController: UIViewController {
     /// dismissed, or its credits window passes.
     private func exitUpNext() {
         presentingUpNext = false
+        model.isPresentingUpNext = false
         upNextAdvanceAtSeconds = nil
         model.upNextAdvanceAtSeconds = nil
         upNextHost?.view.isUserInteractionEnabled = false
@@ -1200,6 +1204,14 @@ final class PlayerInputViewController: UIViewController {
             return
         }
         cancelAutoHide()
+        // A passively-presented Up Next card / Skip button shares the lower-right
+        // slot while nothing is focused there. Entering the control bar opens a
+        // menu, and the two must never co-exist (an unfocusable card over an open
+        // menu is exactly what let Back exit the whole player). Tear the passive
+        // present down here; it re-presents from `evaluateSkipPresentation` once
+        // the bar closes back to the surface — "show it after the menus close".
+        if presentingUpNext { exitUpNext() }
+        if presentingSkipButton { exitSkipButton() }
         focusContext = .controlBar
         model.controlsVisible = true
         model.controlBarVisible = true

@@ -31,7 +31,7 @@ struct PlaybackDiagnosticsOverlay: View {
             }
         }
         .padding(40)
-        .frame(maxWidth: 740, alignment: .leading)
+        .frame(maxWidth: 820, alignment: .leading)
         .plozzGlassPanel(cornerRadius: 64, scrimOpacity: 0.45, refractEdgesOnly: true)
         // Pinned to the player's top-left corner (the overlay host ignores the
         // safe area so this hugs the corner, not the wider tvOS overscan inset).
@@ -77,13 +77,20 @@ struct PlaybackDiagnosticsOverlay: View {
 
     @ViewBuilder
     private func sectionsGrid(for d: PlaybackDiagnostics) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            sourceSection(d)
-            videoSection(d)
-            audioSection(d)
-            subtitleSection(d)
-            playbackSection(d)
-            systemSection(d)
+        // Two columns so the HUD reads at a glance instead of running nearly the
+        // full screen height: content facts on the left (source/video/audio),
+        // session + device health on the right (subtitles/playback/system).
+        HStack(alignment: .top, spacing: 40) {
+            VStack(alignment: .leading, spacing: 12) {
+                sourceSection(d)
+                videoSection(d)
+                audioSection(d)
+            }
+            VStack(alignment: .leading, spacing: 12) {
+                subtitleSection(d)
+                playbackSection(d)
+                systemSection(d)
+            }
         }
     }
 
@@ -101,10 +108,12 @@ struct PlaybackDiagnosticsOverlay: View {
         section("VIDEO") {
             optionalRow("Codec", d.videoCodecText)
             optionalRow("Resolution", d.resolutionWithQualityText)
-            optionalRow("Frame Rate", d.frameRateText)
-            optionalRow("Bitrate", d.indicatedBitrateText)
-            optionalRow("HDR", d.hdrText)
-            optionalRow("Dolby Vision", d.dolbyVisionText)
+            // Nominal frame rate + live observed FPS folded into one row.
+            optionalRow("Frame Rate", frameRateCombined(d))
+            // Indicated (source) bitrate + live network bitrate folded together.
+            optionalRow("Bitrate", videoBitrateCombined(d))
+            // HDR format + Dolby Vision profile folded into a single HDR row.
+            optionalRow("HDR", hdrCombined(d))
             optionalRow("Color", d.colorText)
             optionalRow("Codec Tag", d.videoCodecTagText)
         }
@@ -132,14 +141,14 @@ struct PlaybackDiagnosticsOverlay: View {
 
     @ViewBuilder
     private func playbackSection(_ d: PlaybackDiagnostics) -> some View {
+        // Live FPS + Network bitrate moved up into the VIDEO rows they mirror, so
+        // PLAYBACK is just the session-state facts.
         section("PLAYBACK") {
             optionalRow("Position", d.positionText)
             optionalRow("Seekable", d.seekWindowText)
             optionalRow("State", d.playbackStateText)
             row("Buffer", d.bufferStatusText)
             row("Dropped", "\(d.droppedFramesText) frames")
-            optionalRow("Live FPS", d.observedFpsText)
-            optionalRow("Network", d.observedBitrateText)
         }
     }
 
@@ -197,6 +206,49 @@ struct PlaybackDiagnosticsOverlay: View {
     }
 
     // MARK: - Helpers
+
+    /// Leading numeric token of a formatted value ("24 fps" → "24",
+    /// "11.9 Mbps" → "11.9"), or `nil` for the placeholder. Lets a live/observed
+    /// value be folded next to its nominal counterpart without repeating the unit.
+    private func numericToken(_ text: String) -> String? {
+        guard text != PlaybackDiagnostics.placeholder else { return nil }
+        return text.split(separator: " ").first.map(String.init)
+    }
+
+    /// A nominal value with its live counterpart folded in as "nominal · N live"
+    /// (unit shown once). Falls back to the live value alone when there's no
+    /// nominal, or the placeholder when neither exists.
+    private func withLive(nominal: String, live: String) -> String {
+        if nominal != PlaybackDiagnostics.placeholder {
+            guard let n = numericToken(live) else { return nominal }
+            return "\(nominal) · \(n) live"
+        }
+        return live
+    }
+
+    /// Nominal frame rate with the live observed FPS folded in.
+    private func frameRateCombined(_ d: PlaybackDiagnostics) -> String {
+        withLive(nominal: d.frameRateText, live: d.observedFpsText)
+    }
+
+    /// Indicated (source) video bitrate with the live network bitrate folded in.
+    private func videoBitrateCombined(_ d: PlaybackDiagnostics) -> String {
+        withLive(nominal: d.indicatedBitrateText, live: d.observedBitrateText)
+    }
+
+    /// HDR format folded with its Dolby Vision profile so the HUD shows one HDR
+    /// row rather than two overlapping ones.
+    private func hdrCombined(_ d: PlaybackDiagnostics) -> String {
+        let ph = PlaybackDiagnostics.placeholder
+        let hdr = d.hdrText
+        let dv = d.dolbyVisionText
+        switch (hdr != ph, dv != ph) {
+        case (true, true): return "\(hdr) · \(dv)"
+        case (true, false): return hdr
+        case (false, true): return dv
+        case (false, false): return ph
+        }
+    }
 
 }
 

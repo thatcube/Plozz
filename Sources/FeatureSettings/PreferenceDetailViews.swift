@@ -64,14 +64,9 @@ struct AppearanceDetailView: View {
                 SettingsSplitRow(
                     id: "navigation",
                     title: "Navigation",
-                    description: "How you move between Home, Search and the rest of the app.",
+                    description: "Horizontal tabs across the top, or a collapsible left sidebar. Shared across every profile on this Apple TV.",
                 ) {
-                    DescribedSegmentedPicker(
-                        options: NavigationStyle.allCases,
-                        selection: navigationBinding,
-                        title: { $0.displayName },
-                        detail: { $0.detail }
-                    )
+                    CompactNavigationPicker(selection: navigationBinding)
                 },
                 SettingsSplitRow(
                     id: "theme",
@@ -107,14 +102,9 @@ struct AppearanceDetailView: View {
                 SettingsSplitRow(
                     id: "card-style",
                     title: "Card Style",
-                    description: "How media is shown in rows and grids.",
+                    description: "Cards wrap each poster in a bordered surface with its text inside. Posters show just the artwork with its text underneath.",
                 ) {
-                    DescribedSegmentedPicker(
-                        options: CardStyle.allCases,
-                        selection: $cardStyle.style,
-                        title: { $0.displayName },
-                        detail: { $0.detail }
-                    )
+                    CompactCardStylePicker(selection: $cardStyle.style)
                 },
                 SettingsSplitRow(
                     id: "watch-indicator",

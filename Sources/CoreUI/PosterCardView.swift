@@ -272,10 +272,10 @@ public struct PosterCardView: View {
     }
 
     /// Inset that keeps the watched badge concentric with the borderless card's
-    /// rounded corner. The badge is a 38pt circle (radius 19), so its inset is
-    /// `outerRadius − 19`, matching the progress bar's even spacing.
+    /// rounded corner. The badge is a `metrics.watchedBadgeSize` circle, so its
+    /// inset is `outerRadius − radius`, matching the progress bar's even spacing.
     private var borderlessBadgeInset: CGFloat {
-        max(borderlessCornerRadius - 19, 8)
+        max(borderlessCornerRadius - metrics.watchedBadgeSize / 2, 8)
     }
 
     /// Aspect ratio for the borderless full-bleed image.
@@ -535,18 +535,23 @@ public struct PosterCardView: View {
     @ViewBuilder
     private func watchedBadge(inset: CGFloat) -> some View {
         if item.isPlayed && !showsProgressBar && !hideThumbnail {
+            // Density-scaled (with a floor) so the check grows with the card like
+            // the unwatched flag and progress bar, instead of staying a fixed size
+            // that looks tiny on large cards. Everything keys off `size` so the
+            // glyph, rim and shadow stay proportionate at every display size.
+            let size = metrics.watchedBadgeSize
             Image(systemName: "checkmark")
-                .font(.system(size: 20, weight: .bold))
+                .font(.system(size: size * 0.53, weight: .bold))
                 .foregroundStyle(.white)
-                .frame(width: 38, height: 38)
+                .frame(width: size, height: size)
                 .background(Circle().fill(ThemePalette.brandBlue))
                 .overlay {
                     Circle()
                         .inset(by: -0.5)
-                        .stroke(watchedBadgeRim, lineWidth: 1.5)
+                        .stroke(watchedBadgeRim, lineWidth: max(1.5, size * 0.04))
                 }
                 .padding(inset)
-                .shadow(color: .black.opacity(0.4), radius: 3, y: 1)
+                .shadow(color: .black.opacity(0.4), radius: size * 0.08, y: size * 0.026)
         }
     }
 

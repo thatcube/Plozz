@@ -278,6 +278,17 @@ public enum PlozzTheme {
         /// stays clearly visible even on the tiniest (micro-density) cards.
         public static let unwatchedFlagMinSize: CGFloat = 42
 
+        /// Base diameter of the "watched" check badge (the circle in a card's
+        /// top-trailing corner). Density-scaled (with a floor at
+        /// `watchedBadgeMinSize`) in `PlozzMetrics`, so — like the unwatched flag
+        /// and progress bar — it grows/shrinks with the display-size setting
+        /// instead of staying a fixed pixel size. Nudged a little larger than its
+        /// former fixed 38pt so it reads better on large cards.
+        public static let watchedBadgeSize: CGFloat = 42
+        /// Smallest the density-scaled watched badge is allowed to get, so the
+        /// check stays legible on the tiniest (micro-density) cards.
+        public static let watchedBadgeMinSize: CGFloat = 36
+
         // MARK: Detail
 
         /// Leading inset for the detail hero's title/metadata block, shared by the

@@ -21,17 +21,23 @@ public struct ShareProvider: MediaProvider {
     private let host: String
     private let port: Int?
     private let share: String
+    /// Injected engine-side SMB header prober (nil in tests / when the engine layer
+    /// isn't wired). Used to obtain real per-file stream facts for a share that has
+    /// no server metadata. Currently drives an opt-in on-device timing measurement
+    /// (env `PLZXPROBE=1`); becomes the source for cached facts in Phase 1.
+    private let streamProber: SMBStreamProbing?
 
-    public init(session: UserSession) {
-        self.init(session: session, watchDirectory: nil)
+    public init(session: UserSession, streamProber: SMBStreamProbing? = nil) {
+        self.init(session: session, watchDirectory: nil, streamProber: streamProber)
     }
 
     /// Test seam: build a provider whose device-local watch state lives in
     /// `watchDirectory` instead of Application Support, so the reportPlayback →
     /// persist → continueWatching path can be exercised end-to-end (including a
     /// simulated relaunch) without touching the real app container.
-    init(session: UserSession, watchDirectory: URL?) {
+    init(session: UserSession, watchDirectory: URL?, streamProber: SMBStreamProbing? = nil) {
         self.session = session
+        self.streamProber = streamProber
         let parsed = Self.parse(session.server.baseURL)
         self.host = parsed.host
         self.port = parsed.port
@@ -138,12 +144,45 @@ public struct ShareProvider: MediaProvider {
             // background backlog so its hero/poster/overview persist promptly. Fire-
             // and-forget (no added latency); a no-op once the item is enriched.
             await ShareCatalogRegistry.shared.enrichItem(accountKey: session.server.id, itemID: id)
+            measureStreamProbeIfEnabled(itemID: id)
             return await stampWatchState(indexed)
         }
         guard let item = await store.item(id: id) else {
             throw AppError.unknown("Item not found on share: \(id)")
         }
         return await stampWatchState(item)
+    }
+
+    /// Opt-in on-device timing measurement (env `PLZXPROBE=1`): probe this item's
+    /// file headers over SMB and log elapsed time + facts, so we can validate the
+    /// probe is fast enough for the browse-time metadata feature before building the
+    /// full pipeline. Fire-and-forget; never blocks item resolution.
+    private func measureStreamProbeIfEnabled(itemID: String) {
+        guard ProcessInfo.processInfo.environment["PLZXPROBE"] == "1",
+              let prober = streamProber else { return }
+        Task.detached(priority: .utility) {
+            // Record the browse, let the user settle, then probe ONLY if still idle —
+            // so probing never competes with active navigation. One in-flight at a
+            // time, spaced apart, capped per launch. (A naive fire-per-item version
+            // stormed the NAS and, because the probe blocks a thread, froze the UI.)
+            await ProbeMeasurementGate.shared.noteActivity()
+            try? await Task.sleep(for: .seconds(4))
+            guard await ProbeMeasurementGate.shared.tryStartIfIdle(idleFor: 4) else { return }
+            defer { Task { await ProbeMeasurementGate.shared.finish() } }
+            guard let relPath = await self.store.path(forItemID: itemID) else { return }
+            let ext = (relPath as NSString).pathExtension.lowercased()
+            let videoExts: Set<String> = ["mkv", "mp4", "m4v", "mov", "avi", "ts", "m2ts", "mts", "webm"]
+            guard videoExts.contains(ext), let url = self.smbURL(forRelativePath: relPath) else { return }
+            let name = (relPath as NSString).lastPathComponent
+            let start = Date()
+            let facts = await prober.probe(smbURL: url)
+            let ms = Int(Date().timeIntervalSince(start) * 1000)
+            if let f = facts {
+                HandoffDiagnostics.emit("PROBE ok file=\(name) container=\(ext) elapsed=\(ms)ms range=\(f.videoRangeType ?? "-") res=\(f.videoWidth ?? 0)x\(f.videoHeight ?? 0) vcodec=\(f.videoCodec ?? "-") acodec=\(f.audioCodec ?? "-") ch=\(f.audioChannels ?? 0) atmos=\(f.audioIsAtmos) dur=\(Int(f.durationSeconds ?? 0))s")
+            } else {
+                HandoffDiagnostics.emit("PROBE FAILED file=\(name) container=\(ext) elapsed=\(ms)ms")
+            }
+        }
     }
 
     public func children(of itemID: String) async throws -> [MediaItem] {
@@ -379,5 +418,42 @@ extension ShareProvider: ResumeStateWriting {
     /// draining queued resume can't overwrite a newer state.
     public func setResumePosition(_ seconds: TimeInterval, itemID: String, capturedAt: Date) async throws {
         await watchStore.setResume(seconds, itemID: itemID, capturedAt: capturedAt)
+    }
+}
+
+/// Serializes the opt-in stream-probe MEASUREMENT to ONE probe at a time and caps the
+/// total per launch. A naive fire-per-item version stormed the NAS and — because the
+/// probe blocks a thread — exhausted the Swift concurrency pool, stalling artwork and
+/// enrichment. This gate makes the measurement safe: browsing a whole folder still
+/// runs at most one probe at a time, and never more than `maxTotal` overall.
+private actor ProbeMeasurementGate {
+    static let shared = ProbeMeasurementGate()
+    private var inFlight = false
+    private var completed = 0
+    private var lastStart = Date.distantPast
+    private var lastActivity = Date.distantPast
+    private let maxTotal = 12
+    /// Minimum gap between probe STARTS.
+    private let minInterval: TimeInterval = 6
+
+    /// Record that the user just did something (opened/browsed an item), so probing
+    /// can hold off until they've paused.
+    func noteActivity() { lastActivity = Date() }
+
+    /// Only start a probe when the user has been IDLE for `idleFor` seconds (no
+    /// browsing), so probing never competes with active navigation.
+    func tryStartIfIdle(idleFor: TimeInterval) -> Bool {
+        let now = Date()
+        guard !inFlight, completed < maxTotal,
+              now.timeIntervalSince(lastActivity) >= idleFor,
+              now.timeIntervalSince(lastStart) >= minInterval else { return false }
+        inFlight = true
+        lastStart = now
+        return true
+    }
+
+    func finish() {
+        inFlight = false
+        completed += 1
     }
 }

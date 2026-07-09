@@ -9,6 +9,7 @@ import FeatureProfiles
 import ProviderJellyfin
 import ProviderPlex
 import ProviderShare
+import EnginePlozzigen
 import RatingsService
 import TraktService
 import SeerService
@@ -1073,7 +1074,7 @@ public final class AppState {
             )
         }
         registry.register(.mediaShare) { session in
-            ShareProvider(session: session)
+            ShareProvider(session: session, streamProber: PlozzigenSMBStreamProber())
         }
         return registry
     }

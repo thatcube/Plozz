@@ -81,7 +81,7 @@ struct PlayerControls: View {
         case infoNext       // Info panel: Next Episode
         case infoPrev       // Info panel: Previous Episode
         case infoRestart    // Info panel: Restart
-        case infoStats      // Info panel: Stats (diagnostics) toggle
+        case infoStats      // Info panel: Playback Info (diagnostics) toggle
         case row(Int)
         case edit       // Subtitles header ✎ Edit (appearance) button
         case download   // Trailing "Search for subtitles…" row
@@ -856,11 +856,12 @@ struct PlayerControls: View {
     /// inline with the badges on the bottom row.
     ///
     /// The right column holds an **icon-only** action row (Restart · Previous ·
-    /// Next Episode) pinned to the top and a subtle **Stats** toggle pinned to the
-    /// bottom (it drives the diagnostics overlay, moved off the transport row). The
-    /// focused action expands to show its label — the tvOS equivalent of a tooltip,
-    /// since there is no hover. Icons keep the row short so the artwork — not a tall
-    /// stack of text buttons — governs the card height (no dead space beneath it).
+    /// Next Episode) pinned to the top and a subtle **Playback Info** toggle pinned
+    /// to the bottom (it drives the diagnostics overlay, moved off the transport
+    /// row). The focused action expands to show its label — the tvOS equivalent of
+    /// a tooltip, since there is no hover. Icons keep the row short so the artwork —
+    /// not a tall stack of text buttons — governs the card height (no dead space
+    /// beneath it).
     private var infoPanel: some View {
         // Concentric radii, matching the app's cards: the thumbnail's media radius
         // nested inside the card's glass radius (outer = inner + content padding),
@@ -911,7 +912,12 @@ struct PlayerControls: View {
 
             Spacer(minLength: 32)
 
-            // Right column: icon action row pinned top, Stats toggle pinned bottom.
+            // Right column: icon action row pinned top, Playback Info toggle
+            // pinned bottom. Both are full-width focus sections so a Down press
+            // from ANY top button (even the left-most Restart) routes to Playback
+            // Info: a right-aligned single button wouldn't sit under Restart, so
+            // the bottom row spans the column width (Spacer + button) and is its
+            // own `.focusSection()`, bridging the horizontal offset.
             VStack(alignment: .trailing, spacing: 12) {
                 HStack(spacing: 12) {
                     // Order: Restart · Previous · Next Episode (primary, far right).
@@ -930,18 +936,23 @@ struct PlayerControls: View {
                         }
                     }
                 }
+                .focusSection()
                 Spacer(minLength: 0)
-                // Subtle Stats (diagnostics) toggle, bottom-right — balances the
-                // tech badges bottom-left. Keeps the Info panel open so the viewer
-                // can flip it and watch the top-left overlay appear.
-                infoActionButton(
-                    title: "Stats",
-                    icon: "chart.bar.xaxis",
-                    prominent: model.diagnosticsEnabled,
-                    slot: .infoStats
-                ) {
-                    model.diagnosticsEnabled.toggle()
+                // Subtle Playback Info (diagnostics) toggle, bottom-right —
+                // balances the tech badges bottom-left. Keeps the Info panel open
+                // so the viewer can flip it and watch the top-left overlay appear.
+                HStack(spacing: 0) {
+                    Spacer(minLength: 0)
+                    infoActionButton(
+                        title: "Playback Info",
+                        icon: "cpu",
+                        prominent: model.diagnosticsEnabled,
+                        slot: .infoStats
+                    ) {
+                        model.diagnosticsEnabled.toggle()
+                    }
                 }
+                .focusSection()
             }
             .frame(height: thumbHeight, alignment: .topTrailing)
             .fixedSize(horizontal: true, vertical: false)
@@ -969,9 +980,12 @@ struct PlayerControls: View {
     }
 
     /// An icon-only Info-card action. At rest it shows just its glyph; while
-    /// focused it expands to reveal its label — the tvOS stand-in for a hover
-    /// tooltip. The card is full-width and the middle text column is flexible, so
-    /// the expansion is absorbed by the trailing spacer without reflowing the card.
+    /// focused it **expands** to reveal its label (the tvOS stand-in for a hover
+    /// tooltip). The width/expand animates, but the focus **colours are instant**:
+    /// the `.animation` is scoped to the label's layout only, so the capsule grows
+    /// smoothly while `InfoActionButtonStyle` swaps fill/foreground on the same
+    /// frame (the stock glass styles animate their focus tint, which can't be
+    /// disabled from outside — hence the custom style).
     private func infoActionButton(
         title: String,
         icon: String,
@@ -984,17 +998,21 @@ struct PlayerControls: View {
             HStack(spacing: 8) {
                 Image(systemName: icon)
                 if isFocused {
-                    Text(title)
-                        .fixedSize()
-                        .transition(.opacity.combined(with: .move(edge: .trailing)))
+                    // `.identity` (no fade): the label appears at full opacity and
+                    // is revealed by the capsule growing around it, so the reveal
+                    // reads as pure movement, not a cross-fade.
+                    Text(title).fixedSize().transition(.identity)
                 }
             }
             .font(.subheadline.weight(.semibold))
             .lineLimit(1)
+            // Scope the animation to the label's layout: the capsule (sized to the
+            // label in the style) follows this and grows smoothly, while the fill
+            // and text colours — applied OUTSIDE this scope — change instantly.
+            .animation(.easeOut(duration: 0.2), value: isFocused)
         }
-        .playerGlassButton(prominent: prominent)
+        .buttonStyle(InfoActionButtonStyle(focused: isFocused, prominent: prominent))
         .focused($focus, equals: slot)
-        .animation(.easeOut(duration: 0.18), value: isFocused)
     }
 
     /// Header of the floating panel: the screen title, plus — on the Subtitles
@@ -2443,6 +2461,32 @@ private struct ScrubBar: View {
     private var previewAspect: CGFloat {
         guard let image = model.previewImage, image.height > 0 else { return 16.0 / 9.0 }
         return CGFloat(image.width) / CGFloat(image.height)
+    }
+}
+
+/// The Info-card action-button style: an **instant** focus treatment (no fade).
+/// The stock `.glass` / `.borderedProminent` styles animate their own focus
+/// highlight, which can't be disabled from outside — so the Info card draws its
+/// own capsule and swaps fill/foreground on the same frame focus changes.
+/// `.animation(nil, value: focused)` guarantees the swap never rides an ambient
+/// transaction. Icon-only at rest; the label reveals with the button on focus
+/// (instant, so the row never janks mid-expand).
+private struct InfoActionButtonStyle: ButtonStyle {
+    let focused: Bool
+    let prominent: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        let fill: Color = focused ? .white : .white.opacity(prominent ? 0.24 : 0.12)
+        let fg: Color = focused ? .black : .white
+        return configuration.label
+            .foregroundStyle(fg)
+            .padding(.horizontal, 22)
+            .padding(.vertical, 14)
+            .background(Capsule(style: .continuous).fill(fill))
+            .clipShape(Capsule(style: .continuous))
+            .scaleEffect(configuration.isPressed ? 0.96 : 1)
+            // Everything about focus is instant — no background/foreground fade.
+            .animation(nil, value: focused)
     }
 }
 

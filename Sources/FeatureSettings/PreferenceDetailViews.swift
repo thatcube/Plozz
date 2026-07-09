@@ -64,14 +64,9 @@ struct AppearanceDetailView: View {
                 SettingsSplitRow(
                     id: "navigation",
                     title: "Navigation",
-                    description: "How you move between Home, Search and the rest of the app.",
+                    description: "Tabs in a pill across the top of every page, or a collapsible left sidebar that expands on focus. The pages themselves are identical either way.",
                 ) {
-                    DescribedSegmentedPicker(
-                        options: NavigationStyle.allCases,
-                        selection: navigationBinding,
-                        title: { $0.displayName },
-                        detail: { $0.detail }
-                    )
+                    CompactNavigationPicker(selection: navigationBinding)
                 },
                 SettingsSplitRow(
                     id: "theme",
@@ -107,14 +102,9 @@ struct AppearanceDetailView: View {
                 SettingsSplitRow(
                     id: "card-style",
                     title: "Card Style",
-                    description: "How media is shown in rows and grids.",
+                    description: "Framed cards wrap each poster in a bordered surface with the title inside, or borderless posters show just the artwork with its title underneath.",
                 ) {
-                    DescribedSegmentedPicker(
-                        options: CardStyle.allCases,
-                        selection: $cardStyle.style,
-                        title: { $0.displayName },
-                        detail: { $0.detail }
-                    )
+                    CompactCardStylePicker(selection: $cardStyle.style)
                 },
                 SettingsSplitRow(
                     id: "watch-indicator",

@@ -40,6 +40,43 @@ public final class PlayerViewModel {
 
     public private(set) var phase: Phase = .loading
 
+    /// A fully-resolved, engine-routed playback ready to be adopted verbatim —
+    /// no `playbackInfo` re-resolve needed. Produced by the next-episode prefetch
+    /// (``prefetchedNext``) on the outgoing player and injected into the incoming
+    /// player (``adoptedResolved``) so an episode hand-off skips the network
+    /// resolve, commits the right engine immediately, and reuses the already-open
+    /// server session (Jellyfin) rather than minting a second one.
+    public struct PrefetchedPlayback: Sendable {
+        public let itemID: String
+        public let request: PlaybackRequest
+        public let engineKind: PlaybackEngineKind
+        public init(itemID: String, request: PlaybackRequest, engineKind: PlaybackEngineKind) {
+            self.itemID = itemID
+            self.request = request
+            self.engineKind = engineKind
+        }
+    }
+
+    /// True from bring-up until the engine is genuinely presenting moving frames.
+    /// While it's set (and we're not in `.failed`), the bring-up spinner stays up,
+    /// so the viewer sees ONE continuous loading indicator from tap → first frame
+    /// instead of a spinner that vanishes the instant `engine.load()` returns and
+    /// then a black gap / second in-player spinner while the picture actually
+    /// arrives. Driven by ``beginAwaitingFirstFrame``.
+    public private(set) var awaitingFirstFrame = false
+
+    /// Whether the full-screen bring-up spinner should be shown: while resolving/
+    /// loading, and while `.ready` but the first frame hasn't been presented yet.
+    /// Off once frames advance (or on failure). Lets the view keep a single
+    /// spinner across the `.loading` → `.ready` boundary.
+    public var showBringUpSpinner: Bool {
+        switch phase {
+        case .loading: return true
+        case .ready: return awaitingFirstFrame
+        case .failed: return false
+        }
+    }
+
     /// Set to `true` when playback reaches its natural end *and* this player was
     /// configured to auto-dismiss on completion (currently trailers). The view
     /// observes this and dismisses itself. Ignored for regular library playback,
@@ -296,6 +333,16 @@ public final class PlayerViewModel {
     public private(set) var nextEpisode: MediaItem?
     public private(set) var previousEpisode: MediaItem?
 
+    /// A resolved, engine-routed playback for the NEXT episode, prefetched during
+    /// this episode so the hand-off is near-instant. Handed to the incoming player
+    /// via ``consumePrefetchedNext(matching:)``; released on ``stop()`` if the
+    /// viewer backs out without advancing (so a Jellyfin session isn't orphaned).
+    public private(set) var prefetchedNext: PrefetchedPlayback?
+
+    /// A prefetched playback injected at init by the OUTGOING episode's player, to
+    /// be adopted by ``startPlayback`` instead of re-resolving over the network.
+    private var adoptedResolved: PrefetchedPlayback?
+
     /// Resolves the surrounding episodes (previous, next) for the playing item,
     /// off the main actor. `nil` for non-episode playback.
     private let neighborResolver: (@Sendable () async -> (previous: MediaItem?, next: MediaItem?))?
@@ -359,6 +406,18 @@ public final class PlayerViewModel {
     /// bring-up; `stop()` cancels it so a Back during the transition tears down
     /// cleanly via the cancellation checks in `startPlayback`.
     private var prefetchTask: Task<Void, Never>?
+    /// Background resolve of the NEXT episode's playback (see ``prefetchedNext``).
+    private var nextEpisodePrefetchTask: Task<Void, Never>?
+    /// Fires the next-episode prefetch at most once per player.
+    private var didStartNextEpisodePrefetch = false
+    /// Polls the engine for its first presented frame so the bring-up spinner can
+    /// be held until the picture is actually on screen (see ``awaitingFirstFrame``).
+    private var firstFrameTask: Task<Void, Never>?
+    /// How long before the end to prefetch the next episode when the provider's
+    /// `playbackInfo` is NOT idempotent (Jellyfin) and no closing-credits marker
+    /// opened the Up Next window — a safety net for marker-less servers so the
+    /// hand-off is still resolved ahead of time without orphaning a session early.
+    private static let windowedNextPrefetchLeadTime: TimeInterval = 90
     /// Background series-id enrichment; awaited (briefly) at stop so a fast
     /// finisher still scrobbles with the show's ids resolved.
     private var enrichTask: Task<Void, Never>?
@@ -386,7 +445,8 @@ public final class PlayerViewModel {
         onPlaybackStopped: @escaping @Sendable (_ position: TimeInterval, _ watchedPercent: Double) -> Void = { _, _ in },
         onPlaybackStarted: @escaping @Sendable () -> Void = {},
         onPlaybackCheckpoint: @escaping @Sendable (_ position: TimeInterval, _ watchedPercent: Double) -> Void = { _, _ in },
-        checkpointInterval: TimeInterval = 60
+        checkpointInterval: TimeInterval = 60,
+        adoptedResolved: PrefetchedPlayback? = nil
     ) {
         self.provider = provider
         self.itemID = itemID
@@ -411,6 +471,7 @@ public final class PlayerViewModel {
         self.onPlaybackStarted = onPlaybackStarted
         self.onPlaybackCheckpoint = onPlaybackCheckpoint
         self.checkpointInterval = checkpointInterval
+        self.adoptedResolved = adoptedResolved
         self.engine = engineFactory.makeNative(style)
         self.currentEngineKind = .native
         PlaybackInstrumentation.increment(.viewModel)
@@ -447,6 +508,9 @@ public final class PlayerViewModel {
     private func configureEngineCallbacks() {
         engine.onProgress = { [weak self] in
             guard let self else { return }
+            // Jellyfin (non-idempotent) next-episode prefetch fires once the
+            // hand-off window opens; idempotent providers prefetch eagerly instead.
+            self.maybeStartWindowedNextPrefetch()
             Task { await self.report(event: .progress, isPaused: false) }
         }
         engine.onFailure = { [weak self] error in
@@ -526,6 +590,133 @@ public final class PlayerViewModel {
         controls.hasPreviousEpisode = prev != nil
         controls.hasNextEpisode = next != nil
         updateUpNextCard()
+        // Eagerly prefetch the next episode's resolved stream when the provider's
+        // `playbackInfo` is idempotent (Plex, SMB share) — safe to resolve the
+        // moment it's known, for a near-instant hand-off. Jellyfin (a
+        // session-minting POST) defers to the hand-off window instead; see
+        // ``maybeStartWindowedNextPrefetch``.
+        if next != nil, provider.kind.playbackInfoIsIdempotent {
+            startNextEpisodePrefetch()
+        }
+    }
+
+    // MARK: - Next-episode prefetch (fast hand-off)
+
+    /// Resolves the NEXT episode's stream + engine ahead of the hand-off and
+    /// caches it in ``prefetchedNext``. Fires at most once. Best-effort: a failure
+    /// just means the hand-off resolves normally (no regression). The eager path
+    /// (idempotent providers) calls this from ``resolveNeighbors``; the windowed
+    /// path (Jellyfin) calls it from ``maybeStartWindowedNextPrefetch``.
+    private func startNextEpisodePrefetch() {
+        guard let next = nextEpisode, !didStartNextEpisodePrefetch, prefetchedNext == nil,
+              nextEpisodePrefetchTask == nil else { return }
+        didStartNextEpisodePrefetch = true
+        nextEpisodePrefetchTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let resolved = try await self.resolveAndRoute(
+                    itemID: next.id, mediaSourceID: next.selectedVersionID, forceTranscode: false)
+                // A stop()/back-out cancelled us after the resolve opened a
+                // (Jellyfin) session — release it rather than orphan it.
+                if Task.isCancelled {
+                    await self.releasePrefetchedSession(resolved.request)
+                    self.nextEpisodePrefetchTask = nil
+                    return
+                }
+                self.prefetchedNext = resolved
+                PlozzLog.playback.info("Prefetched next-episode playback (engine=\(resolved.engineKind.rawValue))")
+            } catch is CancellationError {
+                // Nothing resolved yet — nothing to release.
+            } catch {
+                // One-shot: a failed prefetch does NOT re-arm. Re-arming would let
+                // maybeStartWindowedNextPrefetch re-POST every progress tick and
+                // orphan a Jellyfin session that was minted just before the
+                // failure. The hand-off then resolves normally (no regression).
+                PlozzLog.playback.debug("Next-episode prefetch failed (non-fatal)")
+            }
+            self.nextEpisodePrefetchTask = nil
+        }
+    }
+
+    /// Starts the next-episode prefetch for a NON-idempotent provider (Jellyfin)
+    /// once the hand-off window has opened — the closing-credits marker (Up Next
+    /// active) or, as a fallback for marker-less servers, the last
+    /// ``windowedNextPrefetchLeadTime`` seconds. Keeps the minted session fresh.
+    /// Called on the progress cadence. Idempotent providers use the eager path.
+    private func maybeStartWindowedNextPrefetch() {
+        guard nextEpisode != nil, prefetchedNext == nil, !didStartNextEpisodePrefetch,
+              nextEpisodePrefetchTask == nil else { return }
+        guard !provider.kind.playbackInfoIsIdempotent else { return }
+        let duration = engine.duration
+        let remaining = duration - engine.currentTime
+        let windowOpen = controls.upNextActive
+            || (duration > 0 && remaining > 0 && remaining <= Self.windowedNextPrefetchLeadTime)
+        guard windowOpen else { return }
+        startNextEpisodePrefetch()
+    }
+
+    /// Hands the prefetched next-episode resolution to the incoming player and
+    /// clears it locally so ``stop()`` won't release the session being adopted.
+    /// Returns `nil` when there's no prefetch or it doesn't match `itemID` (the
+    /// hand-off then resolves normally). Call this synchronously BEFORE `stop()`.
+    public func consumePrefetchedNext(matching itemID: String) -> PrefetchedPlayback? {
+        guard let prefetched = prefetchedNext, prefetched.itemID == itemID else { return nil }
+        prefetchedNext = nil
+        // The producing task already completed; drop the handle so stop()'s
+        // cancel-and-release can't touch the session the incoming player now owns.
+        nextEpisodePrefetchTask = nil
+        return prefetched
+    }
+
+    /// Releases a prefetched-but-unadopted server session so a back-out doesn't
+    /// orphan a Jellyfin play/transcode session. A no-op for idempotent providers
+    /// (Plex/SMB create no server-side state). Best-effort.
+    private func releasePrefetchedSession(_ request: PlaybackRequest) async {
+        guard !provider.kind.playbackInfoIsIdempotent else { return }
+        guard let sessionID = request.playSessionID, !sessionID.isEmpty else { return }
+        let progress = PlaybackProgress(
+            itemID: request.item.id, playSessionID: sessionID, positionSeconds: 0, isPaused: true)
+        try? await provider.reportPlayback(progress, event: .stop)
+        PlozzLog.playback.info("Released orphaned prefetched next-episode session")
+    }
+
+    // MARK: - First-frame gate (single bring-up spinner)
+
+    /// Holds the bring-up spinner (``showBringUpSpinner``) until the engine is
+    /// genuinely presenting moving frames, so tap → first frame shows ONE
+    /// continuous indicator. Called from ``playResolved`` after `engine.load()`.
+    /// If the engine is already presenting (e.g. a mid-play cross-engine swap),
+    /// clears immediately.
+    private func beginAwaitingFirstFrame() {
+        firstFrameTask?.cancel()
+        if engine.preventsDisplaySleep {
+            awaitingFirstFrame = false
+            return
+        }
+        awaitingFirstFrame = true
+        firstFrameTask = Task { @MainActor [weak self] in
+            // Poll the engine's "frames genuinely advancing" signal
+            // (`preventsDisplaySleep`: native `timeControlStatus == .playing`,
+            // Plozzigen `state == .playing`) — finer than the ~report-cadence
+            // `onProgress`, so the spinner drops the instant the picture is up.
+            // A true hang is handled by the existing playback watchdog, not here.
+            while !Task.isCancelled {
+                guard let self, self.awaitingFirstFrame else { return }
+                if self.engine.preventsDisplaySleep {
+                    self.awaitingFirstFrame = false
+                    return
+                }
+                try? await Task.sleep(nanoseconds: 100_000_000)
+            }
+        }
+    }
+
+    /// Tears down the first-frame gate on any terminal path (stop / failure) so
+    /// the poll never lingers and the spinner never sticks.
+    private func clearFirstFrameWait() {
+        firstFrameTask?.cancel()
+        firstFrameTask = nil
+        awaitingFirstFrame = false
     }
 
     /// Builds the spoiler-aware Up Next presentation for the resolved next episode
@@ -731,22 +922,29 @@ public final class PlayerViewModel {
     private func startPlayback(forceTranscode: Bool, resumeOverride: TimeInterval?) async {
         phase = .loading
         do {
-            var request = try await provider.playbackInfo(for: itemID, mediaSourceID: mediaSourceID, forceTranscode: forceTranscode)
+            let resolved: PrefetchedPlayback
+            if !forceTranscode, let adopted = adoptedResolved, adopted.itemID == itemID {
+                // Adopt the request the previous episode prefetched for us. Skips
+                // the network `playbackInfo` resolve entirely (near-instant
+                // hand-off) and REUSES its already-open session (Jellyfin) so
+                // exactly one server session ever exists. The engine is already
+                // routed, so it commits correctly on the first commit — no
+                // native→Plozzigen swap, one continuous loading spinner.
+                adoptedResolved = nil
+                resolved = adopted
+                PlozzLog.playback.info("Adopted prefetched playback; skipping playbackInfo resolve")
+            } else {
+                resolved = try await resolveAndRoute(
+                    itemID: itemID, mediaSourceID: mediaSourceID, forceTranscode: forceTranscode)
+            }
             // A user-initiated Back during playbackInfo resolution should NOT
             // proceed to bring up an engine that will immediately be torn down —
             // short-circuit cleanly without going through the failure path.
             try Task.checkCancellation()
+
+            let request = resolved.request
             self.request = request
             configureControls(for: request)
-
-            // Steer the engine's INITIAL active audio track by language (no reload)
-            // from the prefer-original-language policy. Computed once here so every
-            // playResolved entry (initial + cross-engine fallback, which reuse
-            // self.request) inherits it. Subtitle language steering is intentionally
-            // left empty — Plozz owns subtitle selection via the SDR overlay, so the
-            // engine must not activate its own subtitle track here.
-            request.preferredAudioLanguages = preferredAudioLanguages(for: request.item)
-            self.request = request
 
             // Enrich the episode with its series-level ids in the background so the
             // first scrobble can identify the show on trackers that require it, then
@@ -772,81 +970,104 @@ public final class PlayerViewModel {
                 startPosition = playbackSettings.resumeRewindInterval.applied(to: base)
             }
 
-            // Pick the engine from the resolved source facts (pure decision).
-            var kind: PlaybackEngineKind
-            if !forceTranscode, engineFactory.plozzigenAvailable,
-                      let descriptor = request.localRemuxSource,
-                      case .eligible = descriptor.plozzigenEligibility {
-                // Plozzigen handles the full pipeline: FFmpeg demux → HLS-fMP4 →
-                // localhost → AVPlayer. Covers HEVC/H.264/VP9/AV1 video with any
-                // audio (stream-copy or lossless bridge). The engine reads
-                // localRemuxSource.originalURL directly.
-                kind = .plozzigen
-            } else {
-                kind = EngineRouter.selectEngine(
-                    source: request.sourceMetadata,
-                    capabilities: capabilities,
-                    isTranscoding: request.isTranscoding,
-                    // Plozzigen is the on-device decode engine, so "hybrid
-                    // available" (needs-on-device-decode is routable) == Plozzigen
-                    // available. When it isn't wired in, the router stays native.
-                    hybridAvailable: engineFactory.plozzigenAvailable
-                )
-                // The router's `.hybrid` return is its abstract "needs on-device
-                // decode" signal; Plozzigen (AetherEngine) is that engine — it
-                // fetches the source itself and remuxes HEVC/`hev1`/etc. to
-                // AVPlayer on-device. Resolve `.hybrid` to it. (The former backing engine is retired.)
-                if kind == .hybrid, engineFactory.plozzigenAvailable {
-                    kind = .plozzigen
-                }
-            }
-
-            // If the subtitle that would be shown by default is image-based
-            // (PGS/DVB/DVD/VOBSUB), AVPlayer can't render it — route to Plozzigen,
-            // which decodes bitmap subtitle packets into image cues that Plozz's
-            // overlay draws at their authored on-frame position (no server
-            // burn-in). Only when direct-playing and Plozzigen is wired in. (A file
-            // with a text-subtitle equivalent stays native; see
-            // `defaultSubtitleNeedsHybridEngine`.) If the source is already routed
-            // to Plozzigen this is a no-op. Use the per-content-type rule so this
-            // prediction matches the on-load default. On Plozzigen, its own
-            // load-time default-selection picks the matching engine track, so we
-            // don't seed a provider-id selection here (the id spaces differ).
-            let subtitleRule = effectiveSubtitleRule(for: request.item)
-            if kind == .native, !request.isTranscoding, engineFactory.plozzigenAvailable,
-               request.subtitleTracks.defaultSubtitleNeedsHybridEngine(
-                   mode: subtitleRule.mode,
-                   preferredLanguage: subtitleRule.preferredLanguage) {
-                PlozzLog.playback.info("Default subtitle is image-based; routing to Plozzigen so it can be rendered on-device")
-                kind = .plozzigen
-            }
-
-            // A raw SMB share stream (the media-share provider) can ONLY be opened
-            // by the on-device engine — AVPlayer/AVFoundation cannot demux or even
-            // open an `smb://` URL. So regardless of container/codec facts (which a
-            // share provider doesn't report), force Plozzigen for any smb:// source.
-            // Without this the router's "no source facts → native" default sends it
-            // to AVPlayer, which silently fails to bring up the stream.
-            let resolvedURL = request.localRemuxSource?.originalURL ?? request.streamURL
-            if kind != .plozzigen, engineFactory.plozzigenAvailable,
-               resolvedURL.scheme?.lowercased() == "smb" {
-                PlozzLog.playback.info("SMB share source; routing to Plozzigen (AVPlayer can't open smb://)")
-                kind = .plozzigen
-            }
-
             try Task.checkCancellation()
-            await playResolved(request, engineKind: kind, startPosition: startPosition)
+            await playResolved(request, engineKind: resolved.engineKind, startPosition: startPosition)
 
             // Best-effort, never blocking play(): (if enabled) fetch a missing
             // subtitle in the preferred language.
-            startAutoSubtitleDownloadIfNeeded(request: request)        } catch is CancellationError {
+            startAutoSubtitleDownloadIfNeeded(request: request)
+        } catch is CancellationError {
             // Leave `phase` as `.loading`; the view is dismissing.
             return
         } catch let error as AppError {
+            clearFirstFrameWait()
             phase = .failed(error)
         } catch {
+            clearFirstFrameWait()
             phase = .failed(.unknown(""))
         }
+    }
+
+    /// Resolves a stream via the provider and picks its engine — the pure,
+    /// network half of bring-up, with NO engine mutation or side effects on
+    /// `self`. Shared by the current-item load (``startPlayback``) and the
+    /// next-episode prefetch (``startNextEpisodePrefetch``) so both route
+    /// identically. The returned ``PrefetchedPlayback`` carries everything the
+    /// engine commit needs, so a prefetched result can be adopted verbatim.
+    private func resolveAndRoute(
+        itemID: String,
+        mediaSourceID: String?,
+        forceTranscode: Bool
+    ) async throws -> PrefetchedPlayback {
+        var request = try await provider.playbackInfo(
+            for: itemID, mediaSourceID: mediaSourceID, forceTranscode: forceTranscode)
+        // Steer the engine's INITIAL active audio track by language (no reload)
+        // from the prefer-original-language policy. Computed here so every
+        // playResolved entry (initial, adopted prefetch, and cross-engine
+        // fallback, which reuse self.request) inherits it. Subtitle language
+        // steering is intentionally left empty — Plozz owns subtitle selection
+        // via the SDR overlay, so the engine must not activate its own track.
+        request.preferredAudioLanguages = preferredAudioLanguages(for: request.item)
+        let kind = routeEngine(for: request, forceTranscode: forceTranscode)
+        return PrefetchedPlayback(itemID: itemID, request: request, engineKind: kind)
+    }
+
+    /// Picks the engine for a resolved request — the pure routing decision, no
+    /// engine mutation or network. Extracted so the current-item load and the
+    /// next-episode prefetch pick the engine the same way.
+    private func routeEngine(for request: PlaybackRequest, forceTranscode: Bool) -> PlaybackEngineKind {
+        var kind: PlaybackEngineKind
+        if !forceTranscode, engineFactory.plozzigenAvailable,
+                  let descriptor = request.localRemuxSource,
+                  case .eligible = descriptor.plozzigenEligibility {
+            // Plozzigen handles the full pipeline: FFmpeg demux → HLS-fMP4 →
+            // localhost → AVPlayer. Covers HEVC/H.264/VP9/AV1 video with any
+            // audio (stream-copy or lossless bridge). The engine reads
+            // localRemuxSource.originalURL directly.
+            kind = .plozzigen
+        } else {
+            kind = EngineRouter.selectEngine(
+                source: request.sourceMetadata,
+                capabilities: capabilities,
+                isTranscoding: request.isTranscoding,
+                // Plozzigen is the on-device decode engine, so "hybrid available"
+                // (needs-on-device-decode is routable) == Plozzigen available.
+                // When it isn't wired in, the router stays native.
+                hybridAvailable: engineFactory.plozzigenAvailable
+            )
+            // The router's `.hybrid` return is its abstract "needs on-device
+            // decode" signal; Plozzigen (AetherEngine) is that engine. Resolve
+            // `.hybrid` to it. (The former backing engine is retired.)
+            if kind == .hybrid, engineFactory.plozzigenAvailable {
+                kind = .plozzigen
+            }
+        }
+
+        // If the subtitle that would be shown by default is image-based
+        // (PGS/DVB/DVD/VOBSUB), AVPlayer can't render it — route to Plozzigen,
+        // which decodes bitmap subtitle packets into image cues that Plozz's
+        // overlay draws (no server burn-in). Only when direct-playing and
+        // Plozzigen is wired in; a no-op when already routed to Plozzigen.
+        let subtitleRule = effectiveSubtitleRule(for: request.item)
+        if kind == .native, !request.isTranscoding, engineFactory.plozzigenAvailable,
+           request.subtitleTracks.defaultSubtitleNeedsHybridEngine(
+               mode: subtitleRule.mode,
+               preferredLanguage: subtitleRule.preferredLanguage) {
+            PlozzLog.playback.info("Default subtitle is image-based; routing to Plozzigen so it can be rendered on-device")
+            kind = .plozzigen
+        }
+
+        // A raw SMB share stream can ONLY be opened by the on-device engine —
+        // AVPlayer/AVFoundation cannot demux or even open an `smb://` URL. Force
+        // Plozzigen for any smb:// source regardless of container/codec facts
+        // (which a share provider doesn't report).
+        let resolvedURL = request.localRemuxSource?.originalURL ?? request.streamURL
+        if kind != .plozzigen, engineFactory.plozzigenAvailable,
+           resolvedURL.scheme?.lowercased() == "smb" {
+            PlozzLog.playback.info("SMB share source; routing to Plozzigen (AVPlayer can't open smb://)")
+            kind = .plozzigen
+        }
+        return kind
     }
 
     /// Resolves the ordered audio-language preference for a load from per-series
@@ -1091,6 +1312,11 @@ public final class PlayerViewModel {
         await Self.yieldToRunLoop()
         await engine.load(request: request, startPosition: startPosition)
         phase = .ready
+        // Hold the bring-up spinner until the engine actually presents its first
+        // frame, so `.loading` → `.ready` is one continuous indicator rather than
+        // a spinner that vanishes here (before the picture is up) and then a black
+        // gap / second in-player spinner while frames arrive.
+        beginAwaitingFirstFrame()
         // Publish diagnostics after the engine load attempt returns, so the
         // diagnostics sampler doesn't churn SwiftUI layout during Plozzigen init.
         diagnosticsToken = UUID()
@@ -1305,6 +1531,7 @@ public final class PlayerViewModel {
         }
 
         // 3) Already transcoding (or out of options): surface the error.
+        clearFirstFrameWait()
         phase = .failed(error)
     }
 
@@ -1780,6 +2007,12 @@ public final class PlayerViewModel {
         didStop = true
         prefetchTask?.cancel()
         prefetchTask = nil
+        // Cancel the next-episode prefetch; its session (if any) is released
+        // below, after the current engine is silenced, so cleanup never delays
+        // stopping playback.
+        nextEpisodePrefetchTask?.cancel()
+        nextEpisodePrefetchTask = nil
+        clearFirstFrameWait()
         checkpointTask?.cancel()
         checkpointTask = nil
         segmentsTask?.cancel()
@@ -1804,6 +2037,19 @@ public final class PlayerViewModel {
         let finalPosition = max(engine.furthestObservedPosition, engine.currentTime)
         let percent = watchedPercent(at: finalPosition)
         engine.stop()
+        // Release any prefetched next-episode session that was never adopted, and
+        // an adopted-but-never-committed session (a hand-off torn down before the
+        // incoming player took ownership), so a Jellyfin session isn't orphaned.
+        // A no-op for idempotent providers. Done AFTER engine.stop() so it never
+        // keeps audio playing while the cleanup round-trips.
+        if let orphan = prefetchedNext {
+            prefetchedNext = nil
+            await releasePrefetchedSession(orphan.request)
+        }
+        if let unadopted = adoptedResolved {
+            adoptedResolved = nil
+            await releasePrefetchedSession(unadopted.request)
+        }
         // Let in-flight series-id enrichment finish so a fast playthrough still
         // scrobbles with the show's ids (anime tagged only AniDB resolve mal/
         // anilist here). Capped at 2s so a slow server never blocks teardown.

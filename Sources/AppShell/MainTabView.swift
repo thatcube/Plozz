@@ -1021,7 +1021,8 @@ private func makePlayerViewModel(
     scrobbler: any TraktScrobbling,
     watchBridge: WatchOutboxBridge,
     identitySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef],
-    onSubtitleStyleChanged: @escaping (SubtitleStyle) -> Void = { _ in }
+    onSubtitleStyleChanged: @escaping (SubtitleStyle) -> Void = { _ in },
+    adoptedResolved: PlayerViewModel.PrefetchedPlayback? = nil
 ) -> PlayerViewModel {
     if let videoID = request.item.youTubeTrailerVideoID {
         let trailerItem = request.item
@@ -1139,7 +1140,8 @@ private func makePlayerViewModel(
             primaryAccountID: primaryAccountID,
             watchBridge: watchBridge,
             identitySources: identitySources
-        )
+        ),
+        adoptedResolved: adoptedResolved
     )
     episodeViewModel.onSubtitleStyleChanged = onSubtitleStyleChanged
     return episodeViewModel
@@ -1248,7 +1250,7 @@ func makePlaybackStoppedHandler(
 /// full-screen cover never dismisses and the series page never flashes through.
 @MainActor
 private struct PlayerPresentation: View {
-    let make: (PlayRequest) -> PlayerViewModel
+    let make: (PlayRequest, PlayerViewModel.PrefetchedPlayback?) -> PlayerViewModel
     /// Re-selects the next-best source after the current target fails to start,
     /// excluding every account already attempted; `nil` means no untried source
     /// remains, so the player's own error state stays on screen (r8-play-failover).
@@ -1266,7 +1268,7 @@ private struct PlayerPresentation: View {
 
     init(
         request: PlayRequest,
-        make: @escaping (PlayRequest) -> PlayerViewModel,
+        make: @escaping (PlayRequest, PlayerViewModel.PrefetchedPlayback?) -> PlayerViewModel,
         makeFailover: @escaping (_ failedItem: MediaItem, _ tried: Set<String>) -> MediaItem?,
         showDiagnostics: Bool,
         themePalette: ThemePalette
@@ -1292,11 +1294,17 @@ private struct PlayerPresentation: View {
         }
         .task {
             if viewModel == nil {
-                viewModel = make(activeRequest)
+                viewModel = make(activeRequest, nil)
             }
         }
         .onChange(of: viewModel?.pendingNextEpisode?.id) { _, nextID in
             guard nextID != nil, let next = viewModel?.pendingNextEpisode else { return }
+            // Adopt the next episode's prefetched resolution (if ready) BEFORE
+            // stop() runs, so the incoming player skips the network resolve and
+            // reuses the already-open session rather than the old player releasing
+            // it. `nil` when the prefetch didn't finish → the new player resolves
+            // normally (no regression).
+            let prefetched = viewModel?.consumePrefetchedNext(matching: next.id)
             Task { @MainActor in
                 // Stop + scrobble the finished episode before swapping.
                 await viewModel?.stop()
@@ -1306,7 +1314,7 @@ private struct PlayerPresentation: View {
                 let newRequest = PlayRequest(item: next, startPosition: 0)
                 // A new title starts its own failover attempt history.
                 triedAccountIDs = []
-                viewModel = make(newRequest)
+                viewModel = make(newRequest, prefetched)
                 activeRequest = newRequest
             }
         }
@@ -1331,7 +1339,7 @@ private struct PlayerPresentation: View {
                     startPosition: activeRequest.startPosition
                 )
                 triedAccountIDs = attempted
-                viewModel = make(newRequest)
+                viewModel = make(newRequest, nil)
                 activeRequest = newRequest
             }
         }
@@ -1686,9 +1694,9 @@ private extension View {
         fullScreenCover(item: playRequest) { request in
             PlayerPresentation(
                 request: request,
-                make: {
+                make: { request, adopted in
                     makePlayerViewModel(
-                        for: $0,
+                        for: request,
                         accounts: accounts,
                         behavior: behavior,
                         style: style,
@@ -1700,7 +1708,8 @@ private extension View {
                         scrobbler: scrobbler,
                         watchBridge: watchBridge,
                         identitySources: identitySources,
-                        onSubtitleStyleChanged: onSubtitleStyleChanged
+                        onSubtitleStyleChanged: onSubtitleStyleChanged,
+                        adoptedResolved: adopted
                     )
                 },
                 makeFailover: { failedItem, tried in

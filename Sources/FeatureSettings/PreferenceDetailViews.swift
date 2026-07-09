@@ -54,12 +54,7 @@ struct AppearanceDetailView: View {
                     title: "Display Size",
                     description: "Scales card size, columns and spacing across the app.",
                 ) {
-                    SettingsOptionList(
-                        options: UIDensity.allCases,
-                        selection: $density.density,
-                        icon: { $0.symbolName },
-                        title: { $0.displayName }
-                    )
+                    CompactDisplaySizePicker(selection: $density.density)
                 },
                 SettingsSplitRow(
                     id: "cards",

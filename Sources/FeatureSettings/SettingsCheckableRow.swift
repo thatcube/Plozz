@@ -2,32 +2,16 @@
 import SwiftUI
 import CoreUI
 
-/// How much visual weight a checkable row carries, so the *same* shared control
-/// can read as either a top-level decision or a child of a master toggle — no
-/// one-off row types.
-///
-/// - `primary`: full weight, matching a switch row on the same screen. For
-///   single-select pickers where the checkmark list *is* the decision (Theme,
-///   Display Size, Music Player style — see ``SettingsOptionList``).
-/// - `secondary`: a step lighter + tighter, for sub-section multi-select lists
-///   that sit under a master toggle (Customize Home rows, the libraries under a
-///   server on Your Servers & Libraries — see ``SettingsCheckList``). Reads as
-///   the toggle's children, not its peer.
-enum SettingsRowProminence {
-    case primary
-    case secondary
-}
-
 /// One focusable, checkable row for the Settings detail pane — a leading optional
 /// icon, a title, and a trailing checkmark shown when `isChecked`.
 ///
 /// Shared by both ``SettingsOptionList`` (single-select — Theme, Display Size,
 /// Music Player style) and ``SettingsCheckList`` (multi-select — the Customize
 /// Home row checklists), so the checkmark and focus-card look are identical
-/// everywhere and defined **once**. At `.primary` prominence it mirrors
-/// ``SettingsSwitchToggleStyle``'s metrics (spacing 20, headline-semibold label,
-/// 14pt vertical padding, 46pt min height) so a checkable row carries the same
-/// weight as a switch row; `.secondary` steps that down for child rows.
+/// everywhere and defined **once**. All heights come from the shared
+/// ``SettingsRowMetrics``, so at `.primary` prominence a checkable row is exactly
+/// as tall as a switch row on the same screen, and `.secondary` steps that down
+/// for child rows — matching selector rows of the same prominence.
 struct SettingsCheckableRow: View {
     let title: String
     var subtitle: String? = nil
@@ -40,22 +24,25 @@ struct SettingsCheckableRow: View {
     /// Full weight (default) or a lighter child treatment — see
     /// ``SettingsRowProminence``.
     var prominence: SettingsRowProminence = .primary
+    /// When false the row does NOT pull its leading edge outward — pass this
+    /// inside a bordered card so the focus card nests concentrically instead of
+    /// hugging the card's border. Default true (flush-left, for split panes).
+    var flushLeading: Bool = true
     let action: () -> Void
 
-    // ``SettingsRowLabel`` insets content by 12pt horizontally; cancel the leading
-    // inset so titles line up flush-left with the pane heading while the focus
-    // card still bleeds outward symmetrically. Same at both prominences so a
-    // secondary child list stays aligned under its master toggle.
-    private let labelInset: CGFloat = 12
+    // ``SettingsRowLabel`` insets content horizontally; cancel the leading inset
+    // (unless `flushLeading` is off) so titles line up flush-left with the pane
+    // heading while the focus card still bleeds outward symmetrically.
+    private var labelInset: CGFloat { SettingsRowMetrics.horizontalPadding }
 
-    private var rowSpacing: CGFloat { prominence == .primary ? 20 : 16 }
+    private var rowSpacing: CGFloat { SettingsRowMetrics.spacing(prominence) }
     private var iconSize: CGFloat { prominence == .primary ? 24 : 20 }
     private var iconFrame: CGFloat { prominence == .primary ? 34 : 30 }
     private var titleFont: Font {
         prominence == .primary ? .headline.weight(.semibold) : .callout.weight(.medium)
     }
-    private var minRowHeight: CGFloat { prominence == .primary ? 46 : 40 }
-    private var verticalPadding: CGFloat { prominence == .primary ? 14 : 11 }
+    private var minRowHeight: CGFloat { SettingsRowMetrics.minHeight(prominence) }
+    private var verticalPadding: CGFloat { SettingsRowMetrics.verticalPadding(prominence) }
 
     var body: some View {
         Button(action: action) {
@@ -88,7 +75,7 @@ struct SettingsCheckableRow: View {
         }
         .buttonStyle(SettingsFocusButtonStyle())
         .disabled(!isEnabled)
-        .padding(.leading, -labelInset)
+        .padding(.leading, flushLeading ? -labelInset : 0)
         .accessibilityAddTraits(isChecked ? .isSelected : [])
     }
 }

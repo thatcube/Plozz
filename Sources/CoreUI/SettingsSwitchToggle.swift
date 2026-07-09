@@ -17,41 +17,52 @@ import SwiftUI
 /// switch graphic + On/Off label are coloured explicitly so they stay legible on
 /// the inverted focus card (via the shared `settingsRow*` focus environment).
 public struct SettingsSwitchToggleStyle: ToggleStyle {
-    public init() {}
+    /// When false the row does NOT pull its leading edge outward — pass this
+    /// inside a bordered card so the focus card nests concentrically instead of
+    /// hugging the card's border. Default true (flush-left, for the borderless
+    /// split-detail panes where the title lines up with the pane heading).
+    var flushLeading: Bool
+
+    public init(flushLeading: Bool = true) {
+        self.flushLeading = flushLeading
+    }
 
     public func makeBody(configuration: Configuration) -> some View {
-        SettingsSwitchToggleBody(configuration: configuration)
+        SettingsSwitchToggleBody(configuration: configuration, flushLeading: flushLeading)
     }
 }
 
 private struct SettingsSwitchToggleBody: View {
     let configuration: ToggleStyleConfiguration
+    let flushLeading: Bool
     @Environment(\.isEnabled) private var isEnabled
 
-    // Horizontal breathing room inside the focus pill. The same amount is pulled
-    // back off the leading edge below, so the *label* lines up flush-left with
-    // the content around it — while the pill (drawn by the button style, which
-    // bleeds outward on focus) still keeps a symmetric cushion around it.
-    private let hInset: CGFloat = 12
+    // Horizontal breathing room inside the focus pill (shared token). The same
+    // amount is pulled back off the leading edge below (unless `flushLeading` is
+    // off), so the *label* lines up flush-left with the content around it — while
+    // the pill (drawn by the button style, which bleeds outward on focus) still
+    // keeps a symmetric cushion around it.
+    private var hInset: CGFloat { SettingsRowMetrics.horizontalPadding }
 
     var body: some View {
         Button {
             configuration.isOn.toggle()
         } label: {
-            HStack(spacing: 20) {
+            HStack(spacing: SettingsRowMetrics.spacing(.primary)) {
                 configuration.label
                     .font(.headline.weight(.semibold))
                     .lineLimit(1)
-                Spacer(minLength: 20)
+                Spacer(minLength: SettingsRowMetrics.spacing(.primary))
                 SettingsSwitchIndicator(isOn: configuration.isOn)
             }
-            .padding(.vertical, 14)
+            .frame(minHeight: SettingsRowMetrics.minHeight(.primary))
+            .padding(.vertical, SettingsRowMetrics.verticalPadding(.primary))
             .padding(.horizontal, hInset)
             .opacity(isEnabled ? 1 : 0.45)
             .contentShape(Rectangle())
         }
         .buttonStyle(SettingsFocusButtonStyle())
-        .padding(.leading, -hInset)
+        .padding(.leading, flushLeading ? -hInset : 0)
     }
 }
 
@@ -69,7 +80,7 @@ public struct FocusGatedSwitch: View {
     private let title: String
     @Binding private var isOn: Bool
     private let canFocus: Bool
-    private let hInset: CGFloat = 12
+    private var hInset: CGFloat { SettingsRowMetrics.horizontalPadding }
 
     public init(_ title: String, isOn: Binding<Bool>, canFocus: Bool = true) {
         self.title = title
@@ -81,14 +92,15 @@ public struct FocusGatedSwitch: View {
         Button {
             isOn.toggle()
         } label: {
-            HStack(spacing: 20) {
+            HStack(spacing: SettingsRowMetrics.spacing(.primary)) {
                 Text(title)
                     .font(.headline.weight(.semibold))
                     .lineLimit(1)
-                Spacer(minLength: 20)
+                Spacer(minLength: SettingsRowMetrics.spacing(.primary))
                 SettingsSwitchIndicator(isOn: isOn)
             }
-            .padding(.vertical, 14)
+            .frame(minHeight: SettingsRowMetrics.minHeight(.primary))
+            .padding(.vertical, SettingsRowMetrics.verticalPadding(.primary))
             .padding(.horizontal, hInset)
             .contentShape(Rectangle())
         }
@@ -110,7 +122,9 @@ private struct SettingsSwitchIndicator: View {
     @Environment(\.colorScheme) private var colorScheme
 
     private let trackWidth: CGFloat = 84
-    private let trackHeight: CGFloat = 46
+    // Matches the primary row min-height so a switch row and a primary checkable
+    // row are exactly the same height.
+    private var trackHeight: CGFloat { SettingsRowMetrics.minHeight(.primary) }
     private var knobSize: CGFloat { trackHeight - 10 }
     private var travel: CGFloat { (trackWidth - knobSize) / 2 - 4 }
 

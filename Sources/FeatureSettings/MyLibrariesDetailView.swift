@@ -79,7 +79,9 @@ struct MyLibrariesDetailView: View {
     /// the card expands to who you watch as + its libraries; when off it collapses
     /// to just the header, staying in the list so nothing reads as "removed".
     private func serverCard(_ group: ServerAccountGroup) -> some View {
-        SettingsPanel {
+        // `rowContentPadding` + `flushLeading: false` rows make every focus card
+        // inside nest concentrically with this panel's border.
+        SettingsPanel(contentPadding: .settingsPanelRowContent) {
             VStack(alignment: .leading, spacing: 18) {
                 // The whole header row is the master toggle: brand + server name on
                 // the left, the On/Off switch on the right.
@@ -90,7 +92,7 @@ struct MyLibrariesDetailView: View {
                         Text(group.serverName)
                     }
                 }
-                .toggleStyle(SettingsSwitchToggleStyle())
+                .toggleStyle(SettingsSwitchToggleStyle(flushLeading: false))
 
                 if isWatching(group) {
                     // A media share has no watcher identity, so it skips "Watching
@@ -132,20 +134,57 @@ struct MyLibrariesDetailView: View {
         }
     }
 
+    /// Trailing accessory for a "Watching as" selector row.
+    private enum IdentityAccessory {
+        /// Jellyfin single-select: green check when this sign-in is the chosen one.
+        case selected(Bool)
+        /// Plex drill-in to the Home-user picker.
+        case chevron
+        /// Informational only (a lone Jellyfin sign-in — nothing to choose).
+        case none
+    }
+
+    /// Shared chrome for a "Watching as" selector row so it's the SAME height as a
+    /// secondary library checkmark (via ``SettingsRowMetrics``) and focuses
+    /// concentrically inside the card. Leading avatar + name + trailing accessory.
+    private func identityRow<Avatar: View>(
+        title: String,
+        @ViewBuilder avatar: () -> Avatar,
+        accessory: IdentityAccessory
+    ) -> some View {
+        HStack(spacing: SettingsRowMetrics.spacing(.secondary)) {
+            avatar()
+            Text(title).font(.callout.weight(.medium)).lineLimit(1)
+            Spacer(minLength: SettingsRowMetrics.spacing(.secondary))
+            switch accessory {
+            case let .selected(on):
+                Image(systemName: on ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(on ? .green : .secondary)
+            case .chevron:
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .settingsRowSecondary()
+            case .none:
+                EmptyView()
+            }
+        }
+        .frame(minHeight: SettingsRowMetrics.minHeight(.secondary))
+        .padding(.vertical, SettingsRowMetrics.verticalPadding(.secondary))
+        .padding(.horizontal, SettingsRowMetrics.horizontalPadding)
+        .contentShape(Rectangle())
+    }
+
     /// Plex identity = a Home user, chosen on a drill-in screen (distinct from
     /// the single shared sign-in).
     private func plexIdentityLink(_ account: Account) -> some View {
         let binding = context.activeProfile.homeUserBinding(forPlexAccount: account.id)
             ?? ownerBinding(for: account)
         return NavigationLink(value: SettingsRoute.plexUser(accountID: account.id)) {
-            HStack(spacing: 14) {
-                plexAvatar(for: binding, size: 40)
-                Text(identityName(for: binding)).font(.callout.weight(.medium)).lineLimit(1)
-                Spacer()
-                Image(systemName: "chevron.right").font(.caption.weight(.semibold)).settingsRowSecondary()
-            }
-            .padding(.vertical, 8).padding(.horizontal, 10)
-            .contentShape(Rectangle())
+            identityRow(
+                title: identityName(for: binding),
+                avatar: { plexAvatar(for: binding, size: 34) },
+                accessory: .chevron
+            )
         }
         .buttonStyle(SettingsFocusButtonStyle())
     }
@@ -155,27 +194,21 @@ struct MyLibrariesDetailView: View {
     @ViewBuilder
     private func jellyfinIdentity(_ group: ServerAccountGroup) -> some View {
         if group.accounts.count <= 1, let only = group.accounts.first {
-            HStack(spacing: 14) {
-                AccountAvatar(name: only.userName, imageURL: resolvedAvatarURL(for: only), size: 40)
-                Text(only.userName).font(.callout.weight(.medium)).lineLimit(1)
-                Spacer()
-            }
-            .padding(.vertical, 8).padding(.horizontal, 10)
+            identityRow(
+                title: only.userName,
+                avatar: { AccountAvatar(name: only.userName, imageURL: resolvedAvatarURL(for: only), size: 34) },
+                accessory: .none
+            )
         } else {
             ForEach(group.accounts) { account in
                 Button {
                     setJellyfinIdentity(account, in: group)
                 } label: {
-                    HStack(spacing: 14) {
-                        AccountAvatar(name: account.userName, imageURL: resolvedAvatarURL(for: account), size: 40)
-                        Text(account.userName).font(.callout.weight(.medium)).lineLimit(1)
-                        Spacer()
-                        Image(systemName: context.isAccountIncludedInActiveProfile(account.id)
-                            ? "checkmark.circle.fill" : "circle")
-                            .foregroundStyle(context.isAccountIncludedInActiveProfile(account.id) ? .green : .secondary)
-                    }
-                    .padding(.vertical, 8).padding(.horizontal, 10)
-                    .contentShape(Rectangle())
+                    identityRow(
+                        title: account.userName,
+                        avatar: { AccountAvatar(name: account.userName, imageURL: resolvedAvatarURL(for: account), size: 34) },
+                        accessory: .selected(context.isAccountIncludedInActiveProfile(account.id))
+                    )
                 }
                 .buttonStyle(SettingsFocusButtonStyle())
             }
@@ -250,6 +283,7 @@ struct MyLibrariesDetailView: View {
                     options: libs,
                     title: { $0.library.title },
                     bordered: false,
+                    flushLeading: false,
                     isChecked: { context.homeVisibility.isEnabled($0.key) },
                     onToggle: { lib in
                         context.homeVisibility.setEnabled(!context.homeVisibility.isEnabled(lib.key), for: lib.key)

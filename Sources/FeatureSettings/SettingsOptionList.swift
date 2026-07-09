@@ -104,6 +104,9 @@ struct SettingsCheckList<Option: Hashable & Identifiable>: View {
     /// sub-section under a master toggle; override to `.primary` for a rare
     /// top-level multi-select.
     var prominence: SettingsRowProminence = .secondary
+    /// Pass `false` when the list sits inside a bordered card so its rows' focus
+    /// cards nest concentrically with the card instead of hugging its border.
+    var flushLeading: Bool = true
     var isChecked: (Option) -> Bool
     var onToggle: (Option) -> Void
 
@@ -117,6 +120,7 @@ struct SettingsCheckList<Option: Hashable & Identifiable>: View {
                     isChecked: isChecked(option),
                     isEnabled: isEnabled(option),
                     prominence: prominence,
+                    flushLeading: flushLeading,
                     action: { onToggle(option) }
                 )
             }

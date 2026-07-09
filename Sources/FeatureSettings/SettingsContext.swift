@@ -64,18 +64,39 @@ enum SettingsRoute: Hashable {
     case server(key: String)
 }
 
+extension EdgeInsets {
+    /// The default uniform `SettingsPanel` inset — fine for text / non-row content.
+    static var settingsPanelDefault: EdgeInsets { EdgeInsets(top: 28, leading: 28, bottom: 28, trailing: 28) }
+
+    /// `SettingsPanel` inset tuned so list-row controls inside focus
+    /// **concentrically** with the panel: 28pt horizontal / 16pt vertical, i.e.
+    /// the focus card's outward bleed (16pt H / 4pt V in `SettingsFocusButtonStyle`)
+    /// plus a uniform 12pt gap on every side. Use for a panel whose content is a
+    /// stack of toggle / checkable / selector rows (which also pass
+    /// `flushLeading: false`).
+    static var settingsPanelRowContent: EdgeInsets { EdgeInsets(top: 16, leading: 28, bottom: 16, trailing: 28) }
+}
+
 /// A titled section rendered as a translucent panel. Reused by every Settings
 /// detail page so the visual treatment is consistent.
 struct SettingsPanel<Content: View>: View {
     let title: String?
     var subtitle: String?
     var footer: String?
+    var contentPadding: EdgeInsets
     @ViewBuilder let content: Content
 
-    init(title: String? = nil, subtitle: String? = nil, footer: String? = nil, @ViewBuilder content: () -> Content) {
+    init(
+        title: String? = nil,
+        subtitle: String? = nil,
+        footer: String? = nil,
+        contentPadding: EdgeInsets = .settingsPanelDefault,
+        @ViewBuilder content: () -> Content
+    ) {
         self.title = title
         self.subtitle = subtitle
         self.footer = footer
+        self.contentPadding = contentPadding
         self.content = content()
     }
 
@@ -107,7 +128,7 @@ struct SettingsPanel<Content: View>: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(28)
+        .padding(contentPadding)
         .background(
             RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
                 .fill(.ultraThinMaterial)

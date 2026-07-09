@@ -9,6 +9,55 @@ public enum SettingsRowSize {
     case prominent
 }
 
+/// How much weight a list-row *control* carries, and therefore how tall it is.
+/// A single scale shared by every Settings row control (toggle rows, checkable
+/// rows, selector rows) so "primary" and "secondary" mean the SAME physical
+/// height everywhere instead of each control re-deriving its own.
+///
+/// - `primary`: master switches and single-select pickers (Theme, Display Size)
+///   — the decision on the pane.
+/// - `secondary`: sub-section checkmarks and selectors that sit under a master
+///   toggle (Customize Home rows, the libraries + "Watching as" rows on Your
+///   Servers & Libraries) — the toggle's children, a step shorter/lighter.
+public enum SettingsRowProminence {
+    case primary
+    case secondary
+}
+
+/// One source of truth for list-row control metrics, so every control at the
+/// same ``SettingsRowProminence`` is the same height and its focus card nests
+/// concentrically. Toggle rows and checkable rows both read these, which is what
+/// keeps a switch row and a primary checkmark row exactly the same height (and a
+/// secondary checkmark row the same height as a secondary selector row).
+public enum SettingsRowMetrics {
+    /// Minimum content height (before vertical padding). A switch indicator is
+    /// sized to this too, so a toggle row matches a checkable row of the same
+    /// prominence.
+    public static func minHeight(_ p: SettingsRowProminence) -> CGFloat {
+        p == .primary ? 46 : 40
+    }
+
+    /// Vertical padding added above/below the content.
+    public static func verticalPadding(_ p: SettingsRowProminence) -> CGFloat {
+        p == .primary ? 14 : 11
+    }
+
+    /// Leading↔title spacing / general row inter-item spacing.
+    public static func spacing(_ p: SettingsRowProminence) -> CGFloat {
+        p == .primary ? 20 : 16
+    }
+
+    /// Horizontal content inset — same at both prominences so a secondary child
+    /// list stays aligned under its primary master.
+    public static let horizontalPadding: CGFloat = 12
+
+    /// The amount a row pulls its leading edge outward to cancel
+    /// ``horizontalPadding`` and sit title-flush-left with a pane heading. Rows
+    /// inside a *bordered* card pass `flushLeading: false` to skip this, so their
+    /// focus card stays concentric with the card instead of hugging its border.
+    public static var leadingPull: CGFloat { horizontalPadding }
+}
+
 /// Single shared, theme-aware focus style for every drill-in list row — the
 /// Settings navigation rows AND any other control that should focus *exactly*
 /// like them (e.g. the music rails' "See All"). Lives in CoreUI so every module

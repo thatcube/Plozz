@@ -104,6 +104,13 @@ public protocol VideoEngine: AnyObject {
     /// engine is inert until `load` is called again.
     func stop()
 
+    /// Stops playback but optionally keeps the current display (HDR/Dolby Vision)
+    /// mode programmed on the panel, so a same-dynamic-range episode hand-off
+    /// (e.g. DV → DV) doesn't flap the TV to SDR and back. Only engines that
+    /// program the panel act on it; others perform a normal stop. Defaulted in the
+    /// protocol extension so existing engines need no change.
+    func stop(preserveDisplayMode: Bool)
+
     // MARK: Live tunables
 
     /// What this engine supports beyond baseline transport. The options menu
@@ -287,6 +294,11 @@ public protocol VideoEngine: AnyObject {
 public extension VideoEngine {
     /// Default: engines that don't track buffering report no buffer fill.
     var bufferedPosition: TimeInterval { 0 }
+
+    /// Default: engines that don't program the panel just perform a normal stop —
+    /// the `preserveDisplayMode` hint is only meaningful to the on-device engine,
+    /// which drives `AVDisplayManager` for HDR/Dolby Vision.
+    func stop(preserveDisplayMode: Bool) { stop() }
 
     /// Default no-op: only engines advertising
     /// ``PlayerEngineCapabilities/dualSubtitleDecode`` decode a second subtitle

@@ -1305,9 +1305,13 @@ private struct PlayerPresentation: View {
             // it. `nil` when the prefetch didn't finish → the new player resolves
             // normally (no regression).
             let prefetched = viewModel?.consumePrefetchedNext(matching: next.id)
+            // Keep the panel's HDR/DV mode across a same-range hand-off so the TV
+            // doesn't flap DV→SDR→DV between episodes (needs the prefetched next's
+            // source facts, so it's a no-op on a prefetch miss).
+            let preserveDisplay = viewModel?.shouldPreserveDisplayMode(forNext: prefetched) ?? false
             Task { @MainActor in
                 // Stop + scrobble the finished episode before swapping.
-                await viewModel?.stop()
+                await viewModel?.stop(preserveDisplayMode: preserveDisplay)
                 // Create the new VM and update the request in one synchronous
                 // block so SwiftUI batches the render: the .id change forces a
                 // fresh PlayerView that picks up the new VM via @State init.

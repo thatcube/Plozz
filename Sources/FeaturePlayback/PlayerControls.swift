@@ -81,7 +81,7 @@ struct PlayerControls: View {
         case infoNext       // Info panel: Next Episode
         case infoPrev       // Info panel: Previous Episode
         case infoRestart    // Info panel: Restart
-        case diagnostics
+        case infoStats      // Info panel: Stats (diagnostics) toggle
         case row(Int)
         case edit       // Subtitles header ✎ Edit (appearance) button
         case download   // Trailing "Search for subtitles…" row
@@ -535,7 +535,8 @@ struct PlayerControls: View {
 
     private var buttonRow: some View {
         HStack(spacing: 20) {
-            // Utility cluster (far left): media Info placeholder + Diagnostics.
+            // Utility cluster (far left): media Info. (The Diagnostics/Stats
+            // toggle moved into the Info card so the transport row stays lean.)
             Button {
                 toggle(.info)
             } label: {
@@ -544,18 +545,6 @@ struct PlayerControls: View {
             }
             .playerGlassButton(prominent: openPanel == .info)
             .focused($focus, equals: .button(.info))
-
-            Button {
-                model.diagnosticsEnabled.toggle()
-            } label: {
-                Label(
-                    "Diagnostics",
-                    systemImage: model.diagnosticsEnabled ? "waveform.circle.fill" : "waveform.circle"
-                )
-                .labelStyle(.iconOnly)
-            }
-            .playerGlassButton(prominent: model.diagnosticsEnabled)
-            .focused($focus, equals: .diagnostics)
 
             Spacer(minLength: 20)
 
@@ -865,6 +854,13 @@ struct PlayerControls: View {
     /// equidistant on every edge whether or not the item has a description. The
     /// headline is the episode (not the show) title; season/episode + runtime ride
     /// inline with the badges on the bottom row.
+    ///
+    /// The right column holds an **icon-only** action row (Restart · Previous ·
+    /// Next Episode) pinned to the top and a subtle **Stats** toggle pinned to the
+    /// bottom (it drives the diagnostics overlay, moved off the transport row). The
+    /// focused action expands to show its label — the tvOS equivalent of a tooltip,
+    /// since there is no hover. Icons keep the row short so the artwork — not a tall
+    /// stack of text buttons — governs the card height (no dead space beneath it).
     private var infoPanel: some View {
         // Concentric radii, matching the app's cards: the thumbnail's media radius
         // nested inside the card's glass radius (outer = inner + content padding),
@@ -877,18 +873,23 @@ struct PlayerControls: View {
         return HStack(alignment: .top, spacing: 28) {
             infoThumbnail(cornerRadius: thumbRadius, height: thumbHeight)
 
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 6) {
                 Text(model.infoHeadline.isEmpty ? "Now Playing" : model.infoHeadline)
-                    .font(.title3.weight(.bold))
+                    .font(.headline.weight(.bold))
                     .foregroundStyle(.white)
                     .lineLimit(2)
+                    .truncationMode(.tail)
                 if !model.overview.isEmpty {
+                    // Ellipsis, no `fixedSize`: the overview truncates instead of
+                    // forcing its full height, so a long synopsis can never push
+                    // the meta/badge row off the bottom of the card (it stays
+                    // pinned by the Spacer below).
                     Text(model.overview)
-                        .font(.subheadline)
+                        .font(.footnote)
                         .foregroundStyle(.white.opacity(0.82))
-                        .lineLimit(4)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.top, 2)
+                        .lineLimit(3)
+                        .truncationMode(.tail)
+                        .padding(.top, 1)
                 }
                 Spacer(minLength: 8)
                 // Bottom metadata row: season/episode + runtime, then the technical
@@ -910,22 +911,39 @@ struct PlayerControls: View {
 
             Spacer(minLength: 32)
 
+            // Right column: icon action row pinned top, Stats toggle pinned bottom.
             VStack(alignment: .trailing, spacing: 12) {
-                if model.hasNextEpisode {
-                    infoActionButton(title: "Next Episode", icon: "forward.end.fill", prominent: true, slot: .infoNext) {
-                        actions.playNextEpisode()
+                HStack(spacing: 12) {
+                    // Order: Restart · Previous · Next Episode (primary, far right).
+                    infoActionButton(title: "Restart", icon: "arrow.counterclockwise", prominent: false, slot: .infoRestart) {
+                        actions.restart()
+                        openPanel = nil   // focus restored centrally in onChange(of: openPanel)
+                    }
+                    if model.hasPreviousEpisode {
+                        infoActionButton(title: "Previous", icon: "backward.end.fill", prominent: false, slot: .infoPrev) {
+                            actions.playPreviousEpisode()
+                        }
+                    }
+                    if model.hasNextEpisode {
+                        infoActionButton(title: "Next Episode", icon: "forward.end.fill", prominent: true, slot: .infoNext) {
+                            actions.playNextEpisode()
+                        }
                     }
                 }
-                if model.hasPreviousEpisode {
-                    infoActionButton(title: "Previous", icon: "backward.end.fill", prominent: false, slot: .infoPrev) {
-                        actions.playPreviousEpisode()
-                    }
-                }
-                infoActionButton(title: "Restart", icon: "arrow.counterclockwise", prominent: false, slot: .infoRestart) {
-                    actions.restart()
-                    openPanel = nil   // focus restored centrally in onChange(of: openPanel)
+                Spacer(minLength: 0)
+                // Subtle Stats (diagnostics) toggle, bottom-right — balances the
+                // tech badges bottom-left. Keeps the Info panel open so the viewer
+                // can flip it and watch the top-left overlay appear.
+                infoActionButton(
+                    title: "Stats",
+                    icon: "chart.bar.xaxis",
+                    prominent: model.diagnosticsEnabled,
+                    slot: .infoStats
+                ) {
+                    model.diagnosticsEnabled.toggle()
                 }
             }
+            .frame(height: thumbHeight, alignment: .topTrailing)
             .fixedSize(horizontal: true, vertical: false)
         }
         .padding(contentPad)
@@ -950,6 +968,10 @@ struct PlayerControls: View {
             .plozzMediaEdge(cornerRadius: cornerRadius)
     }
 
+    /// An icon-only Info-card action. At rest it shows just its glyph; while
+    /// focused it expands to reveal its label — the tvOS stand-in for a hover
+    /// tooltip. The card is full-width and the middle text column is flexible, so
+    /// the expansion is absorbed by the trailing spacer without reflowing the card.
     private func infoActionButton(
         title: String,
         icon: String,
@@ -957,13 +979,22 @@ struct PlayerControls: View {
         slot: FocusSlot,
         action: @escaping () -> Void
     ) -> some View {
-        Button(action: action) {
-            Label(title, systemImage: icon)
-                .font(.subheadline.weight(.semibold))
-                .lineLimit(1)
+        let isFocused = focus == slot
+        return Button(action: action) {
+            HStack(spacing: 8) {
+                Image(systemName: icon)
+                if isFocused {
+                    Text(title)
+                        .fixedSize()
+                        .transition(.opacity.combined(with: .move(edge: .trailing)))
+                }
+            }
+            .font(.subheadline.weight(.semibold))
+            .lineLimit(1)
         }
         .playerGlassButton(prominent: prominent)
         .focused($focus, equals: slot)
+        .animation(.easeOut(duration: 0.18), value: isFocused)
     }
 
     /// Header of the floating panel: the screen title, plus — on the Subtitles
@@ -2062,11 +2093,11 @@ struct PlayerControls: View {
 
     /// Focus target when the bar first takes focus: Subtitles (the most-used
     /// control) when present, otherwise the first category, otherwise the
-    /// always-present Diagnostics button.
+    /// always-present Info button.
     private var initialFocus: FocusSlot {
         if availableCategories.contains(.subtitles) { return .button(.subtitles) }
         if let first = availableCategories.first { return .button(first) }
-        return .diagnostics
+        return .button(.info)
     }
 
     private struct TrackRow: Identifiable {

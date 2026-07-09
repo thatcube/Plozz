@@ -475,8 +475,20 @@ public final class PlayerViewModel {
         self.onPlaybackCheckpoint = onPlaybackCheckpoint
         self.checkpointInterval = checkpointInterval
         self.adoptedResolved = adoptedResolved
-        self.engine = engineFactory.makeNative(style)
-        self.currentEngineKind = .native
+        // Boot directly on the engine the hand-off already resolved, so an adopted
+        // prefetch skips the native→Plozzigen swap entirely — no mid-bring-up
+        // engine switch, no SDR-drop→DV-resync, one loading indicator. This is the
+        // "know the engine before it even starts" path. Falls back to native when
+        // there's no adopted decision (fresh launch) or Plozzigen isn't linked.
+        if let adopted = adoptedResolved, adopted.engineKind == .plozzigen,
+           let makePlozzigen = engineFactory.makePlozzigen, let plozzigen = makePlozzigen() {
+            self.engine = plozzigen
+            self.currentEngineKind = .plozzigen
+            HandoffDiagnostics.emit("engine BOOT plozzigen (adopted; no native→plozzigen swap)")
+        } else {
+            self.engine = engineFactory.makeNative(style)
+            self.currentEngineKind = .native
+        }
         PlaybackInstrumentation.increment(.viewModel)
         // Seed last-used speed so a user who set 1.25× on the last show keeps it.
         self.controls.playbackSpeed = preferencesStore.loadPlaybackSpeed()
@@ -678,7 +690,8 @@ public final class PlayerViewModel {
         guard durUnknown || (remaining > 0 && remaining <= 60) else { return }
         guard Date().timeIntervalSince(lastUpNextDiagAt) >= 8 else { return }
         lastUpNextDiagAt = Date()
-        HandoffDiagnostics.emit("upnext-state cDur=\(Int(cDur)) cCur=\(Int(cCur)) eDur=\(Int(engine.duration)) remaining=\(Int(remaining)) card=\(controls.upNext != nil) show=\(playbackSettings.showUpNextCard) marker=\(controls.hasCreditsMarker) nearEndByTime=\(controls.isNearEndByTime) active=\(controls.upNextActive) presenting=\(controls.isPresentingUpNext) lead=\(Int(controls.upNextLeadSeconds))")
+        let creditsStart = controls.skippableSegments.first { $0.kind == .credits }?.start
+        HandoffDiagnostics.emit("upnext-state cDur=\(Int(cDur)) cCur=\(Int(cCur)) eDur=\(Int(engine.duration)) remaining=\(Int(remaining)) creditsStart=\(creditsStart.map { Int($0) }.map(String.init) ?? "none") card=\(controls.upNext != nil) show=\(playbackSettings.showUpNextCard) marker=\(controls.hasCreditsMarker) nearEndByTime=\(controls.isNearEndByTime) active=\(controls.upNextActive) presenting=\(controls.isPresentingUpNext) lead=\(Int(controls.upNextLeadSeconds))")
     }
 
     /// Hands the prefetched next-episode resolution to the incoming player and

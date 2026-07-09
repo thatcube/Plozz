@@ -365,14 +365,17 @@ public struct PosterCardView: View {
     /// Shoko/AniDB usually ship no per-episode image, so TMDb supplies it.
     private var asyncArtworkFallback: (@Sendable () async -> URL?)? {
         guard enablesAsyncArtworkFallback else { return nil }
-        if style == .poster { return tmdbPosterFallback }
-        if item.kind == .episode,
-           item.seasonNumber != nil,
-           item.episodeNumber != nil {
+        // The inner resolver (the actual network lookup) for this card's style.
+        let inner: (@Sendable () async -> URL?)?
+        if style == .poster {
+            inner = tmdbPosterFallback
+        } else if item.kind == .episode,
+                  item.seasonNumber != nil,
+                  item.episodeNumber != nil {
             let snapshot = item
             let seriesItem = Self.seriesArtworkItem(for: item)
             let serverSeriesBackdrop = item.fallbackArtworkURL
-            return {
+            inner = {
                 // 1) Real per-episode still first (TMDb stills, then TVmaze for
                 //    western TV). Anime via Shoko/AniDB usually ship none.
                 if let still = await ArtworkRouter.shared.artworkURL(.thumbnail, for: snapshot) {
@@ -388,8 +391,20 @@ public struct PosterCardView: View {
                 // 3) Last resort: the server's own series backdrop, if present.
                 return serverSeriesBackdrop
             }
+        } else {
+            inner = tmdbBackdropFallback
         }
-        return tmdbBackdropFallback
+        guard let inner else { return nil }
+        // Bound concurrent grid-card resolutions so a large un-enriched library
+        // (SMB) can't flood the metadata network + ArtworkRouter actor while
+        // scrolling. Skip the network call entirely if this card scrolled away
+        // (its .task was cancelled) before a permit freed up.
+        return {
+            await ArtworkSession.artworkResolveLimiter.run {
+                if Task.isCancelled { return nil }
+                return await inner()
+            }
+        }
     }
 
     /// A lightweight *series-level* item synthesized from an episode, used only to

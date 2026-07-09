@@ -46,4 +46,15 @@ public enum ArtworkSession {
     /// warms saturate most of the 6-connection pool), low enough that ≥2
     /// connections stay reserved for foreground hero/logo/still loads.
     public static let warmLimiter = ConcurrencyLimiter(limit: 4)
+
+    /// Global cap on *concurrent live metadata resolutions* for grid cards whose
+    /// provider art is missing (no baked-in posterURL) — chiefly a large, not-yet-
+    /// enriched SMB library, where every card would otherwise fire a live TMDb/
+    /// keyless *search* to resolve its poster. Unbounded, that flood saturated the
+    /// metadata network pool and the (serialized) ArtworkRouter actor as you scrolled
+    /// deeper, compounding into whole-app lag and slow detail opens. Bounding the
+    /// grid path to a few concurrent resolutions keeps it a gentle background fill;
+    /// foreground/detail art calls ArtworkRouter directly (NOT gated here), so they
+    /// never queue behind the grid backlog. Same lesson as the SMB probe-storm fix.
+    public static let artworkResolveLimiter = ConcurrencyLimiter(limit: 3)
 }

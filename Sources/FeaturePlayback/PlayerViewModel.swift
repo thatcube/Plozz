@@ -540,8 +540,12 @@ public final class PlayerViewModel {
         let hideThumb = spoilerSettings.shouldHideThumbnail(for: next)
         let hideText = spoilerSettings.shouldHideText(for: next)
 
-        let title = hideText ? spoilerSettings.maskedTitle(for: next) : next.title
-        let subtitle = Self.upNextSubtitle(for: next)
+        // The show/series name leads the card — never a spoiler (you're watching
+        // it) and reliably readable. Fall back to the (spoiler-aware) episode title
+        // only when the series title is unknown.
+        let showName = next.parentTitle
+            ?? (hideText ? spoilerSettings.maskedTitle(for: next) : next.title)
+        let metaLine = Self.upNextMeta(for: next)
 
         // Placeholder mode never loads the real still: fall back to spoiler-safe
         // series art. Blur mode shows the real still but blurred. When not hidden,
@@ -558,21 +562,38 @@ public final class PlayerViewModel {
 
         controls.upNext = UpNextInfo(
             episode: next,
-            title: title,
-            subtitle: subtitle,
+            showName: showName,
+            metaLine: metaLine,
             thumbnailURLs: thumbnailURLs,
             blurThumbnail: blur
         )
     }
 
-    /// The Up Next card's secondary line, e.g. "S2 · E3". Season/episode numbers
-    /// are never spoilers, so this is always shown even under a masked title.
-    private static func upNextSubtitle(for item: MediaItem) -> String? {
+    /// The Up Next card's secondary line, e.g. "S2 · E3 · 48m" — season/episode
+    /// plus runtime. Season/episode numbers and runtime are never spoilers, so
+    /// this is always shown even under a masked thumbnail.
+    private static func upNextMeta(for item: MediaItem) -> String? {
+        var parts: [String] = []
         if let season = item.seasonNumber, let episode = item.episodeNumber {
-            return "S\(season) · E\(episode)"
+            parts.append("S\(season) · E\(episode)")
+        } else if let episode = item.episodeNumber {
+            parts.append("Episode \(episode)")
         }
-        if let episode = item.episodeNumber { return "Episode \(episode)" }
-        return nil
+        if let runtime = item.runtime, runtime > 0 {
+            parts.append(Self.upNextRuntimeLabel(runtime))
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    /// Compact runtime label for the Up Next meta line, e.g. `48m` or `1h 2m`.
+    private static func upNextRuntimeLabel(_ seconds: TimeInterval) -> String {
+        let totalMinutes = max(0, Int(seconds / 60))
+        let hours = totalMinutes / 60
+        let minutes = totalMinutes % 60
+        if hours > 0 {
+            return minutes > 0 ? "\(hours)h \(minutes)m" : "\(hours)h"
+        }
+        return "\(minutes)m"
     }
 
     /// Advances to the resolved next episode (Up Next card Play / auto-advance).

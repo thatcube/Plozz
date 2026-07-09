@@ -128,9 +128,16 @@ public final class PlozzigenVideoEngine: VideoEngine {
     /// session (state=.ended)` line that proves a backward seek after end-of-media
     /// is a no-op. Gated, so it's free (and unhooked) in normal runs.
     private func installEngineLogMirror() {
-        guard PlaybackTrace.enabled else { return }
+        let trace = PlaybackTrace.enabled
+        let handoff = HandoffDiagnostics.isEnabled
+        guard trace || handoff else { return }
         EngineLog.handler = { line in
-            PlaybackTrace.note("AE " + line)
+            if trace { PlaybackTrace.note("AE " + line) }
+            // Forward AetherEngine's load() phase timings to the hand-off telemetry
+            // stdout channel so time-to-first-frame is attributable on device.
+            if handoff, line.contains("[TTFF]") {
+                HandoffDiagnostics.emit("aether " + line)
+            }
         }
     }
 

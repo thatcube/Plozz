@@ -217,6 +217,13 @@ public final class PlayerControlsModel {
     /// segment, so it doesn't keep re-grabbing focus for the rest of that window.
     public var dismissedSegmentID: String?
 
+    /// Mirrors `CustomPlayerContainer.presentingSkipButton`: true only while the
+    /// container has actually *presented* the Skip button (focused or the passive
+    /// grace-seek present). The SwiftUI `SkipSegmentButton` renders on this — not
+    /// the raw `skipButtonVisible` — so it can never draw on top of an open menu
+    /// or steal the lower-right slot the container hasn't handed it.
+    public var isPresentingSkipButton: Bool = false
+
     /// Set when a committed seek lands inside a skippable segment, describing how
     /// the landing relates to that segment so the presentation layer can respect
     /// the seek: a *deep* landing (`isWithinGrace == false`) suppresses the Skip
@@ -234,6 +241,13 @@ public final class PlayerControlsModel {
     /// True once the user has dismissed the Up Next card for the current item, so
     /// it doesn't keep re-grabbing focus through the rest of the credits.
     public var dismissedUpNext: Bool = false
+    /// Mirrors `CustomPlayerContainer.presentingUpNext`: true only while the
+    /// container has actually *presented* the Up Next card (focused or the passive
+    /// grace-seek present). The SwiftUI `UpNextCardView` renders on this — not the
+    /// raw `upNextActive` — so it renders in lockstep with the container's focus
+    /// state and never draws on top of an open menu (the root cause of Back
+    /// exiting the whole player instead of dismissing the card).
+    public var isPresentingUpNext: Bool = false
     /// In `.autoDelay`, the playback position (seconds) at which the Up Next card
     /// auto-advances to the next episode. Drives the card's countdown ring; `nil`
     /// when not counting down.
@@ -386,12 +400,16 @@ public struct UpNextInfo: Equatable, Sendable {
     public let episode: MediaItem
     /// Eyebrow line above the title (always "Up Next").
     public let eyebrow: String
-    /// The next episode's title, or a spoiler-safe mask (e.g. "Episode 5") when
-    /// the next episode is spoiler-hidden.
-    public let title: String
-    /// Secondary line, e.g. "S2 · E3". Season/episode numbers are never treated
-    /// as spoilers, so this is shown even when the title/thumbnail are masked.
-    public let subtitle: String?
+    /// The **show** name (series title) — the card's prominent line. The show is
+    /// never a spoiler (you're already watching it) and stays readable where a
+    /// long, often-obscure episode title would just truncate. Falls back to the
+    /// episode title (spoiler-masked when needed) only when the series title is
+    /// unknown.
+    public let showName: String
+    /// Secondary meta line, e.g. "S2 · E3 · 48m" (season/episode + runtime).
+    /// Season/episode numbers and runtime are never spoilers, so this shows even
+    /// when the thumbnail is masked.
+    public let metaLine: String?
     /// Ordered thumbnail candidates: the real episode still when it may be shown,
     /// or the spoiler-safe series backdrop (never the episode's own frame) when
     /// the thumbnail is hidden in placeholder mode.
@@ -402,15 +420,15 @@ public struct UpNextInfo: Equatable, Sendable {
     public init(
         episode: MediaItem,
         eyebrow: String = "Up Next",
-        title: String,
-        subtitle: String?,
+        showName: String,
+        metaLine: String?,
         thumbnailURLs: [URL],
         blurThumbnail: Bool
     ) {
         self.episode = episode
         self.eyebrow = eyebrow
-        self.title = title
-        self.subtitle = subtitle
+        self.showName = showName
+        self.metaLine = metaLine
         self.thumbnailURLs = thumbnailURLs
         self.blurThumbnail = blurThumbnail
     }

@@ -11,8 +11,10 @@ import CoreUI
 ///
 /// Select → seek past the segment (`actions.skipSegment`). Menu / swipe-up →
 /// dismiss without seeking (`actions.dismissSkip`). The button only renders when
-/// `model.activeSkipSegment` is non-nil; otherwise it collapses to nothing so it
-/// never intercepts focus between segments.
+/// `model.isPresentingSkipButton` is true and no menu is open
+/// (`!controlBarVisible`) — i.e. the container has actually presented it for the
+/// active segment — so it collapses to nothing between segments and never draws
+/// over an open menu or intercepts focus the container hasn't handed it.
 ///
 /// A slim bar beneath the label depletes over the segment's window so the viewer
 /// can see, at a glance, how much longer the button will remain before it clears.
@@ -29,10 +31,10 @@ struct SkipSegmentButton: View {
             Spacer()
             HStack {
                 Spacer()
-                if model.skipButtonVisible, let segment = model.activeSkipSegment {
+                if model.isPresentingSkipButton, !model.controlBarVisible, let segment = model.activeSkipSegment {
                     skipControl(for: segment)
                         .transition(.move(edge: .bottom).combined(with: .opacity))
-                } else if let notice = model.autoSkipNotice {
+                } else if let notice = model.autoSkipNotice, !model.controlBarVisible {
                     autoSkipNotice(notice)
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
@@ -44,7 +46,7 @@ struct SkipSegmentButton: View {
             .padding(.bottom, 200)
         }
         .ignoresSafeArea()
-        .animation(.spring(response: 0.32, dampingFraction: 0.82), value: model.activeSkipSegment)
+        .animation(.spring(response: 0.32, dampingFraction: 0.82), value: model.isPresentingSkipButton)
         .animation(.spring(response: 0.32, dampingFraction: 0.82), value: model.autoSkipNotice)
         .onAppear { focused = true }
     }

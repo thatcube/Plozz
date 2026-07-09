@@ -736,15 +736,16 @@ struct MusicDetailLayout<InfoColumn: View>: View {
     let onPlayTrack: (MusicTrack) -> Void
     @ViewBuilder var info: InfoColumn
 
-    /// App-wide navigation chrome. Drives the top-inset compensation below: the
+    /// Per-profile navigation chrome (injected at the app root as
+    /// `\.plozzNavigationStyle`). Drives the top-inset compensation below: the
     /// `-80` only makes sense under the top tab bar (which reserves a top
     /// safe-area inset). In sidebar mode the chrome sits on the leading edge and
     /// there's no top inset to cancel, so the compensation is dropped or the
     /// detail floats too high (mis-centred vertically).
-    @AppStorage(NavigationStyle.storageKey) private var navigationStyleRaw = NavigationStyle.default.rawValue
+    @Environment(\.plozzNavigationStyle) private var navigationStyle
 
     private var isSidebar: Bool {
-        NavigationStyle(rawValue: navigationStyleRaw) == .sidebar
+        navigationStyle == .sidebar
     }
 
     // Pull the whole detail up under tvOS's reserved top safe-area inset so the

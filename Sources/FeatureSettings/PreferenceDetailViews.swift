@@ -19,21 +19,11 @@ struct AppearanceDetailView: View {
     @Environment(UIDensitySettingsModel.self) private var density
     @Environment(CardStyleSettingsModel.self) private var cardStyle
     @Environment(WatchStatusIndicatorSettingsModel.self) private var watchStatusIndicator
-    /// App-wide (global) — persists across all profiles. Same un-namespaced
-    /// `@AppStorage` key RootView reads. Do not move into a per-profile store.
-    /// See AGENTS.local.md ("Per-profile vs app-wide settings").
-    @AppStorage(TransparencyPreference.storageKey) private var transparencyPreferenceRaw = TransparencyPreference.default.rawValue
-    /// App-wide (global) navigation chrome — top bar vs. sidebar. Same
-    /// un-namespaced `@AppStorage` key `MainTabView` reads to pick the tab style.
-    @AppStorage(NavigationStyle.storageKey) private var navigationStyleRaw = NavigationStyle.default.rawValue
-
-    private var transparencyPreference: TransparencyPreference {
-        TransparencyPreference(rawValue: transparencyPreferenceRaw) ?? .default
-    }
-
-    private var navigationStyle: NavigationStyle {
-        NavigationStyle(rawValue: navigationStyleRaw) ?? .default
-    }
+    /// Per-profile navigation chrome + transparency, edited here and injected into
+    /// the environment by `MainTabView` (rebuilt on profile switch like the other
+    /// per-profile appearance models).
+    @Environment(NavigationStyleSettingsModel.self) private var navigation
+    @Environment(TransparencyPreferenceModel.self) private var transparency
 
     var body: some View {
         SettingsSplitLayout(title: "Appearance", sections: sections)
@@ -50,23 +40,17 @@ struct AppearanceDetailView: View {
         @Bindable var density = density
         @Bindable var cardStyle = cardStyle
         @Bindable var watchStatusIndicator = watchStatusIndicator
-        let transparencyBinding = Binding(
-            get: { transparencyPreference },
-            set: { transparencyPreferenceRaw = $0.rawValue }
-        )
-        let navigationBinding = Binding(
-            get: { navigationStyle },
-            set: { navigationStyleRaw = $0.rawValue }
-        )
+        @Bindable var navigation = navigation
+        @Bindable var transparency = transparency
 
         return [
             SettingsSplitSection(id: "display", header: "Display", rows: [
                 SettingsSplitRow(
                     id: "navigation",
                     title: "Navigation",
-                    description: "Horizontal tabs across the top, or a collapsible left sidebar. Shared across every profile on this Apple TV.",
+                    description: "Horizontal tabs across the top, or a collapsible left sidebar.",
                 ) {
-                    CompactNavigationPicker(selection: navigationBinding)
+                    CompactNavigationPicker(selection: $navigation.style)
                 },
                 SettingsSplitRow(
                     id: "theme",
@@ -82,7 +66,7 @@ struct AppearanceDetailView: View {
                 ) {
                     DescribedSegmentedPicker(
                         options: TransparencyPreference.allCases,
-                        selection: transparencyBinding,
+                        selection: $transparency.preference,
                         title: { $0.displayName },
                         detail: { $0.detail }
                     )

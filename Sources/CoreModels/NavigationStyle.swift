@@ -2,12 +2,12 @@ import Foundation
 
 /// How the app's top-level navigation chrome is presented (pure data model).
 ///
-/// An **app-wide** (global, not per-profile) preference — the chrome is a
-/// structural choice about the whole shell, not a per-viewer aesthetic — so it
-/// mirrors `TransparencyPreference`: a single un-namespaced `@AppStorage` key
-/// that `MainTabView` reads to pick a `TabViewStyle` and the Settings ▸
-/// Appearance screen writes. Foundation-only so it can live in `CoreModels`
-/// and be edited without importing SwiftUI.
+/// A **per-profile** display preference (each profile keeps its own choice) like
+/// `AppTheme` / `CardStyle`: persisted via `NavigationStyleSettingsStore`
+/// (namespace-scoped) and rebuilt on profile switch in
+/// `AppState.rebuildSettingsModels()`. `MainTabView` reads the model to pick a
+/// `TabViewStyle` and the Settings ▸ Appearance screen writes it. Foundation-only
+/// so it can live in `CoreModels` and be edited without importing SwiftUI.
 ///
 /// Both looks are native tvOS 18 `TabView` presentations over the *same* tabs —
 /// the individual pages are byte-for-byte identical regardless of choice, so
@@ -53,7 +53,8 @@ public enum NavigationStyle: String, CaseIterable, Identifiable, Codable, Sendab
     /// opt-in in Settings ▸ Appearance ▸ Navigation.
     public static let `default`: NavigationStyle = .sidebar
 
-    /// AppStorage key shared by `MainTabView` (reads it to choose the tab style)
-    /// and Settings (writes it). App-wide — do not namespace per profile.
+    /// Persistence key base shared by `MainTabView` (reads the model to choose the
+    /// tab style) and Settings (writes it). Per-profile: the default profile reuses
+    /// this un-suffixed key; other profiles namespace it via `SettingsKey.scoped`.
     public static let storageKey = "navigationStyle"
 }

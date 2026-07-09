@@ -493,6 +493,23 @@ struct PlaybackDetailView: View {
                     : "Don't show the Up Next card. Episode credits behave like everything else — Skip Credits (if enabled) and the usual auto-advance at the very end.",
             ) {
                 Toggle("Show Up Next card", isOn: $playback.settings.showUpNextCard)
+            },
+            SettingsSplitRow(
+                id: "up-next-lead",
+                title: "Lead time (files without markers)",
+                description: "Jellyfin and Plex know exactly when the credits start, so the card appears right on cue. Local and SMB-share files have no credits marker, so there's no way to detect that — for those, show the card this many seconds before the end.",
+            ) {
+                VStack(alignment: .leading, spacing: 20) {
+                    SettingsStepper(
+                        options: PlaybackSettings.upNextLeadSecondsOptions,
+                        selection: $playback.settings.upNextLeadSeconds,
+                        title: { "\($0)s" }
+                    )
+                    Text("Marker-less content shows Up Next \(playback.settings.upNextLeadSeconds)s before the end. Set it higher for shows with long credits, lower to avoid it appearing before the episode's really over.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
         ])
     }

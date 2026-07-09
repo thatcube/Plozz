@@ -810,6 +810,12 @@ actor ShareCatalogStore {
             seasonNumber: season,
             episodeNumber: episode,
             seriesID: ShareCatalogID.series(seriesKey),
+            // Give the episode its season id (the provider's own `season:key:N`
+            // scheme that `children(of:)` decodes) so the player's neighbour
+            // resolver — gated on `kind == .episode && seasonID != nil` — engages
+            // for SMB shares too, enabling auto-advance, the Up Next card, and the
+            // next-episode prefetch. Without it SMB episodes never hand off.
+            seasonID: season.map { ShareCatalogID.season(seriesKey, $0) },
             libraryID: ShareCatalogID.library(library)
         )
     }

@@ -337,11 +337,42 @@ public final class PlayerControlsModel {
         upNext != nil && activeCreditsSegment != nil
     }
 
-    /// Whether the Up Next card should own the lower-right slot right now: credits
-    /// are owned by Up Next and the user hasn't dismissed the card.
+    /// Seconds before the end at which the Up Next card appears when there is NO
+    /// closing-credits marker to anchor it — marker-less servers (SMB shares) or
+    /// content the server never analysed for segments. Marker-based content still
+    /// triggers on its real credits segment (usually earlier / more accurate).
+    /// Set from the profile's `PlaybackSettings.upNextLeadSeconds`; default 30s.
+    public var upNextLeadSeconds: TimeInterval = 30
+
+    /// Whether playback is in its final stretch by time alone — the fallback
+    /// trigger for the Up Next card when there's no credits marker. Guarded on a
+    /// known duration and real forward progress so it never fires at position 0 or
+    /// on a live / unknown-duration stream. `duration`/`currentSeconds` are kept
+    /// live from the engine each tick, so this works even for SMB items that carry
+    /// no server-provided runtime until played.
+    public var isNearEndByTime: Bool {
+        guard duration > 0, currentSeconds > 0 else { return false }
+        let remaining = duration - currentSeconds
+        return remaining > 0 && remaining <= upNextLeadSeconds
+    }
+
+    /// Whether this content has a closing-credits marker at all. When it does, the
+    /// Up Next card waits for that (accurate) marker rather than the time fallback;
+    /// when it doesn't (SMB shares, unanalysed content), the time fallback applies.
+    public var hasCreditsMarker: Bool {
+        skippableSegments.contains { $0.kind == .credits }
+    }
+
+    /// Whether the Up Next card should own the lower-right slot right now: there's
+    /// a queued next episode, the user hasn't dismissed the card, and we've reached
+    /// the hand-off window — the server's closing-credits marker (accurate, when
+    /// provided) OR, only for content with NO credits marker (SMB shares), the
+    /// final ``markerlessUpNextLeadSeconds`` by time. Marker-based content is
+    /// unaffected — it still triggers exactly on its credits segment.
     public var upNextActive: Bool {
-        guard !dismissedUpNext else { return false }
-        return creditsOwnedByUpNext
+        guard !dismissedUpNext, upNext != nil else { return false }
+        if creditsOwnedByUpNext { return true }
+        return !hasCreditsMarker && isNearEndByTime
     }
 
     /// How intros/credits are handled (Off / On / Auto (delay) / Auto (instant)).

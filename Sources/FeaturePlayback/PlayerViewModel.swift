@@ -413,6 +413,9 @@ public final class PlayerViewModel {
     /// Polls the engine for its first presented frame so the bring-up spinner can
     /// be held until the picture is actually on screen (see ``awaitingFirstFrame``).
     private var firstFrameTask: Task<Void, Never>?
+    /// When the current bring-up began, for hand-off latency telemetry
+    /// (``HandoffDiagnostics``). `nil` until ``startPlayback`` runs.
+    private var bringUpStartedAt: Date?
     /// How long before the end to prefetch the next episode when the provider's
     /// `playbackInfo` is NOT idempotent (Jellyfin) and no closing-credits marker
     /// opened the Up Next window — a safety net for marker-less servers so the
@@ -480,6 +483,7 @@ public final class PlayerViewModel {
         self.controls.skipBackwardInterval = playbackSettings.skipBackwardInterval
         self.controls.skipForwardInterval = playbackSettings.skipForwardInterval
         self.controls.seekWithoutPausing = playbackSettings.seekWithoutPausing
+        self.controls.upNextLeadSeconds = TimeInterval(playbackSettings.upNextLeadSeconds)
         // Seed the overlay with the profile's persisted subtitle appearance so a
         // selected subtitle renders in the user's style from the first cue.
         self.liveSubtitles.style = style
@@ -596,7 +600,7 @@ public final class PlayerViewModel {
         // session-minting POST) defers to the hand-off window instead; see
         // ``maybeStartWindowedNextPrefetch``.
         if next != nil, provider.kind.playbackInfoIsIdempotent {
-            startNextEpisodePrefetch()
+            startNextEpisodePrefetch(trigger: "eager")
         }
     }
 
@@ -607,10 +611,12 @@ public final class PlayerViewModel {
     /// just means the hand-off resolves normally (no regression). The eager path
     /// (idempotent providers) calls this from ``resolveNeighbors``; the windowed
     /// path (Jellyfin) calls it from ``maybeStartWindowedNextPrefetch``.
-    private func startNextEpisodePrefetch() {
+    private func startNextEpisodePrefetch(trigger: String) {
         guard let next = nextEpisode, !didStartNextEpisodePrefetch, prefetchedNext == nil,
               nextEpisodePrefetchTask == nil else { return }
         didStartNextEpisodePrefetch = true
+        HandoffDiagnostics.emit("prefetch START trigger=\(trigger) next=\(next.id) provider=\(provider.kind.rawValue) idempotent=\(provider.kind.playbackInfoIsIdempotent)")
+        let prefetchStart = Date()
         nextEpisodePrefetchTask = Task { @MainActor [weak self] in
             guard let self else { return }
             do {
@@ -624,6 +630,7 @@ public final class PlayerViewModel {
                     return
                 }
                 self.prefetchedNext = resolved
+                HandoffDiagnostics.emit("prefetch READY next=\(next.id) engine=\(resolved.engineKind.rawValue) took=\(HandoffDiagnostics.ms(prefetchStart))")
                 PlozzLog.playback.info("Prefetched next-episode playback (engine=\(resolved.engineKind.rawValue))")
             } catch is CancellationError {
                 // Nothing resolved yet — nothing to release.
@@ -632,6 +639,7 @@ public final class PlayerViewModel {
                 // maybeStartWindowedNextPrefetch re-POST every progress tick and
                 // orphan a Jellyfin session that was minted just before the
                 // failure. The hand-off then resolves normally (no regression).
+                HandoffDiagnostics.emit("prefetch FAILED next=\(next.id) took=\(HandoffDiagnostics.ms(prefetchStart)) (hand-off will resolve normally)")
                 PlozzLog.playback.debug("Next-episode prefetch failed (non-fatal)")
             }
             self.nextEpisodePrefetchTask = nil
@@ -652,7 +660,7 @@ public final class PlayerViewModel {
         let windowOpen = controls.upNextActive
             || (duration > 0 && remaining > 0 && remaining <= Self.windowedNextPrefetchLeadTime)
         guard windowOpen else { return }
-        startNextEpisodePrefetch()
+        startNextEpisodePrefetch(trigger: "windowed")
     }
 
     /// Hands the prefetched next-episode resolution to the incoming player and
@@ -660,7 +668,11 @@ public final class PlayerViewModel {
     /// Returns `nil` when there's no prefetch or it doesn't match `itemID` (the
     /// hand-off then resolves normally). Call this synchronously BEFORE `stop()`.
     public func consumePrefetchedNext(matching itemID: String) -> PrefetchedPlayback? {
-        guard let prefetched = prefetchedNext, prefetched.itemID == itemID else { return nil }
+        guard let prefetched = prefetchedNext, prefetched.itemID == itemID else {
+            HandoffDiagnostics.emit("handoff advance next=\(itemID) prefetch=MISS (not ready — incoming player will resolve)")
+            return nil
+        }
+        HandoffDiagnostics.emit("handoff advance next=\(itemID) prefetch=HIT engine=\(prefetched.engineKind.rawValue)")
         prefetchedNext = nil
         // The producing task already completed; drop the handle so stop()'s
         // cancel-and-release can't touch the session the incoming player now owns.
@@ -691,6 +703,9 @@ public final class PlayerViewModel {
         firstFrameTask?.cancel()
         if engine.preventsDisplaySleep {
             awaitingFirstFrame = false
+            if let start = bringUpStartedAt {
+                HandoffDiagnostics.emit("first-frame (already presenting) total=\(HandoffDiagnostics.ms(start)) engine=\(currentEngineKind.rawValue)")
+            }
             return
         }
         awaitingFirstFrame = true
@@ -704,6 +719,9 @@ public final class PlayerViewModel {
                 guard let self, self.awaitingFirstFrame else { return }
                 if self.engine.preventsDisplaySleep {
                     self.awaitingFirstFrame = false
+                    if let start = self.bringUpStartedAt {
+                        HandoffDiagnostics.emit("first-frame PRESENTED total=\(HandoffDiagnostics.ms(start)) engine=\(self.currentEngineKind.rawValue)")
+                    }
                     return
                 }
                 try? await Task.sleep(nanoseconds: 100_000_000)
@@ -921,6 +939,8 @@ public final class PlayerViewModel {
     /// retry resumes there instead of the provider's stale resume point.
     private func startPlayback(forceTranscode: Bool, resumeOverride: TimeInterval?) async {
         phase = .loading
+        let bringUpStart = Date()
+        bringUpStartedAt = bringUpStart
         do {
             let resolved: PrefetchedPlayback
             if !forceTranscode, let adopted = adoptedResolved, adopted.itemID == itemID {
@@ -932,10 +952,13 @@ public final class PlayerViewModel {
                 // native→Plozzigen swap, one continuous loading spinner.
                 adoptedResolved = nil
                 resolved = adopted
+                HandoffDiagnostics.emit("bringup ADOPTED prefetch item=\(itemID) engine=\(resolved.engineKind.rawValue) (skipped network resolve)")
                 PlozzLog.playback.info("Adopted prefetched playback; skipping playbackInfo resolve")
             } else {
+                let resolveStart = Date()
                 resolved = try await resolveAndRoute(
                     itemID: itemID, mediaSourceID: mediaSourceID, forceTranscode: forceTranscode)
+                HandoffDiagnostics.emit("bringup RESOLVED on-demand item=\(itemID) engine=\(resolved.engineKind.rawValue) playbackInfo=\(HandoffDiagnostics.ms(resolveStart)) provider=\(provider.kind.rawValue) transcode=\(forceTranscode)")
             }
             // A user-initiated Back during playbackInfo resolution should NOT
             // proceed to bring up an engine that will immediately be torn down —
@@ -1310,7 +1333,9 @@ public final class PlayerViewModel {
         // error still triggers the fallback chain instead of spinning forever.
         armPlaybackWatchdog(startPosition: startPosition)
         await Self.yieldToRunLoop()
+        let loadStart = Date()
         await engine.load(request: request, startPosition: startPosition)
+        HandoffDiagnostics.emit("engine.load returned engine=\(engineKind.rawValue) took=\(HandoffDiagnostics.ms(loadStart))")
         phase = .ready
         // Hold the bring-up spinner until the engine actually presents its first
         // frame, so `.loading` → `.ready` is one continuous indicator rather than

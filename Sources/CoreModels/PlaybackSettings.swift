@@ -49,6 +49,14 @@ public struct PlaybackSettings: Codable, Equatable, Sendable {
     /// Only ever applies to episodes with a next episode — movies are unaffected.
     public var showUpNextCard: Bool
 
+    /// How many seconds before the end the Up Next card appears for content with
+    /// **no** closing-credits marker — local/SMB files (and anything the server
+    /// never analysed for segments). Server-marker content (Jellyfin/Plex) still
+    /// triggers on its real credits segment and ignores this. There's no reliable
+    /// way to detect where credits start in a bare file, so this mirrors how Kodi's
+    /// Up Next and Infuse behave: a fixed, user-tunable lead time. Default 30s.
+    public var upNextLeadSeconds: Int
+
     /// The profile's default audio-language preference: original spoken language
     /// (e.g. Japanese for anime), the viewer's device language (dub-friendly), or
     /// an explicit language. `.original` by default — the maintainer's primary
@@ -78,6 +86,7 @@ public struct PlaybackSettings: Codable, Equatable, Sendable {
         syncWatchAcrossServers: Bool = true,
         seekWithoutPausing: Bool = true,
         showUpNextCard: Bool = true,
+        upNextLeadSeconds: Int = 30,
         audioLanguagePreference: AudioLanguagePreference = .original,
         rememberAudioTrackPerSeries: Bool = true,
         rememberSubtitleTrackPerSeries: Bool = true
@@ -89,12 +98,18 @@ public struct PlaybackSettings: Codable, Equatable, Sendable {
         self.syncWatchAcrossServers = syncWatchAcrossServers
         self.seekWithoutPausing = seekWithoutPausing
         self.showUpNextCard = showUpNextCard
+        self.upNextLeadSeconds = upNextLeadSeconds
         self.audioLanguagePreference = audioLanguagePreference
         self.rememberAudioTrackPerSeries = rememberAudioTrackPerSeries
         self.rememberSubtitleTrackPerSeries = rememberSubtitleTrackPerSeries
     }
 
     public static let `default` = PlaybackSettings()
+
+    /// Selectable values (seconds) for ``upNextLeadSeconds`` in Settings. A small,
+    /// curated set — err late (never interrupt real content) with room to go
+    /// earlier for shows with long credits. `default`'s 30s must be a member.
+    public static let upNextLeadSecondsOptions: [Int] = [15, 20, 30, 45, 60]
 }
 
 // MARK: - Codable (tolerant of older / future persisted payloads)
@@ -108,6 +123,7 @@ public extension PlaybackSettings {
         case syncWatchAcrossServers
         case seekWithoutPausing
         case showUpNextCard
+        case upNextLeadSeconds
         case audioLanguagePreference
         /// Legacy boolean predecessor of `audioLanguagePreference`, still read for
         /// migration (`true` → `.original`, `false` → `.device`).
@@ -158,6 +174,9 @@ public extension PlaybackSettings {
         self.showUpNextCard =
             (try? container.decodeIfPresent(Bool.self, forKey: .showUpNextCard))
             .flatMap { $0 } ?? defaults.showUpNextCard
+        self.upNextLeadSeconds =
+            (try? container.decodeIfPresent(Int.self, forKey: .upNextLeadSeconds))
+            .flatMap { $0 } ?? defaults.upNextLeadSeconds
         // Prefer the new preference; fall back to the legacy boolean (true →
         // original, false → device) so installs that predate the dropdown keep
         // their prefer-original choice; default to `.original` when neither is set.
@@ -189,6 +208,7 @@ public extension PlaybackSettings {
         try container.encode(syncWatchAcrossServers, forKey: .syncWatchAcrossServers)
         try container.encode(seekWithoutPausing, forKey: .seekWithoutPausing)
         try container.encode(showUpNextCard, forKey: .showUpNextCard)
+        try container.encode(upNextLeadSeconds, forKey: .upNextLeadSeconds)
         try container.encode(audioLanguagePreference, forKey: .audioLanguagePreference)
         try container.encode(rememberAudioTrackPerSeries, forKey: .rememberAudioTrackPerSeries)
         try container.encode(rememberSubtitleTrackPerSeries, forKey: .rememberSubtitleTrackPerSeries)

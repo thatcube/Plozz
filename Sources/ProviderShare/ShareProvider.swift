@@ -101,7 +101,20 @@ public struct ShareProvider: MediaProvider {
         let resumable = await watchStore.resumable(limit: limit)
         var items: [MediaItem] = []
         for entry in resumable {
-            guard let base = await store.item(id: entry.itemID) else { continue }
+            // Resolve through the CATALOG first (indexed → carries series/season
+            // linkage, including the `seasonID` the player's neighbour resolver
+            // needs to offer Up Next / auto-advance), falling back to the raw
+            // file-tree build only for un-indexed items. Matches `item(id:)`'s
+            // resolution order; a bare `store.item(id:)` yields a filename-parsed
+            // item with no `seasonID`, which silently disables episode hand-off.
+            let base: MediaItem
+            if let indexed = await catalog.item(id: entry.itemID) {
+                base = indexed
+            } else if let raw = await store.item(id: entry.itemID) {
+                base = raw
+            } else {
+                continue
+            }
             items.append(Self.stamped(base, with: entry.record))
         }
         // Device-observable (in-app log ring) so a missing Continue Watching row

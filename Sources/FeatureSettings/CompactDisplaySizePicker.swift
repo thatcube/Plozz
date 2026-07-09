@@ -20,7 +20,7 @@ struct CompactDisplaySizePicker: View {
 
     /// Fixed leading column so every preview strip shares the same left origin —
     /// that shared origin is what lets the eye read the widths as a ramp.
-    private let labelWidth: CGFloat = 132
+    private let labelWidth: CGFloat = 150
     private var labelInset: CGFloat { SettingsRowMetrics.horizontalPadding }
 
     var body: some View {
@@ -52,7 +52,8 @@ struct CompactDisplaySizePicker: View {
                 .frame(width: labelWidth, alignment: .leading)
 
                 DisplaySizeSwatch(density: density)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                Spacer(minLength: SettingsRowMetrics.spacing(.primary))
 
                 SettingsCheckmark(isChecked: selection == density)
             }

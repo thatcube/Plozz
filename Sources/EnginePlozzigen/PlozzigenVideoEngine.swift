@@ -259,9 +259,21 @@ public final class PlozzigenVideoEngine: VideoEngine {
     }
 
     public func stop() {
+        stopEngine(resetDisplayCriteria: true)
+    }
+
+    /// Same-dynamic-range hand-off: when asked to preserve the display mode, stop
+    /// AetherEngine WITHOUT nil-ing `preferredDisplayCriteria`, so the panel stays
+    /// in its current HDR/DV mode. The incoming episode's engine re-applies the
+    /// identical criteria, so tvOS performs no re-sync (no DV→SDR→DV flap).
+    public func stop(preserveDisplayMode: Bool) {
+        stopEngine(resetDisplayCriteria: !preserveDisplayMode)
+    }
+
+    private func stopEngine(resetDisplayCriteria: Bool) {
         progressTimer?.cancel()
         progressTimer = nil
-        engine.stop()
+        engine.stop(resetDisplayCriteria: resetDisplayCriteria)
         status = .idle
         intendsPause = true
         isPaused = true

@@ -698,6 +698,22 @@ public final class PlayerViewModel {
         return prefetched
     }
 
+    /// Whether the panel's HDR/Dolby-Vision mode should be kept across this
+    /// hand-off — i.e. stop the outgoing engine WITHOUT resetting the display, so
+    /// the TV doesn't flap DV→SDR→DV between episodes. True only when both this
+    /// and the next episode play on the on-device engine in the SAME HDR/DV mode:
+    /// the incoming engine then re-applies identical criteria, so tvOS re-syncs
+    /// nothing. Any mismatch (different range, SDR, or a native-engine side) keeps
+    /// the normal full reset so a genuine mode change still happens.
+    public func shouldPreserveDisplayMode(forNext next: PrefetchedPlayback?) -> Bool {
+        let curMode = contentDisplayMode
+        let nextMode = next.map { HDRDisplayMode($0.request.sourceMetadata) }
+        let bothPlozzigen = currentEngineKind == .plozzigen && next?.engineKind == .plozzigen
+        let preserve = bothPlozzigen && (nextMode?.isHDR ?? false) && nextMode == curMode
+        HandoffDiagnostics.emit("handoff display cur=\(curMode) next=\(nextMode.map { "\($0)" } ?? "none") bothPlozzigen=\(bothPlozzigen) preserve=\(preserve)")
+        return preserve
+    }
+
     /// Releases a prefetched-but-unadopted server session so a back-out doesn't
     /// orphan a Jellyfin play/transcode session. A no-op for idempotent providers
     /// (Plex/SMB create no server-side state). Best-effort.
@@ -2044,7 +2060,7 @@ public final class PlayerViewModel {
 
     /// Call when leaving playback: report a final stop so the server records the
     /// resume point, then tear the engine down.
-    public func stop() async {
+    public func stop(preserveDisplayMode: Bool = false) async {
         guard !didStop else { return }
         PlaybackTrace.note("stop() teardown curr=\(String(format: "%.2f", engine.currentTime)) shouldDismiss=\(shouldDismiss) pendingNext=\(pendingNextEpisode != nil) isSeeking=\(controls.isSeeking)")
         didStop = true
@@ -2079,7 +2095,7 @@ public final class PlayerViewModel {
         // the resume position up front since the engine is torn down here.
         let finalPosition = max(engine.furthestObservedPosition, engine.currentTime)
         let percent = watchedPercent(at: finalPosition)
-        engine.stop()
+        engine.stop(preserveDisplayMode: preserveDisplayMode)
         // Release any prefetched next-episode session that was never adopted, and
         // an adopted-but-never-committed session (a hand-off torn down before the
         // incoming player took ownership), so a Jellyfin session isn't orphaned.

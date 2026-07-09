@@ -99,8 +99,7 @@ private struct NavigationStyleMini: View {
             .overlay(Capsule(style: .continuous).strokeBorder(NavigationPreviewColors.chromeBorder, lineWidth: 1))
             .frame(maxWidth: .infinity, alignment: .center)
 
-            posterRow()
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            posterRow(availH: availH)
         }
     }
 
@@ -129,50 +128,56 @@ private struct NavigationStyleMini: View {
                     .strokeBorder(NavigationPreviewColors.chromeBorder, lineWidth: 1)
             )
 
-            posterRow()
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            posterRow(availH: availH)
         }
     }
 
     // MARK: Shared page content
 
-    /// A row of neutral mock poster tiles that fills the whole content width
-    /// (even gaps, flush to both edges) so the page reads as balanced — identical
-    /// in both variants.
-    private func posterRow() -> some View {
-        GeometryReader { geo in
-            let regionW = geo.size.width
-            let regionH = geo.size.height
-            let gap = regionW * 0.045
-            // Pick a tile count that keeps each poster close to a 2:3 shape while
-            // still filling the full width, so neither the wide top-bar area nor
-            // the narrower sidebar content area is left with a lop-sided trailing
-            // gap.
-            let ratio = regionH > 0 ? regionW / (regionH * (2.0 / 3.0)) : 1
-            let count = max(1, min(4, Int(ratio.rounded())))
-            let tileW = (regionW - gap * CGFloat(count - 1)) / CGFloat(max(1, count))
-            let tileH = min(regionH, tileW * 1.5)
-            let corner = tileW * 0.12
+    /// The rendered height of the top tab bar (pill thickness + its vertical
+    /// padding). The sidebar rail doesn't eat vertical space, so the top bar is the
+    /// height-limiting variant — its leftover content height sets the poster size
+    /// used by BOTH variants, so the mock cards are identical whichever chrome is
+    /// shown (the choice is *navigation*, not card size).
+    private func barHeight(_ availH: CGFloat) -> CGFloat {
+        let thick = tabThickness(availH)
+        return thick + thick * 0.75 * 2
+    }
 
-            HStack(spacing: gap) {
-                ForEach(0..<count, id: \.self) { _ in
-                    RoundedRectangle(cornerRadius: corner, style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: [NavigationPreviewColors.tileTop, NavigationPreviewColors.tileBottom],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
+    /// The single poster tile size shared by both variants: a 2:3 tile sized to the
+    /// (shorter) top-bar content height, with a little breathing room.
+    private func posterTileSize(availH: CGFloat) -> CGSize {
+        let contentH = max(0, availH - barHeight(availH) - availH * 0.09)
+        let h = contentH * 0.86
+        return CGSize(width: h * (2.0 / 3.0), height: h)
+    }
+
+    /// A centred row of exactly three neutral mock poster tiles at the shared size,
+    /// so the page reads as balanced and — crucially — the cards look identical in
+    /// both variants.
+    private func posterRow(availH: CGFloat) -> some View {
+        let size = posterTileSize(availH: availH)
+        let gap = size.width * 0.22
+        let corner = size.width * 0.12
+
+        return HStack(spacing: gap) {
+            ForEach(0..<3, id: \.self) { _ in
+                RoundedRectangle(cornerRadius: corner, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [NavigationPreviewColors.tileTop, NavigationPreviewColors.tileBottom],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
                         )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: corner, style: .continuous)
-                                .strokeBorder(NavigationPreviewColors.tileBorder, lineWidth: 1)
-                        )
-                        .frame(width: tileW, height: tileH)
-                }
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: corner, style: .continuous)
+                            .strokeBorder(NavigationPreviewColors.tileBorder, lineWidth: 1)
+                    )
+                    .frame(width: size.width, height: size.height)
             }
-            .frame(width: regionW, height: regionH, alignment: .center)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
     }
 }
 

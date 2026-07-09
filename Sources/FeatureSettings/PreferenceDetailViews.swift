@@ -102,7 +102,7 @@ struct AppearanceDetailView: View {
                 SettingsSplitRow(
                     id: "card-style",
                     title: "Card Style",
-                    description: "Cards wrap each poster in a bordered surface with the title inside. Posters show just the artwork with the title underneath.",
+                    description: "Cards wrap each poster in a bordered surface with its text inside. Posters show just the artwork with its text underneath.",
                 ) {
                     CompactCardStylePicker(selection: $cardStyle.style)
                 },

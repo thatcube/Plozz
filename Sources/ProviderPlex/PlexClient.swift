@@ -741,11 +741,7 @@ public struct PlexClient: Sendable {
     /// `hybridEngineEnabled`.
     private static let hybridDirectPlayContainers: Set<String> = [
         "mkv", "webm", "matroska",
-        "ts", "m2ts", "mts", "m2t", "mpegts", "bdav", "bdmv",
-        // AVPlayer can't demux AVI, so Plex transcodes it. The on-device engine
-        // (FFmpeg) demuxes AVI and decodes its usual MPEG-4 Part 2 (DivX/Xvid) /
-        // MPEG-2 / VC-1 payloads (already handled on-device inside MKV) → direct-play.
-        "avi"
+        "ts", "m2ts", "mts", "m2t", "mpegts", "bdav", "bdmv"
     ]
 
     /// Lossy audio codecs the Apple TV always decodes in software, regardless of

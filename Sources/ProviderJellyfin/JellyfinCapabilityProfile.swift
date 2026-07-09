@@ -176,7 +176,7 @@ extension JellyfinCapabilityProfile {
             profiles.append(
                 DirectPlayProfile(
                     type: "Video",
-                    container: "mkv,webm,ts,m2ts,mts,m2t,mpegts,bdav,bdmv,avi",
+                    container: "mkv,webm,ts,m2ts,mts,m2t,mpegts,bdav,bdmv",
                     videoCodec: mkvVideo.joined(separator: ","),
                     audioCodec: mkvAudio.joined(separator: ",")
                 )

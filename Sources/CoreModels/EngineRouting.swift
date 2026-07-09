@@ -169,12 +169,6 @@ public enum EngineRouter {
             || container == "m2t"
             || container == "mpegts"
             || container == "bdav" || container == "bdmv"
-            // AVPlayer/AVFoundation cannot demux AVI at all (a raw AVI URL just
-            // fails), so servers transcode it. The on-device engine (FFmpeg) demuxes
-            // AVI and software-decodes its usual payloads (MPEG-4 Part 2 / DivX / Xvid,
-            // MPEG-2, VC-1) — the same codecs already handled on-device inside MKV — so
-            // direct-play it on-device instead of paying for a server transcode.
-            || container == "avi"
     }
 
     /// True when the video stream carries a **Dolby Vision** signal (any profile).

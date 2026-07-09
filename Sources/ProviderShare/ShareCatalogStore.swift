@@ -80,6 +80,9 @@ actor ShareCatalogStore {
         exec("CREATE INDEX IF NOT EXISTS idx_assets_lib ON assets(library, kind);")
         exec("CREATE INDEX IF NOT EXISTS idx_assets_series ON assets(series_key, season, episode);")
         exec("CREATE INDEX IF NOT EXISTS idx_assets_added ON assets(first_seen_at DESC);")
+        // Covers the Movies grid query (WHERE library, kind ORDER BY sort_title) so
+        // the sort is index-provided instead of a per-page temp B-tree sort.
+        exec("CREATE INDEX IF NOT EXISTS idx_assets_movies_sort ON assets(library, kind, sort_title);")
         exec("CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT);")
         // Per-logical-item enrichment (resolved at scan time by ShareEnricher and
         // persisted): external ids for merge/ratings/Trakt, plus overview + artwork
@@ -479,14 +482,26 @@ actor ShareCatalogStore {
         defer { sqlite3_finalize(stmt) }
         bindText(stmt, 1, itemID)
         guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
+        return enrichmentRecord(fromColumns: stmt, startingAt: 0)
+    }
+
+    /// Decode the 7 enrichment columns (provider_ids_json, overview, genres_json,
+    /// runtime, poster_url, backdrop_url, logo_url) starting at `startingAt` into a
+    /// record. Shared by the standalone `enrichmentRow` lookup and the JOINed grid
+    /// queries (movies/series), so a page fetch reads enrichment in ONE query instead
+    /// of N+1 per-row lookups. Returns nil when every column is NULL (no enrichment
+    /// row matched the LEFT JOIN).
+    private func enrichmentRecord(fromColumns stmt: OpaquePointer?, startingAt base: Int32) -> EnrichmentRecord? {
+        let allNull = (0..<7).allSatisfy { sqlite3_column_type(stmt, base + $0) == SQLITE_NULL }
+        if allNull { return nil }
         var rec = EnrichmentRecord()
-        rec.providerIDs = decodeJSON([String: String].self, columnText(stmt, 0)) ?? [:]
-        rec.overview = columnText(stmt, 1)
-        rec.genres = decodeJSON([String].self, columnText(stmt, 2)) ?? []
-        if sqlite3_column_type(stmt, 3) != SQLITE_NULL { rec.runtime = sqlite3_column_double(stmt, 3) }
-        rec.posterURL = columnText(stmt, 4).flatMap(URL.init(string:))
-        rec.backdropURL = columnText(stmt, 5).flatMap(URL.init(string:))
-        rec.logoURL = columnText(stmt, 6).flatMap(URL.init(string:))
+        rec.providerIDs = decodeJSON([String: String].self, columnText(stmt, base + 0)) ?? [:]
+        rec.overview = columnText(stmt, base + 1)
+        rec.genres = decodeJSON([String].self, columnText(stmt, base + 2)) ?? []
+        if sqlite3_column_type(stmt, base + 3) != SQLITE_NULL { rec.runtime = sqlite3_column_double(stmt, base + 3) }
+        rec.posterURL = columnText(stmt, base + 4).flatMap(URL.init(string:))
+        rec.backdropURL = columnText(stmt, base + 5).flatMap(URL.init(string:))
+        rec.logoURL = columnText(stmt, base + 6).flatMap(URL.init(string:))
         return rec
     }
 
@@ -505,6 +520,12 @@ actor ShareCatalogStore {
             return item
         }
         guard let rec = enrichmentRow(itemID: key) else { return item }
+        return applyEnrichment(item, rec)
+    }
+
+    /// Merge an already-fetched enrichment record onto an item. Extracted from
+    /// `withEnrichment` so the JOINed grid queries can reuse the exact same merge.
+    private func applyEnrichment(_ item: MediaItem, _ rec: EnrichmentRecord) -> MediaItem {
         var copy = item
         // Merge ids (don't clobber any already present).
         if !rec.providerIDs.isEmpty {
@@ -635,20 +656,34 @@ actor ShareCatalogStore {
         ensureOpen()
         guard db != nil else { return [] }
         var out: [MediaItem] = []
+        // LEFT JOIN enrichment in the SAME query (keyed "f:<rel_path>") so a page is
+        // ONE query instead of 1 + N per-row enrichment lookups. The
+        // idx_assets_movies_sort covering index (library, kind, sort_title) lets the
+        // ORDER BY be index-provided instead of a per-page temp B-tree sort.
         query("""
-        SELECT rel_path, title, year FROM assets
-        WHERE library='movies' AND kind='movie' ORDER BY sort_title LIMIT ? OFFSET ?;
+        SELECT a.rel_path, a.title, a.year,
+               e.provider_ids_json, e.overview, e.genres_json, e.runtime,
+               e.poster_url, e.backdrop_url, e.logo_url
+        FROM assets a
+        LEFT JOIN enrichment e ON e.item_id = 'f:' || a.rel_path
+        WHERE a.library='movies' AND a.kind='movie'
+        ORDER BY a.sort_title LIMIT ? OFFSET ?;
         """, bind: { sqlite3_bind_int64($0, 1, Int64(limit)); sqlite3_bind_int64($0, 2, Int64(offset)) }) { stmt in
             let relPath = self.columnText(stmt, 0) ?? ""
-            out.append(MediaItem(
+            let item = MediaItem(
                 id: ShareCatalogID.file(relPath),
                 title: self.columnText(stmt, 1) ?? relPath,
                 kind: .movie,
                 productionYear: self.columnOptInt(stmt, 2),
                 libraryID: ShareCatalogID.moviesLibrary
-            ))
+            )
+            if let rec = self.enrichmentRecord(fromColumns: stmt, startingAt: 3) {
+                out.append(self.applyEnrichment(item, rec))
+            } else {
+                out.append(item)
+            }
         }
-        return out.map(withEnrichment)
+        return out
     }
 
     /// Distinct series items for a TV/Anime library, alphabetical.
@@ -656,18 +691,30 @@ actor ShareCatalogStore {
         ensureOpen()
         guard db != nil, library != .movies else { return [] }
         var out: [MediaItem] = []
+        // LEFT JOIN enrichment (keyed "series:<series_key>") into the grouped query so
+        // a page is one query, not 1 + N per-row enrichment lookups. The GROUP BY is
+        // over series_key, which the JOIN is 1:1 with.
         query("""
-        SELECT series_key, series_title, MAX(year), MIN(sort_title) AS s FROM assets
-        WHERE library=? AND kind='episode' AND series_key IS NOT NULL
-        GROUP BY series_key ORDER BY s LIMIT ? OFFSET ?;
+        SELECT a.series_key, a.series_title, MAX(a.year), MIN(a.sort_title) AS s,
+               e.provider_ids_json, e.overview, e.genres_json, e.runtime,
+               e.poster_url, e.backdrop_url, e.logo_url
+        FROM assets a
+        LEFT JOIN enrichment e ON e.item_id = 'series:' || a.series_key
+        WHERE a.library=? AND a.kind='episode' AND a.series_key IS NOT NULL
+        GROUP BY a.series_key ORDER BY s LIMIT ? OFFSET ?;
         """, bind: {
             self.bindText($0, 1, library.rawValue)
             sqlite3_bind_int64($0, 2, Int64(limit)); sqlite3_bind_int64($0, 3, Int64(offset))
         }) { stmt in
             guard let key = self.columnText(stmt, 0) else { return }
-            out.append(self.seriesItem(key: key, title: self.columnText(stmt, 1) ?? key, library: library, year: self.columnOptInt(stmt, 2)))
+            let item = self.seriesItem(key: key, title: self.columnText(stmt, 1) ?? key, library: library, year: self.columnOptInt(stmt, 2))
+            if let rec = self.enrichmentRecord(fromColumns: stmt, startingAt: 4) {
+                out.append(self.applyEnrichment(item, rec))
+            } else {
+                out.append(item)
+            }
         }
-        return out.map(withEnrichment)
+        return out
     }
 
     /// Season container items for a series (distinct season numbers; a `NULL`

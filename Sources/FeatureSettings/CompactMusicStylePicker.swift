@@ -50,7 +50,7 @@ struct MusicPlayerStyleDetail: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            FocusGatedSwitch("Show album, quality & lyrics", isOn: $showTrackDetails, canFocus: cardFocused)
+            FocusGatedSwitch("Show album, quality & lyrics source", isOn: $showTrackDetails, canFocus: cardFocused)
                 .focused($focused, equals: .toggle)
         }
         .focusSection()

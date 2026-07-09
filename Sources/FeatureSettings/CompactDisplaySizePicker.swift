@@ -3,72 +3,57 @@ import SwiftUI
 import CoreModels
 import CoreUI
 
-/// The Display Size picker, drawn as a **visual size ramp**: one focusable row
-/// per `UIDensity`, each showing a mock Home rail (a shelf of captioned poster
-/// cards) at that density's true relative card size (via ``DisplaySizeSwatch``).
-/// Stacked top-to-bottom the rows read small → large — the same "show me the
-/// feature" treatment Card Style and Watched Indicator use — so the choice looks
-/// like what it does instead of a plain checkmark list with abstract grid glyphs.
+/// The compact, in-Settings picker for Display Size: a grid of preview cards
+/// (`PreviewCard` + `DisplaySizeSwatch`) mirroring the Card Style / Watched
+/// Indicator / Navigation pickers, so every Appearance picker reads the same way.
+/// Each card's swatch is a mock screen filled with neutral placeholder posters at
+/// that density's card size, so the six cards read as a size ramp (many small
+/// cards → few big ones). Tapping a card selects that density; the active one
+/// carries the same accent wash/ring the sibling pickers use.
 ///
-/// Structurally a sibling of ``SettingsCheckableRow`` (shared checkmark, focus
-/// card, metrics) with the rail illustration filling the width between the name
-/// column and the trailing checkmark. Single-select, bound to the profile's
-/// density.
+/// Six options don't fit comfortably in one row, so they wrap to a 3-up grid
+/// (Micro/Tiny/Small over Default/Large/Huge) — the natural reading order keeps
+/// the ramp legible.
 struct CompactDisplaySizePicker: View {
     @Binding var selection: UIDensity
+    @Environment(\.themePalette) private var palette
 
-    @FocusState private var focused: UIDensity?
+    /// A shorter swatch than the two-up pickers use: with three cards per row the
+    /// cards are narrower, so this keeps each mock screen a landscape (TV) shape
+    /// rather than a tall box.
+    private let swatchHeight: CGFloat = 150
+    private let columnsPerRow = 3
 
-    /// Fixed leading column so every rail illustration shares the same left origin.
-    private let labelWidth: CGFloat = 132
-    /// Height of each row's mock-rail illustration.
-    private let swatchHeight: CGFloat = 92
-    private var labelInset: CGFloat { SettingsRowMetrics.horizontalPadding }
-
-    var body: some View {
-        SettingsCheckGroup {
-            VStack(alignment: .leading, spacing: 8) {
-                ForEach(UIDensity.allCases) { density in
-                    row(density)
-                        .focused($focused, equals: density)
-                }
-            }
+    private var rows: [[UIDensity]] {
+        stride(from: 0, to: UIDensity.allCases.count, by: columnsPerRow).map { start in
+            Array(UIDensity.allCases[start..<min(start + columnsPerRow, UIDensity.allCases.count)])
         }
     }
 
-    private func row(_ density: UIDensity) -> some View {
-        Button {
-            selection = density
-        } label: {
-            HStack(spacing: SettingsRowMetrics.spacing(.primary)) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(density.displayName)
-                        .font(.headline.weight(.semibold))
-                        .lineLimit(1)
-                    Text(density.detail)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
+    var body: some View {
+        VStack(spacing: 16) {
+            ForEach(Array(rows.enumerated()), id: \.offset) { _, rowDensities in
+                HStack(alignment: .top, spacing: 16) {
+                    ForEach(rowDensities) { density in
+                        PreviewCard(
+                            title: density.displayName,
+                            detail: density.detail,
+                            isSelected: selection == density,
+                            accent: palette.accent,
+                            compact: true,
+                            swatchHeight: swatchHeight,
+                            action: { selection = density }
+                        ) {
+                            DisplaySizeSwatch(
+                                density: density,
+                                cornerRadius: PlozzTheme.Metrics.Radius.content
+                            )
+                        }
+                    }
                 }
-                .frame(width: labelWidth, alignment: .leading)
-
-                DisplaySizeSwatch(density: density)
-                    .frame(height: swatchHeight)
-                    .frame(maxWidth: .infinity)
-
-                SettingsCheckmark(isChecked: selection == density)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .frame(minHeight: SettingsRowMetrics.minHeight(.primary))
-            .padding(.vertical, SettingsRowMetrics.verticalPadding(.primary))
-            .padding(.horizontal, labelInset)
-            .contentShape(Rectangle())
         }
-        .buttonStyle(SettingsFocusButtonStyle())
-        .padding(.leading, -labelInset)
-        .accessibilityLabel(Text(density.displayName))
-        .accessibilityValue(Text(density.detail))
-        .accessibilityAddTraits(selection == density ? .isSelected : [])
     }
 }
 #endif

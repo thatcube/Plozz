@@ -13,13 +13,14 @@ private enum WatchIndicatorPreviewColors {
     static let tileBorder = Color.white.opacity(0.12)
     static let progressTrack = Color.white.opacity(0.28)
 
-    /// Three distinct fixed poster gradients so the mock row reads as three
-    /// different titles (finished · in-progress · new), left → right.
-    static let tileArt: [[Color]] = [
-        [Color(red: 0.24, green: 0.52, blue: 0.62), Color(red: 0.14, green: 0.28, blue: 0.44)],
-        [Color(red: 0.55, green: 0.32, blue: 0.60), Color(red: 0.28, green: 0.18, blue: 0.44)],
-        [Color(red: 0.62, green: 0.44, blue: 0.30), Color(red: 0.40, green: 0.22, blue: 0.20)]
-    ]
+    /// Neutral grey posters (matching the Navigation swatch tiles) so the corner
+    /// marks and progress bar — the actual subject of this picker — are what stand
+    /// out, not the artwork. Kept as three entries so the per-tile indexing below
+    /// is unchanged.
+    static let tileArt: [[Color]] = Array(
+        repeating: [Color(white: 0.30), Color(white: 0.22)],
+        count: 3
+    )
 }
 
 /// The three mock poster states the row illustrates, left → right.
@@ -104,11 +105,9 @@ private struct WatchIndicatorMini: View {
                     endPoint: .bottomTrailing
                 )
             )
-            // Dull the mock artwork — same hues, less vibrant — so the posters read
-            // as quiet stand-ins and the corner marks stay the focus. Applied only
-            // to the fill (before the overlays) so the brand-blue flag/check keep
-            // their full saturation.
-            .saturation(0.45)
+            // Neutral grey stand-in art (see `tileArt`); no saturation trim needed
+            // since it's already grey, so the brand-blue flag/check and progress
+            // bar keep their full saturation and stay the focus.
             .overlay(alignment: .topTrailing) { cornerMark(for: state, tileWidth: width) }
             .overlay(alignment: .bottom) { progressBar(for: state, tileWidth: width, tileHeight: height) }
             .overlay(

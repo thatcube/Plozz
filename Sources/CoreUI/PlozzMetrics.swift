@@ -67,6 +67,11 @@ public struct PlozzMetrics: Equatable, Sendable {
     /// setting yet never shrinks below a clearly-visible minimum on tiny cards.
     public let unwatchedFlagSize: CGFloat
 
+    /// Diameter of the "watched" check badge, density-scaled and floored at
+    /// `PlozzTheme.Metrics.watchedBadgeMinSize` so it grows with the display-size
+    /// setting (like the unwatched flag) yet never shrinks below a legible minimum.
+    public let watchedBadgeSize: CGFloat
+
     // MARK: Media spacing (scaled)
 
     /// Gap between adjacent media cards in a rail and gutter in a poster grid —
@@ -216,6 +221,10 @@ public struct PlozzMetrics: Equatable, Sendable {
         self.unwatchedFlagSize = max(
             step(PlozzTheme.Metrics.unwatchedFlagSize),
             PlozzTheme.Metrics.unwatchedFlagMinSize
+        )
+        self.watchedBadgeSize = max(
+            step(PlozzTheme.Metrics.watchedBadgeSize),
+            PlozzTheme.Metrics.watchedBadgeMinSize
         )
 
         self.cardSpacing = step(PlozzTheme.Metrics.cardSpacing)

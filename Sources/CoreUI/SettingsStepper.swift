@@ -23,20 +23,30 @@ public struct SettingsStepper<Value: Hashable>: View {
     /// time. When false (the default) the value clamps at the ends of the preset
     /// list and the end arrow dims.
     public let wraps: Bool
+    /// Called with `true` when either the − or + button gains focus and `false`
+    /// when focus leaves the stepper. Lets a caller drive a live preview while the
+    /// user is dialing the value (e.g. Circadian's Darkness/Warmth tint preview),
+    /// mirroring ``SettingsOptionPicker``'s hook.
+    public let onFocusChange: ((Bool) -> Void)?
 
     @Environment(\.themePalette) private var palette
+    @FocusState private var focusedButton: StepperButton?
+
+    private enum StepperButton { case minus, plus }
 
     public init(
         options: [Value],
         selection: Binding<Value>,
         compact: Bool = false,
         wraps: Bool = false,
+        onFocusChange: ((Bool) -> Void)? = nil,
         title: @escaping (Value) -> String
     ) {
         self.options = options
         self._selection = selection
         self.compact = compact
         self.wraps = wraps
+        self.onFocusChange = onFocusChange
         self.title = title
     }
 
@@ -63,7 +73,7 @@ public struct SettingsStepper<Value: Hashable>: View {
 
     public var body: some View {
         HStack(spacing: rowSpacing) {
-            stepButton(symbol: "minus", dimmed: !canDecrement) {
+            stepButton(symbol: "minus", dimmed: !canDecrement, focus: .minus) {
                 if let next = stepped(by: -1) { selection = next }
             }
 
@@ -80,11 +90,16 @@ public struct SettingsStepper<Value: Hashable>: View {
             .frame(minWidth: valueMinWidth)
             .animation(.easeOut(duration: 0.16), value: index)
 
-            stepButton(symbol: "plus", dimmed: !canIncrement) {
+            stepButton(symbol: "plus", dimmed: !canIncrement, focus: .plus) {
                 if let next = stepped(by: 1) { selection = next }
             }
         }
         .fixedSize()
+        // Report focus entering/leaving the stepper as a whole (either button) so
+        // a caller can drive a live preview while the value is being dialed.
+        .onChange(of: focusedButton) { _, focused in
+            onFocusChange?(focused != nil)
+        }
     }
 
     private func valueLabel(_ text: String) -> some View {
@@ -96,7 +111,7 @@ public struct SettingsStepper<Value: Hashable>: View {
             .foregroundStyle(palette.primaryText)
     }
 
-    private func stepButton(symbol: String, dimmed: Bool, action: @escaping () -> Void) -> some View {
+    private func stepButton(symbol: String, dimmed: Bool, focus: StepperButton, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
                 .font(.system(size: glyphSize, weight: .semibold))
@@ -106,6 +121,7 @@ public struct SettingsStepper<Value: Hashable>: View {
                 .opacity(dimmed ? 0.35 : 1)
         }
         .buttonStyle(StepperButtonStyle())
+        .focused($focusedButton, equals: focus)
     }
 }
 

@@ -14,11 +14,11 @@ import CoreUI
 /// three/four-up theme and music pickers use — the mock poster row reads clearly.
 struct CompactWatchIndicatorPicker: View {
     @Binding var selection: WatchStatusIndicator
+    /// Preview swatch height. Defaults to the tall two-up illustration; pass a
+    /// smaller value when the picker shares a pane with another (e.g. the combined
+    /// Cards settings row) so both fit without heavy scrolling.
+    var swatchHeight: CGFloat = 248
     @Environment(\.themePalette) private var palette
-
-    /// Roughly twice the standard compact swatch height (124pt); the two-up layout
-    /// leaves room for a larger, more legible poster-row illustration.
-    private let swatchHeight: CGFloat = 248
 
     var body: some View {
         HStack(alignment: .top, spacing: 16) {

@@ -33,98 +33,88 @@ struct CircadianSectionsBuilder {
     let model: NightShiftSettingsModel
     var primaryHeader: String? = nil
 
+    /// Everything Circadian now lives in ONE row's detail pane (schedule + Fade +
+    /// Darkness + Warmth + Preview) instead of being scattered across five master
+    /// rows and a "Look" sub-section — so enabling the tint no longer sprays a
+    /// handful of new rows down the list. The pane reveals the extras reactively
+    /// when the tint is on (``CircadianDetail`` observes the model).
     var sections: [SettingsSplitSection] {
-        @Bindable var model = model
-
-        // One control governs on/off *and* schedule (Off · Auto · Manual ·
-        // Always On), so the first section is just that plus Fade.
-        var primaryRows: [SettingsSplitRow] = [
+        [SettingsSplitSection(id: "night-shift", header: primaryHeader, rows: [
             SettingsSplitRow(
                 id: "night-shift",
                 title: "Circadian Mode",
                 description: "Warms and dims the display at night to help you sleep.",
             ) {
-                NightShiftScheduleControl(model: model)
+                CircadianDetail(model: model)
             }
-        ]
+        ])]
+    }
+}
 
-        // Fade governs only the on/off transition, so it is irrelevant when the
-        // tint is off or always on.
-        if model.settings.isEnabled, model.settings.scheduleMode != .alwaysOn {
-            primaryRows.append(
-                SettingsSplitRow(
-                    id: "fade",
-                    title: "Fade",
-                    description: "How gradually the tint ramps on and off around the scheduled times.",
-                ) {
-                    SettingsStepper(
-                        options: NightShiftSettingsModel.fadeOptions,
-                        selection: Binding(
-                            get: { clampedFade },
-                            set: { model.settings.fadeMinutes = $0 }
-                        ),
-                        title: { NightShiftSettingsModel.fadeLabel(minutes: $0) }
-                    )
+/// The single Circadian detail pane: the schedule control on top, then — once the
+/// tint is enabled — the Fade / Darkness / Warmth steppers and the day preview,
+/// all compact `− value +` rows so they read as one coherent panel instead of
+/// separate pages. Darkness and Warmth drive the live tint preview while focused,
+/// so stepping shows the exact level on screen (the fun level names stay as the
+/// stepper's value).
+private struct CircadianDetail: View {
+    @Bindable var model: NightShiftSettingsModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: SettingsMetrics.sectionSpacing) {
+            NightShiftScheduleControl(model: model)
+
+            if model.settings.isEnabled {
+                // Fade governs only the on/off transition, so it's irrelevant when
+                // the tint is always on.
+                if model.settings.scheduleMode != .alwaysOn {
+                    LabeledSettingRow("Fade", subtitle: "How gradually the tint ramps on and off.") {
+                        SettingsStepper(
+                            options: NightShiftSettingsModel.fadeOptions,
+                            selection: Binding(
+                                get: { clampedFade },
+                                set: { model.settings.fadeMinutes = $0 }
+                            ),
+                            title: { NightShiftSettingsModel.fadeLabel(minutes: $0) }
+                        )
+                    }
                 }
-            )
-        }
 
-        var sections: [SettingsSplitSection] = [
-            SettingsSplitSection(id: "night-shift", header: primaryHeader, rows: primaryRows)
-        ]
-
-        // Off hides the rest — there's nothing to tune when the tint never paints.
-        guard model.settings.isEnabled else { return sections }
-
-        sections.append(
-            SettingsSplitSection(id: "look", header: "Look", rows: [
-                SettingsSplitRow(
-                    id: "darkness",
-                    title: "Darkness",
-                    description: "Dims the whole picture like sunglasses. Focus a row to preview at full night strength.",
-                ) {
-                    SettingsOptionList(
+                LabeledSettingRow("Darkness") {
+                    SettingsStepper(
                         options: NightShiftDimness.allCases,
                         selection: $model.settings.dimness,
                         onFocusChange: { model.isPreviewing = $0 },
                         title: { $0.displayName }
                     )
-                },
-                SettingsSplitRow(
-                    id: "warmth",
-                    title: "Warmth",
-                    description: "Tints the picture toward amber and red. Focus a row to preview at full night strength.",
-                ) {
-                    SettingsOptionList(
+                }
+
+                LabeledSettingRow("Warmth") {
+                    SettingsStepper(
                         options: NightShiftWarmth.allCases,
                         selection: $model.settings.warmth,
                         onFocusChange: { model.isPreviewing = $0 },
                         title: { $0.displayName }
                     )
-                },
-                SettingsSplitRow(
-                    id: "preview",
-                    title: "Preview",
-                    description: "Play a whole simulated day to see how the tint moves from daytime through sunset to night."
-                ) {
+                }
+
+                LabeledSettingRow("Preview") {
                     HStack(spacing: 28) {
                         DayNightDial(
                             intensity: model.currentIntensity,
                             progress: model.previewProgress
                         )
                         .frame(width: 160, height: 84)
-
                         previewButton
                         Spacer(minLength: 0)
                     }
                 }
-            ])
-        )
-
-        return sections
+            }
+        }
+        // Leaving the pane (focus moves to another row, or the page closes) must
+        // never leave the whole-screen calibration tint stuck on.
+        .onDisappear { model.isPreviewing = false }
     }
-
-    // MARK: - Appearance
 
     private var previewButton: some View {
         Button {
@@ -141,9 +131,7 @@ struct CircadianSectionsBuilder {
         .buttonStyle(PlozzSeasonTabStyle(isSelected: false))
     }
 
-    // MARK: - Building blocks
-
-    /// `fadeMinutes` snapped to the nearest available preset, so the Fade row
+    /// `fadeMinutes` snapped to the nearest available preset, so the Fade stepper
     /// always highlights a valid option even if a persisted value falls between.
     private var clampedFade: Int {
         NightShiftSettingsModel.fadeOptions.min(by: {

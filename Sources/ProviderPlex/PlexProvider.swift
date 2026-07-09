@@ -476,6 +476,7 @@ public struct PlexProvider: MediaProvider {
         doviProfile: Int?,
         doviLevel: Int?,
         doviBLPresent: Bool?,
+        doviBLCompatID: Int?,
         displayTitles: [String?]
     ) -> String? {
         let transfer = (colorTransfer ?? "").lowercased()
@@ -502,8 +503,24 @@ public struct PlexProvider: MediaProvider {
             || titleHint.contains("HLG")
 
         if hasDovi {
+            // A Dolby Vision stream is ALWAYS PQ-encoded and ALWAYS carries a base
+            // layer, so neither the PQ transfer nor `DOVIBLPresent` proves an HDR10
+            // fallback (Profile 5 is PQ + BLPresent yet has NO HDR10 base). The
+            // base-layer compatibility ID is the authoritative cross-compat signal:
+            //   0 = none (pure DV, e.g. Profile 5), 1 = HDR10, 2 = SDR, 4 = HLG.
+            switch doviBLCompatID {
+            case 1: return "DOVIWithHDR10"
+            case 2: return "DOVIWithSDR"
+            case 4: return "DOVIWithHLG"
+            case 0: return "DOVI"
+            default: break   // compat ID absent (older Plex) → infer from profile
+            }
+            // Without a compat ID: Profile 5 never has a fallback; only an explicit
+            // HDR10+ hint or Profiles 7/8 (HDR10-compatible base) add a second badge.
+            // Do NOT infer HDR10 from the PQ transfer — every DV stream is PQ.
+            if doviProfile == 5 { return "DOVI" }
             if hasHDR10Plus { return "DOVIWithHDR10PLUS" }
-            if hasHDR10 || doviBLPresent == true { return "DOVIWithHDR10" }
+            if doviProfile == 7 || doviProfile == 8 { return "DOVIWithHDR10" }
             if hasHLG { return "DOVIWithHLG" }
             return "DOVI"
         }
@@ -564,6 +581,7 @@ public struct PlexProvider: MediaProvider {
                 doviProfile: v.DOVIProfile,
                 doviLevel: v.DOVILevel,
                 doviBLPresent: v.DOVIBLPresent,
+                doviBLCompatID: v.DOVIBLCompatID,
                 displayTitles: [v.displayTitle, v.extendedDisplayTitle, mediaVideoDisplayTitle]
             )
             let rangeType = detectedRange ?? "SDR"
@@ -949,6 +967,7 @@ public struct PlexProvider: MediaProvider {
             doviProfile: nil,
             doviLevel: nil,
             doviBLPresent: nil,
+            doviBLCompatID: nil,
             displayTitles: [media.videoStreamDisplayTitle, media.videoProfile]
         )
         let video: MediaSourceMetadata.VideoStream?

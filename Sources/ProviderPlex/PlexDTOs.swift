@@ -344,6 +344,11 @@ struct PlexStream: Decodable {
     let DOVIProfile: Int?
     let DOVILevel: Int?
     let DOVIBLPresent: Bool?
+    /// Dolby Vision base-layer **compatibility** ID — the authoritative cross-
+    /// compat signal (0 = none / pure DV like Profile 5, 1 = HDR10, 2 = SDR,
+    /// 4 = HLG). `DOVIBLPresent` only says a base layer exists (it always does for
+    /// single-layer DV); it does NOT imply an HDR10 fallback.
+    let DOVIBLCompatID: Int?
     // Audio facts
     let channels: Int?
     let samplingRate: Int?
@@ -375,6 +380,7 @@ struct PlexStream: Decodable {
         DOVIProfile = c.flexibleInt(.DOVIProfile)
         DOVILevel = c.flexibleInt(.DOVILevel)
         DOVIBLPresent = c.flexibleBool(.DOVIBLPresent)
+        DOVIBLCompatID = c.flexibleInt(.DOVIBLCompatID)
         channels = c.flexibleInt(.channels)
         samplingRate = c.flexibleInt(.samplingRate)
         audioChannelLayout = c.flexibleString(.audioChannelLayout)
@@ -385,7 +391,7 @@ struct PlexStream: Decodable {
         case id, streamType, index, codec, profile, language, languageTag
         case displayTitle, extendedDisplayTitle, selected, `default`, forced, key
         case width, height, frameRate, scanType, colorTrc
-        case DOVIPresent, DOVIProfile, DOVILevel, DOVIBLPresent
+        case DOVIPresent, DOVIProfile, DOVILevel, DOVIBLPresent, DOVIBLCompatID
         case channels, samplingRate, audioChannelLayout, bitrate
     }
 }

@@ -23,17 +23,31 @@ public struct PlozzGlassCardModifier: ViewModifier {
         self.glassAtRest = glassAtRest
     }
 
-    /// tvOS 27 shipped a Liquid Glass regression: a native `.glassEffect` on a
-    /// **focusable card inside a scrollable / lazy container** hard-crashes the
-    /// render server the instant the card gains focus. (Single, non-scrolling
-    /// glass views — panels, HUDs, the odd standalone tile — are unaffected, which
-    /// is why the crash only hit the dense media grids.) Until Apple fixes it,
-    /// cards on that OS render a translucent surface with the *stable*
-    /// `.ultraThinMaterial` subsystem instead of native Liquid Glass — glassy, but
-    /// crash-free. tvOS 26 keeps real Liquid Glass.
-    static var avoidsLiquidGlassCards: Bool {
-        if #available(tvOS 27.0, *) { return true }
-        return false
+    /// tvOS 27 hangs the **main thread** (not a crash — animations keep running,
+    /// but focus freezes and never recovers) when `.glassEffect` is applied
+    /// *directly to card content that contains an async image + text* and that
+    /// card gains focus: SwiftUI's layout goes into an infinite update loop.
+    ///
+    /// The fix is structural, not a fallback: draw the Liquid Glass as a
+    /// **background underlay** on a `Color.clear` layer with the real content on
+    /// top, instead of wrapping `.glassEffect` around the content. The borderless
+    /// focus halo has always drawn glass this way (`Color.clear.glassEffect`) and
+    /// never hangs on the same OS — proof the underlay structure is safe. So every
+    /// glass card now matches it, on both tvOS 26 and 27.
+    @available(tvOS 26.0, *)
+    @ViewBuilder
+    private func glassUnderlay() -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        Color.clear
+            .glassEffect(
+                isFocused ? .regular.tint(palette.focusedCardGlassTint) : .regular,
+                in: .rect(cornerRadius: cornerRadius)
+            )
+            .background {
+                // Light mode + focus: opaque backing so the focus drop shadow can't
+                // bleed *through* the glass and read as a muddy haze inside the card.
+                if isFocused && palette.isLight { shape.fill(palette.cardOpaqueSurface) }
+            }
     }
 
     public func body(content: Content) -> some View {
@@ -54,56 +68,18 @@ public struct PlozzGlassCardModifier: ViewModifier {
                     )
                 }
                 .clipShape(shape)
-        } else if Self.avoidsLiquidGlassCards {
-            // tvOS 27 Liquid Glass crash workaround — see `avoidsLiquidGlassCards`.
-            // The crash needs a whole grid of live-glass tiles at once, so we split
-            // by focus: the single focused card (one live-glass layer, under the
-            // crash threshold) uses REAL Liquid Glass, while the resting grid falls
-            // back to the stable frosted `.ultraThinMaterial`.
-            if isFocused, #available(tvOS 26.0, *) {
-                content
-                    .glassEffect(.regular.tint(palette.focusedCardGlassTint), in: .rect(cornerRadius: cornerRadius))
-                    .background {
-                        // Light mode: opaque backing so the focus drop shadow can't
-                        // bleed through the glass (matches the tvOS 26 path).
-                        if palette.isLight { shape.fill(palette.cardOpaqueSurface) }
-                    }
-                    .clipShape(shape)
-            } else {
-                content
-                    .background(.ultraThinMaterial, in: shape)
-                    .overlay {
-                        shape.strokeBorder(palette.cardOpaqueBorder, lineWidth: 1)
-                    }
-                    .clipShape(shape)
-            }
         } else if #available(tvOS 26.0, *) {
-            // Native Liquid Glass, matching Twozz 1:1: focus picks up a faint
-            // theme-aware tint (dark/OLED brighten, light darkens) blended into
-            // the live glass, never a flat opacity fill.
-            if isFocused {
-                content
-                    .glassEffect(.regular.tint(palette.focusedCardGlassTint), in: .rect(cornerRadius: cornerRadius))
-                    .background {
-                        // In Light mode the translucent glass lets the focus drop
-                        // shadow bleed *through*, reading as a muddy haze inside the
-                        // card. An opaque backing keeps the shadow behind it. Dark/OLED
-                        // don't show this, so they keep pure translucent glass.
-                        if palette.isLight { shape.fill(palette.cardOpaqueSurface) }
+            // Liquid Glass drawn as a BACKGROUND underlay (see `glassUnderlay`),
+            // NOT wrapped around the content — the latter hangs on tvOS 27 focus.
+            // Focus tints the glass; `glassAtRest: false` cards (dense poster grids)
+            // draw no resting glass and only bloom it on focus.
+            content
+                .background {
+                    if isFocused || glassAtRest {
+                        glassUnderlay()
                     }
-                    .clipShape(shape)
-            } else if glassAtRest {
-                content
-                    .glassEffect(.regular, in: .rect(cornerRadius: cornerRadius))
-                    .clipShape(shape)
-            } else {
-                // Glass-free resting surface. A live `.glassEffect` samples and
-                // blurs the backdrop *every frame*, so with dozens of cards on
-                // screen it's the dominant scroll cost. Cards that opt out (dense
-                // poster grids) draw no glass at rest and lean on their artwork,
-                // media edge, and drop shadow for definition — silky to scroll past.
-                content.clipShape(shape)
-            }
+                }
+                .clipShape(shape)
         } else {
             // Pre-Liquid-Glass fallback: opaque lift on focus, light translucent
             // wash at rest.

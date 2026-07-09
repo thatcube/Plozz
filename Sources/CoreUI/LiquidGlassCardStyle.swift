@@ -69,14 +69,21 @@ public struct PlozzGlassCardModifier: ViewModifier {
                 }
                 .clipShape(shape)
         } else if #available(tvOS 26.0, *) {
-            // Liquid Glass drawn as a BACKGROUND underlay (see `glassUnderlay`),
-            // NOT wrapped around the content — the latter hangs on tvOS 27 focus.
-            // Focus tints the glass; `glassAtRest: false` cards (dense poster grids)
-            // draw no resting glass and only bloom it on focus.
+            // Glass drawn as a BACKGROUND underlay (see `glassUnderlay`), NOT
+            // wrapped around the content — the latter hangs on tvOS 27 focus.
+            //
+            // Focus → real refractive Liquid Glass (one card at a time, tinted).
+            // At rest → the cheaper frosted `.ultraThinMaterial`: it gives a glassy
+            // surface without a live `.glassEffect`'s per-frame backdrop sampling,
+            // so a dense resting grid stays lag-free while still reading as glass.
+            // `glassAtRest: false` opts a card out of even the frosted rest surface
+            // (bare artwork at rest) for the very densest grids.
             content
                 .background {
-                    if isFocused || glassAtRest {
+                    if isFocused {
                         glassUnderlay()
+                    } else if glassAtRest {
+                        shape.fill(.ultraThinMaterial)
                     }
                 }
                 .clipShape(shape)

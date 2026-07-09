@@ -43,12 +43,13 @@ public struct PlayerView: View {
 
             switch viewModel.phase {
             case .loading:
-                ZStack {
-                    VideoSurfaceContainer(engine: viewModel.videoEngine)
-                        .id(viewModel.engineToken)
-                        .ignoresSafeArea()
-                    LoadingMessagesView(spinnerTint: .white, messageColor: .white.opacity(0.85))
-                }
+                // Black backdrop that hosts the (not-yet-presenting) engine
+                // surface. The bring-up spinner is a top-level overlay
+                // (`showBringUpSpinner`) so it spans this and the `.ready`-but-
+                // awaiting-first-frame window as one continuous indicator.
+                VideoSurfaceContainer(engine: viewModel.videoEngine)
+                    .id(viewModel.engineToken)
+                    .ignoresSafeArea()
 
             case .ready:
                 CustomPlayerContainer(
@@ -125,6 +126,19 @@ public struct PlayerView: View {
                 .allowsHitTesting(hdrTransition.veilOpacity > 0.01)
                 .animation(.easeInOut(duration: 0.35), value: hdrTransition.veilOpacity)
         }
+        // Single bring-up spinner: shown while resolving/loading AND while
+        // `.ready` but the engine hasn't presented its first frame yet, so the
+        // viewer sees one continuous indicator from tap → first frame (no black
+        // gap, no second in-player spinner on an engine swap). Above the HDR veil
+        // so it stays visible during an HDMI display-mode switch.
+        .overlay {
+            if viewModel.showBringUpSpinner {
+                LoadingMessagesView(spinnerTint: .white, messageColor: .white.opacity(0.85))
+                    .ignoresSafeArea()
+                    .transition(.opacity)
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: viewModel.showBringUpSpinner)
         .overlay(alignment: .topLeading) {
             // Keep diagnostics off during load/failure while Plozzigen is initializing;
             // this avoids extra SwiftUI preference/layout churn on the crash path.

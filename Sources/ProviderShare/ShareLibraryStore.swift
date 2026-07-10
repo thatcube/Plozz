@@ -139,8 +139,7 @@ actor ShareLibraryStore {
         // its folder) into a clean title + year + season/episode; a wrong guess
         // just falls back to the clean title on a neutral card.
         let id = "f:\(relPath)"
-        let parentHint = Self.seriesHintFolder(forRelPath: relPath)
-        switch ShareMediaParser.classify(fileName: name, parentFolder: parentHint) {
+        switch ShareMediaParser.classify(relPath: relPath) {
         case .movie(let movie):
             return MediaItem(
                 id: id,
@@ -172,27 +171,6 @@ actor ShareLibraryStore {
 
     private static func lastComponent(_ relPath: String) -> String {
         relPath.split(separator: "/").last.map(String.init) ?? relPath
-    }
-
-    /// The folder name that best hints at a *series* title for an episode file:
-    /// normally the file's immediate parent, but when that parent is a "Season N"
-    /// / "S03" folder we hop up to its parent (the show) instead — so an episode
-    /// in `TV Shows/Breaking Bad/Season 1/ep.mkv` recovers "Breaking Bad", not
-    /// "Season 1". `nil` when the file sits at the share root.
-    private static func seriesHintFolder(forRelPath relPath: String) -> String? {
-        var dirs = relPath.split(separator: "/").map(String.init)
-        guard dirs.count >= 2 else { return nil } // just "<file>" → no parent dir
-        dirs.removeLast() // drop the filename
-        guard let parent = dirs.last else { return nil }
-        if isSeasonFolder(parent), dirs.count >= 2 {
-            return dirs[dirs.count - 2]
-        }
-        return parent
-    }
-
-    private static func isSeasonFolder(_ name: String) -> Bool {
-        name.range(of: #"^[Ss]eason\s*\d+$"#, options: .regularExpression) != nil
-            || name.range(of: #"^[Ss]\d{1,2}$"#, options: .regularExpression) != nil
     }
 
     /// Drop the file extension for a cleaner on-screen title while still showing

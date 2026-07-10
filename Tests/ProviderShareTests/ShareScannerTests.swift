@@ -102,6 +102,54 @@ final class ShareScannerTests: XCTestCase {
         XCTAssertFalse(tv.contains { $0.title == "Naruto" })
     }
 
+    /// Bare-numbered anime (no `SxxEyy` marker) grouped under one series by the
+    /// folder tree — and NOT leaking into the Movies library. This is the exact
+    /// regression from the report (many "Sword Art Online 2 18" cards in Movies).
+    func testBareNumberedAnimeGroupsAsSeriesNotMovies() async {
+        let store = ShareCatalogStore(accountKey: "a", directory: tempDir())
+        let tree: [String: [SMBShareBrowser.Entry]] = [
+            "": [dir("Anime")],
+            "Anime": [dir("Sword Art Online II")],
+            "Anime/Sword Art Online II": [
+                file("Sword Art Online II - 18.mkv"),
+                file("Sword Art Online II - 19.mkv"),
+                file("Sword Art Online II - 20.mkv"),
+            ],
+        ]
+        let scanner = makeScanner(store: store, fake: FakeShare(tree))
+        await scanner.scan()
+
+        let counts = await store.libraryCounts()
+        XCTAssertEqual(counts.movies, 0, "bare-numbered anime must not land in Movies")
+        XCTAssertEqual(counts.animeSeries, 1)
+
+        let key = ShareCatalogID.seriesKey(fromTitle: "Sword Art Online II")
+        let eps = await store.episodes(seriesKey: key, season: 1)
+        XCTAssertEqual(eps.map(\.episodeNumber), [18, 19, 20])
+    }
+
+    /// A classifier bump forces a fresh walk even when the throttle would skip it,
+    /// so already-indexed files get reclassified under the new rules.
+    func testClassifierBumpForcesReparse() async {
+        let store = ShareCatalogStore(accountKey: "a", directory: tempDir())
+        let fake = FakeShare(standardTree())
+        let scanner = makeScanner(store: store, fake: fake)
+        await scanner.scan()
+        let afterFirst = await fake.listCount
+        XCTAssertGreaterThan(afterFirst, 0)
+
+        // Same classifier version already recorded → throttled (no new listings).
+        await scanner.scanIfStale()
+        let afterThrottled = await fake.listCount
+        XCTAssertEqual(afterThrottled, afterFirst, "throttled when parser_version matches")
+
+        // Simulate a classifier bump by clearing the recorded version.
+        await store.setMeta("parser_version", "0")
+        await scanner.scanIfStale()
+        let afterBump = await fake.listCount
+        XCTAssertGreaterThan(afterBump, afterFirst, "a classifier bump re-walks despite the throttle")
+    }
+
     func testExcludedDirsAndSampleFilesSkipped() async {
         let store = ShareCatalogStore(accountKey: "a", directory: tempDir())
         let fake = FakeShare(standardTree())

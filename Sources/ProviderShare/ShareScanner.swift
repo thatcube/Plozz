@@ -76,7 +76,15 @@ actor ShareScanner {
     /// Called fire-and-forget from the Home hot path, so it must be cheap to no-op.
     func scanIfStale(minInterval: TimeInterval = 600) async {
         if isRunning { return }
-        if let last = await store.meta("last_full_scan_at"),
+        // Force a walk (ignoring the staleness throttle) when the CLASSIFIER changed
+        // since the last completed pass, so every already-indexed file is
+        // reclassified under the new movie/episode rules right away instead of
+        // waiting for it to change on disk (a re-walk re-upserts each file's kind/
+        // library/keys). A cheap meta read on the hot path.
+        let parserCurrent = String(ShareMediaParser.classifierVersion)
+        let parserStored = await store.meta("parser_version")
+        if parserStored == parserCurrent,
+           let last = await store.meta("last_full_scan_at"),
            let ts = TimeInterval(last),
            Date().timeIntervalSince1970 - ts < minInterval {
             return
@@ -187,6 +195,9 @@ actor ShareScanner {
             await store.pruneNotSeen(inScan: scanID)
         }
         await store.setMeta("last_full_scan_at", String(Date().timeIntervalSince1970))
+        // Record the classifier the catalog was built with, so `scanIfStale` only
+        // force-reparses once per classifier bump (and doesn't perpetually re-walk).
+        await store.setMeta("parser_version", String(ShareMediaParser.classifierVersion))
         PlozzLog.boot("share.scan done scanID=\(scanID) dirs=\(dirsWalked) files=\(filesFound) pruned=\(!anyListingFailed)")
     }
 
@@ -231,8 +242,7 @@ actor ShareScanner {
 
     static func asset(relPath: String, entry: SMBShareBrowser.Entry) -> CatalogAsset {
         let name = entry.name
-        let seriesHint = seriesHintFolder(forRelPath: relPath)
-        switch ShareMediaParser.classify(fileName: name, parentFolder: seriesHint) {
+        switch ShareMediaParser.classify(relPath: relPath) {
         case .movie(let movie):
             let title = movie.title.isEmpty ? displayTitle(forFileName: name) : movie.title
             return CatalogAsset(
@@ -270,23 +280,6 @@ actor ShareScanner {
     static func isSampleFile(_ name: String) -> Bool {
         let stem = (name as NSString).deletingPathExtension.lowercased()
         return stem == "sample" || stem.hasSuffix("-sample") || stem.hasSuffix(".sample") || stem.hasSuffix(" sample")
-    }
-
-    /// The folder that best hints at a *series* title for an episode: normally the
-    /// immediate parent, but hop over a "Season N" / "S03" folder to the show.
-    /// Mirrors `ShareLibraryStore.seriesHintFolder`.
-    static func seriesHintFolder(forRelPath relPath: String) -> String? {
-        var dirs = relPath.split(separator: "/").map(String.init)
-        guard dirs.count >= 2 else { return nil }
-        dirs.removeLast()
-        guard let parent = dirs.last else { return nil }
-        if isSeasonFolder(parent), dirs.count >= 2 { return dirs[dirs.count - 2] }
-        return parent
-    }
-
-    private static func isSeasonFolder(_ name: String) -> Bool {
-        name.range(of: #"^[Ss]eason\s*\d+$"#, options: .regularExpression) != nil
-            || name.range(of: #"^[Ss]\d{1,2}$"#, options: .regularExpression) != nil
     }
 
     private static func displayTitle(forFileName name: String) -> String {

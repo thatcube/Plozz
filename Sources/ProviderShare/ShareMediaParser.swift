@@ -9,6 +9,12 @@ import Foundation
 /// needs to be good enough to group episodes under a show and give movies a
 /// clean title + year.
 enum ShareMediaParser {
+    /// Bumped whenever the movie/episode CLASSIFICATION rules (or the keys derived
+    /// from them) change, so a share's catalog can force a one-time full re-walk
+    /// that reclassifies every already-indexed file under the new rules instead of
+    /// waiting for each file to change on disk. See `ShareScanner.scanIfStale`.
+    static let classifierVersion = 2
+
     /// File extensions we treat as playable video.
     static let videoExtensions: Set<String> = [
         "mkv", "mp4", "m4v", "mov", "avi", "webm", "ts", "m2ts", "mts",
@@ -52,6 +58,10 @@ enum ShareMediaParser {
 
     /// Classify a video file (given its name and the immediate parent folder
     /// name, which helps recover a series title the filename abbreviates).
+    ///
+    /// Filename-only fallback kept for callers/tests without a full path; the
+    /// production paths use ``classify(relPath:)``, which also weighs the folder
+    /// tree — the strongest real-world signal (how Plex/Jellyfin/Infuse decide).
     static func classify(fileName: String, parentFolder: String?) -> Kind {
         let stem = (fileName as NSString).deletingPathExtension
         if let ep = parseEpisode(stem: stem, parentFolder: parentFolder) {
@@ -60,9 +70,87 @@ enum ShareMediaParser {
         return .movie(parseMovie(stem: stem, parentFolder: parentFolder))
     }
 
+    /// Classify a video file from its full share-relative path, using the FOLDER
+    /// TREE as the primary signal and the filename as the secondary one — the way
+    /// real media scanners work. Media shares are organised
+    /// (`Movies/…`, `TV/Show/Season 1/…`, `Anime/Show/…`), so the folder resolves
+    /// the movie-vs-episode ambiguity a bare filename can't (e.g. anime named
+    /// `Sword Art Online II - 18.mkv` with no `SxxEyy` marker).
+    ///
+    /// Precedence (high → low):
+    ///  1. Explicit filename episode marker (`SxxEyy`, `1x02`, `Season N Episode M`).
+    ///  2. A `Season N`/`SNN`/`Staffel N`/`Specials` ancestor, OR a series library
+    ///     root (`TV`, `TV Shows`, `Shows`, `Series`, `Anime`, …) → accept a BARE
+    ///     episode number the marker patterns reject. TV/season context beats the
+    ///     movie-folder guard.
+    ///  3. A `Title (Year)` movie folder or a movie library root
+    ///     (`Movies`, `Films`, `Anime Movies`, …) → movie.
+    ///  4. Fallback: filename heuristic (a year ⇒ movie).
+    static func classify(relPath: String) -> Kind {
+        let comps = relPath.split(separator: "/").map(String.init)
+        guard let fileName = comps.last else {
+            return .movie(Movie(title: relPath, year: nil))
+        }
+        let stem = (fileName as NSString).deletingPathExtension
+        let ancestors = Array(comps.dropLast())            // folders, root-first
+        let showHint = seriesHintFolder(fromAncestors: ancestors)
+
+        // (1) Explicit episode marker — strongest, works in any folder.
+        if let ep = parseEpisode(stem: stem, parentFolder: showHint) {
+            return .episode(ep)
+        }
+
+        // (2) Folder says "this is a series" → accept a bare episode number.
+        let seasonAncestor = ancestors.last(where: isSeasonFolder)
+        let context = libraryContext(ancestors)
+        if seasonAncestor != nil || context == .seriesLibrary {
+            if let ep = parseBareEpisode(stem: stem, seasonFolder: seasonAncestor, showFolder: showHint) {
+                return .episode(ep)
+            }
+        }
+
+        // (3)/(4) Movie: a `Title (Year)` folder / movie library root, or the
+        // filename fallback. `ancestors.last` gives the movie folder its year/title
+        // when the filename lacks them (`Star Wars (1977)/movie.mkv`).
+        return .movie(parseMovie(stem: stem, parentFolder: ancestors.last))
+    }
+
     enum Kind: Equatable {
         case movie(Movie)
         case episode(Episode)
+    }
+
+    // MARK: - Folder context
+
+    /// What a folder in the path tells us about the library it belongs to.
+    enum PathContext: Equatable { case seriesLibrary, movieLibrary, unknown }
+
+    /// Library-root folder names that mark their subtree as **series** content.
+    /// Matched as a whole component (so `Anime` ⇒ series but `Anime Movies` ⇒
+    /// movie — see `movieLibraryNames`).
+    private static let seriesLibraryNames: Set<String> = [
+        "tv", "tvshows", "tv shows", "tv-shows", "shows", "series", "tv series",
+        "anime", "animes", "anime tv", "anime series", "cartoons",
+    ]
+
+    /// Library-root folder names that mark their subtree as **movie** content.
+    /// Includes the anime-film variants so anime *movies* aren't misread as series.
+    private static let movieLibraryNames: Set<String> = [
+        "movies", "movie", "films", "film", "cinema", "4k movies", "uhd movies",
+        "anime movies", "anime films", "anime movie",
+    ]
+
+    /// The library context implied by the path: the FIRST (top-most) ancestor that
+    /// names a known library root decides, so `Movies/Star Wars (1977)` is a movie
+    /// library and `Anime/Show` is a series library. `.unknown` when no ancestor
+    /// names a recognised root (the classifier then falls back to filename rules).
+    static func libraryContext(_ ancestors: [String]) -> PathContext {
+        for folder in ancestors {
+            let name = folder.lowercased().trimmingCharacters(in: .whitespaces)
+            if movieLibraryNames.contains(name) { return .movieLibrary }
+            if seriesLibraryNames.contains(name) { return .seriesLibrary }
+        }
+        return .unknown
     }
 
     // MARK: - Episode
@@ -95,13 +183,103 @@ enum ShareMediaParser {
         return nil
     }
 
+    // MARK: - Bare episode numbers (only trusted in a TV/anime folder context)
+
+    /// Parse an episode whose filename carries only a **bare number** — the common
+    /// anime / loosely-named-TV case the strict `SxxEyy` patterns reject
+    /// (`Sword Art Online II - 18.mkv`, `Show E18.mkv`, `Show #18.mkv`,
+    /// `Show 18.mkv`). Only called by ``classify(relPath:)`` once the folder tree
+    /// has established a TV context, so a movie whose title ends in a number
+    /// (`Rocky 2`, `Ocean's 11`) can't reach here from a `Movies/` folder.
+    ///
+    /// The season comes from a `Season N`/`Specials` ancestor when present, else
+    /// defaults to 1 (absolute-numbered anime with no season folder is treated as
+    /// season 1 — matching the catalog's `COALESCE(season,1)`).
+    static func parseBareEpisode(stem: String, seasonFolder: String?, showFolder: String?) -> Episode? {
+        guard let (episode, before) = bareEpisodeNumber(fromStem: stem) else { return nil }
+        let season = seasonFolder.flatMap(seasonNumber(fromFolder:)) ?? 1
+        var series = clean(before)
+        if series.isEmpty {
+            series = seriesFromFolder(showFolder) ?? "Unknown"
+        }
+        return Episode(series: series, season: season, episode: episode, title: nil)
+    }
+
+    /// Extracts a bare episode number and the series text that precedes it. Tries,
+    /// right-most first: an explicit `E18`/`Ep 18`/`#18`/`[18]` token, else the
+    /// last standalone integer in the (lightly de-tagged) stem. Returns `nil` when
+    /// no plausible number remains — so a title that is only words stays a movie.
+    static func bareEpisodeNumber(fromStem stem: String) -> (episode: Int, before: String)? {
+        // Strip bracket groups and resolution/quality tokens first, so a `1080p` /
+        // `[Group]` / `(2016)` can't be mistaken for the episode number. Preserve
+        // offsets is unnecessary — we only need the surviving text + its own layout.
+        var s = stem
+        s = s.replacingOccurrences(of: #"[\[\(\{][^\]\)\}]*[\]\)\}]"#, with: " ", options: .regularExpression)
+        s = s.replacingOccurrences(of: #"\b\d{3,4}\s*[xX]\s*\d{3,4}\b"#, with: " ", options: .regularExpression)
+        s = s.replacingOccurrences(of: #"\b\d{3,4}[piPI]\b"#, with: " ", options: .regularExpression)
+        s = s.replacingOccurrences(of: #"(?i)\b(?:x26[45]|hevc|h ?26[45]|web[- ]?dl|webrip|bluray|hdtv|remux|aac|ddp?5? ?1?|4k|uhd|hdr|dv)\b"#,
+                                    with: " ", options: .regularExpression)
+        let ns = s as NSString
+        let full = NSRange(location: 0, length: ns.length)
+
+        // Explicit episode tokens (highest confidence), right-most wins.
+        for pattern in [#"(?i)\bep(?:isode)?[\s._-]*(\d{1,4})"#, #"(?i)\be(\d{1,4})\b"#, #"#(\d{1,4})"#] {
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
+            if let m = regex.matches(in: s, range: full).last, m.numberOfRanges >= 2,
+               let n = Int(ns.substring(with: m.range(at: 1))), n > 0, n < 10_000 {
+                return (n, ns.substring(to: m.range.location))
+            }
+        }
+
+        // Otherwise the last standalone integer — the anime `Show - 18` / `Show 18`
+        // case. `before` is everything up to that number (the series text).
+        guard let regex = try? NSRegularExpression(pattern: #"(?<![0-9])(\d{1,4})(?![0-9])"#),
+              let m = regex.matches(in: s, range: full).last,
+              let n = Int(ns.substring(with: m.range(at: 1))), n > 0, n < 10_000 else { return nil }
+        return (n, ns.substring(to: m.range.location))
+    }
+
+    /// The season number encoded by a season-folder name: `Season 3`/`S03` → 3,
+    /// `Staffel 2` → 2, `Specials` → 0. `nil` when the folder isn't a season.
+    static func seasonNumber(fromFolder folder: String?) -> Int? {
+        guard let folder else { return nil }
+        let l = folder.lowercased().trimmingCharacters(in: .whitespaces)
+        if l == "specials" || l == "special" { return 0 }
+        let ns = l as NSString
+        let full = NSRange(location: 0, length: ns.length)
+        for pattern in [#"^(?:season|staffel|series)\s*0*(\d{1,3})$"#, #"^s0*(\d{1,3})$"#] {
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
+            if let m = regex.firstMatch(in: l, range: full), m.numberOfRanges >= 2 {
+                return Int(ns.substring(with: m.range(at: 1)))
+            }
+        }
+        return nil
+    }
+
+    /// Whether a folder name is a season container (`Season 3`, `S03`,
+    /// `Staffel 2`, `Series 4`, `Specials`) rather than a show or a movie.
+    static func isSeasonFolder(_ name: String) -> Bool {
+        seasonNumber(fromFolder: name) != nil
+    }
+
+    /// The folder that best names a *series* for an episode file, given the file's
+    /// ancestor folders (root-first): normally the immediate parent, but hop over a
+    /// `Season N`/`Specials` folder to the show above it.
+    static func seriesHintFolder(fromAncestors ancestors: [String]) -> String? {
+        guard let parent = ancestors.last else { return nil }
+        if isSeasonFolder(parent), ancestors.count >= 2 {
+            return ancestors[ancestors.count - 2]
+        }
+        return parent
+    }
+
     private static func seriesFromFolder(_ folder: String?) -> String? {
         guard let folder, !folder.isEmpty else { return nil }
-        // A "Season 3" folder tells us the season, not the show; the show is its
-        // parent, which the caller passes as the grandparent when it can. Here we
-        // just avoid returning "Season 3" as a title.
-        if folder.range(of: #"^[Ss]eason\s*\d+$"#, options: .regularExpression) != nil { return nil }
-        if folder.range(of: #"^[Ss]\d+$"#, options: .regularExpression) != nil { return nil }
+        // A season folder names the season, not the show; a library-root folder
+        // (`Anime`, `Movies`, `TV`) names neither — never use either as a title.
+        if isSeasonFolder(folder) { return nil }
+        let name = folder.lowercased().trimmingCharacters(in: .whitespaces)
+        if seriesLibraryNames.contains(name) || movieLibraryNames.contains(name) { return nil }
         let cleaned = clean(folder)
         return cleaned.isEmpty ? nil : cleaned
     }

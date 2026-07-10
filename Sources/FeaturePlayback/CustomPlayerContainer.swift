@@ -25,6 +25,12 @@ struct PlayerActions {
     /// Apply an edited subtitle appearance (in-player Style screen), for live
     /// preview + persistence.
     var setSubtitleStyle: (SubtitleStyle) -> Void = { _ in }
+    /// Search the server's subtitle source for the given language (nil = preferred).
+    var searchRemoteSubtitles: (String?) -> Void = { _ in }
+    /// Re-run the last subtitle search (e.g. after a per-search preference change).
+    var refreshRemoteSubtitleSearch: () -> Void = {}
+    /// Download the chosen remote subtitle and hot-load it into the player.
+    var downloadRemoteSubtitle: (RemoteSubtitle) -> Void = { _ in }
     /// Advance to the next episode (Info card → Next Episode).
     var playNextEpisode: () -> Void = {}
     /// Return to the previous episode (Info card → Previous).
@@ -379,6 +385,9 @@ final class PlayerInputViewController: UIViewController {
             setSubtitleDelay: { [weak self] in self?.actions.setSubtitleDelay($0) },
             setDialogEnhance: { [weak self] in self?.actions.setDialogEnhance($0) },
             setSubtitleStyle: { [weak self] in self?.actions.setSubtitleStyle($0) },
+            searchRemoteSubtitles: { [weak self] in self?.actions.searchRemoteSubtitles($0) },
+            refreshRemoteSubtitleSearch: { [weak self] in self?.actions.refreshRemoteSubtitleSearch() },
+            downloadRemoteSubtitle: { [weak self] in self?.actions.downloadRemoteSubtitle($0) },
             playNextEpisode: { [weak self] in self?.actions.playNextEpisode() },
             playPreviousEpisode: { [weak self] in self?.actions.playPreviousEpisode() },
             restart: { [weak self] in self?.actions.restart() }

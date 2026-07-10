@@ -834,6 +834,19 @@ public struct JellyfinProvider: MediaProvider {
         try await client.downloadRemoteSubtitle(itemID: itemID, subtitleID: subtitleID)
     }
 
+    /// The item's current subtitle tracks (text sidecars get a VTT `deliveryURL`),
+    /// fetched via a plain item lookup — no `PlaybackInfo`/transcode. Used to
+    /// observe a just-downloaded subtitle so it can be hot-loaded.
+    public func subtitleTracks(forItemID itemID: String) async throws -> [MediaTrack] {
+        let dto = try await client.item(userID: session.userID, id: itemID)
+        let source = dto.MediaSources?.first
+        let sourceID = source?.Id ?? itemID
+        let streams = source?.MediaStreams ?? dto.MediaStreams ?? []
+        return streams
+            .filter { $0.`Type` == "Subtitle" }
+            .map { map(subtitleStream: $0, itemID: itemID, sourceID: sourceID) }
+    }
+
     // MARK: - Mapping
 
     private func resolveStreamURL(itemID: String, source: MediaSourceInfo, playSessionID: String?) throws -> URL {

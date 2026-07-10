@@ -711,6 +711,15 @@ public struct PlexProvider: MediaProvider {
         try await client.downloadRemoteSubtitle(ratingKey: itemID, key: subtitleID)
     }
 
+    /// The item's current subtitle tracks (text sidecars carry a `deliveryURL`),
+    /// from a single `metadata` fetch — no transcode session. Used to observe a
+    /// just-downloaded subtitle so it can be hot-loaded into the running player.
+    public func subtitleTracks(forItemID itemID: String) async throws -> [MediaTrack] {
+        let detail = try await client.metadata(ratingKey: itemID)
+        let streams = detail.Media?.first?.Part?.first?.Stream ?? []
+        return streams.filter { $0.streamType == 3 }.map(map(stream:))
+    }
+
     // MARK: - Mapping
 
     private func map(metadata dto: PlexMetadata) -> MediaItem {

@@ -21,6 +21,12 @@ struct PlayerOptionsActions {
     /// Apply an edited subtitle **appearance** (from the in-player Style screen):
     /// the host updates the live overlay for instant preview and persists it.
     var setSubtitleStyle: (SubtitleStyle) -> Void = { _ in }
+    /// Search the server's subtitle source (nil = preferred language).
+    var searchRemoteSubtitles: (String?) -> Void = { _ in }
+    /// Re-run the last subtitle search (e.g. after a per-search preference change).
+    var refreshRemoteSubtitleSearch: () -> Void = {}
+    /// Download the chosen remote subtitle and hot-load it into the player.
+    var downloadRemoteSubtitle: (RemoteSubtitle) -> Void = { _ in }
     var playNextEpisode: () -> Void = {}
     var playPreviousEpisode: () -> Void = {}
     var restart: () -> Void = {}
@@ -1133,7 +1139,9 @@ struct PlayerControls: View {
                 .background(.white.opacity(0.12))
                 .padding(.horizontal, 16)
                 .padding(.vertical, 6)
-            downloadEntryRow
+            if model.canSearchRemoteSubtitles {
+                downloadEntryRow
+            }
             #if DEBUG
             if !model.primarySubtitleDiagnostic.isEmpty {
                 Text(model.primarySubtitleDiagnostic)
@@ -1154,6 +1162,11 @@ struct PlayerControls: View {
     private var downloadEntryRow: some View {
         Button {
             openSubtitleScreen(.download)
+            // Kick off a search on entry (idempotent: while results already show,
+            // re-opening won't wipe them — the VM only re-searches on demand).
+            if case .results = model.subtitleDownloadState {} else {
+                actions.searchRemoteSubtitles(nil)
+            }
         } label: {
             HStack(spacing: 10) {
                 Image(systemName: "arrow.down.circle").font(.body)
@@ -1169,10 +1182,120 @@ struct PlayerControls: View {
         .focused($focus, equals: .download)
     }
 
-    // MARK: Subtitles sub-screens (Download stub / live Style editor)
+    // MARK: Subtitles sub-screens (Download search / live Style editor)
 
+    /// The in-player subtitle **search + download** screen. Shows a spinner while
+    /// searching, the ranked results (with Forced/SDH badges) to pick from, or a
+    /// friendly empty/error state. Picking a result downloads it server-side and
+    /// hot-loads it into the running player.
+    @ViewBuilder
     private var subtitleDownloadStub: some View {
-        subScreenStub(message: "Search the server's providers for a subtitle in your language and load it right here.")
+        switch model.subtitleDownloadState {
+        case .idle, .searching:
+            subtitleDownloadStatus(
+                systemImage: "magnifyingglass",
+                title: "Searching for subtitles…",
+                detail: "Looking through your server's subtitle source.",
+                showSpinner: true
+            )
+        case .results(let subs):
+            subtitleResultsList(subs)
+        case .empty:
+            subtitleDownloadStatus(
+                systemImage: "text.magnifyingglass",
+                title: "No subtitles found",
+                detail: "Nothing matched in your language. If this is a Plex or Jellyfin server, make sure a subtitle source (e.g. OpenSubtitles) is set up on the server."
+            )
+        case .downloading:
+            subtitleDownloadStatus(
+                systemImage: "arrow.down.circle",
+                title: "Downloading subtitle…",
+                detail: "Fetching it and loading it into the player.",
+                showSpinner: true
+            )
+        case .added:
+            subtitleDownloadStatus(
+                systemImage: "checkmark.circle.fill",
+                title: "Subtitle added",
+                detail: "It's now playing and available in your subtitle list."
+            )
+        case .failed:
+            subtitleDownloadStatus(
+                systemImage: "exclamationmark.triangle",
+                title: "Couldn't get that subtitle",
+                detail: "Something went wrong searching or downloading. Try again."
+            )
+        }
+    }
+
+    private func subtitleDownloadStatus(systemImage: String, title: String, detail: String, showSpinner: Bool = false) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                if showSpinner {
+                    ProgressView()
+                } else {
+                    Image(systemName: systemImage).font(.body)
+                }
+                Text(title).font(.callout.weight(.semibold))
+            }
+            Text(detail)
+                .font(.caption)
+                .foregroundStyle(.white.opacity(0.7))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 28)
+        .padding(.vertical, 14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func subtitleResultsList(_ subs: [RemoteSubtitle]) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(Array(subs.prefix(30).enumerated()), id: \.element.id) { index, sub in
+                    Button {
+                        actions.downloadRemoteSubtitle(sub)
+                    } label: {
+                        HStack(spacing: 10) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(Self.remoteSubtitleTitle(sub)).font(.body).lineLimit(1)
+                                Text(Self.remoteSubtitleDetail(sub))
+                                    .font(.caption2)
+                                    .playerMenuRowSecondary()
+                                    .lineLimit(1)
+                            }
+                            Spacer(minLength: 8)
+                            Image(systemName: "arrow.down.circle").font(.body)
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(PlayerMenuRowButtonStyle())
+                    .focusEffectDisabled()
+                    .focused($focus, equals: .row(index))
+                }
+            }
+            .padding(.horizontal, 14)
+        }
+    }
+
+    /// The candidate's display name, falling back to language when unnamed.
+    private static func remoteSubtitleTitle(_ sub: RemoteSubtitle) -> String {
+        if !sub.name.isEmpty { return sub.name }
+        if let language = sub.language { return SubtitleLanguageCatalog.displayName(forCode: language) ?? language }
+        return "Subtitle"
+    }
+
+    /// The provider · downloads · badges line beneath a candidate.
+    private static func remoteSubtitleDetail(_ sub: RemoteSubtitle) -> String {
+        var parts: [String] = []
+        if let provider = sub.providerName, !provider.isEmpty { parts.append(provider) }
+        if let language = sub.language,
+           let name = SubtitleLanguageCatalog.displayName(forCode: language) { parts.append(name) }
+        if let count = sub.downloadCount, count > 0 { parts.append("\(count) downloads") }
+        if sub.isForced { parts.append("Forced") }
+        if sub.isHearingImpaired { parts.append("SDH") }
+        return parts.isEmpty ? "Tap to download" : parts.joined(separator: " · ")
     }
 
     /// Compact timing screen reached from the header Sync chip: nudge the primary
@@ -1770,21 +1893,6 @@ struct PlayerControls: View {
         if color.red == 1, color.green == 1, color.blue == 1 { return "White" }
         if color.red == 0.15, color.green == 0.15, color.blue == 0.15 { return "Charcoal" }
         return "Custom"
-    }
-
-    private func subScreenStub(message: String) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text(message)
-                .font(.callout)
-                .foregroundStyle(.white.opacity(0.7))
-                .fixedSize(horizontal: false, vertical: true)
-            Text("Coming soon")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.white.opacity(0.4))
-        }
-        .padding(.horizontal, 28)
-        .padding(.vertical, 14)
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// Shown in place of the whole style editor when the primary subtitle is a

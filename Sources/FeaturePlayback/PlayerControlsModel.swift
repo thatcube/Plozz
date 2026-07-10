@@ -34,6 +34,25 @@ public enum SecondarySubtitleStatus: Equatable, Sendable {
     case unavailable
 }
 
+/// State of the in-player subtitle **search + download** screen (server-proxied
+/// on Jellyfin/Plex). Drives the results list, spinner, and empty/error copy.
+public enum SubtitleDownloadState: Equatable, Sendable {
+    /// Nothing searched yet.
+    case idle
+    /// Searching the server's subtitle source.
+    case searching
+    /// Candidate subtitles found (already ranked by the SDH/Forced preference).
+    case results([RemoteSubtitle])
+    /// The search returned no candidates (often: server has no source configured).
+    case empty
+    /// Downloading the candidate with this `RemoteSubtitle.id`.
+    case downloading(String)
+    /// Downloaded and loaded into the running player.
+    case added
+    /// The search or download failed.
+    case failed
+}
+
 /// Shared, observable state for the custom player's transport overlay.
 ///
 /// `PlayerViewModel` writes live playback facts (position, duration, buffered,
@@ -126,6 +145,14 @@ public final class PlayerControlsModel {
     /// available — including when it's empty for the ordinary reason that the media
     /// simply has no other text track to show.
     public var secondarySubtitleImagePrimaryFormat: String? = nil
+
+    // MARK: Subtitle search / download
+    /// Whether the active provider supports server-proxied subtitle search &
+    /// download (Jellyfin/Plex advertise `.remoteSubtitles`; SMB does not). Gates
+    /// the "Search for subtitles…" entry row.
+    public var canSearchRemoteSubtitles: Bool = false
+    /// State of the in-player subtitle search/download screen.
+    public var subtitleDownloadState: SubtitleDownloadState = .idle
 
     #if DEBUG
     /// DEBUG-only readout of how the *primary* selected subtitle is being routed:

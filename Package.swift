@@ -74,7 +74,10 @@ let package = Package(
         // the fMP4 muxer needs a PARSED audio packet to build the AC-3/E-AC-3/TrueHD
         // sample entry, else a mid-file backward seek wedged the muxer.) See
         // docs/media-share-proposal.md § 5.1.
-        .package(url: "https://github.com/thatcube/AetherEngine", revision: "b62837d52e78af494746d616202426654a956dda"),
+        // Fork = upstream AetherEngine 5.0.1 (includes the merged DV settle fix, PR #118)
+        // + two local patches Plozz needs: public stop(resetDisplayCriteria:) and the
+        // SDR pre-play settle gate. See thatcube/AetherEngine branch plozz-on-5.0.1.
+        .package(url: "https://github.com/thatcube/AetherEngine", revision: "9fb4907156273270b67b2e457ad75462cabd46a1"),
         // NOTE: FFmpegBuild (FFmpeg n8.1.x decode-only) and LibDovi (Dolby Vision
         // RPU parser) are pulled in TRANSITIVELY by AetherEngine — its own manifest
         // declares and consumes them. Plozz used to declare them directly only for

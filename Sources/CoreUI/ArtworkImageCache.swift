@@ -35,10 +35,14 @@ public final class ArtworkImageCache: NSObject, @unchecked Sendable {
     /// approximate decoded byte cost so the browse memory sampler can separate
     /// "the decoded-image cache is growing" from "render surfaces / view backing
     /// stores are growing" — the two have completely different fixes. Updated on
-    /// store (+) and on NSCache eviction (via `NSCacheDelegate`, -).
+    /// store (+) and on NSCache eviction (via `NSCacheDelegate`, -). Gated by
+    /// `BrowseDiagnostics.isEnabled` (the `PLZXMEM` dev flag) so the accounting is
+    /// entirely free — no lock, no counters — in a normal/shipped run; it only
+    /// tracks while the on-device memory sampler is active during development.
     nonisolated(unsafe) private static var liveCount = 0
     nonisolated(unsafe) private static var liveCostBytes = 0
     private static let statsLock = NSLock()
+    private static let statsEnabled = BrowseDiagnostics.isEnabled
     public struct CacheStats: Sendable { public let count: Int; public let costMB: Double }
     public static func cacheStats() -> CacheStats {
         statsLock.lock(); defer { statsLock.unlock() }
@@ -47,9 +51,11 @@ public final class ArtworkImageCache: NSObject, @unchecked Sendable {
     /// Instance convenience for callers holding `.shared`.
     public func currentStats() -> CacheStats { Self.cacheStats() }
     private static func noteStored(cost: Int) {
+        guard statsEnabled else { return }
         statsLock.lock(); liveCount += 1; liveCostBytes += cost; statsLock.unlock()
     }
     private static func noteEvicted(cost: Int) {
+        guard statsEnabled else { return }
         statsLock.lock(); liveCount = max(0, liveCount - 1); liveCostBytes = max(0, liveCostBytes - cost); statsLock.unlock()
     }
     /// Dedicated, bounded queue for the *synchronous* image decode

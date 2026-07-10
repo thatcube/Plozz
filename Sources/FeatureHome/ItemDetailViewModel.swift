@@ -275,11 +275,17 @@ public final class ItemDetailViewModel {
         await OnlineTrailerSource.trailers(for: item)
     }
 
-    /// Production playability verifier: extracts via YouTubeKit (in
-    /// `ProviderTrailers`) and returns the first candidate that yields a playable
-    /// public stream, skipping any private/removed video.
+    /// Production trailer-existence check: a keyless YouTube oEmbed probe (cheap
+    /// HTTP, **no JavaScriptCore**) that returns the first candidate id which
+    /// exists and is embeddable, skipping any private/removed video. This decides
+    /// whether to surface the Trailer button. Full stream extraction (the ~512MB
+    /// JSContext) is deferred to tap-time playback, where the player already
+    /// re-extracts with a primary→alternatives→replacement-search fallback. This
+    /// removes trailer JavaScriptCore from the browse path — the dominant
+    /// detail-page memory cost — while keeping the "only show a button when a real
+    /// trailer exists" accuracy guarantee.
     public static let defaultPlayableVideoIDResolver: PlayableTrailerResolving = { candidates in
-        await YouTubeTrailerProvider.firstPlayableVideoID(in: candidates)
+        await YouTubeTrailerProvider.firstEmbeddableVideoID(in: candidates)
     }
 
     /// Cancels every piece of owned background work so no detached/async task can
@@ -608,23 +614,24 @@ public final class ItemDetailViewModel {
             surfaceTrailer(videoID: optimistic, for: item)
         }
 
-        // Dwell gate: the authoritative verify/replace pass below runs YouTubeKit's
-        // JavaScriptCore stream extraction, which is heavy (a JSContext executing
-        // YouTube's player JS) and the single biggest CPU consumer during browsing.
-        // This dwell means roughly 1.7s of continuous settle on ONE page before any
-        // trailer JS runs — so even "pause to look at it load" browsing never
-        // triggers extraction, only a page the user has genuinely settled on. The
-        // optimistic button above has already appeared, so this never delays what
-        // the user sees. trailers run on the awaited load() path, so a navigate-away
-        // cancels load() — and this dwell with it (the guard below bails). Skipped
-        // under tests so the (injected, instant) verify/search pass is deterministic.
+        // Dwell gate: the verify/replace pass below now uses a cheap keyless oEmbed
+        // existence check (no JavaScriptCore), but it's still speculative network
+        // work, so a short settle keeps fast browsing from firing a burst of checks.
+        // Roughly 1.7s of continuous settle on ONE page before any trailer
+        // verification runs — so flying through pages triggers none, only a page the
+        // user has genuinely settled on. The optimistic button above (server-id
+        // items) has already appeared, so this never delays what the user sees.
+        // trailers run on the awaited load() path, so a navigate-away cancels load()
+        // — and this dwell with it (the guard below bails). Skipped under tests so
+        // the (injected, instant) verify/search pass is deterministic.
         if Self.trailerExtractionDwellNanos > 0 {
             try? await Task.sleep(nanoseconds: Self.trailerExtractionDwellNanos)
             guard !Task.isCancelled, isStillLoaded(item) else { return }
         }
 
-        // Verify (authoritative): refine to the first server id that actually
-        // plays, else search for a replacement, then cache the outcome.
+        // Verify (existence): confirm the server id exists+embeds via oEmbed, else
+        // search for a replacement and confirm that, then cache the outcome. Full
+        // stream extraction (JavaScriptCore) is deferred to tap-time playback.
         var workingID = await playableVideoIDResolver(serverIDs)
         guard !Task.isCancelled else { return }
         if workingID == nil {

@@ -237,7 +237,57 @@ public struct YouTubeTrailerProvider: MediaProvider {
         return indexed.first(where: { $0.offset == bestIndex })?.element
     }
 
-    /// Whether one candidate resolves to a stream that actually serves bytes.
+    /// Whether each candidate trailer **exists and is embeddable**, decided by a
+    /// single cheap keyless HTTP GET against YouTube's public oEmbed endpoint —
+    /// crucially with **no JavaScriptCore**. This is the browse-time signal for
+    /// whether to surface a Trailer button; full stream extraction (which spins up
+    /// a persistent ~512MB JSContext VM reservation, the biggest memory cost of a
+    /// detail page) is deferred to *tap*, when the video is actually played and the
+    /// player's own primary→alternatives fallback also runs.
+    ///
+    /// oEmbed returns **200** for a public, embeddable video; **401/403** for a
+    /// private or embedding-disabled one; **404** for a removed/nonexistent one.
+    /// Only a 200 surfaces a button, so a dead or gated link never yields a fake
+    /// "there's a trailer" button — the exact accuracy guarantee the JavaScriptCore
+    /// verifier gave, at a tiny fraction of the cost. Returns the FIRST candidate
+    /// (in priority order) that passes, mirroring ``firstPlayableVideoID(in:)``.
+    public static func firstEmbeddableVideoID(in candidates: [String]) async -> String? {
+        let indexed = candidates.enumerated().filter { !$0.element.isEmpty }
+        guard !indexed.isEmpty else { return nil }
+
+        let bestIndex = await withTaskGroup(of: (Int, Bool).self) { group -> Int? in
+            for (index, id) in indexed {
+                group.addTask { (index, await isEmbeddable(videoID: id)) }
+            }
+            var best: Int?
+            for await (index, ok) in group where ok {
+                best = min(best ?? index, index)
+            }
+            return best
+        }
+
+        guard let bestIndex else { return nil }
+        return indexed.first(where: { $0.offset == bestIndex })?.element
+    }
+
+    /// One keyless oEmbed existence/embeddability probe (HTTP GET, no
+    /// JavaScriptCore). `true` only on HTTP 200 (public + embeddable). Best-effort:
+    /// any network error or non-200 counts as "don't surface a button", so we never
+    /// show a trailer button we can't stand behind.
+    static func isEmbeddable(videoID id: String) async -> Bool {
+        var components = URLComponents(string: "https://www.youtube.com/oembed")
+        components?.queryItems = [
+            URLQueryItem(name: "url", value: "https://www.youtube.com/watch?v=\(id)"),
+            URLQueryItem(name: "format", value: "json")
+        ]
+        guard let url = components?.url else { return false }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 6
+        guard let (_, response) = try? await URLSession.shared.data(for: request),
+              let http = response as? HTTPURLResponse
+        else { return false }
+        return http.statusCode == 200
+    }
     /// Verification uses the reliable muxed/HLS path (`allowAdaptive: false`): if
     /// that plays, the higher-res adaptive upgrade chosen at play time is safe (it
     /// shares the same video) and self-heals to this stream if it ever fails.

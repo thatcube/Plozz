@@ -174,21 +174,30 @@ public struct MediaRowView: View {
                         // clearance in layout, so the row's height and its gap to the
                         // neighbouring rows are unchanged; only the clip grows.
                         .padding(.vertical, metrics.railShadowClearance)
-                        // Treat the rail as a single focus section ONLY when this
-                        // row runs the gated single-target flow (the episode rail):
-                        // there, pressing down must enter the section and land on the
-                        // gated target even when it's parked far right, which tvOS's
-                        // geometric downward search would otherwise miss. For ordinary
-                        // rows (Home, detail children — `tracksFocus == false`) a focus
-                        // section is HARMFUL: it makes the row remember its own last-
-                        // focused card, so navigating up/down between rows restores a
-                        // far-side card instead of tvOS's normal column-aligned
-                        // X-projection — the "focus jumps to the opposite side" bug.
-                        // Leaving it off lets vertical navigation keep the column.
-                        .focusSectionIf(tracksFocus)
                     }
                     .padding(.top, metrics.railTopClearanceOffset)
                     .padding(.bottom, metrics.railBottomClearanceOffset)
+                    // Section the whole rail VIEWPORT (the full-width horizontal
+                    // ScrollView) — NOT the scrolled inner LazyHStack — but ONLY for
+                    // the gated single-target flow (the episode rail). tvOS only enters
+                    // a focus section if part of its FRAME sits in the swipe's path, and
+                    // then forwards focus to the section's sole enabled focusable
+                    // regardless of where that card is scrolled. On the inner LazyHStack
+                    // the section only spanned the scrolled/visible cards, so pressing
+                    // DOWN from a horizontally-distant season chip found no rail geometry
+                    // in its corridor and either missed the target (landing on the cast
+                    // avatar below) or didn't move at all when the target was scrolled to
+                    // the opposite side. At the ScrollView level the section is the full,
+                    // static viewport width — directly below the season bar for every
+                    // chip position — so DOWN reliably reaches the gated target wherever
+                    // it sits (last far-right, first far-left, or middle), with no
+                    // repositioning. This mirrors the season bar's own ScrollView-level
+                    // `.focusSection()` (which makes UP work the same way) and the hero
+                    // action row (commit eddd937e). Ordinary rows (Home, detail children —
+                    // `tracksFocus == false`) stay UNsectioned so vertical navigation
+                    // keeps tvOS's column-aligned X-projection (the "focus jumps to the
+                    // opposite side" bug, commit f812fe64).
+                    .focusSectionIf(tracksFocus)
                     .onAppear { applyInitialFocus(using: proxy) }
                     .onChange(of: focusedID) { _, newValue in
                         handleFocusChange(to: newValue, using: proxy)

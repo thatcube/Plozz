@@ -272,19 +272,6 @@ struct SeriesDetailView: View {
                     }
 
                     DetailExtrasView(item: series, leadingInset: PlozzTheme.Metrics.heroLeadingPadding)
-                        // Group the cast row (the only focusable content in the
-                        // extras) into its own focus section so it stops competing
-                        // as an on-axis LOOSE focusable directly below the episode
-                        // rail. Pressing DOWN from a left-aligned season chip then
-                        // becomes a section-vs-section contest: the rail's full-width
-                        // focus section sits immediately below the bar and intersects
-                        // the downward focus corridor first, so it wins and forwards
-                        // focus to its single gated card (the target episode) even
-                        // when that card is parked far to the right — instead of tvOS
-                        // tunnelling past the rail to the keyline-aligned first cast
-                        // avatar. Keeps the target episode exactly where it is; no
-                        // repositioning, no trailing spacer.
-                        .focusSection()
                 }
                 .padding(.bottom, PlozzTheme.Metrics.screenPadding)
                 // Cap the whole scroll column to the proposed (safe viewport)

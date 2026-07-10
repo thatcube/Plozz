@@ -23,6 +23,33 @@ public struct PlozzGlassCardModifier: ViewModifier {
         self.glassAtRest = glassAtRest
     }
 
+    /// tvOS 27 hangs the **main thread** (not a crash — animations keep running,
+    /// but focus freezes and never recovers) when `.glassEffect` is applied
+    /// *directly to card content that contains an async image + text* and that
+    /// card gains focus: SwiftUI's layout goes into an infinite update loop.
+    ///
+    /// The fix is structural, not a fallback: draw the Liquid Glass as a
+    /// **background underlay** on a `Color.clear` layer with the real content on
+    /// top, instead of wrapping `.glassEffect` around the content. The borderless
+    /// focus halo has always drawn glass this way (`Color.clear.glassEffect`) and
+    /// never hangs on the same OS — proof the underlay structure is safe. So every
+    /// glass card now matches it, on both tvOS 26 and 27.
+    @available(tvOS 26.0, *)
+    @ViewBuilder
+    private func glassUnderlay() -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        Color.clear
+            .glassEffect(
+                isFocused ? .regular.tint(palette.focusedCardGlassTint) : .regular,
+                in: .rect(cornerRadius: cornerRadius)
+            )
+            .background {
+                // Light mode + focus: opaque backing so the focus drop shadow can't
+                // bleed *through* the glass and read as a muddy haze inside the card.
+                if isFocused && palette.isLight { shape.fill(palette.cardOpaqueSurface) }
+            }
+    }
+
     public func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
 
@@ -42,32 +69,41 @@ public struct PlozzGlassCardModifier: ViewModifier {
                 }
                 .clipShape(shape)
         } else if #available(tvOS 26.0, *) {
-            // Native Liquid Glass, matching Twozz 1:1: focus picks up a faint
-            // theme-aware tint (dark/OLED brighten, light darkens) blended into
-            // the live glass, never a flat opacity fill.
-            if isFocused {
-                content
-                    .glassEffect(.regular.tint(palette.focusedCardGlassTint), in: .rect(cornerRadius: cornerRadius))
-                    .background {
-                        // In Light mode the translucent glass lets the focus drop
-                        // shadow bleed *through*, reading as a muddy haze inside the
-                        // card. An opaque backing keeps the shadow behind it. Dark/OLED
-                        // don't show this, so they keep pure translucent glass.
-                        if palette.isLight { shape.fill(palette.cardOpaqueSurface) }
+            // Glass drawn as a BACKGROUND underlay (see `glassUnderlay`), NOT
+            // wrapped around the content — the latter hangs on tvOS 27 focus.
+            //
+            // Focus → real refractive Liquid Glass (one card at a time, tinted).
+            // At rest → the cheaper frosted `.ultraThinMaterial`: it gives a glassy
+            // surface without a live `.glassEffect`'s per-frame backdrop sampling,
+            // so a dense resting grid stays lag-free while still reading as glass.
+            // `glassAtRest: false` opts a card out of even the frosted rest surface
+            // (bare artwork at rest) for the very densest grids.
+            content
+                .background {
+                    if isFocused {
+                        glassUnderlay()
+                    } else if glassAtRest {
+                        shape.fill(.ultraThinMaterial)
                     }
-                    .clipShape(shape)
-            } else if glassAtRest {
-                content
-                    .glassEffect(.regular, in: .rect(cornerRadius: cornerRadius))
-                    .clipShape(shape)
-            } else {
-                // Glass-free resting surface. A live `.glassEffect` samples and
-                // blurs the backdrop *every frame*, so with dozens of cards on
-                // screen it's the dominant scroll cost. Cards that opt out (dense
-                // poster grids) draw no glass at rest and lean on their artwork,
-                // media edge, and drop shadow for definition — silky to scroll past.
-                content.clipShape(shape)
-            }
+                }
+                // A hairline edge so a resting card reads on any theme: the frosted
+                // `.ultraThinMaterial` is translucent, so on a dark/OLED page it
+                // darkens to near-invisible and the card loses its edge. The
+                // theme-aware `cardOpaqueBorder` (light on dark/OLED, dark on light)
+                // defines that edge; drawn only at rest, since the focused glass
+                // brings its own tint + shadow. Skipped for `glassAtRest: false`.
+                .overlay {
+                    if !isFocused && glassAtRest {
+                        // Soften the edge on dark/OLED — the light hairline reads
+                        // stronger against a near-black page than the same value does
+                        // on a light one, so trim it there while leaving Light as-is.
+                        shape.strokeBorder(
+                            palette.cardOpaqueBorder.opacity(palette.isLight ? 1 : 0.55),
+                            lineWidth: 1
+                        )
+                    }
+                }
+                .clipShape(shape)
         } else {
             // Pre-Liquid-Glass fallback: opaque lift on focus, light translucent
             // wash at rest.
@@ -174,15 +210,20 @@ public extension View {
     /// Flattens a card's layer tree to reduce GPU offscreen render passes.
     /// When Reduce Transparency is ON (opaque cards, no live glass), uses
     /// `.drawingGroup()` to rasterize the entire card into one Metal texture —
-    /// collapsing clips, overlays, and borders into a single pass. When glass
-    /// is active, falls back to `.compositingGroup()` since `.drawingGroup()`
-    /// doesn't support live glass compositing.
+    /// collapsing clips, overlays, and borders into a single pass.
+    ///
+    /// When Liquid Glass is active it does **nothing**. Live glass has to sample
+    /// the *real* backdrop, so it can't be isolated into an offscreen group:
+    /// wrapping a focusable glass card in `.compositingGroup()` (or
+    /// `.drawingGroup()`) makes the render server hard-crash the instant the card
+    /// gains its focus glass. This is the state cards rendered in before the
+    /// rasterize was added — when "glass on every card" worked.
     @ViewBuilder
     func plozzCardRasterize(reduceTransparency: Bool) -> some View {
         if reduceTransparency {
             self.drawingGroup()
         } else {
-            self.compositingGroup()
+            self
         }
     }
 

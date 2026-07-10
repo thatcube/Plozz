@@ -121,9 +121,11 @@ public enum MusicLyricsPreference {
 /// User control over the translucent "liquid glass" surfaces (cards, menus,
 /// overlays). A tri-state because the app sits on top of the tvOS Accessibility
 /// "Reduce Transparency" setting: the user can follow the system, force glass
-/// on, or force solid surfaces. Deliberately an APP-WIDE (global) setting — a
-/// visual-comfort/accessibility preference that belongs to the household, not a
-/// single profile. See AGENTS.local.md ("Per-profile vs app-wide settings").
+/// on, or force solid surfaces. A **per-profile** display preference (each
+/// profile keeps its own choice) like `AppTheme` / `CardStyle`: persisted via
+/// `TransparencyPreferenceStore` (namespace-scoped) and rebuilt on profile
+/// switch. Its `.system` option still defers to the device Accessibility setting,
+/// so a viewer who needs reduced transparency system-wide always gets it.
 public enum TransparencyPreference: String, CaseIterable, Identifiable, Codable, Sendable {
     /// Follow the tvOS Accessibility "Reduce Transparency" setting.
     case system
@@ -163,8 +165,10 @@ public enum TransparencyPreference: String, CaseIterable, Identifiable, Codable,
 
     public static let `default`: TransparencyPreference = .system
 
-    /// AppStorage key shared by RootView (reads it to drive the environment) and
-    /// Settings (writes it).
+    /// Persistence key base shared by RootView (reads the model to drive the
+    /// environment) and Settings (writes it). Per-profile: the default profile
+    /// reuses this un-suffixed key; other profiles namespace it via
+    /// `SettingsKey.scoped`.
     public static let storageKey = "transparencyPreference"
 
     /// Whether liquid-glass surfaces should render SOLID (reduced transparency),

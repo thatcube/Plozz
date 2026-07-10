@@ -50,14 +50,8 @@ struct MusicPlayerStyleDetail: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            VStack(alignment: .leading, spacing: 6) {
-                FocusGatedSwitch("Show track details", isOn: $showTrackDetails, canFocus: cardFocused)
-                    .focused($focused, equals: .toggle)
-                Text("Album name, audio quality & lyrics source on the now-playing screen.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            FocusGatedSwitch("Show album, quality & lyrics source", isOn: $showTrackDetails, canFocus: cardFocused)
+                .focused($focused, equals: .toggle)
         }
         .focusSection()
         .onChange(of: focused) { _, new in

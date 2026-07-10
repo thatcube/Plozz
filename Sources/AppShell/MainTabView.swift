@@ -113,6 +113,15 @@ struct MainTabView: View {
     /// Injected into the environment for the Settings editor; card rendering reads
     /// `\.plozzWatchStatusIndicator` (installed at the app root in RootView).
     let watchStatusIndicatorModel: WatchStatusIndicatorSettingsModel
+    /// Per-profile navigation chrome (top bar vs. sidebar), edited in Settings ▸
+    /// Appearance ▸ Display. This view reads its `style` to pick the `TabViewStyle`;
+    /// the Settings editor binds the model, and chrome-sensitive views elsewhere
+    /// read `\.plozzNavigationStyle` (installed at the app root in RootView).
+    let navigationStyleModel: NavigationStyleSettingsModel
+    /// Per-profile transparency (liquid glass) preference, edited in Settings ▸
+    /// Appearance ▸ Display. Injected into the environment for the Settings editor;
+    /// the resolved value drives `\.plozzReduceTransparency` (installed in RootView).
+    let transparencyModel: TransparencyPreferenceModel
     /// Per-profile Home hero (featured carousel) settings, edited in
     /// Settings ▸ Home display. Threaded into `HomeTab` to drive the carousel and
     /// into Settings for editing.
@@ -214,11 +223,6 @@ struct MainTabView: View {
     @State private var resumePrompt: MediaItem?
     @Environment(\.colorScheme) private var systemColorScheme
 
-    /// App-wide navigation chrome (top bar vs. sidebar), edited in Settings ▸
-    /// Appearance. Un-namespaced on purpose — it's a global shell choice, not a
-    /// per-profile aesthetic (see `NavigationStyle`).
-    @AppStorage(NavigationStyle.storageKey) private var navigationStyleRaw = NavigationStyle.default.rawValue
-
     /// The selected root tab, persisted so it survives MainTabView being torn
     /// down and rebuilt — e.g. the add-server flow swaps the whole root out for
     /// the onboarding chooser, and on return we want to land back on the tab the
@@ -233,7 +237,7 @@ struct MainTabView: View {
     }
 
     private var navigationStyle: NavigationStyle {
-        NavigationStyle(rawValue: navigationStyleRaw) ?? .default
+        navigationStyleModel.style
     }
 
     private var resolvedPalette: ThemePalette {
@@ -421,6 +425,8 @@ struct MainTabView: View {
         .environment(uiDensityModel)
         .environment(cardStyleModel)
         .environment(watchStatusIndicatorModel)
+        .environment(navigationStyleModel)
+        .environment(transparencyModel)
         .environment(heroSettingsModel)
         .environment(shareScanStatusModel)
         .task(id: accounts.map(\.account.id)) {

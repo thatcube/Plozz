@@ -14,11 +14,11 @@ import CoreUI
 /// framed-vs-borderless illustration reads clearly.
 struct CompactCardStylePicker: View {
     @Binding var selection: CardStyle
+    /// Preview swatch height. Defaults to the tall two-up illustration; pass a
+    /// smaller value when the picker shares a pane with another (e.g. the combined
+    /// Cards settings row) so both fit without heavy scrolling.
+    var swatchHeight: CGFloat = 248
     @Environment(\.themePalette) private var palette
-
-    /// Matches `CompactWatchIndicatorPicker` — the two-up layout leaves room for a
-    /// larger, more legible card illustration.
-    private let swatchHeight: CGFloat = 248
 
     var body: some View {
         HStack(alignment: .top, spacing: 16) {

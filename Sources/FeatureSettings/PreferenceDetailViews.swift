@@ -19,21 +19,11 @@ struct AppearanceDetailView: View {
     @Environment(UIDensitySettingsModel.self) private var density
     @Environment(CardStyleSettingsModel.self) private var cardStyle
     @Environment(WatchStatusIndicatorSettingsModel.self) private var watchStatusIndicator
-    /// App-wide (global) — persists across all profiles. Same un-namespaced
-    /// `@AppStorage` key RootView reads. Do not move into a per-profile store.
-    /// See AGENTS.local.md ("Per-profile vs app-wide settings").
-    @AppStorage(TransparencyPreference.storageKey) private var transparencyPreferenceRaw = TransparencyPreference.default.rawValue
-    /// App-wide (global) navigation chrome — top bar vs. sidebar. Same
-    /// un-namespaced `@AppStorage` key `MainTabView` reads to pick the tab style.
-    @AppStorage(NavigationStyle.storageKey) private var navigationStyleRaw = NavigationStyle.default.rawValue
-
-    private var transparencyPreference: TransparencyPreference {
-        TransparencyPreference(rawValue: transparencyPreferenceRaw) ?? .default
-    }
-
-    private var navigationStyle: NavigationStyle {
-        NavigationStyle(rawValue: navigationStyleRaw) ?? .default
-    }
+    /// Per-profile navigation chrome + transparency, edited here and injected into
+    /// the environment by `MainTabView` (rebuilt on profile switch like the other
+    /// per-profile appearance models).
+    @Environment(NavigationStyleSettingsModel.self) private var navigation
+    @Environment(TransparencyPreferenceModel.self) private var transparency
 
     var body: some View {
         SettingsSplitLayout(title: "Appearance", sections: sections)
@@ -48,70 +38,37 @@ struct AppearanceDetailView: View {
     private var sections: [SettingsSplitSection] {
         @Bindable var musicPlayer = musicPlayer
         @Bindable var density = density
-        @Bindable var cardStyle = cardStyle
-        @Bindable var watchStatusIndicator = watchStatusIndicator
-        let transparencyBinding = Binding(
-            get: { transparencyPreference },
-            set: { transparencyPreferenceRaw = $0.rawValue }
-        )
-        let navigationBinding = Binding(
-            get: { navigationStyle },
-            set: { navigationStyleRaw = $0.rawValue }
-        )
+        @Bindable var navigation = navigation
 
         return [
             SettingsSplitSection(id: "display", header: "Display", rows: [
                 SettingsSplitRow(
-                    id: "navigation",
-                    title: "Navigation",
-                    description: "Horizontal tabs across the top, or a collapsible left sidebar. Shared across every profile on this Apple TV.",
-                ) {
-                    CompactNavigationPicker(selection: navigationBinding)
-                },
-                SettingsSplitRow(
                     id: "theme",
                     title: "Theme",
-                    description: "The overall light or dark appearance of the app.",
+                    description: "The overall light or dark look of the app.",
                 ) {
-                    CompactThemePicker(selection: $theme.theme)
-                },
-                SettingsSplitRow(
-                    id: "transparency",
-                    title: "Transparency",
-                    description: "Liquid glass — translucent panels and cards. Turn off for solid backgrounds.",
-                ) {
-                    DescribedSegmentedPicker(
-                        options: TransparencyPreference.allCases,
-                        selection: transparencyBinding,
-                        title: { $0.displayName },
-                        detail: { $0.detail }
-                    )
+                    themeAndTransparency
                 },
                 SettingsSplitRow(
                     id: "display-size",
                     title: "Display Size",
                     description: "Scales card size, columns and spacing across the app.",
                 ) {
-                    SettingsOptionList(
-                        options: UIDensity.allCases,
-                        selection: $density.density,
-                        icon: { $0.symbolName },
-                        title: { $0.displayName }
-                    )
+                    CompactDisplaySizePicker(selection: $density.density)
                 },
                 SettingsSplitRow(
-                    id: "card-style",
-                    title: "Card Style",
-                    description: "Cards wrap each poster in a bordered surface with its text inside. Posters show just the artwork with its text underneath.",
+                    id: "cards",
+                    title: "Cards",
+                    description: "How media cards look across the app.",
                 ) {
-                    CompactCardStylePicker(selection: $cardStyle.style)
+                    cardsControls
                 },
                 SettingsSplitRow(
-                    id: "watch-indicator",
-                    title: "Watched Indicator",
-                    description: "A check badge on watched items, or a corner flag on unwatched ones. In-progress items always show a progress bar.",
+                    id: "navigation",
+                    title: "Navigation",
+                    description: "Horizontal tabs across the top, or a collapsible left sidebar.",
                 ) {
-                    CompactWatchIndicatorPicker(selection: $watchStatusIndicator.indicator)
+                    CompactNavigationPicker(selection: $navigation.style)
                 }
             ]),
             SettingsSplitSection(id: "music", header: "Music Player", rows: [
@@ -128,6 +85,43 @@ struct AppearanceDetailView: View {
             ])
         ] + CircadianSectionsBuilder(model: nightShift, primaryHeader: "Circadian Mode").sections
             + SpoilerSectionsBuilder(spoilers: spoilers).sections
+    }
+
+    /// Theme cards plus the transparency (liquid-glass) control folded in beneath
+    /// them — transparency isn't a top-level concern, so it rides along in the
+    /// "overall look" pane rather than owning a row. Its self-explanatory label +
+    /// the tri-toggle's focus-following subtext carry the meaning, so it needs no
+    /// separate description paragraph.
+    @ViewBuilder private var themeAndTransparency: some View {
+        @Bindable var transparency = transparency
+        VStack(alignment: .leading, spacing: SettingsMetrics.sectionSpacing) {
+            CompactThemePicker(selection: $theme.theme)
+            SettingsDetailGroup(title: "Liquid Glass") {
+                DescribedSegmentedPicker(
+                    options: TransparencyPreference.allCases,
+                    selection: $transparency.preference,
+                    title: { $0.displayName },
+                    detail: { $0.detail }
+                )
+            }
+        }
+    }
+
+    /// The two media-card controls in one pane — style (framed vs poster) and the
+    /// watched indicator — since both are "how a card looks". Shorter swatches so
+    /// the two preview rows sit together without heavy scrolling; each headed by a
+    /// shared uppercase section header.
+    @ViewBuilder private var cardsControls: some View {
+        @Bindable var cardStyle = cardStyle
+        @Bindable var watchStatusIndicator = watchStatusIndicator
+        VStack(alignment: .leading, spacing: SettingsMetrics.sectionSpacing) {
+            SettingsDetailGroup(title: "Style") {
+                CompactCardStylePicker(selection: $cardStyle.style, swatchHeight: 150)
+            }
+            SettingsDetailGroup(title: "Watched Indicator") {
+                CompactWatchIndicatorPicker(selection: $watchStatusIndicator.indicator, swatchHeight: 150)
+            }
+        }
     }
 }
 
@@ -153,7 +147,7 @@ struct SpoilerSectionsBuilder {
             SettingsSplitRow(
                 id: "spoilers",
                 title: "Spoilers",
-                description: "Keep unwatched episodes and ratings from spoiling you while you browse.",
+                description: "Hide unwatched episodes and ratings until you've seen them.",
             ) {
                 VStack(alignment: .leading, spacing: SettingsMetrics.sectionSpacing) {
                     SettingsRevealSection(
@@ -165,13 +159,8 @@ struct SpoilerSectionsBuilder {
                         }
                     }
 
-                    SettingsDetailGroup(
-                        title: "Ratings",
-                        description: "Keeps IMDb, Rotten Tomatoes and other scores hidden on a movie or episode until you've finished it, so the ratings don't bias you beforehand. They appear once it's marked watched."
-                    ) {
-                        Toggle("Hide ratings until watched", isOn: $spoilers.settings.hideRatingsUntilWatched)
-                            .toggleStyle(SettingsSwitchToggleStyle())
-                    }
+                    Toggle("Hide ratings until watched", isOn: $spoilers.settings.hideRatingsUntilWatched)
+                        .toggleStyle(SettingsSwitchToggleStyle())
                 }
             }
         ])]

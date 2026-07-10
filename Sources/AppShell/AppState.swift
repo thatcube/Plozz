@@ -94,6 +94,15 @@ public final class AppState {
     /// the app root like `cardStyleModel`, and rebuilt on profile switch like the
     /// other per-profile models.
     public private(set) var watchStatusIndicatorModel: WatchStatusIndicatorSettingsModel
+    /// The active profile's navigation chrome (top bar vs. collapsible sidebar).
+    /// Injected into the environment at the app root like `cardStyleModel`, and
+    /// rebuilt on profile switch like the other per-profile models.
+    public private(set) var navigationStyleModel: NavigationStyleSettingsModel
+    /// The active profile's transparency (liquid-glass) preference. Injected into
+    /// the environment at the app root like `cardStyleModel`, and rebuilt on
+    /// profile switch. Its `.system` option still defers to the device
+    /// Accessibility "Reduce Transparency" setting.
+    public private(set) var transparencyModel: TransparencyPreferenceModel
     /// The active profile's Home hero (featured carousel) settings: which sources
     /// feed it, how many items, Random library scope, trailers, and auto-advance.
     /// Scoped per profile (rebuilt on profile switch) like `cardStyleModel`.
@@ -912,6 +921,8 @@ public final class AppState {
         uiDensityModel: UIDensitySettingsModel? = nil,
         cardStyleModel: CardStyleSettingsModel? = nil,
         watchStatusIndicatorModel: WatchStatusIndicatorSettingsModel? = nil,
+        navigationStyleModel: NavigationStyleSettingsModel? = nil,
+        transparencyModel: TransparencyPreferenceModel? = nil,
         nightShiftModel: NightShiftSettingsModel? = nil,
         ratingsProvider: (any ExternalRatingsProviding)? = nil,
         traktService: TraktService? = nil,
@@ -939,6 +950,8 @@ public final class AppState {
             || uiDensityModel != nil
             || cardStyleModel != nil
             || watchStatusIndicatorModel != nil
+            || navigationStyleModel != nil
+            || transparencyModel != nil
             || nightShiftModel != nil
         self.usesInjectedModels = injected
         let ns = (profilesModel ?? self.profilesModel).activeNamespace
@@ -972,6 +985,10 @@ public final class AppState {
             ?? CardStyleSettingsModel(store: CardStyleSettingsStore(namespace: ns))
         self.watchStatusIndicatorModel = watchStatusIndicatorModel
             ?? WatchStatusIndicatorSettingsModel(store: WatchStatusIndicatorSettingsStore(namespace: ns))
+        self.navigationStyleModel = navigationStyleModel
+            ?? NavigationStyleSettingsModel(store: NavigationStyleSettingsStore(namespace: ns))
+        self.transparencyModel = transparencyModel
+            ?? TransparencyPreferenceModel(store: TransparencyPreferenceStore(namespace: ns))
         self.heroSettingsModel = HeroSettingsModel(store: HeroSettingsStore(namespace: ns))
         self.nightShiftModel = nightShiftModel
             ?? NightShiftSettingsModel(store: NightShiftSettingsStore(namespace: ns))
@@ -2070,6 +2087,8 @@ public final class AppState {
         uiDensityModel = UIDensitySettingsModel(store: UIDensitySettingsStore(namespace: ns))
         cardStyleModel = CardStyleSettingsModel(store: CardStyleSettingsStore(namespace: ns))
         watchStatusIndicatorModel = WatchStatusIndicatorSettingsModel(store: WatchStatusIndicatorSettingsStore(namespace: ns))
+        navigationStyleModel = NavigationStyleSettingsModel(store: NavigationStyleSettingsStore(namespace: ns))
+        transparencyModel = TransparencyPreferenceModel(store: TransparencyPreferenceStore(namespace: ns))
         heroSettingsModel = HeroSettingsModel(store: HeroSettingsStore(namespace: ns))
         nightShiftModel = NightShiftSettingsModel(store: NightShiftSettingsStore(namespace: ns))
     }

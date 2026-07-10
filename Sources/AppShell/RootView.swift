@@ -17,18 +17,11 @@ public struct RootView: View {
     @State private var appState: AppState
     @Environment(\.colorScheme) private var systemColorScheme
     @Environment(\.scenePhase) private var scenePhase
-    /// The OS-level Reduce Transparency setting, resolved against the in-app
-    /// "Transparency (liquid glass)" preference (Settings ▸ Appearance) and
-    /// injected as the app-wide `\.plozzReduceTransparency`. `tvOS Default`
+    /// The OS-level Reduce Transparency setting, resolved against the active
+    /// profile's in-app "Transparency (liquid glass)" preference (Settings ▸
+    /// Appearance) and injected as `\.plozzReduceTransparency`. `tvOS Default`
     /// follows this OS value; `On` forces glass; `Off` forces solid.
     @Environment(\.accessibilityReduceTransparency) private var systemReduceTransparency
-    /// Deliberately an APP-WIDE (global) setting: a plain `@AppStorage` key with no
-    /// profile namespace, so it persists across every profile and is intentionally
-    /// NOT part of `AppState.rebuildSettingsModels()` (the per-profile store set).
-    /// Do not scope this per profile — accessibility/visual-comfort preferences
-    /// belong to the household, not an individual profile. See AGENTS.local.md
-    /// ("Per-profile vs app-wide settings").
-    @AppStorage(TransparencyPreference.storageKey) private var transparencyPreferenceRaw = TransparencyPreference.default.rawValue
     /// Window-level black veil that survives the player's dismiss into Home so it
     /// can cover the TV's *physical* HDR/DV → SDR panel switch (which on some TVs
     /// lags ~1s behind tvOS's `displayDidSettle`). Injected into the environment so
@@ -178,6 +171,8 @@ public struct RootView: View {
                         uiDensityModel: appState.uiDensityModel,
                         cardStyleModel: appState.cardStyleModel,
                         watchStatusIndicatorModel: appState.watchStatusIndicatorModel,
+                        navigationStyleModel: appState.navigationStyleModel,
+                        transparencyModel: appState.transparencyModel,
                         heroSettingsModel: appState.heroSettingsModel,
                         shareScanStatusModel: appState.shareScanStatusModel,
                         nightShiftModel: appState.nightShiftModel,
@@ -271,7 +266,8 @@ public struct RootView: View {
         .environment(\.plozzMetrics, PlozzMetrics(density: appState.uiDensityModel.density))
         .environment(\.plozzCardStyle, appState.cardStyleModel.style)
         .environment(\.plozzWatchStatusIndicator, appState.watchStatusIndicatorModel.indicator)
-        .environment(\.plozzReduceTransparency, (TransparencyPreference(rawValue: transparencyPreferenceRaw) ?? .default).reducesTransparency(systemReduceTransparency: systemReduceTransparency))
+        .environment(\.plozzNavigationStyle, appState.navigationStyleModel.style)
+        .environment(\.plozzReduceTransparency, appState.transparencyModel.preference.reducesTransparency(systemReduceTransparency: systemReduceTransparency))
         .environment(displayVeil)
         // Push the theme's effective scheme DOWN into the tree instead of forcing
         // it on the window via `preferredColorScheme`. A downward environment value

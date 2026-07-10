@@ -43,7 +43,8 @@ struct MyLibrariesDetailView: View {
     /// The server itself is never removed here — that's a household sign-out on
     /// This Apple TV › Servers.
     private func toggleWatching(_ group: ServerAccountGroup) {
-        isWatching(group) ? stopWatching(group) : startWatching(group)
+        let was = isWatching(group)
+        was ? stopWatching(group) : startWatching(group)
     }
 
     var body: some View {

@@ -2034,10 +2034,13 @@ public final class AppState {
     /// ("Use this server" toggle on Settings → Servers & Libraries → server).
     public func setAccount(_ accountID: String, includedInActiveProfile included: Bool) {
         let profileID = profilesModel.activeProfileID
-        let current = Set(profilesModel.activeAccountIDs(
-            for: profileID,
-            fallback: accountStore.activeAccountIDs()
-        ))
+        // Mutate the resolved set that the UI is actually showing, not the raw
+        // stored set. The latter can contain only stale account ids after a
+        // server is removed/re-added; reloadAccounts() intentionally resolves
+        // that situation to the current household set. Starting from the stale
+        // stored value would make removing a visible account a no-op, then the
+        // next reload would fall back to every account and leave the switch On.
+        let current = activeAccountIDs
         var next = current
         if included { next.insert(accountID) } else { next.remove(accountID) }
         profilesModel.setActiveAccountIDs(Array(next), for: profileID)

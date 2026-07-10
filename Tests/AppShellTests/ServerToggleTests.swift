@@ -102,4 +102,34 @@ final class ServerToggleTests: XCTestCase {
         XCTAssertFalse(state.isAccountIncludedInActiveProfile("a"))
         XCTAssertFalse(state.isAccountIncludedInActiveProfile("b"))
     }
+
+    /// A profile may retain ids for accounts that were removed and later
+    /// re-added. AppState resolves that stale-only selection to the current
+    /// household set; toggling must mutate that resolved set, not the stale raw
+    /// value, or removing a visible account becomes a no-op.
+    func testTurningOffServerRepairsStaleStoredSelection() throws {
+        let accountStore = AccountStore(
+            secureStore: InMemorySecureStore(),
+            defaults: makeDefaults()
+        )
+        try accountStore.add(account(id: "a", host: "a.example.com"), token: "token-a")
+        try accountStore.add(account(id: "b", host: "b.example.com"), token: "token-b")
+
+        let profiles = ProfilesModel(store: ProfileStore(defaults: makeDefaults()))
+        profiles.setActiveAccountIDs(["removed-account"], for: profiles.activeProfileID)
+
+        let state = AppState(accountStore: accountStore, profilesModel: profiles)
+        state.bootstrap()
+        XCTAssertTrue(state.isAccountIncludedInActiveProfile("a"))
+        XCTAssertTrue(state.isAccountIncludedInActiveProfile("b"))
+
+        state.setAccount("a", includedInActiveProfile: false)
+
+        XCTAssertFalse(state.isAccountIncludedInActiveProfile("a"))
+        XCTAssertTrue(state.isAccountIncludedInActiveProfile("b"))
+        XCTAssertEqual(
+            Set(profiles.storedActiveAccountIDs(for: profiles.activeProfileID) ?? []),
+            ["b"]
+        )
+    }
 }

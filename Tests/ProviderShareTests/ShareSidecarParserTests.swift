@@ -62,4 +62,21 @@ final class ShareSidecarParserTests: XCTestCase {
         let sidecar = ShareMediaParser.parseSidecar("The Matrix (1999).en.srt")
         XCTAssertEqual(sidecar?.stem, video)
     }
+
+    // MARK: - Sidecar ↔ video matching
+
+    func testSameDirRequiresExactStem() {
+        // Non-zero-padded episodes must NOT cross-attach in the video's own dir.
+        XCTAssertTrue(ShareProvider.sidecarMatchesVideo(sidecarStem: "Show.S01E10", videoStem: "Show.S01E10", dedicatedFolder: false))
+        XCTAssertFalse(ShareProvider.sidecarMatchesVideo(sidecarStem: "Show.S01E1", videoStem: "Show.S01E10", dedicatedFolder: false))
+        XCTAssertFalse(ShareProvider.sidecarMatchesVideo(sidecarStem: "Batman", videoStem: "Batman Begins", dedicatedFolder: false))
+    }
+
+    func testDedicatedFolderAllowsBoundaryPrefix() {
+        // In a Subs/ folder a boundary-aligned prefix match is allowed…
+        XCTAssertTrue(ShareProvider.sidecarMatchesVideo(sidecarStem: "Movie", videoStem: "Movie.1080p", dedicatedFolder: true))
+        XCTAssertTrue(ShareProvider.sidecarMatchesVideo(sidecarStem: "Movie.1080p", videoStem: "Movie", dedicatedFolder: true))
+        // …but E1 still must not prefix-match E10 (no separator boundary).
+        XCTAssertFalse(ShareProvider.sidecarMatchesVideo(sidecarStem: "Show.S01E1", videoStem: "Show.S01E10", dedicatedFolder: true))
+    }
 }

@@ -287,16 +287,16 @@ public struct ShareProvider: MediaProvider {
         let dir = (relPath as NSString).deletingLastPathComponent
         let videoStem = ShareMediaParser.videoStem((relPath as NSString).lastPathComponent)
 
-        // Gather candidate (directory, entry) pairs from the video's own folder and
-        // any sibling Subs/Subtitles folder.
-        var candidates: [(dir: String, name: String)] = []
-        let siblingDirs = [dir] + ["Subs", "Subtitles", "subs", "subtitles"].map { sub in
-            dir.isEmpty ? sub : "\(dir)/\(sub)"
-        }
-        for listDir in siblingDirs {
+        // Gather candidate (directory, entry, isDedicatedSubsFolder) triples from the
+        // video's own folder and any sibling Subs/Subtitles folder.
+        var candidates: [(dir: String, name: String, dedicated: Bool)] = []
+        let ownDir = dir
+        let subFolderNames = ["Subs", "Subtitles", "subs", "subtitles"]
+        let subDirs = subFolderNames.map { sub in dir.isEmpty ? sub : "\(dir)/\(sub)" }
+        for (listDir, dedicated) in [(ownDir, false)] + subDirs.map({ ($0, true) }) {
             guard let entries = try? await store.rawEntries(inDirectory: listDir) else { continue }
             for entry in entries where !entry.isDirectory && ShareMediaParser.isSubtitleFile(entry.name) {
-                candidates.append((listDir, entry.name))
+                candidates.append((listDir, entry.name, dedicated))
             }
         }
         guard !candidates.isEmpty else { return [] }
@@ -307,14 +307,9 @@ public struct ShareProvider: MediaProvider {
             .appendingPathComponent("plozz-sidecars", isDirectory: true)
         try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
 
-        for (candidateDir, name) in candidates {
+        for (candidateDir, name, dedicated) in candidates {
             guard let sidecar = ShareMediaParser.parseSidecar(name) else { continue }
-            // Match the sidecar to this video: same stem, or (for a dedicated Subs
-            // folder holding one movie's subs) a stem that's a prefix of the video's.
-            let stemMatches = sidecar.stem == videoStem
-                || videoStem.hasPrefix(sidecar.stem)
-                || sidecar.stem.hasPrefix(videoStem)
-            guard stemMatches else { continue }
+            guard Self.sidecarMatchesVideo(sidecarStem: sidecar.stem, videoStem: videoStem, dedicatedFolder: dedicated) else { continue }
 
             let relSidecar = candidateDir.isEmpty ? name : "\(candidateDir)/\(name)"
             guard let data = try? await store.readFile(relSidecar), !data.isEmpty else { continue }
@@ -343,6 +338,30 @@ public struct ShareProvider: MediaProvider {
             nextID += 1
         }
         return tracks
+    }
+
+    /// Whether a sidecar's parsed stem belongs to the video with `videoStem`.
+    ///
+    /// In the video's **own** directory we require an *exact* stem match — a
+    /// prefix relaxation there cross-attaches sibling episodes with non-zero-padded
+    /// numbering (`Show.S01E1.srt` would prefix-match `Show.S01E10.mkv`) and movie
+    /// siblings (`Batman` vs `Batman Begins`). In a **dedicated** `Subs/Subtitles`
+    /// folder — conventionally holding a single title's subs — we allow a prefix
+    /// match, but only at a separator boundary so `E1` still can't match `E10`.
+    static func sidecarMatchesVideo(sidecarStem: String, videoStem: String, dedicatedFolder: Bool) -> Bool {
+        if sidecarStem == videoStem { return true }
+        guard dedicatedFolder else { return false }
+        return isPrefixAtBoundary(sidecarStem, of: videoStem)
+            || isPrefixAtBoundary(videoStem, of: sidecarStem)
+    }
+
+    /// Whether `prefix` is a prefix of `whole` ending at a separator boundary
+    /// (the next character is `.`, space, `-`, `_`), so `E1` can't prefix `E10`.
+    private static func isPrefixAtBoundary(_ prefix: String, of whole: String) -> Bool {
+        guard prefix.count < whole.count, whole.hasPrefix(prefix) else { return false }
+        let nextIndex = whole.index(whole.startIndex, offsetBy: prefix.count)
+        let next = whole[nextIndex]
+        return next == "." || next == " " || next == "-" || next == "_"
     }
 
     public func reportPlayback(_ progress: PlaybackProgress, event: PlaybackEvent) async throws {

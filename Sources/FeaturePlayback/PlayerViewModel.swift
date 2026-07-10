@@ -3045,9 +3045,14 @@ public final class PlayerViewModel {
         subtitleDownloadTask?.cancel()
         subtitleDownloadTask = Task { [weak self] in
             do {
+                // Snapshot the item's existing server-side subtitle ids first, so the
+                // poll can tell the *newly downloaded* sidecar apart from ones that
+                // were already attached (which would otherwise be mistaken for the
+                // download and duplicated in the menu).
+                let baseline = await Self.existingSubtitleTrackIDs(provider: provider, itemID: itemID)
                 try await provider.downloadRemoteSubtitle(itemID: itemID, subtitleID: subtitle.id)
                 let track = try await self?.pollForNewSubtitleTrack(
-                    provider: provider, itemID: itemID, language: language
+                    provider: provider, itemID: itemID, language: language, knownIDs: baseline
                 ) ?? nil
                 try Task.checkCancellation()
                 await MainActor.run { [weak self] in
@@ -3074,9 +3079,17 @@ public final class PlayerViewModel {
         }
     }
 
+    /// The item's current server-side subtitle-track ids (best-effort, empty on
+    /// failure), used as the "already attached" baseline for `pollForNewSubtitleTrack`.
+    private nonisolated static func existingSubtitleTrackIDs(provider: any MediaProvider, itemID: String) async -> Set<Int> {
+        let tracks = (try? await provider.subtitleTracks(forItemID: itemID)) ?? []
+        return Set(tracks.map(\.id))
+    }
+
     /// Polls the item's subtitle tracks (the server attaches asynchronously) for a
-    /// new text sidecar in `language`, returning the first match or `nil` after a
-    /// bounded number of attempts. Nonisolated so it runs off the main actor.
+    /// *new* text sidecar — one whose id isn't in `knownIDs` (the pre-download
+    /// baseline) — preferring a language match, returning `nil` after a bounded
+    /// number of attempts. Nonisolated so it runs off the main actor.
     private nonisolated func pollForNewSubtitleTrack(
         provider: any MediaProvider,
         itemID: String,
@@ -3089,13 +3102,16 @@ public final class PlayerViewModel {
             }
             try Task.checkCancellation()
             let tracks = (try? await provider.subtitleTracks(forItemID: itemID)) ?? []
-            let textSubs = tracks.filter { $0.deliveryURL != nil && !$0.isImageBasedSubtitle }
-            // Prefer a language match; else any newly-appeared text sidecar.
+            // Only consider text sidecars that appeared *after* the download.
+            let newTextSubs = tracks.filter {
+                $0.deliveryURL != nil && !$0.isImageBasedSubtitle && !knownIDs.contains($0.id)
+            }
+            // Prefer a language match among the new tracks; else any new sidecar.
             if let language, !language.isEmpty,
-               let match = textSubs.first(where: { LanguageMatch.matches($0.language, language) }) {
+               let match = newTextSubs.first(where: { LanguageMatch.matches($0.language, language) }) {
                 return match
             }
-            if let any = textSubs.last { return any }
+            if let any = newTextSubs.last { return any }
         }
         return nil
     }
@@ -3152,10 +3168,13 @@ public final class PlayerViewModel {
                     forLanguage: language, mode: mode,
                     preference: preference, requireLanguageMatch: true
                 ), !best.id.isEmpty else { return }
+                // Baseline of already-attached subtitle ids so the poll only picks up
+                // the newly-downloaded one.
+                let baseline = await Self.existingSubtitleTrackIDs(provider: provider, itemID: itemID)
                 try await provider.downloadRemoteSubtitle(itemID: itemID, subtitleID: best.id)
                 PlozzLog.playback.info("Auto-downloaded subtitle for item")
                 let track = try await self?.pollForNewSubtitleTrack(
-                    provider: provider, itemID: itemID, language: language
+                    provider: provider, itemID: itemID, language: language, knownIDs: baseline
                 ) ?? nil
                 try Task.checkCancellation()
                 await MainActor.run { [weak self] in

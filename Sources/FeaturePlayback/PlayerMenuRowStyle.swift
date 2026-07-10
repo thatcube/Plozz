@@ -157,10 +157,10 @@ struct ExternalSubtitleBadge: View {
             .accessibilityLabel("External subtitle")
     }
 }
-/// A single-line label that truncates (with a soft right-edge fade) at rest and
-/// **marquee-scrolls** the full text left-and-back when its row is focused — the
-/// standard tvOS treatment for long titles that don't fit. Reads the row's focus
-/// from `playerMenuRowIsFocused`, so it only animates the focused row.
+/// A single-line label that truncates at rest and **marquee-scrolls** the full
+/// text left-and-back when its row is focused — the standard tvOS treatment for
+/// long titles that don't fit. Reads the row's focus from `playerMenuRowIsFocused`
+/// so it only animates the focused row.
 struct MarqueeText: View {
     let text: String
     var font: Font = .body
@@ -168,65 +168,56 @@ struct MarqueeText: View {
     @Environment(\.playerMenuRowIsFocused) private var focused
     @State private var textWidth: CGFloat = 0
     @State private var containerWidth: CGFloat = 0
-    @State private var scroll = false
-
-    private var overflow: CGFloat { max(0, textWidth - containerWidth) }
+    @State private var offset: CGFloat = 0
 
     var body: some View {
+        // A hidden copy claims the available width + single-line height WITHOUT
+        // being stretched by the real (fixedSize) text. The scrolling text is an
+        // overlay — overlays don't influence the parent's size — so the row stays
+        // bounded to the panel width (no focus outline running off-screen), and the
+        // real text overflows *inside* it, clipped, free to scroll.
         Text(text)
             .font(font)
             .lineLimit(1)
-            .fixedSize(horizontal: true, vertical: false)
-            .background(GeometryReader { g in
-                Color.clear.preference(key: MarqueeTextWidthKey.self, value: g.size.width)
-            })
-            .offset(x: scroll ? -overflow : 0)
+            .hidden()
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(GeometryReader { g in
-                Color.clear.preference(key: MarqueeContainerWidthKey.self, value: g.size.width)
+                Color.clear
+                    .onAppear { containerWidth = g.size.width }
+                    .onChange(of: g.size.width) { _, w in containerWidth = w }
             })
+            .overlay(alignment: .leading) {
+                Text(text)
+                    .font(font)
+                    .lineLimit(1)
+                    .fixedSize()
+                    .background(GeometryReader { g in
+                        Color.clear
+                            .onAppear { textWidth = g.size.width }
+                            .onChange(of: g.size.width) { _, w in textWidth = w }
+                    })
+                    .offset(x: offset)
+            }
             .clipped()
-            .mask(fadeMask)
-            .onPreferenceChange(MarqueeTextWidthKey.self) { textWidth = $0; updateScroll() }
-            .onPreferenceChange(MarqueeContainerWidthKey.self) { containerWidth = $0; updateScroll() }
-            .onChange(of: focused) { _, _ in updateScroll() }
+            .onChange(of: focused) { _, _ in restart() }
+            .onChange(of: textWidth) { _, _ in restart() }
+            .onChange(of: containerWidth) { _, _ in restart() }
     }
 
-    /// Soft fade on the right edge at rest to signal "there's more"; solid (no
-    /// fade) while scrolling so the end is fully legible as it passes.
-    @ViewBuilder private var fadeMask: some View {
-        if overflow > 1 && !scroll {
-            LinearGradient(
-                stops: [.init(color: .black, location: 0),
-                        .init(color: .black, location: 0.88),
-                        .init(color: .clear, location: 1.0)],
-                startPoint: .leading, endPoint: .trailing)
-        } else {
-            Color.black
+    private func restart() {
+        // Hard-stop any running loop and snap back to the start.
+        var stop = Transaction()
+        stop.disablesAnimations = true
+        withTransaction(stop) { offset = 0 }
+
+        let overflow = max(0, textWidth - containerWidth)
+        guard focused, overflow > 1 else { return }
+        // Scroll left to reveal the end, then back — looping while focused. Speed
+        // scales with the overflow so long and short names move at a similar pace.
+        let duration = max(2.0, Double(overflow) / 55.0)
+        withAnimation(.easeInOut(duration: duration).delay(0.5).repeatForever(autoreverses: true)) {
+            offset = -overflow
         }
     }
-
-    private func updateScroll() {
-        guard focused, overflow > 1 else {
-            withAnimation(.easeOut(duration: 0.2)) { scroll = false }
-            return
-        }
-        // Speed proportional to the overflow so long and short names scroll at a
-        // similar pace; pause at each end (autoreverse) and loop while focused.
-        withAnimation(.linear(duration: max(2.2, Double(overflow) / 55))
-            .delay(0.6)
-            .repeatForever(autoreverses: true)) {
-            scroll = true
-        }
-    }
-}
-
-private struct MarqueeTextWidthKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
-}
-private struct MarqueeContainerWidthKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
 }
 #endif

@@ -396,6 +396,56 @@ struct PlexStream: Decodable {
     }
 }
 
+// MARK: - On-demand subtitle search
+
+/// Response envelope for `GET /library/metadata/{ratingKey}/subtitles` — Plex's
+/// on-demand subtitle search. Unlike an item's *attached* streams (which arrive
+/// nested under `Metadata → Media → Part → Stream`), the search returns its
+/// candidate subtitles as `Stream` elements at the **`MediaContainer` root**, so
+/// this dedicated envelope decodes that top-level `Stream` array.
+struct PlexSubtitleSearchResponse: Decodable {
+    let MediaContainer: Container
+
+    struct Container: Decodable {
+        let Stream: [PlexSubtitleSearchStream]?
+    }
+}
+
+/// One on-demand subtitle search result. Distinct from `PlexStream` (which models
+/// an item's embedded/attached streams): search results carry the download `key`
+/// (echoed back verbatim as `?key=` to the download PUT), the source provider,
+/// a match/popularity `score`, and the HI/forced flags that drive accessibility
+/// ranking. Numeric/boolean fields use the lenient decoders because PMS serialises
+/// them inconsistently (JSON number vs string vs bool).
+struct PlexSubtitleSearchStream: Decodable {
+    let key: String?
+    let title: String?
+    let language: String?
+    let languageCode: String?
+    let format: String?
+    let providerTitle: String?
+    let score: Int?
+    let forced: Bool?
+    let hearingImpaired: Bool?
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        key = c.flexibleString(.key)
+        title = c.flexibleString(.title)
+        language = c.flexibleString(.language)
+        languageCode = c.flexibleString(.languageCode)
+        format = c.flexibleString(.format)
+        providerTitle = c.flexibleString(.providerTitle)
+        score = c.flexibleInt(.score)
+        forced = c.flexibleBool(.forced)
+        hearingImpaired = c.flexibleBool(.hearingImpaired)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case key, title, language, languageCode, format, providerTitle, score, forced, hearingImpaired
+    }
+}
+
 // MARK: Plex.tv: PIN flow
 
 /// `POST /api/v2/pins?strong=true` and `GET /api/v2/pins/{id}`.

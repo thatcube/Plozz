@@ -690,6 +690,36 @@ public struct PlexProvider: MediaProvider {
         nil
     }
 
+    // MARK: Remote subtitles
+
+    /// Plex's on-demand subtitle search (keyless, server-proxied via the server's
+    /// OpenSubtitles.com integration). `itemID` is the ratingKey. The SDH/Forced
+    /// preference is passed through natively as Plex's `hearingImpaired`/`forced`
+    /// query levels (0–3).
+    public func remoteSubtitleSearch(itemID: String, language: String, preference: SubtitleSearchPreference) async throws -> [RemoteSubtitle] {
+        try await client.remoteSubtitleSearch(
+            ratingKey: itemID,
+            language: language,
+            hearingImpaired: preference.hearingImpaired.plexParameterValue,
+            forced: preference.forced.plexParameterValue
+        ).map(map(remoteSubtitle:))
+    }
+
+    /// Asks the server to download the chosen on-demand subtitle and attach it to
+    /// the item. `subtitleID` is the search result's `key`.
+    public func downloadRemoteSubtitle(itemID: String, subtitleID: String) async throws {
+        try await client.downloadRemoteSubtitle(ratingKey: itemID, key: subtitleID)
+    }
+
+    /// The item's current subtitle tracks (text sidecars carry a `deliveryURL`),
+    /// from a single `metadata` fetch — no transcode session. Used to observe a
+    /// just-downloaded subtitle so it can be hot-loaded into the running player.
+    public func subtitleTracks(forItemID itemID: String) async throws -> [MediaTrack] {
+        let detail = try await client.metadata(ratingKey: itemID)
+        let streams = detail.Media?.first?.Part?.first?.Stream ?? []
+        return streams.filter { $0.streamType == 3 }.map(map(stream:))
+    }
+
     // MARK: - Mapping
 
     private func map(metadata dto: PlexMetadata) -> MediaItem {
@@ -1069,6 +1099,20 @@ public struct PlexProvider: MediaProvider {
             }
         }
         return ratings
+    }
+
+    private func map(remoteSubtitle dto: PlexSubtitleSearchStream) -> RemoteSubtitle {
+        RemoteSubtitle(
+            id: dto.key ?? "",
+            name: dto.title ?? dto.providerTitle ?? dto.languageCode ?? dto.language ?? "Subtitle",
+            providerName: dto.providerTitle,
+            language: dto.languageCode ?? dto.language,
+            format: dto.format,
+            communityRating: nil,
+            downloadCount: dto.score,
+            isForced: dto.forced ?? false,
+            isHearingImpaired: dto.hearingImpaired ?? false
+        )
     }
 
     private func map(stream dto: PlexStream) -> MediaTrack {

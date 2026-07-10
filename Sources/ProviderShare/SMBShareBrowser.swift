@@ -141,6 +141,38 @@ actor SMBShareBrowser {
         await invalidate()
     }
 
+    /// Read a whole file's bytes, `path` share-relative. Serialised behind the
+    /// same `listTail` chain as `listDirectory` (SMBClient's single session is not
+    /// safe for overlapping ops), with the same reconnect-once-on-failure recovery.
+    /// Used to pull small sidecar subtitle files off the share into a local temp so
+    /// the player's overlay (which fetches over HTTP/`file://`, not `smb://`) can
+    /// read them.
+    func readFile(_ path: String) async throws -> Data {
+        let previous = listTail
+        let task = Task { () async throws -> Data in
+            await previous.value
+            do {
+                return try await self.attemptRead(path)
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                PlozzLog.boot("share: read \(path) failed (\(error)); reconnecting once")
+                await self.invalidate()
+                return try await self.attemptRead(path)
+            }
+        }
+        listTail = Task { _ = await task.result }
+        return try await task.value
+    }
+
+    /// One connect-on-demand + download pass on the shared session.
+    private func attemptRead(_ path: String) async throws -> Data {
+        let client = try await self.connectedClient()
+        return try await Self.withTimeout(self.listTimeout, "reading \(path)") {
+            try await client.download(path: path)
+        }
+    }
+
     /// Drop the cached session (best effort logoff). After this the next
     /// ``listDirectory(_:)`` reconnects from scratch. Safe to call more than once.
     private func invalidate() async {

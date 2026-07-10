@@ -199,6 +199,17 @@ public struct SettingsView: View {
         self.onSetSeerrUser = onSetSeerrUser
     }
 
+    /// Whether the active profile includes at least one server that can download
+    /// subtitles (Jellyfin or Plex). A media-share (SMB) account can't — it only
+    /// surfaces sidecar files already on the share — so download-only settings are
+    /// hidden for a share-only profile.
+    private var activeProfileCanDownloadSubtitles: Bool {
+        accounts.contains { account in
+            isAccountIncludedInActiveProfile(account.id)
+                && (account.server.provider == .jellyfin || account.server.provider == .plex)
+        }
+    }
+
     private var context: SettingsContext {
         SettingsContext(
             spoilers: spoilers,
@@ -587,7 +598,7 @@ public struct SettingsView: View {
         case .nightShift:
             NightShiftDetailView(model: nightShift)
         case .playback:
-            PlaybackDetailView(playback: playback, subtitleBehavior: subtitleBehavior, subtitlePolicy: subtitlePolicy, audioPolicy: audioPolicy)
+            PlaybackDetailView(playback: playback, subtitleBehavior: subtitleBehavior, subtitlePolicy: subtitlePolicy, audioPolicy: audioPolicy, canDownloadSubtitles: activeProfileCanDownloadSubtitles)
         case .spoilers:
             SpoilersDetailView(spoilers: spoilers)
         case .integrations:

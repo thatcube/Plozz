@@ -226,6 +226,51 @@ public struct PlexClient: Sendable {
         return container.Metadata?.first?.Marker ?? []
     }
 
+    /// `GET /library/metadata/{ratingKey}/subtitles?language=&hearingImpaired=&forced=`
+    /// — searches Plex's on-demand subtitle source (OpenSubtitles.com, configured
+    /// server-side) for the item. `language` is an ISO-639-1 (2-letter) code;
+    /// `hearingImpaired`/`forced` are Plex's 0–3 preference levels
+    /// (0 prefer-non · 1 prefer · 2 only · 3 only-non). Keyless from the client:
+    /// the server owns the subtitle account. Returns `[]` when the server has no
+    /// on-demand source configured.
+    func remoteSubtitleSearch(
+        ratingKey: String,
+        language: String,
+        hearingImpaired: Int = 0,
+        forced: Int = 0
+    ) async throws -> [PlexSubtitleSearchStream] {
+        let lang = LanguageMatch.normalized(language) ?? language
+        let endpoint = Endpoint(
+            path: "/library/metadata/\(ratingKey)/subtitles",
+            queryItems: [
+                URLQueryItem(name: "language", value: lang),
+                URLQueryItem(name: "hearingImpaired", value: String(hearingImpaired)),
+                URLQueryItem(name: "forced", value: String(forced))
+            ],
+            headers: headers
+        )
+        return try await decode(PlexSubtitleSearchResponse.self, endpoint, using: interactiveHTTP)
+            .MediaContainer.Stream ?? []
+    }
+
+    /// `PUT /library/metadata/{ratingKey}/subtitles?key={subtitleKey}` — tells the
+    /// server to download the chosen on-demand subtitle and attach it to the item
+    /// (which also selects it server-side for this user). Asynchronous: the server
+    /// queues the fetch and returns before it completes, so callers must poll the
+    /// item's streams to observe the new sidecar.
+    func downloadRemoteSubtitle(ratingKey: String, key: String) async throws {
+        let endpoint = Endpoint(
+            method: .put,
+            path: "/library/metadata/\(ratingKey)/subtitles",
+            queryItems: [
+                URLQueryItem(name: "key", value: key),
+                URLQueryItem(name: "X-Plex-Token", value: token)
+            ],
+            headers: headers
+        )
+        _ = try await send(endpoint)
+    }
+
     /// `GET /library/metadata/{ratingKey}/children` — seasons of a show,
     /// episodes of a season, …
     ///

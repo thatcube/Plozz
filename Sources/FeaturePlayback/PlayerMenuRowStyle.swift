@@ -131,4 +131,93 @@ extension View {
         modifier(PlayerMenuRowMarkStyle(isSelected: isSelected, accent: accent))
     }
 }
+
+/// A small "knockout" pill marking an external (downloaded / sidecar) subtitle in
+/// the track menu: a solid fill with the label cut out of it (transparent text),
+/// so the row — or the inverted white focus card — shows through the letters. The
+/// fill is focus-aware (light on the dark row, dark on the white focus card) so it
+/// reads on both.
+struct ExternalSubtitleBadge: View {
+    @Environment(\.playerMenuRowIsFocused) private var focused
+
+    var body: some View {
+        let fill = focused ? Color.black.opacity(0.62) : Color.white.opacity(0.6)
+        Text("EXTERNAL")
+            .font(.system(size: 11, weight: .heavy))
+            .tracking(0.4)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 2)
+            // The text punches its own shape out of the fill behind it; the fill is
+            // drawn first (as the background), then the text's destinationOut blend
+            // removes the glyphs. `compositingGroup` isolates the blend so it only
+            // cuts the pill, never the HDR video behind the panel.
+            .blendMode(.destinationOut)
+            .background(RoundedRectangle(cornerRadius: 5, style: .continuous).fill(fill))
+            .compositingGroup()
+            .accessibilityLabel("External subtitle")
+    }
+}
+/// A single-line label that truncates at rest and **marquee-scrolls** the full
+/// text left-and-back when its row is focused — the standard tvOS treatment for
+/// long titles that don't fit. Reads the row's focus from `playerMenuRowIsFocused`
+/// so it only animates the focused row.
+struct MarqueeText: View {
+    let text: String
+    var font: Font = .body
+
+    @Environment(\.playerMenuRowIsFocused) private var focused
+    @State private var textWidth: CGFloat = 0
+    @State private var containerWidth: CGFloat = 0
+    @State private var offset: CGFloat = 0
+
+    var body: some View {
+        // A hidden copy claims the available width + single-line height WITHOUT
+        // being stretched by the real (fixedSize) text. The scrolling text is an
+        // overlay — overlays don't influence the parent's size — so the row stays
+        // bounded to the panel width (no focus outline running off-screen), and the
+        // real text overflows *inside* it, clipped, free to scroll.
+        Text(text)
+            .font(font)
+            .lineLimit(1)
+            .hidden()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(GeometryReader { g in
+                Color.clear
+                    .onAppear { containerWidth = g.size.width }
+                    .onChange(of: g.size.width) { _, w in containerWidth = w }
+            })
+            .overlay(alignment: .leading) {
+                Text(text)
+                    .font(font)
+                    .lineLimit(1)
+                    .fixedSize()
+                    .background(GeometryReader { g in
+                        Color.clear
+                            .onAppear { textWidth = g.size.width }
+                            .onChange(of: g.size.width) { _, w in textWidth = w }
+                    })
+                    .offset(x: offset)
+            }
+            .clipped()
+            .onChange(of: focused) { _, _ in restart() }
+            .onChange(of: textWidth) { _, _ in restart() }
+            .onChange(of: containerWidth) { _, _ in restart() }
+    }
+
+    private func restart() {
+        // Hard-stop any running loop and snap back to the start.
+        var stop = Transaction()
+        stop.disablesAnimations = true
+        withTransaction(stop) { offset = 0 }
+
+        let overflow = max(0, textWidth - containerWidth)
+        guard focused, overflow > 1 else { return }
+        // Scroll left to reveal the end, then back — looping while focused. Speed
+        // scales with the overflow so long and short names move at a similar pace.
+        let duration = max(2.0, Double(overflow) / 55.0)
+        withAnimation(.easeInOut(duration: duration).delay(0.5).repeatForever(autoreverses: true)) {
+            offset = -overflow
+        }
+    }
+}
 #endif

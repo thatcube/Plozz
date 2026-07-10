@@ -346,9 +346,41 @@ struct PlaybackDetailView: View {
             SettingsSplitRow(
                 id: "subtitle-auto-download",
                 title: "Automatically download subtitles",
-                description: "When an item has no suitable subtitle in your preferred language, Plozz asks the Jellyfin server to fetch the best match so every client benefits.",
+                description: "When an item has no suitable subtitle in your preferred language, Plozz asks the server (Jellyfin or Plex) to fetch the best match so every client benefits.",
             ) {
                 Toggle("Auto-download subtitles", isOn: $subtitleBehavior.settings.autoDownloadSubtitles)
+            },
+            SettingsSplitRow(
+                id: "subtitle-sdh",
+                title: "Hearing-impaired (SDH) subtitles",
+                description: "How subtitles for the deaf or hard-of-hearing are ranked when searching or auto-downloading. Applies to Jellyfin, Plex, and local sidecar files.",
+            ) {
+                Menu {
+                    Picker("Hearing-impaired subtitles", selection: $subtitleBehavior.settings.hearingImpairedPreference) {
+                        ForEach(HearingImpairedPreference.allCases, id: \.self) { option in
+                            Text(option.displayName).tag(option)
+                        }
+                    }
+                } label: {
+                    Label(subtitleBehavior.settings.hearingImpairedPreference.displayName, systemImage: "ear")
+                }
+                .menuStyle(.button)
+            },
+            SettingsSplitRow(
+                id: "subtitle-forced",
+                title: "Forced subtitles",
+                description: "How forced subtitles (for foreign-language passages only) are ranked when searching or auto-downloading.",
+            ) {
+                Menu {
+                    Picker("Forced subtitles", selection: $subtitleBehavior.settings.forcedSearchPreference) {
+                        ForEach(ForcedSubtitlePreference.allCases, id: \.self) { option in
+                            Text(option.displayName).tag(option)
+                        }
+                    }
+                } label: {
+                    Label(subtitleBehavior.settings.forcedSearchPreference.displayName, systemImage: "captions.bubble")
+                }
+                .menuStyle(.button)
             },
             SettingsSplitRow(
                 id: "subtitle-remember",

@@ -231,7 +231,90 @@ final class RemoteSubtitleBestMatchTests: XCTestCase {
         let results = [remote("a", lang: "eng", rating: 1, forced: true), remote("b", lang: "eng", rating: 1)]
         XCTAssertEqual(results.bestMatch(forLanguage: "en", mode: .all)?.id, "b")
     }
+
+    // MARK: - SDH / Forced accessibility preference
+
+    private func hi(_ id: String, lang: String?, rating: Double? = nil, downloads: Int? = nil, forced: Bool = false, sdh: Bool = false) -> RemoteSubtitle {
+        RemoteSubtitle(id: id, name: id, language: lang, communityRating: rating, downloadCount: downloads, isForced: forced, isHearingImpaired: sdh)
+    }
+
+    func testDefaultPreferNonSDHDeRanksHigherRatedSDH() {
+        // A higher-rated SDH candidate must NOT win under the default prefer-non-SDH.
+        let results = [
+            hi("sdh", lang: "eng", rating: 9, sdh: true),
+            hi("plain", lang: "eng", rating: 5, sdh: false)
+        ]
+        XCTAssertEqual(results.bestMatch(forLanguage: "en")?.id, "plain",
+                       "prefer-non-SDH default outranks a more-highly-rated SDH sub")
+    }
+
+    func testPreferSDHRanksSDHFirst() {
+        let results = [
+            hi("sdh", lang: "eng", rating: 1, sdh: true),
+            hi("plain", lang: "eng", rating: 9, sdh: false)
+        ]
+        let pref = SubtitleSearchPreference(hearingImpaired: .preferSDH)
+        XCTAssertEqual(results.bestMatch(forLanguage: "en", preference: pref)?.id, "sdh")
+    }
+
+    func testOnlySDHFiltersOutNonSDH() {
+        let results = [
+            hi("sdh", lang: "eng", rating: 1, sdh: true),
+            hi("plain", lang: "eng", rating: 9, sdh: false)
+        ]
+        let pref = SubtitleSearchPreference(hearingImpaired: .onlySDH)
+        XCTAssertEqual(results.bestMatch(forLanguage: "en", preference: pref)?.id, "sdh")
+    }
+
+    func testOnlySDHGracefullyDegradesWhenNoneAreSDH() {
+        // No SDH candidates → Only-SDH must not dead-end; fall back to the pool.
+        let results = [hi("a", lang: "eng", rating: 5), hi("b", lang: "eng", rating: 9)]
+        let pref = SubtitleSearchPreference(hearingImpaired: .onlySDH)
+        XCTAssertEqual(results.bestMatch(forLanguage: "en", preference: pref)?.id, "b")
+    }
+
+    func testRequireLanguageMatchReturnsNilWhenNoLanguageMatch() {
+        let results = [remote("a", lang: "fre", rating: 10)]
+        XCTAssertNil(results.bestMatch(forLanguage: "en", requireLanguageMatch: true),
+                     "auto-download must not attach a wrong-language sub")
+        XCTAssertEqual(results.bestMatch(forLanguage: "en", requireLanguageMatch: false)?.id, "a",
+                       "manual/fallback path still returns something")
+    }
+
+    func testForcedOnlyModeOverridesForcedPreference() {
+        // mode .forcedOnly must win even if the profile prefers non-forced.
+        let results = [remote("a", lang: "eng", rating: 9), remote("b", lang: "eng", rating: 1, forced: true)]
+        let pref = SubtitleSearchPreference(forced: .preferNonForced)
+        XCTAssertEqual(results.bestMatch(forLanguage: "en", mode: .forcedOnly, preference: pref)?.id, "b")
+    }
+
+    func testApplyingSortsByPreferenceAndDegrades() {
+        let results = [
+            hi("plain", lang: "eng", rating: 9, sdh: false),
+            hi("sdh", lang: "eng", rating: 1, sdh: true)
+        ]
+        // Prefer SDH → sdh first, plain still present.
+        let ordered = results.applying(SubtitleSearchPreference(hearingImpaired: .preferSDH))
+        XCTAssertEqual(ordered.map(\.id), ["sdh", "plain"])
+        // Only-SDH with an SDH present → filters to just sdh.
+        XCTAssertEqual(results.applying(SubtitleSearchPreference(hearingImpaired: .onlySDH)).map(\.id), ["sdh"])
+        // Only-SDH with none SDH → degrade, keep both.
+        let nonSDH = [hi("a", lang: "eng", rating: 1), hi("b", lang: "eng", rating: 2)]
+        XCTAssertEqual(Set(nonSDH.applying(SubtitleSearchPreference(hearingImpaired: .onlySDH)).map(\.id)), ["a", "b"])
+    }
+
+    func testNameSuggestsHearingImpairedWordBoundary() {
+        XCTAssertTrue(RemoteSubtitle.nameSuggestsHearingImpaired("Movie.2020.en.SDH.srt"))
+        XCTAssertTrue(RemoteSubtitle.nameSuggestsHearingImpaired("Show S01E01 [HI]"))
+        XCTAssertTrue(RemoteSubtitle.nameSuggestsHearingImpaired("Episode (hearing impaired)"))
+        XCTAssertTrue(RemoteSubtitle.nameSuggestsHearingImpaired("english-cc"))
+        // Must NOT false-positive on substrings.
+        XCTAssertFalse(RemoteSubtitle.nameSuggestsHearingImpaired("Hindi"))
+        XCTAssertFalse(RemoteSubtitle.nameSuggestsHearingImpaired("Ghibli.eng.srt"))
+        XCTAssertFalse(RemoteSubtitle.nameSuggestsHearingImpaired("Chino"))
+    }
 }
+
 
 final class SubtitleBehaviorTests: XCTestCase {
     func testRoundTripWithSubtitleFields() throws {

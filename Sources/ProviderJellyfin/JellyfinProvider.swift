@@ -824,7 +824,9 @@ public struct JellyfinProvider: MediaProvider {
     }
 
     // MARK: Subtitles
-    public func remoteSubtitleSearch(itemID: String, language: String) async throws -> [RemoteSubtitle] {
+    public func remoteSubtitleSearch(itemID: String, language: String, preference: SubtitleSearchPreference) async throws -> [RemoteSubtitle] {
+        // Jellyfin's RemoteSearch endpoint takes only a language; the SDH/Forced
+        // preference is applied client-side over the returned candidates.
         try await client.remoteSubtitleSearch(itemID: itemID, language: language).map(map(remoteSubtitle:))
     }
 
@@ -1145,16 +1147,20 @@ public struct JellyfinProvider: MediaProvider {
     }
 
     private func map(remoteSubtitle dto: RemoteSubtitleInfoDto) -> RemoteSubtitle {
-        RemoteSubtitle(
+        // Jellyfin's RemoteSubtitleInfo has no explicit SDH flag, so infer it from
+        // the subtitle name (word-boundary "SDH"/"HI"/"CC"/…) to feed the SDH
+        // accessibility preference client-side.
+        let name = dto.Name ?? dto.ProviderName ?? "Subtitle"
+        return RemoteSubtitle(
             id: dto.Id ?? "",
-            name: dto.Name ?? dto.ProviderName ?? "Subtitle",
+            name: name,
             providerName: dto.ProviderName,
             language: dto.ThreeLetterISOLanguageName,
             format: dto.Format,
             communityRating: dto.CommunityRating,
             downloadCount: dto.DownloadCount,
             isForced: dto.IsForced ?? false,
-            isHearingImpaired: false
+            isHearingImpaired: RemoteSubtitle.nameSuggestsHearingImpaired(name)
         )
     }
 

@@ -693,10 +693,16 @@ public struct PlexProvider: MediaProvider {
     // MARK: Remote subtitles
 
     /// Plex's on-demand subtitle search (keyless, server-proxied via the server's
-    /// OpenSubtitles.com integration). `itemID` is the ratingKey.
-    public func remoteSubtitleSearch(itemID: String, language: String) async throws -> [RemoteSubtitle] {
-        try await client.remoteSubtitleSearch(ratingKey: itemID, language: language)
-            .map(map(remoteSubtitle:))
+    /// OpenSubtitles.com integration). `itemID` is the ratingKey. The SDH/Forced
+    /// preference is passed through natively as Plex's `hearingImpaired`/`forced`
+    /// query levels (0–3).
+    public func remoteSubtitleSearch(itemID: String, language: String, preference: SubtitleSearchPreference) async throws -> [RemoteSubtitle] {
+        try await client.remoteSubtitleSearch(
+            ratingKey: itemID,
+            language: language,
+            hearingImpaired: preference.hearingImpaired.plexParameterValue,
+            forced: preference.forced.plexParameterValue
+        ).map(map(remoteSubtitle:))
     }
 
     /// Asks the server to download the chosen on-demand subtitle and attach it to

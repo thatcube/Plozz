@@ -288,14 +288,20 @@ public struct ShareProvider: MediaProvider {
         let videoStem = ShareMediaParser.videoStem((relPath as NSString).lastPathComponent)
 
         // Gather candidate (directory, entry, isDedicatedSubsFolder) triples from the
-        // video's own folder and any sibling Subs/Subtitles folder.
+        // video's own folder and any sibling Subs/Subtitles folder. On a
+        // case-insensitive share (Windows/NTFS/exFAT/macOS-hosted SMB) "Subs" and
+        // "subs" resolve to the same folder, so dedup the probed candidates by a
+        // lowercased (dir, name) key to avoid surfacing every sidecar 2-4×.
         var candidates: [(dir: String, name: String, dedicated: Bool)] = []
+        var seenCandidateKeys = Set<String>()
         let ownDir = dir
         let subFolderNames = ["Subs", "Subtitles", "subs", "subtitles"]
         let subDirs = subFolderNames.map { sub in dir.isEmpty ? sub : "\(dir)/\(sub)" }
         for (listDir, dedicated) in [(ownDir, false)] + subDirs.map({ ($0, true) }) {
             guard let entries = try? await store.rawEntries(inDirectory: listDir) else { continue }
             for entry in entries where !entry.isDirectory && ShareMediaParser.isSubtitleFile(entry.name) {
+                let key = "\(listDir.lowercased())/\(entry.name.lowercased())"
+                guard seenCandidateKeys.insert(key).inserted else { continue }
                 candidates.append((listDir, entry.name, dedicated))
             }
         }
@@ -313,7 +319,9 @@ public struct ShareProvider: MediaProvider {
 
             let relSidecar = candidateDir.isEmpty ? name : "\(candidateDir)/\(name)"
             guard let data = try? await store.readFile(relSidecar), !data.isEmpty else { continue }
-            let localURL = tempDir.appendingPathComponent("\(abs(relSidecar.hashValue))-\(name)")
+            // `.magnitude` (not `abs`) so `Int.min` can't trap; hex keeps it short.
+            let stableKey = String(relSidecar.hashValue.magnitude, radix: 16)
+            let localURL = tempDir.appendingPathComponent("\(stableKey)-\(name)")
             do {
                 try data.write(to: localURL, options: .atomic)
             } catch {

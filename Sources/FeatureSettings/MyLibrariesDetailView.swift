@@ -26,7 +26,7 @@ struct MyLibrariesDetailView: View {
     private var allGroups: [ServerAccountGroup] { serverGroups(from: context.accounts) }
 
     private func isWatching(_ group: ServerAccountGroup) -> Bool {
-        group.accounts.contains { context.isAccountIncludedInActiveProfile($0.id) }
+        group.accounts.contains { context.activeAccountIDs.contains($0.id) }
     }
 
     /// The server's master on/off for this profile: on ⇒ watch it (include a
@@ -207,7 +207,7 @@ struct MyLibrariesDetailView: View {
                     identityRow(
                         title: account.userName,
                         avatar: { AccountAvatar(name: account.userName, imageURL: resolvedAvatarURL(for: account), size: 34) },
-                        accessory: .selected(context.isAccountIncludedInActiveProfile(account.id))
+                        accessory: .selected(context.activeAccountIDs.contains(account.id))
                     )
                 }
                 .buttonStyle(SettingsFocusButtonStyle())

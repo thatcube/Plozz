@@ -80,6 +80,7 @@ public struct SettingsView: View {
     private let reloadLibraries: () async -> Void
     private let accounts: [Account]
     private let activeAccountID: String?
+    private let activeAccountIDs: Set<String>
     private let profiles: [Profile]
     private let activeProfile: Profile
     private let askProfileOnStartup: Bool
@@ -127,6 +128,7 @@ public struct SettingsView: View {
         reloadLibraries: @escaping () async -> Void,
         accounts: [Account],
         activeAccountID: String?,
+        activeAccountIDs: Set<String>,
         profiles: [Profile],
         activeProfile: Profile,
         askProfileOnStartup: Bool,
@@ -173,6 +175,7 @@ public struct SettingsView: View {
         self.reloadLibraries = reloadLibraries
         self.accounts = accounts
         self.activeAccountID = activeAccountID
+        self.activeAccountIDs = activeAccountIDs
         self.profiles = profiles
         self.activeProfile = activeProfile
         self.askProfileOnStartup = askProfileOnStartup
@@ -209,6 +212,7 @@ public struct SettingsView: View {
             reloadLibraries: reloadLibraries,
             accounts: accounts,
             activeAccountID: activeAccountID,
+            activeAccountIDs: activeAccountIDs,
             profiles: profiles,
             activeProfile: activeProfile,
             askProfileOnStartup: askProfileOnStartup,
@@ -708,7 +712,7 @@ public struct SettingsView: View {
     private var watchedServerGroups: [ServerAccountGroup] {
         serverGroups(from: accounts).filter { group in
             profilesEnabled
-                ? group.accounts.contains { isAccountIncludedInActiveProfile($0.id) }
+                ? group.accounts.contains { activeAccountIDs.contains($0.id) }
                 : true
         }
     }
@@ -768,7 +772,7 @@ public struct SettingsView: View {
     /// nowhere to fan out to), so the Trackers page uses it to gate that toggle.
     private var activeProfileServerCount: Int {
         let relevant = profilesEnabled
-            ? accounts.filter { isAccountIncludedInActiveProfile($0.id) }
+            ? accounts.filter { activeAccountIDs.contains($0.id) }
             : accounts
         return Set(relevant.map { $0.server.id }).count
     }

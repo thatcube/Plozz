@@ -23,21 +23,27 @@ import CoreUI
 struct MyLibrariesDetailView: View {
     let context: SettingsContext
 
+    /// Bumped on every server/identity mutation so the pushed view re-renders
+    /// immediately and re-reads live state through `context`'s closures. This is
+    /// what makes the master switch move the instant it's pressed: the settings
+    /// screen is a cached navigation destination, so it does NOT otherwise re-run
+    /// its body when `AppState.activeAccountIDs` changes underneath it. Reading a
+    /// snapshot value here (a copied `Set`) went stale for the same reason — hence
+    /// a local revision counter driving live re-reads instead.
+    @State private var revision = 0
+
     private var allGroups: [ServerAccountGroup] { serverGroups(from: context.accounts) }
 
     private func isWatching(_ group: ServerAccountGroup) -> Bool {
-        group.accounts.contains { context.activeAccountIDs.contains($0.id) }
+        group.accounts.contains { context.isAccountIncludedInActiveProfile($0.id) }
     }
 
     /// The server's master on/off for this profile: on ⇒ watch it (include a
     /// sign-in), off ⇒ stop watching (drop all its sign-ins from the profile).
     /// The server itself is never removed here — that's a household sign-out on
     /// This Apple TV › Servers.
-    private func masterBinding(_ group: ServerAccountGroup) -> Binding<Bool> {
-        Binding(
-            get: { isWatching(group) },
-            set: { $0 ? startWatching(group) : stopWatching(group) }
-        )
+    private func toggleWatching(_ group: ServerAccountGroup) {
+        isWatching(group) ? stopWatching(group) : startWatching(group)
     }
 
     var body: some View {
@@ -83,16 +89,21 @@ struct MyLibrariesDetailView: View {
         // inside nest concentrically with this panel's border.
         SettingsPanel(contentPadding: .settingsPanelRowContent) {
             VStack(alignment: .leading, spacing: 18) {
-                // The whole header row is the master toggle: brand + server name on
-                // the left, the On/Off switch on the right.
-                Toggle(isOn: masterBinding(group)) {
+                // The whole header row is the master switch: brand + server name
+                // on the left, the On/Off switch on the right. A Button (not a
+                // Toggle) so the tvOS press reliably fires the side-effectful
+                // watch/unwatch action.
+                SettingsSwitchButton(
+                    isOn: isWatching(group),
+                    flushLeading: false,
+                    action: { toggleWatching(group) }
+                ) {
                     HStack(spacing: 16) {
                         ProviderBrandMark(provider: group.providerKind, size: 48, showsBackground: false)
                             .frame(width: 48)
                         Text(group.serverName)
                     }
                 }
-                .toggleStyle(SettingsSwitchToggleStyle(flushLeading: false))
 
                 if isWatching(group) {
                     // A media share has no watcher identity, so it skips "Watching
@@ -207,7 +218,7 @@ struct MyLibrariesDetailView: View {
                     identityRow(
                         title: account.userName,
                         avatar: { AccountAvatar(name: account.userName, imageURL: resolvedAvatarURL(for: account), size: 34) },
-                        accessory: .selected(context.activeAccountIDs.contains(account.id))
+                        accessory: .selected(context.isAccountIncludedInActiveProfile(account.id))
                     )
                 }
                 .buttonStyle(SettingsFocusButtonStyle())
@@ -219,12 +230,14 @@ struct MyLibrariesDetailView: View {
         for account in group.accounts {
             context.onSetAccountIncluded(account.id, account.id == chosen.id)
         }
+        revision += 1
     }
 
     private func stopWatching(_ group: ServerAccountGroup) {
         for account in group.accounts {
             context.onSetAccountIncluded(account.id, false)
         }
+        revision += 1
     }
 
     // MARK: - Add a server
@@ -253,6 +266,7 @@ struct MyLibrariesDetailView: View {
         for account in group.accounts {
             context.onSetAccountIncluded(account.id, account.id == first.id)
         }
+        revision += 1
     }
 
     // MARK: - Libraries on Home (per-profile visibility)

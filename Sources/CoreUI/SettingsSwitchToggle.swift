@@ -112,6 +112,55 @@ public struct FocusGatedSwitch: View {
     }
 }
 
+/// A plain `Button` that looks EXACTLY like `SettingsSwitchToggleStyle` (same
+/// track-and-knob switch + On/Off word), but is a button, not a `Toggle`, and
+/// takes an arbitrary `label`.
+///
+/// Use this when "on/off" is really a **side-effectful action** rather than a
+/// simple boolean binding — e.g. the per-profile server master switch, where one
+/// press expands/collapses a whole card and mutates a multi-account set. A plain
+/// `Button` makes the press path unambiguous on tvOS (a real `Toggle` with a
+/// custom style drove nothing here), and reading `isOn` from live state each
+/// render keeps it honest even when the hosting screen is a cached navigation
+/// destination.
+public struct SettingsSwitchButton<Label: View>: View {
+    private let isOn: Bool
+    private let flushLeading: Bool
+    private let action: () -> Void
+    @ViewBuilder private let label: () -> Label
+    private var hInset: CGFloat { SettingsRowMetrics.horizontalPadding }
+
+    public init(
+        isOn: Bool,
+        flushLeading: Bool = true,
+        action: @escaping () -> Void,
+        @ViewBuilder label: @escaping () -> Label
+    ) {
+        self.isOn = isOn
+        self.flushLeading = flushLeading
+        self.action = action
+        self.label = label
+    }
+
+    public var body: some View {
+        Button(action: action) {
+            HStack(spacing: SettingsRowMetrics.spacing(.primary)) {
+                label()
+                    .font(.headline.weight(.semibold))
+                    .lineLimit(1)
+                Spacer(minLength: SettingsRowMetrics.spacing(.primary))
+                SettingsSwitchIndicator(isOn: isOn)
+            }
+            .frame(minHeight: SettingsRowMetrics.minHeight(.primary))
+            .padding(.vertical, SettingsRowMetrics.verticalPadding(.primary))
+            .padding(.horizontal, hInset)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(SettingsFocusButtonStyle())
+        .padding(.leading, flushLeading ? -hInset : 0)
+    }
+}
+
 /// The track-and-knob graphic plus the On/Off state word. Reads the shared
 /// settings focus environment so it stays legible against the inverted
 /// (white-in-dark-mode) focus card.

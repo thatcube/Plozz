@@ -166,9 +166,6 @@ struct MainTabView: View {
     let appliedWatchRecency: @Sendable () async -> [String: AppliedResumeRecord]
     let displayAccounts: [Account]
     let activeAccountID: String?
-    /// The active profile's included-account set, threaded as a value so the
-    /// Settings toggles that read it re-render when a server is switched on/off.
-    let activeAccountIDs: Set<String>
     let profiles: [Profile]
     let activeProfile: Profile
     let askProfileOnStartup: Bool
@@ -363,7 +360,6 @@ struct MainTabView: View {
                 },
                 accounts: displayAccounts,
                 activeAccountID: activeAccountID,
-                activeAccountIDs: activeAccountIDs,
                 profiles: profiles,
                 activeProfile: activeProfile,
                 askProfileOnStartup: askProfileOnStartup,

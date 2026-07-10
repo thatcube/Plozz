@@ -17,13 +17,6 @@ struct SettingsContext {
     let reloadLibraries: () async -> Void
     let accounts: [Account]
     let activeAccountID: String?
-    /// The active profile's included-account set, passed as a *value* (not just
-    /// the `isAccountIncludedInActiveProfile` closure) so SwiftUI actually
-    /// observes changes to it: a view reading this in `body` re-renders when a
-    /// server is toggled on/off. Reading it only through the closure never
-    /// registers an `@Observable` dependency, which is why the master server
-    /// toggle used to appear frozen.
-    let activeAccountIDs: Set<String>
     let profiles: [Profile]
     let activeProfile: Profile
     let askProfileOnStartup: Bool

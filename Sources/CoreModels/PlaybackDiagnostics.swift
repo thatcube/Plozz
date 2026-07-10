@@ -187,6 +187,9 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
     public var sourceProvider: ProviderKind?
     /// Friendly server name shown in the overlay header (e.g. "Allie's Jellyfin").
     public var serverName: String?
+    /// Basename of the actual selected source file. This is provider-supplied
+    /// rather than derived from the playback URL, which may be a transcode API.
+    public var sourceFileName: String?
     /// Container codec FourCC tag, e.g. `hvc1` / `hev1` / `dvh1`. The hvc1-vs-hev1
     /// distinction is make-or-break for AVPlayer (hev1 plays audio with a black
     /// screen), so it's surfaced explicitly.
@@ -251,6 +254,7 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
         liveViewModels: Int? = nil,
         liveNativeEngines: Int? = nil,
         sourceProvider: ProviderKind? = nil,
+        sourceFileName: String? = nil,
         videoCodecTag: String? = nil,
         videoBitDepth: Int? = nil,
         dolbyVisionProfile: Int? = nil,
@@ -294,6 +298,7 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
         self.liveViewModels = liveViewModels
         self.liveNativeEngines = liveNativeEngines
         self.sourceProvider = sourceProvider
+        self.sourceFileName = sourceFileName
         self.videoCodecTag = videoCodecTag
         self.videoBitDepth = videoBitDepth
         self.dolbyVisionProfile = dolbyVisionProfile
@@ -848,6 +853,14 @@ public extension PlaybackDiagnostics {
 
     /// Token-stripped transport summary of what AVPlayer is actually playing.
     var streamTransportText: String { streamTransport ?? Self.placeholder }
+
+    /// Selected source filename, or a placeholder when the provider cannot expose
+    /// one. Whitespace-only values are suppressed.
+    var sourceFileNameText: String {
+        guard let value = sourceFileName?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !value.isEmpty else { return Self.placeholder }
+        return value
+    }
 
     /// Current position over duration, e.g. `12:34 / 1:58:24`.
     var positionText: String {

@@ -295,6 +295,10 @@ public struct PlaybackRequest: Hashable, Sendable {
     public var sourceProvider: ProviderKind?
     /// Friendly name of the media server (e.g. "Allie's Jellyfin", "Living Room").
     public var serverName: String?
+    /// Basename of the selected source file, when the provider exposes it. Kept
+    /// separate from `streamURL`: Plex/Jellyfin often play an API/transcode URL
+    /// whose last path component is not the original media filename.
+    public var sourceFileName: String?
     /// Ordered ISO-639 audio languages to steer the engine's INITIAL active audio
     /// track at load (AetherEngine `LoadOptions.preferredAudioLanguages` — first
     /// match wins, no reload). Computed by `PlayerViewModel` from per-series
@@ -320,7 +324,8 @@ public struct PlaybackRequest: Hashable, Sendable {
         localRemuxSource: LocalRemuxSourceDescriptor? = nil,
         scrubPreview: ScrubPreviewSource? = nil,
         sourceProvider: ProviderKind? = nil,
-        serverName: String? = nil
+        serverName: String? = nil,
+        sourceFileName: String? = nil
     ) {
         self.item = item
         self.streamURL = streamURL
@@ -337,6 +342,7 @@ public struct PlaybackRequest: Hashable, Sendable {
         self.isManifestStream = isTranscoding || streamURL.pathExtension.lowercased() == "m3u8"
         self.sourceProvider = sourceProvider
         self.serverName = serverName
+        self.sourceFileName = sourceFileName
     }
 }
 

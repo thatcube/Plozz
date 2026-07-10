@@ -568,7 +568,9 @@ public struct JellyfinProvider: MediaProvider {
             localRemuxSource: localRemuxSource,
             scrubPreview: trickplayManifest(itemID: itemID, source: source, trickplay: detail.Trickplay).map(ScrubPreviewSource.tiled),
             sourceProvider: .jellyfin,
-            serverName: session.server.name
+            serverName: session.server.name,
+            sourceFileName: originalSource.Path.map { ($0 as NSString).lastPathComponent }
+                ?? originalSource.Name
         )
     }
 

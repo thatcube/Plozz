@@ -69,6 +69,14 @@ final class PlaybackDiagnosticsHDRTests: XCTestCase {
         XCTAssertNil(PlaybackDiagnostics.friendlyContainerName(nil))
     }
 
+    func testSourceFileNameText() {
+        var diagnostics = PlaybackDiagnostics(sourceFileName: "Movie (2024) 2160p.mkv")
+        XCTAssertEqual(diagnostics.sourceFileNameText, "Movie (2024) 2160p.mkv")
+
+        diagnostics.sourceFileName = "   "
+        XCTAssertEqual(diagnostics.sourceFileNameText, PlaybackDiagnostics.placeholder)
+    }
+
     func testContainerLabelPairsFriendlyNameWithRawToken() {
         XCTAssertEqual(PlaybackDiagnostics.containerLabel("mkv"), "Matroska (MKV)")
         XCTAssertEqual(PlaybackDiagnostics.containerLabel("webm"), "WebM")

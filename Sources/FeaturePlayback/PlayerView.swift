@@ -265,6 +265,7 @@ public struct PlayerView: View {
             capabilities: viewModel.mediaCapabilities,
             sourceProvider: viewModel.sourceProvider,
             serverName: viewModel.serverName,
+            sourceFileName: viewModel.diagnosticsSourceFileName,
             streamURL: viewModel.diagnosticsStreamURL,
             engineTelemetry: { viewModel.engineLiveTelemetry },
             probedFacts: { viewModel.engineProbedFacts }

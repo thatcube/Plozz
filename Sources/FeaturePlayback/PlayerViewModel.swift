@@ -2191,6 +2191,8 @@ public final class PlayerViewModel {
     /// The URL AVPlayer is actually playing, used for the diagnostics "Stream"
     /// transport row.
     public var diagnosticsStreamURL: URL? { request?.streamURL }
+    /// Provider-supplied basename of the selected source media file.
+    public var diagnosticsSourceFileName: String? { request?.sourceFileName }
 
     /// Device/display/audio capabilities used for routing and diagnostics.
     public var mediaCapabilities: MediaCapabilities { capabilities }

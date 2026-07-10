@@ -210,6 +210,9 @@ struct MediaSourceInfo: Decodable {
     /// Human-readable source name, e.g. `Movie (2009) Bluray-2160p`. Surfaced in
     /// the version picker when a title has several sources.
     let Name: String?
+    /// Server filesystem path of the selected source, when Jellyfin exposes it.
+    /// Used only for its basename in diagnostics; the full path is never shown.
+    let Path: String?
     /// File size in bytes, used to show "12.4 GB" per version.
     let Size: Int64?
     /// Overall declared bitrate in bits/sec.

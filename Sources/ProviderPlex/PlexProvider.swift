@@ -423,7 +423,9 @@ public struct PlexProvider: MediaProvider {
             localRemuxSource: localRemuxSource,
             scrubPreview: scrubPreview(for: part),
             sourceProvider: .plex,
-            serverName: session.server.name
+            serverName: session.server.name,
+            sourceFileName: part.file.map { ($0 as NSString).lastPathComponent }
+                ?? part.key.map { ($0 as NSString).lastPathComponent }
         )
     }
 

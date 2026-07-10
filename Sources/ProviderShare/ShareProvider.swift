@@ -304,7 +304,8 @@ public struct ShareProvider: MediaProvider {
             streamURL: url,
             startPosition: startPosition,
             sourceProvider: .mediaShare,
-            serverName: session.server.name
+            serverName: session.server.name,
+            sourceFileName: (relPath as NSString).lastPathComponent
         )
     }
 

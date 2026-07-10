@@ -41,6 +41,8 @@ struct SeriesDetailView: View {
     /// episode row to it, and parks focus on the hero Play button.
     let initialEpisode: MediaItem?
 
+    @Environment(\.plozzMetrics) private var metrics
+
     /// Which season's episodes the rail is currently showing. Driven by season
     /// tab focus; seeded to the "next up" season on first appearance.
     @State private var selectedSeasonID: String?
@@ -153,6 +155,17 @@ struct SeriesDetailView: View {
     /// us decide true visibility and the clipped edge for a minimal reveal.
     private static let seasonBarSpace = "seasonBarViewport"
 
+    /// A single hero height for the page's lifetime. The earlier focus-driven
+    /// 0.8 → 0.42 animation raced tvOS's episode focus-reveal when DOWN was pressed
+    /// twice quickly: the reveal used the rail's pre-collapse frame, then the page
+    /// shrank underneath that offset and ended up overscrolled. This density-aware
+    /// height never changes as focus moves. Smaller cards spend the reclaimed room
+    /// on the hero; larger cards progressively reserve more of the viewport for the
+    /// episode rail.
+    private var stableHeroHeightFraction: CGFloat {
+        min(0.62, max(0.36, 0.75 - 0.28 * metrics.scale))
+    }
+
     var body: some View {
         scrollContent
             // Never clip a focused card's lift, shadow or border.
@@ -209,8 +222,9 @@ struct SeriesDetailView: View {
                     DetailHeroView(
                         item: displayHeroItem,
                         backdropItem: series,
-                        heroHeightFraction: 0.8,
+                        heroHeightFraction: stableHeroHeightFraction,
                         backdropBottomExtensionFraction: 0.1,
+                        compactPresentation: true,
                         spoilerSettings: spoilerSettings,
                         subtitleOverride: heroSubtitleOverride,
                         playTitle: playTarget.map { viewModel.playButtonTitle(for: $0) },

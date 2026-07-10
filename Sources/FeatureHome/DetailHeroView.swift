@@ -36,6 +36,12 @@ struct DetailHeroView: View {
     /// series page so the seamless fade lands closer to the top of the episode
     /// rail instead of completing high up the page.
     var backdropBottomExtensionFraction: CGFloat = 0
+    /// Uses a shorter, geometry-stable content treatment for a series page whose
+    /// season tabs and episode rail share the first viewport. The logo and overview
+    /// keep fixed footprints and the rarely-populated tagline is omitted, preserving
+    /// useful episode metadata without letting focused-item differences resize the
+    /// outer page.
+    var compactPresentation: Bool = false
     let spoilerSettings: SpoilerSettings
     /// Replaces the hero's own subtitle when set. Used by a TV-show hero that is
     /// presenting the *series* (not a focused episode) to still surface the
@@ -219,6 +225,7 @@ struct DetailHeroView: View {
     /// the colour scheme into account — otherwise its white fill vanishes against
     /// the light unfocused button in light mode.
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.plozzMetrics) private var metrics
 
     /// The item supplying the backdrop artwork (the pinned series, when set).
     private var backdrop: MediaItem { backdropItem ?? item }
@@ -228,6 +235,15 @@ struct DetailHeroView: View {
     /// content does). The scrim geometry is identical across modes — only this
     /// tone flips — so legibility stays consistent between appearances.
     private var scrimTone: Color { colorScheme == .dark ? .black : .white }
+
+    private var heroLogoHeight: CGFloat { compactPresentation ? 140 : 200 }
+
+    /// Huge episode cards need the extra vertical line more than the hero does.
+    /// This remains fixed for every episode at a given display size, so horizontal
+    /// browsing cannot reflow the page.
+    private var overviewLineCount: Int {
+        compactPresentation && metrics.density == .extraLarge ? 2 : 3
+    }
 
     // MARK: - Visible item actions (discoverability)
 
@@ -368,33 +384,41 @@ struct DetailHeroView: View {
             HeroLogoArtwork(
                 primaryURL: backdrop.logoURL,
                 asyncFallbackURL: tmdbLogoFallback,
-                backgroundSample: heroBackgroundSample
+                backgroundSample: heroBackgroundSample,
+                maxHeight: heroLogoHeight
             ) {
                 titleText(hideText: hideText)
             }
-            if let subtitle = subtitleOverride ?? item.subtitle, !isYearOnlySubtitle(subtitle) {
-                Text(subtitle)
-                    .font(.system(size: 26, weight: .medium))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .contentTransition(.opacity)
+            .frame(height: compactPresentation ? heroLogoHeight : nil, alignment: .bottomLeading)
+            ZStack(alignment: .leading) {
+                if let subtitle = subtitleOverride ?? item.subtitle, !isYearOnlySubtitle(subtitle) {
+                    Text(subtitle)
+                        .font(.system(size: 26, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .contentTransition(.opacity)
+                }
             }
+            .frame(height: compactPresentation ? 32 : nil, alignment: .leading)
             let metadata = item.metadataComponents()
-            if heroRatingBadge != nil || !metadata.isEmpty {
-                HStack(alignment: .center, spacing: 16) {
-                    if let badge = heroRatingBadge {
-                        MediaBadgeChip(badge: badge)
-                    }
-                    if !metadata.isEmpty {
-                        Text(metadata.joined(separator: "  ·  "))
-                            .font(.system(size: 23, weight: .medium))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .contentTransition(.opacity)
+            ZStack(alignment: .leading) {
+                if heroRatingBadge != nil || !metadata.isEmpty {
+                    HStack(alignment: .center, spacing: 16) {
+                        if let badge = heroRatingBadge {
+                            MediaBadgeChip(badge: badge)
+                        }
+                        if !metadata.isEmpty {
+                            Text(metadata.joined(separator: "  ·  "))
+                                .font(.system(size: 23, weight: .medium))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .contentTransition(.opacity)
+                        }
                     }
                 }
             }
-            if !hideText, let tagline = item.tagline {
+            .frame(height: compactPresentation ? 36 : nil, alignment: .leading)
+            if !compactPresentation, !hideText, let tagline = item.tagline {
                 Text(tagline)
                     .font(.system(size: 24, weight: .medium))
                     .italic()
@@ -403,29 +427,24 @@ struct DetailHeroView: View {
                     .frame(maxWidth: 960, alignment: .topLeading)
                     .contentTransition(.opacity)
             }
-            if !featureBadges.isEmpty {
-                MediaBadgeRow(badges: featureBadges)
+            ZStack(alignment: .leading) {
+                if !featureBadges.isEmpty {
+                    MediaBadgeRow(badges: featureBadges)
+                }
             }
-            if !heroRatings.isEmpty && !spoilerSettings.shouldHideRatings(for: item) {
-                RatingsBadgeRow(ratings: heroRatings)
+            .frame(height: compactPresentation ? 36 : nil, alignment: .leading)
+            ZStack(alignment: .leading) {
+                if !heroRatings.isEmpty && !spoilerSettings.shouldHideRatings(for: item) {
+                    RatingsBadgeRow(ratings: heroRatings)
+                }
             }
-            if hideText {
-                Label("Overview hidden to avoid spoilers", systemImage: "eye.slash.fill")
-                    .font(.system(size: 22))
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: 960, alignment: .topLeading)
-            } else if let overview = item.overview {
-                Text(overview)
-                    .font(.system(size: 22))
-                    .foregroundStyle(.secondary)
-                    .lineSpacing(2)
-                    // Reserve three lines of height even when the text is
-                    // shorter, so swapping the focused item never makes the
-                    // controls below jump up and down.
-                    .lineLimit(3, reservesSpace: true)
-                    .frame(maxWidth: 960, alignment: .topLeading)
-                    .contentTransition(.opacity)
-            }
+            .frame(height: compactPresentation ? 50 : nil, alignment: .leading)
+            HeroOverviewText(
+                overview: item.overview,
+                hidesSpoilers: hideText,
+                mode: spoilerSettings.mode,
+                lineCount: overviewLineCount
+            )
             if isDiscoveryItem ? showsRequestPill : ((playTitle != nil && onPlay != nil) || onPlayTrailer != nil || showsMoreMenu || hasHeroActionButtons) {
                 HStack(spacing: 24) {
                     if isDiscoveryItem {
@@ -489,8 +508,8 @@ struct DetailHeroView: View {
                 }
             }
         }
-        .padding(.top, PlozzTheme.Metrics.screenPadding)
-        .padding(.bottom, bottomInset)
+        .padding(.top, compactPresentation ? 20 : PlozzTheme.Metrics.screenPadding)
+        .padding(.bottom, compactPresentation ? 20 : bottomInset)
         .padding(.trailing, PlozzTheme.Metrics.screenPadding)
         .padding(.leading, PlozzTheme.Metrics.heroLeadingPadding)
         // Occupy the backdrop's height and pin the content to the bottom-leading
@@ -1088,6 +1107,61 @@ private struct HeroMoreMenu: View, Equatable {
                 .foregroundStyle(Color.primary)
                 .frame(width: iconSize, height: iconSize)
         }
+    }
+}
+
+/// The hero overview's geometry is identical for revealed, spoiler-hidden, and
+/// missing text. Blur mode mirrors the thumbnail treatment by obscuring the real
+/// overview; placeholder mode never puts the real overview in the view hierarchy.
+/// Both hidden forms expose only a spoiler-safe accessibility label.
+private struct HeroOverviewText: View {
+    let overview: String?
+    let hidesSpoilers: Bool
+    let mode: SpoilerSettings.Mode
+    let lineCount: Int
+
+    private static let hiddenLabel = "Overview hidden to avoid spoilers"
+
+    var body: some View {
+        Group {
+            if hidesSpoilers {
+                hiddenOverview
+            } else {
+                Text(overview ?? "")
+                    .opacity(overview == nil ? 0 : 1)
+                    .accessibilityHidden(overview == nil)
+            }
+        }
+        .font(.system(size: 22))
+        .foregroundStyle(.secondary)
+        .lineSpacing(2)
+        .lineLimit(lineCount, reservesSpace: true)
+        .frame(maxWidth: 960, alignment: .topLeading)
+        .contentTransition(.opacity)
+    }
+
+    @ViewBuilder
+    private var hiddenOverview: some View {
+        switch mode {
+        case .blur:
+            if let overview {
+                Text(overview)
+                    .blur(radius: 12)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(Self.hiddenLabel)
+            } else {
+                placeholderOverview
+            }
+        case .placeholder:
+            placeholderOverview
+        }
+    }
+
+    private var placeholderOverview: some View {
+        Text(verbatim: Array(repeating: Self.hiddenLabel, count: lineCount).joined(separator: "\n"))
+            .redacted(reason: .placeholder)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(Self.hiddenLabel)
     }
 }
 

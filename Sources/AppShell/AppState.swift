@@ -2056,16 +2056,28 @@ public final class AppState {
         registry.invalidateCache()
         accounts = accountStore.loadAccounts()
         let known = Set(accounts.map(\.id))
-        // The active set is the active profile's chosen subset, falling back to
-        // the household-global active set (default profile / upgrade path).
+        // The household-global active set is the fallback for a profile that has
+        // never chosen a subset (default profile / upgrade path).
         let globalActive = accountStore.activeAccountIDs()
-        let profileIDs = profilesModel.activeAccountIDs(
-            for: profilesModel.activeProfileID,
-            fallback: globalActive
-        )
-        var resolved = Set(profileIDs.filter { known.contains($0) })
-        // A profile that selected nothing valid uses every account.
-        if resolved.isEmpty { resolved = known }
+        let resolved: Set<String>
+        if let stored = profilesModel.storedActiveAccountIDs(for: profilesModel.activeProfileID) {
+            // The profile made an *explicit* choice. Honor it exactly — including
+            // an intentional empty set ("watch nothing"), which is what turning
+            // the last server off produces and must not be silently re-expanded
+            // to every account (that's what made the master server toggle appear
+            // to do nothing). Only fall back if every chosen account has since
+            // gone stale (e.g. the servers were signed out household-wide), so a
+            // profile isn't left permanently blank by a removal it didn't make.
+            let valid = Set(stored.filter { known.contains($0) })
+            if valid.isEmpty && !stored.isEmpty {
+                resolved = Set(globalActive.filter { known.contains($0) })
+            } else {
+                resolved = valid
+            }
+        } else {
+            // Never chose → default to the household-global active set.
+            resolved = Set(globalActive.filter { known.contains($0) })
+        }
         activeAccountIDs = resolved
     }
 

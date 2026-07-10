@@ -46,6 +46,12 @@ public struct MediaTrack: Codable, Hashable, Identifiable, Sendable {
     /// key off this flag, not `deliveryURL == nil`, or embedded SRT gets pushed
     /// to the hybrid engine (and crashes on multichannel) needlessly.
     public var isImageBasedSubtitle: Bool
+    /// `true` for a subtitle that isn't embedded in the media file — a subtitle the
+    /// user downloaded this session (server-fetched) or a local sidecar file
+    /// (SMB `.srt`/`.ass`). Drives a small "external" marker in the track menu so a
+    /// freshly-downloaded sub is distinguishable in a list full of same-language
+    /// embedded tracks. Defaults to `false` (embedded).
+    public var isExternal: Bool
 
     public init(
         id: Int,
@@ -60,7 +66,8 @@ public struct MediaTrack: Codable, Hashable, Identifiable, Sendable {
         isHearingImpaired: Bool = false,
         isCommentary: Bool = false,
         deliveryURL: URL? = nil,
-        isImageBasedSubtitle: Bool = false
+        isImageBasedSubtitle: Bool = false,
+        isExternal: Bool = false
     ) {
         self.id = id
         self.kind = kind
@@ -75,6 +82,7 @@ public struct MediaTrack: Codable, Hashable, Identifiable, Sendable {
         self.isCommentary = isCommentary
         self.deliveryURL = deliveryURL
         self.isImageBasedSubtitle = isImageBasedSubtitle
+        self.isExternal = isExternal
     }
 
     /// Codec tokens that identify a **bitmap** (image-based) subtitle format —

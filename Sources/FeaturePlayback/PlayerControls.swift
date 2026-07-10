@@ -99,7 +99,7 @@ struct PlayerControls: View {
     /// header ✎ Edit opens `style`, and the trailing row opens `download`. The
     /// Style screen has its own detail sub-screens (`styleOutline` / `styleBackground`
     /// / `styleDual`). Back steps to a screen's PARENT rather than closing the panel.
-    private enum SubtitleScreen {
+    private enum SubtitleScreen: Equatable {
         case tracks, download, sync, style, styleFont, styleOutline, styleBackground, styleDual
 
         /// The screen a Back / Menu press should return to.
@@ -268,6 +268,14 @@ struct PlayerControls: View {
             // already uses on close. Any one-frame highlight of the engine's pick happens
             // while the panel is still at ~0 opacity (mid fade-in), so it's imperceptible.
             restoreFocus(preferredPanelFocus)
+        }
+        .onChange(of: model.subtitleDownloadState) { _, state in
+            // When search results land (async) while the Download screen is open,
+            // move focus onto the first result so it's immediately actionable —
+            // instead of leaving it parked on Back. Deferred for the same reason as
+            // panel-open focus: let tvOS's own pass run first, then land ours.
+            guard openPanel == .subtitles, subtitleScreen == .download else { return }
+            if case .results = state { restoreFocus(.row(0)) }
         }
         .onExitCommand { handleExit() }
         .onPlayPauseCommand { actions.togglePlayPause() }
@@ -630,6 +638,10 @@ struct PlayerControls: View {
             case .tracks:
                 return .row(selectedRowIndex(for: .subtitles))
             case .download:
+                // Land on the first result when we have them; while still searching
+                // (no rows yet) rest on Back. An async results arrival is handled by
+                // an onChange that moves focus onto the first row.
+                if case .results = model.subtitleDownloadState { return .row(0) }
                 return .subBack
             case .sync:
                 // Land on the − nudge (leftmost control); the value and + sit to
@@ -671,6 +683,10 @@ struct PlayerControls: View {
     private func panelWidth(for category: Category) -> CGFloat {
         switch category {
         case .speed: return 260
+        // The Download screen lists scene-release filenames; it's wider than the
+        // other menus, and the title marquee-scrolls the rest on focus, so it needs
+        // room to be readable without being absurdly wide.
+        case .subtitles where subtitleScreen == .download: return 860
         default: return 520
         }
     }
@@ -718,6 +734,12 @@ struct PlayerControls: View {
         // inside." The Spacer/transport layout flip keeps its animation (that modifier
         // lives on `body`, above this override).
         .animation(nil, value: styleEditing)
+        // Content swaps INSTANTLY on a subtitle sub-screen change (track list ↔
+        // Download ↔ Style): only the glass container should animate, never the rows
+        // ghosting into each other. The container's width/height animate via the
+        // explicit `withAnimation` in `openSubtitleScreen` + the height morph in
+        // `onPreferenceChange` — both of which sit OUTSIDE this nil scope.
+        .animation(nil, value: subtitleScreen)
         .frame(width: panelWidth(for: category), alignment: .leading)
         .colorScheme(.dark)
         .modifier(PanelGlassBackground())
@@ -1104,7 +1126,15 @@ struct PlayerControls: View {
     private var subtitleBody: some View {
         switch subtitleScreen {
         case .tracks: subtitlePane
-        case .download: subtitleDownloadStub
+        case .download:
+            // Pin the Download screen to the panel's max body height so it opens to a
+            // stable size and stays put across its states (searching → results →
+            // downloading → added). Without this floor the short "searching"/"added"
+            // states would collapse the box and the results list would then grow it
+            // back — a visible shrink-then-expand. A tall results list still scrolls
+            // (the enclosing morphingBody caps + scrolls at this same height).
+            subtitleDownloadStub
+                .frame(minHeight: Self.panelBodyMaxHeight, alignment: .top)
         case .sync: subtitleSyncScreen
         case .style:
             // A bitmap primary (PGS/DVD/…) is pre-rendered by the source, so NONE
@@ -1169,8 +1199,8 @@ struct PlayerControls: View {
             }
         } label: {
             HStack(spacing: 10) {
-                Image(systemName: "arrow.down.circle").font(.body)
-                Text("Search for subtitles…").font(.body).lineLimit(1)
+                Image(systemName: "square.and.arrow.down").font(.body)
+                Text("Download subtitles…").font(.body).lineLimit(1)
                 Spacer(minLength: 8)
             }
             .padding(.horizontal, 16)
@@ -1229,54 +1259,56 @@ struct PlayerControls: View {
     }
 
     private func subtitleDownloadStatus(systemImage: String, title: String, detail: String, showSpinner: Bool = false) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(spacing: 12) {
             HStack(spacing: 10) {
                 if showSpinner {
                     ProgressView()
                 } else {
-                    Image(systemName: systemImage).font(.body)
+                    Image(systemName: systemImage).font(.title3)
                 }
                 Text(title).font(.callout.weight(.semibold))
             }
             Text(detail)
                 .font(.caption)
                 .foregroundStyle(.white.opacity(0.7))
+                .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(.horizontal, 28)
-        .padding(.vertical, 14)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 40)
+        // Fill the pinned Download-screen height and centre, so the spinner /
+        // message sits in the middle of the box rather than jammed top-left.
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
     }
 
     private func subtitleResultsList(_ subs: [RemoteSubtitle]) -> some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 2) {
-                ForEach(Array(subs.prefix(30).enumerated()), id: \.element.id) { index, sub in
-                    Button {
-                        actions.downloadRemoteSubtitle(sub)
-                    } label: {
-                        HStack(spacing: 10) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(Self.remoteSubtitleTitle(sub)).font(.body).lineLimit(1)
-                                Text(Self.remoteSubtitleDetail(sub))
-                                    .font(.caption2)
-                                    .playerMenuRowSecondary()
-                                    .lineLimit(1)
-                            }
-                            Spacer(minLength: 8)
-                            Image(systemName: "arrow.down.circle").font(.body)
-                        }
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 10)
-                        .contentShape(Rectangle())
+        // A plain column (NOT a ScrollView): the enclosing `morphingBody` already
+        // provides the scroll + height measurement that drives the open/height
+        // morph, exactly like the track list. A nested ScrollView here is greedy
+        // vertically, breaks that measurement (so the panel wouldn't animate open),
+        // and reads as janky.
+        VStack(alignment: .leading, spacing: 2) {
+            ForEach(Array(subs.prefix(30).enumerated()), id: \.element.id) { index, sub in
+                Button {
+                    actions.downloadRemoteSubtitle(sub)
+                } label: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        MarqueeText(text: Self.remoteSubtitleTitle(sub), font: .body)
+                        Text(Self.remoteSubtitleDetail(sub))
+                            .font(.caption2)
+                            .playerMenuRowSecondary()
+                            .lineLimit(1)
                     }
-                    .buttonStyle(PlayerMenuRowButtonStyle())
-                    .focusEffectDisabled()
-                    .focused($focus, equals: .row(index))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(PlayerMenuRowButtonStyle())
+                .focusEffectDisabled()
+                .focused($focus, equals: .row(index))
             }
-            .padding(.horizontal, 14)
         }
+        .padding(.horizontal, 14)
     }
 
     /// The candidate's display name, falling back to language when unnamed.
@@ -1286,13 +1318,21 @@ struct PlayerControls: View {
         return "Subtitle"
     }
 
-    /// The provider · downloads · badges line beneath a candidate.
+    /// The language · downloads · badges line beneath a candidate. The provider is
+    /// omitted for OpenSubtitles (Plex's only source, and Jellyfin's usual one — so
+    /// it's noise); a *different* provider is shown since then it's informative.
     private static func remoteSubtitleDetail(_ sub: RemoteSubtitle) -> String {
         var parts: [String] = []
-        if let provider = sub.providerName, !provider.isEmpty { parts.append(provider) }
+        if let provider = sub.providerName, !provider.isEmpty,
+           !provider.lowercased().replacingOccurrences(of: " ", with: "").contains("opensubtitles") {
+            parts.append(provider)
+        }
         if let language = sub.language,
            let name = SubtitleLanguageCatalog.displayName(forCode: language) { parts.append(name) }
-        if let count = sub.downloadCount, count > 0 { parts.append("\(count) downloads") }
+        if let count = sub.downloadCount, count > 0 {
+            let formatted = NumberFormatter.localizedString(from: NSNumber(value: count), number: .decimal)
+            parts.append("\(formatted) downloads")
+        }
         if sub.isForced { parts.append("Forced") }
         if sub.isHearingImpaired { parts.append("SDH") }
         return parts.isEmpty ? "Tap to download" : parts.joined(separator: " · ")
@@ -1937,7 +1977,14 @@ struct PlayerControls: View {
                 styleBodyHeight = min(styleBodyHeight, Self.panelBodyMaxHeight)
             }
         }
-        subtitleScreen = screen
+        // Animate the CONTAINER as the screen changes: setting `subtitleScreen`
+        // inside an explicit animation animates the frame width (e.g. 520→720 for
+        // the wider Download screen) and, via onPreferenceChange, the height. The
+        // content is held instant by `.animation(nil, value: subtitleScreen)` on the
+        // panel, so only the glass box glides; the rows swap without ghosting.
+        withAnimation(.easeInOut(duration: 0.28)) {
+            subtitleScreen = screen
+        }
         // Defer the focus write to the next runloop tick (same mechanism as
         // panel-open, via `restoreFocus`). Swapping the header chips + rows for the
         // new sub-screen makes tvOS's focus engine run its own default pass in this
@@ -1979,6 +2026,12 @@ struct PlayerControls: View {
                 Text(row.title)
                     .font(.body)
                     .lineLimit(1)
+                if row.isExternal {
+                    // Marks a subtitle that isn't embedded in the video — one you
+                    // downloaded this session, or a local sidecar file — so it's
+                    // findable in a list full of same-language embedded tracks.
+                    ExternalSubtitleBadge()
+                }
                 Spacer(minLength: 8)
                 if row.isSelected {
                     Image(systemName: "checkmark")
@@ -2233,6 +2286,7 @@ struct PlayerControls: View {
         let subtitle: String
         let isSelected: Bool
         let isToggle: Bool
+        var isExternal: Bool = false
         let action: () -> Void
     }
 
@@ -2249,6 +2303,7 @@ struct PlayerControls: View {
                 subtitle: "",
                 isSelected: option.isSelected,
                 isToggle: false,
+                isExternal: option.isExternal,
                 action: { actions.selectSubtitle(option.id) }
             )
         }

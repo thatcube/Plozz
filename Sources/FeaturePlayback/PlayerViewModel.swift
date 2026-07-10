@@ -2378,7 +2378,8 @@ public final class PlayerViewModel {
                         detectedLanguage: detectedSubtitleLanguages[track.id],
                         trackID: track.id
                     ),
-                    isSelected: track.id == selectedSubtitleTrackID
+                    isSelected: track.id == selectedSubtitleTrackID,
+                    isExternal: track.isExternal
                 )
             })
             controls.subtitleOptions = options
@@ -3126,6 +3127,7 @@ public final class PlayerViewModel {
         if t.language == nil { t.language = preferredLanguage }
         t.isForced = t.isForced || forced
         t.isImageBasedSubtitle = false
+        t.isExternal = true
         hotLoadedSubtitleTracks.append(t)
         loadTrackOptions()
         return t.id

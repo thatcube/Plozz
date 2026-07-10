@@ -13,11 +13,15 @@ public struct PlayerTrackOption: Identifiable, Hashable, Sendable {
     public var id: Int
     public var title: String
     public var isSelected: Bool
+    /// `true` for an external (downloaded / sidecar) subtitle, so the menu can mark
+    /// it apart from the media's embedded tracks.
+    public var isExternal: Bool
 
-    public init(id: Int, title: String, isSelected: Bool) {
+    public init(id: Int, title: String, isSelected: Bool, isExternal: Bool = false) {
         self.id = id
         self.title = title
         self.isSelected = isSelected
+        self.isExternal = isExternal
     }
 }
 

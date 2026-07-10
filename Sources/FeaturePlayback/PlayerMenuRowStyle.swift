@@ -131,4 +131,102 @@ extension View {
         modifier(PlayerMenuRowMarkStyle(isSelected: isSelected, accent: accent))
     }
 }
+
+/// A small "knockout" pill marking an external (downloaded / sidecar) subtitle in
+/// the track menu: a solid fill with the label cut out of it (transparent text),
+/// so the row — or the inverted white focus card — shows through the letters. The
+/// fill is focus-aware (light on the dark row, dark on the white focus card) so it
+/// reads on both.
+struct ExternalSubtitleBadge: View {
+    @Environment(\.playerMenuRowIsFocused) private var focused
+
+    var body: some View {
+        let fill = focused ? Color.black.opacity(0.62) : Color.white.opacity(0.6)
+        Text("EXTERNAL")
+            .font(.system(size: 11, weight: .heavy))
+            .tracking(0.4)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 2)
+            // The text punches its own shape out of the fill behind it; the fill is
+            // drawn first (as the background), then the text's destinationOut blend
+            // removes the glyphs. `compositingGroup` isolates the blend so it only
+            // cuts the pill, never the HDR video behind the panel.
+            .blendMode(.destinationOut)
+            .background(RoundedRectangle(cornerRadius: 5, style: .continuous).fill(fill))
+            .compositingGroup()
+            .accessibilityLabel("External subtitle")
+    }
+}
+/// A single-line label that truncates (with a soft right-edge fade) at rest and
+/// **marquee-scrolls** the full text left-and-back when its row is focused — the
+/// standard tvOS treatment for long titles that don't fit. Reads the row's focus
+/// from `playerMenuRowIsFocused`, so it only animates the focused row.
+struct MarqueeText: View {
+    let text: String
+    var font: Font = .body
+
+    @Environment(\.playerMenuRowIsFocused) private var focused
+    @State private var textWidth: CGFloat = 0
+    @State private var containerWidth: CGFloat = 0
+    @State private var scroll = false
+
+    private var overflow: CGFloat { max(0, textWidth - containerWidth) }
+
+    var body: some View {
+        Text(text)
+            .font(font)
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
+            .background(GeometryReader { g in
+                Color.clear.preference(key: MarqueeTextWidthKey.self, value: g.size.width)
+            })
+            .offset(x: scroll ? -overflow : 0)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(GeometryReader { g in
+                Color.clear.preference(key: MarqueeContainerWidthKey.self, value: g.size.width)
+            })
+            .clipped()
+            .mask(fadeMask)
+            .onPreferenceChange(MarqueeTextWidthKey.self) { textWidth = $0; updateScroll() }
+            .onPreferenceChange(MarqueeContainerWidthKey.self) { containerWidth = $0; updateScroll() }
+            .onChange(of: focused) { _, _ in updateScroll() }
+    }
+
+    /// Soft fade on the right edge at rest to signal "there's more"; solid (no
+    /// fade) while scrolling so the end is fully legible as it passes.
+    @ViewBuilder private var fadeMask: some View {
+        if overflow > 1 && !scroll {
+            LinearGradient(
+                stops: [.init(color: .black, location: 0),
+                        .init(color: .black, location: 0.88),
+                        .init(color: .clear, location: 1.0)],
+                startPoint: .leading, endPoint: .trailing)
+        } else {
+            Color.black
+        }
+    }
+
+    private func updateScroll() {
+        guard focused, overflow > 1 else {
+            withAnimation(.easeOut(duration: 0.2)) { scroll = false }
+            return
+        }
+        // Speed proportional to the overflow so long and short names scroll at a
+        // similar pace; pause at each end (autoreverse) and loop while focused.
+        withAnimation(.linear(duration: max(2.2, Double(overflow) / 55))
+            .delay(0.6)
+            .repeatForever(autoreverses: true)) {
+            scroll = true
+        }
+    }
+}
+
+private struct MarqueeTextWidthKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+}
+private struct MarqueeContainerWidthKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+}
 #endif

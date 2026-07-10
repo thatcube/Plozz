@@ -333,7 +333,8 @@ public struct ShareProvider: MediaProvider {
                 isForced: sidecar.isForced,
                 isHearingImpaired: sidecar.isSDH,
                 deliveryURL: localURL,
-                isImageBasedSubtitle: false
+                isImageBasedSubtitle: false,
+                isExternal: true
             ))
             nextID += 1
         }

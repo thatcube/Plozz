@@ -690,6 +690,21 @@ public struct PlexProvider: MediaProvider {
         nil
     }
 
+    // MARK: Remote subtitles
+
+    /// Plex's on-demand subtitle search (keyless, server-proxied via the server's
+    /// OpenSubtitles.com integration). `itemID` is the ratingKey.
+    public func remoteSubtitleSearch(itemID: String, language: String) async throws -> [RemoteSubtitle] {
+        try await client.remoteSubtitleSearch(ratingKey: itemID, language: language)
+            .map(map(remoteSubtitle:))
+    }
+
+    /// Asks the server to download the chosen on-demand subtitle and attach it to
+    /// the item. `subtitleID` is the search result's `key`.
+    public func downloadRemoteSubtitle(itemID: String, subtitleID: String) async throws {
+        try await client.downloadRemoteSubtitle(ratingKey: itemID, key: subtitleID)
+    }
+
     // MARK: - Mapping
 
     private func map(metadata dto: PlexMetadata) -> MediaItem {
@@ -1069,6 +1084,20 @@ public struct PlexProvider: MediaProvider {
             }
         }
         return ratings
+    }
+
+    private func map(remoteSubtitle dto: PlexSubtitleSearchStream) -> RemoteSubtitle {
+        RemoteSubtitle(
+            id: dto.key ?? "",
+            name: dto.title ?? dto.providerTitle ?? dto.languageCode ?? dto.language ?? "Subtitle",
+            providerName: dto.providerTitle,
+            language: dto.languageCode ?? dto.language,
+            format: dto.format,
+            communityRating: nil,
+            downloadCount: dto.score,
+            isForced: dto.forced ?? false,
+            isHearingImpaired: dto.hearingImpaired ?? false
+        )
     }
 
     private func map(stream dto: PlexStream) -> MediaTrack {

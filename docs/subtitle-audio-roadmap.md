@@ -44,27 +44,30 @@ The foundation of the "Plozz owns subtitle rendering" architecture is in:
 
 ## 🔜 Remaining work (grouped & prioritized)
 
-### B. Sourcing — **NEXT PRIORITY**
+### B. Sourcing — ✅ **DONE (this branch)**
 
-A self-contained phase: get more subtitles, keylessly, on both providers, and
-make a downloaded subtitle behave well across servers.
+Get more subtitles, keylessly, on both providers, and surface local sidecars.
 
-- **Manual keyless search + download**, in-player. Provider-proxied so there is
-  **no user-supplied API key** — the Jellyfin/Plex server already has the
-  subtitle agent/account; the client calls the server's search + download
-  endpoints. **Both Plex and Jellyfin** (Jellyfin path largely exists; add Plex
-  parity).
-- **Automatic subtitle download** when a policy match is missing. The
-  `autoDownloadIfMissing` flag already exists on `SubtitlePolicy`; wire it to a
-  pre-fetch at item-detail / on play.
-- **🔑 Downloaded subs × multi-server (design decision).** A downloaded subtitle
-  must not be trapped on one server. **Proposed approach:** store the downloaded
-  cues **client-side, keyed by the cross-server episode identity** (the same
-  external-ID keys that already power per-series memory), so the subtitle
-  **follows the episode across Plex ↔ Jellyfin**. Optionally also offer "save to
-  server" so other clients benefit. This reuses the cross-server identity layer
-  already built for per-series memory. *Needs a short storage design before
-  build.*
+- ✅ **Manual keyless search + download**, in-player. Provider-proxied (no
+  user-supplied API key) on **both Jellyfin and Plex** — the "Search for
+  subtitles…" row now opens a real search → results (with Forced/SDH badges) →
+  download → **appears in the running player** flow (was a "Coming soon" stub).
+  Plex parity added via `GET/PUT /library/metadata/{ratingKey}/subtitles`
+  (keyless; no Plex Pass needed).
+- ✅ **Automatic subtitle download** when a policy match is missing —
+  `autoDownloadIfMissing` is now capability-gated (Plex included), applies the
+  SDH/Forced preference, requires a genuine language match (no wrong-language
+  fallback), and hot-loads the result into the current session.
+- ✅ **SDH/Forced accessibility preference** — a per-profile 4-level
+  hearing-impaired + forced search preference mirroring Plex's levels, applied
+  natively on Plex and client-side on Jellyfin/SMB. Folded into `bestMatch`.
+- ✅ **SMB sidecars** — local shares surface existing `.srt/.ass/.ssa/.vtt`
+  sidecars (same-dir + sibling `Subs/`), materialised to `file://` temps for the
+  overlay.
+- **Still open (a later Sourcing follow-up):** **downloaded subs × multi-server**
+  client-side cross-server cue cache (store the downloaded cues keyed by the
+  cross-server episode identity so a sub follows the episode across Plex ↔
+  Jellyfin). SMB *online* download (needs an OpenSubtitles account) also deferred.
 
 ### A. Rendering completeness
 

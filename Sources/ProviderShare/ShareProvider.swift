@@ -262,13 +262,87 @@ public struct ShareProvider: MediaProvider {
         // Play-from-Continue-Watching.
         let record = await watchStore.record(for: itemID)
         let startPosition = (record?.played == true) ? 0 : (record?.position ?? 0)
+        // Surface any text sidecar subtitles sitting next to the video (and in a
+        // sibling Subs/Subtitles folder) as selectable tracks. Best-effort: a
+        // listing/read failure just yields no sidecars rather than blocking play.
+        let subtitleTracks = (try? await discoverSidecarSubtitles(forVideoRelPath: relPath)) ?? []
         return PlaybackRequest(
             item: item,
             streamURL: url,
+            subtitleTracks: subtitleTracks,
             startPosition: startPosition,
             sourceProvider: .mediaShare,
             serverName: session.server.name
         )
+    }
+
+    /// Finds text sidecar subtitles for a video by listing its directory (and a
+    /// sibling `Subs`/`Subtitles` folder) and matching files by stem, then
+    /// materialises each to a local `file://` temp so the player's overlay — which
+    /// fetches over HTTP/`file://`, never `smb://` — can read them. Reads are
+    /// serial (the SMB session is single-connection) and lazy-small (sidecars are
+    /// tiny). Cleans up its temp dir on player teardown is handled by the OS temp
+    /// reaper; files are namespaced per item so replays reuse them within a run.
+    private func discoverSidecarSubtitles(forVideoRelPath relPath: String) async throws -> [MediaTrack] {
+        let dir = (relPath as NSString).deletingLastPathComponent
+        let videoStem = ShareMediaParser.videoStem((relPath as NSString).lastPathComponent)
+
+        // Gather candidate (directory, entry) pairs from the video's own folder and
+        // any sibling Subs/Subtitles folder.
+        var candidates: [(dir: String, name: String)] = []
+        let siblingDirs = [dir] + ["Subs", "Subtitles", "subs", "subtitles"].map { sub in
+            dir.isEmpty ? sub : "\(dir)/\(sub)"
+        }
+        for listDir in siblingDirs {
+            guard let entries = try? await store.rawEntries(inDirectory: listDir) else { continue }
+            for entry in entries where !entry.isDirectory && ShareMediaParser.isSubtitleFile(entry.name) {
+                candidates.append((listDir, entry.name))
+            }
+        }
+        guard !candidates.isEmpty else { return [] }
+
+        var tracks: [MediaTrack] = []
+        var nextID = 5_000
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("plozz-sidecars", isDirectory: true)
+        try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+
+        for (candidateDir, name) in candidates {
+            guard let sidecar = ShareMediaParser.parseSidecar(name) else { continue }
+            // Match the sidecar to this video: same stem, or (for a dedicated Subs
+            // folder holding one movie's subs) a stem that's a prefix of the video's.
+            let stemMatches = sidecar.stem == videoStem
+                || videoStem.hasPrefix(sidecar.stem)
+                || sidecar.stem.hasPrefix(videoStem)
+            guard stemMatches else { continue }
+
+            let relSidecar = candidateDir.isEmpty ? name : "\(candidateDir)/\(name)"
+            guard let data = try? await store.readFile(relSidecar), !data.isEmpty else { continue }
+            let localURL = tempDir.appendingPathComponent("\(abs(relSidecar.hashValue))-\(name)")
+            do {
+                try data.write(to: localURL, options: .atomic)
+            } catch {
+                continue
+            }
+            let language = sidecar.language
+            let langName = language.flatMap { SubtitleLanguageCatalog.displayName(forCode: $0) }
+            var title = langName ?? language ?? "Subtitle"
+            if sidecar.isForced { title += " (Forced)" }
+            if sidecar.isSDH { title += " (SDH)" }
+            tracks.append(MediaTrack(
+                id: nextID,
+                kind: .subtitle,
+                displayTitle: title,
+                language: language,
+                codec: sidecar.ext,
+                isForced: sidecar.isForced,
+                isHearingImpaired: sidecar.isSDH,
+                deliveryURL: localURL,
+                isImageBasedSubtitle: false
+            ))
+            nextID += 1
+        }
+        return tracks
     }
 
     public func reportPlayback(_ progress: PlaybackProgress, event: PlaybackEvent) async throws {

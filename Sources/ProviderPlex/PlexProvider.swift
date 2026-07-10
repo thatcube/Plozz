@@ -516,11 +516,15 @@ public struct PlexProvider: MediaProvider {
             default: break   // compat ID absent (older Plex) → infer from profile
             }
             // Without a compat ID: Profile 5 never has a fallback; only an explicit
-            // HDR10+ hint or Profiles 7/8 (HDR10-compatible base) add a second badge.
-            // Do NOT infer HDR10 from the PQ transfer — every DV stream is PQ.
+            // HDR10+ hint, Profiles 7/8 (HDR10-compatible base), or an explicit
+            // "HDR10" in the server's display title (a genuine dual-format label
+            // like "DoVi/HDR10") add a second badge. Do NOT infer HDR10 from the PQ
+            // transfer or DOVIBLPresent — every DV stream is PQ + base-layer, so
+            // those would wrongly badge a pure Profile 5 file.
             if doviProfile == 5 { return "DOVI" }
             if hasHDR10Plus { return "DOVIWithHDR10PLUS" }
             if doviProfile == 7 || doviProfile == 8 { return "DOVIWithHDR10" }
+            if titleHint.contains("HDR10") { return "DOVIWithHDR10" }
             if hasHLG { return "DOVIWithHLG" }
             return "DOVI"
         }

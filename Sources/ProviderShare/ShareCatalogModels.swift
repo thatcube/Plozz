@@ -48,6 +48,16 @@ struct CatalogAsset: Sendable, Equatable {
     var seriesKey: String?
     var season: Int?
     var episode: Int?
+    /// Movie-only: the stable grouping key that collapses several files of the SAME
+    /// film (a 4K remux beside a 1080p web-dl, or an edition variant) into one
+    /// logical movie with selectable versions — the share's local equivalent of the
+    /// server-side version grouping Plex/Jellyfin do. Derived from the movie folder
+    /// (`Title (Year)/`) when present, else the parsed title+year; stacked parts
+    /// (`CD1`/`CD2`) get distinct keys so they aren't mis-presented as versions.
+    /// `nil` for episodes and for movie rows indexed before this column existed
+    /// (they group as singletons until the next reparse). Never rewritten by
+    /// enrichment, so `movie:<key>` ids stay stable for watch-state / TopShelf.
+    var movieKey: String?
 }
 
 /// Central id scheme for catalog items so the store, scanner, and provider agree.
@@ -84,6 +94,25 @@ enum ShareCatalogID {
     static func isSeries(_ id: String) -> Bool { id.hasPrefix("series:") }
     static func seriesKey(forSeriesID id: String) -> String? {
         id.hasPrefix("series:") ? String(id.dropFirst("series:".count)) : nil
+    }
+
+    /// A logical movie container id (`movie:<key>`) whose selectable versions are
+    /// the individual files that share the key. Mirrors the `series:<key>` scheme.
+    static func movie(_ key: String) -> String { "movie:\(key)" }
+    static func isMovie(_ id: String) -> Bool { id.hasPrefix("movie:") }
+    static func movieKey(forMovieID id: String) -> String? {
+        id.hasPrefix("movie:") ? String(id.dropFirst("movie:".count)) : nil
+    }
+
+    /// Stable, filesystem/id-safe grouping key for a movie: the normalized title
+    /// plus its year, so two files of the SAME film collapse to one logical movie
+    /// while a same-title different-year film stays distinct. Never contains a
+    /// colon. Deterministic and independent of enrichment (see `CatalogAsset`).
+    static func movieKey(fromTitle title: String, year: Int?) -> String {
+        let base = seriesKey(fromTitle: title)
+        let stem = base.isEmpty ? "untitled" : base
+        if let year { return "\(stem)-\(year)" }
+        return stem
     }
 
     static func season(_ key: String, _ season: Int) -> String { "season:\(key):\(season)" }

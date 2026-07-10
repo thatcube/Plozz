@@ -13,7 +13,7 @@ enum ShareMediaParser {
     /// from them) change, so a share's catalog can force a one-time full re-walk
     /// that reclassifies every already-indexed file under the new rules instead of
     /// waiting for each file to change on disk. See `ShareScanner.scanIfStale`.
-    static let classifierVersion = 2
+    static let classifierVersion = 3
 
     /// File extensions we treat as playable video.
     static let videoExtensions: Set<String> = [
@@ -329,6 +329,53 @@ enum ShareMediaParser {
         }
         if title.isEmpty { title = stem }
         return Movie(title: title, year: year)
+    }
+
+    /// The `(title, year)` a movie file should GROUP by, plus a stacked-part token.
+    /// Uses the dedicated movie folder (`Movies/Star Wars (1977)/…`) as the identity
+    /// when present — the way Plex/Jellyfin fold several files in one movie folder
+    /// into one title — so differently-named quality/edition files still collapse to
+    /// one logical movie. Loose files (`Movies/Star Wars (1977).mkv`) fall back to
+    /// the filename's parsed title+year. A stacked part (`CD1`/`Part2`) is returned
+    /// separately so the caller can keep parts as distinct entries rather than
+    /// mis-presenting them as selectable versions of one playable title.
+    static func movieGrouping(relPath: String, parsedTitle: String, parsedYear: Int?) -> (title: String, year: Int?, part: String?) {
+        let comps = relPath.split(separator: "/").map(String.init)
+        let fileName = comps.last ?? relPath
+        let ancestors = Array(comps.dropLast())
+
+        var title = parsedTitle
+        var year = parsedYear
+        // A dedicated `Title (Year)` movie folder is a strong identity: require the
+        // folder name to carry a year and not be a library root / season folder.
+        if let parent = ancestors.last {
+            let name = parent.lowercased().trimmingCharacters(in: .whitespaces)
+            let isRoot = seriesLibraryNames.contains(name) || movieLibraryNames.contains(name)
+            if !isRoot, !isSeasonFolder(parent) {
+                let folder = parseMovie(stem: parent, parentFolder: nil)
+                if folder.year != nil, !folder.title.isEmpty {
+                    title = folder.title
+                    year = folder.year
+                }
+            }
+        }
+        return (title, year, stackedPartToken(fileName: fileName))
+    }
+
+    /// A multi-file movie's part marker (`CD1`, `Part 2`, `Disc1`, `pt2`) as a
+    /// normalized token, or `nil` when the file isn't a stacked part. Used to keep
+    /// the parts of one split movie as separate catalog entries (we can't play a
+    /// concatenated multi-part stream yet) rather than collapsing them into one
+    /// title whose "versions" would each be an incomplete half.
+    static func stackedPartToken(fileName: String) -> String? {
+        let stem = (fileName as NSString).deletingPathExtension.lowercased()
+        let ns = stem as NSString
+        let full = NSRange(location: 0, length: ns.length)
+        guard let regex = try? NSRegularExpression(pattern: #"\b(cd|dvd|disc|disk|part|pt)\s*0*(\d{1,2})\b"#),
+              let m = regex.firstMatch(in: stem, range: full), m.numberOfRanges >= 3,
+              let n = Int(ns.substring(with: m.range(at: 2))) else { return nil }
+        let word = ns.substring(with: m.range(at: 1))
+        return "\(word)\(n)"
     }
 
     // MARK: - Cleaning

@@ -102,30 +102,43 @@ public struct ShareProvider: MediaProvider {
 
     public func continueWatching(limit: Int) async throws -> [MediaItem] {
         // Resume row is served entirely from local watch state — no network, so
-        // it's safe on the Home hot path. Each resumable id is rebuilt from the
-        // store (id → item, no scan) and stamped with its saved progress.
-        let resumable = await watchStore.resumable(limit: limit)
+        // it's safe on the Home hot path. Fetch a generous window and FOLD each
+        // resumable file into its canonical (logical movie) id BEFORE applying the
+        // limit, so several versions of one film collapse to a single card and
+        // folding can never push a distinct title off the row. Episodes keep their
+        // own id. Each surviving id is rebuilt from the catalog (id → item, no scan).
+        let raw = await watchStore.resumable(limit: max(limit * 4, 40))
+        var byCanonical: [String: ShareWatchStore.Record] = [:]
+        for entry in raw {
+            let canonical = await catalog.canonicalItemID(entry.itemID)
+            if let existing = byCanonical[canonical], existing.updatedAt >= entry.record.updatedAt {
+                continue // keep the most-recently-updated record for the collapsed title
+            }
+            byCanonical[canonical] = entry.record
+        }
+        let ranked = byCanonical
+            .sorted { $0.value.updatedAt > $1.value.updatedAt }
+            .prefix(limit)
+
         var items: [MediaItem] = []
-        for entry in resumable {
+        for (itemID, record) in ranked {
             // Resolve through the CATALOG first (indexed → carries series/season
             // linkage, including the `seasonID` the player's neighbour resolver
             // needs to offer Up Next / auto-advance), falling back to the raw
-            // file-tree build only for un-indexed items. Matches `item(id:)`'s
-            // resolution order; a bare `store.item(id:)` yields a filename-parsed
-            // item with no `seasonID`, which silently disables episode hand-off.
+            // file-tree build only for un-indexed items.
             let base: MediaItem
-            if let indexed = await catalog.item(id: entry.itemID) {
+            if let indexed = await catalog.item(id: itemID) {
                 base = indexed
-            } else if let raw = await store.item(id: entry.itemID) {
-                base = raw
+            } else if let rawItem = await store.item(id: itemID) {
+                base = rawItem
             } else {
                 continue
             }
-            items.append(Self.stamped(base, with: entry.record))
+            items.append(Self.stamped(base, with: record))
         }
         // Device-observable (in-app log ring) so a missing Continue Watching row
         // can be traced to "no resumable state on disk" vs "rebuild dropped it".
-        PlozzLog.playback.info("share.continueWatching account=\(session.server.id) resumable=\(resumable.count) rebuilt=\(items.count)")
+        PlozzLog.playback.info("share.continueWatching account=\(session.server.id) resumable=\(raw.count) folded=\(byCanonical.count) rebuilt=\(items.count)")
         return items
     }
 
@@ -250,20 +263,44 @@ public struct ShareProvider: MediaProvider {
     // MARK: Playback
 
     public func playbackInfo(for itemID: String) async throws -> PlaybackRequest {
-        let item = try await item(id: itemID)
-        guard let relPath = await store.path(forItemID: itemID) else {
+        try await playbackInfo(for: itemID, mediaSourceID: nil, forceTranscode: false)
+    }
+
+    public func playbackInfo(for itemID: String, forceTranscode: Bool) async throws -> PlaybackRequest {
+        try await playbackInfo(for: itemID, mediaSourceID: nil, forceTranscode: forceTranscode)
+    }
+
+    /// Resolve the file to stream. The version picker threads the chosen version's
+    /// id (which, for a share, IS the file's rel-path) as `mediaSourceID`; a logical
+    /// `movie:<key>` with no chosen version plays its best default file; a bare
+    /// `f:<rel>` (raw browser / episode) plays directly.
+    public func playbackInfo(for itemID: String, mediaSourceID: String?, forceTranscode: Bool) async throws -> PlaybackRequest {
+        let relPath: String
+        if let ms = mediaSourceID, !ms.isEmpty {
+            relPath = ms
+        } else if let key = ShareCatalogID.movieKey(forMovieID: itemID) {
+            guard let def = await catalog.defaultMovieRelPath(forKey: key) else {
+                throw AppError.unknown("No playable version for \(itemID)")
+            }
+            relPath = def
+        } else if let p = await store.path(forItemID: itemID) {
+            relPath = p
+        } else {
             throw AppError.unknown("Item is not directly playable: \(itemID)")
         }
         guard let url = smbURL(forRelativePath: relPath) else {
             throw AppError.unknown("Couldn't build a stream URL for \(relPath)")
         }
-        // Resume where the user left off (0 for a fresh/finished item). The player
-        // treats this as the authoritative seed for both Play-from-detail and
-        // Play-from-Continue-Watching.
-        let record = await watchStore.record(for: itemID)
+        let item = try await item(id: itemID)
+        // Resume where the user left off. Prefer the logical item's record; fall
+        // back to the chosen file's own `f:<rel>` record so a movie watched BEFORE
+        // version-grouping (resume stored per file) still resumes after the upgrade.
+        var record = await watchStore.record(for: itemID)
+        if record == nil { record = await watchStore.record(for: ShareCatalogID.file(relPath)) }
         let startPosition = (record?.played == true) ? 0 : (record?.position ?? 0)
+        let playItem = (mediaSourceID != nil) ? item.selectingVersion(mediaSourceID) : item
         return PlaybackRequest(
-            item: item,
+            item: playItem,
             streamURL: url,
             startPosition: startPosition,
             sourceProvider: .mediaShare,
@@ -282,7 +319,8 @@ public struct ShareProvider: MediaProvider {
         PlozzLog.playback.info("share.reportPlayback event=\(String(describing: event)) item=\(progress.itemID) pos=\(Int(progress.positionSeconds)) account=\(session.server.id)")
         switch event {
         case .progress, .pause, .stop:
-            await watchStore.setResume(progress.positionSeconds, itemID: progress.itemID, capturedAt: Date(), duration: progress.durationSeconds)
+            let id = await catalog.canonicalItemID(progress.itemID)
+            await watchStore.setResume(progress.positionSeconds, itemID: id, capturedAt: Date(), duration: progress.durationSeconds)
         case .start, .unpause:
             break
         }
@@ -409,7 +447,7 @@ extension ShareProvider: WatchStateProviding {
     /// stamp with the current time. The outbox-drained path uses the timestamped
     /// ``PlayedStateWriting`` overload below with the play's real capture time.
     public func setPlayed(_ played: Bool, itemID: String) async throws {
-        await watchStore.setPlayed(played, itemID: itemID, capturedAt: Date())
+        await watchStore.setPlayed(played, itemID: await catalog.canonicalItemID(itemID), capturedAt: Date())
     }
 }
 
@@ -419,7 +457,7 @@ extension ShareProvider: PlayedStateWriting {
     /// can't overwrite the newer resume state — the local store orders writes by
     /// `capturedAt`.
     public func setPlayed(_ played: Bool, itemID: String, capturedAt: Date) async throws {
-        await watchStore.setPlayed(played, itemID: itemID, capturedAt: capturedAt)
+        await watchStore.setPlayed(played, itemID: await catalog.canonicalItemID(itemID), capturedAt: capturedAt)
     }
 }
 
@@ -427,7 +465,7 @@ extension ShareProvider: ResumeStateWriting {
     /// Persist a resume position locally. `capturedAt` orders writes so a late
     /// draining queued resume can't overwrite a newer state.
     public func setResumePosition(_ seconds: TimeInterval, itemID: String, capturedAt: Date) async throws {
-        await watchStore.setResume(seconds, itemID: itemID, capturedAt: capturedAt)
+        await watchStore.setResume(seconds, itemID: await catalog.canonicalItemID(itemID), capturedAt: capturedAt)
     }
 }
 

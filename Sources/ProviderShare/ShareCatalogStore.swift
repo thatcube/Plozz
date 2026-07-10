@@ -107,6 +107,14 @@ actor ShareCatalogStore {
         if !hasColumn(table: "enrichment", column: "attempts") {
             exec("ALTER TABLE enrichment ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0;")
         }
+        // Migration: movie grouping key (added with within-share version dedup). NULL
+        // for rows indexed before it existed; a classifier-version reparse backfills
+        // it, and grouped queries `COALESCE(movie_key, rel_path)` so pre-reparse rows
+        // each stand alone rather than collapsing into one NULL bucket.
+        if !hasColumn(table: "assets", column: "movie_key") {
+            exec("ALTER TABLE assets ADD COLUMN movie_key TEXT;")
+        }
+        exec("CREATE INDEX IF NOT EXISTS idx_assets_movie_key ON assets(library, kind, movie_key);")
     }
 
     // MARK: - Scan write path
@@ -121,14 +129,14 @@ actor ShareCatalogStore {
         let sql = """
         INSERT INTO assets
           (rel_path, basename, size, modified_at, first_seen_at, last_scan,
-           kind, library, title, sort_title, year, series_title, series_key, season, episode)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+           kind, library, title, sort_title, year, series_title, series_key, season, episode, movie_key)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(rel_path) DO UPDATE SET
           basename=excluded.basename, size=excluded.size, modified_at=excluded.modified_at,
           last_scan=excluded.last_scan, kind=excluded.kind, library=excluded.library,
           title=excluded.title, sort_title=excluded.sort_title, year=excluded.year,
           series_title=excluded.series_title, series_key=excluded.series_key,
-          season=excluded.season, episode=excluded.episode;
+          season=excluded.season, episode=excluded.episode, movie_key=excluded.movie_key;
         """
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
@@ -152,6 +160,7 @@ actor ShareCatalogStore {
             bindOptText(stmt, 13, a.seriesKey)
             bindOptInt(stmt, 14, a.season)
             bindOptInt(stmt, 15, a.episode)
+            bindOptText(stmt, 16, a.movieKey)
             _ = sqlite3_step(stmt)
         }
         exec("COMMIT;")
@@ -302,6 +311,16 @@ actor ShareCatalogStore {
     func pendingEnrichment(forItemID id: String, version: Int) -> PendingEnrichment? {
         ensureOpen()
         guard db != nil else { return nil }
+
+        // Logical movie → enrich its REPRESENTATIVE file (where movies() reads art),
+        // so opening a movie fast-tracks the id the grid/detail actually display.
+        if let mkey = ShareCatalogID.movieKey(forMovieID: id) {
+            var rep: String?
+            query("SELECT MIN(rel_path) FROM assets WHERE movie_key=? AND library='movies' AND kind='movie';",
+                  bind: { self.bindText($0, 1, mkey) }) { stmt in rep = self.columnText(stmt, 0) }
+            guard let rep else { return nil }
+            return pendingEnrichment(forItemID: ShareCatalogID.file(rep), version: version)
+        }
 
         // Series → the enrichment row is keyed by `series:<key>`.
         if ShareCatalogID.isSeries(id), let key = ShareCatalogID.seriesKey(forSeriesID: id) {
@@ -511,8 +530,14 @@ actor ShareCatalogStore {
     private func withEnrichment(_ item: MediaItem) -> MediaItem {
         let key: String
         switch item.kind {
-        case .series, .movie:
+        case .series:
             key = item.id
+        case .movie:
+            // A grouped movie (`movie:<key>`) stores its enrichment under the
+            // group's REPRESENTATIVE file id (`f:<MIN(rel_path)>`) — where the
+            // per-file enrichment pass already wrote art/ids — so resolve to that.
+            // A legacy un-grouped `f:` movie id is its own enrichment key.
+            key = movieEnrichmentKey(forID: item.id)
         case .season, .episode:
             guard let seriesID = item.seriesID else { return item }
             key = seriesID
@@ -521,6 +546,16 @@ actor ShareCatalogStore {
         }
         guard let rec = enrichmentRow(itemID: key) else { return item }
         return applyEnrichment(item, rec)
+    }
+
+    /// The enrichment row id for a movie item: the group's representative file id
+    /// for a logical `movie:<key>`, else the id unchanged (a legacy `f:` movie).
+    private func movieEnrichmentKey(forID id: String) -> String {
+        guard let mkey = ShareCatalogID.movieKey(forMovieID: id) else { return id }
+        var rep: String?
+        query("SELECT 'f:' || MIN(rel_path) FROM assets WHERE movie_key=? AND library='movies' AND kind='movie';",
+              bind: { self.bindText($0, 1, mkey) }) { stmt in rep = self.columnText(stmt, 0) }
+        return rep ?? id
     }
 
     /// Merge an already-fetched enrichment record onto an item. Extracted from
@@ -581,15 +616,20 @@ actor ShareCatalogStore {
         guard db != nil, limit > 0 else { return [] }
         var out: [(added: Double, item: MediaItem)] = []
 
-        // Movies
+        // Movies — grouped by movie_key so a multi-file film is one Recently Added
+        // card, dated by the FIRST version discovered (when the movie appeared).
         query("""
-        SELECT rel_path, title, year, first_seen_at FROM assets
-        WHERE library='movies' AND kind='movie' ORDER BY first_seen_at DESC LIMIT ?;
+        SELECT
+          CASE WHEN MIN(movie_key) IS NOT NULL THEN 'movie:' || MIN(movie_key)
+               ELSE 'f:' || MIN(rel_path) END AS logical_id,
+          MIN(title), MAX(year), MIN(first_seen_at) AS added
+        FROM assets WHERE library='movies' AND kind='movie'
+        GROUP BY COALESCE(movie_key, rel_path)
+        ORDER BY added DESC LIMIT ?;
         """, bind: { sqlite3_bind_int64($0, 1, Int64(limit)) }) { stmt in
-            let relPath = self.columnText(stmt, 0) ?? ""
             let item = MediaItem(
-                id: ShareCatalogID.file(relPath),
-                title: self.columnText(stmt, 1) ?? relPath,
+                id: self.columnText(stmt, 0) ?? "",
+                title: self.columnText(stmt, 1) ?? "",
                 kind: .movie,
                 productionYear: self.columnOptInt(stmt, 2),
                 libraryID: ShareCatalogID.moviesLibrary
@@ -621,15 +661,19 @@ actor ShareCatalogStore {
         var out: [MediaItem] = []
 
         query("""
-        SELECT rel_path, title, year FROM assets
-        WHERE library='movies' AND kind='movie' AND sort_title LIKE ? LIMIT ?;
+        SELECT
+          CASE WHEN MIN(movie_key) IS NOT NULL THEN 'movie:' || MIN(movie_key)
+               ELSE 'f:' || MIN(rel_path) END AS logical_id,
+          MIN(title), MAX(year)
+        FROM assets
+        WHERE library='movies' AND kind='movie' AND sort_title LIKE ?
+        GROUP BY COALESCE(movie_key, rel_path) LIMIT ?;
         """, bind: {
             self.bindText($0, 1, needle); sqlite3_bind_int64($0, 2, Int64(limit))
         }) { stmt in
-            let relPath = self.columnText(stmt, 0) ?? ""
             out.append(MediaItem(
-                id: ShareCatalogID.file(relPath),
-                title: self.columnText(stmt, 1) ?? relPath,
+                id: self.columnText(stmt, 0) ?? "",
+                title: self.columnText(stmt, 1) ?? "",
                 kind: .movie,
                 productionYear: self.columnOptInt(stmt, 2),
                 libraryID: ShareCatalogID.moviesLibrary
@@ -651,28 +695,35 @@ actor ShareCatalogStore {
         return Array(out.prefix(limit)).map(withEnrichment)
     }
 
-    /// Movie items for the Movies library grid (paged).
+    /// Movie items for the Movies library grid (paged). Movies are **grouped** by
+    /// `movie_key` so several files of one film collapse to a single logical card
+    /// (`movie:<key>`); a row with no key (pre-reparse) stands alone under its own
+    /// `f:<rel_path>` id via `COALESCE`. Enrichment is read from the group's
+    /// representative file id (`f:<MIN(rel_path)>`), which already carries art —
+    /// so grouping never blanks a card.
     func movies(offset: Int, limit: Int) -> [MediaItem] {
         ensureOpen()
         guard db != nil else { return [] }
         var out: [MediaItem] = []
-        // LEFT JOIN enrichment in the SAME query (keyed "f:<rel_path>") so a page is
-        // ONE query instead of 1 + N per-row enrichment lookups. The
-        // idx_assets_movies_sort covering index (library, kind, sort_title) lets the
-        // ORDER BY be index-provided instead of a per-page temp B-tree sort.
         query("""
-        SELECT a.rel_path, a.title, a.year,
+        SELECT g.logical_id, g.title, g.year,
                e.provider_ids_json, e.overview, e.genres_json, e.runtime,
                e.poster_url, e.backdrop_url, e.logo_url
-        FROM assets a
-        LEFT JOIN enrichment e ON e.item_id = 'f:' || a.rel_path
-        WHERE a.library='movies' AND a.kind='movie'
-        ORDER BY a.sort_title LIMIT ? OFFSET ?;
+        FROM (
+          SELECT
+            CASE WHEN MIN(movie_key) IS NOT NULL THEN 'movie:' || MIN(movie_key)
+                 ELSE 'f:' || MIN(rel_path) END AS logical_id,
+            'f:' || MIN(rel_path) AS rep_id,
+            MIN(title) AS title, MAX(year) AS year, MIN(sort_title) AS gsort
+          FROM assets WHERE library='movies' AND kind='movie'
+          GROUP BY COALESCE(movie_key, rel_path)
+        ) g
+        LEFT JOIN enrichment e ON e.item_id = g.rep_id
+        ORDER BY g.gsort LIMIT ? OFFSET ?;
         """, bind: { sqlite3_bind_int64($0, 1, Int64(limit)); sqlite3_bind_int64($0, 2, Int64(offset)) }) { stmt in
-            let relPath = self.columnText(stmt, 0) ?? ""
             let item = MediaItem(
-                id: ShareCatalogID.file(relPath),
-                title: self.columnText(stmt, 1) ?? relPath,
+                id: self.columnText(stmt, 0) ?? "",
+                title: self.columnText(stmt, 1) ?? "",
                 kind: .movie,
                 productionYear: self.columnOptInt(stmt, 2),
                 libraryID: ShareCatalogID.moviesLibrary
@@ -719,10 +770,15 @@ actor ShareCatalogStore {
 
     /// Exact number of movies in the Movies library, for the grid's `totalCount`
     /// so it can size its sparse backing store once and random-access any page
-    /// (jump-to-bottom), instead of paging sequentially against an open-ended
-    /// estimate. Cheap: COUNT over the (library, kind, sort_title) index.
+    /// (jump-to-bottom). Counts DISTINCT logical movies (grouped by `movie_key`,
+    /// falling back to `rel_path` for un-keyed rows) to match `movies()`.
     func movieCount() -> Int {
-        count(where: "library='movies' AND kind='movie'")
+        ensureOpen()
+        guard db != nil else { return 0 }
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "SELECT COUNT(DISTINCT COALESCE(movie_key, rel_path)) FROM assets WHERE library='movies' AND kind='movie';", -1, &stmt, nil) == SQLITE_OK else { return 0 }
+        defer { sqlite3_finalize(stmt) }
+        return sqlite3_step(stmt) == SQLITE_ROW ? Int(sqlite3_column_int64(stmt, 0)) : 0
     }
 
     /// Exact number of distinct series in a TV/Anime library, for the grid's
@@ -780,6 +836,9 @@ actor ShareCatalogStore {
     func item(id: String) -> MediaItem? {
         ensureOpen()
         guard db != nil else { return nil }
+        if let mkey = ShareCatalogID.movieKey(forMovieID: id) {
+            return movieItem(key: mkey)
+        }
         if let key = ShareCatalogID.seriesKey(forSeriesID: id) {
             var title = key
             var library: CatalogLibrary = .tv
@@ -821,6 +880,100 @@ actor ShareCatalogStore {
     }
 
     // MARK: - Item builders
+
+    /// Build the logical movie (`movie:<key>`) for a detail page: its files become
+    /// selectable ``MediaVersion``s (best-quality first, one flagged default), so
+    /// the version picker lets the user choose which file plays — the share's local
+    /// equivalent of the multi-file movie a Plex/Jellyfin server returns as one
+    /// item. A single-file movie exposes no versions (no picker). Enrichment is
+    /// applied via the group's representative file (see `movieEnrichmentKey`).
+    private func movieItem(key: String) -> MediaItem? {
+        var files: [(relPath: String, basename: String, size: Int64)] = []
+        var title: String?
+        var year: Int?
+        query("""
+        SELECT rel_path, basename, size, title, year FROM assets
+        WHERE movie_key=? AND library='movies' AND kind='movie' ORDER BY rel_path;
+        """, bind: { self.bindText($0, 1, key) }) { stmt in
+            let rel = self.columnText(stmt, 0) ?? ""
+            files.append((rel, self.columnText(stmt, 1) ?? rel, sqlite3_column_int64(stmt, 2)))
+            if title == nil { title = self.columnText(stmt, 3) }
+            if let y = self.columnOptInt(stmt, 4) { year = max(year ?? y, y) }
+        }
+        guard !files.isEmpty else { return nil }
+        var versions = files.map { Self.movieVersion(relPath: $0.relPath, basename: $0.basename, size: $0.size) }
+            .sortedForPicker()
+        if !versions.isEmpty { versions[0].isDefault = true }
+        let item = MediaItem(
+            id: ShareCatalogID.movie(key),
+            title: title ?? key,
+            kind: .movie,
+            productionYear: year,
+            libraryID: ShareCatalogID.moviesLibrary,
+            // Cards/rows leave versions empty; only the detail item carries them.
+            // A lone file needs no picker, so expose versions only when there's a
+            // genuine choice.
+            versions: versions.count > 1 ? versions : []
+        )
+        return withEnrichment(item)
+    }
+
+    /// The best default file to play for a logical movie when the caller named no
+    /// specific version (play-from-card, before the detail's version picker set
+    /// one): the highest parsed resolution, then the largest file.
+    func defaultMovieRelPath(forKey key: String) -> String? {
+        var best: (rel: String, height: Int, size: Int64)?
+        query("SELECT rel_path, basename, size FROM assets WHERE movie_key=? AND library='movies' AND kind='movie';",
+              bind: { self.bindText($0, 1, key) }) { stmt in
+            let rel = self.columnText(stmt, 0) ?? ""
+            let h = Self.resolutionHeight(fromName: self.columnText(stmt, 1) ?? "") ?? 0
+            let sz = sqlite3_column_int64(stmt, 2)
+            if best == nil || h > best!.height || (h == best!.height && sz > best!.size) {
+                best = (rel, h, sz)
+            }
+        }
+        return best?.rel
+    }
+
+    /// Canonical watch-state id for a leaf id: a movie file (`f:<rel>`) folds into
+    /// its logical `movie:<key>` so resume/played is unified across versions; an
+    /// episode file or an un-keyed movie keeps its own id.
+    func canonicalItemID(_ id: String) -> String {
+        guard let rel = ShareCatalogID.relPath(forFileID: id) else { return id }
+        var key: String?
+        query("SELECT movie_key FROM assets WHERE rel_path=? AND kind='movie';",
+              bind: { self.bindText($0, 1, rel) }) { stmt in key = self.columnText(stmt, 0) }
+        if let key { return ShareCatalogID.movie(key) }
+        return id
+    }
+
+    /// A share file → provider-agnostic ``MediaVersion``. The share has no server
+    /// stream metadata, so the resolution is parsed from the filename and the
+    /// basename is passed as `name` for the shared `EditionParser` to recover the
+    /// edition (Director's Cut, …) and source quality (Remux/BluRay/WEB-DL). The
+    /// version `id` is the file's rel-path, threaded back as the `mediaSourceID`.
+    private static func movieVersion(relPath: String, basename: String, size: Int64) -> MediaVersion {
+        MediaVersion(
+            id: relPath,
+            name: (basename as NSString).deletingPathExtension,
+            height: resolutionHeight(fromName: basename),
+            sizeBytes: size > 0 ? size : nil,
+            container: (basename as NSString).pathExtension.lowercased()
+        )
+    }
+
+    /// Best-effort resolution height parsed from a filename token (`2160p`, `1080p`,
+    /// `4K`, …). `nil` when the name states none.
+    private static func resolutionHeight(fromName name: String) -> Int? {
+        let l = name.lowercased()
+        if l.contains("2160p") || l.contains("4k") || l.contains("uhd") { return 2160 }
+        if l.contains("1440p") { return 1440 }
+        if l.contains("1080p") || l.contains("1080i") { return 1080 }
+        if l.contains("720p") { return 720 }
+        if l.contains("576p") { return 576 }
+        if l.contains("480p") { return 480 }
+        return nil
+    }
 
     private func seriesItem(key: String, title: String, library: CatalogLibrary, year: Int?) -> MediaItem {
         MediaItem(

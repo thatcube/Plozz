@@ -58,6 +58,12 @@ public final class ArtworkImageCache: NSObject, @unchecked Sendable {
         guard statsEnabled else { return }
         statsLock.lock(); liveCount = max(0, liveCount - 1); liveCostBytes = max(0, liveCostBytes - cost); statsLock.unlock()
     }
+    /// Reset accounting to empty — used by the memory-warning flush, which calls
+    /// `removeAllObjects()` (NSCache does not fire `willEvictObject:` for that).
+    private static func noteFlushedAll() {
+        guard statsEnabled else { return }
+        statsLock.lock(); liveCount = 0; liveCostBytes = 0; statsLock.unlock()
+    }
     /// Dedicated, bounded queue for the *synchronous* image decode
     /// (`CGImageSourceCreateThumbnailAtIndex` / `preparingForDisplay`). This work
     /// is CPU-bound, and running it inside `Task.detached` executes it directly on
@@ -119,6 +125,11 @@ public final class ArtworkImageCache: NSObject, @unchecked Sendable {
             queue: nil
         ) { [weak cache] _ in
             cache?.removeAllObjects()
+            // NSCache does NOT call `willEvictObject:` for `removeAllObjects()`
+            // (only for automatic cost/pressure eviction), so reset the diagnostic
+            // accounting directly here — otherwise the PLZXMEM sampler would stay
+            // over-counted after a memory warning.
+            Self.noteFlushedAll()
         }
     }
 
@@ -272,8 +283,9 @@ public final class ArtworkImageCache: NSObject, @unchecked Sendable {
 extension ArtworkImageCache: NSCacheDelegate {
     /// NSCache is about to drop `obj` (cost-limit or memory-pressure eviction).
     /// Decrement the live accounting by the same cost formula `store` used, so the
-    /// diagnostic count/cost track the real resident set. Also fires for
-    /// `removeAllObjects()` (the memory-warning flush).
+    /// diagnostic count/cost track the real resident set. NOTE: this does NOT fire
+    /// for `removeAllObjects()` — the memory-warning flush resets the counters
+    /// itself via `noteFlushedAll()`.
     public func cache(_ cache: NSCache<AnyObject, AnyObject>, willEvictObject obj: Any) {
         guard let image = obj as? UIImage else { return }
         let scale = image.scale

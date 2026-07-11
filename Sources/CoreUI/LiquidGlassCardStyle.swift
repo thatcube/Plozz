@@ -33,7 +33,7 @@ public struct PlozzGlassCardModifier: ViewModifier {
     private var focusedGlassBacking: Color {
         guard isFocused else { return .clear }
         if addsFocusHaloBacking {
-            return palette.isLight ? .black.opacity(0.25) : .white.opacity(0.06)
+            return palette.isLight ? .black.opacity(0.40) : .white.opacity(0.06)
         }
         return palette.isLight ? palette.cardOpaqueSurface : .clear
     }

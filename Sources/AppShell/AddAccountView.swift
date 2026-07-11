@@ -137,10 +137,10 @@ private struct ProviderChooserView: View {
         ZStack(alignment: .topLeading) {
             HStack(spacing: 72) {
                 if showsBranding {
-                    FirstRunBrandPanel()
+                    FirstRunBranding()
                 }
 
-                ProviderChoiceColumn(onSelect: onSelect)
+                ProviderChoiceGroup(onSelect: onSelect)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
@@ -160,90 +160,107 @@ private struct ProviderChooserView: View {
     }
 }
 
-private struct FirstRunBrandPanel: View {
+private struct FirstRunBranding: View {
     var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
-                .fill(.ultraThinMaterial)
-                .overlay {
-                    RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
-                        .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
-                }
+        VStack(spacing: 28) {
+            HStack(spacing: 24) {
+                Image("PlozzLogo")
+                    .resizable()
+                    .interpolation(.none)
+                    .scaledToFit()
+                    .frame(width: 128, height: 128)
 
-            Image("PlozzLogo")
-                .resizable()
-                .interpolation(.none)
-                .scaledToFit()
-                .frame(width: 240, height: 240)
-                .accessibilityHidden(true)
+                Image("PlozzWordmark")
+                    .resizable()
+                    .interpolation(.none)
+                    .scaledToFit()
+                    .frame(width: 224, height: 112)
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Plozz")
+
+            Text("Free forever and open source.")
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(.secondary)
         }
-        .frame(width: 460, height: 680)
+        .frame(width: 480)
     }
 }
 
-private struct ProviderChoiceColumn: View {
+private struct ProviderChoiceGroup: View {
     let onSelect: (ProviderKind) -> Void
 
     var body: some View {
-        VStack(spacing: 28) {
-            ProviderChoiceCard(
+        VStack(spacing: 0) {
+            ProviderChoiceRow(
                 provider: .jellyfin,
                 title: "Jellyfin",
-                height: 180,
-                markSize: 76
+                height: 152
             ) {
                 onSelect(.jellyfin)
             }
 
-            ProviderChoiceCard(
+            Divider().padding(.horizontal, 24)
+
+            ProviderChoiceRow(
                 provider: .plex,
                 title: "Plex",
-                height: 180,
-                markSize: 76
+                height: 152
             ) {
                 onSelect(.plex)
             }
 
-            ProviderChoiceCard(
+            Divider().padding(.horizontal, 24)
+
+            ProviderChoiceRow(
                 provider: .mediaShare,
                 title: "SMB Share",
-                height: 108,
-                markSize: 76
+                height: 108
             ) {
                 onSelect(.mediaShare)
             }
         }
-        .frame(width: 760)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 12)
+        .frame(width: 720)
+        .background(
+            RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
+                .fill(.ultraThinMaterial)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
+        }
+        .focusSection()
     }
 }
 
-private struct ProviderChoiceCard: View {
+private struct ProviderChoiceRow: View {
     let provider: ProviderKind
     let title: LocalizedStringKey
     let height: CGFloat
-    let markSize: CGFloat
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 28) {
-                ProviderBrandMark(provider: provider, size: markSize)
+            HStack(spacing: 24) {
+                ProviderBrandMark(provider: provider, size: 64)
 
                 Text(title)
-                    .font(.title2.weight(.bold))
+                    .font(.system(size: 32, weight: .semibold))
 
                 Spacer(minLength: 24)
 
                 Image(systemName: "chevron.forward")
                     .font(.system(size: 22, weight: .semibold))
-                    .foregroundStyle(.tertiary)
+                    .settingsRowSecondary()
             }
-            .padding(.horizontal, 36)
+            .padding(.horizontal, 24)
             .frame(maxWidth: .infinity)
             .frame(height: height)
             .contentShape(Rectangle())
         }
-        .buttonStyle(SettingsCardButtonStyle())
+        .buttonStyle(SettingsFocusButtonStyle(size: .prominent))
     }
 }
 

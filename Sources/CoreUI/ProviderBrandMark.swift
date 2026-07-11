@@ -56,7 +56,7 @@ public struct ProviderBrandMark: View {
     public var body: some View {
         ZStack {
             if showsBackground {
-                Circle().fill(Self.brandTint(provider).opacity(rowFocused ? 0 : 0.18))
+                Circle().fill(Self.brandTint(provider).opacity(rowFocused ? 0.24 : 0.18))
             }
             if let systemSymbolName {
                 Image(systemName: systemSymbolName)

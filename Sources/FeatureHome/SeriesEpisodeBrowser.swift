@@ -157,7 +157,7 @@ private struct SeriesRecededLogo: View {
         .animation(
             reduceMotion
                 ? nil
-                : (logoAtRest ? .smooth(duration: 1.5) : .easeOut(duration: 0.39)),
+                : (logoAtRest ? .smooth(duration: 2.5) : .easeOut(duration: 0.39)),
             value: logoAtRest
         )
         .accessibilityHidden(!recedeModel.isReceded)

@@ -88,72 +88,12 @@ struct AddAccountView: View {
     }
 
     private var chooser: some View {
-        VStack(spacing: 40) {
-            if !canReturnToApp {
-                FirstRunBrandMark()
-            }
-
-            HStack(spacing: 32) {
-                providerButton(
-                    provider: .jellyfin,
-                    detail: "Find it on your network or enter an address."
-                ) { navigate(to: .jellyfin) }
-
-                providerButton(
-                    provider: .plex,
-                    detail: "Link this device at plex.tv/link."
-                ) { navigate(to: .plex) }
-            }
-
-            // Media shares are deliberately second-class: a smaller secondary
-            // button under the two first-class backends, not a co-equal card.
-            // Kept side-by-side with Cancel rather than stacked.
-            HStack(spacing: 24) {
-                Button {
-                    navigate(to: .mediaShare)
-                } label: {
-                    Label("Add a local media share (SMB)", systemImage: "externaldrive.connected.to.line.below.fill")
-                        .font(.callout)
-                }
-                .buttonStyle(.bordered)
-
-                if canReturnToApp {
-                    Button("Cancel", action: onCancel)
-                        .buttonStyle(.bordered)
-                }
-            }
-            .padding(.top, 8)
-        }
-        .padding(60)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        // Menu/back should return to wherever the flow was opened from (e.g.
-        // Settings), not fall through and suspend the whole app.
-        .onExitCommand {
-            if canReturnToApp { onCancel() }
-        }
-    }
-
-    private func providerButton(
-        provider: ProviderKind,
-        detail: String,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            VStack(spacing: 16) {
-                ProviderBrandMark(provider: provider, size: 100)
-                Text(provider.displayName)
-                    .font(.title2).bold()
-                Text(detail)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 320)
-            }
-            .frame(width: 420, height: 400)
-        }
-        // Same focus treatment as the Settings About / Report a Problem cards:
-        // accent outline + gentle lift, no contrast inversion.
-        .buttonStyle(SettingsCardButtonStyle())
+        ProviderChooserView(
+            showsBranding: !canReturnToApp,
+            showsBackButton: canReturnToApp,
+            onBack: onCancel,
+            onSelect: navigate(to:)
+        )
     }
 
     private var pageTransition: AnyTransition {
@@ -187,14 +127,133 @@ struct AddAccountView: View {
     }
 }
 
-private struct FirstRunBrandMark: View {
+private struct ProviderChooserView: View {
+    let showsBranding: Bool
+    let showsBackButton: Bool
+    let onBack: () -> Void
+    let onSelect: (ProviderKind) -> Void
+
     var body: some View {
-        Image("PlozzLogo")
-            .resizable()
-            .interpolation(.none)
-            .scaledToFit()
-            .frame(width: 96, height: 96)
-            .accessibilityHidden(true)
+        ZStack(alignment: .topLeading) {
+            HStack(spacing: 72) {
+                if showsBranding {
+                    FirstRunBrandPanel()
+                }
+
+                ProviderChoiceColumn(onSelect: onSelect)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            if showsBackButton {
+                Button(action: onBack) {
+                    Label("Back", systemImage: "chevron.backward")
+                }
+                .buttonStyle(.bordered)
+            }
+        }
+        .padding(.horizontal, 80)
+        .padding(.vertical, 64)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onExitCommand {
+            if showsBackButton { onBack() }
+        }
+    }
+}
+
+private struct FirstRunBrandPanel: View {
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
+                .fill(.ultraThinMaterial)
+                .overlay {
+                    RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
+                        .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
+                }
+
+            Image("PlozzLogo")
+                .resizable()
+                .interpolation(.none)
+                .scaledToFit()
+                .frame(width: 240, height: 240)
+                .accessibilityHidden(true)
+        }
+        .frame(width: 460, height: 680)
+    }
+}
+
+private struct ProviderChoiceColumn: View {
+    let onSelect: (ProviderKind) -> Void
+
+    var body: some View {
+        VStack(spacing: 28) {
+            ProviderChoiceCard(
+                provider: .jellyfin,
+                title: "Jellyfin",
+                detail: "Find it on your network or enter an address.",
+                height: 220,
+                markSize: 88
+            ) {
+                onSelect(.jellyfin)
+            }
+
+            ProviderChoiceCard(
+                provider: .plex,
+                title: "Plex",
+                detail: "Link this device at plex.tv/link.",
+                height: 220,
+                markSize: 88
+            ) {
+                onSelect(.plex)
+            }
+
+            ProviderChoiceCard(
+                provider: .mediaShare,
+                title: "Media Share (SMB)",
+                detail: "Connect to a shared folder on your local network.",
+                height: 128,
+                markSize: 60
+            ) {
+                onSelect(.mediaShare)
+            }
+        }
+        .frame(width: 760)
+    }
+}
+
+private struct ProviderChoiceCard: View {
+    let provider: ProviderKind
+    let title: LocalizedStringKey
+    let detail: LocalizedStringKey
+    let height: CGFloat
+    let markSize: CGFloat
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 28) {
+                ProviderBrandMark(provider: provider, size: markSize)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(title)
+                        .font(.title2.weight(.bold))
+                    Text(detail)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.leading)
+                }
+
+                Spacer(minLength: 24)
+
+                Image(systemName: "chevron.forward")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 36)
+            .frame(maxWidth: .infinity)
+            .frame(height: height)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(SettingsCardButtonStyle())
     }
 }
 

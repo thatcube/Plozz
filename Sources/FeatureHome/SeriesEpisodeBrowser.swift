@@ -129,7 +129,8 @@ private struct SeriesRecededLogo: View {
             asyncFallbackURL: logoFallback,
             backgroundSample: backgroundSample,
             maxWidth: 620,
-            maxHeight: 200
+            maxHeight: 200,
+            alignment: .center
         ) {
             Text(series.title)
                 .font(.system(size: 64, weight: .bold))

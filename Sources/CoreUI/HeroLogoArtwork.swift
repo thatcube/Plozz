@@ -33,15 +33,17 @@ public struct HeroBackgroundSample: Sendable {
 ///   3. `textFallback` — the caller's styled title `Text`, shown when nothing
 ///      resolves (or on platforms without UIKit image decoding).
 ///
-/// The logo is fit (never cropped) inside a `maxWidth` × `maxHeight` box, pinned
-/// to the leading edge, and fades in once decoded. Unlike poster art there is no
-/// aspect-ratio guard — logos are legitimately wide.
+/// The logo is fit (never cropped) inside a `maxWidth` × `maxHeight` box and
+/// fades in once decoded. It defaults to leading alignment for hero content
+/// columns, while callers presenting a centered logo can opt into `.center`.
+/// Unlike poster art there is no aspect-ratio guard — logos are legitimately wide.
 public struct HeroLogoArtwork<TextFallback: View>: View {
     private let primaryURL: URL?
     private let asyncFallbackURL: (@Sendable () async -> URL?)?
     private let backgroundSample: (@Sendable () async -> HeroBackgroundSample?)?
     private let maxWidth: CGFloat
     private let maxHeight: CGFloat
+    private let alignment: Alignment
     private let textFallback: () -> TextFallback
 
     public init(
@@ -50,6 +52,7 @@ public struct HeroLogoArtwork<TextFallback: View>: View {
         backgroundSample: (@Sendable () async -> HeroBackgroundSample?)? = nil,
         maxWidth: CGFloat = 620,
         maxHeight: CGFloat = 200,
+        alignment: Alignment = .leading,
         @ViewBuilder textFallback: @escaping () -> TextFallback
     ) {
         self.primaryURL = primaryURL
@@ -57,6 +60,7 @@ public struct HeroLogoArtwork<TextFallback: View>: View {
         self.backgroundSample = backgroundSample
         self.maxWidth = maxWidth
         self.maxHeight = maxHeight
+        self.alignment = alignment
         self.textFallback = textFallback
     }
 
@@ -68,6 +72,7 @@ public struct HeroLogoArtwork<TextFallback: View>: View {
             backgroundSample: backgroundSample,
             maxWidth: maxWidth,
             maxHeight: maxHeight,
+            alignment: alignment,
             textFallback: textFallback
         )
         #else
@@ -83,6 +88,7 @@ private struct LoadedLogo<TextFallback: View>: View {
     let backgroundSample: (@Sendable () async -> HeroBackgroundSample?)?
     let maxWidth: CGFloat
     let maxHeight: CGFloat
+    let alignment: Alignment
     let textFallback: () -> TextFallback
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -131,13 +137,13 @@ private struct LoadedLogo<TextFallback: View>: View {
                 .renderingMode(.template)
                 .resizable()
                 .aspectRatio(contentMode: .fit)
-                .frame(maxWidth: maxWidth, maxHeight: maxHeight, alignment: .leading)
+                .frame(maxWidth: maxWidth, maxHeight: maxHeight, alignment: alignment)
                 .foregroundStyle(tintLight ? Color.white : Color.black)
         } else {
             Image(uiImage: processed.image)
                 .resizable()
                 .aspectRatio(contentMode: .fit)
-                .frame(maxWidth: maxWidth, maxHeight: maxHeight, alignment: .leading)
+                .frame(maxWidth: maxWidth, maxHeight: maxHeight, alignment: alignment)
                 .modifier(LogoLegibilityHalo(isDark: processed.isDark, active: processed.needsHalo))
         }
     }

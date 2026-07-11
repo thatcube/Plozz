@@ -23,6 +23,30 @@ public struct HeroBackgroundSample: Sendable {
     }
 }
 
+/// Controls whether a hero may replace its readable text title after asynchronous
+/// logo work completes.
+public enum HeroLogoPresentationPolicy: Sendable, Equatable {
+    /// Show the logo whenever it finishes. Best for a detail page that does not
+    /// transition between many titles in place.
+    case whenReady
+    /// Adopt the logo only if it is ready within the arrival window. A later result
+    /// still warms the shared cache, but the current title remains visually stable.
+    case onArrival(maximumWait: TimeInterval)
+
+    func shouldAdopt(elapsed: TimeInterval) -> Bool {
+        switch self {
+        case .whenReady:
+            return true
+        case .onArrival(let maximumWait):
+            return elapsed <= max(0, maximumWait)
+        }
+    }
+
+    var animatesResolvedLogo: Bool {
+        self == .whenReady
+    }
+}
+
 /// Renders a show's stylized title/logo art for the detail hero, falling back to
 /// a plain text title when no logo can be found.
 ///
@@ -42,6 +66,7 @@ public struct HeroLogoArtwork<TextFallback: View>: View {
     private let backgroundSample: (@Sendable () async -> HeroBackgroundSample?)?
     private let maxWidth: CGFloat
     private let maxHeight: CGFloat
+    private let presentationPolicy: HeroLogoPresentationPolicy
     private let textFallback: () -> TextFallback
 
     public init(
@@ -50,6 +75,7 @@ public struct HeroLogoArtwork<TextFallback: View>: View {
         backgroundSample: (@Sendable () async -> HeroBackgroundSample?)? = nil,
         maxWidth: CGFloat = 620,
         maxHeight: CGFloat = 200,
+        presentationPolicy: HeroLogoPresentationPolicy = .whenReady,
         @ViewBuilder textFallback: @escaping () -> TextFallback
     ) {
         self.primaryURL = primaryURL
@@ -57,6 +83,7 @@ public struct HeroLogoArtwork<TextFallback: View>: View {
         self.backgroundSample = backgroundSample
         self.maxWidth = maxWidth
         self.maxHeight = maxHeight
+        self.presentationPolicy = presentationPolicy
         self.textFallback = textFallback
     }
 
@@ -68,6 +95,7 @@ public struct HeroLogoArtwork<TextFallback: View>: View {
             backgroundSample: backgroundSample,
             maxWidth: maxWidth,
             maxHeight: maxHeight,
+            presentationPolicy: presentationPolicy,
             textFallback: textFallback
         )
         #else
@@ -83,6 +111,7 @@ private struct LoadedLogo<TextFallback: View>: View {
     let backgroundSample: (@Sendable () async -> HeroBackgroundSample?)?
     let maxWidth: CGFloat
     let maxHeight: CGFloat
+    let presentationPolicy: HeroLogoPresentationPolicy
     let textFallback: () -> TextFallback
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -103,7 +132,12 @@ private struct LoadedLogo<TextFallback: View>: View {
                     .transition(.opacity)
             }
         }
-        .animation(reduceMotion ? nil : .easeIn(duration: 0.25), value: image != nil)
+        .animation(
+            reduceMotion || !presentationPolicy.animatesResolvedLogo
+                ? nil
+                : .easeIn(duration: 0.25),
+            value: image != nil
+        )
         .task(id: taskKey) { await resolve() }
     }
 
@@ -147,18 +181,21 @@ private struct LoadedLogo<TextFallback: View>: View {
     }
 
     private func resolve() async {
+        let startedAt = ProcessInfo.processInfo.systemUptime
         image = nil
         // `HeroLogoPipeline` caches the processed result by URL and runs the heavy
         // pixel work off the main actor, so re-appears / scheme changes / fast
         // scrolling reuse the prepared logo instead of reprocessing it.
-        if let primaryURL, let prepared = await HeroLogoPipeline.shared.preparedLogo(for: primaryURL) {
-            image = await finalize(prepared)
-            return
-        }
-        if let asyncFallbackURL, let url = await asyncFallbackURL(),
-           let prepared = await HeroLogoPipeline.shared.preparedLogo(for: url) {
-            image = await finalize(prepared)
-        }
+        guard let prepared = await loadPreparedHeroLogo(
+            primaryURL: primaryURL,
+            asyncFallbackURL: asyncFallbackURL,
+            priority: .userInitiated
+        ) else { return }
+        let processed = await finalize(prepared)
+        guard !Task.isCancelled else { return }
+        let elapsed = ProcessInfo.processInfo.systemUptime - startedAt
+        guard presentationPolicy.shouldAdopt(elapsed: elapsed) else { return }
+        image = processed
     }
 
     /// Combines the prepared logo with a colour sample of the background to decide
@@ -225,6 +262,42 @@ private struct LoadedLogo<TextFallback: View>: View {
         let db = b1 - b2
         return ((2 + rMean) * dr * dr + 4 * dg * dg + (3 - rMean) * db * db).squareRoot()
     }
+}
+
+/// Opportunistically prepares logo artwork before a hero slide becomes visible.
+/// The shared pipeline de-duplicates this work with any foreground request.
+public enum HeroLogoPreloader {
+    public static func warm(primaryURL: URL?) async {
+        guard let primaryURL else { return }
+        _ = await loadPreparedHeroLogo(
+            primaryURL: primaryURL,
+            asyncFallbackURL: nil,
+            priority: .utility
+        )
+    }
+}
+
+private func loadPreparedHeroLogo(
+    primaryURL: URL?,
+    asyncFallbackURL: (@Sendable () async -> URL?)?,
+    priority: TaskPriority
+) async -> PreparedLogo? {
+    guard !Task.isCancelled else { return nil }
+    if let primaryURL,
+       let prepared = await HeroLogoPipeline.shared.preparedLogo(
+           for: primaryURL,
+           priority: priority
+       ) {
+        return prepared
+    }
+    guard !Task.isCancelled,
+          let asyncFallbackURL,
+          let url = await asyncFallbackURL(),
+          !Task.isCancelled
+    else {
+        return nil
+    }
+    return await HeroLogoPipeline.shared.preparedLogo(for: url, priority: priority)
 }
 
 /// A logo after background removal/trim, carrying the mean luminance *and* mean
@@ -295,7 +368,10 @@ private actor HeroLogoPipeline {
     private var inFlight: [String: Task<PreparedLogo?, Never>] = [:]
     private let capacity = 48
 
-    func preparedLogo(for url: URL) async -> PreparedLogo? {
+    func preparedLogo(
+        for url: URL,
+        priority: TaskPriority = .userInitiated
+    ) async -> PreparedLogo? {
         let key = url.absoluteString
         if let hit = cache[key] {
             promote(key)
@@ -304,7 +380,7 @@ private actor HeroLogoPipeline {
         if let running = inFlight[key] {
             return await running.value
         }
-        let task = Task.detached(priority: .userInitiated) {
+        let task = Task.detached(priority: priority) {
             await HeroLogoPipeline.fetchAndPrepare(url)
         }
         inFlight[key] = task

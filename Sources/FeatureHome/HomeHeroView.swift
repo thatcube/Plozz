@@ -459,6 +459,13 @@ struct HomeHeroView: View {
         .task(id: artworkSetToken) {
             await warmHeroPreviews()
         }
+        // Provider logos are much smaller than backdrops, but still require a
+        // network fetch plus decode/analysis. Warm them in likely paging order so
+        // each slide arrives with its final identity instead of replacing a settled
+        // text title. The shared limiter keeps this behind foreground artwork.
+        .task(id: artworkSetToken) {
+            await warmHeroLogos()
+        }
         // Auto-advance: the fire is rescheduled whenever `autoAdvanceKey` changes
         // (slide change, manual page, pause/resume, or the item count settling).
         // It runs REGARDLESS of focus — focus lands on the hero action row by
@@ -575,7 +582,11 @@ struct HomeHeroView: View {
                     // below) so it never runs wider than the buttons beneath it —
                     // matching the title/overview. Falls back to the component's
                     // default until first measured.
-                    maxWidth: actionButtonsWidth > 0 ? actionButtonsWidth : 620
+                    maxWidth: actionButtonsWidth > 0 ? actionButtonsWidth : 620,
+                    // The parent keeps metadata hidden for 280ms during a wipe. A
+                    // cache-hot logo lands inside that window; a later result warms
+                    // the next visit but never pops into an already-settled slide.
+                    presentationPolicy: .onArrival(maximumWait: 0.2)
                 ) {
                     Text(hideText ? spoilerSettings.maskedTitle(for: item) : item.title)
                         .font(.system(size: 64, weight: .bold))
@@ -1713,6 +1724,39 @@ struct HomeHeroView: View {
             batchStart = batchEnd
         }
         #endif
+    }
+
+    /// Prepares provider-supplied logos in the same current/next/previous order as
+    /// backdrop previews. Two-at-a-time warming stays lightweight and avoids
+    /// launching external metadata searches for slides that have no provider logo;
+    /// those retain the immediate text title and resolve their optional fallback on
+    /// demand without ever becoming visually blank.
+    private func warmHeroLogos() async {
+        try? await Task.sleep(nanoseconds: 350_000_000)
+        guard !Task.isCancelled else { return }
+
+        var seen = Set<URL>()
+        let orderedURLs = HeroPreviewWarmOrder.indices(count: items.count, centeredAt: index)
+            .compactMap { items[$0].logoURL }
+            .filter { seen.insert($0).inserted }
+        let batchSize = 2
+        var batchStart = 0
+        while batchStart < orderedURLs.count {
+            guard !Task.isCancelled else { return }
+            let batchEnd = min(batchStart + batchSize, orderedURLs.count)
+            await withTaskGroup(of: Void.self) { group in
+                for url in orderedURLs[batchStart..<batchEnd] {
+                    group.addTask(priority: .utility) {
+                        guard !Task.isCancelled else { return }
+                        await ArtworkSession.warmLimiter.run {
+                            guard !Task.isCancelled else { return }
+                            await HeroLogoPreloader.warm(primaryURL: url)
+                        }
+                    }
+                }
+            }
+            batchStart = batchEnd
+        }
     }
 
     /// Resolves the best hero backdrop URL for one item. Mirrors

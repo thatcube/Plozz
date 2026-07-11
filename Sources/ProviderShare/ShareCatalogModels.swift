@@ -118,6 +118,17 @@ enum ShareCatalogID {
         return stem
     }
 
+    /// User-facing library sort key, matching the common Plex/Jellyfin convention:
+    /// ignore a leading standalone English article "The" while leaving the
+    /// displayed title untouched (`The Batman` sorts under B; `Theodore` under T).
+    static func sortTitle(from title: String) -> String {
+        let words = title.split(whereSeparator: \.isWhitespace)
+        guard words.count > 1, words[0].caseInsensitiveCompare("the") == .orderedSame else {
+            return title.lowercased()
+        }
+        return words.dropFirst().joined(separator: " ").lowercased()
+    }
+
     static func season(_ key: String, _ season: Int) -> String { "season:\(key):\(season)" }
     static func isSeason(_ id: String) -> Bool { id.hasPrefix("season:") }
     /// Decode a `season:<key>:<n>` id back into `(seriesKey, seasonNumber)`.

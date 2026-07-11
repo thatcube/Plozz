@@ -180,6 +180,40 @@ final class ShareCatalogStoreTests: XCTestCase {
         XCTAssertTrue(seasons.allSatisfy { $0.libraryID == ShareCatalogID.animeLibrary })
     }
 
+    func testLibrarySortIgnoresLeadingTheAndUsesSeriesTitle() async {
+        let store = ShareCatalogStore(accountKey: "sort", directory: tempDir())
+        await store.upsert([
+            movie("Movies/Zootopia (2016).mkv", title: "Zootopia", year: 2016),
+            movie("Movies/The Batman (2022).mkv", title: "The Batman", year: 2022),
+            movie("Movies/Avatar (2009).mkv", title: "Avatar", year: 2009),
+            episode("TV/Yellowstone/S01E01.mkv", series: "Yellowstone", season: 1, episode: 1),
+            // Episode titles intentionally sort differently; the grid must use the
+            // SERIES title, not "Zulu"/"Alpha".
+            CatalogAsset(
+                relPath: "TV/The Bear/S01E01.mkv", basename: "S01E01.mkv",
+                size: 1_000, modifiedAt: Date(), kind: .episode, library: .tv,
+                title: "Zulu", year: nil, seriesTitle: "The Bear",
+                seriesKey: ShareCatalogID.seriesKey(fromTitle: "The Bear"),
+                season: 1, episode: 1
+            ),
+            CatalogAsset(
+                relPath: "TV/Andor/S01E01.mkv", basename: "S01E01.mkv",
+                size: 1_000, modifiedAt: Date(), kind: .episode, library: .tv,
+                title: "Alpha", year: nil, seriesTitle: "Andor",
+                seriesKey: ShareCatalogID.seriesKey(fromTitle: "Andor"),
+                season: 1, episode: 1
+            ),
+        ], scanID: 1)
+
+        let movies = await store.movies(offset: 0, limit: 10)
+        XCTAssertEqual(movies.map(\.title), ["Avatar", "The Batman", "Zootopia"])
+
+        let series = await store.series(in: .tv, offset: 0, limit: 10)
+        XCTAssertEqual(series.map(\.title), ["Andor", "The Bear", "Yellowstone"])
+        XCTAssertEqual(ShareCatalogID.sortTitle(from: "Theodore"), "theodore")
+        XCTAssertEqual(ShareCatalogID.sortTitle(from: "  THE   Thing  "), "thing")
+    }
+
     func testAnimeAndTvLibrariesAreSeparate() async {
         let store = ShareCatalogStore(accountKey: "a", directory: tempDir())
         await store.upsert([

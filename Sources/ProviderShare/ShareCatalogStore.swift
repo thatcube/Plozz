@@ -187,7 +187,8 @@ actor ShareCatalogStore {
                 bindText(stmt, 7, a.kind.rawValue)
                 bindText(stmt, 8, a.library.rawValue)
                 bindText(stmt, 9, a.title)
-                bindText(stmt, 10, a.title.lowercased())
+                let libraryTitle = a.kind == .episode ? (a.seriesTitle ?? a.title) : a.title
+                bindText(stmt, 10, ShareCatalogID.sortTitle(from: libraryTitle))
                 bindOptInt(stmt, 11, a.year)
                 bindOptText(stmt, 12, a.seriesTitle)
                 bindOptText(stmt, 13, a.seriesKey)
@@ -900,7 +901,7 @@ actor ShareCatalogStore {
           GROUP BY COALESCE(movie_group_key, movie_key, rel_path)
         ) g
         LEFT JOIN enrichment e ON e.item_id = g.rep_id
-        ORDER BY g.gsort LIMIT ? OFFSET ?;
+        ORDER BY g.gsort, g.title, g.logical_id LIMIT ? OFFSET ?;
         """, bind: { sqlite3_bind_int64($0, 1, Int64(limit)); sqlite3_bind_int64($0, 2, Int64(offset)) }) { stmt in
             let item = MediaItem(
                 id: self.columnText(stmt, 0) ?? "",
@@ -927,13 +928,13 @@ actor ShareCatalogStore {
         // a page is one query, not 1 + N per-row enrichment lookups. The GROUP BY is
         // over series_key, which the JOIN is 1:1 with.
         query("""
-        SELECT a.series_key, a.series_title, MAX(a.year), MIN(a.sort_title) AS s,
+        SELECT a.series_key, MIN(a.series_title), MAX(a.year), MIN(a.sort_title) AS s,
                e.provider_ids_json, e.overview, e.genres_json, e.runtime,
                e.poster_url, e.backdrop_url, e.logo_url
         FROM assets a
         LEFT JOIN enrichment e ON e.item_id = 'series:' || a.series_key
         WHERE a.library=? AND a.kind='episode' AND a.series_key IS NOT NULL
-        GROUP BY a.series_key ORDER BY s LIMIT ? OFFSET ?;
+        GROUP BY a.series_key ORDER BY s, a.series_key LIMIT ? OFFSET ?;
         """, bind: {
             self.bindText($0, 1, library.rawValue)
             sqlite3_bind_int64($0, 2, Int64(limit)); sqlite3_bind_int64($0, 3, Int64(offset))
@@ -1010,7 +1011,7 @@ actor ShareCatalogStore {
         query("""
         SELECT rel_path, title, series_title, season, episode, library, year FROM assets
         WHERE series_key=? AND kind='episode' AND COALESCE(season,1)=?
-        ORDER BY COALESCE(episode, 999999), sort_title;
+        ORDER BY COALESCE(episode, 999999), sort_title, rel_path;
         """, bind: { self.bindText($0, 1, seriesKey); sqlite3_bind_int64($0, 2, Int64(season)) }) { stmt in
             out.append(self.episodeItem(from: stmt, seriesKey: seriesKey))
         }

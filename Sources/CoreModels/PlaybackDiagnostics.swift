@@ -42,6 +42,7 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
         case sdr
         case hlg
         case hdr10
+        case hdr10Plus
         case dolbyVision
         case unknown
 
@@ -50,6 +51,7 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
             case .sdr: return "SDR"
             case .hlg: return "HDR (HLG)"
             case .hdr10: return "HDR10 (PQ)"
+            case .hdr10Plus: return "HDR10+"
             case .dolbyVision: return "Dolby Vision"
             case .unknown: return "Unknown"
             }
@@ -62,6 +64,7 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
             case .sdr: return "SDR"
             case .hlg: return "HLG"
             case .hdr10: return "HDR10"
+            case .hdr10Plus: return "HDR10+"
             case .dolbyVision: return "Dolby Vision"
             case .unknown: return nil
             }
@@ -187,6 +190,9 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
     public var sourceProvider: ProviderKind?
     /// Friendly server name shown in the overlay header (e.g. "Allie's Jellyfin").
     public var serverName: String?
+    /// Basename of the actual selected source file. This is provider-supplied
+    /// rather than derived from the playback URL, which may be a transcode API.
+    public var sourceFileName: String?
     /// Container codec FourCC tag, e.g. `hvc1` / `hev1` / `dvh1`. The hvc1-vs-hev1
     /// distinction is make-or-break for AVPlayer (hev1 plays audio with a black
     /// screen), so it's surfaced explicitly.
@@ -251,6 +257,7 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
         liveViewModels: Int? = nil,
         liveNativeEngines: Int? = nil,
         sourceProvider: ProviderKind? = nil,
+        sourceFileName: String? = nil,
         videoCodecTag: String? = nil,
         videoBitDepth: Int? = nil,
         dolbyVisionProfile: Int? = nil,
@@ -294,6 +301,7 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
         self.liveViewModels = liveViewModels
         self.liveNativeEngines = liveNativeEngines
         self.sourceProvider = sourceProvider
+        self.sourceFileName = sourceFileName
         self.videoCodecTag = videoCodecTag
         self.videoBitDepth = videoBitDepth
         self.dolbyVisionProfile = dolbyVisionProfile
@@ -378,6 +386,10 @@ public extension PlaybackDiagnostics {
 
         if isDolbyVision || type.contains("DOVI") || type.contains("DOLBY") || range.contains("DOVI") {
             return .dolbyVision
+        }
+        if type.contains("HDR10PLUS") || type.contains("HDR10+")
+            || range.contains("HDR10PLUS") || range.contains("HDR10+") {
+            return .hdr10Plus
         }
         if type.contains("HLG") || transfer.contains("ARIB") || transfer.contains("B67") || transfer.contains("HLG") {
             return .hlg
@@ -848,6 +860,14 @@ public extension PlaybackDiagnostics {
 
     /// Token-stripped transport summary of what AVPlayer is actually playing.
     var streamTransportText: String { streamTransport ?? Self.placeholder }
+
+    /// Selected source filename, or a placeholder when the provider cannot expose
+    /// one. Whitespace-only values are suppressed.
+    var sourceFileNameText: String {
+        guard let value = sourceFileName?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !value.isEmpty else { return Self.placeholder }
+        return value
+    }
 
     /// Current position over duration, e.g. `12:34 / 1:58:24`.
     var positionText: String {

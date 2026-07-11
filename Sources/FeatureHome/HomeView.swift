@@ -1,7 +1,9 @@
 #if canImport(SwiftUI)
 import SwiftUI
 import CoreModels
+import CoreNetworking
 import CoreUI
+import MetadataKit
 
 /// The Home screen: an optional cinematic **hero** carousel followed by
 /// Continue Watching, Latest, and library shortcuts.
@@ -19,6 +21,7 @@ public struct HomeView: View {
     private let heroCurator: HeroCurator
     private let heroFeaturedProvider: FeaturedContentProviding
     private let heroRandomProvider: RandomLibraryContentProviding
+    private let heroArtworkProvider: HeroArtworkProviding
     /// Whether Seerr is currently connected — threaded to the hero so a not-owned
     /// featured title only offers a Request CTA when a server is reachable.
     private let heroSeerConnected: Bool
@@ -31,6 +34,11 @@ public struct HomeView: View {
 
     /// The curated hero items, recomputed as Home content or settings change.
     @State private var heroItems: [MediaItem] = []
+    /// The latest curation input that completed (including a valid empty result).
+    /// A cached Home snapshot can render rows before async-only hero sources finish;
+    /// comparing this with the current input distinguishes "still curating" from
+    /// "curation completed with no eligible hero items."
+    @State private var completedHeroRecomputeKey: HeroRecomputeKey?
 
     /// Whether the hero is receded (focus moved down onto the Continue Watching
     /// row). Driven by the page scroll crossing `recedeScrollThreshold` (see
@@ -73,6 +81,14 @@ public struct HomeView: View {
         heroCurator: HeroCurator = HeroCurator(),
         heroFeaturedProvider: @escaping FeaturedContentProviding = HeroFeaturedProvider.none,
         heroRandomProvider: @escaping RandomLibraryContentProviding = HeroRandomProvider.none,
+        heroArtworkProvider: @escaping HeroArtworkProviding = { item in
+            switch item.kind {
+            case .folder, .collection, .unknown:
+                return nil
+            default:
+                return await ArtworkRouter.shared.artworkURL(.hero, for: item)
+            }
+        },
         seerConnected: Bool = false,
         onRequestItem: ((MediaItem) async -> MediaAvailabilityStatus?)? = nil,
         navigationStyle: NavigationStyle = .default,
@@ -87,6 +103,7 @@ public struct HomeView: View {
         self.heroCurator = heroCurator
         self.heroFeaturedProvider = heroFeaturedProvider
         self.heroRandomProvider = heroRandomProvider
+        self.heroArtworkProvider = heroArtworkProvider
         self.heroSeerConnected = seerConnected
         self.onRequestItem = onRequestItem
         self.navigationStyle = navigationStyle
@@ -119,6 +136,10 @@ public struct HomeView: View {
             // kind, order *and* how many cards it actually showed, so the skeleton
             // matches a full row and a sparse one alike.
             let layout = rows.map { HomeRowLayout(kind: $0.kind, count: $0.cardCount) }
+            let heroRecomputeKey = HeroRecomputeKey(
+                content: content,
+                settings: heroSettings?.settings
+            )
             // Seed the hero synchronously from the already-loaded sources
             // (Continue Watching + Watchlist) so it renders in the *same frame* as
             // the rows — no pop-in. Once `recomputeHero` finishes, `heroItems`
@@ -131,7 +152,13 @@ public struct HomeView: View {
                 )
             } ?? []
             let displayHeroItems = heroItems.isEmpty ? syncHeroItems : heroItems
-            let heroActive = (heroSettings?.settings.isActive ?? false) && !displayHeroItems.isEmpty
+            let heroSlotState = HomeHeroSlotState.resolve(
+                isConfigured: heroSettings?.settings.isActive ?? false,
+                hasItems: !displayHeroItems.isEmpty,
+                recomputeComplete: completedHeroRecomputeKey == heroRecomputeKey
+            )
+            let heroActive = heroSlotState == .content
+            let heroLayoutActive = heroSlotState != .hidden
             // Account-scoped ids of every watchlisted title, so the hero can show
             // the *series'* watchlist state on an episode/season slide.
             let watchlistedKeys = Set(content.watchlist.map {
@@ -163,7 +190,7 @@ public struct HomeView: View {
                         // unambiguously inside the scroll content and its superview
                         // walk reaches the UIScrollView. Gated to the hero layout.
                         #if canImport(UIKit)
-                        if heroActive {
+                        if heroLayoutActive {
                             ScrollPanDisabler()
                                 .frame(width: 1, height: 0)
                                 .allowsHitTesting(false)
@@ -214,6 +241,18 @@ public struct HomeView: View {
                             .id(Self.heroTopID)
                             // (touch-pan disabler lives as a sibling below so it is
                             //  unambiguously inside the scroll content — see note.)
+                        } else if heroSlotState == .placeholder {
+                            // Cached Home rows can paint before Random/Featured hero
+                            // curation. Reserve the exact final hero geometry now so
+                            // rows never appear "finished" and then jump down seconds
+                            // later when the hero arrives.
+                            HomeHeroSkeletonView()
+                                .id(Self.heroTopID)
+                                .contentShape(Rectangle())
+                                .focusable(true)
+                                .prefersDefaultFocus(true, in: heroFocusScope)
+                                .focusEffectDisabled()
+                                .accessibilityLabel("Loading featured content")
                         }
                         VStack(alignment: .leading, spacing: metrics.rowSpacing) {
                             if content.mergeLibraries {
@@ -244,7 +283,7 @@ public struct HomeView: View {
                         // padding is STATIC (never animated) — the recede lift is a
                         // separate `.offset` below so it never triggers a relayout of
                         // the non-lazy rows VStack (the source of the recede stutter).
-                        .padding(.top, heroActive
+                        .padding(.top, heroLayoutActive
                             ? -Self.heroRowOverlap
                             : PlozzTheme.Metrics.screenVerticalPadding)
                         .padding(.bottom, PlozzTheme.Metrics.screenVerticalPadding)
@@ -267,7 +306,7 @@ public struct HomeView: View {
                     .overlay(alignment: .topTrailing) {
                         scanBanner
                             .padding(.trailing, PlozzTheme.Metrics.screenPadding)
-                            .padding(.top, heroActive ? 56 : 12)
+                            .padding(.top, heroLayoutActive ? 56 : 12)
                     }
                 }
                 // Never clip a focused card's lift, shadow or border.
@@ -295,7 +334,7 @@ public struct HomeView: View {
                 // above the backdrop (the gap that made the hero sit too low).
                 // An empty edge set is a no-op, so the classic rows layout keeps
                 // its normal top inset under the tab bar.
-                .ignoresSafeArea(.container, edges: heroActive ? .top : [])
+                .ignoresSafeArea(.container, edges: heroLayoutActive ? .top : [])
             }
             // Remember the structure we actually rendered (post-visibility), keyed
             // on kinds *and* counts so a changed card count re-persists too. Only in
@@ -305,8 +344,8 @@ public struct HomeView: View {
             .task(id: layout) { if content.mergeLibraries { viewModel.rememberLayout(layout) } }
             // Recompute the curated hero set whenever Home content or the hero
             // config changes. Off the main actor via the curator's async sources.
-            .task(id: HeroRecomputeKey(content: content, settings: heroSettings?.settings)) {
-                await recomputeHero(content: content)
+            .task(id: heroRecomputeKey) {
+                await recomputeHero(content: content, key: heroRecomputeKey)
             }
             // Live-refresh ONLY the status of featured (Seerr) hero items — their
             // `availability` + `downloadProgress` — folding fresh values onto the
@@ -316,7 +355,7 @@ public struct HomeView: View {
             // only reacts to a change in the items' *ids* — see its id-keyed
             // onChange). Restarts with the recompute baseline; idles when Featured
             // is off or absent.
-            .task(id: HeroRecomputeKey(content: content, settings: heroSettings?.settings)) {
+            .task(id: heroRecomputeKey) {
                 await refreshFeaturedStatusLoop()
             }
         }
@@ -452,11 +491,19 @@ public struct HomeView: View {
     /// active hero settings, via the injected curator + content seams. Clears the
     /// set when the hero is disabled so Home falls back to its classic layout.
     @MainActor
-    private func recomputeHero(content: HomeViewModel.Content) async {
+    private func recomputeHero(
+        content: HomeViewModel.Content,
+        key: HeroRecomputeKey
+    ) async {
+        let started = Date()
         guard let settings = heroSettings?.settings, settings.isActive else {
             heroItems = []
+            completedHeroRecomputeKey = key
             return
         }
+        PlozzLog.boot(
+            "HomeHero.curate START max=\(settings.maxItems) sources=\(settings.sources.count)"
+        )
         // Resolve the Random source's library scope: an empty set means "all
         // currently-visible libraries", so expand it to concrete keys from the
         // loaded, visibility-filtered library set before handing off to the
@@ -473,9 +520,18 @@ public struct HomeView: View {
             continueWatching: content.continueWatching,
             watchlist: content.watchlist,
             featuredProvider: heroFeaturedProvider,
-            randomProvider: heroRandomProvider
+            randomProvider: heroRandomProvider,
+            artworkProvider: heroArtworkProvider
         )
+        guard !Task.isCancelled else {
+            let elapsedMS = Int(Date().timeIntervalSince(started) * 1_000)
+            PlozzLog.boot("HomeHero.curate CANCEL ms=\(elapsedMS)")
+            return
+        }
         heroItems = items
+        completedHeroRecomputeKey = key
+        let elapsedMS = Int(Date().timeIntervalSince(started) * 1_000)
+        PlozzLog.boot("HomeHero.curate DONE ms=\(elapsedMS) items=\(items.count)")
     }
 
     /// Interval between in-place featured-status refreshes while Home is visible.
@@ -653,6 +709,26 @@ private struct HeroRecomputeKey: Equatable {
         self.watchlistIDs = content.watchlist.map(\.id)
         self.libraryKeys = content.libraries.map(\.key)
         self.settings = settings
+    }
+}
+
+/// Resolves the Home hero's structural slot independently from its item details.
+/// Loaded rows may be available from disk while async-only hero sources are still
+/// curating; that state must reserve the hero geometry with a placeholder rather
+/// than briefly rendering the classic rows-only layout.
+enum HomeHeroSlotState: Equatable {
+    case hidden
+    case placeholder
+    case content
+
+    static func resolve(
+        isConfigured: Bool,
+        hasItems: Bool,
+        recomputeComplete: Bool
+    ) -> HomeHeroSlotState {
+        guard isConfigured else { return .hidden }
+        if hasItems { return .content }
+        return recomputeComplete ? .hidden : .placeholder
     }
 }
 

@@ -6,8 +6,26 @@ import CoreModels
 /// sources, cross-source de-dup, `maxItems` cap, disabled-source skipping, and
 /// the inert `.featured` (Seerr) seam.
 final class HeroCuratorTests: XCTestCase {
-    private func item(_ id: String, kind: MediaItemKind = .movie) -> MediaItem {
-        MediaItem(id: id, title: id, kind: kind)
+    private actor ArtworkCalls {
+        private(set) var ids: [String] = []
+
+        func record(_ id: String) {
+            ids.append(id)
+        }
+    }
+
+    private func item(
+        _ id: String,
+        kind: MediaItemKind = .movie,
+        hasHeroArtwork: Bool = true
+    ) -> MediaItem {
+        MediaItem(
+            id: id,
+            title: id,
+            kind: kind,
+            posterURL: URL(string: "https://example.com/\(id)-poster.jpg"),
+            backdropURL: hasHeroArtwork ? URL(string: "https://example.com/\(id).jpg") : nil
+        )
     }
 
     private func settings(
@@ -121,6 +139,63 @@ final class HeroCuratorTests: XCTestCase {
         XCTAssertFalse(featuredCalled)
     }
 
+    func testExcludesItemsWithoutHeroArtwork() async {
+        let curator = HeroCurator()
+        let fallback = MediaItem(
+            id: "fallback",
+            title: "fallback",
+            kind: .episode,
+            fallbackArtworkURL: URL(string: "https://example.com/series.jpg")
+        )
+        let result = await curator.curate(
+            settings: settings(sources: [.continueWatching]),
+            continueWatching: [
+                item("backdrop"),
+                item("poster-only", hasHeroArtwork: false),
+                fallback
+            ],
+            watchlist: []
+        )
+
+        XCTAssertEqual(result.map(\.id), ["backdrop", "fallback"])
+    }
+
+    func testIncludesRouterResolvedHeroArtwork() async {
+        let curator = HeroCurator()
+        let resolvedURL = URL(string: "https://example.com/resolved-hero.jpg")!
+        let result = await curator.curate(
+            settings: settings(sources: [.continueWatching]),
+            continueWatching: [item("router", hasHeroArtwork: false)],
+            watchlist: [],
+            artworkProvider: { item in
+                item.id == "router" ? resolvedURL : nil
+            }
+        )
+
+        XCTAssertEqual(result.map(\.id), ["router"])
+        XCTAssertEqual(result.first?.heroBackdropURL, resolvedURL)
+    }
+
+    func testArtworkResolutionStopsOnceSourceCanFillHero() async {
+        let curator = HeroCurator()
+        let calls = ArtworkCalls()
+        let candidates = (1...10).map { item("router-\($0)", hasHeroArtwork: false) }
+
+        let result = await curator.curate(
+            settings: settings(sources: [.continueWatching], maxItems: 3),
+            continueWatching: candidates,
+            watchlist: [],
+            artworkProvider: { item in
+                await calls.record(item.id)
+                return URL(string: "https://example.com/\(item.id)-hero.jpg")
+            }
+        )
+        let resolvedIDs = await calls.ids
+
+        XCTAssertEqual(result.map(\.id), ["router-1", "router-2", "router-3"])
+        XCTAssertEqual(resolvedIDs, ["router-1", "router-2", "router-3"])
+    }
+
     // MARK: - Synchronous seed (pop-in avoidance)
 
     func testCurateSyncUsesOnlyLibrarySourcesInOrder() {
@@ -154,5 +229,62 @@ final class HeroCuratorTests: XCTestCase {
             watchlist: []
         )
         XCTAssertEqual(result.map(\.id), ["c1", "c2"])
+    }
+
+    func testCurateSyncExcludesItemsWithoutHeroArtwork() {
+        let curator = HeroCurator()
+        let result = curator.curateSync(
+            settings: settings(sources: [.continueWatching]),
+            continueWatching: [item("art"), item("missing", hasHeroArtwork: false)],
+            watchlist: []
+        )
+
+        XCTAssertEqual(result.map(\.id), ["art"])
+    }
+}
+
+final class HomeHeroSlotStateTests: XCTestCase {
+    func testAsyncOnlyHeroReservesPlaceholderUntilCurationCompletes() {
+        XCTAssertEqual(
+            HomeHeroSlotState.resolve(
+                isConfigured: true,
+                hasItems: false,
+                recomputeComplete: false
+            ),
+            .placeholder
+        )
+    }
+
+    func testAvailableSeedOrCuratedItemsShowContentImmediately() {
+        XCTAssertEqual(
+            HomeHeroSlotState.resolve(
+                isConfigured: true,
+                hasItems: true,
+                recomputeComplete: false
+            ),
+            .content
+        )
+    }
+
+    func testCompletedEmptyCurationRemovesPlaceholder() {
+        XCTAssertEqual(
+            HomeHeroSlotState.resolve(
+                isConfigured: true,
+                hasItems: false,
+                recomputeComplete: true
+            ),
+            .hidden
+        )
+    }
+
+    func testDisabledHeroNeverReservesSlot() {
+        XCTAssertEqual(
+            HomeHeroSlotState.resolve(
+                isConfigured: false,
+                hasItems: true,
+                recomputeComplete: false
+            ),
+            .hidden
+        )
     }
 }

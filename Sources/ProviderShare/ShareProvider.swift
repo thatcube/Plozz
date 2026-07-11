@@ -21,6 +21,7 @@ public struct ShareProvider: MediaProvider {
     private let host: String
     private let port: Int?
     private let share: String
+    private let catalogOverride: ShareCatalogStore?
     /// Injected engine-side SMB header prober (nil in tests / when the engine layer
     /// isn't wired). Used to obtain real per-file stream facts for a share that has
     /// no server metadata. Currently drives an opt-in on-device timing measurement
@@ -35,9 +36,15 @@ public struct ShareProvider: MediaProvider {
     /// `watchDirectory` instead of Application Support, so the reportPlayback →
     /// persist → continueWatching path can be exercised end-to-end (including a
     /// simulated relaunch) without touching the real app container.
-    init(session: UserSession, watchDirectory: URL?, streamProber: SMBStreamProbing? = nil) {
+    init(
+        session: UserSession,
+        watchDirectory: URL?,
+        streamProber: SMBStreamProbing? = nil,
+        catalogStore: ShareCatalogStore? = nil
+    ) {
         self.session = session
         self.streamProber = streamProber
+        self.catalogOverride = catalogStore
         let parsed = Self.parse(session.server.baseURL)
         self.host = parsed.host
         self.port = parsed.port
@@ -60,7 +67,8 @@ public struct ShareProvider: MediaProvider {
     /// throttled background scan.
     private var catalog: ShareCatalogStore {
         get async {
-            await ShareCatalogRegistry.shared.store(
+            if let catalogOverride { return catalogOverride }
+            return await ShareCatalogRegistry.shared.store(
                 accountKey: session.server.id,
                 displayName: session.server.name,
                 host: host, port: port, share: share,
@@ -83,7 +91,7 @@ public struct ShareProvider: MediaProvider {
         // Movies / TV Shows / Anime libraries appear ONLY once the scan has found
         // content for them (no empty rows on a fresh share); the raw file-tree
         // library (named after the share) is always present and browsed live.
-        let catalog = await catalog
+        let catalog = await self.catalog
         let counts = await catalog.libraryCounts()
         var result: [MediaLibrary] = []
         if counts.movies > 0 {
@@ -101,31 +109,34 @@ public struct ShareProvider: MediaProvider {
     }
 
     public func continueWatching(limit: Int) async throws -> [MediaItem] {
-        // Resume row is served entirely from local watch state — no network, so
-        // it's safe on the Home hot path. Each resumable id is rebuilt from the
-        // store (id → item, no scan) and stamped with its saved progress.
-        let resumable = await watchStore.resumable(limit: limit)
+        // Canonicalize ALL stored state before filtering/limiting so several legacy
+        // file-version records collapse to one movie without pushing distinct
+        // titles off the row.
+        let byCanonical = await allCanonicalWatchRecords()
+        let resumable = byCanonical.filter { !$0.value.played && $0.value.position > 1 }
+        let ranked = resumable
+            .sorted { $0.value.updatedAt > $1.value.updatedAt }
+            .prefix(limit)
+
         var items: [MediaItem] = []
-        for entry in resumable {
+        for (itemID, record) in ranked {
             // Resolve through the CATALOG first (indexed → carries series/season
             // linkage, including the `seasonID` the player's neighbour resolver
             // needs to offer Up Next / auto-advance), falling back to the raw
-            // file-tree build only for un-indexed items. Matches `item(id:)`'s
-            // resolution order; a bare `store.item(id:)` yields a filename-parsed
-            // item with no `seasonID`, which silently disables episode hand-off.
+            // file-tree build only for un-indexed items.
             let base: MediaItem
-            if let indexed = await catalog.item(id: entry.itemID) {
+            if let indexed = await catalog.item(id: itemID) {
                 base = indexed
-            } else if let raw = await store.item(id: entry.itemID) {
-                base = raw
+            } else if let rawItem = await store.item(id: itemID) {
+                base = rawItem
             } else {
                 continue
             }
-            items.append(Self.stamped(base, with: entry.record))
+            items.append(Self.stamped(base, with: record))
         }
         // Device-observable (in-app log ring) so a missing Continue Watching row
         // can be traced to "no resumable state on disk" vs "rebuild dropped it".
-        PlozzLog.playback.info("share.continueWatching account=\(session.server.id) resumable=\(resumable.count) rebuilt=\(items.count)")
+        PlozzLog.playback.info("share.continueWatching account=\(session.server.id) resumable=\(resumable.count) folded=\(byCanonical.count) rebuilt=\(items.count)")
         return items
     }
 
@@ -203,7 +214,7 @@ public struct ShareProvider: MediaProvider {
         // small (delegate to `children`); the raw file tree lists the directory.
         if let library = ShareCatalogID.catalogLibrary(forID: containerID) {
             let t0 = Date()
-            let catalog = await catalog
+            let catalog = await self.catalog
             let items: [MediaItem]
             let total: Int
             switch library {
@@ -244,31 +255,164 @@ public struct ShareProvider: MediaProvider {
 
     public func search(query: String, limit: Int) async throws -> [MediaItem] {
         // Indexed search over the catalog; empty until the first scan populates.
-        await stampWatchState(await catalog.search(query: query, limit: limit))
+        return await stampWatchState(await catalog.search(query: query, limit: limit))
     }
 
     // MARK: Playback
 
     public func playbackInfo(for itemID: String) async throws -> PlaybackRequest {
-        let item = try await item(id: itemID)
-        guard let relPath = await store.path(forItemID: itemID) else {
+        try await playbackInfo(for: itemID, mediaSourceID: nil, forceTranscode: false)
+    }
+
+    public func playbackInfo(for itemID: String, forceTranscode: Bool) async throws -> PlaybackRequest {
+        try await playbackInfo(for: itemID, mediaSourceID: nil, forceTranscode: forceTranscode)
+    }
+
+    /// Resolve the file to stream. The version picker threads the chosen version's
+    /// id (which, for a share, IS the file's rel-path) as `mediaSourceID`; a logical
+    /// `movie:<key>` with no chosen version plays its best default file; a bare
+    /// `f:<rel>` (raw browser / episode) plays directly.
+    public func playbackInfo(for itemID: String, mediaSourceID: String?, forceTranscode: Bool) async throws -> PlaybackRequest {
+        let catalog = await self.catalog
+        let canonicalItemID = await catalog.canonicalItemID(itemID)
+        let relPath: String
+        if let ms = mediaSourceID, !ms.isEmpty {
+            relPath = ms
+        } else if ShareCatalogID.relPath(forFileID: itemID) != nil,
+                  await catalog.containsFileAsset(id: itemID),
+                  let path = await store.path(forItemID: itemID) {
+            // A live raw-file id means the user selected that exact file in Files.
+            relPath = path
+        } else if let key = ShareCatalogID.movieKey(forMovieID: canonicalItemID) {
+            guard let def = await catalog.defaultMovieRelPath(forKey: key) else {
+                throw AppError.unknown("No playable version for \(canonicalItemID)")
+            }
+            relPath = def
+        } else if let p = await store.path(forItemID: itemID) {
+            relPath = p
+        } else {
             throw AppError.unknown("Item is not directly playable: \(itemID)")
         }
         guard let url = smbURL(forRelativePath: relPath) else {
             throw AppError.unknown("Couldn't build a stream URL for \(relPath)")
         }
-        // Resume where the user left off (0 for a fresh/finished item). The player
-        // treats this as the authoritative seed for both Play-from-detail and
-        // Play-from-Continue-Watching.
-        let record = await watchStore.record(for: itemID)
+        let item = try await item(id: canonicalItemID)
+        // Resume from the newest canonical/legacy member-file state so a movie
+        // watched before version grouping still resumes after the upgrade.
+        let records = await watchRecords(for: [canonicalItemID])
+        let record = records[canonicalItemID]
         let startPosition = (record?.played == true) ? 0 : (record?.position ?? 0)
+        let playItem = (mediaSourceID != nil) ? item.selectingVersion(mediaSourceID) : item
+        // Surface any text sidecar subtitles sitting next to the video (and in a
+        // sibling Subs/Subtitles folder) as selectable tracks. Best-effort: a
+        // listing/read failure just yields no sidecars rather than blocking play.
+        let subtitleTracks = (try? await discoverSidecarSubtitles(forVideoRelPath: relPath)) ?? []
         return PlaybackRequest(
-            item: item,
+            item: playItem,
             streamURL: url,
+            subtitleTracks: subtitleTracks,
             startPosition: startPosition,
             sourceProvider: .mediaShare,
-            serverName: session.server.name
+            serverName: session.server.name,
+            sourceFileName: (relPath as NSString).lastPathComponent
         )
+    }
+
+    /// Finds text sidecar subtitles for a video by listing its directory (and a
+    /// sibling `Subs`/`Subtitles` folder) and matching files by stem, then
+    /// materialises each to a local `file://` temp so the player's overlay — which
+    /// fetches over HTTP/`file://`, never `smb://` — can read them. Reads are
+    /// serial (the SMB session is single-connection) and lazy-small (sidecars are
+    /// tiny). Cleans up its temp dir on player teardown is handled by the OS temp
+    /// reaper; files are namespaced per item so replays reuse them within a run.
+    private func discoverSidecarSubtitles(forVideoRelPath relPath: String) async throws -> [MediaTrack] {
+        let dir = (relPath as NSString).deletingLastPathComponent
+        let videoStem = ShareMediaParser.videoStem((relPath as NSString).lastPathComponent)
+
+        // Gather candidate (directory, entry, isDedicatedSubsFolder) triples from the
+        // video's own folder and any sibling Subs/Subtitles folder. On a
+        // case-insensitive share (Windows/NTFS/exFAT/macOS-hosted SMB) "Subs" and
+        // "subs" resolve to the same folder, so dedup the probed candidates by a
+        // lowercased (dir, name) key to avoid surfacing every sidecar 2-4×.
+        var candidates: [(dir: String, name: String, dedicated: Bool)] = []
+        var seenCandidateKeys = Set<String>()
+        let ownDir = dir
+        let subFolderNames = ["Subs", "Subtitles", "subs", "subtitles"]
+        let subDirs = subFolderNames.map { sub in dir.isEmpty ? sub : "\(dir)/\(sub)" }
+        for (listDir, dedicated) in [(ownDir, false)] + subDirs.map({ ($0, true) }) {
+            guard let entries = try? await store.rawEntries(inDirectory: listDir) else { continue }
+            for entry in entries where !entry.isDirectory && ShareMediaParser.isSubtitleFile(entry.name) {
+                let key = "\(listDir.lowercased())/\(entry.name.lowercased())"
+                guard seenCandidateKeys.insert(key).inserted else { continue }
+                candidates.append((listDir, entry.name, dedicated))
+            }
+        }
+        guard !candidates.isEmpty else { return [] }
+
+        var tracks: [MediaTrack] = []
+        var nextID = 5_000
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("plozz-sidecars", isDirectory: true)
+        try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+
+        for (candidateDir, name, dedicated) in candidates {
+            guard let sidecar = ShareMediaParser.parseSidecar(name) else { continue }
+            guard Self.sidecarMatchesVideo(sidecarStem: sidecar.stem, videoStem: videoStem, dedicatedFolder: dedicated) else { continue }
+
+            let relSidecar = candidateDir.isEmpty ? name : "\(candidateDir)/\(name)"
+            guard let data = try? await store.readFile(relSidecar), !data.isEmpty else { continue }
+            // `.magnitude` (not `abs`) so `Int.min` can't trap; hex keeps it short.
+            let stableKey = String(relSidecar.hashValue.magnitude, radix: 16)
+            let localURL = tempDir.appendingPathComponent("\(stableKey)-\(name)")
+            do {
+                try data.write(to: localURL, options: .atomic)
+            } catch {
+                continue
+            }
+            let language = sidecar.language
+            let langName = language.flatMap { SubtitleLanguageCatalog.displayName(forCode: $0) }
+            var title = langName ?? language ?? "Subtitle"
+            if sidecar.isForced { title += " (Forced)" }
+            if sidecar.isSDH { title += " (SDH)" }
+            tracks.append(MediaTrack(
+                id: nextID,
+                kind: .subtitle,
+                displayTitle: title,
+                language: language,
+                codec: sidecar.ext,
+                isForced: sidecar.isForced,
+                isHearingImpaired: sidecar.isSDH,
+                deliveryURL: localURL,
+                isImageBasedSubtitle: false,
+                isExternal: true
+            ))
+            nextID += 1
+        }
+        return tracks
+    }
+
+    /// Whether a sidecar's parsed stem belongs to the video with `videoStem`.
+    ///
+    /// In the video's **own** directory we require an *exact* stem match — a
+    /// prefix relaxation there cross-attaches sibling episodes with non-zero-padded
+    /// numbering (`Show.S01E1.srt` would prefix-match `Show.S01E10.mkv`) and movie
+    /// siblings (`Batman` vs `Batman Begins`). In a **dedicated** `Subs/Subtitles`
+    /// folder — conventionally holding a single title's subs — we allow a prefix
+    /// match, but only at a separator boundary so `E1` still can't match `E10`.
+    static func sidecarMatchesVideo(sidecarStem: String, videoStem: String, dedicatedFolder: Bool) -> Bool {
+        if sidecarStem == videoStem { return true }
+        guard dedicatedFolder else { return false }
+        return isPrefixAtBoundary(sidecarStem, of: videoStem)
+            || isPrefixAtBoundary(videoStem, of: sidecarStem)
+    }
+
+    /// Whether `prefix` is a prefix of `whole` ending at a separator boundary
+    /// (the next character is `.`, space, `-`, `_`), so `E1` can't prefix `E10`.
+    private static func isPrefixAtBoundary(_ prefix: String, of whole: String) -> Bool {
+        guard prefix.count < whole.count, whole.hasPrefix(prefix) else { return false }
+        let nextIndex = whole.index(whole.startIndex, offsetBy: prefix.count)
+        let next = whole[nextIndex]
+        return next == "." || next == " " || next == "-" || next == "_"
     }
 
     public func reportPlayback(_ progress: PlaybackProgress, event: PlaybackEvent) async throws {
@@ -282,7 +426,8 @@ public struct ShareProvider: MediaProvider {
         PlozzLog.playback.info("share.reportPlayback event=\(String(describing: event)) item=\(progress.itemID) pos=\(Int(progress.positionSeconds)) account=\(session.server.id)")
         switch event {
         case .progress, .pause, .stop:
-            await watchStore.setResume(progress.positionSeconds, itemID: progress.itemID, capturedAt: Date(), duration: progress.durationSeconds)
+            let id = await catalog.canonicalItemID(progress.itemID)
+            await watchStore.setResume(progress.positionSeconds, itemID: id, capturedAt: Date(), duration: progress.durationSeconds)
         case .start, .unpause:
             break
         }
@@ -301,15 +446,65 @@ public struct ShareProvider: MediaProvider {
         default:
             break
         }
-        let record = await watchStore.record(for: item.id)
+        let records = await watchRecords(for: [item.id])
+        let canonicalID = await self.catalog.canonicalItemID(item.id)
+        let record = records[canonicalID]
         return Self.stamped(item, with: record)
     }
 
-    private func stampWatchState(_ items: [MediaItem]) async -> [MediaItem] {
-        var result: [MediaItem] = []
-        result.reserveCapacity(items.count)
-        for item in items { result.append(await stampWatchState(item)) }
+    /// Full-history fold used only by Continue Watching, which inherently needs all
+    /// resumable state before sorting/limiting.
+    private func allCanonicalWatchRecords() async -> [String: ShareWatchStore.Record] {
+        let snapshot = await watchStore.recordsSnapshot()
+        let catalog = await self.catalog
+        var result: [String: ShareWatchStore.Record] = [:]
+        for (id, record) in snapshot {
+            let canonical = await catalog.canonicalItemID(id)
+            if let existing = result[canonical], existing.updatedAt >= record.updatedAt {
+                continue
+            }
+            result[canonical] = record
+        }
         return result
+    }
+
+    /// Bounded watch lookup for normal item/page operations. The catalog returns
+    /// only aliases relevant to requested ids; the watch store then performs direct
+    /// dictionary lookups for that small set.
+    private func watchRecords(for itemIDs: [String]) async -> [String: ShareWatchStore.Record] {
+        let catalog = await self.catalog
+        let aliases = await catalog.watchStateAliases(for: itemIDs)
+        let stored = await watchStore.records(for: aliases.keys)
+        var result: [String: ShareWatchStore.Record] = [:]
+        for (storedID, canonicalID) in aliases {
+            guard let record = stored[storedID] else { continue }
+            if let existing = result[canonicalID], existing.updatedAt >= record.updatedAt { continue }
+            result[canonicalID] = record
+        }
+        return result
+    }
+
+    private func stampWatchState(_ items: [MediaItem]) async -> [MediaItem] {
+        let playableIDs = items.compactMap { item -> String? in
+            switch item.kind {
+            case .folder, .collection, .series, .season: return nil
+            default: return item.id
+            }
+        }
+        let records = await watchRecords(for: playableIDs)
+        let catalog = await self.catalog
+        var stamped: [MediaItem] = []
+        stamped.reserveCapacity(items.count)
+        for item in items {
+            switch item.kind {
+            case .folder, .collection, .series, .season:
+                stamped.append(item)
+            default:
+                let canonical = await catalog.canonicalItemID(item.id)
+                stamped.append(Self.stamped(item, with: records[canonical]))
+            }
+        }
+        return stamped
     }
 
     private static func stamped(_ item: MediaItem, with record: ShareWatchStore.Record?) -> MediaItem {
@@ -404,12 +599,18 @@ extension ShareProvider: CapabilityReporting {
     public var capabilities: ProviderCapability { .video }
 }
 
+extension ShareProvider: InteractiveBrowseActivityReporting {
+    public func noteInteractiveBrowseActivity() async {
+        await ShareCatalogRegistry.shared.noteInteractiveActivity(accountKey: session.server.id)
+    }
+}
+
 extension ShareProvider: WatchStateProviding {
     /// Live UI toggle (mark watched / unwatched): the action happens *now*, so
     /// stamp with the current time. The outbox-drained path uses the timestamped
     /// ``PlayedStateWriting`` overload below with the play's real capture time.
     public func setPlayed(_ played: Bool, itemID: String) async throws {
-        await watchStore.setPlayed(played, itemID: itemID, capturedAt: Date())
+        await watchStore.setPlayed(played, itemID: await catalog.canonicalItemID(itemID), capturedAt: Date())
     }
 }
 
@@ -419,7 +620,7 @@ extension ShareProvider: PlayedStateWriting {
     /// can't overwrite the newer resume state — the local store orders writes by
     /// `capturedAt`.
     public func setPlayed(_ played: Bool, itemID: String, capturedAt: Date) async throws {
-        await watchStore.setPlayed(played, itemID: itemID, capturedAt: capturedAt)
+        await watchStore.setPlayed(played, itemID: await catalog.canonicalItemID(itemID), capturedAt: capturedAt)
     }
 }
 
@@ -427,7 +628,7 @@ extension ShareProvider: ResumeStateWriting {
     /// Persist a resume position locally. `capturedAt` orders writes so a late
     /// draining queued resume can't overwrite a newer state.
     public func setResumePosition(_ seconds: TimeInterval, itemID: String, capturedAt: Date) async throws {
-        await watchStore.setResume(seconds, itemID: itemID, capturedAt: capturedAt)
+        await watchStore.setResume(seconds, itemID: await catalog.canonicalItemID(itemID), capturedAt: capturedAt)
     }
 }
 

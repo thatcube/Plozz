@@ -14,4 +14,13 @@ public enum SubtitleLanguageCatalog {
         ("ru", "Russian"), ("ja", "Japanese"), ("ko", "Korean"), ("zh", "Chinese"),
         ("ar", "Arabic"), ("tr", "Turkish")
     ]
+
+    /// The human-readable language name for an ISO-639 code (2- or 3-letter,
+    /// with any region/script suffix), or `nil` when unknown. Folds 3-letter
+    /// codes to their 2-letter base via `LanguageMatch` so `eng`/`en-US` both
+    /// resolve to "English".
+    public static func displayName(forCode code: String?) -> String? {
+        guard let normalized = LanguageMatch.normalized(code) else { return nil }
+        return languages.first { $0.code == normalized }?.name
+    }
 }

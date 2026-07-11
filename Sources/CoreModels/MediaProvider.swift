@@ -55,6 +55,10 @@ public protocol MediaProvider: Sendable {
     /// backend has no (playable) trailer for the item.
     func trailers(for itemID: String) async throws -> [MediaItem]
 
+    /// The title's theme song as a directly playable audio stream, or `nil`
+    /// when the backend and fallback archive have no theme.
+    func themeMusic(for itemID: String) async throws -> ThemeMusic?
+
     /// Children of a container (season → episodes, series → seasons, …).
     ///
     /// Intended for small containers whose contents fit comfortably in one
@@ -155,12 +159,19 @@ public protocol MediaProvider: Sendable {
     // MARK: Subtitles
 
     /// Search remote subtitle services for subtitles matching `language`
-    /// (an ISO code). Returns candidates that can be downloaded onto the server.
-    func remoteSubtitleSearch(itemID: String, language: String) async throws -> [RemoteSubtitle]
+    /// (an ISO code), honouring the SDH/Forced accessibility `preference`
+    /// (passed through natively where the backend supports it, e.g. Plex).
+    /// Returns candidates that can be downloaded onto the server.
+    func remoteSubtitleSearch(itemID: String, language: String, preference: SubtitleSearchPreference) async throws -> [RemoteSubtitle]
 
     /// Ask the server to download a previously-searched remote subtitle and
     /// attach it to the item, so every client sees it.
     func downloadRemoteSubtitle(itemID: String, subtitleID: String) async throws
+
+    /// The item's current subtitle tracks, fetched *without* starting a new
+    /// playback/transcode session — used to observe a just-downloaded subtitle so
+    /// it can be hot-loaded into the running player. Default: none.
+    func subtitleTracks(forItemID itemID: String) async throws -> [MediaTrack]
 
     // MARK: Skip segments
 
@@ -190,6 +201,14 @@ public protocol MediaProvider: Sendable {
     var connectionLocality: SourceLocality { get }
 }
 
+/// Optional provider capability used by UI surfaces to report genuine user
+/// browsing. Background indexers/fan-out never call this protocol, so providers
+/// can prioritize interactive work without mistaking internal requests for user
+/// activity.
+public protocol InteractiveBrowseActivityReporting: Sendable {
+    func noteInteractiveBrowseActivity() async
+}
+
 // MARK: - Optional subtitle capability defaults
 //
 // Providers that don't support remote subtitle search/download (or test
@@ -217,8 +236,15 @@ public extension MediaProvider {
         try await search(query: query, limit: limit)
     }
 
-    func remoteSubtitleSearch(itemID: String, language: String) async throws -> [RemoteSubtitle] { [] }
+    func remoteSubtitleSearch(itemID: String, language: String, preference: SubtitleSearchPreference) async throws -> [RemoteSubtitle] { [] }
     func downloadRemoteSubtitle(itemID: String, subtitleID: String) async throws {}
+    func subtitleTracks(forItemID itemID: String) async throws -> [MediaTrack] { [] }
+
+    /// Convenience: search with the default (no-op) preference. Keeps existing
+    /// callers/tests that don't care about the SDH/Forced knobs working.
+    func remoteSubtitleSearch(itemID: String, language: String) async throws -> [RemoteSubtitle] {
+        try await remoteSubtitleSearch(itemID: itemID, language: language, preference: .default)
+    }
 
     /// Default: no skip segments. Providers backed by a server marker source
     /// (Jellyfin `/MediaSegments`, Plex metadata markers) override this; test
@@ -243,6 +269,10 @@ public extension MediaProvider {
     /// trailers, Plex extras) override this; test doubles and other conformers
     /// inherit the safe empty result, so adding the capability stays additive.
     func trailers(for itemID: String) async throws -> [MediaItem] { [] }
+
+    /// Default: no theme. Jellyfin and Plex override this; media shares,
+    /// trailers, aggregates, and test doubles remain graceful no-ops.
+    func themeMusic(for itemID: String) async throws -> ThemeMusic? { nil }
 
     /// Default: ignore `forceTranscode` and resolve normally. Providers that can
     /// force a server-side transcode (Jellyfin, Plex) override this; test doubles

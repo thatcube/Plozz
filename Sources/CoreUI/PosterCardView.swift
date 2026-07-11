@@ -329,7 +329,14 @@ public struct PosterCardView: View {
 
     @ViewBuilder
     private var artwork: some View {
-        if hideThumbnail {
+        if PosterCardPresentation.usesFolderArtwork(for: item.kind) {
+            FolderPlaceholderArtwork(
+                foreground: titleColor,
+                background: titleColor.opacity(0.08),
+                isFocused: isFocused,
+                iconSize: PosterCardPresentation.folderIconSize(for: style)
+            )
+        } else if hideThumbnail {
             switch spoilerSettings.mode {
             case .blur:
                 realArtwork.blur(radius: 28)
@@ -519,6 +526,7 @@ public struct PosterCardView: View {
     /// you're mid-way through, in-progress wins, so a card never shows both the
     /// progress bar and the watched check at the same time.
     private var showsProgressBar: Bool {
+        guard PosterCardPresentation.showsPlaybackIndicators(for: item.kind) else { return false }
         guard let percentage = item.playedPercentage else { return false }
         return percentage > 0.01 && percentage < 0.99
     }
@@ -544,11 +552,13 @@ public struct PosterCardView: View {
     /// episode whose art is deliberately obscured.
     @ViewBuilder
     private func statusIndicator(inset: CGFloat) -> some View {
-        switch watchStatusIndicator {
-        case .watched:
-            watchedBadge(inset: inset)
-        case .unwatched:
-            unwatchedCorner()
+        if PosterCardPresentation.showsWatchStatus(for: item.kind) {
+            switch watchStatusIndicator {
+            case .watched:
+                watchedBadge(inset: inset)
+            case .unwatched:
+                unwatchedCorner()
+            }
         }
     }
 
@@ -662,6 +672,57 @@ public struct PosterCardView: View {
                 .padding(.horizontal, hInset)
                 .padding(.bottom, bottomInset)
             }
+        }
+    }
+}
+
+/// Pure presentation policy so folder treatment stays testable without rendering
+/// SwiftUI. Folders retain the shared poster footprint/focus mechanics but never
+/// look like playable, unwatched media.
+enum PosterCardPresentation {
+    static func usesFolderArtwork(for kind: MediaItemKind) -> Bool {
+        kind == .folder
+    }
+
+    static func showsWatchStatus(for kind: MediaItemKind) -> Bool {
+        kind != .folder
+    }
+
+    static func showsPlaybackIndicators(for kind: MediaItemKind) -> Bool {
+        kind != .folder
+    }
+
+    static func folderIconSize(for style: PosterCardView.Style) -> CGFloat {
+        switch style {
+        case .poster: return 48
+        case .landscape: return 52
+        }
+    }
+
+    static func folderIconOpacity(isFocused: Bool) -> Double {
+        isFocused ? 0.52 : 0.4
+    }
+}
+
+/// Dedicated folder artwork: a generic symbol only. The item's real title stays
+/// in the normal caption below the card, so it is never duplicated in the poster.
+private struct FolderPlaceholderArtwork: View {
+    let foreground: Color
+    let background: Color
+    let isFocused: Bool
+    let iconSize: CGFloat
+
+    var body: some View {
+        ZStack {
+            background
+            Image(systemName: "folder.fill")
+                .symbolRenderingMode(.hierarchical)
+                .font(.system(size: iconSize, weight: .medium))
+                .foregroundStyle(
+                    foreground.opacity(
+                        PosterCardPresentation.folderIconOpacity(isFocused: isFocused)
+                    )
+                )
         }
     }
 }

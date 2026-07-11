@@ -77,6 +77,7 @@ public final class PlaybackDiagnosticsSampler {
         capabilities: MediaCapabilities = .detected(),
         sourceProvider: ProviderKind? = nil,
         serverName: String? = nil,
+        sourceFileName: String? = nil,
         streamURL: URL? = nil,
         engineTelemetry: (@MainActor () -> EngineLiveTelemetry?)? = nil,
         probedFacts: (@MainActor () -> EngineProbedSourceFacts?)? = nil
@@ -94,6 +95,7 @@ public final class PlaybackDiagnosticsSampler {
             serverName: serverName
         )
         base.engineName = engineName
+        base.sourceFileName = sourceFileName
         base.streamTransport = PlaybackDiagnostics.streamTransportSummary(url: streamURL)
         Self.fillDeviceInfo(into: &base)
         staticDiagnostics = base
@@ -261,7 +263,8 @@ public final class PlaybackDiagnosticsSampler {
         switch range {
         case .sdr: return .sdr
         case .hlg: return .hlg
-        case .hdr10, .hdr10Plus: return .hdr10
+        case .hdr10: return .hdr10
+        case .hdr10Plus: return .hdr10Plus
         case .dolbyVision: return .dolbyVision
         }
     }

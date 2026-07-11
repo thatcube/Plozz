@@ -29,6 +29,66 @@ final class ShareCatalogStoreTests: XCTestCase {
                      season: season, episode: episode)
     }
 
+    /// A large first-time regroup may take a few hundred milliseconds overall,
+    /// but must yield the catalog actor so a Movies-grid page can complete without
+    /// waiting for the whole regroup.
+    func testLargeMovieRegroupDoesNotBlockBrowseReads() async {
+        let store = ShareCatalogStore(accountKey: "perf", directory: tempDir())
+        let assets: [CatalogAsset] = (0..<15_000).map { index in
+            let title = "Movie \(index / 2)"
+            let year = 2000 + (index % 2)
+            return CatalogAsset(
+                relPath: "Movies/\(title) (\(year)) \(index).mkv",
+                basename: "\(title) (\(year)) \(index).mkv",
+                size: 1_000, modifiedAt: Date(), kind: .movie, library: .movies,
+                title: title, year: year, seriesTitle: nil, seriesKey: nil,
+                season: nil, episode: nil,
+                movieKey: ShareCatalogID.movieKey(fromTitle: title, year: year),
+                movieTitleKey: ShareCatalogID.seriesKey(fromTitle: title)
+            )
+        }
+        await store.upsert(assets, scanID: 1)
+
+        let clock = ContinuousClock()
+        let rebuildStart = clock.now
+        let rebuild = Task { await store.rebuildMovieGroups() }
+        await Task.yield()
+        let browseStart = clock.now
+        _ = await store.movies(offset: 0, limit: 60)
+        let browseDuration = browseStart.duration(to: clock.now)
+        await rebuild.value
+        let rebuildDuration = rebuildStart.duration(to: clock.now)
+        XCTAssertLessThan(
+            browseDuration,
+            .milliseconds(100),
+            "browse reads must interleave with a large end-of-scan regroup (regroup: \(rebuildDuration))"
+        )
+    }
+
+    /// One unusually large directory must not hold the catalog actor for its
+    /// entire insert; the chunked upsert yields between bounded transactions.
+    func testLargeDirectoryUpsertDoesNotBlockBrowseReads() async {
+        let store = ShareCatalogStore(accountKey: "perf-upsert", directory: tempDir())
+        await store.upsert([movie("Movies/Existing (2000).mkv", title: "Existing", year: 2000)], scanID: 1)
+        let assets: [CatalogAsset] = (0..<15_000).map { index in
+            movie("Movies/New \(index) (2020).mkv", title: "New \(index)", year: 2020)
+        }
+
+        let upsert = Task { await store.upsert(assets, scanID: 2) }
+        await Task.yield()
+        let clock = ContinuousClock()
+        let browseStart = clock.now
+        _ = await store.movies(offset: 0, limit: 60)
+        let browseDuration = browseStart.duration(to: clock.now)
+        await upsert.value
+
+        XCTAssertLessThan(
+            browseDuration,
+            .milliseconds(100),
+            "browse reads must interleave with a giant directory upsert"
+        )
+    }
+
     func testEmptyUntilPopulated() async {
         let store = ShareCatalogStore(accountKey: "a", directory: tempDir())
         let empty = await store.isEmpty()
@@ -86,6 +146,74 @@ final class ShareCatalogStoreTests: XCTestCase {
         XCTAssertTrue(s1.allSatisfy { $0.kind == .episode && $0.parentTitle == "Breaking Bad" })
     }
 
+    /// Regression: normalized-equivalent episode titles/library classifications
+    /// must not emit duplicate season tabs with identical ids (which makes tvOS
+    /// focus collapse onto only one of the visually duplicated buttons).
+    func testSeasonsDeduplicateVariantSeriesMetadataBySeasonNumber() async {
+        let store = ShareCatalogStore(accountKey: "korra", directory: tempDir())
+        let canonical = "The Legend of Korra"
+        let key = ShareCatalogID.seriesKey(fromTitle: canonical)
+        let variants: [(season: Int, title: String, library: CatalogLibrary)] = [
+            (1, canonical, .tv),
+            (2, canonical, .tv),
+            (3, "The.Legend.of.Korra", .tv),
+            (3, canonical, .anime),
+            (4, "The.Legend.of.Korra", .tv),
+            (4, canonical, .anime),
+        ]
+        let assets = variants.map { value in
+            CatalogAsset(
+                relPath: "TV/Korra/S\(value.season)/E01-\(value.title)-\(value.library.rawValue).mkv",
+                basename: "E01.mkv", size: 1_000, modifiedAt: Date(),
+                kind: .episode, library: value.library,
+                title: "Episode 1", year: nil,
+                seriesTitle: value.title, seriesKey: key,
+                season: value.season, episode: 1
+            )
+        }
+        await store.upsert(assets, scanID: 1)
+
+        let seasons = await store.seasons(seriesKey: key)
+        XCTAssertEqual(seasons.map(\.seasonNumber), [1, 2, 3, 4])
+        XCTAssertEqual(Set(seasons.map(\.id)).count, 4, "season ids must be unique for stable focus")
+        XCTAssertTrue(seasons.allSatisfy { $0.parentTitle == canonical })
+        XCTAssertTrue(seasons.allSatisfy { $0.libraryID == ShareCatalogID.animeLibrary })
+    }
+
+    func testLibrarySortIgnoresLeadingTheAndUsesSeriesTitle() async {
+        let store = ShareCatalogStore(accountKey: "sort", directory: tempDir())
+        await store.upsert([
+            movie("Movies/Zootopia (2016).mkv", title: "Zootopia", year: 2016),
+            movie("Movies/The Batman (2022).mkv", title: "The Batman", year: 2022),
+            movie("Movies/Avatar (2009).mkv", title: "Avatar", year: 2009),
+            episode("TV/Yellowstone/S01E01.mkv", series: "Yellowstone", season: 1, episode: 1),
+            // Episode titles intentionally sort differently; the grid must use the
+            // SERIES title, not "Zulu"/"Alpha".
+            CatalogAsset(
+                relPath: "TV/The Bear/S01E01.mkv", basename: "S01E01.mkv",
+                size: 1_000, modifiedAt: Date(), kind: .episode, library: .tv,
+                title: "Zulu", year: nil, seriesTitle: "The Bear",
+                seriesKey: ShareCatalogID.seriesKey(fromTitle: "The Bear"),
+                season: 1, episode: 1
+            ),
+            CatalogAsset(
+                relPath: "TV/Andor/S01E01.mkv", basename: "S01E01.mkv",
+                size: 1_000, modifiedAt: Date(), kind: .episode, library: .tv,
+                title: "Alpha", year: nil, seriesTitle: "Andor",
+                seriesKey: ShareCatalogID.seriesKey(fromTitle: "Andor"),
+                season: 1, episode: 1
+            ),
+        ], scanID: 1)
+
+        let movies = await store.movies(offset: 0, limit: 10)
+        XCTAssertEqual(movies.map(\.title), ["Avatar", "The Batman", "Zootopia"])
+
+        let series = await store.series(in: .tv, offset: 0, limit: 10)
+        XCTAssertEqual(series.map(\.title), ["Andor", "The Bear", "Yellowstone"])
+        XCTAssertEqual(ShareCatalogID.sortTitle(from: "Theodore"), "theodore")
+        XCTAssertEqual(ShareCatalogID.sortTitle(from: "  THE   Thing  "), "thing")
+    }
+
     func testAnimeAndTvLibrariesAreSeparate() async {
         let store = ShareCatalogStore(accountKey: "a", directory: tempDir())
         await store.upsert([
@@ -113,6 +241,9 @@ final class ShareCatalogStoreTests: XCTestCase {
         XCTAssertTrue(titles.contains("The Matrix"))
         XCTAssertTrue(titles.contains("Matrix Reloaded Show"))
         XCTAssertFalse(titles.contains("Unrelated"))
+
+        let fullTitleHits = await store.search(query: "The Matrix", limit: 20)
+        XCTAssertEqual(fullTitleHits.map(\.title), ["The Matrix"])
     }
 
     func testItemResolvesEveryIdShape() async {

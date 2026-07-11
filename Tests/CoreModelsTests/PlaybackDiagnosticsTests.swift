@@ -50,6 +50,7 @@ final class PlaybackDiagnosticsHDRTests: XCTestCase {
         XCTAssertEqual(PlaybackDiagnostics.classifyHDR(videoRange: "HDR", videoRangeType: "HDR10"), .hdr10)
         XCTAssertEqual(PlaybackDiagnostics.classifyHDR(videoRange: "HDR", videoRangeType: "HLG"), .hlg)
         XCTAssertEqual(PlaybackDiagnostics.classifyHDR(videoRange: "SDR", videoRangeType: "SDR"), .sdr)
+        XCTAssertEqual(PlaybackDiagnostics.classifyHDR(videoRange: "HDR", videoRangeType: "HDR10Plus"), .hdr10Plus)
         XCTAssertEqual(
             PlaybackDiagnostics.classifyHDR(videoRange: nil, videoRangeType: nil, colorTransfer: "smpte2084"),
             .hdr10
@@ -61,12 +62,31 @@ final class PlaybackDiagnosticsHDRTests: XCTestCase {
         XCTAssertEqual(PlaybackDiagnostics.classifyHDR(videoRange: nil, videoRangeType: nil), .unknown)
     }
 
+    func testSourceFilenameHandlesWindowsAndPOSIXPaths() {
+        XCTAssertEqual(
+            PlaybackRequest.sourceFileName(from: #"D:\Media\Movies\Film.mkv"#),
+            "Film.mkv"
+        )
+        XCTAssertEqual(
+            PlaybackRequest.sourceFileName(from: "/media/movies/Film.mkv"),
+            "Film.mkv"
+        )
+    }
+
     func testFriendlyContainerNames() {
         XCTAssertEqual(PlaybackDiagnostics.friendlyContainerName("mkv"), "Matroska")
         XCTAssertEqual(PlaybackDiagnostics.friendlyContainerName("mp4"), "MP4")
         XCTAssertEqual(PlaybackDiagnostics.friendlyContainerName("webm"), "WebM")
         XCTAssertEqual(PlaybackDiagnostics.friendlyContainerName("xyz"), "XYZ")
         XCTAssertNil(PlaybackDiagnostics.friendlyContainerName(nil))
+    }
+
+    func testSourceFileNameText() {
+        var diagnostics = PlaybackDiagnostics(sourceFileName: "Movie (2024) 2160p.mkv")
+        XCTAssertEqual(diagnostics.sourceFileNameText, "Movie (2024) 2160p.mkv")
+
+        diagnostics.sourceFileName = "   "
+        XCTAssertEqual(diagnostics.sourceFileNameText, PlaybackDiagnostics.placeholder)
     }
 
     func testContainerLabelPairsFriendlyNameWithRawToken() {

@@ -38,6 +38,7 @@ actor ShareScanner {
     private let store: ShareCatalogStore
     private let makeLister: @Sendable () -> ScanLister
     private let concurrency: Int
+    private let pacer: ShareScanPacer
     private let shareID: String
     private let name: String
     private var reporter: ShareScanReporter
@@ -54,11 +55,29 @@ actor ShareScanner {
     init(store: ShareCatalogStore, shareID: String = "", name: String = "",
          reporter: ShareScanReporter = .noop, concurrency: Int = 4,
          makeLister: @escaping @Sendable () -> ScanLister) {
+        self.init(
+            store: store,
+            shareID: shareID,
+            name: name,
+            reporter: reporter,
+            concurrency: concurrency,
+            pacer: ShareScanPacer(),
+            makeLister: makeLister
+        )
+    }
+
+    /// Test seam for deterministic pacing behavior; production uses `.shared`
+    /// through the source-compatible initializer above.
+    init(store: ShareCatalogStore, shareID: String = "", name: String = "",
+         reporter: ShareScanReporter = .noop, concurrency: Int = 4,
+         pacer: ShareScanPacer,
+         makeLister: @escaping @Sendable () -> ScanLister) {
         self.store = store
         self.shareID = shareID
         self.name = name
         self.reporter = reporter
         self.concurrency = max(1, concurrency)
+        self.pacer = pacer
         self.makeLister = makeLister
     }
 
@@ -76,7 +95,15 @@ actor ShareScanner {
     /// Called fire-and-forget from the Home hot path, so it must be cheap to no-op.
     func scanIfStale(minInterval: TimeInterval = 600) async {
         if isRunning { return }
-        if let last = await store.meta("last_full_scan_at"),
+        // Force a walk (ignoring the staleness throttle) when the CLASSIFIER changed
+        // since the last completed pass, so every already-indexed file is
+        // reclassified under the new movie/episode rules right away instead of
+        // waiting for it to change on disk (a re-walk re-upserts each file's kind/
+        // library/keys). A cheap meta read on the hot path.
+        let parserCurrent = String(ShareMediaParser.classifierVersion)
+        let parserStored = await store.meta("parser_version")
+        if parserStored == parserCurrent,
+           let last = await store.meta("last_full_scan_at"),
            let ts = TimeInterval(last),
            Date().timeIntervalSince1970 - ts < minInterval {
             return
@@ -89,6 +116,7 @@ actor ShareScanner {
     func scan() async {
         if isRunning { return }
         isRunning = true
+        let started = Date()
         reporter.scanStarted(shareID, name)
 
         // Pre-build the pool of independent listers (each its own SMB connection).
@@ -114,6 +142,8 @@ actor ShareScanner {
         var frontier: [String] = [""] // "" == share root
         var dirsWalked = 0
         var filesFound = 0
+        let progressClock = ContinuousClock()
+        var lastProgressReport = progressClock.now
         // Set if ANY directory listing failed this pass (transient SMB timeout, auth
         // hiccup, permission-denied folder). A failed listing looks like an empty
         // folder, so pruning on a partial walk would delete still-present content and
@@ -164,18 +194,31 @@ actor ShareScanner {
                     if !result.assets.isEmpty {
                         filesFound += result.assets.count
                         await store.upsert(result.assets, scanID: scanID)
-                        reporter.scanProgress(shareID, filesFound)
+                    }
+                    let now = progressClock.now
+                    if dirsWalked == 1
+                        || lastProgressReport.duration(to: now) >= .milliseconds(250) {
+                        reporter.scanDetailedProgress(shareID, dirsWalked, filesFound)
+                        lastProgressReport = now
                     }
                     if Task.isCancelled { continue }   // stop dispatching; let in-flight drain
-                    spawnNext()
+                    // Never pause for browsing (which could starve a scan forever).
+                    // Instead, admit replacement directory requests at a bounded
+                    // slower rate while the user is actively navigating the share.
+                    if index < frontier.count {
+                        await pacer.paceIfBrowsing()
+                        spawnNext()
+                    }
                 }
             }
+
             if Task.isCancelled {
                 PlozzLog.boot("share.scan cancelled after \(dirsWalked) dirs, \(filesFound) files — no prune")
                 return
             }
             frontier = nextFrontier
         }
+        reporter.scanDetailedProgress(shareID, dirsWalked, filesFound)
 
         // Completed a full pass. Only prune (drop assets no longer on the share) when
         // EVERY directory listed cleanly — a partial walk (some listing failed) must
@@ -184,10 +227,17 @@ actor ShareScanner {
         // permanently-inaccessible folder can't cause a perpetual re-scan); the next
         // clean pass performs the deferred prune.
         if !anyListingFailed {
+            await store.preserveMovieAliasesBeforePrune()
             await store.pruneNotSeen(inScan: scanID)
+            await store.rebuildMovieGroups()
         }
         await store.setMeta("last_full_scan_at", String(Date().timeIntervalSince1970))
-        PlozzLog.boot("share.scan done scanID=\(scanID) dirs=\(dirsWalked) files=\(filesFound) pruned=\(!anyListingFailed)")
+        // Record the classifier the catalog was built with, so `scanIfStale` only
+        // force-reparses once per classifier bump (and doesn't perpetually re-walk).
+        await store.setMeta("parser_version", String(ShareMediaParser.classifierVersion))
+        PlozzLog.boot(
+            "share.scan done scanID=\(scanID) dirs=\(dirsWalked) files=\(filesFound) pruned=\(!anyListingFailed) elapsed=\(Int(Date().timeIntervalSince(started) * 1_000))ms"
+        )
     }
 
     /// Result of listing one directory: the connection it used (returned to the
@@ -224,6 +274,7 @@ actor ShareScanner {
                 assets.append(asset(relPath: childPath, entry: entry))
             }
         }
+
         return DirResult(lister: lister, subdirs: subdirs, assets: assets, ok: true)
     }
 
@@ -231,15 +282,22 @@ actor ShareScanner {
 
     static func asset(relPath: String, entry: SMBShareBrowser.Entry) -> CatalogAsset {
         let name = entry.name
-        let seriesHint = seriesHintFolder(forRelPath: relPath)
-        switch ShareMediaParser.classify(fileName: name, parentFolder: seriesHint) {
+        switch ShareMediaParser.classify(relPath: relPath) {
         case .movie(let movie):
             let title = movie.title.isEmpty ? displayTitle(forFileName: name) : movie.title
+            let g = ShareMediaParser.movieGrouping(relPath: relPath, parsedTitle: title, parsedYear: movie.year)
+            var movieKey = ShareCatalogID.movieKey(fromTitle: g.title, year: g.year)
+            var movieTitleKey = ShareCatalogID.seriesKey(fromTitle: g.title)
+            if let part = g.part {
+                movieKey += "-\(part)"
+                movieTitleKey += "-\(part)"
+            }
             return CatalogAsset(
                 relPath: relPath, basename: name, size: Int64(entry.size),
                 modifiedAt: entry.modifiedAt, kind: .movie, library: .movies,
-                title: title, year: movie.year,
-                seriesTitle: nil, seriesKey: nil, season: nil, episode: nil
+                title: g.title, year: g.year,
+                seriesTitle: nil, seriesKey: nil, season: nil, episode: nil,
+                movieKey: movieKey, movieTitleKey: movieTitleKey
             )
         case .episode(let ep):
             let library: CatalogLibrary = isAnimePath(relPath) ? .anime : .tv
@@ -250,7 +308,8 @@ actor ShareScanner {
                 title: ep.title ?? fallback, year: nil,
                 seriesTitle: ep.series,
                 seriesKey: ShareCatalogID.seriesKey(fromTitle: ep.series),
-                season: ep.season, episode: ep.episode
+                season: ep.season, episode: ep.episode,
+                movieKey: nil, movieTitleKey: nil
             )
         }
     }
@@ -272,23 +331,6 @@ actor ShareScanner {
         return stem == "sample" || stem.hasSuffix("-sample") || stem.hasSuffix(".sample") || stem.hasSuffix(" sample")
     }
 
-    /// The folder that best hints at a *series* title for an episode: normally the
-    /// immediate parent, but hop over a "Season N" / "S03" folder to the show.
-    /// Mirrors `ShareLibraryStore.seriesHintFolder`.
-    static func seriesHintFolder(forRelPath relPath: String) -> String? {
-        var dirs = relPath.split(separator: "/").map(String.init)
-        guard dirs.count >= 2 else { return nil }
-        dirs.removeLast()
-        guard let parent = dirs.last else { return nil }
-        if isSeasonFolder(parent), dirs.count >= 2 { return dirs[dirs.count - 2] }
-        return parent
-    }
-
-    private static func isSeasonFolder(_ name: String) -> Bool {
-        name.range(of: #"^[Ss]eason\s*\d+$"#, options: .regularExpression) != nil
-            || name.range(of: #"^[Ss]\d{1,2}$"#, options: .regularExpression) != nil
-    }
-
     private static func displayTitle(forFileName name: String) -> String {
         let base = (name as NSString).deletingPathExtension
         return base.isEmpty ? name : base
@@ -301,5 +343,33 @@ actor ShareScanner {
         let next = current + 1
         await store.setMeta("scan_counter", String(next))
         return next
+    }
+}
+
+/// Bounded scan admission control shared by interactive ShareProvider requests
+/// and the background scanner. Recent navigation adds a small delay before each
+/// replacement directory request; continuous navigation still makes guaranteed
+/// progress because the delay is fixed rather than waiting for an idle window.
+actor ShareScanPacer {
+    private let activeWindow: Duration
+    private let activeDelay: Duration
+    private let clock = ContinuousClock()
+    private var lastInteractiveActivity: ContinuousClock.Instant?
+
+    init(activeWindow: Duration = .seconds(1), activeDelay: Duration = .milliseconds(60)) {
+        self.activeWindow = activeWindow
+        self.activeDelay = activeDelay
+    }
+
+    func noteInteractiveActivity() {
+        lastInteractiveActivity = clock.now
+    }
+
+    @discardableResult
+    func paceIfBrowsing() async -> Bool {
+        guard let lastInteractiveActivity,
+              lastInteractiveActivity.duration(to: clock.now) < activeWindow else { return false }
+        try? await Task.sleep(for: activeDelay)
+        return true
     }
 }

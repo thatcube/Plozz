@@ -169,6 +169,24 @@ final class ProfilesModelTests: XCTestCase {
         XCTAssertEqual(model.activeAccountIDs(for: id, fallback: ["g1", "g2"]), ["only"])
     }
 
+    /// `storedActiveAccountIDs` must preserve the difference between "never
+    /// chose" (`nil`) and "chose to watch nothing" (`[]`). AppState's
+    /// `reloadAccounts()` relies on this so that turning the last server off
+    /// on Settings → Your Servers & Libraries actually sticks instead of
+    /// snapping back on.
+    func testStoredActiveAccountIDsDistinguishesUnsetFromExplicitlyEmpty() {
+        let model = ProfilesModel(store: ProfileStore(defaults: makeDefaults()))
+        let id = model.activeProfile.id
+        // Never chose → nil (caller defaults to the household set).
+        XCTAssertNil(model.storedActiveAccountIDs(for: id))
+        // Explicitly turned everything off → an empty array, NOT nil.
+        model.setActiveAccountIDs([], for: id)
+        XCTAssertEqual(model.storedActiveAccountIDs(for: id), [])
+        // A real selection round-trips too.
+        model.setActiveAccountIDs(["s1"], for: id)
+        XCTAssertEqual(model.storedActiveAccountIDs(for: id), ["s1"])
+    }
+
     func testHasRememberedSelectionTracksAnExplicitPick() {
         let defaults = makeDefaults()
         // Fresh household: a default profile exists but no system user has picked.

@@ -72,9 +72,9 @@ final class ShareScanStatusModelTests: XCTestCase {
     func testBusyStatesAndSharedNameLookup() {
         let model = ShareScanStatusModel()
         model.scanStarted(shareID: "s1", name: "Brando NAS")
-        model.scanProgress(shareID: "s1", itemsFound: 1234)
+        model.scanProgress(shareID: "s1", directoriesScanned: 88, itemsFound: 1234)
         XCTAssertEqual(model.busyStates.map(\.name), ["Brando NAS"])
-        XCTAssertEqual(model.busyStates.first?.progressDetail, "1,234 items")
+        XCTAssertEqual(model.busyStates.first?.progressDetail, "88 folders · 1,234 items")
         XCTAssertTrue(model.isBusy(shareNamed: "Brando NAS"))
         XCTAssertFalse(model.isBusy(shareNamed: "Other"))
         XCTAssertFalse(model.isBusy(shareNamed: ""), "an empty name never matches")
@@ -116,7 +116,7 @@ final class ShareScanStatusModelTests: XCTestCase {
         let model = ShareScanStatusModel()
         let r = model.reporter()
         r.scanStarted("s1", "NAS")
-        r.scanProgress("s1", 10)
+        r.scanDetailedProgress("s1", 4, 10)
         r.scanFinished("s1")
         r.enrichStarted("s1", 30)
         r.enrichProgress("s1", 15)
@@ -130,5 +130,26 @@ final class ShareScanStatusModelTests: XCTestCase {
         XCTAssertEqual(s?.itemsFound, 10, "progress applied")
         XCTAssertNotNil(s?.lastScanAt, "finish stamped a last-scanned time")
         XCTAssertFalse(model.isAnyBusy, "enrich finish applied — indicator cleared")
+    }
+
+    func testLegacyReporterReceivesDetailedScannerProgress() {
+        final class Capture: @unchecked Sendable {
+            private let lock = NSLock()
+            private var value: Int?
+            func set(_ value: Int) { lock.lock(); self.value = value; lock.unlock() }
+            func get() -> Int? { lock.lock(); defer { lock.unlock() }; return value }
+        }
+        let captured = Capture()
+        let reporter = ShareScanReporter(
+            scanStarted: { _, _ in },
+            scanProgress: { _, items in captured.set(items) },
+            scanFinished: { _ in },
+            enrichStarted: { _, _ in },
+            enrichProgress: { _, _ in },
+            enrichFinished: { _ in }
+        )
+
+        reporter.scanDetailedProgress("s1", 42, 123)
+        XCTAssertEqual(captured.get(), 123)
     }
 }

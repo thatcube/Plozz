@@ -93,4 +93,47 @@ final class ShareProviderWatchTests: XCTestCase {
         let pct = try XCTUnwrap(cw.first?.playedPercentage)
         XCTAssertEqual(pct, 0.1, accuracy: 0.001, "progress bar fraction must be position / duration after relaunch")
     }
+
+    func testGroupedMovieRestoresLegacyFileWatchStateOnGridAndDetail() async throws {
+        let watchDir = makeTempDir()
+        let catalog = ShareCatalogStore(accountKey: "legacy-watch", directory: makeTempDir())
+        let session = makeSession()
+        let relPath = "Movies/Legacy Film (2020) 1080p.mkv"
+        let movieKey = ShareCatalogID.movieKey(fromTitle: "Legacy Film", year: 2020)
+        await catalog.upsert([
+            CatalogAsset(
+                relPath: relPath, basename: "Legacy Film (2020) 1080p.mkv",
+                size: 1_000, modifiedAt: Date(), kind: .movie, library: .movies,
+                title: "Legacy Film", year: 2020,
+                seriesTitle: nil, seriesKey: nil, season: nil, episode: nil,
+                movieKey: movieKey,
+                movieTitleKey: ShareCatalogID.seriesKey(fromTitle: "Legacy Film")
+            )
+        ], scanID: 1)
+        await catalog.rebuildMovieGroups()
+
+        // Pre-upgrade state was persisted against the physical file id.
+        let legacyID = ShareCatalogID.file(relPath)
+        let watch = ShareWatchStore(accountKey: session.server.id, directory: watchDir)
+        await watch.setResume(600, itemID: legacyID, capturedAt: Date(), duration: 6_000)
+
+        let provider = ShareProvider(
+            session: session,
+            watchDirectory: watchDir,
+            catalogStore: catalog
+        )
+        let logicalID = ShareCatalogID.movie(movieKey)
+
+        let detail = try await provider.item(id: logicalID)
+        XCTAssertEqual(detail.resumePosition, 600)
+        XCTAssertEqual(detail.playedPercentage ?? 0, 0.1, accuracy: 0.001)
+
+        let page = try await provider.items(
+            in: ShareCatalogID.moviesLibrary,
+            kind: .movie,
+            page: PageRequest(startIndex: 0, limit: 10)
+        )
+        XCTAssertEqual(page.items.map(\.id), [logicalID])
+        XCTAssertEqual(page.items.first?.resumePosition, 600)
+    }
 }

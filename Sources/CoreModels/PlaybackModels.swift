@@ -46,6 +46,12 @@ public struct MediaTrack: Codable, Hashable, Identifiable, Sendable {
     /// key off this flag, not `deliveryURL == nil`, or embedded SRT gets pushed
     /// to the hybrid engine (and crashes on multichannel) needlessly.
     public var isImageBasedSubtitle: Bool
+    /// `true` for a subtitle that isn't embedded in the media file — a subtitle the
+    /// user downloaded this session (server-fetched) or a local sidecar file
+    /// (SMB `.srt`/`.ass`). Drives a small "external" marker in the track menu so a
+    /// freshly-downloaded sub is distinguishable in a list full of same-language
+    /// embedded tracks. Defaults to `false` (embedded).
+    public var isExternal: Bool
 
     public init(
         id: Int,
@@ -60,7 +66,8 @@ public struct MediaTrack: Codable, Hashable, Identifiable, Sendable {
         isHearingImpaired: Bool = false,
         isCommentary: Bool = false,
         deliveryURL: URL? = nil,
-        isImageBasedSubtitle: Bool = false
+        isImageBasedSubtitle: Bool = false,
+        isExternal: Bool = false
     ) {
         self.id = id
         self.kind = kind
@@ -75,6 +82,7 @@ public struct MediaTrack: Codable, Hashable, Identifiable, Sendable {
         self.isCommentary = isCommentary
         self.deliveryURL = deliveryURL
         self.isImageBasedSubtitle = isImageBasedSubtitle
+        self.isExternal = isExternal
     }
 
     /// Codec tokens that identify a **bitmap** (image-based) subtitle format —
@@ -295,6 +303,10 @@ public struct PlaybackRequest: Hashable, Sendable {
     public var sourceProvider: ProviderKind?
     /// Friendly name of the media server (e.g. "Allie's Jellyfin", "Living Room").
     public var serverName: String?
+    /// Basename of the selected source file, when the provider exposes it. Kept
+    /// separate from `streamURL`: Plex/Jellyfin often play an API/transcode URL
+    /// whose last path component is not the original media filename.
+    public var sourceFileName: String?
     /// Ordered ISO-639 audio languages to steer the engine's INITIAL active audio
     /// track at load (AetherEngine `LoadOptions.preferredAudioLanguages` — first
     /// match wins, no reload). Computed by `PlayerViewModel` from per-series
@@ -320,7 +332,8 @@ public struct PlaybackRequest: Hashable, Sendable {
         localRemuxSource: LocalRemuxSourceDescriptor? = nil,
         scrubPreview: ScrubPreviewSource? = nil,
         sourceProvider: ProviderKind? = nil,
-        serverName: String? = nil
+        serverName: String? = nil,
+        sourceFileName: String? = nil
     ) {
         self.item = item
         self.streamURL = streamURL
@@ -337,6 +350,21 @@ public struct PlaybackRequest: Hashable, Sendable {
         self.isManifestStream = isTranscoding || streamURL.pathExtension.lowercased() == "m3u8"
         self.sourceProvider = sourceProvider
         self.serverName = serverName
+        self.sourceFileName = sourceFileName
+    }
+
+    /// Basename from either POSIX or Windows server paths. Darwin's
+    /// `NSString.lastPathComponent` only recognizes `/`, so using it directly can
+    /// expose a full `D:\Media\Movie.mkv` path in diagnostics.
+    public static func sourceFileName(from path: String?) -> String? {
+        guard let path else { return nil }
+        let value = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else { return nil }
+        return value
+            .replacingOccurrences(of: "\\", with: "/")
+            .split(separator: "/", omittingEmptySubsequences: true)
+            .last
+            .map(String.init)
     }
 }
 

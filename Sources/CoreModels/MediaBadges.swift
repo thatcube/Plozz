@@ -319,6 +319,14 @@ public extension MediaVersion {
         }()
 
         let range: [MediaBadge] = {
+            let normalized = (videoRange ?? "").uppercased()
+                .replacingOccurrences(of: "+", with: "PLUS")
+                .replacingOccurrences(of: " ", with: "")
+                .replacingOccurrences(of: "_", with: "")
+                .replacingOccurrences(of: "-", with: "")
+            if normalized == "HDR10PLUS" {
+                return [MediaBadge("HDR10+", style: .hdr)]
+            }
             guard let token = videoRange, let hdr = HDRRange(rawValue: token) else { return [] }
             switch hdr {
             case .sdr: return [MediaBadge("SDR", style: .sdr)]

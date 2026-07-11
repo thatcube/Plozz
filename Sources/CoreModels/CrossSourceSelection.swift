@@ -17,9 +17,10 @@ public struct CrossSourceSelection: Sendable, Hashable {
 ///
 /// It extends the single-server smart default
 /// (``Swift/Array/recommendedSelection(for:)``) across servers: each source's own
-/// best version is evaluated for this device, then ranked so the user gets the
-/// highest-quality option their Apple TV can **Direct Play** without a transcode,
-/// while every other server stays available as an explicit pick / fallback.
+/// best version is evaluated for this device, then ranked using conservative
+/// native-profile compatibility. This is not the resolved delivery mode:
+/// providers and Plozzigen may play/remux/decode more than the flattened facts
+/// can prove. Every other server remains available as an explicit pick/fallback.
 ///
 /// Ranking (highest first):
 /// 0. **Local beats remote** — a copy on the same LAN as the Apple TV always
@@ -28,9 +29,8 @@ public struct CrossSourceSelection: Sendable, Hashable {
 ///    better default than a remote 4K that buffers over a relay. Sources of
 ///    unknown locality sit between known-local and known-remote so an
 ///    unclassifiable host never loses to a known-remote server.
-/// 1. **Direct Play beats Transcode** — a 1080p file that plays untouched is a
-///    better default than a 4K file the server must transcode (mirrors the
-///    single-server policy).
+/// 1. **Known native compatibility** — a version whose flattened facts fit the
+///    native profile beats one that does not. This is only an ordering hint.
 /// 2. **Known beats unknown** — a source whose versions are loaded beats one
 ///    whose file list hasn't been fetched yet.
 /// 3. **Higher quality** — `qualityScore` (resolution → HDR → bitrate).
@@ -42,7 +42,7 @@ public enum CrossSourceSelector {
         var source: MediaSourceRef
         var version: MediaVersion?
         var localityRank: Int
-        var directPlays: Bool
+        var nativeCompatible: Bool
         var hasVersions: Bool
         var qualityScore: Int
         var isPreferred: Bool
@@ -90,7 +90,7 @@ public enum CrossSourceSelector {
                     source: source,
                     version: best,
                     localityRank: localityRank,
-                    directPlays: best.compatibility(with: capabilities) == .directPlay,
+                    nativeCompatible: best.compatibility(with: capabilities) == .directPlay,
                     hasVersions: true,
                     qualityScore: best.qualityScore,
                     isPreferred: isPreferred
@@ -101,7 +101,7 @@ public enum CrossSourceSelector {
                 source: source,
                 version: nil,
                 localityRank: localityRank,
-                directPlays: false,
+                nativeCompatible: false,
                 hasVersions: false,
                 qualityScore: Int.min,
                 isPreferred: isPreferred
@@ -110,7 +110,9 @@ public enum CrossSourceSelector {
 
         let winner = candidates.max { lhs, rhs in
             if lhs.localityRank != rhs.localityRank { return lhs.localityRank < rhs.localityRank }
-            if lhs.directPlays != rhs.directPlays { return !lhs.directPlays && rhs.directPlays }
+            if lhs.nativeCompatible != rhs.nativeCompatible {
+                return !lhs.nativeCompatible && rhs.nativeCompatible
+            }
             if lhs.hasVersions != rhs.hasVersions { return !lhs.hasVersions && rhs.hasVersions }
             if lhs.qualityScore != rhs.qualityScore { return lhs.qualityScore < rhs.qualityScore }
             // Soft origin/library preference: only breaks an otherwise-exact tie.

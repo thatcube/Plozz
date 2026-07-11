@@ -11,14 +11,19 @@ public struct JellyfinProvider: MediaProvider {
     public let kind: ProviderKind = .jellyfin
     public let session: UserSession
     let client: JellyfinClient
+    let themeArchiveResolver: @Sendable (String?) async -> URL?
 
     public init(
         session: UserSession,
         http: HTTPClient = URLSessionHTTPClient(),
         interactiveHTTP: HTTPClient? = nil,
-        hybridEngineEnabled: Bool = false
+        hybridEngineEnabled: Bool = false,
+        themeArchiveResolver: @escaping @Sendable (String?) async -> URL? = {
+            await ThemeMusicArchive.resolvedURL(tvdbID: $0)
+        }
     ) {
         self.session = session
+        self.themeArchiveResolver = themeArchiveResolver
         self.client = JellyfinClient(
             baseURL: session.server.baseURL,
             deviceProfile: JellyfinDeviceProfile(deviceID: session.deviceID),
@@ -257,6 +262,21 @@ public struct JellyfinProvider: MediaProvider {
             return MediaItem.youTubeTrailer(fromURL: url, title: link.Name ?? "Trailer")
         }
         return local + remote
+    }
+
+    public func themeMusic(for itemID: String) async throws -> ThemeMusic? {
+        if let song = try? await client.themeSongs(userID: session.userID, id: itemID).Items.first,
+           let streamURL = client.audioStreamURL(
+               itemID: song.Id,
+               playSessionID: UUID().uuidString
+           ) {
+            return ThemeMusic(itemID: itemID, streamURL: streamURL, title: song.Name)
+        }
+
+        let item = try? await client.item(userID: session.userID, id: itemID)
+        let tvdbID = item?.ProviderIds?["Tvdb"] ?? item?.ProviderIds?["tvdb"]
+        guard let archiveURL = await themeArchiveResolver(tvdbID) else { return nil }
+        return ThemeMusic(itemID: itemID, streamURL: archiveURL, title: item?.Name)
     }
 
     public func children(of itemID: String) async throws -> [MediaItem] {
@@ -568,7 +588,9 @@ public struct JellyfinProvider: MediaProvider {
             localRemuxSource: localRemuxSource,
             scrubPreview: trickplayManifest(itemID: itemID, source: source, trickplay: detail.Trickplay).map(ScrubPreviewSource.tiled),
             sourceProvider: .jellyfin,
-            serverName: session.server.name
+            serverName: session.server.name,
+            sourceFileName: PlaybackRequest.sourceFileName(from: originalSource.Path)
+                ?? PlaybackRequest.sourceFileName(from: originalSource.Name)
         )
     }
 
@@ -824,12 +846,27 @@ public struct JellyfinProvider: MediaProvider {
     }
 
     // MARK: Subtitles
-    public func remoteSubtitleSearch(itemID: String, language: String) async throws -> [RemoteSubtitle] {
+    public func remoteSubtitleSearch(itemID: String, language: String, preference: SubtitleSearchPreference) async throws -> [RemoteSubtitle] {
+        // Jellyfin's RemoteSearch endpoint takes only a language; the SDH/Forced
+        // preference is applied client-side over the returned candidates.
         try await client.remoteSubtitleSearch(itemID: itemID, language: language).map(map(remoteSubtitle:))
     }
 
     public func downloadRemoteSubtitle(itemID: String, subtitleID: String) async throws {
         try await client.downloadRemoteSubtitle(itemID: itemID, subtitleID: subtitleID)
+    }
+
+    /// The item's current subtitle tracks (text sidecars get a VTT `deliveryURL`),
+    /// fetched via a plain item lookup — no `PlaybackInfo`/transcode. Used to
+    /// observe a just-downloaded subtitle so it can be hot-loaded.
+    public func subtitleTracks(forItemID itemID: String) async throws -> [MediaTrack] {
+        let dto = try await client.item(userID: session.userID, id: itemID)
+        let source = dto.MediaSources?.first
+        let sourceID = source?.Id ?? itemID
+        let streams = source?.MediaStreams ?? dto.MediaStreams ?? []
+        return streams
+            .filter { $0.`Type` == "Subtitle" }
+            .map { map(subtitleStream: $0, itemID: itemID, sourceID: sourceID) }
     }
 
     // MARK: - Mapping
@@ -1145,16 +1182,20 @@ public struct JellyfinProvider: MediaProvider {
     }
 
     private func map(remoteSubtitle dto: RemoteSubtitleInfoDto) -> RemoteSubtitle {
-        RemoteSubtitle(
+        // Jellyfin's RemoteSubtitleInfo has no explicit SDH flag, so infer it from
+        // the subtitle name (word-boundary "SDH"/"HI"/"CC"/…) to feed the SDH
+        // accessibility preference client-side.
+        let name = dto.Name ?? dto.ProviderName ?? "Subtitle"
+        return RemoteSubtitle(
             id: dto.Id ?? "",
-            name: dto.Name ?? dto.ProviderName ?? "Subtitle",
+            name: name,
             providerName: dto.ProviderName,
             language: dto.ThreeLetterISOLanguageName,
             format: dto.Format,
             communityRating: dto.CommunityRating,
             downloadCount: dto.DownloadCount,
             isForced: dto.IsForced ?? false,
-            isHearingImpaired: false
+            isHearingImpaired: RemoteSubtitle.nameSuggestsHearingImpaired(name)
         )
     }
 

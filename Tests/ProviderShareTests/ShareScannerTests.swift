@@ -54,8 +54,13 @@ final class ShareScannerTests: XCTestCase {
 
     /// Build a scanner whose pool of listers all read the shared (concurrency-safe)
     /// fake tree — mirrors production, where each pool slot has its own connection.
-    private func makeScanner(store: ShareCatalogStore, fake: FakeShare, concurrency: Int = 4) -> ShareScanner {
-        ShareScanner(store: store, concurrency: concurrency, makeLister: {
+    private func makeScanner(
+        store: ShareCatalogStore,
+        fake: FakeShare,
+        concurrency: Int = 4,
+        pacer: ShareScanPacer = ShareScanPacer()
+    ) -> ShareScanner {
+        ShareScanner(store: store, concurrency: concurrency, pacer: pacer, makeLister: {
             ShareScanner.ScanLister(list: { await fake.list($0) }, close: {})
         })
     }
@@ -100,6 +105,54 @@ final class ShareScannerTests: XCTestCase {
         // Naruto must NOT also appear under TV.
         let tv = await store.series(in: .tv, offset: 0, limit: 10)
         XCTAssertFalse(tv.contains { $0.title == "Naruto" })
+    }
+
+    /// Bare-numbered anime (no `SxxEyy` marker) grouped under one series by the
+    /// folder tree — and NOT leaking into the Movies library. This is the exact
+    /// regression from the report (many "Sword Art Online 2 18" cards in Movies).
+    func testBareNumberedAnimeGroupsAsSeriesNotMovies() async {
+        let store = ShareCatalogStore(accountKey: "a", directory: tempDir())
+        let tree: [String: [SMBShareBrowser.Entry]] = [
+            "": [dir("Anime")],
+            "Anime": [dir("Sword Art Online II")],
+            "Anime/Sword Art Online II": [
+                file("Sword Art Online II - 18.mkv"),
+                file("Sword Art Online II - 19.mkv"),
+                file("Sword Art Online II - 20.mkv"),
+            ],
+        ]
+        let scanner = makeScanner(store: store, fake: FakeShare(tree))
+        await scanner.scan()
+
+        let counts = await store.libraryCounts()
+        XCTAssertEqual(counts.movies, 0, "bare-numbered anime must not land in Movies")
+        XCTAssertEqual(counts.animeSeries, 1)
+
+        let key = ShareCatalogID.seriesKey(fromTitle: "Sword Art Online II")
+        let eps = await store.episodes(seriesKey: key, season: 1)
+        XCTAssertEqual(eps.map(\.episodeNumber), [18, 19, 20])
+    }
+
+    /// A classifier bump forces a fresh walk even when the throttle would skip it,
+    /// so already-indexed files get reclassified under the new rules.
+    func testClassifierBumpForcesReparse() async {
+        let store = ShareCatalogStore(accountKey: "a", directory: tempDir())
+        let fake = FakeShare(standardTree())
+        let scanner = makeScanner(store: store, fake: fake)
+        await scanner.scan()
+        let afterFirst = await fake.listCount
+        XCTAssertGreaterThan(afterFirst, 0)
+
+        // Same classifier version already recorded → throttled (no new listings).
+        await scanner.scanIfStale()
+        let afterThrottled = await fake.listCount
+        XCTAssertEqual(afterThrottled, afterFirst, "throttled when parser_version matches")
+
+        // Simulate a classifier bump by clearing the recorded version.
+        await store.setMeta("parser_version", "0")
+        await scanner.scanIfStale()
+        let afterBump = await fake.listCount
+        XCTAssertGreaterThan(afterBump, afterFirst, "a classifier bump re-walks despite the throttle")
     }
 
     func testExcludedDirsAndSampleFilesSkipped() async {
@@ -267,5 +320,54 @@ final class ShareScannerTests: XCTestCase {
         let s2Parallel = await parallelStore.episodes(seriesKey: key, season: 2)
         XCTAssertEqual(s2Serial.count, 10)
         XCTAssertEqual(s2Parallel.map(\.episodeNumber), s2Serial.map(\.episodeNumber))
+    }
+
+    func testScanKeepsProgressingDuringContinuousInteractiveActivity() async {
+        let store = ShareCatalogStore(accountKey: "paced", directory: tempDir())
+        let tree = wideTree(shows: 12, seasonsPerShow: 2, episodesPerSeason: 8, movies: 100)
+        let pacer = ShareScanPacer(activeWindow: .seconds(10), activeDelay: .milliseconds(2))
+        let scanner = makeScanner(
+            store: store,
+            fake: FakeShare(tree),
+            concurrency: 4,
+            pacer: pacer
+        )
+        let activity = Task {
+            while !Task.isCancelled {
+                await pacer.noteInteractiveActivity()
+                try? await Task.sleep(for: .milliseconds(1))
+            }
+        }
+        await scanner.scan()
+        activity.cancel()
+
+        let counts = await store.libraryCounts()
+        XCTAssertEqual(counts.movies, 100)
+        XCTAssertEqual(counts.tvSeries, 12,
+                       "bounded pacing must slow admission, never wait for idle/starve")
+    }
+
+    func testPacerEngagesOnlyForRecentActivityAndIsPerShare() async {
+        let firstShare = ShareScanPacer(
+            activeWindow: .milliseconds(15),
+            activeDelay: .milliseconds(1)
+        )
+        let secondShare = ShareScanPacer(
+            activeWindow: .seconds(1),
+            activeDelay: .milliseconds(1)
+        )
+
+        let idle = await firstShare.paceIfBrowsing()
+        XCTAssertFalse(idle)
+
+        await firstShare.noteInteractiveActivity()
+        let active = await firstShare.paceIfBrowsing()
+        let unrelated = await secondShare.paceIfBrowsing()
+        XCTAssertTrue(active, "recent activity must engage bounded pacing")
+        XCTAssertFalse(unrelated, "browsing one share must not throttle another")
+
+        try? await Task.sleep(for: .milliseconds(20))
+        let expired = await firstShare.paceIfBrowsing()
+        XCTAssertFalse(expired, "full throughput resumes after the activity window")
     }
 }

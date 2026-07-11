@@ -71,6 +71,8 @@ public final class AppState {
     /// switch, mirroring `subtitlePolicyModel`.
     public private(set) var audioPolicyModel: AudioPolicyModel
     public private(set) var themeModel: ThemeSettingsModel
+    /// Opt-in background theme music for movie and series detail pages.
+    public private(set) var themeMusicModel: ThemeMusicSettingsModel
     public private(set) var diagnosticsModel: DiagnosticsSettingsModel
     /// The full-screen music player's per-profile look + "show extra info"
     /// preference. Scoped per profile (rebuilt on profile switch) like the theme.
@@ -915,6 +917,7 @@ public final class AppState {
         spoilerModel: SpoilerSettingsModel? = nil,
         playbackModel: PlaybackSettingsModel? = nil,
         themeModel: ThemeSettingsModel? = nil,
+        themeMusicModel: ThemeMusicSettingsModel? = nil,
         diagnosticsModel: DiagnosticsSettingsModel? = nil,
         musicPlayerModel: MusicPlayerSettingsModel? = nil,
         homeLibraryVisibilityModel: HomeLibraryVisibilityModel? = nil,
@@ -945,7 +948,7 @@ public final class AppState {
         let injected = spoilerModel != nil
             || subtitleBehaviorModel != nil || subtitleStyleModel != nil
             || playbackModel != nil
-            || themeModel != nil || diagnosticsModel != nil
+            || themeModel != nil || themeMusicModel != nil || diagnosticsModel != nil
             || homeLibraryVisibilityModel != nil || musicPlayerModel != nil
             || uiDensityModel != nil
             || cardStyleModel != nil
@@ -975,6 +978,8 @@ public final class AppState {
         self.subtitlePolicyModel = SubtitlePolicyModel(store: SubtitlePolicyStore(namespace: ns))
         self.audioPolicyModel = AudioPolicyModel(store: AudioPolicyStore(namespace: ns))
         self.themeModel = themeModel ?? ThemeSettingsModel(store: ThemeSettingsStore(namespace: ns))
+        self.themeMusicModel = themeMusicModel
+            ?? ThemeMusicSettingsModel(store: ThemeMusicSettingsStore(namespace: ns))
         self.diagnosticsModel = diagnosticsModel ?? DiagnosticsSettingsModel(store: DiagnosticsSettingsStore(namespace: ns))
         self.musicPlayerModel = musicPlayerModel ?? MusicPlayerSettingsModel(store: MusicPlayerSettingsStore(namespace: ns))
         self.homeLibraryVisibilityModel = homeLibraryVisibilityModel
@@ -2034,10 +2039,13 @@ public final class AppState {
     /// ("Use this server" toggle on Settings → Servers & Libraries → server).
     public func setAccount(_ accountID: String, includedInActiveProfile included: Bool) {
         let profileID = profilesModel.activeProfileID
-        let current = Set(profilesModel.activeAccountIDs(
-            for: profileID,
-            fallback: accountStore.activeAccountIDs()
-        ))
+        // Mutate the resolved set that the UI is actually showing, not the raw
+        // stored set. The latter can contain only stale account ids after a
+        // server is removed/re-added; reloadAccounts() intentionally resolves
+        // that situation to the current household set. Starting from the stale
+        // stored value would make removing a visible account a no-op, then the
+        // next reload would fall back to every account and leave the switch On.
+        let current = activeAccountIDs
         var next = current
         if included { next.insert(accountID) } else { next.remove(accountID) }
         profilesModel.setActiveAccountIDs(Array(next), for: profileID)
@@ -2056,20 +2064,32 @@ public final class AppState {
         registry.invalidateCache()
         accounts = accountStore.loadAccounts()
         let known = Set(accounts.map(\.id))
-        // The active set is the active profile's chosen subset, falling back to
-        // the household-global active set (default profile / upgrade path).
+        // The household-global active set is the fallback for a profile that has
+        // never chosen a subset (default profile / upgrade path).
         let globalActive = accountStore.activeAccountIDs()
-        let profileIDs = profilesModel.activeAccountIDs(
-            for: profilesModel.activeProfileID,
-            fallback: globalActive
-        )
-        var resolved = Set(profileIDs.filter { known.contains($0) })
-        // A profile that selected nothing valid uses every account.
-        if resolved.isEmpty { resolved = known }
+        let resolved: Set<String>
+        if let stored = profilesModel.storedActiveAccountIDs(for: profilesModel.activeProfileID) {
+            // The profile made an *explicit* choice. Honor it exactly — including
+            // an intentional empty set ("watch nothing"), which is what turning
+            // the last server off produces and must not be silently re-expanded
+            // to every account (that's what made the master server toggle appear
+            // to do nothing). Only fall back if every chosen account has since
+            // gone stale (e.g. the servers were signed out household-wide), so a
+            // profile isn't left permanently blank by a removal it didn't make.
+            let valid = Set(stored.filter { known.contains($0) })
+            if valid.isEmpty && !stored.isEmpty {
+                resolved = Set(globalActive.filter { known.contains($0) })
+            } else {
+                resolved = valid
+            }
+        } else {
+            // Never chose → default to the household-global active set.
+            resolved = Set(globalActive.filter { known.contains($0) })
+        }
         activeAccountIDs = resolved
     }
 
-    /// Rebuilds the four settings models scoped to the active profile's
+    /// Rebuilds the settings models scoped to the active profile's
     /// namespace. No-op when settings models were injected (tests).
     private func rebuildSettingsModels() {
         guard !usesInjectedModels else { return }
@@ -2081,6 +2101,7 @@ public final class AppState {
         subtitlePolicyModel = SubtitlePolicyModel(store: SubtitlePolicyStore(namespace: ns))
         audioPolicyModel = AudioPolicyModel(store: AudioPolicyStore(namespace: ns))
         themeModel = ThemeSettingsModel(store: ThemeSettingsStore(namespace: ns))
+        themeMusicModel = ThemeMusicSettingsModel(store: ThemeMusicSettingsStore(namespace: ns))
         diagnosticsModel = DiagnosticsSettingsModel(store: DiagnosticsSettingsStore(namespace: ns))
         musicPlayerModel = MusicPlayerSettingsModel(store: MusicPlayerSettingsStore(namespace: ns))
         homeLibraryVisibilityModel = HomeLibraryVisibilityModel(store: HomeLibraryVisibilityStore(namespace: ns))

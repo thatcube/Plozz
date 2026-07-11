@@ -35,6 +35,41 @@ final class LibraryBrowseViewModelTests: XCTestCase {
         XCTAssertNil(vm.item(at: 10), "Later items are placeholders until their page loads")
         XCTAssertEqual(provider.requestedPages.count, 1)
         XCTAssertEqual(provider.requestedPages.first?.startIndex, 0)
+        XCTAssertEqual(provider.interactiveBrowseActivityCount, 1)
+    }
+
+    func testCatalogRefreshReplacesStaleSparsePagesWithoutLoadingState() async {
+        let (vm, provider) = makeVM(itemCount: 30, pageSize: 10)
+        await vm.loadFirstPage()
+        await vm.itemAppeared(at: 10)
+        XCTAssertEqual(vm.item(at: 10)?.id, "i10")
+
+        provider.allItems = (0..<30).map {
+            MediaItem(id: "fresh\($0)", title: "Fresh \($0)", kind: .movie)
+        }
+        await vm.refreshAfterCatalogChange()
+
+        XCTAssertEqual(vm.state.value, 30)
+        XCTAssertEqual(vm.totalCount, 30)
+        XCTAssertEqual(vm.item(at: 0)?.id, "fresh0")
+        XCTAssertEqual(vm.item(at: 10)?.id, "fresh10",
+                       "currently-visible deeper pages must be refreshed atomically")
+        XCTAssertFalse(vm.state.isLoading)
+    }
+
+    func testCatalogRefreshPopulatesLibraryThatWasEmptyBeforeFirstScan() async {
+        let (vm, provider) = makeVM(itemCount: 0, pageSize: 10)
+        await vm.loadFirstPage()
+        XCTAssertEqual(vm.state, .empty)
+
+        provider.allItems = (0..<5).map {
+            MediaItem(id: "scanned\($0)", title: "Scanned \($0)", kind: .movie)
+        }
+        await vm.refreshAfterCatalogChange()
+
+        XCTAssertEqual(vm.state.value, 5)
+        XCTAssertEqual(vm.totalCount, 5)
+        XCTAssertEqual(vm.item(at: 0)?.id, "scanned0")
     }
 
     func testItemAppearedLoadsOwningPage() async {
@@ -48,6 +83,7 @@ final class LibraryBrowseViewModelTests: XCTestCase {
         XCTAssertNotNil(vm.item(at: 29))
         XCTAssertEqual(vm.item(at: 20)?.id, "i20")
         XCTAssertTrue(provider.requestedPages.contains { $0.startIndex == 20 })
+        XCTAssertGreaterThanOrEqual(provider.interactiveBrowseActivityCount, 2)
     }
 
     func testBackHalfOfPagePrefetchesNextPage() async {

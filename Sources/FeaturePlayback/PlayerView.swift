@@ -67,6 +67,9 @@ public struct PlayerView: View {
                         setSubtitleDelay: { viewModel.setSubtitleDelay($0) },
                         setDialogEnhance: { viewModel.setDialogEnhanceEnabled($0) },
                         setSubtitleStyle: { viewModel.applySubtitleStyle($0) },
+                        searchRemoteSubtitles: { viewModel.searchRemoteSubtitles(language: $0) },
+                        refreshRemoteSubtitleSearch: { viewModel.refreshRemoteSubtitleSearch() },
+                        downloadRemoteSubtitle: { viewModel.downloadAndLoadRemoteSubtitle($0) },
                         playNextEpisode: { if let next = viewModel.nextEpisode { viewModel.playEpisode(next) } },
                         playPreviousEpisode: { if let prev = viewModel.previousEpisode { viewModel.playEpisode(prev) } },
                         restart: { viewModel.requestSeek(to: 0) },
@@ -265,6 +268,7 @@ public struct PlayerView: View {
             capabilities: viewModel.mediaCapabilities,
             sourceProvider: viewModel.sourceProvider,
             serverName: viewModel.serverName,
+            sourceFileName: viewModel.diagnosticsSourceFileName,
             streamURL: viewModel.diagnosticsStreamURL,
             engineTelemetry: { viewModel.engineLiveTelemetry },
             probedFacts: { viewModel.engineProbedFacts }

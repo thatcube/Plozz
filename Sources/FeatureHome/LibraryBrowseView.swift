@@ -134,6 +134,13 @@ public struct LibraryBrowseView: View {
         // dedicated destination with no navigation chrome pinned at the top.
         .toolbar(.hidden, for: .tabBar)
         .task { if viewModel.state.value == nil { await viewModel.loadFirstPage() } }
+        .background {
+            if viewModel.isMediaShare {
+                ShareCatalogRefreshObserver(shareID: viewModel.sourceServerID) {
+                    Task { await viewModel.refreshAfterCatalogChange() }
+                }
+            }
+        }
         .task {
             // Opt-in (PLZXMEM=1) memory/background-activity sampler. Fully inert
             // when disabled — returns before starting any timer or keep-alive loop.
@@ -168,6 +175,7 @@ public struct LibraryBrowseView: View {
             Spacer(minLength: PlozzTheme.Spacing.large)
             sortControl
         }
+
         .padding(.horizontal, HomeLayout.horizontalPadding)
         .focusSection()
     }
@@ -224,6 +232,28 @@ public struct LibraryBrowseView: View {
             }
         }
         #endif
+    }
+}
+
+/// Render-isolated scan-completion observer. Scan/enrichment progress mutates the
+/// whole status dictionary frequently; containing that observation here prevents
+/// progress ticks from invalidating the poster grid.
+private struct ShareCatalogRefreshObserver: View {
+    let shareID: String
+    let onRefresh: () -> Void
+
+    @Environment(ShareScanStatusModel.self) private var status: ShareScanStatusModel?
+
+    private var lastScanAt: Date? { status?.byShare[shareID]?.lastScanAt }
+
+    var body: some View {
+        Color.clear
+            .frame(width: 0, height: 0)
+            .onChange(of: lastScanAt) { oldValue, newValue in
+                guard newValue != nil, newValue != oldValue else { return }
+                onRefresh()
+            }
+            .accessibilityHidden(true)
     }
 }
 

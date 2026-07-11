@@ -216,12 +216,11 @@ private struct ProviderChooserView: View {
     private func bridgeBackButtonFocus(_ direction: MoveCommandDirection) {
         guard showsBackButton else { return }
         switch (focusedControl, direction) {
-        case (.some(.jellyfin), .up),
-             (.some(.jellyfin), .left),
+        case (.some(.jellyfin), .left),
              (.some(.plex), .left),
              (.some(.mediaShare), .left):
             focusedControl = .back
-        case (.some(.back), .down), (.some(.back), .right):
+        case (.some(.back), .right):
             focusedControl = .jellyfin
         default:
             break

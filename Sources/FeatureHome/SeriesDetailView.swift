@@ -272,6 +272,7 @@ struct SeriesDetailView: View {
                         series: series,
                         recedeModel: recedeModel,
                         showsSeasons: !seasons.isEmpty,
+                        showsCast: !series.cast.isEmpty,
                         focusAnchorID: Self.browserFocusAnchorID,
                         seasonContent: {
                             seasonTabBar {

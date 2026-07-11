@@ -39,12 +39,11 @@ enum SeriesEpisodeBrowserLayout {
     /// height while preserving normal size proposals for every card.
     static let episodeRailHeight: CGFloat = 520
     /// Align the episode column's visible content—not the taller rail viewport—
-    /// with screen center. The matching runway reduction keeps Cast at the same
-    /// lower-edge position.
+    /// with screen center.
     static let focusedContentShift: CGFloat = 110
     static let focusAnchorY = episodeRailHeight / 2 - focusedContentShift
 
-    static var focusedStageHeight: CGFloat {
+    static var minimumNoCastStageHeight: CGFloat {
         #if canImport(UIKit)
         UIScreen.main.bounds.height - focusedContentShift
         #else
@@ -52,11 +51,14 @@ enum SeriesEpisodeBrowserLayout {
         #endif
     }
 
-    static func trailingRunwayHeight(showsSeasons: Bool) -> CGFloat {
+    /// Cast already provides enough real trailing content to center the browser;
+    /// only a no-Cast page needs invisible runway to reach the same position.
+    static func trailingRunwayHeight(showsSeasons: Bool, showsCast: Bool) -> CGFloat {
+        guard !showsCast else { return 0 }
         let groupedHeight = recededLogoHeight
             + (showsSeasons ? seasonBarHeight : 0)
             + episodeRailHeight
-        return max(focusedStageHeight - groupedHeight, 0)
+        return max(minimumNoCastStageHeight - groupedHeight, 0)
     }
 }
 
@@ -68,6 +70,7 @@ struct SeriesEpisodeBrowser<SeasonContent: View, EpisodeContent: View>: View {
     let series: MediaItem
     let recedeModel: SeriesHeroRecedeModel
     let showsSeasons: Bool
+    let showsCast: Bool
     let focusAnchorID: String
     @ViewBuilder let seasonContent: () -> SeasonContent
     @ViewBuilder let episodeContent: () -> EpisodeContent
@@ -108,7 +111,8 @@ struct SeriesEpisodeBrowser<SeasonContent: View, EpisodeContent: View>: View {
 
             Color.clear.frame(
                 height: SeriesEpisodeBrowserLayout.trailingRunwayHeight(
-                    showsSeasons: showsSeasons
+                    showsSeasons: showsSeasons,
+                    showsCast: showsCast
                 )
             )
         }

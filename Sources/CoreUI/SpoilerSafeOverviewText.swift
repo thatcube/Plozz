@@ -58,7 +58,7 @@ public struct SpoilerSafeOverviewText: View {
         case .blur:
             if let overview {
                 Text(overview)
-                    .blur(radius: 8)
+                    .blur(radius: 6)
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel(EpisodeColumnPresentation.hiddenOverviewLabel)
             } else {

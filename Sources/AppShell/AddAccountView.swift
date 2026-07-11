@@ -19,7 +19,14 @@ struct AddAccountView: View {
     let onShareConfigured: (ShareDraft) -> Void
     let onCancel: () -> Void
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var choice: ProviderKind?
+    @State private var navigationDirection: NavigationDirection = .forward
+
+    private enum NavigationDirection {
+        case forward
+        case backward
+    }
 
     init(
         deviceID: String,
@@ -47,29 +54,37 @@ struct AddAccountView: View {
     }
 
     var body: some View {
-        switch choice {
-        case .none:
-            chooser
-        case .jellyfin:
-            ServerPickerView(
-                signedInServers: signedInServers.filter { $0.server.provider == .jellyfin },
-                onBack: { choice = nil }
-            ) { onJellyfinServerSelected($0) }
-        case .plex:
-            PlexLinkView(
-                viewModel: PlexAuthViewModel(
-                    service: PlexAuthService(deviceID: deviceID),
-                    onAuthenticated: onPlexAuthenticated,
-                    onAuthenticatedMany: onPlexAuthenticatedMany
-                ),
-                onCancel: { choice = nil }
-            )
-        case .mediaShare:
-            AddShareView(
-                onBack: { choice = nil },
-                onConfigured: onShareConfigured
-            )
+        ZStack {
+            switch choice {
+            case .none:
+                chooser
+                    .transition(pageTransition)
+            case .jellyfin:
+                ServerPickerView(
+                    signedInServers: signedInServers.filter { $0.server.provider == .jellyfin },
+                    onBack: navigateBackToChooser
+                ) { onJellyfinServerSelected($0) }
+                    .transition(pageTransition)
+            case .plex:
+                PlexLinkView(
+                    viewModel: PlexAuthViewModel(
+                        service: PlexAuthService(deviceID: deviceID),
+                        onAuthenticated: onPlexAuthenticated,
+                        onAuthenticatedMany: onPlexAuthenticatedMany
+                    ),
+                    onCancel: navigateBackToChooser
+                )
+                .transition(pageTransition)
+            case .mediaShare:
+                AddShareView(
+                    onBack: navigateBackToChooser,
+                    onConfigured: onShareConfigured
+                )
+                .transition(pageTransition)
+            }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .clipped()
     }
 
     private var chooser: some View {
@@ -82,12 +97,12 @@ struct AddAccountView: View {
                 providerButton(
                     provider: .jellyfin,
                     detail: "Find it on your network or enter an address."
-                ) { choice = .jellyfin }
+                ) { navigate(to: .jellyfin) }
 
                 providerButton(
                     provider: .plex,
                     detail: "Link this device at plex.tv/link."
-                ) { choice = .plex }
+                ) { navigate(to: .plex) }
             }
 
             // Media shares are deliberately second-class: a smaller secondary
@@ -95,7 +110,7 @@ struct AddAccountView: View {
             // Kept side-by-side with Cancel rather than stacked.
             HStack(spacing: 24) {
                 Button {
-                    choice = .mediaShare
+                    navigate(to: .mediaShare)
                 } label: {
                     Label("Add a local media share (SMB)", systemImage: "externaldrive.connected.to.line.below.fill")
                         .font(.callout)
@@ -139,6 +154,36 @@ struct AddAccountView: View {
         // Same focus treatment as the Settings About / Report a Problem cards:
         // accent outline + gentle lift, no contrast inversion.
         .buttonStyle(SettingsCardButtonStyle())
+    }
+
+    private var pageTransition: AnyTransition {
+        guard !reduceMotion else { return .opacity }
+        let enteringOffset: CGFloat = navigationDirection == .forward ? 72 : -72
+        let leavingOffset: CGFloat = navigationDirection == .forward ? -48 : 48
+        return .asymmetric(
+            insertion: .offset(x: enteringOffset).combined(with: .opacity),
+            removal: .offset(x: leavingOffset).combined(with: .opacity)
+        )
+    }
+
+    private var pageAnimation: Animation {
+        reduceMotion
+            ? .easeInOut(duration: 0.18)
+            : .spring(response: 0.42, dampingFraction: 0.9)
+    }
+
+    private func navigate(to destination: ProviderKind) {
+        withAnimation(pageAnimation) {
+            navigationDirection = .forward
+            choice = destination
+        }
+    }
+
+    private func navigateBackToChooser() {
+        withAnimation(pageAnimation) {
+            navigationDirection = .backward
+            choice = nil
+        }
     }
 }
 

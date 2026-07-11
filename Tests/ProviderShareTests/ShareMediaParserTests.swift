@@ -142,10 +142,26 @@ final class ShareMediaParserTests: XCTestCase {
         XCTAssertEqual(bladeRunner?.year, 2017)
     }
 
+    func testNumberedFilmDirectlyInsideSeriesRootIsMovie() {
+        let bladeRunner = movie("Anime/Blade Runner 2049 (2017).mkv")
+        XCTAssertEqual(bladeRunner?.title, "Blade Runner 2049")
+        XCTAssertEqual(bladeRunner?.year, 2017)
+
+        let oceans = movie("TV/Ocean's 13 (2007).mkv")
+        XCTAssertEqual(oceans?.title, "Ocean's 13")
+        XCTAssertEqual(oceans?.year, 2007)
+    }
+
     func testYearBearingSeriesFolderStillAcceptsBareEpisodeNumber() {
         let ep = episode("TV/Show (2024)/Show 01.mkv")
         XCTAssertEqual(ep?.series, "Show")
         XCTAssertEqual(ep?.season, 1)
+        XCTAssertEqual(ep?.episode, 1)
+    }
+
+    func testYearBearingSeriesFilenameStillAcceptsNewTrailingEpisodeNumber() {
+        let ep = episode("TV/Show (2024)/Show (2024) 01.mkv")
+        XCTAssertEqual(ep?.series, "Show")
         XCTAssertEqual(ep?.episode, 1)
     }
 

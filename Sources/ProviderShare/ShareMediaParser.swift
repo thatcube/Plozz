@@ -13,7 +13,7 @@ enum ShareMediaParser {
     /// from them) change, so a share's catalog can force a one-time full re-walk
     /// that reclassifies every already-indexed file under the new rules instead of
     /// waiting for each file to change on disk. See `ShareScanner.scanIfStale`.
-    static let classifierVersion = 6
+    static let classifierVersion = 7
 
     /// File extensions we treat as playable video.
     static let videoExtensions: Set<String> = [
@@ -105,6 +105,13 @@ enum ShareMediaParser {
         let context = libraryContext(ancestors)
         if seasonAncestor != nil || context == .seriesLibrary {
             if let ep = parseBareEpisode(stem: stem, seasonFolder: seasonAncestor, showFolder: showHint) {
+                if seasonAncestor == nil {
+                    let fileMovie = parseMovie(stem: stem, parentFolder: nil)
+                    if fileMovie.year != nil,
+                       title(fileMovie.title, containsStandaloneNumber: ep.episode) {
+                        return .movie(fileMovie)
+                    }
+                }
                 // Mixed Anime/Series roots often contain films too. A year-bearing
                 // parent folder is a movie signal when the apparent episode number
                 // is actually part of that parent title ("Ghost in the Shell 2",
@@ -165,9 +172,13 @@ enum ShareMediaParser {
 
     private static func yearBearingMovieFolder(_ folder: String, containsTitleNumber number: Int) -> Bool {
         guard let parsed = movieFolderIdentity(folder) else { return false }
-        let numbers = parsed.title.components(separatedBy: CharacterSet.decimalDigits.inverted)
+        return title(parsed.title, containsStandaloneNumber: number)
+    }
+
+    private static func title(_ title: String, containsStandaloneNumber number: Int) -> Bool {
+        title.components(separatedBy: CharacterSet.decimalDigits.inverted)
             .compactMap(Int.init)
-        return numbers.contains(number)
+            .contains(number)
     }
 
     /// A dedicated `Title (Year)` folder. A bare year bucket (`Movies/2024/`) is

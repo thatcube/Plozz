@@ -149,8 +149,8 @@ struct SeriesDetailView: View {
     /// Scroll anchor for the hero, used to keep the page pinned to the top while
     /// initial focus lands on the bottom-anchored Play button.
     private static let topAnchorID = "series-hero-top"
-    /// The complete episode rail, centered identically when focus first enters
-    /// either Seasons or Episodes.
+    /// The episode column's visual-center marker, used identically when focus first
+    /// enters either Seasons or Episodes.
     private static let browserFocusAnchorID = "series-episode-browser-focus"
 
     /// Named coordinate space anchored to the season bar's scroll viewport. In it the
@@ -322,7 +322,7 @@ struct SeriesDetailView: View {
         }
     }
 
-    /// Moves the episode rail to the one final browser position immediately as
+    /// Moves the episode column to the one final browser position immediately as
     /// focus enters either section. Both entry paths target the same fixed frame,
     /// so Season → Episode has no second vertical movement and rapid DOWN-DOWN
     /// cannot produce a different resting offset from a slow navigation.

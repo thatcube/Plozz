@@ -30,6 +30,7 @@ enum SeriesEpisodeBrowserLayout {
     /// this static preserves immutable focus geometry and leaves a clean gap between
     /// the hero action row and Seasons despite the deeper browser overlap.
     static let heroContentBottomLift: CGFloat = 160
+    static let recededLogoHeight: CGFloat = 200
     /// A real, fixed viewport for the horizontal tab rail. Constraining the
     /// ScrollView itself removes its excess vertical proposal while keeping its
     /// rendered frame and tvOS focus-section geometry identical.
@@ -37,17 +38,25 @@ enum SeriesEpisodeBrowserLayout {
     /// Prevents the episode rail from absorbing the full-screen stage's surplus
     /// height while preserving normal size proposals for every card.
     static let episodeRailHeight: CGFloat = 520
-    /// The browser owns one complete viewport before Cast/extras begin. Besides
-    /// creating a deliberate episode-browsing page, the unused portion after the
-    /// grouped browser is nonfocusable trailing runway. It centers the rail
-    /// identically whether extras exist or not without separating Seasons from
-    /// Episodes.
-    static var stageHeight: CGFloat {
+    /// Align the episode column's visible content—not the taller rail viewport—
+    /// with screen center. The matching runway reduction keeps Cast at the same
+    /// lower-edge position.
+    static let focusedContentShift: CGFloat = 110
+    static let focusAnchorY = episodeRailHeight / 2 - focusedContentShift
+
+    static var focusedStageHeight: CGFloat {
         #if canImport(UIKit)
-        UIScreen.main.bounds.height
+        UIScreen.main.bounds.height - focusedContentShift
         #else
-        1080
+        1080 - focusedContentShift
         #endif
+    }
+
+    static func trailingRunwayHeight(showsSeasons: Bool) -> CGFloat {
+        let groupedHeight = recededLogoHeight
+            + (showsSeasons ? seasonBarHeight : 0)
+            + episodeRailHeight
+        return max(focusedStageHeight - groupedHeight, 0)
     }
 }
 
@@ -67,24 +76,43 @@ struct SeriesEpisodeBrowser<SeasonContent: View, EpisodeContent: View>: View {
         VStack(alignment: .leading, spacing: 0) {
             SeriesRecededLogo(series: series, recedeModel: recedeModel)
                 .frame(maxWidth: .infinity)
-                .frame(height: 200, alignment: .center)
+                .frame(height: SeriesEpisodeBrowserLayout.recededLogoHeight, alignment: .center)
 
             if showsSeasons {
                 seasonContent()
             }
 
-            episodeContent()
-                // Reserve the complete standard episode-column rail even while a
-                // season's episodes are loading. The exact height also prevents this
-                // flexible ScrollView from absorbing the stage's trailing runway.
-                .frame(height: SeriesEpisodeBrowserLayout.episodeRailHeight, alignment: .top)
-                .id(focusAnchorID)
+            ZStack(alignment: .top) {
+                episodeContent()
+                    .frame(
+                        height: SeriesEpisodeBrowserLayout.episodeRailHeight,
+                        alignment: .top
+                    )
+
+                VStack(spacing: 0) {
+                    Color.clear.frame(height: SeriesEpisodeBrowserLayout.focusAnchorY)
+                    Color.clear
+                        .frame(width: 1, height: 1)
+                        .id(focusAnchorID)
+                    Spacer(minLength: 0)
+                }
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+            }
+            .frame(
+                maxWidth: .infinity,
+                minHeight: SeriesEpisodeBrowserLayout.episodeRailHeight,
+                maxHeight: SeriesEpisodeBrowserLayout.episodeRailHeight,
+                alignment: .topLeading
+            )
+
+            Color.clear.frame(
+                height: SeriesEpisodeBrowserLayout.trailingRunwayHeight(
+                    showsSeasons: showsSeasons
+                )
+            )
         }
-        .frame(
-            maxWidth: .infinity,
-            minHeight: SeriesEpisodeBrowserLayout.stageHeight,
-            alignment: .topLeading
-        )
+        .frame(maxWidth: .infinity, alignment: .topLeading)
         .environment(\.plozzMetrics, .standard)
     }
 }

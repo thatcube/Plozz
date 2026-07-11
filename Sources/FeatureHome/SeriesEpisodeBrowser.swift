@@ -126,6 +126,7 @@ private struct SeriesRecededLogo: View {
     let recedeModel: SeriesHeroRecedeModel
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var logoVisible = false
 
     var body: some View {
         HeroLogoArtwork(
@@ -144,13 +145,40 @@ private struct SeriesRecededLogo: View {
                 .frame(maxWidth: 1200, alignment: .center)
         }
         .frame(width: 620, height: 200, alignment: .center)
-        .opacity(recedeModel.isReceded ? 1 : 0)
+        .opacity(logoVisible ? 1 : 0)
         .offset(y: recedeModel.isReceded ? 0 : -220)
         .animation(
             reduceMotion ? nil : .smooth(duration: 0.65),
             value: recedeModel.isReceded
         )
         .accessibilityHidden(!recedeModel.isReceded)
+        .task(id: animationTaskID) {
+            let shouldShow = recedeModel.isReceded
+            if reduceMotion {
+                logoVisible = shouldShow
+                return
+            }
+            if shouldShow {
+                do {
+                    try await Task.sleep(for: .milliseconds(180))
+                } catch {
+                    return
+                }
+            }
+            guard !Task.isCancelled, recedeModel.isReceded == shouldShow else { return }
+            withAnimation(.easeOut(duration: shouldShow ? 0.28 : 0.14)) {
+                logoVisible = shouldShow
+            }
+        }
+    }
+
+    private var animationTaskID: AnimationTaskID {
+        AnimationTaskID(isReceded: recedeModel.isReceded, reduceMotion: reduceMotion)
+    }
+
+    private struct AnimationTaskID: Hashable {
+        let isReceded: Bool
+        let reduceMotion: Bool
     }
 
     private var logoFallback: (@Sendable () async -> URL?)? {

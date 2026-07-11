@@ -39,7 +39,7 @@ struct FirstRunProfileView: View {
                         .font(.title3.weight(.semibold))
                         .multilineTextAlignment(.center)
 
-                    Text("We created this profile from your \(providerName) account. You can rename it or change the photo here, or anytime in Settings.")
+                    Text("We created this profile from your \(providerName) account. You can rename it or change the photo here, or any time in Settings.")
                         .font(.body)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)

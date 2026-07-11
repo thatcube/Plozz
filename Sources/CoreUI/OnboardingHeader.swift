@@ -1,6 +1,38 @@
 #if canImport(SwiftUI)
 import SwiftUI
 
+public enum OnboardingNavigationDirection: Sendable {
+    case forward
+    case backward
+}
+
+public enum OnboardingPageMotion {
+    public static func transition(
+        direction: OnboardingNavigationDirection,
+        reduceMotion: Bool
+    ) -> AnyTransition {
+        guard !reduceMotion else { return .opacity }
+        let enteringOffset: CGFloat = direction == .forward ? 72 : -72
+        let leavingOffset: CGFloat = direction == .forward ? -48 : 48
+        return .asymmetric(
+            insertion: .offset(x: enteringOffset).combined(with: .opacity),
+            removal: .offset(x: leavingOffset).combined(with: .opacity)
+        )
+    }
+
+    public static func exitAnimation(reduceMotion: Bool) -> Animation {
+        reduceMotion
+            ? .easeInOut(duration: 0.10)
+            : .easeIn(duration: 0.18)
+    }
+
+    public static func entryAnimation(reduceMotion: Bool) -> Animation {
+        reduceMotion
+            ? .easeInOut(duration: 0.10)
+            : .easeOut(duration: 0.24)
+    }
+}
+
 /// The standardised header for onboarding / account-setup screens (Quick
 /// Connect, password sign-in, Plex user picker, library picker, add-share).
 ///

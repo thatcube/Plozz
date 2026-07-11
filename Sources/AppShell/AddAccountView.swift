@@ -21,15 +21,10 @@ struct AddAccountView: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var choice: ProviderKind?
-    @State private var navigationDirection: NavigationDirection = .forward
+    @State private var navigationDirection: OnboardingNavigationDirection = .forward
     @State private var pageIsVisible = true
     @State private var pageIsReady = true
     @State private var isTransitioning = false
-
-    private enum NavigationDirection {
-        case forward
-        case backward
-    }
 
     init(
         deviceID: String,
@@ -111,25 +106,18 @@ struct AddAccountView: View {
     }
 
     private var pageTransition: AnyTransition {
-        guard !reduceMotion else { return .opacity }
-        let enteringOffset: CGFloat = navigationDirection == .forward ? 72 : -72
-        let leavingOffset: CGFloat = navigationDirection == .forward ? -48 : 48
-        return .asymmetric(
-            insertion: .offset(x: enteringOffset).combined(with: .opacity),
-            removal: .offset(x: leavingOffset).combined(with: .opacity)
+        OnboardingPageMotion.transition(
+            direction: navigationDirection,
+            reduceMotion: reduceMotion
         )
     }
 
     private var pageExitAnimation: Animation {
-        reduceMotion
-            ? .easeInOut(duration: 0.10)
-            : .easeIn(duration: 0.18)
+        OnboardingPageMotion.exitAnimation(reduceMotion: reduceMotion)
     }
 
     private var pageEntryAnimation: Animation {
-        reduceMotion
-            ? .easeInOut(duration: 0.10)
-            : .easeOut(duration: 0.24)
+        OnboardingPageMotion.entryAnimation(reduceMotion: reduceMotion)
     }
 
     private func navigate(to destination: ProviderKind) {
@@ -140,7 +128,7 @@ struct AddAccountView: View {
         transition(to: nil, direction: .backward)
     }
 
-    private func transition(to destination: ProviderKind?, direction: NavigationDirection) {
+    private func transition(to destination: ProviderKind?, direction: OnboardingNavigationDirection) {
         guard !isTransitioning else { return }
 
         isTransitioning = true

@@ -195,7 +195,7 @@ private struct ProviderChoiceGroup: View {
             ProviderChoiceRow(
                 provider: .jellyfin,
                 title: "Jellyfin",
-                height: 152
+                height: 108
             ) {
                 onSelect(.jellyfin)
             }
@@ -205,7 +205,7 @@ private struct ProviderChoiceGroup: View {
             ProviderChoiceRow(
                 provider: .plex,
                 title: "Plex",
-                height: 152
+                height: 108
             ) {
                 onSelect(.plex)
             }

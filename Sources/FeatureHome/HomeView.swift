@@ -506,6 +506,13 @@ public struct HomeView: View {
         randomLibraries: [HeroRandomLibrary],
         key: HeroRecomputeKey
     ) async {
+        guard HeroRecomputePolicy.shouldRun(
+            key: key,
+            completedKey: completedHeroRecomputeKey
+        ) else {
+            PlozzLog.boot("HomeHero.curate SKIP unchanged input")
+            return
+        }
         let started = Date()
         guard let settings = heroSettings?.settings, settings.isActive else {
             heroItems = []
@@ -723,6 +730,19 @@ struct HeroRecomputeKey: Equatable {
         self.randomLibraries = activeSources.contains(.randomFromLibrary)
             ? randomLibraries
             : []
+    }
+}
+
+/// SwiftUI restarts a view's `.task(id:)` when it reappears even if its id did
+/// not change. A NavigationStack push therefore must not be treated as a request
+/// to fetch a fresh Random/Featured set; only a genuinely new curation input may
+/// replace the completed hero.
+enum HeroRecomputePolicy {
+    static func shouldRun(
+        key: HeroRecomputeKey,
+        completedKey: HeroRecomputeKey?
+    ) -> Bool {
+        completedKey != key
     }
 }
 

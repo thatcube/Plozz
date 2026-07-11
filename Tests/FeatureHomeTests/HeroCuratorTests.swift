@@ -413,6 +413,32 @@ final class HeroRecomputeKeyTests: XCTestCase {
         XCTAssertEqual(withoutRandom, withoutRandomOrLibrary)
         XCTAssertNotEqual(withRandom, withDifferentRandom)
     }
+
+    func testReappearanceDoesNotRerunCompletedCuration() {
+        let key = HeroRecomputeKey(
+            content: content(),
+            settings: settings(sources: [.randomFromLibrary]),
+            randomLibraries: []
+        )
+
+        XCTAssertFalse(HeroRecomputePolicy.shouldRun(key: key, completedKey: key))
+    }
+
+    func testMissingOrChangedCompletionRunsCuration() {
+        let original = HeroRecomputeKey(
+            content: content(),
+            settings: settings(sources: [.randomFromLibrary]),
+            randomLibraries: []
+        )
+        let changed = HeroRecomputeKey(
+            content: content(),
+            settings: settings(sources: [.continueWatching]),
+            randomLibraries: []
+        )
+
+        XCTAssertTrue(HeroRecomputePolicy.shouldRun(key: original, completedKey: nil))
+        XCTAssertTrue(HeroRecomputePolicy.shouldRun(key: changed, completedKey: original))
+    }
 }
 
 final class HeroRandomLibrarySelectionTests: XCTestCase {

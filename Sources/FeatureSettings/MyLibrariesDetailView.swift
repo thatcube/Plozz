@@ -100,7 +100,7 @@ struct MyLibrariesDetailView: View {
                     action: { toggleWatching(group) }
                 ) {
                     HStack(spacing: 16) {
-                        ProviderBrandMark(provider: group.providerKind, size: 48, showsBackground: false)
+                        ProviderBrandMark(provider: group.providerKind, size: 48)
                             .frame(width: 48)
                         Text(group.serverName)
                     }

@@ -11,14 +11,19 @@ public struct JellyfinProvider: MediaProvider {
     public let kind: ProviderKind = .jellyfin
     public let session: UserSession
     let client: JellyfinClient
+    let themeArchiveResolver: @Sendable (String?) async -> URL?
 
     public init(
         session: UserSession,
         http: HTTPClient = URLSessionHTTPClient(),
         interactiveHTTP: HTTPClient? = nil,
-        hybridEngineEnabled: Bool = false
+        hybridEngineEnabled: Bool = false,
+        themeArchiveResolver: @escaping @Sendable (String?) async -> URL? = {
+            await ThemeMusicArchive.resolvedURL(tvdbID: $0)
+        }
     ) {
         self.session = session
+        self.themeArchiveResolver = themeArchiveResolver
         self.client = JellyfinClient(
             baseURL: session.server.baseURL,
             deviceProfile: JellyfinDeviceProfile(deviceID: session.deviceID),
@@ -257,6 +262,21 @@ public struct JellyfinProvider: MediaProvider {
             return MediaItem.youTubeTrailer(fromURL: url, title: link.Name ?? "Trailer")
         }
         return local + remote
+    }
+
+    public func themeMusic(for itemID: String) async throws -> ThemeMusic? {
+        if let song = try? await client.themeSongs(userID: session.userID, id: itemID).Items.first,
+           let streamURL = client.audioStreamURL(
+               itemID: song.Id,
+               playSessionID: UUID().uuidString
+           ) {
+            return ThemeMusic(itemID: itemID, streamURL: streamURL, title: song.Name)
+        }
+
+        let item = try? await client.item(userID: session.userID, id: itemID)
+        let tvdbID = item?.ProviderIds?["Tvdb"] ?? item?.ProviderIds?["tvdb"]
+        guard let archiveURL = await themeArchiveResolver(tvdbID) else { return nil }
+        return ThemeMusic(itemID: itemID, streamURL: archiveURL, title: item?.Name)
     }
 
     public func children(of itemID: String) async throws -> [MediaItem] {

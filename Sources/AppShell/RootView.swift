@@ -163,6 +163,7 @@ public struct RootView: View {
                         subtitlePolicyModel: appState.subtitlePolicyModel,
                         audioPolicyModel: appState.audioPolicyModel,
                         themeModel: appState.themeModel,
+                        themeMusicModel: appState.themeMusicModel,
                         seriesTrackStore: SeriesTrackPreferenceStore(namespace: appState.profilesModel.activeNamespace),
                         diagnosticsModel: appState.diagnosticsModel,
                         crashReportingModel: appState.crashReportingModel,

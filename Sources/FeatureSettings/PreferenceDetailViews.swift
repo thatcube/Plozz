@@ -176,6 +176,8 @@ struct PlaybackDetailView: View {
     /// Per-content-type audio-language overrides ("original audio for anime,
     /// device language for everything else").
     @Bindable var audioPolicy: AudioPolicyModel
+    /// Background theme audio for movie and series detail pages.
+    @Bindable var themeMusic: ThemeMusicSettingsModel
     /// Whether the active profile has a server that can download subtitles
     /// (Jellyfin or Plex). A share-only profile can't — so the whole "Downloading
     /// subtitles" row (auto-download + SDH/Forced ranking, all of which only act on
@@ -309,6 +311,7 @@ struct PlaybackDetailView: View {
         [
             subtitlesSection,
             audioSection,
+            themeMusicSection,
             skipIntrosSection,
             skipIntervalsSection,
             resumeSection,
@@ -429,6 +432,36 @@ struct PlaybackDetailView: View {
                     Toggle("Remember audio per series", isOn: $playback.settings.rememberAudioTrackPerSeries)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        ])
+    }
+
+    private var themeMusicSection: SettingsSplitSection {
+        SettingsSplitSection(id: "theme-music", header: "Detail Pages", rows: [
+            SettingsSplitRow(
+                id: "theme-music",
+                title: "Theme music",
+                description: "Play a movie or show's theme softly while you browse its detail page."
+            ) {
+                SettingsRevealSection(
+                    isOn: $themeMusic.settings.isEnabled,
+                    masterLabel: "Play theme music"
+                ) {
+                    VStack(alignment: .leading, spacing: SettingsMetrics.sectionSpacing) {
+                        SettingsDetailGroup(title: "Volume") {
+                            DescribedSegmentedPicker(
+                                options: ThemeMusicVolume.allCases,
+                                selection: $themeMusic.settings.volume,
+                                title: { $0.displayName },
+                                detail: { $0.detail }
+                            )
+                        }
+                        Toggle(
+                            "Loop while the page is open",
+                            isOn: $themeMusic.settings.loops
+                        )
+                    }
+                }
             }
         ])
     }

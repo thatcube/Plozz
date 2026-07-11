@@ -71,6 +71,8 @@ public final class AppState {
     /// switch, mirroring `subtitlePolicyModel`.
     public private(set) var audioPolicyModel: AudioPolicyModel
     public private(set) var themeModel: ThemeSettingsModel
+    /// Opt-in background theme music for movie and series detail pages.
+    public private(set) var themeMusicModel: ThemeMusicSettingsModel
     public private(set) var diagnosticsModel: DiagnosticsSettingsModel
     /// The full-screen music player's per-profile look + "show extra info"
     /// preference. Scoped per profile (rebuilt on profile switch) like the theme.
@@ -915,6 +917,7 @@ public final class AppState {
         spoilerModel: SpoilerSettingsModel? = nil,
         playbackModel: PlaybackSettingsModel? = nil,
         themeModel: ThemeSettingsModel? = nil,
+        themeMusicModel: ThemeMusicSettingsModel? = nil,
         diagnosticsModel: DiagnosticsSettingsModel? = nil,
         musicPlayerModel: MusicPlayerSettingsModel? = nil,
         homeLibraryVisibilityModel: HomeLibraryVisibilityModel? = nil,
@@ -945,7 +948,7 @@ public final class AppState {
         let injected = spoilerModel != nil
             || subtitleBehaviorModel != nil || subtitleStyleModel != nil
             || playbackModel != nil
-            || themeModel != nil || diagnosticsModel != nil
+            || themeModel != nil || themeMusicModel != nil || diagnosticsModel != nil
             || homeLibraryVisibilityModel != nil || musicPlayerModel != nil
             || uiDensityModel != nil
             || cardStyleModel != nil
@@ -975,6 +978,8 @@ public final class AppState {
         self.subtitlePolicyModel = SubtitlePolicyModel(store: SubtitlePolicyStore(namespace: ns))
         self.audioPolicyModel = AudioPolicyModel(store: AudioPolicyStore(namespace: ns))
         self.themeModel = themeModel ?? ThemeSettingsModel(store: ThemeSettingsStore(namespace: ns))
+        self.themeMusicModel = themeMusicModel
+            ?? ThemeMusicSettingsModel(store: ThemeMusicSettingsStore(namespace: ns))
         self.diagnosticsModel = diagnosticsModel ?? DiagnosticsSettingsModel(store: DiagnosticsSettingsStore(namespace: ns))
         self.musicPlayerModel = musicPlayerModel ?? MusicPlayerSettingsModel(store: MusicPlayerSettingsStore(namespace: ns))
         self.homeLibraryVisibilityModel = homeLibraryVisibilityModel
@@ -2084,7 +2089,7 @@ public final class AppState {
         activeAccountIDs = resolved
     }
 
-    /// Rebuilds the four settings models scoped to the active profile's
+    /// Rebuilds the settings models scoped to the active profile's
     /// namespace. No-op when settings models were injected (tests).
     private func rebuildSettingsModels() {
         guard !usesInjectedModels else { return }
@@ -2096,6 +2101,7 @@ public final class AppState {
         subtitlePolicyModel = SubtitlePolicyModel(store: SubtitlePolicyStore(namespace: ns))
         audioPolicyModel = AudioPolicyModel(store: AudioPolicyStore(namespace: ns))
         themeModel = ThemeSettingsModel(store: ThemeSettingsStore(namespace: ns))
+        themeMusicModel = ThemeMusicSettingsModel(store: ThemeMusicSettingsStore(namespace: ns))
         diagnosticsModel = DiagnosticsSettingsModel(store: DiagnosticsSettingsStore(namespace: ns))
         musicPlayerModel = MusicPlayerSettingsModel(store: MusicPlayerSettingsStore(namespace: ns))
         homeLibraryVisibilityModel = HomeLibraryVisibilityModel(store: HomeLibraryVisibilityStore(namespace: ns))

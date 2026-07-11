@@ -65,6 +65,7 @@ public struct SettingsView: View {
     private let subtitlePolicy: SubtitlePolicyModel
     private let audioPolicy: AudioPolicyModel
     private let theme: ThemeSettingsModel
+    private let themeMusic: ThemeMusicSettingsModel
     private let nightShift: NightShiftSettingsModel
     private let homeVisibility: HomeLibraryVisibilityModel
     private let diagnostics: DiagnosticsSettingsModel
@@ -112,6 +113,7 @@ public struct SettingsView: View {
         subtitlePolicy: SubtitlePolicyModel,
         audioPolicy: AudioPolicyModel,
         theme: ThemeSettingsModel,
+        themeMusic: ThemeMusicSettingsModel,
         nightShift: NightShiftSettingsModel,
         homeVisibility: HomeLibraryVisibilityModel,
         diagnostics: DiagnosticsSettingsModel,
@@ -158,6 +160,7 @@ public struct SettingsView: View {
         self.subtitlePolicy = subtitlePolicy
         self.audioPolicy = audioPolicy
         self.theme = theme
+        self.themeMusic = themeMusic
         self.nightShift = nightShift
         self.homeVisibility = homeVisibility
         self.diagnostics = diagnostics
@@ -598,7 +601,14 @@ public struct SettingsView: View {
         case .nightShift:
             NightShiftDetailView(model: nightShift)
         case .playback:
-            PlaybackDetailView(playback: playback, subtitleBehavior: subtitleBehavior, subtitlePolicy: subtitlePolicy, audioPolicy: audioPolicy, canDownloadSubtitles: activeProfileCanDownloadSubtitles)
+            PlaybackDetailView(
+                playback: playback,
+                subtitleBehavior: subtitleBehavior,
+                subtitlePolicy: subtitlePolicy,
+                audioPolicy: audioPolicy,
+                themeMusic: themeMusic,
+                canDownloadSubtitles: activeProfileCanDownloadSubtitles
+            )
         case .spoilers:
             SpoilersDetailView(spoilers: spoilers)
         case .integrations:

@@ -11,6 +11,7 @@ public struct PlexProvider: MediaProvider {
     public let kind: ProviderKind = .plex
     public let session: UserSession
     let client: PlexClient
+    let themeArchiveResolver: @Sendable (String?) async -> URL?
 
     public init(
         session: UserSession,
@@ -18,9 +19,13 @@ public struct PlexProvider: MediaProvider {
         interactiveHTTP: HTTPClient? = nil,
         hybridEngineEnabled: Bool = false,
         connectionRefresh: PlexConnectionResolver.Refresh? = nil,
-        probe: HTTPClient = URLSessionHTTPClient(session: .plozzDiscovery)
+        probe: HTTPClient = URLSessionHTTPClient(session: .plozzDiscovery),
+        themeArchiveResolver: @escaping @Sendable (String?) async -> URL? = {
+            await ThemeMusicArchive.resolvedURL(tvdbID: $0)
+        }
     ) {
         self.session = session
+        self.themeArchiveResolver = themeArchiveResolver
         let deviceProfile = PlexDeviceProfile(clientIdentifier: session.deviceID)
         // Probe the persisted connection list (or the single saved URL) and stay
         // on whichever is reachable. With only one candidate and no refresh this
@@ -236,6 +241,23 @@ public struct PlexProvider: MediaProvider {
         try await client.extras(ratingKey: itemID)
             .filter { ($0.subtype ?? "").lowercased() == "trailer" }
             .map(map(metadata:))
+    }
+
+    public func themeMusic(for itemID: String) async throws -> ThemeMusic? {
+        let metadata = try await client.metadata(ratingKey: itemID)
+        if let path = metadata.theme?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !path.isEmpty,
+           let streamURL = client.themeStreamURL(forThemePath: path) {
+            return ThemeMusic(
+                itemID: itemID,
+                streamURL: streamURL,
+                title: metadata.title
+            )
+        }
+
+        let tvdbID = Self.providerIDs(from: metadata)["Tvdb"]
+        guard let archiveURL = await themeArchiveResolver(tvdbID) else { return nil }
+        return ThemeMusic(itemID: itemID, streamURL: archiveURL, title: metadata.title)
     }
 
     public func children(of itemID: String) async throws -> [MediaItem] {

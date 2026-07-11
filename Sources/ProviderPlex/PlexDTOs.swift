@@ -149,6 +149,8 @@ struct PlexMetadata: Decodable {
     let editionTitle: String?
     let thumb: String?
     let art: String?
+    /// Server-relative path to this title's theme audio.
+    let theme: String?
     let grandparentThumb: String?
     let parentThumb: String?
     /// Album/playlist track count (`leafCount`) and artist album count

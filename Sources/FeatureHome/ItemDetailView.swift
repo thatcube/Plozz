@@ -178,6 +178,12 @@ public struct ItemDetailView: View {
                 Task { await viewModel.reload() }
             }
         }
+        #if canImport(AVFoundation)
+        .themeMusicPlayback(
+            playbackID: viewModel.themeMusicPlaybackID,
+            resolve: { await viewModel.resolveThemeMusic() }
+        )
+        #endif
     }
 
     /// Layout for non-series detail: a hero plus, for seasons/folders/collections,

@@ -90,6 +90,7 @@ struct MainTabView: View {
     /// player (resolved against the playback base) and into Settings for editing.
     let audioPolicyModel: AudioPolicyModel
     let themeModel: ThemeSettingsModel
+    let themeMusicModel: ThemeMusicSettingsModel
     /// Per-profile remembered per-series audio/subtitle selections, threaded into
     /// the player so a manual track switch sticks across that show's episodes.
     let seriesTrackStore: any SeriesTrackPreferenceStoring
@@ -208,6 +209,7 @@ struct MainTabView: View {
     /// instead rebuilt the root rows mid-flip → `setToViewXFlippedScreenShot:` UAF.
     @State private var librariesStore = DiscoveredLibrariesStore()
     @State private var musicAvailability = MusicAvailabilityModel()
+    @State private var themeMusicController = ThemeMusicController()
     /// Hosts the full-screen Now Playing player as a `fullScreenCover` on the root
     /// TabView rather than inside the Music tab's navigation stack — the latter
     /// presents unreliably under the sidebar tab style (the cover only appears
@@ -336,6 +338,7 @@ struct MainTabView: View {
                 subtitlePolicy: subtitlePolicyModel,
                 audioPolicy: audioPolicyModel,
                 theme: themeModel,
+                themeMusic: themeMusicModel,
                 nightShift: nightShiftModel,
                 homeVisibility: homeVisibility,
                 diagnostics: diagnosticsModel,
@@ -421,6 +424,19 @@ struct MainTabView: View {
             themePalette: resolvedPalette,
             onSubtitleStyleChanged: { subtitleStyleModel.style = $0 }
         )
+        .environment(\.themeMusicController, themeMusicController)
+        .environment(\.themeMusicSettings, themeMusicModel.settings)
+        .onChange(of: audioController.hasActivePlayback, initial: true) { _, active in
+            themeMusicController.setBlocked(active)
+        }
+        .onChange(of: playRequest != nil) { _, videoStarting in
+            if videoStarting {
+                themeMusicController.stop()
+            }
+        }
+        .onChange(of: selectedTabRaw) {
+            themeMusicController.stop()
+        }
         .environment(musicPlayerModel)
         .environment(uiDensityModel)
         .environment(cardStyleModel)

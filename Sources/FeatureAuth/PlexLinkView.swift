@@ -96,7 +96,7 @@ public struct PlexLinkView: View {
                 .font(.title2)
 
         case let .awaitingLink(code, authorizationURL, expiresAt):
-            HStack(alignment: .top, spacing: 80) {
+            HStack(alignment: .top, spacing: 56) {
                 VStack(spacing: 28) {
                     Text("Scan with your phone")
                         .font(.title3).bold()
@@ -106,11 +106,12 @@ public struct PlexLinkView: View {
                         size: 460
                     )
                 }
+                .frame(maxWidth: .infinity)
 
                 orDivider
 
                 VStack(spacing: 0) {
-                    Text("Or enter a code")
+                    Text("Or enter a code at")
                         .font(.title3).bold()
 
                     // Center the link + code + timer in the space below the
@@ -118,16 +119,11 @@ public struct PlexLinkView: View {
                     Spacer(minLength: 0)
 
                     VStack(spacing: 24) {
-                        VStack(spacing: 4) {
-                            Text("Go to")
-                                .font(.body)
-                                .foregroundStyle(.secondary)
-                            Text("plex.tv/link")
-                                .font(.system(size: 72, weight: .bold))
-                                .foregroundStyle(PlexBrand.gold)
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.5)
-                        }
+                        Text("plex.tv/link")
+                            .font(.system(size: 64, weight: .bold))
+                            .foregroundStyle(PlexBrand.gold)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.5)
 
                         Text(code)
                             .font(.plozzCode(size: 96))
@@ -143,7 +139,7 @@ public struct PlexLinkView: View {
 
                     Spacer(minLength: 0)
                 }
-                .frame(maxWidth: 700, maxHeight: .infinity)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             // Bound the row to the QR column's height so the divider and the
             // right column fill exactly that (not the whole centered area).
@@ -186,7 +182,7 @@ public struct PlexLinkView: View {
                 shape.fill(Color.black.opacity(palette.isLight ? 0.06 : 0.26))
             }
             .overlay {
-                shape.strokeBorder(palette.cardBorder, lineWidth: 1)
+                shape.strokeBorder(palette.cardBorder.opacity(0.55), lineWidth: 1)
             }
     }
 

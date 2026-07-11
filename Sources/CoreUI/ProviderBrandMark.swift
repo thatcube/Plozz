@@ -5,8 +5,7 @@ import CoreModels
 /// Shared brand mark for a media provider (Jellyfin / Plex): the real bundled
 /// `JellyfinLogo` / `PlexLogo` assets — the SAME logos Settings uses — instead
 /// of an SF Symbol stand-in. Template-rendered and tinted with the provider's
-/// brand color so it reads on any background, and it flips to the focus
-/// foreground when it sits on a focused Settings-style row.
+/// brand color so its identity remains consistent across focus states.
 ///
 /// Lives in CoreUI so every surface (Settings, onboarding chooser, the server
 /// picker) draws provider logos one identical way instead of each re-deriving
@@ -16,12 +15,6 @@ public struct ProviderBrandMark: View {
     private let size: CGFloat
     private let showsBackground: Bool
 
-    // Reads the unified Settings-row focus state so the mark flips to the focus
-    // foreground on the inverted card (avoids a tinted glyph on a same-color
-    // background). No-ops outside a Settings-style focus row (defaults unfocused).
-    @Environment(\.settingsRowIsFocused) private var rowFocused
-    @Environment(\.settingsRowFocusForeground) private var rowFocusForeground
-
     public init(provider: ProviderKind, size: CGFloat = 14, showsBackground: Bool = true) {
         self.provider = provider
         self.size = size
@@ -29,7 +22,7 @@ public struct ProviderBrandMark: View {
     }
 
     private var tint: Color {
-        rowFocused ? rowFocusForeground : Self.brandTint(provider)
+        Self.brandTint(provider)
     }
 
     private var assetName: String {
@@ -56,7 +49,7 @@ public struct ProviderBrandMark: View {
     public var body: some View {
         ZStack {
             if showsBackground {
-                Circle().fill(Self.brandTint(provider).opacity(rowFocused ? 0.24 : 0.18))
+                Circle().fill(Self.brandTint(provider).opacity(0.18))
             }
             if let systemSymbolName {
                 Image(systemName: systemSymbolName)

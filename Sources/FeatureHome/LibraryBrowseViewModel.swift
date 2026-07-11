@@ -62,6 +62,10 @@ public final class LibraryBrowseViewModel {
     /// Whether the trailing alphabet rail should be shown — true only when a
     /// name-sort letter index resolved with at least a couple of letters.
     public var showsLetterRail: Bool { letterEntries.count > 1 }
+    /// Scan-completion refresh is relevant only to the device-local SMB catalog.
+    public var isMediaShare: Bool { provider.kind == .mediaShare }
+    /// Stable share id used to select this grid's status from ShareScanStatusModel.
+    public var sourceServerID: String { provider.session.server.id }
 
     /// Below this library size the alphabet rail isn't worth showing (a short
     /// list scrolls fine on its own) or the round-trips to build it.
@@ -202,6 +206,65 @@ public final class LibraryBrowseViewModel {
             PlozzLog.app.error("LibraryBrowse: first page failed for \(containerID): \(String(describing: error))")
             guard generation == loadGeneration else { return }
             state = .failed(.unknown(""))
+        }
+    }
+
+    /// Silently replace stale sparse pages after an SMB catalog scan completes.
+    /// Unlike `loadFirstPage`, this keeps the current loaded/empty presentation
+    /// until the fresh first page arrives, avoiding a full-screen loading flash.
+    /// Resetting `pagesLoaded` ensures any currently-visible deeper page refetches
+    /// against the new catalog instead of retaining pre-scan cards.
+    public func refreshAfterCatalogChange() async {
+        switch state {
+        case .idle, .loading: return
+        case .loaded, .empty, .failed: break
+        }
+        loadGeneration += 1
+        let generation = loadGeneration
+        let visiblePages = Set(visibleIndices.map(pageForIndex)).subtracting([0])
+        do {
+            let firstPage = try await Self.fetchPage(
+                provider: provider,
+                containerID: containerID,
+                containerKind: containerKind,
+                request: pageRequest(forPage: 0),
+                priority: .userInitiated
+            )
+            var refreshed: [(index: Int, page: MediaPage)] = [(0, firstPage)]
+            // Local SQLite reads are fast; fetch every currently-visible page before
+            // replacing slots so focused content never turns into a placeholder.
+            for pageIndex in visiblePages.sorted()
+                where startIndex(forPage: pageIndex) < firstPage.totalCount {
+                let page = try await Self.fetchPage(
+                    provider: provider,
+                    containerID: containerID,
+                    containerKind: containerKind,
+                    request: pageRequest(forPage: pageIndex),
+                    priority: .userInitiated
+                )
+                refreshed.append((pageIndex, page))
+            }
+            guard !Task.isCancelled, generation == loadGeneration else { return }
+            cancelAllPageLoads()
+            pagesInFlight = []
+            pagesLoaded = []
+            pageError = nil
+            totalCount = firstPage.totalCount
+            loaded = Self.makeSlots(count: firstPage.totalCount)
+            for entry in refreshed {
+                fill(entry.page)
+                pagesLoaded.insert(entry.index)
+            }
+            state = firstPage.totalCount == 0 ? .empty : .loaded(firstPage.totalCount)
+            letterIndexTask?.cancel()
+            letterEntries = []
+            loadLetterIndexIfNeeded()
+        } catch {
+            // Keep the still-usable old page on a transient refresh failure; normal
+            // page/retry behavior remains available.
+            PlozzLog.app.error(
+                "LibraryBrowse: catalog refresh failed for \(containerID): \(String(describing: error))"
+            )
         }
     }
 

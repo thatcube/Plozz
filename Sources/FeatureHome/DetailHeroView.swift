@@ -486,6 +486,10 @@ struct DetailHeroView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .focusScope(heroActionsScope)
                 .focusSection()
+                // The receded row is visually hidden, so remove only its controls
+                // from focus. Disabling the entire hero would also disable the
+                // sibling return proxy that restores Play on an UP press.
+                .disabled(seriesRecedeModel?.isReceded == true)
                 // Keep the whole action row pinned to the hero top: this row is
                 // bottom-anchored in a hero that is full-screen-height for a
                 // childless movie, so when focus lands on any button tvOS
@@ -1125,7 +1129,6 @@ private struct SeriesHeroContentRecedeModifier: ViewModifier {
         content
             .opacity(model?.isReceded == true ? 0 : 1)
             .offset(y: model?.isReceded == true ? -120 : 0)
-            .disabled(model?.isReceded == true)
             .animation(.smooth(duration: 0.45), value: model?.isReceded)
     }
 }

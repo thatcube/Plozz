@@ -334,7 +334,7 @@ public struct PosterCardView: View {
                 foreground: titleColor,
                 background: titleColor.opacity(0.08),
                 isFocused: isFocused,
-                iconSize: style == .poster ? 64 : 52
+                iconSize: PosterCardPresentation.folderIconSize(for: style)
             )
         } else if hideThumbnail {
             switch spoilerSettings.mode {
@@ -691,6 +691,17 @@ enum PosterCardPresentation {
     static func showsPlaybackIndicators(for kind: MediaItemKind) -> Bool {
         kind != .folder
     }
+
+    static func folderIconSize(for style: PosterCardView.Style) -> CGFloat {
+        switch style {
+        case .poster: return 48
+        case .landscape: return 52
+        }
+    }
+
+    static func folderIconOpacity(isFocused: Bool) -> Double {
+        isFocused ? 0.52 : 0.4
+    }
 }
 
 /// Dedicated folder artwork: a generic symbol only. The item's real title stays
@@ -706,9 +717,12 @@ private struct FolderPlaceholderArtwork: View {
             background
             Image(systemName: "folder.fill")
                 .symbolRenderingMode(.hierarchical)
-                .font(.system(size: iconSize, weight: .semibold))
-                .foregroundStyle(foreground.opacity(isFocused ? 0.95 : 0.72))
-                .shadow(color: .black.opacity(isFocused ? 0.28 : 0.14), radius: 8, y: 4)
+                .font(.system(size: iconSize, weight: .medium))
+                .foregroundStyle(
+                    foreground.opacity(
+                        PosterCardPresentation.folderIconOpacity(isFocused: isFocused)
+                    )
+                )
         }
     }
 }

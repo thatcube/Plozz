@@ -8,6 +8,13 @@ final class PosterCardPresentationTests: XCTestCase {
         XCTAssertTrue(PosterCardPresentation.usesFolderArtwork(for: .folder))
         XCTAssertFalse(PosterCardPresentation.showsWatchStatus(for: .folder))
         XCTAssertFalse(PosterCardPresentation.showsPlaybackIndicators(for: .folder))
+        XCTAssertEqual(PosterCardPresentation.folderIconSize(for: .poster), 48)
+        XCTAssertEqual(PosterCardPresentation.folderIconOpacity(isFocused: false), 0.4)
+        XCTAssertLessThan(
+            PosterCardPresentation.folderIconOpacity(isFocused: true),
+            0.6,
+            "focused folder glyph stays subdued like a library-type watermark"
+        )
     }
 
     func testPlayableMediaKeepsNormalPosterAndPlaybackChrome() {

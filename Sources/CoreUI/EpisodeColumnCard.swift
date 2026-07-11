@@ -15,6 +15,7 @@ public struct EpisodeColumnCard: View {
 
     @FocusState private var isFocused: Bool
     @State private var synopsisVisible = false
+    @State private var synopsisAtRest = false
     @Environment(\.plozzWatchStatusIndicator) private var watchStatusIndicator
     @Environment(\.themePalette) private var palette
 
@@ -77,6 +78,9 @@ public struct EpisodeColumnCard: View {
                     maxWidth: Self.artworkSize.width
                 )
                 .opacity(synopsisVisible ? 1 : 0)
+                .animation(.easeOut(duration: 0.12), value: synopsisVisible)
+                .offset(y: synopsisAtRest ? 0 : -metrics.focusCaptionPush)
+                .animation(.smooth(duration: 0.28), value: synopsisAtRest)
                 .padding(.top, 10)
             }
             .offset(y: isFocused ? 0 : -metrics.focusCaptionPush)
@@ -93,10 +97,12 @@ public struct EpisodeColumnCard: View {
         .animation(.easeOut(duration: 0.18), value: isFocused)
         .task(id: isFocused) {
             synopsisVisible = false
+            synopsisAtRest = false
             guard isFocused else { return }
             try? await Task.sleep(for: .milliseconds(110))
             guard !Task.isCancelled else { return }
-            withAnimation(.easeOut(duration: 0.16)) { synopsisVisible = true }
+            synopsisVisible = true
+            synopsisAtRest = true
         }
         .mediaItemContextMenu(for: item)
         .accessibilityElement(children: .ignore)

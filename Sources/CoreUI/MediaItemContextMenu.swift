@@ -81,13 +81,14 @@ public struct MediaItemContextMenu: ViewModifier {
     @Environment(\.mediaItemActionHandler) private var handler
     @Environment(\.mediaItemActionContext) private var context
     @Environment(\.mediaItemNavigator) private var navigator
-    /// Navigation must not mutate the stack from inside the native context-menu
-    /// action callback. tvOS is still presenting a snapshot of the lifted card at
-    /// that point; replacing the screen synchronously can orphan that snapshot over
-    /// the destination until the system times it out. Queueing the target in state
-    /// lets the action return first, so the menu begins its normal cross-fade before
-    /// the navigation update runs.
+    /// Navigation must wait for the native context menu's rollback animation.
+    /// tvOS keeps a snapshot of the lifted card alive for roughly 300 ms after an
+    /// action is chosen; replacing the screen during that window orphans the poster
+    /// over the destination until the system times it out. Queueing the target lets
+    /// the menu dismiss first, then the task below pushes after a small safety margin.
     @State private var pendingNavigationTarget: MediaItem?
+
+    private static var navigationDismissalDelay: Duration { .milliseconds(450) }
 
     public init(item: MediaItem) {
         self.item = item
@@ -105,8 +106,14 @@ public struct MediaItemContextMenu: ViewModifier {
                     }
                 }
             }
-            .onChange(of: pendingNavigationTarget) { _, target in
-                guard let target else { return }
+            .task(id: pendingNavigationTarget) {
+                guard let target = pendingNavigationTarget else { return }
+                do {
+                    try await Task.sleep(for: Self.navigationDismissalDelay)
+                } catch {
+                    return
+                }
+                guard pendingNavigationTarget == target else { return }
                 pendingNavigationTarget = nil
                 navigator?(target)
             }

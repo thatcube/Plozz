@@ -163,8 +163,8 @@ private struct SeriesRecededLogo: View {
             }
             guard !Task.isCancelled, recedeModel.isReceded == shouldShow else { return }
             let animation: Animation = shouldShow
-                ? .smooth(duration: 0.5)
-                : .easeOut(duration: 0.14)
+                ? .smooth(duration: 0.75)
+                : .easeOut(duration: 0.39)
             withAnimation(animation) {
                 logoVisible = shouldShow
             }

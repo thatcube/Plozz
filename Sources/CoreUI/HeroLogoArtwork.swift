@@ -30,12 +30,12 @@ public struct HeroBackgroundSample: Sendable {
 ///   1. `primaryURL` — the provider's own `Logo` image (e.g. Jellyfin).
 ///   2. `asyncFallbackURL` — a TMDb logo lookup, used only when the provider has
 ///      no usable logo.
-///   3. `textFallback` — the caller's styled title `Text`, shown when nothing
-///      resolves (or on platforms without UIKit image decoding).
+///   3. `textFallback` — the caller's styled title `Text`, shown immediately while
+///      artwork resolves and retained when no logo can be found.
 ///
 /// The logo is fit (never cropped) inside a `maxWidth` × `maxHeight` box, pinned
-/// to the leading edge, and fades in once decoded. Unlike poster art there is no
-/// aspect-ratio guard — logos are legitimately wide.
+/// to the leading edge, and crossfades over the readable title once decoded.
+/// Unlike poster art there is no aspect-ratio guard — logos are legitimately wide.
 public struct HeroLogoArtwork<TextFallback: View>: View {
     private let primaryURL: URL?
     private let asyncFallbackURL: (@Sendable () async -> URL?)?
@@ -89,19 +89,18 @@ private struct LoadedLogo<TextFallback: View>: View {
     @Environment(\.colorScheme) private var colorScheme
 
     @State private var image: ProcessedLogo?
-    @State private var resolved = false
 
     var body: some View {
         Group {
             if let processed = image {
                 logo(processed)
                     .transition(.opacity)
-            } else if resolved {
-                textFallback()
             } else {
-                // While loading, hold the title in place so the hero doesn't jump
-                // when a logo resolves a beat later.
-                textFallback().opacity(0)
+                // A cache miss may include a network lookup plus decode/analysis.
+                // Keep the title readable throughout; identity must never depend
+                // on optional artwork finishing first.
+                textFallback()
+                    .transition(.opacity)
             }
         }
         .animation(reduceMotion ? nil : .easeIn(duration: 0.25), value: image != nil)
@@ -148,23 +147,18 @@ private struct LoadedLogo<TextFallback: View>: View {
     }
 
     private func resolve() async {
-        resolved = false
         image = nil
         // `HeroLogoPipeline` caches the processed result by URL and runs the heavy
         // pixel work off the main actor, so re-appears / scheme changes / fast
         // scrolling reuse the prepared logo instead of reprocessing it.
         if let primaryURL, let prepared = await HeroLogoPipeline.shared.preparedLogo(for: primaryURL) {
             image = await finalize(prepared)
-            resolved = true
             return
         }
         if let asyncFallbackURL, let url = await asyncFallbackURL(),
            let prepared = await HeroLogoPipeline.shared.preparedLogo(for: url) {
             image = await finalize(prepared)
-            resolved = true
-            return
         }
-        resolved = true
     }
 
     /// Combines the prepared logo with a colour sample of the background to decide

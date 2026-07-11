@@ -21,6 +21,7 @@ struct AddAccountView: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var choice: ProviderKind?
+    @State private var plexAuthViewModel: PlexAuthViewModel
     @State private var navigationDirection: OnboardingNavigationDirection = .forward
     @State private var pageIsReady = true
     @State private var isTransitioning = false
@@ -48,6 +49,11 @@ struct AddAccountView: View {
         // with the provider preserved so we land on its server list, not the
         // chooser. Plex has no intermediate list, so it falls back to the chooser.
         _choice = State(initialValue: initialProvider == .jellyfin ? initialProvider : nil)
+        _plexAuthViewModel = State(initialValue: PlexAuthViewModel(
+            service: PlexAuthService(deviceID: deviceID),
+            onAuthenticated: onPlexAuthenticated,
+            onAuthenticatedMany: onPlexAuthenticatedMany
+        ))
     }
 
     var body: some View {
@@ -79,11 +85,7 @@ struct AddAccountView: View {
             ) { onJellyfinServerSelected($0) }
         case .plex:
             PlexLinkView(
-                viewModel: PlexAuthViewModel(
-                    service: PlexAuthService(deviceID: deviceID),
-                    onAuthenticated: onPlexAuthenticated,
-                    onAuthenticatedMany: onPlexAuthenticatedMany
-                ),
+                viewModel: plexAuthViewModel,
                 onCancel: navigateBackToChooser
             )
         case .mediaShare:
@@ -121,6 +123,9 @@ struct AddAccountView: View {
     }
 
     private func navigate(to destination: ProviderKind) {
+        if destination == .plex {
+            plexAuthViewModel.start()
+        }
         transition(to: destination, direction: .forward)
     }
 

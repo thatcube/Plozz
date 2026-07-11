@@ -63,7 +63,7 @@ public struct PlexLinkView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .defaultFocus($focused, defaultControl)
         .onExitCommand { requestCancel() }
-        .onAppear { viewModel.start() }
+        .onAppear { viewModel.startIfNeeded() }
         .onDisappear { viewModel.cancel() }
         .onChange(of: viewModel.phase) { _, newPhase in
             // When the server picker appears, land focus on Continue (not Cancel).

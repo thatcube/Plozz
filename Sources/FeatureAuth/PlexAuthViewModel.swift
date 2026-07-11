@@ -91,6 +91,7 @@ public final class PlexAuthViewModel {
                         continue // Transparently issue a fresh code + QR.
                     }
                 }
+
             } catch is CancellationError {
                 // Cancelled by the user; leave phase as-is (view is dismissing).
             } catch let error as AppError {
@@ -100,6 +101,12 @@ public final class PlexAuthViewModel {
                 self.phase = .error(AppError.unknown("").userMessage)
             }
         }
+    }
+
+    /// Starts the flow when a host has not already begun preloading it.
+    public func startIfNeeded() {
+        guard flow == nil else { return }
+        start()
     }
 
     private enum LinkOutcome {

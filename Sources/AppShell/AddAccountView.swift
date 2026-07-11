@@ -23,6 +23,7 @@ struct AddAccountView: View {
     @State private var choice: ProviderKind?
     @State private var navigationDirection: NavigationDirection = .forward
     @State private var pageIsVisible = true
+    @State private var pageIsReady = true
     @State private var isTransitioning = false
 
     private enum NavigationDirection {
@@ -58,10 +59,7 @@ struct AddAccountView: View {
     var body: some View {
         ZStack {
             if pageIsVisible {
-                ZStack {
-                    pageContent
-                        .transaction { $0.animation = nil }
-                }
+                ZStack { pageContent }
                 .transition(pageTransition)
             }
         }
@@ -76,6 +74,7 @@ struct AddAccountView: View {
             chooser
         case .jellyfin:
             ServerPickerView(
+                isPageReady: pageIsReady,
                 signedInServers: signedInServers.filter { $0.server.provider == .jellyfin },
                 onBack: navigateBackToChooser
             ) { onJellyfinServerSelected($0) }
@@ -90,6 +89,7 @@ struct AddAccountView: View {
             )
         case .mediaShare:
             AddShareView(
+                isPageReady: pageIsReady,
                 onBack: navigateBackToChooser,
                 onConfigured: onShareConfigured
             )
@@ -139,6 +139,7 @@ struct AddAccountView: View {
         guard !isTransitioning else { return }
 
         isTransitioning = true
+        pageIsReady = false
         navigationDirection = direction
         withAnimation(pageExitAnimation, completionCriteria: .removed) {
             pageIsVisible = false
@@ -147,6 +148,7 @@ struct AddAccountView: View {
             withAnimation(pageEntryAnimation, completionCriteria: .logicallyComplete) {
                 pageIsVisible = true
             } completion: {
+                pageIsReady = true
                 isTransitioning = false
             }
         }

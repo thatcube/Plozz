@@ -10,6 +10,7 @@ import CoreUI
 public struct ServerPickerView: View {
     @State private var viewModel: ServerPickerViewModel
     @FocusState private var focusedControl: FocusTarget?
+    private let isPageReady: Bool
     private let onSelect: (MediaServer) -> Void
     /// Invoked when the user backs out — the in-bounds Back button or the Siri
     /// Remote's Menu button. `nil` hides the Back button and lets Menu fall
@@ -28,6 +29,7 @@ public struct ServerPickerView: View {
     @MainActor
     public init(
         viewModel: ServerPickerViewModel? = nil,
+        isPageReady: Bool = true,
         signedInServers: [SignedInServer] = [],
         onBack: (() -> Void)? = nil,
         onSelect: @escaping (MediaServer) -> Void
@@ -35,6 +37,7 @@ public struct ServerPickerView: View {
         let vm = viewModel ?? ServerPickerViewModel()
         vm.setSignedInServers(signedInServers)
         _viewModel = State(initialValue: vm)
+        self.isPageReady = isPageReady
         self.onBack = onBack
         self.onSelect = onSelect
     }
@@ -52,8 +55,8 @@ public struct ServerPickerView: View {
                     let signedIn = viewModel.signedInServers
                     let recents = viewModel.recentServers
                     let discovered = viewModel.discoveredServers
-                    // Discovery can update while the parent page is sliding in.
-                    // Keep those updates instant so only the page itself moves.
+                    // Discovery starts after the parent transition; keep later
+                    // result insertions instant so only navigation animates.
                     Group {
                         if signedIn.isEmpty && recents.isEmpty && discovered.isEmpty {
                             emptyServersPlaceholder
@@ -131,8 +134,15 @@ public struct ServerPickerView: View {
         .onExitCommand { onBack?() }
         .onAppear {
             let initialFocus = preferredInitialFocus
-            viewModel.startScan()
             focusedControl = initialFocus
+            if isPageReady { viewModel.startScan() }
+        }
+        .onChange(of: isPageReady) { _, ready in
+            if ready {
+                viewModel.startScan()
+            } else {
+                viewModel.stopScan()
+            }
         }
         .onDisappear { viewModel.stopScan() }
     }

@@ -22,6 +22,7 @@ struct ShareDraft: Equatable {
 /// second-class backend, so this stays lightweight — no reachability probes,
 /// recents, or credential management, just enough to point Plozz at a folder.
 struct AddShareView: View {
+    let isPageReady: Bool
     let onBack: () -> Void
     let onConfigured: (ShareDraft) -> Void
 
@@ -43,37 +44,48 @@ struct AddShareView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 28) {
-                switch viewModel.step {
-                case .chooseServer: serverStep
-                case .chooseShare: shareStep
+        GeometryReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 28) {
+                    switch viewModel.step {
+                    case .chooseServer: serverStep
+                    case .chooseShare: shareStep
+                    }
                 }
+                .frame(maxWidth: PlozzTheme.Metrics.settingsContentMaxWidth, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
+                .padding(.vertical, 32)
+                .padding(.top, proxy.safeAreaInsets.top)
+                .padding(.bottom, proxy.safeAreaInsets.bottom)
             }
-            .frame(maxWidth: PlozzTheme.Metrics.settingsContentMaxWidth, alignment: .leading)
-            .frame(maxWidth: .infinity, alignment: .center)
-            .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
-            .padding(.vertical, 32)
+            .scrollClipDisabled()
+            .ignoresSafeArea(.container, edges: .vertical)
         }
-        .scrollClipDisabled()
-        .modifier(VerticalScrollEdgeEffectHidden())
         .defaultFocus($focusedField, .back)
         .onExitCommand {
             if viewModel.step == .chooseShare { viewModel.backToServers() } else { onBack() }
         }
         .onAppear {
-            viewModel.startScan()
             focusedField = .back
+            if isPageReady { viewModel.startScan() }
         }
         .onChange(of: viewModel.step) { _, _ in focusedField = .back }
+        .onChange(of: isPageReady) { _, ready in
+            if ready {
+                viewModel.startScan()
+            } else {
+                viewModel.stopScan()
+            }
+        }
         .onDisappear { viewModel.stopScan() }
     }
 
     // MARK: - Step 1: choose a server
 
     private var serverStep: some View {
-        // Results can arrive during the parent page transition; keep the
-        // list update instant so it doesn't compete with the page motion.
+        // Discovery starts after the parent transition; keep later result
+        // insertions instant so the list never introduces competing motion.
         Group {
             headerRow(
                 title: "Add a Media Share",
@@ -417,17 +429,6 @@ private struct SharePanel<Content: View, Accessory: View>: View {
             RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
                 .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
         )
-    }
-}
-
-private struct VerticalScrollEdgeEffectHidden: ViewModifier {
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        if #available(tvOS 26.0, *) {
-            content.scrollEdgeEffectHidden(for: .vertical)
-        } else {
-            content
-        }
     }
 }
 

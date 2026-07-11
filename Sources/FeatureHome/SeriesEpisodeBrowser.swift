@@ -146,11 +146,7 @@ private struct SeriesRecededLogo: View {
         }
         .frame(width: 620, height: 200, alignment: .center)
         .opacity(logoVisible ? 1 : 0)
-        .offset(y: recedeModel.isReceded ? 0 : -220)
-        .animation(
-            reduceMotion ? nil : .smooth(duration: 0.65),
-            value: recedeModel.isReceded
-        )
+        .offset(y: logoVisible ? 0 : -100)
         .accessibilityHidden(!recedeModel.isReceded)
         .task(id: animationTaskID) {
             let shouldShow = recedeModel.isReceded
@@ -166,7 +162,10 @@ private struct SeriesRecededLogo: View {
                 }
             }
             guard !Task.isCancelled, recedeModel.isReceded == shouldShow else { return }
-            withAnimation(.easeOut(duration: shouldShow ? 0.28 : 0.14)) {
+            let animation: Animation = shouldShow
+                ? .smooth(duration: 0.5)
+                : .easeOut(duration: 0.14)
+            withAnimation(animation) {
                 logoVisible = shouldShow
             }
         }

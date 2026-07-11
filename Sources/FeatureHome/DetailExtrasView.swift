@@ -16,6 +16,9 @@ struct DetailExtrasView: View {
     /// Leading inset so the cast row and chip strips align with the hero text
     /// above. Defaults to the standard screen padding.
     var leadingInset: CGFloat = PlozzTheme.Metrics.screenPadding
+    /// Series pages supply their cosmetic recede model so only Cast participates
+    /// in the browser transition. Movie detail leaves this nil and stays visible.
+    var seriesRecedeModel: SeriesHeroRecedeModel? = nil
 
     private var hasContent: Bool {
         !item.cast.isEmpty || !item.studios.isEmpty || !item.tags.isEmpty
@@ -26,6 +29,7 @@ struct DetailExtrasView: View {
             VStack(alignment: .leading, spacing: 28) {
                 if !item.cast.isEmpty {
                     CastRowView(people: item.cast, leadingInset: leadingInset)
+                        .modifier(SeriesCastRevealModifier(model: seriesRecedeModel))
                 }
                 if !item.studios.isEmpty {
                     StudiosRow(studios: item.studios)
@@ -35,6 +39,29 @@ struct DetailExtrasView: View {
                 }
             }
         }
+    }
+}
+
+private struct SeriesCastRevealModifier: ViewModifier {
+    let model: SeriesHeroRecedeModel?
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        let revealed = model?.isReceded ?? true
+        content
+            .opacity(revealed ? 1 : 0)
+            .offset(y: revealed ? 0 : 18)
+            .disabled(!revealed)
+            .accessibilityHidden(!revealed)
+            .animation(
+                reduceMotion
+                    ? nil
+                    : (revealed
+                        ? .smooth(duration: 0.44).delay(0.08)
+                        : .easeOut(duration: 0.14)),
+                value: revealed
+            )
     }
 }
 

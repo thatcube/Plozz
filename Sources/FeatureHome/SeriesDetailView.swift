@@ -287,7 +287,11 @@ struct SeriesDetailView: View {
                     )
                     .padding(.top, -SeriesEpisodeBrowserLayout.heroOverlap)
 
-                    DetailExtrasView(item: series, leadingInset: PlozzTheme.Metrics.heroLeadingPadding)
+                    DetailExtrasView(
+                        item: series,
+                        leadingInset: PlozzTheme.Metrics.heroLeadingPadding,
+                        seriesRecedeModel: recedeModel
+                    )
                         .padding(.top, 32)
                 }
                 .padding(.bottom, PlozzTheme.Metrics.screenPadding)

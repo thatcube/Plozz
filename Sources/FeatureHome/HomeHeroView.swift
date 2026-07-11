@@ -174,6 +174,9 @@ struct HomeHeroView: View {
     /// Bumped on every page so a late metadata fade-in from a *previous* page
     /// can't fire after a newer page has already started.
     @State private var slideToken = 0
+    /// Changes only when the curated hero identity set changes. Drives the
+    /// low-resolution all-slide preview warm without restarting it on every page.
+    @State private var artworkSetToken = 0
     /// Best resolved hero backdrop URL per item id. For episode/season slides
     /// this is the **series-level** hero art (correct show, high-res — matching
     /// the detail page), resolved via ``ArtworkRouter`` and preloaded for the
@@ -380,6 +383,7 @@ struct HomeHeroView: View {
         // swap, else clamp, then prune resolved art and re-resolve.
         .onChange(of: items.map(\.id)) { oldIDs, newIDs in
             guard oldIDs != newIDs else { return }
+            artworkSetToken &+= 1
             let oldIdx = index
             let frontedID = oldIDs.indices.contains(index) ? oldIDs[index] : nil
             if let frontedID, let newIdx = newIDs.firstIndex(of: frontedID) {
@@ -442,6 +446,13 @@ struct HomeHeroView: View {
         // decoding artwork the user has already skipped.
         .task(id: ArtworkResolutionKey(slideToken: slideToken, index: index)) {
             await resolveArtwork(around: index)
+        }
+        // A cheap 768px preview for every configured hero slide makes even a
+        // 20-item fly-through immediate. This task survives page changes; all work
+        // stays behind the shared background limiter and full hero art still has
+        // foreground priority.
+        .task(id: artworkSetToken) {
+            await warmHeroPreviews()
         }
         // Auto-advance: the fire is rescheduled whenever `autoAdvanceKey` changes
         // (slide change, manual page, pause/resume, or the item count settling).
@@ -1551,11 +1562,12 @@ struct HomeHeroView: View {
         let targetIndices = HeroArtworkWindow.indices(count: items.count, centeredAt: idx)
         guard !targetIndices.isEmpty else { return }
 
-        // Resolve the visible slide immediately. Neighbor warming is speculative,
-        // so give focus a short dwell first; rapid presses cancel this task during
-        // the sleep and never start downloads for slides already skipped.
+        // Resolve the visible slide immediately. Full-resolution neighbor warming
+        // is speculative and much heavier than the all-slide preview pass, so wait
+        // for a real dwell. Rapid presses cancel during this sleep; the small previews
+        // get the background lanes first instead of waiting behind four 2000px decodes.
         _ = await resolveArtworkURL(for: items[targetIndices[0]])
-        try? await Task.sleep(nanoseconds: 150_000_000)
+        try? await Task.sleep(nanoseconds: 600_000_000)
         guard !Task.isCancelled else { return }
 
         var warmURLs: [URL] = []
@@ -1583,6 +1595,119 @@ struct HomeHeroView: View {
                 }
             }
         }
+    }
+
+    /// Warms one lightweight progressive frame for the full curated hero set.
+    /// Existing full-resolution or landscape-card decodes already satisfy the
+    /// instant path and are not duplicated. Work starts immediately and proceeds
+    /// in likely paging order (current, next, previous, then expanding outward), so
+    /// the first remote presses become cache-hot before distant slides. Small
+    /// bounded batches avoid creating a long, cancellation-insensitive limiter
+    /// queue when a curated set is replaced.
+    private func warmHeroPreviews() async {
+        var targets: [HeroPreviewWarmTarget] = []
+        let orderedIndices = HeroPreviewWarmOrder.indices(count: items.count, centeredAt: index)
+        for itemIndex in orderedIndices {
+            guard !Task.isCancelled else { return }
+            let item = items[itemIndex]
+            let candidates = primaryBackdropURLs(for: item)
+            guard !candidates.isEmpty else { continue }
+            targets.append(
+                HeroPreviewWarmTarget(
+                    itemID: item.id,
+                    candidateURLs: candidates,
+                    asyncFallbackURL: backdropFallback(for: item)
+                )
+            )
+        }
+
+        #if canImport(UIKit)
+        let uncached = targets.filter { target in
+            !HeroBackdropArtworkPolicy.hasUsableCachedArtwork(for: target.candidateURLs)
+        }
+        let batchSize = 4
+        var fallbackTargets: [HeroPreviewWarmTarget] = []
+        var batchStart = 0
+        while batchStart < uncached.count {
+            guard !Task.isCancelled else { return }
+            let batchEnd = min(batchStart + batchSize, uncached.count)
+            let failures = await withTaskGroup(
+                of: HeroPreviewWarmTarget?.self,
+                returning: [HeroPreviewWarmTarget].self
+            ) { group in
+                for target in uncached[batchStart..<batchEnd] {
+                    group.addTask(priority: .utility) {
+                        guard !Task.isCancelled else { return nil }
+                        let usable = await ArtworkSession.warmLimiter.run {
+                            guard !Task.isCancelled else { return false }
+                            return await HeroBackdropArtworkPolicy.warmFirstUsablePreview(
+                                for: target.candidateURLs
+                            )
+                        }
+                        return usable ? nil : target
+                    }
+                }
+                var failures: [HeroPreviewWarmTarget] = []
+                for await failure in group {
+                    if let failure { failures.append(failure) }
+                }
+                return failures
+            }
+            fallbackTargets.append(contentsOf: failures)
+            batchStart = batchEnd
+        }
+
+        // Only malformed/failed provider candidates reach this phase. Resolve their
+        // router fallbacks after every ordinary slide has had its preview chance,
+        // and never hold an artwork-network permit while metadata resolution runs.
+        batchStart = 0
+        while batchStart < fallbackTargets.count {
+            guard !Task.isCancelled else { return }
+            let batchEnd = min(batchStart + batchSize, fallbackTargets.count)
+            let resolvedFallbacks = await withTaskGroup(
+                of: ResolvedHeroPreviewFallback?.self,
+                returning: [ResolvedHeroPreviewFallback].self
+            ) { group in
+                for target in fallbackTargets[batchStart..<batchEnd] {
+                    group.addTask(priority: .utility) {
+                        guard !Task.isCancelled,
+                              let resolver = target.asyncFallbackURL,
+                              let url = await resolver(),
+                              !Task.isCancelled,
+                              !target.candidateURLs.contains(url)
+                        else {
+                            return nil
+                        }
+                        return ResolvedHeroPreviewFallback(itemID: target.itemID, url: url)
+                    }
+                }
+                var resolved: [ResolvedHeroPreviewFallback] = []
+                for await fallback in group {
+                    if let fallback { resolved.append(fallback) }
+                }
+                return resolved
+            }
+
+            for fallback in resolvedFallbacks {
+                guard !Task.isCancelled else { return }
+                resolvedBackdrop[fallback.itemID] = fallback.url
+            }
+            await withTaskGroup(of: Void.self) { group in
+                for fallback in resolvedFallbacks {
+                    group.addTask(priority: .utility) {
+                        guard !Task.isCancelled else { return }
+                        await ArtworkSession.warmLimiter.run {
+                            guard !Task.isCancelled else { return }
+                            _ = await HeroBackdropArtworkPolicy.warmFirstUsablePreview(
+                                for: [fallback.url]
+                            )
+                        }
+                    }
+                }
+            }
+            batchStart = batchEnd
+        }
+        #endif
     }
 
     /// Resolves the best hero backdrop URL for one item. Mirrors
@@ -1660,6 +1785,17 @@ struct HomeHeroView: View {
         let slideToken: Int
         let index: Int
     }
+
+    private struct HeroPreviewWarmTarget: Sendable {
+        let itemID: String
+        let candidateURLs: [URL]
+        let asyncFallbackURL: (@Sendable () async -> URL?)?
+    }
+
+    private struct ResolvedHeroPreviewFallback: Sendable {
+        let itemID: String
+        let url: URL
+    }
 }
 
 /// A fixed-size, wraparound neighborhood used for hero artwork warming. Its size
@@ -1676,6 +1812,30 @@ enum HeroArtworkWindow {
             let candidate = (center + offset + count) % count
             return seen.insert(candidate).inserted ? candidate : nil
         }
+    }
+}
+
+/// Full-carousel order for lightweight preview warming. Alternating forward and
+/// backward distance makes either first paging direction cache-hot, while keeping
+/// the current/adjacent slides ahead of distant work.
+enum HeroPreviewWarmOrder {
+    static func indices(count: Int, centeredAt index: Int) -> [Int] {
+        guard count > 0 else { return [] }
+        let center = min(max(index, 0), count - 1)
+        var result = [center]
+        var seen: Set<Int> = [center]
+        var distance = 1
+        while result.count < count {
+            for offset in [distance, -distance] {
+                let candidate = (center + offset + count) % count
+                if seen.insert(candidate).inserted {
+                    result.append(candidate)
+                    if result.count == count { return result }
+                }
+            }
+            distance += 1
+        }
+        return result
     }
 }
 

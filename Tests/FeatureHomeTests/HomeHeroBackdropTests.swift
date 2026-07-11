@@ -81,6 +81,45 @@ final class HomeHeroBackdropTests: XCTestCase {
         XCTAssertNil(container.frontImage)
     }
 
+    func testProgressiveImageUpgradeKeepsWipeInFlight() {
+        let container = HeroWipeContainerView(
+            bleed: 8,
+            parallaxIn: 1_200,
+            driftOut: 320
+        )
+        container.slideSize = CGSize(width: 1_920, height: 1_080)
+        container.setInitialImage(image(.red))
+        let preview = image(.green)
+        let fullResolution = image(.blue)
+
+        let wipe = container.prepareWipe(incomingImage: preview, forward: true)
+        container.animateIncoming(wipe.incoming)
+        container.frontImage = fullResolution
+
+        XCTAssertEqual(container.pageCount, 2)
+        XCTAssertEqual(container.activeWipeCount, 1)
+        XCTAssertTrue(container.frontImage === fullResolution)
+
+        container.finishWipe(wipe.incoming)
+        XCTAssertEqual(container.pageCount, 1)
+        XCTAssertEqual(container.activeWipeCount, 0)
+        XCTAssertTrue(container.frontImage === fullResolution)
+    }
+
+    func testHeroBackdropPolicyRejectsUltraWideProviderJunk() {
+        let usable = UIGraphicsImageRenderer(size: CGSize(width: 16, height: 9)).image {
+            UIColor.red.setFill()
+            $0.fill(CGRect(x: 0, y: 0, width: 16, height: 9))
+        }
+        let ultraWide = UIGraphicsImageRenderer(size: CGSize(width: 40, height: 10)).image {
+            UIColor.red.setFill()
+            $0.fill(CGRect(x: 0, y: 0, width: 40, height: 10))
+        }
+
+        XCTAssertTrue(HeroBackdropArtworkPolicy.isUsable(usable))
+        XCTAssertFalse(HeroBackdropArtworkPolicy.isUsable(ultraWide))
+    }
+
     private func image(_ color: UIColor) -> UIImage {
         UIGraphicsImageRenderer(size: CGSize(width: 16, height: 9)).image { context in
             color.setFill()

@@ -92,14 +92,176 @@ public final class ArtworkImageCache: NSObject, @unchecked Sendable {
         queue.qualityOfService = .utility
         return queue
     }()
-    /// One coalesced, cancellable load of a single URL+variant. `waiters` counts
-    /// the live `image(for:)` callers awaiting it; when the last waiter's task is
-    /// cancelled (e.g. its card scrolled off-screen) the underlying download +
-    /// decode is cancelled too, freeing the artwork connection it was holding for
-    /// whatever the user is actually looking at now.
-    private final class ImageLoad {
-        var task: Task<UIImage?, Never>!
-        var waiters: Int = 0
+    private enum ImageLoadState {
+        case pending
+        case finished(UIImage?)
+    }
+
+    /// One coalesced load of a single URL+variant. Every caller gets its own
+    /// continuation so cancelling one waiter returns immediately without cancelling
+    /// a transfer another visible/background consumer still needs. When the final
+    /// waiter leaves, the shared download/decode is cancelled as before.
+    private final class ImageLoad: @unchecked Sendable {
+        var task: Task<Void, Never>!
+        var state: ImageLoadState = .pending
+        var waiterIsForeground: [UUID: Bool] = [:]
+        var continuations: [UUID: CheckedContinuation<UIImage?, Never>] = [:]
+        var foregroundWaiterCount = 0
+        var decodeJob: DecodeJob?
+    }
+
+    private struct ImageWaiter: @unchecked Sendable {
+        let id: UUID
+        let key: CacheKey
+        let load: ImageLoad
+    }
+
+    /// Cancellation-aware bridge around ImageIO's synchronous thumbnail decode.
+    /// Cancelling before this operation starts removes it from the queue entirely;
+    /// cancelling after it starts resumes the async caller immediately and discards
+    /// the unavoidable synchronous result when ImageIO returns.
+    private final class DecodeJob: @unchecked Sendable {
+        private let lock = NSLock()
+        private let decode: () -> UIImage?
+        private var continuation: CheckedContinuation<UIImage?, Never>?
+        private var operation: BlockOperation?
+        private var finished = false
+        private var promotionRequested = false
+        private var decodeStarted = false
+        private var operationIsForeground = false
+
+        init(foregroundRequested: Bool, decode: @escaping () -> UIImage?) {
+            self.promotionRequested = foregroundRequested
+            self.decode = decode
+        }
+
+        func install(continuation: CheckedContinuation<UIImage?, Never>) -> Bool {
+            lock.lock()
+            guard !finished else {
+                lock.unlock()
+                continuation.resume(returning: nil)
+                return false
+            }
+            self.continuation = continuation
+            lock.unlock()
+            return true
+        }
+
+        func start(
+            backgroundQueue: OperationQueue,
+            foregroundQueue: OperationQueue
+        ) {
+            lock.lock()
+            guard !finished else {
+                lock.unlock()
+                return
+            }
+            let useForeground = promotionRequested
+            let operation = makeOperation(foreground: useForeground)
+            self.operation = operation
+            operationIsForeground = useForeground
+            lock.unlock()
+            (useForeground ? foregroundQueue : backgroundQueue).addOperation(operation)
+        }
+
+        private func makeOperation(foreground: Bool) -> BlockOperation {
+            let operation = BlockOperation()
+            operation.qualityOfService = foreground ? .userInitiated : .utility
+            operation.queuePriority = foreground ? .veryHigh : .normal
+            operation.addExecutionBlock { [weak self, weak operation] in
+                guard let self, let operation, self.claim(operation) else { return }
+                let image = autoreleasepool { self.decode() }
+                self.finish(with: image)
+            }
+            return operation
+        }
+
+        /// Only the operation currently owned by this job may enter ImageIO. A
+        /// foreground promotion replaces a queued background operation; this claim
+        /// closes the race where the canceled operation begins while its replacement
+        /// is being enqueued, so the bitmap is still decoded exactly once.
+        private func claim(_ operation: BlockOperation) -> Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            guard !finished,
+                  !decodeStarted,
+                  self.operation === operation,
+                  !operation.isCancelled
+            else { return false }
+            decodeStarted = true
+            return true
+        }
+
+        private func finish(with image: UIImage?) {
+            lock.lock()
+            guard !finished else {
+                lock.unlock()
+                return
+            }
+            finished = true
+            let continuation = self.continuation
+            self.continuation = nil
+            operation = nil
+            lock.unlock()
+            continuation?.resume(returning: image)
+        }
+
+        func cancel() {
+            lock.lock()
+            guard !finished else {
+                lock.unlock()
+                return
+            }
+            finished = true
+            let continuation = self.continuation
+            let operation = self.operation
+            self.continuation = nil
+            self.operation = nil
+            lock.unlock()
+            operation?.cancel()
+            continuation?.resume(returning: nil)
+        }
+
+        func promote(to foregroundQueue: OperationQueue) {
+            lock.lock()
+            promotionRequested = true
+            guard !finished,
+                  !decodeStarted,
+                  !operationIsForeground,
+                  let oldOperation = operation
+            else {
+                lock.unlock()
+                return
+            }
+            // `claim` checks operation identity under this same lock. Replacing the
+            // identity before unlocking guarantees the old block can no longer enter
+            // ImageIO, even if OperationQueue marks it executing concurrently.
+            oldOperation.cancel()
+            let replacement = makeOperation(foreground: true)
+            operation = replacement
+            operationIsForeground = true
+            lock.unlock()
+            foregroundQueue.addOperation(replacement)
+        }
+
+        func demote(to backgroundQueue: OperationQueue) {
+            lock.lock()
+            promotionRequested = false
+            guard !finished,
+                  !decodeStarted,
+                  operationIsForeground,
+                  let oldOperation = operation
+            else {
+                lock.unlock()
+                return
+            }
+            oldOperation.cancel()
+            let replacement = makeOperation(foreground: false)
+            operation = replacement
+            operationIsForeground = false
+            lock.unlock()
+            backgroundQueue.addOperation(replacement)
+        }
     }
     /// In-flight image loads keyed by URL+variant so a card's own load and the
     /// rail's prefetch never decode the same target twice.
@@ -147,11 +309,13 @@ public final class ArtworkImageCache: NSObject, @unchecked Sendable {
     public func image(for url: URL, variant: ArtworkImageVariant = .original, background: Bool = false) async -> UIImage? {
         if let cached = cachedImage(for: url, variant: variant) { return cached }
         let key = CacheKey(url: url, variant: variant)
-        let load = registerWaiter(for: key, background: background)
+        let waiter = registerWaiter(for: key, background: background)
         return await withTaskCancellationHandler {
-            await load.task.value
+            await withCheckedContinuation { continuation in
+                install(continuation, for: waiter)
+            }
         } onCancel: {
-            unregisterWaiter(load, for: key)
+            unregisterWaiter(waiter)
         }
     }
 
@@ -168,43 +332,116 @@ public final class ArtworkImageCache: NSObject, @unchecked Sendable {
         }
     }
 
-    private func registerWaiter(for key: CacheKey, background: Bool) -> ImageLoad {
+    private func registerWaiter(for key: CacheKey, background: Bool) -> ImageWaiter {
         lock.lock()
         defer { lock.unlock() }
+        let waiterID = UUID()
         if let existing = inFlight[key] {
-            existing.waiters += 1
-            return existing
+            if !background {
+                existing.foregroundWaiterCount += 1
+                existing.decodeJob?.promote(to: Self.decodeQueueFG)
+            }
+            existing.waiterIsForeground[waiterID] = !background
+            return ImageWaiter(id: waiterID, key: key, load: existing)
         }
         let load = ImageLoad()
-        load.waiters = 1
+        load.waiterIsForeground[waiterID] = !background
+        load.foregroundWaiterCount = background ? 0 : 1
         // Detached so the download + decode never inherit (and block) the MainActor
         // when kicked off from a card's `onAppear`/prefetch. The download is a
         // cancellable URLSession call and the decode runs off the cooperative pool,
         // so cancelling this task (last waiter gone) both stops the in-flight
         // transfer — freeing its connection — and skips the decode.
-        load.task = Task<UIImage?, Never>.detached(priority: .utility) { [weak self, weak load] in
-            guard let self else { return nil }
-            defer { self.clearInFlight(key, ifMatches: load) }
-            if Task.isCancelled { return nil }
-            guard let data = await Self.downloadData(key.url) else { return nil }
-            if Task.isCancelled { return nil }
-            guard let image = await Self.decodeImageOffPool(from: data, variant: key.variant, background: background) else {
-                return nil
-            }
-            self.store(image, for: key)
-            return image
+        let priority: TaskPriority = background ? .utility : .userInitiated
+        load.task = Task<Void, Never>.detached(priority: priority) { [weak self, weak load] in
+            guard let self, let load else { return }
+            let image = await self.performLoad(for: key, load: load)
+            self.finishLoad(load, for: key, with: image)
         }
         inFlight[key] = load
-        return load
+        return ImageWaiter(id: waiterID, key: key, load: load)
     }
 
-    private func unregisterWaiter(_ load: ImageLoad, for key: CacheKey) {
+    private func install(
+        _ continuation: CheckedContinuation<UIImage?, Never>,
+        for waiter: ImageWaiter
+    ) {
+        var immediateResult: (ready: Bool, image: UIImage?) = (false, nil)
         lock.lock()
-        defer { lock.unlock() }
-        load.waiters -= 1
-        if load.waiters <= 0 {
-            load.task.cancel()
-            if inFlight[key] === load { inFlight[key] = nil }
+        switch waiter.load.state {
+        case .finished(let image):
+            immediateResult = (true, image)
+        case .pending:
+            if waiter.load.waiterIsForeground[waiter.id] != nil {
+                waiter.load.continuations[waiter.id] = continuation
+            } else {
+                // Cancellation won before the continuation was installed.
+                immediateResult = (true, nil)
+            }
+        }
+        lock.unlock()
+        if immediateResult.ready {
+            continuation.resume(returning: immediateResult.image)
+        }
+    }
+
+    private func unregisterWaiter(_ waiter: ImageWaiter) {
+        var continuation: CheckedContinuation<UIImage?, Never>?
+        var taskToCancel: Task<Void, Never>?
+        lock.lock()
+        if let wasForeground = waiter.load.waiterIsForeground.removeValue(forKey: waiter.id) {
+            if wasForeground {
+                waiter.load.foregroundWaiterCount = max(0, waiter.load.foregroundWaiterCount - 1)
+                if waiter.load.foregroundWaiterCount == 0,
+                   !waiter.load.waiterIsForeground.isEmpty {
+                    waiter.load.decodeJob?.demote(to: Self.decodeQueueBG)
+                }
+            }
+            continuation = waiter.load.continuations.removeValue(forKey: waiter.id)
+            if waiter.load.waiterIsForeground.isEmpty,
+               case .pending = waiter.load.state {
+                taskToCancel = waiter.load.task
+                if inFlight[waiter.key] === waiter.load {
+                    inFlight[waiter.key] = nil
+                }
+            }
+        }
+        lock.unlock()
+        continuation?.resume(returning: nil)
+        taskToCancel?.cancel()
+    }
+
+    private func performLoad(for key: CacheKey, load: ImageLoad) async -> UIImage? {
+        if Task.isCancelled { return nil }
+        let requestURL = key.variant.requestURL(for: key.url)
+        guard let data = await Self.downloadData(requestURL), !Task.isCancelled else { return nil }
+        guard let image = await decodeImageOffPool(
+            from: data,
+            variant: key.variant,
+            load: load
+        ), !Task.isCancelled else {
+            return nil
+        }
+        store(image, for: key)
+        return image
+    }
+
+    private func finishLoad(_ load: ImageLoad, for key: CacheKey, with image: UIImage?) {
+        var continuations: [CheckedContinuation<UIImage?, Never>] = []
+        lock.lock()
+        if case .pending = load.state {
+            load.state = .finished(image)
+            continuations = Array(load.continuations.values)
+            load.continuations.removeAll()
+            load.waiterIsForeground.removeAll()
+            load.foregroundWaiterCount = 0
+            if inFlight[key] === load {
+                inFlight[key] = nil
+            }
+        }
+        lock.unlock()
+        for continuation in continuations {
+            continuation.resume(returning: image)
         }
     }
 
@@ -213,14 +450,6 @@ public final class ArtworkImageCache: NSObject, @unchecked Sendable {
         let cost = max(Int(image.size.width * scale * image.size.height * scale * 4), 1)
         cache.setObject(image, forKey: key.cacheKey, cost: cost)
         Self.noteStored(cost: cost)
-    }
-
-    private func clearInFlight(_ key: CacheKey, ifMatches load: ImageLoad?) {
-        lock.lock()
-        if let load, inFlight[key] === load {
-            inFlight[key] = nil
-        }
-        lock.unlock()
     }
 
     private static func downloadData(_ url: URL) async -> Data? {
@@ -236,30 +465,68 @@ public final class ArtworkImageCache: NSObject, @unchecked Sendable {
     /// decodes (visible card / detail hero) use the higher-priority lane so they
     /// never wait behind a background prewarm storm. Keeps artwork CPU off the
     /// cooperative pool so it can't starve unrelated `async` continuations.
-    private static func decodeImageOffPool(from data: Data, variant: ArtworkImageVariant, background: Bool) async -> UIImage? {
-        let queue = background ? decodeQueueBG : decodeQueueFG
-        return await withCheckedContinuation { continuation in
-            queue.addOperation {
-                let img = decodeImage(from: data, variant: variant)
-                continuation.resume(returning: img)
+    private func decodeImageOffPool(
+        from data: Data,
+        variant: ArtworkImageVariant,
+        load: ImageLoad
+    ) async -> UIImage? {
+        let job = lock.withLock {
+            let job = DecodeJob(
+                foregroundRequested: load.foregroundWaiterCount > 0
+            ) {
+                Self.decodeImage(from: data, variant: variant)
             }
+            load.decodeJob = job
+            return job
+        }
+
+        defer {
+            lock.withLock {
+                if load.decodeJob === job {
+                    load.decodeJob = nil
+                }
+            }
+        }
+
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                if job.install(continuation: continuation) {
+                    job.start(
+                        backgroundQueue: Self.decodeQueueBG,
+                        foregroundQueue: Self.decodeQueueFG
+                    )
+                }
+            }
+        } onCancel: {
+            job.cancel()
         }
     }
 
     private static func decodeImage(from data: Data, variant: ArtworkImageVariant) -> UIImage? {
-        let image: UIImage?
         if let maxPixelSize = variant.maxPixelSize {
-            image = downsampledImage(from: data, maxPixelSize: maxPixelSize)
-        } else {
-            image = UIImage(data: data)
+            // `kCGImageSourceShouldCacheImmediately` already materializes the
+            // thumbnail's pixels. Calling `preparingForDisplay()` again here creates
+            // a redundant second prepared image and repeats work on the hot path.
+            return downsampledImage(from: data, maxPixelSize: maxPixelSize)
         }
+        let image = UIImage(data: data)
         guard let image else { return nil }
         // Force-decode now (off the main thread) so the cached image is render-ready.
         return image.preparingForDisplay() ?? image
     }
 
     private static func downsampledImage(from data: Data, maxPixelSize: Int) -> UIImage? {
-        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        let sourceOptions: [CFString: Any] = [
+            // Do not let ImageIO inflate/cache the full source before producing the
+            // thumbnail; only the bounded destination bitmap should be materialized.
+            kCGImageSourceShouldCache: false
+        ]
+        guard let source = CGImageSourceCreateWithData(
+            data as CFData,
+            sourceOptions as CFDictionary
+        ) else {
+            return nil
+        }
         let options: [CFString: Any] = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceCreateThumbnailWithTransform: true,

@@ -16,9 +16,10 @@ import Foundation
 /// The same source URL can be resident at several variants at once without collision
 /// (an episode card's small backdrop and the detail hero's large one), because the
 /// cache key is composed from the variant *and* the URL — see `cacheKey(for:)`. The
-/// raw byte download for that URL is still shared across variants (the cache
-/// coalesces the network transfer), so multiple variants cost one fetch and N cheap
-/// decodes.
+/// The source URL remains the cache identity, while ``requestURL(for:)`` asks known
+/// image servers for no more pixels than this variant can display. Variants that
+/// resolve to the same request URL still share `URLCache` bytes; a small progressive
+/// preview deliberately gets its own much smaller response so it can paint sooner.
 ///
 /// This type is Foundation-only (no UIKit/SwiftUI) so the size policy and cache-key
 /// composition stay unit-testable off-device.
@@ -30,6 +31,10 @@ public enum ArtworkImageVariant: String, Sendable, CaseIterable {
     case posterCard
     /// Wide landscape / episode-still cards. ~480pt at 2x plus focus-lift headroom.
     case landscapeCard
+    /// Lightweight full-bleed hero preview. Small enough to retain one for every
+    /// configured hero slide, used only as an immediate progressive frame while
+    /// the high-fidelity hero decode finishes.
+    case heroPreview
     /// Full-bleed detail-hero backdrops and ambient samplers. High fidelity but
     /// bounded below 4K so a single backdrop never retains a multi-megabyte bitmap.
     case heroBackdrop
@@ -54,8 +59,29 @@ public enum ArtworkImageVariant: String, Sendable, CaseIterable {
         case .personHeadshot: return 400
         case .posterCard: return 960
         case .landscapeCard: return 1_200
+        case .heroPreview: return 768
         case .heroBackdrop: return 2_000
         }
+    }
+
+    /// Returns a transfer URL capped to this variant's decode size when the source
+    /// is a known resizable image endpoint. The original URL remains the decoded
+    /// cache key, so callers never need to know that the byte request was right-sized.
+    ///
+    /// Never raises an existing size limit: a 1280px TMDb or Jellyfin image remains
+    /// 1280px for a 2000px hero rather than being upscaled by the server.
+    public func requestURL(for sourceURL: URL) -> URL {
+        guard let maxPixelSize else { return sourceURL }
+        if let jellyfin = resizedJellyfinURL(sourceURL, maxPixelSize: maxPixelSize) {
+            return jellyfin
+        }
+        if let plex = resizedPlexURL(sourceURL, maxPixelSize: maxPixelSize) {
+            return plex
+        }
+        if let tmdb = resizedTMDbURL(sourceURL, maxPixelSize: maxPixelSize) {
+            return tmdb
+        }
+        return sourceURL
     }
 
     /// Composite cache key for `url` under this variant, so one source URL can be
@@ -64,5 +90,70 @@ public enum ArtworkImageVariant: String, Sendable, CaseIterable {
     /// colliding.
     public func cacheKey(for url: URL) -> String {
         "\(rawValue)|\(url.absoluteString)"
+    }
+
+    private func resizedJellyfinURL(_ url: URL, maxPixelSize: Int) -> URL? {
+        guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              components.path.localizedCaseInsensitiveContains("/images/"),
+              var queryItems = components.queryItems,
+              let index = queryItems.firstIndex(where: { $0.name.lowercased() == "maxwidth" }),
+              let value = queryItems[index].value,
+              let currentWidth = Int(value),
+              currentWidth > maxPixelSize
+        else {
+            return nil
+        }
+        queryItems[index].value = String(maxPixelSize)
+        components.queryItems = queryItems
+        return components.url
+    }
+
+    private func resizedPlexURL(_ url: URL, maxPixelSize: Int) -> URL? {
+        guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              components.path.hasSuffix("/photo/:/transcode"),
+              var queryItems = components.percentEncodedQueryItems,
+              let widthIndex = queryItems.firstIndex(where: { $0.name == "width" }),
+              let widthValue = queryItems[widthIndex].value,
+              let currentWidth = Int(widthValue),
+              currentWidth > maxPixelSize
+        else {
+            return nil
+        }
+
+        if let heightIndex = queryItems.firstIndex(where: { $0.name == "height" }),
+           let heightValue = queryItems[heightIndex].value,
+           let currentHeight = Int(heightValue),
+           currentHeight > 0 {
+            let ratio = Double(currentHeight) / Double(currentWidth)
+            queryItems[heightIndex].value = String(max(1, Int((Double(maxPixelSize) * ratio).rounded())))
+        }
+        queryItems[widthIndex].value = String(maxPixelSize)
+        components.percentEncodedQueryItems = queryItems
+        return components.url
+    }
+
+    private func resizedTMDbURL(_ url: URL, maxPixelSize: Int) -> URL? {
+        guard url.host?.lowercased() == "image.tmdb.org" else { return nil }
+        var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        guard var pathParts = components?.path.split(separator: "/", omittingEmptySubsequences: true).map(String.init),
+              pathParts.count >= 4,
+              pathParts[0] == "t",
+              pathParts[1] == "p"
+        else {
+            return nil
+        }
+
+        let currentSize = pathParts[2]
+        let currentWidth = currentSize.first == "w" ? Int(currentSize.dropFirst()) : nil
+        let widths = [92, 154, 185, 342, 500, 780, 1_280]
+        guard let requestedWidth = widths.first(where: { $0 >= maxPixelSize }),
+              currentSize == "original" || (currentWidth.map { $0 > requestedWidth } ?? false)
+        else {
+            return nil
+        }
+
+        pathParts[2] = "w\(requestedWidth)"
+        components?.path = "/" + pathParts.joined(separator: "/")
+        return components?.url
     }
 }

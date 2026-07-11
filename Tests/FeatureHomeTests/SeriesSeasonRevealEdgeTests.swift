@@ -44,3 +44,33 @@ final class SeriesSeasonRevealEdgeTests: XCTestCase {
         ))
     }
 }
+
+final class SeriesDetailBrowserPolicyTests: XCTestCase {
+    func testLooseEpisodeBrowserRearmsWhenHeroRegainsFocus() {
+        XCTAssertTrue(SeriesDetailBrowserPolicy.rearmsEpisodeRailOnHeroFocus(hasSeasons: false))
+        XCTAssertFalse(SeriesDetailBrowserPolicy.rearmsEpisodeRailOnHeroFocus(hasSeasons: true))
+    }
+
+    func testCastRevealsOnlyWhenAnEmptyBrowserHasFinishedLoading() {
+        XCTAssertFalse(SeriesDetailBrowserPolicy.revealsCastWithoutBrowser(
+            childrenLoaded: false,
+            hasSeasons: false,
+            hasEpisodes: false
+        ))
+        XCTAssertFalse(SeriesDetailBrowserPolicy.revealsCastWithoutBrowser(
+            childrenLoaded: true,
+            hasSeasons: true,
+            hasEpisodes: false
+        ))
+        XCTAssertFalse(SeriesDetailBrowserPolicy.revealsCastWithoutBrowser(
+            childrenLoaded: true,
+            hasSeasons: false,
+            hasEpisodes: true
+        ))
+        XCTAssertTrue(SeriesDetailBrowserPolicy.revealsCastWithoutBrowser(
+            childrenLoaded: true,
+            hasSeasons: false,
+            hasEpisodes: false
+        ))
+    }
+}

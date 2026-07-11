@@ -172,7 +172,7 @@ struct SeriesDetailView: View {
             // loaded yet); keying on the season ids re-runs this the moment they
             // arrive so a series/episode entry (selectedSeasonID still nil) picks
             // its first season and loads episodes instead of staying empty.
-            .task(id: seasons.map(\.id)) { await prepareInitialSeason() }
+            .task(id: seasonSetKey) { await prepareInitialSeason() }
             // Keep the series-level hero in sync with the active server: when an
             // in-place cross-server switch re-points `series` to the other server's
             // copy while the hero is showing the show itself (no episode fronted),
@@ -189,7 +189,7 @@ struct SeriesDetailView: View {
             // Background-warm *every* season's thumbnails the moment the page opens,
             // so switching seasons later is instant (no gray-placeholder flash)
             // rather than fetching that season's stills only once it is selected.
-            .task(id: seasons.map(\.id)) { await prewarmAllSeasons() }
+            .task(id: seasonSetKey) { await prewarmAllSeasons() }
             // The hero mirrors the focused episode via a local copy, so when a
             // watched/watchlist mutation broadcasts (e.g. from the hero's own
             // Watched button), flip the same flags on `heroItem` in place so the
@@ -239,6 +239,7 @@ struct SeriesDetailView: View {
                         // scroll drift the page down. Same animation as the
                         // Play-regains-focus case below.
                         onHeroActionFocused: {
+                            rearmEpisodeRailOnHeroFocusIfNeeded()
                             recedeModel.restore()
                             if reduceMotion {
                                 proxy.scrollTo(Self.topAnchorID, anchor: .top)
@@ -295,7 +296,8 @@ struct SeriesDetailView: View {
                     DetailExtrasView(
                         item: series,
                         leadingInset: PlozzTheme.Metrics.heroLeadingPadding,
-                        seriesRecedeModel: recedeModel
+                        seriesRecedeModel: recedeModel,
+                        revealsSeriesCastWithoutBrowser: revealsCastWithoutBrowser
                     )
                         .padding(.top, 32)
                 }
@@ -623,7 +625,12 @@ struct SeriesDetailView: View {
     /// it fires once the selected season's episodes arrive and again when the
     /// season changes — but not on every unrelated re-render.
     private var stillPrefetchKey: String {
-        "\(selectedSeasonID ?? "loose")#\(currentEpisodes.count)"
+        "\(series.sourceAccountID ?? "_")#\(series.id)#\(selectedSeasonID ?? "loose")#\(currentEpisodes.count)"
+    }
+
+    private var seasonSetKey: String {
+        let seasonIDs = seasons.map(\.id).joined(separator: ",")
+        return "\(series.sourceAccountID ?? "_")#\(series.id)#\(seasonIDs)"
     }
 
     /// Warms the **currently selected** season so its episode thumbnails are
@@ -697,14 +704,17 @@ struct SeriesDetailView: View {
     ///     to the view model so the rail re-renders seeding the now-decoded image.
     private func warmSeason(_ seasonID: String) async {
         guard let episodes = viewModel.episodes(for: seasonID) else { return }
-        var resolved = episodes
-        var changed = false
+        var resolvedPosterURLs: [String: URL] = [:]
         var heroResolved = false
         var heroURL: URL?
-        for index in resolved.indices {
+        for episode in episodes {
             if Task.isCancelled { return }
-            let episode = resolved[index]
-            if let url = episode.artworkCandidates(for: .landscape).first {
+            let candidates = MediaArtworkPrefetchPolicy.candidates(
+                for: episode,
+                style: .landscape,
+                spoilerSettings: spoilerSettings
+            )
+            if let url = candidates.first {
                 #if canImport(UIKit)
                 await ArtworkSession.warmLimiter.run {
                     _ = await ArtworkImageCache.shared.image(for: url, variant: .landscapeCard, background: true)
@@ -712,13 +722,17 @@ struct SeriesDetailView: View {
                 #endif
                 continue
             }
+            guard !(spoilerSettings.mode == .placeholder
+                    && spoilerSettings.shouldHideThumbnail(for: episode)) else { continue }
             guard episode.kind == .episode else { continue }
             // No server image: resolve a real still, falling back to the series
             // hero (resolved once and reused) so every episode is at least covered.
             var still = await ArtworkRouter.shared.artworkURL(.thumbnail, for: episode)
+            if Task.isCancelled { return }
             if still == nil {
                 if !heroResolved {
                     heroURL = await ArtworkRouter.shared.artworkURL(.hero, for: series)
+                    if Task.isCancelled { return }
                     heroResolved = true
                 }
                 still = heroURL ?? series.fallbackArtworkURL
@@ -729,12 +743,10 @@ struct SeriesDetailView: View {
                 _ = await ArtworkImageCache.shared.image(for: still, variant: .landscapeCard, background: true)
             }
             #endif
-            resolved[index].posterURL = still
-            changed = true
+            if Task.isCancelled { return }
+            resolvedPosterURLs[episode.id] = still
         }
-        if changed {
-            viewModel.setEpisodes(resolved, for: seasonID)
-        }
+        viewModel.mergeResolvedEpisodePosterURLs(resolvedPosterURLs, for: seasonID)
     }
 
     /// Decodes each episode's first displayed landscape candidate (its server
@@ -743,7 +755,11 @@ struct SeriesDetailView: View {
     private func warmPrimaryThumbnails(for episodes: [MediaItem]) {
         #if canImport(UIKit)
         for episode in episodes {
-            guard let url = episode.artworkCandidates(for: .landscape).first else { continue }
+            guard let url = MediaArtworkPrefetchPolicy.candidates(
+                for: episode,
+                style: .landscape,
+                spoilerSettings: spoilerSettings
+            ).first else { continue }
             ArtworkImageCache.shared.prefetch(url, variant: .landscapeCard)
         }
         #endif
@@ -756,6 +772,21 @@ struct SeriesDetailView: View {
             return episodes
         }
         return seasons.isEmpty ? stampedLooseEpisodes : []
+    }
+
+    private var revealsCastWithoutBrowser: Bool {
+        SeriesDetailBrowserPolicy.revealsCastWithoutBrowser(
+            childrenLoaded: viewModel.state.value?.childrenLoaded == true,
+            hasSeasons: !seasons.isEmpty,
+            hasEpisodes: !currentEpisodes.isEmpty
+        )
+    }
+
+    private func rearmEpisodeRailOnHeroFocusIfNeeded() {
+        guard SeriesDetailBrowserPolicy.rearmsEpisodeRailOnHeroFocus(
+            hasSeasons: !seasons.isEmpty
+        ) else { return }
+        episodeRailResetToken &+= 1
     }
 
     /// A representative tech-badge set (best resolution/HDR/audio) derived from
@@ -1011,6 +1042,20 @@ struct SeriesDetailView: View {
         updateRailTarget()
     }
 
+}
+
+enum SeriesDetailBrowserPolicy {
+    static func rearmsEpisodeRailOnHeroFocus(hasSeasons: Bool) -> Bool {
+        !hasSeasons
+    }
+
+    static func revealsCastWithoutBrowser(
+        childrenLoaded: Bool,
+        hasSeasons: Bool,
+        hasEpisodes: Bool
+    ) -> Bool {
+        childrenLoaded && !hasSeasons && !hasEpisodes
+    }
 }
 
 enum SeriesSeasonRevealEdge: Equatable {

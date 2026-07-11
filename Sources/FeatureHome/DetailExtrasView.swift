@@ -19,6 +19,9 @@ struct DetailExtrasView: View {
     /// Series pages supply their cosmetic recede model so only Cast participates
     /// in the browser transition. Movie detail leaves this nil and stays visible.
     var seriesRecedeModel: SeriesHeroRecedeModel? = nil
+    /// A series with a definitively empty season/episode browser has no lower
+    /// focus target that could trigger recede, so Cast must be available directly.
+    var revealsSeriesCastWithoutBrowser = false
 
     private var hasContent: Bool {
         !item.cast.isEmpty || !item.studios.isEmpty || !item.tags.isEmpty
@@ -29,7 +32,10 @@ struct DetailExtrasView: View {
             VStack(alignment: .leading, spacing: 28) {
                 if !item.cast.isEmpty {
                     CastRowView(people: item.cast, leadingInset: leadingInset)
-                        .modifier(SeriesCastRevealModifier(model: seriesRecedeModel))
+                        .modifier(SeriesCastRevealModifier(
+                            model: seriesRecedeModel,
+                            revealsWithoutBrowser: revealsSeriesCastWithoutBrowser
+                        ))
                 }
                 if !item.studios.isEmpty {
                     StudiosRow(studios: item.studios)
@@ -44,11 +50,12 @@ struct DetailExtrasView: View {
 
 private struct SeriesCastRevealModifier: ViewModifier {
     let model: SeriesHeroRecedeModel?
+    let revealsWithoutBrowser: Bool
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func body(content: Content) -> some View {
-        let revealed = model?.isReceded ?? true
+        let revealed = (model?.isReceded ?? true) || revealsWithoutBrowser
         content
             .opacity(revealed ? 1 : 0)
             .offset(y: revealed ? 0 : 96)

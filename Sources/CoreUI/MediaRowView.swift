@@ -393,7 +393,7 @@ public struct MediaRowView: View {
             let candidate = items[i]
             guard !prefetchedIDs.contains(candidate.id) else { continue }
             prefetchedIDs.insert(candidate.id)
-            for url in MediaRowArtworkPrefetchPolicy.candidates(
+            for url in MediaArtworkPrefetchPolicy.candidates(
                 for: candidate,
                 style: artworkStyle,
                 spoilerSettings: spoilerSettings
@@ -523,8 +523,8 @@ enum MediaRowFocusPolicy {
     }
 }
 
-enum MediaRowArtworkPrefetchPolicy {
-    static func candidates(
+public enum MediaArtworkPrefetchPolicy {
+    public static func candidates(
         for item: MediaItem,
         style: PosterCardView.Style,
         spoilerSettings: SpoilerSettings

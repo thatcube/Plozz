@@ -27,7 +27,7 @@ final class MediaRowPolicyTests: XCTestCase {
 
     func testPlaceholderModePrefetchesOnlySpoilerSafeFallbackArtwork() {
         let artwork = artworkURLs()
-        let candidates = MediaRowArtworkPrefetchPolicy.candidates(
+        let candidates = MediaArtworkPrefetchPolicy.candidates(
             for: episode(artwork: artwork),
             style: .landscape,
             spoilerSettings: SpoilerSettings(isEnabled: true, mode: .placeholder)
@@ -41,7 +41,7 @@ final class MediaRowPolicyTests: XCTestCase {
     func testBlurModePrefetchesRealArtworkNeededForBlur() {
         let artwork = artworkURLs()
         XCTAssertEqual(
-            MediaRowArtworkPrefetchPolicy.candidates(
+            MediaArtworkPrefetchPolicy.candidates(
                 for: episode(artwork: artwork),
                 style: .landscape,
                 spoilerSettings: SpoilerSettings(isEnabled: true, mode: .blur)
@@ -53,7 +53,7 @@ final class MediaRowPolicyTests: XCTestCase {
     func testWatchedEpisodePrefetchesRealArtworkInPlaceholderMode() {
         let artwork = artworkURLs()
         XCTAssertEqual(
-            MediaRowArtworkPrefetchPolicy.candidates(
+            MediaArtworkPrefetchPolicy.candidates(
                 for: episode(artwork: artwork, isPlayed: true),
                 style: .landscape,
                 spoilerSettings: SpoilerSettings(isEnabled: true, mode: .placeholder)

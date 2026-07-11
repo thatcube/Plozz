@@ -220,7 +220,6 @@ private struct ProviderChoiceGroup: View {
                 onSelect(.mediaShare)
             }
         }
-        .padding(.vertical, 12)
         .frame(width: 720)
         .background(
             RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
@@ -263,7 +262,7 @@ private struct ProviderChoiceRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(SettingsFocusButtonStyle(size: .contained))
-        .padding(.horizontal, 12)
+        .padding(12)
     }
 }
 

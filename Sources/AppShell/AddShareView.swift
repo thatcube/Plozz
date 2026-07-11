@@ -344,6 +344,7 @@ struct AddShareView: View {
             OnboardingHeader(title, subtitle: subtitle)
                 .frame(maxWidth: .infinity)
         }
+        .padding(.top, PlozzTheme.Spacing.large)
     }
 
     private func serverRowLabel(name: String, host: String?, icon: String = "externaldrive.connected.to.line.below.fill") -> some View {

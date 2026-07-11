@@ -165,6 +165,7 @@ public struct ServerPickerView: View {
             .buttonStyle(.bordered)
             .focused($focusedControl, equals: .rescan)
         }
+        .padding(.top, PlozzTheme.Spacing.large)
     }
 
     private var preferredInitialFocus: FocusTarget {

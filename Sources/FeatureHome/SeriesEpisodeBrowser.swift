@@ -165,18 +165,8 @@ private struct SeriesRecededLogo: View {
             }
             guard !Task.isCancelled, recedeModel.isReceded == shouldShow else { return }
             if shouldShow {
-                withAnimation(.easeOut(duration: 0.28)) {
+                withAnimation(.easeInOut(duration: 0.75)) {
                     logoVisible = true
-                }
-                // Keep opacity and offset in separate render transactions so tvOS
-                // cannot collapse both properties onto the faster fade animation.
-                do {
-                    try await Task.sleep(for: .milliseconds(32))
-                } catch {
-                    return
-                }
-                guard !Task.isCancelled, recedeModel.isReceded else { return }
-                withAnimation(.easeInOut(duration: 2.5)) {
                     logoAtRest = true
                 }
             } else {

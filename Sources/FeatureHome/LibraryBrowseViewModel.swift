@@ -163,6 +163,7 @@ public final class LibraryBrowseViewModel {
 
     /// Loads (or reloads) the first page and sizes the grid to the full library.
     public func loadFirstPage() async {
+        await noteInteractiveBrowseActivity()
         loadGeneration += 1
         let generation = loadGeneration
         state = .loading
@@ -331,6 +332,8 @@ public final class LibraryBrowseViewModel {
             visibleCellCountsByPage[page, default: 0] += 1
             updateTopVisibleIndex()
         }
+        await noteInteractiveBrowseActivity()
+        guard !Task.isCancelled, visibleIndices.contains(index) else { return }
         await ensurePageLoaded(page)
         let lookAhead = prefetchLookAheadPages(for: index, inPage: page)
         if lookAhead > 0 {
@@ -339,7 +342,7 @@ public final class LibraryBrowseViewModel {
             }
         }
         pruneInFlightPages(around: page, lookAhead: lookAhead)
-        lastAppearedIndex = index
+        if visibleIndices.contains(index) { lastAppearedIndex = index }
     }
 
     private func ensurePageLoaded(_ page: Int) async {
@@ -575,6 +578,11 @@ public final class LibraryBrowseViewModel {
     private func tagged(_ item: MediaItem) -> MediaItem {
         guard let sourceAccountID else { return item }
         return item.taggingSource(sourceAccountID)
+    }
+
+    private func noteInteractiveBrowseActivity() async {
+        guard let interactive = provider as? any InteractiveBrowseActivityReporting else { return }
+        await interactive.noteInteractiveBrowseActivity()
     }
 
     /// A fresh array of `count` empty placeholder slots. Each is a distinct

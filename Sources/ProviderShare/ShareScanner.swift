@@ -38,6 +38,7 @@ actor ShareScanner {
     private let store: ShareCatalogStore
     private let makeLister: @Sendable () -> ScanLister
     private let concurrency: Int
+    private let pacer: ShareScanPacer
     private let shareID: String
     private let name: String
     private var reporter: ShareScanReporter
@@ -54,11 +55,29 @@ actor ShareScanner {
     init(store: ShareCatalogStore, shareID: String = "", name: String = "",
          reporter: ShareScanReporter = .noop, concurrency: Int = 4,
          makeLister: @escaping @Sendable () -> ScanLister) {
+        self.init(
+            store: store,
+            shareID: shareID,
+            name: name,
+            reporter: reporter,
+            concurrency: concurrency,
+            pacer: ShareScanPacer(),
+            makeLister: makeLister
+        )
+    }
+
+    /// Test seam for deterministic pacing behavior; production uses `.shared`
+    /// through the source-compatible initializer above.
+    init(store: ShareCatalogStore, shareID: String = "", name: String = "",
+         reporter: ShareScanReporter = .noop, concurrency: Int = 4,
+         pacer: ShareScanPacer,
+         makeLister: @escaping @Sendable () -> ScanLister) {
         self.store = store
         self.shareID = shareID
         self.name = name
         self.reporter = reporter
         self.concurrency = max(1, concurrency)
+        self.pacer = pacer
         self.makeLister = makeLister
     }
 
@@ -123,6 +142,8 @@ actor ShareScanner {
         var frontier: [String] = [""] // "" == share root
         var dirsWalked = 0
         var filesFound = 0
+        let progressClock = ContinuousClock()
+        var lastProgressReport = progressClock.now
         // Set if ANY directory listing failed this pass (transient SMB timeout, auth
         // hiccup, permission-denied folder). A failed listing looks like an empty
         // folder, so pruning on a partial walk would delete still-present content and
@@ -173,18 +194,31 @@ actor ShareScanner {
                     if !result.assets.isEmpty {
                         filesFound += result.assets.count
                         await store.upsert(result.assets, scanID: scanID)
-                        reporter.scanProgress(shareID, filesFound)
+                    }
+                    let now = progressClock.now
+                    if dirsWalked == 1
+                        || lastProgressReport.duration(to: now) >= .milliseconds(250) {
+                        reporter.scanDetailedProgress(shareID, dirsWalked, filesFound)
+                        lastProgressReport = now
                     }
                     if Task.isCancelled { continue }   // stop dispatching; let in-flight drain
-                    spawnNext()
+                    // Never pause for browsing (which could starve a scan forever).
+                    // Instead, admit replacement directory requests at a bounded
+                    // slower rate while the user is actively navigating the share.
+                    if index < frontier.count {
+                        await pacer.paceIfBrowsing()
+                        spawnNext()
+                    }
                 }
             }
+
             if Task.isCancelled {
                 PlozzLog.boot("share.scan cancelled after \(dirsWalked) dirs, \(filesFound) files — no prune")
                 return
             }
             frontier = nextFrontier
         }
+        reporter.scanDetailedProgress(shareID, dirsWalked, filesFound)
 
         // Completed a full pass. Only prune (drop assets no longer on the share) when
         // EVERY directory listed cleanly — a partial walk (some listing failed) must
@@ -240,6 +274,7 @@ actor ShareScanner {
                 assets.append(asset(relPath: childPath, entry: entry))
             }
         }
+
         return DirResult(lister: lister, subdirs: subdirs, assets: assets, ok: true)
     }
 
@@ -308,5 +343,33 @@ actor ShareScanner {
         let next = current + 1
         await store.setMeta("scan_counter", String(next))
         return next
+    }
+}
+
+/// Bounded scan admission control shared by interactive ShareProvider requests
+/// and the background scanner. Recent navigation adds a small delay before each
+/// replacement directory request; continuous navigation still makes guaranteed
+/// progress because the delay is fixed rather than waiting for an idle window.
+actor ShareScanPacer {
+    private let activeWindow: Duration
+    private let activeDelay: Duration
+    private let clock = ContinuousClock()
+    private var lastInteractiveActivity: ContinuousClock.Instant?
+
+    init(activeWindow: Duration = .seconds(1), activeDelay: Duration = .milliseconds(60)) {
+        self.activeWindow = activeWindow
+        self.activeDelay = activeDelay
+    }
+
+    func noteInteractiveActivity() {
+        lastInteractiveActivity = clock.now
+    }
+
+    @discardableResult
+    func paceIfBrowsing() async -> Bool {
+        guard let lastInteractiveActivity,
+              lastInteractiveActivity.duration(to: clock.now) < activeWindow else { return false }
+        try? await Task.sleep(for: activeDelay)
+        return true
     }
 }

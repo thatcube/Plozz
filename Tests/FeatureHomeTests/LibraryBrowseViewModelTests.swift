@@ -35,6 +35,7 @@ final class LibraryBrowseViewModelTests: XCTestCase {
         XCTAssertNil(vm.item(at: 10), "Later items are placeholders until their page loads")
         XCTAssertEqual(provider.requestedPages.count, 1)
         XCTAssertEqual(provider.requestedPages.first?.startIndex, 0)
+        XCTAssertEqual(provider.interactiveBrowseActivityCount, 1)
     }
 
     func testCatalogRefreshReplacesStaleSparsePagesWithoutLoadingState() async {
@@ -82,6 +83,7 @@ final class LibraryBrowseViewModelTests: XCTestCase {
         XCTAssertNotNil(vm.item(at: 29))
         XCTAssertEqual(vm.item(at: 20)?.id, "i20")
         XCTAssertTrue(provider.requestedPages.contains { $0.startIndex == 20 })
+        XCTAssertGreaterThanOrEqual(provider.interactiveBrowseActivityCount, 2)
     }
 
     func testBackHalfOfPagePrefetchesNextPage() async {

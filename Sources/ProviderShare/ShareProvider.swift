@@ -255,7 +255,7 @@ public struct ShareProvider: MediaProvider {
 
     public func search(query: String, limit: Int) async throws -> [MediaItem] {
         // Indexed search over the catalog; empty until the first scan populates.
-        await stampWatchState(await catalog.search(query: query, limit: limit))
+        return await stampWatchState(await catalog.search(query: query, limit: limit))
     }
 
     // MARK: Playback
@@ -597,6 +597,12 @@ extension ShareProvider: CapabilityReporting {
     /// A media share is video-only: no music library, no server-backed remote
     /// subtitle search. Advertised explicitly so capability-gated UI is correct.
     public var capabilities: ProviderCapability { .video }
+}
+
+extension ShareProvider: InteractiveBrowseActivityReporting {
+    public func noteInteractiveBrowseActivity() async {
+        await ShareCatalogRegistry.shared.noteInteractiveActivity(accountKey: session.server.id)
+    }
 }
 
 extension ShareProvider: WatchStateProviding {

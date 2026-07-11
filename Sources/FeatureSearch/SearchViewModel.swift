@@ -156,6 +156,9 @@ public final class SearchViewModel {
                         return key.hasPrefix(prefix) ? String(key.dropFirst(prefix.count)) : nil
                     }
                     do {
+                        if let interactive = resolved.provider as? any InteractiveBrowseActivityReporting {
+                            await interactive.noteInteractiveBrowseActivity()
+                        }
                         let hits = try await resolved.provider.search(query: query, limit: perAccountLimit, excludingLibraries: disabledForAccount)
                         return (index, .success(hits.map { $0.taggingSource(accountID) }))
                     } catch let error as AppError {

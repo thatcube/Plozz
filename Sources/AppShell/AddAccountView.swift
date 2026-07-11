@@ -208,7 +208,7 @@ private struct ProviderChoiceColumn: View {
                 provider: .mediaShare,
                 title: "SMB Share",
                 height: 108,
-                markSize: 52
+                markSize: 76
             ) {
                 onSelect(.mediaShare)
             }
@@ -235,7 +235,7 @@ private struct ProviderChoiceCard: View {
                 Spacer(minLength: 24)
 
                 Image(systemName: "chevron.forward")
-                    .font(.title3.weight(.semibold))
+                    .font(.system(size: 22, weight: .semibold))
                     .foregroundStyle(.tertiary)
             }
             .padding(.horizontal, 36)

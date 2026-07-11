@@ -1276,6 +1276,17 @@ final class PlexAuthClientTests: XCTestCase {
         XCTAssertNil(query?.first(where: { $0.name == "strong" }))
     }
 
+    func testCreateStrongPinRequestsHostedAuthChallenge() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/api/v2/pins", json: #"{"id":424242,"code":"long-code","authToken":null}"#)
+
+        let pin = try await client(stub).createPin(strong: true)
+
+        XCTAssertEqual(pin.code, "long-code")
+        let query = stub.queryItems(forPathSuffix: "/api/v2/pins")
+        XCTAssertEqual(query?.first(where: { $0.name == "strong" })?.value, "true")
+    }
+
     func testPollPinPendingThenClaimed() async throws {
         let stub = StubHTTPClient()
         stub.stubSequence(pathSuffix: "/api/v2/pins/1", jsons: [

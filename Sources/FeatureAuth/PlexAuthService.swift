@@ -46,9 +46,10 @@ public struct PlexAuthService: Sendable {
         PlexAuthClient(deviceProfile: PlexDeviceProfile(clientIdentifier: deviceID), http: http)
     }
 
-    /// Issues a fresh PIN/code for the user to link at plex.tv/link.
-    public func begin() async throws -> PlexPinChallenge {
-        try await client.createPin()
+    /// Issues either a short manual-entry PIN or the strong challenge required
+    /// by Plex's hosted authorization page.
+    public func begin(strong: Bool = false) async throws -> PlexPinChallenge {
+        try await client.createPin(strong: strong)
     }
 
     /// Hosted Plex authorization page for the issued PIN. The QR code uses this

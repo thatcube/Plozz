@@ -55,16 +55,22 @@ public final class PlexAuthViewModel {
             do {
                 while true {
                     try Task.checkCancellation()
-                    let pin = try await service.begin()
+                    async let manualPinRequest = service.begin()
+                    async let hostedPinRequest = service.begin(strong: true)
+                    let (manualPin, hostedPin) = try await (manualPinRequest, hostedPinRequest)
                     try Task.checkCancellation()
                     let expiresAt = Date().addingTimeInterval(service.timeout)
                     self.phase = .awaitingLink(
-                        code: pin.code,
-                        authorizationURL: service.authorizationURL(for: pin),
+                        code: manualPin.code,
+                        authorizationURL: service.authorizationURL(for: hostedPin),
                         expiresAt: expiresAt
                     )
 
-                    switch try await Self.awaitLinkOrExpiry(service: service, pin: pin, expiresAt: expiresAt) {
+                    switch try await Self.awaitLinkOrExpiry(
+                        service: service,
+                        pins: [manualPin, hostedPin],
+                        expiresAt: expiresAt
+                    ) {
                     case let .linked(token):
                         try Task.checkCancellation()
                         self.authToken = token
@@ -106,15 +112,17 @@ public final class PlexAuthViewModel {
     /// so the screen can never get stranded on an expired code.
     private static func awaitLinkOrExpiry(
         service: PlexAuthService,
-        pin: PlexPinChallenge,
+        pins: [PlexPinChallenge],
         expiresAt: Date
     ) async throws -> LinkOutcome {
         try await withThrowingTaskGroup(of: LinkOutcome.self) { group in
-            group.addTask {
-                do {
-                    return .linked(try await service.awaitLink(for: pin))
-                } catch let error as AppError where error == .quickConnectExpired {
-                    return .expired
+            for pin in pins {
+                group.addTask {
+                    do {
+                        return .linked(try await service.awaitLink(for: pin))
+                    } catch let error as AppError where error == .quickConnectExpired {
+                        return .expired
+                    }
                 }
             }
             group.addTask {

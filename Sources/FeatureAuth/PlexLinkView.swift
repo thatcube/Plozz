@@ -121,16 +121,21 @@ public struct PlexLinkView: View {
                             .lineLimit(1)
                             .minimumScaleFactor(0.5)
 
-                        Text(code)
-                            .font(.plozzCode(size: 96))
-                            .tracking(12)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.6)
-                            .padding(.horizontal, 48)
-                            .padding(.vertical, 24)
-                            .background { codePanel }
+                        HStack(spacing: 32) {
+                            Text(code)
+                                .font(.plozzCode(size: 96))
+                                .tracking(12)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.6)
+                                .padding(.horizontal, 48)
+                                .padding(.vertical, 24)
+                                .background { codePanel }
 
-                        PlexExpiryCountdown(expiresAt: expiresAt, lifetime: viewModel.codeLifetime)
+                            PlexExpiryCountdown(
+                                expiresAt: expiresAt,
+                                lifetime: viewModel.codeLifetime
+                            )
+                        }
                     }
 
                     Spacer(minLength: 0)

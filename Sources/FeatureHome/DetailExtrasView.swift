@@ -51,7 +51,7 @@ private struct SeriesCastRevealModifier: ViewModifier {
         let revealed = model?.isReceded ?? true
         content
             .opacity(revealed ? 1 : 0)
-            .offset(y: revealed ? 0 : 48)
+            .offset(y: revealed ? 0 : 96)
             .disabled(!revealed)
             .accessibilityHidden(!revealed)
             .animation(

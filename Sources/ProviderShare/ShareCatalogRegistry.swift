@@ -92,7 +92,7 @@ actor ShareCatalogRegistry {
     /// touching the provider's catalog first (see `ShareProvider.rescan()`).
     func rescan(accountKey: String) {
         guard let scanner = scanners[accountKey], let enricher = enrichers[accountKey] else { return }
-        Task {
+        Task(priority: .utility) {
             await scanner.scan()
             await enricher.enrichPending()
         }
@@ -116,7 +116,7 @@ actor ShareCatalogRegistry {
         guard scanTasks[accountKey] == nil,
               let scanner = scanners[accountKey],
               let enricher = enrichers[accountKey] else { return }
-        scanTasks[accountKey] = Task { [weak self] in
+        scanTasks[accountKey] = Task(priority: .utility) { [weak self] in
             ShareBackgroundActivity.scanStarted()
             await scanner.scanIfStale()
             ShareBackgroundActivity.scanFinished()

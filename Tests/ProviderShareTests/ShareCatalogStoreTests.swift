@@ -29,6 +29,66 @@ final class ShareCatalogStoreTests: XCTestCase {
                      season: season, episode: episode)
     }
 
+    /// A large first-time regroup may take a few hundred milliseconds overall,
+    /// but must yield the catalog actor so a Movies-grid page can complete without
+    /// waiting for the whole regroup.
+    func testLargeMovieRegroupDoesNotBlockBrowseReads() async {
+        let store = ShareCatalogStore(accountKey: "perf", directory: tempDir())
+        let assets: [CatalogAsset] = (0..<15_000).map { index in
+            let title = "Movie \(index / 2)"
+            let year = 2000 + (index % 2)
+            return CatalogAsset(
+                relPath: "Movies/\(title) (\(year)) \(index).mkv",
+                basename: "\(title) (\(year)) \(index).mkv",
+                size: 1_000, modifiedAt: Date(), kind: .movie, library: .movies,
+                title: title, year: year, seriesTitle: nil, seriesKey: nil,
+                season: nil, episode: nil,
+                movieKey: ShareCatalogID.movieKey(fromTitle: title, year: year),
+                movieTitleKey: ShareCatalogID.seriesKey(fromTitle: title)
+            )
+        }
+        await store.upsert(assets, scanID: 1)
+
+        let clock = ContinuousClock()
+        let rebuildStart = clock.now
+        let rebuild = Task { await store.rebuildMovieGroups() }
+        await Task.yield()
+        let browseStart = clock.now
+        _ = await store.movies(offset: 0, limit: 60)
+        let browseDuration = browseStart.duration(to: clock.now)
+        await rebuild.value
+        let rebuildDuration = rebuildStart.duration(to: clock.now)
+        XCTAssertLessThan(
+            browseDuration,
+            .milliseconds(100),
+            "browse reads must interleave with a large end-of-scan regroup (regroup: \(rebuildDuration))"
+        )
+    }
+
+    /// One unusually large directory must not hold the catalog actor for its
+    /// entire insert; the chunked upsert yields between bounded transactions.
+    func testLargeDirectoryUpsertDoesNotBlockBrowseReads() async {
+        let store = ShareCatalogStore(accountKey: "perf-upsert", directory: tempDir())
+        await store.upsert([movie("Movies/Existing (2000).mkv", title: "Existing", year: 2000)], scanID: 1)
+        let assets: [CatalogAsset] = (0..<15_000).map { index in
+            movie("Movies/New \(index) (2020).mkv", title: "New \(index)", year: 2020)
+        }
+
+        let upsert = Task { await store.upsert(assets, scanID: 2) }
+        await Task.yield()
+        let clock = ContinuousClock()
+        let browseStart = clock.now
+        _ = await store.movies(offset: 0, limit: 60)
+        let browseDuration = browseStart.duration(to: clock.now)
+        await upsert.value
+
+        XCTAssertLessThan(
+            browseDuration,
+            .milliseconds(100),
+            "browse reads must interleave with a giant directory upsert"
+        )
+    }
+
     func testEmptyUntilPopulated() async {
         let store = ShareCatalogStore(accountKey: "a", directory: tempDir())
         let empty = await store.isEmpty()

@@ -28,6 +28,9 @@ actor ShareCatalogStore {
     // SQLite wants a destructor sentinel for transient (copied) bound text; not
     // exported into Swift, so reconstruct it.
     private static let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+    /// Bounded catalog writes keep the actor cooperative with Home/grid/search
+    /// reads while a large share is scanning.
+    private static let writeChunkSize = 200
 
     /// - Parameters:
     ///   - accountKey: stable per-share id (`server.id`) — names the DB file so two
@@ -122,6 +125,14 @@ actor ShareCatalogStore {
         }
         exec("CREATE INDEX IF NOT EXISTS idx_assets_movie_key ON assets(library, kind, movie_key);")
         exec("CREATE INDEX IF NOT EXISTS idx_assets_movie_group ON assets(library, kind, movie_group_key);")
+        exec("""
+        CREATE INDEX IF NOT EXISTS idx_assets_movie_logical_sort
+        ON assets(
+          library, kind,
+          COALESCE(movie_group_key, movie_key, rel_path),
+          sort_title
+        );
+        """)
     }
 
     // MARK: - Scan write path
@@ -129,10 +140,11 @@ actor ShareCatalogStore {
     /// Insert or update a batch of discovered assets under one scan id. Preserves
     /// `first_seen_at` for rows already present (so "date added" = first discovery,
     /// never a re-scan), and refreshes size/mtime/parse/library. Idempotent.
-    func upsert(_ assets: [CatalogAsset], scanID: Int64, now: Date = Date()) {
+    func upsert(_ assets: [CatalogAsset], scanID: Int64, now: Date = Date()) async {
         ensureOpen()
         guard db != nil, !assets.isEmpty else { return }
-        exec("BEGIN IMMEDIATE;")
+        let started = Date()
+        var slowestChunkMs = 0
         let sql = """
         INSERT INTO assets
           (rel_path, basename, size, modified_at, first_seen_at, last_scan,
@@ -155,31 +167,46 @@ actor ShareCatalogStore {
         """
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
-            exec("ROLLBACK;"); return
+            return
         }
         defer { sqlite3_finalize(stmt) }
-        for a in assets {
-            sqlite3_reset(stmt)
-            bindText(stmt, 1, a.relPath)
-            bindText(stmt, 2, a.basename)
-            sqlite3_bind_int64(stmt, 3, a.size)
-            sqlite3_bind_double(stmt, 4, a.modifiedAt.timeIntervalSince1970)
-            sqlite3_bind_double(stmt, 5, now.timeIntervalSince1970)
-            sqlite3_bind_int64(stmt, 6, scanID)
-            bindText(stmt, 7, a.kind.rawValue)
-            bindText(stmt, 8, a.library.rawValue)
-            bindText(stmt, 9, a.title)
-            bindText(stmt, 10, a.title.lowercased())
-            bindOptInt(stmt, 11, a.year)
-            bindOptText(stmt, 12, a.seriesTitle)
-            bindOptText(stmt, 13, a.seriesKey)
-            bindOptInt(stmt, 14, a.season)
-            bindOptInt(stmt, 15, a.episode)
-            bindOptText(stmt, 16, a.movieKey)
-            bindOptText(stmt, 17, a.movieTitleKey)
-            _ = sqlite3_step(stmt)
+
+        var index = 0
+        while index < assets.count {
+            let end = min(index + Self.writeChunkSize, assets.count)
+            let chunkStarted = Date()
+            exec("BEGIN IMMEDIATE;")
+            for a in assets[index..<end] {
+                sqlite3_reset(stmt)
+                bindText(stmt, 1, a.relPath)
+                bindText(stmt, 2, a.basename)
+                sqlite3_bind_int64(stmt, 3, a.size)
+                sqlite3_bind_double(stmt, 4, a.modifiedAt.timeIntervalSince1970)
+                sqlite3_bind_double(stmt, 5, now.timeIntervalSince1970)
+                sqlite3_bind_int64(stmt, 6, scanID)
+                bindText(stmt, 7, a.kind.rawValue)
+                bindText(stmt, 8, a.library.rawValue)
+                bindText(stmt, 9, a.title)
+                bindText(stmt, 10, a.title.lowercased())
+                bindOptInt(stmt, 11, a.year)
+                bindOptText(stmt, 12, a.seriesTitle)
+                bindOptText(stmt, 13, a.seriesKey)
+                bindOptInt(stmt, 14, a.season)
+                bindOptInt(stmt, 15, a.episode)
+                bindOptText(stmt, 16, a.movieKey)
+                bindOptText(stmt, 17, a.movieTitleKey)
+                _ = sqlite3_step(stmt)
+            }
+            exec("COMMIT;")
+            slowestChunkMs = max(slowestChunkMs, Int(Date().timeIntervalSince(chunkStarted) * 1_000))
+            index = end
+            if index < assets.count { await Task.yield() }
         }
-        exec("COMMIT;")
+        if slowestChunkMs >= 20 {
+            PlozzLog.boot(
+                "share.catalog slow upsert files=\(assets.count) total=\(Int(Date().timeIntervalSince(started) * 1_000))ms maxChunk=\(slowestChunkMs)ms"
+            )
+        }
     }
 
     /// Rebuild persisted logical movie groups after a CLEAN full scan. Files with
@@ -187,16 +214,21 @@ actor ShareCatalogStore {
     /// versions of one movie (metadata commonly differs by festival/theatrical
     /// year); distant remakes remain separate. Existing group ids win so adding a
     /// version later does not churn watch-state or deep-link ids.
-    func rebuildMovieGroups() {
+    func rebuildMovieGroups() async {
         ensureOpen()
         guard db != nil else { return }
+        let started = Date()
 
-        struct Row {
+        struct Row: Sendable {
             var relPath: String
             var movieKey: String
             var titleKey: String
             var year: Int?
             var existingGroup: String?
+        }
+        struct Assignment: Sendable {
+            var relPath: String
+            var group: String
         }
 
         var rows: [Row] = []
@@ -218,60 +250,88 @@ actor ShareCatalogStore {
             ))
         }
 
-        var assignments: [(relPath: String, group: String)] = []
-        for titleRows in Dictionary(grouping: rows, by: \.titleKey).values {
-            let known = titleRows.filter { $0.year != nil }.sorted {
-                if $0.year != $1.year { return ($0.year ?? 0) < ($1.year ?? 0) }
-                return $0.relPath < $1.relPath
-            }
-            var clusters: [[Row]] = []
-            for row in known {
-                if let last = clusters.indices.last,
-                   let firstYear = clusters[last].first?.year,
-                   let year = row.year,
-                   year - firstYear <= 1 {
-                    clusters[last].append(row)
-                } else {
-                    clusters.append([row])
-                }
-            }
-
-            let unknown = titleRows.filter { $0.year == nil }
-            if !unknown.isEmpty {
-                // A yearless variant can safely join when this title has only one
-                // known release cluster; otherwise keep it separate from remakes.
-                if clusters.count == 1 {
-                    clusters[0].append(contentsOf: unknown)
-                } else {
-                    clusters.append(unknown)
-                }
-            }
-
-            for cluster in clusters {
-                let existing = cluster.compactMap(\.existingGroup).sorted().first
-                let fallback = cluster.max {
+        // Sorting/grouping is pure CPU work. Run it off-actor so a grid/search/
+        // detail query can use the SQLite connection while a large catalog is
+        // computing assignments.
+        let computeStarted = Date()
+        let assignments: [Assignment] = await Task.detached(priority: .utility) {
+            var result: [Assignment] = []
+            for titleRows in Dictionary(grouping: rows, by: \.titleKey).values {
+                let known = titleRows.filter { $0.year != nil }.sorted {
                     if $0.year != $1.year { return ($0.year ?? 0) < ($1.year ?? 0) }
-                    return $0.movieKey > $1.movieKey
-                }?.movieKey
-                guard let group = existing ?? fallback else { continue }
-                assignments.append(contentsOf: cluster.map { ($0.relPath, group) })
-            }
-        }
+                    return $0.relPath < $1.relPath
+                }
+                var clusters: [[Row]] = []
+                for row in known {
+                    if let last = clusters.indices.last,
+                       let firstYear = clusters[last].first?.year,
+                       let year = row.year,
+                       year - firstYear <= 1 {
+                        clusters[last].append(row)
+                    } else {
+                        clusters.append([row])
+                    }
+                }
 
-        exec("BEGIN IMMEDIATE;")
+                let unknown = titleRows.filter { $0.year == nil }
+                if !unknown.isEmpty {
+                    if clusters.count == 1 {
+                        clusters[0].append(contentsOf: unknown)
+                    } else {
+                        clusters.append(unknown)
+                    }
+                }
+
+                for cluster in clusters {
+                    let existing = cluster.compactMap(\.existingGroup).sorted().first
+                    let fallback = cluster.max {
+                        if $0.year != $1.year { return ($0.year ?? 0) < ($1.year ?? 0) }
+                        return $0.movieKey > $1.movieKey
+                    }?.movieKey
+                    guard let group = existing ?? fallback else { continue }
+                    // Re-scans usually produce zero writes. Only changed/new group
+                    // members enter the bounded SQLite update phase.
+                    result.append(contentsOf: cluster.compactMap { row in
+                        row.existingGroup == group ? nil : Assignment(relPath: row.relPath, group: group)
+                    })
+                }
+            }
+            return result
+        }.value
+        let computeMs = Int(Date().timeIntervalSince(computeStarted) * 1_000)
+
+        guard !assignments.isEmpty else {
+            PlozzLog.boot(
+                "share.catalog regroup rows=\(rows.count) changed=0 compute=\(computeMs)ms total=\(Int(Date().timeIntervalSince(started) * 1_000))ms"
+            )
+            return
+        }
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, "UPDATE assets SET movie_group_key=? WHERE rel_path=?;", -1, &stmt, nil) == SQLITE_OK else {
-            exec("ROLLBACK;")
             return
         }
         defer { sqlite3_finalize(stmt) }
-        for assignment in assignments {
-            sqlite3_reset(stmt)
-            bindText(stmt, 1, assignment.group)
-            bindText(stmt, 2, assignment.relPath)
-            _ = sqlite3_step(stmt)
+
+        var index = 0
+        var slowestChunkMs = 0
+        while index < assignments.count {
+            let end = min(index + Self.writeChunkSize, assignments.count)
+            let chunkStarted = Date()
+            exec("BEGIN IMMEDIATE;")
+            for assignment in assignments[index..<end] {
+                sqlite3_reset(stmt)
+                bindText(stmt, 1, assignment.group)
+                bindText(stmt, 2, assignment.relPath)
+                _ = sqlite3_step(stmt)
+            }
+            exec("COMMIT;")
+            slowestChunkMs = max(slowestChunkMs, Int(Date().timeIntervalSince(chunkStarted) * 1_000))
+            index = end
+            if index < assignments.count { await Task.yield() }
         }
-        exec("COMMIT;")
+        PlozzLog.boot(
+            "share.catalog regroup rows=\(rows.count) changed=\(assignments.count) compute=\(computeMs)ms total=\(Int(Date().timeIntervalSince(started) * 1_000))ms maxChunk=\(slowestChunkMs)ms"
+        )
     }
 
     /// Delete rows not seen by `scanID` — assets removed from the share since the

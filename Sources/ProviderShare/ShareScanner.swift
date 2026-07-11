@@ -97,6 +97,7 @@ actor ShareScanner {
     func scan() async {
         if isRunning { return }
         isRunning = true
+        let started = Date()
         reporter.scanStarted(shareID, name)
 
         // Pre-build the pool of independent listers (each its own SMB connection).
@@ -199,7 +200,9 @@ actor ShareScanner {
         // Record the classifier the catalog was built with, so `scanIfStale` only
         // force-reparses once per classifier bump (and doesn't perpetually re-walk).
         await store.setMeta("parser_version", String(ShareMediaParser.classifierVersion))
-        PlozzLog.boot("share.scan done scanID=\(scanID) dirs=\(dirsWalked) files=\(filesFound) pruned=\(!anyListingFailed)")
+        PlozzLog.boot(
+            "share.scan done scanID=\(scanID) dirs=\(dirsWalked) files=\(filesFound) pruned=\(!anyListingFailed) elapsed=\(Int(Date().timeIntervalSince(started) * 1_000))ms"
+        )
     }
 
     /// Result of listing one directory: the connection it used (returned to the

@@ -149,6 +149,9 @@ struct SeriesDetailView: View {
     /// Scroll anchor for the hero, used to keep the page pinned to the top while
     /// initial focus lands on the bottom-anchored Play button.
     private static let topAnchorID = "series-hero-top"
+    /// The complete episode rail, centered identically when focus first enters
+    /// either Seasons or Episodes.
+    private static let browserFocusAnchorID = "series-episode-browser-focus"
 
     /// Named coordinate space anchored to the season bar's scroll viewport. In it the
     /// visible region is exactly `0...seasonBarViewportWidth`, so each chip's frame
@@ -269,8 +272,17 @@ struct SeriesDetailView: View {
                         series: series,
                         recedeModel: recedeModel,
                         showsSeasons: !seasons.isEmpty,
-                        seasonContent: { seasonTabBar },
-                        episodeContent: { episodeRail }
+                        focusAnchorID: Self.browserFocusAnchorID,
+                        seasonContent: {
+                            seasonTabBar {
+                                centerEpisodeBrowser(using: proxy)
+                            }
+                        },
+                        episodeContent: {
+                            episodeRail {
+                                centerEpisodeBrowser(using: proxy)
+                            }
+                        }
                     )
                     .padding(.top, -SeriesEpisodeBrowserLayout.heroOverlap)
 
@@ -310,9 +322,20 @@ struct SeriesDetailView: View {
         }
     }
 
+    /// Moves the episode rail to the one final browser position immediately as
+    /// focus enters either section. Both entry paths target the same fixed frame,
+    /// so Season → Episode has no second vertical movement and rapid DOWN-DOWN
+    /// cannot produce a different resting offset from a slow navigation.
+    private func centerEpisodeBrowser(using proxy: ScrollViewProxy) {
+        recedeModel.recede()
+        withAnimation(.smooth(duration: 0.55)) {
+            proxy.scrollTo(Self.browserFocusAnchorID, anchor: .center)
+        }
+    }
+
     // MARK: Season tabs
 
-    private var seasonTabBar: some View {
+    private func seasonTabBar(onFocusEntered: @escaping () -> Void) -> some View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 12) {
@@ -366,10 +389,12 @@ struct SeriesDetailView: View {
                     seasonBarEngaged = false
                     return
                 }
+                let isEntering = !seasonBarEngaged
                 // We're now inside the bar — open every chip to focus so left/right
                 // navigation between seasons works.
                 seasonBarEngaged = true
                 recedeModel.recede()
+                if isEntering { onFocusEntered() }
                 // Focus has genuinely left the episode rail (it's now on the bar), so
                 // tell the rail to re-arm its entry gate for the next down-press.
                 episodeRailResetToken += 1
@@ -507,7 +532,7 @@ struct SeriesDetailView: View {
 
     // MARK: Episode rail
 
-    private var episodeRail: some View {
+    private func episodeRail(onFocusEntered: @escaping () -> Void) -> some View {
         let episodes = currentEpisodes
         // The episode focus should land on when entering the rail / where it
         // pre-scrolls. We use the STABLE `railTargetID` (updated only on open,
@@ -535,6 +560,7 @@ struct SeriesDetailView: View {
             leadingInset: PlozzTheme.Metrics.heroLeadingPadding,
             onFocusEntered: {
                 recedeModel.recede()
+                onFocusEntered()
             },
             onFocusChange: { focused in
                 if let focused, heroItem.id != focused.id { heroItem = focused }

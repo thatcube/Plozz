@@ -23,19 +23,34 @@ final class SeriesHeroRecedeModel {
 }
 
 enum SeriesEpisodeBrowserLayout {
-    /// Pulls the stage just far enough into the full-screen hero for the episode
-    /// artwork to peek at the bottom without colliding with the bottom-anchored
-    /// hero action row. The reserved 200pt logo slot remains invisible at rest.
-    static let heroOverlap: CGFloat = 300
+    /// Pulls enough episode artwork above the fold to make the horizontal browser
+    /// unmistakable while the full-screen backdrop still owns the resting page.
+    static let heroOverlap: CGFloat = 440
+    /// The matching series-only lift for the bottom-anchored hero content. Keeping
+    /// this static preserves immutable focus geometry and leaves a clean gap between
+    /// the hero action row and Seasons despite the deeper browser overlap.
+    static let heroContentBottomLift: CGFloat = 140
+    /// The browser owns one complete viewport before Cast/extras begin. Besides
+    /// creating a deliberate episode-browsing page, this guarantees enough trailing
+    /// scroll runway to center the rail identically whether extras exist or not.
+    static var stageHeight: CGFloat {
+        #if canImport(UIKit)
+        UIScreen.main.bounds.height
+        #else
+        1080
+        #endif
+    }
 }
 
 /// One fixed-geometry stage for the receded series logo, Seasons, and Episodes.
 /// Its static overlap makes the episode row peek below the resting full-screen
-/// hero; native focus scrolling moves this whole composition to its final position.
+/// hero; one shared rail-center anchor moves this whole composition to its final
+/// position when either Seasons or Episodes first receives focus.
 struct SeriesEpisodeBrowser<SeasonContent: View, EpisodeContent: View>: View {
     let series: MediaItem
     let recedeModel: SeriesHeroRecedeModel
     let showsSeasons: Bool
+    let focusAnchorID: String
     @ViewBuilder let seasonContent: () -> SeasonContent
     @ViewBuilder let episodeContent: () -> EpisodeContent
 
@@ -50,8 +65,17 @@ struct SeriesEpisodeBrowser<SeasonContent: View, EpisodeContent: View>: View {
             }
 
             episodeContent()
+                // Reserve the complete standard episode-column rail even while a
+                // season's episodes are loading. Centering this stable wrapper gives
+                // Seasons and Episodes the exact same vertical destination.
+                .frame(minHeight: 520, alignment: .top)
+                .id(focusAnchorID)
         }
-        .frame(maxWidth: .infinity, minHeight: 760, alignment: .topLeading)
+        .frame(
+            maxWidth: .infinity,
+            minHeight: SeriesEpisodeBrowserLayout.stageHeight,
+            alignment: .topLeading
+        )
         .environment(\.plozzMetrics, .standard)
     }
 }

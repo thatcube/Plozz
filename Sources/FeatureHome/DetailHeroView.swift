@@ -360,9 +360,11 @@ struct DetailHeroView: View {
         // left. A non-full-height hero (a show) has rows beneath it and keeps the
         // plain inter-section `screenPadding`.
         let isFullScreenHero = heroHeightFraction >= 1.0
-        let bottomInset = isFullScreenHero
+        let baseBottomInset = isFullScreenHero
             ? Self.horizontalSafeAreaInset + PlozzTheme.Metrics.heroLeadingPadding
             : PlozzTheme.Metrics.screenPadding
+        let bottomInset = baseBottomInset
+            + (seriesRecedeModel == nil ? 0 : SeriesEpisodeBrowserLayout.heroContentBottomLift)
         // The leading-aligned content column. It is the ONLY thing that sizes the
         // hero, so the hero always reports the safe viewport width — never the
         // full panel — keeping its title/logo/Play on-screen and focusable.

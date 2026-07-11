@@ -427,7 +427,7 @@ public struct MediaRowView: View {
         // strand the focus indicator. The gate now re-arms only on `focusResetToken`
         // (focus actually left the row, up to the season bar).
         guard let newValue else { return }
-        onFocusEntered?()
+        if !focusEngaged { onFocusEntered?() }
         lastFocusedID = newValue
         if !focusEngaged,
            let target = gateTarget,

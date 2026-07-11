@@ -62,9 +62,6 @@ struct DetailHeroView: View {
     /// The currently-effective selected version id (drives the picker's label and
     /// the menu checkmark). `nil` falls back to the first/recommended version.
     var selectedVersionID: String? = nil
-    /// This device's capabilities, used to predict Direct Play vs Transcode for
-    /// each version in the picker (the creative compatibility badge).
-    var capabilities: MediaCapabilities = .detected()
     /// Invoked with the chosen `MediaVersion.id` when the user picks a version.
     var onSelectVersion: ((String) -> Void)? = nil
     /// The cross-server sources for this (possibly merged) title. When more than
@@ -700,8 +697,8 @@ struct DetailHeroView: View {
     /// section (which server hosts this title — primary first, one row per
     /// account, active one checkmarked; picking one retargets Play and repopulates
     /// the version list with that server's files) and a "Version" section (the
-    /// active server's editions/qualities with a predicted Direct Play / Transcode
-    /// badge for this device, active one checkmarked). Either section is omitted
+    /// active server's factual edition/quality labels, active one checkmarked).
+    /// Either section is omitted
     /// when it has only one option.
     ///
     /// The menu is extracted into a dedicated `Equatable` child view so that
@@ -718,7 +715,6 @@ struct DetailHeroView: View {
             versions: versions,
             selectedSourceAccountID: selectedSourceAccountID,
             selectedVersionID: selectedVersionID,
-            capabilities: capabilities,
             glyphSize: heroGlyphSize,
             iconSize: heroIconSize,
             onSelectSource: onSelectSource,
@@ -1026,7 +1022,6 @@ private struct HeroMoreMenu: View, Equatable {
     let versions: [MediaVersion]
     let selectedSourceAccountID: String?
     let selectedVersionID: String?
-    let capabilities: MediaCapabilities
     let glyphSize: CGFloat
     let iconSize: CGFloat
     let onSelectSource: ((String) -> Void)?
@@ -1038,7 +1033,6 @@ private struct HeroMoreMenu: View, Equatable {
             && lhs.versions == rhs.versions
             && lhs.selectedSourceAccountID == rhs.selectedSourceAccountID
             && lhs.selectedVersionID == rhs.selectedVersionID
-            && lhs.capabilities == rhs.capabilities
             && lhs.glyphSize == rhs.glyphSize
             && lhs.iconSize == rhs.iconSize
             && (lhs.onSelectSource == nil) == (rhs.onSelectSource == nil)
@@ -1071,12 +1065,10 @@ private struct HeroMoreMenu: View, Equatable {
                         Button {
                             onSelectVersion(version.id)
                         } label: {
-                            let badge = version.compatibility(with: capabilities).badge
-                            let suffix = badge.isEmpty ? "" : "  •  \(badge)"
                             if version.id == currentVersion?.id {
-                                Label(version.displayLabel + suffix, systemImage: "checkmark")
+                                Label(version.displayLabel, systemImage: "checkmark")
                             } else {
-                                Text(version.displayLabel + suffix)
+                                Text(version.displayLabel)
                             }
                         }
                     }

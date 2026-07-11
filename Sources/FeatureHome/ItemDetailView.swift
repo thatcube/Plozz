@@ -46,8 +46,8 @@ public struct ItemDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @FocusState private var emptyBackFocused: Bool
 
-    /// This device's capabilities, used to drive the smart default version and
-    /// the per-version Direct Play / Transcode prediction in the picker.
+    /// This device's capabilities, used only as a conservative ordering hint for
+    /// the smart default version/server. Actual delivery is resolved at play time.
     private let capabilities: MediaCapabilities
     /// Persists the user's per-title preferred version (creative addition), so a
     /// title reopens on the version they last chose rather than the default.
@@ -311,7 +311,6 @@ public struct ItemDetailView: View {
                         onPlayTrailer: viewModel.trailers.first.map { trailer in { onPlay(trailer) } },
                         versions: effectiveVersions,
                         selectedVersionID: effectiveVersionID,
-                        capabilities: capabilities,
                         onSelectVersion: { id in selectVersion(id, for: detail.item) },
                         sources: serverChoices,
                         selectedSourceAccountID: effectiveSource?.accountID,
@@ -495,8 +494,8 @@ public struct ItemDetailView: View {
     /// The server `Play` should target right now: the user's in-session server
     /// override, else the default source — which honors the **origin** when the
     /// detail was opened from a library tile (that library's server), otherwise
-    /// the cross-server best-source default (highest-quality Direct-Play option
-    /// this device can play) — else the primary. `nil` for a single-server title
+    /// the cross-server best-source default (locality, known native compatibility,
+    /// then quality) — else the primary. `nil` for a single-server title
     /// (no server picker; legacy version-only flow).
     ///
     /// Same-account duplicates (two Jellyfin items for the same film on one

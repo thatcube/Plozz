@@ -116,7 +116,8 @@ final class MediaVersionTests: XCTestCase {
     }
 
     func testCompatibilityTranscodeWhenHDRUnsupported() {
-        // A Dolby Vision file on a non-DoVi device must tone-map (transcode).
+        // Dolby Vision falls outside the default native profile. The provider or
+        // Plozzigen may still handle it without a server transcode.
         let dovi = MediaVersion(id: "1", height: 2160, videoCodec: "hevc", videoRange: "DOVI", audioCodec: "aac")
         XCTAssertEqual(dovi.compatibility(with: .default), .transcode)
 
@@ -126,7 +127,7 @@ final class MediaVersionTests: XCTestCase {
 
     func testCompatibilityTranscodeWhenVideoCodecUnsupported() {
         let av1 = MediaVersion(id: "1", height: 2160, videoCodec: "av1", videoRange: "SDR", audioCodec: "aac")
-        XCTAssertEqual(av1.compatibility(with: .default), .transcode) // default has no AV1
+        XCTAssertEqual(av1.compatibility(with: .default), .transcode) // default native profile has no AV1
         XCTAssertEqual(av1.compatibility(with: MediaCapabilities(supportsAV1: true)), .directPlay)
     }
 
@@ -136,17 +137,11 @@ final class MediaVersionTests: XCTestCase {
         XCTAssertEqual(dts.compatibility(with: MediaCapabilities(supportsDTSPassthrough: true)), .directPlay)
     }
 
-    func testCompatibilityBadgeStrings() {
-        XCTAssertEqual(VersionPlaybackCompatibility.directPlay.badge, "Direct Play")
-        XCTAssertEqual(VersionPlaybackCompatibility.transcode.badge, "Transcode")
-        XCTAssertEqual(VersionPlaybackCompatibility.unknown.badge, "")
-    }
-
     // MARK: - Recommended selection (smart default)
 
     func testRecommendedSelectionPicksBestDirectPlayable() {
-        // On a default (non-DoVi) device the 4K DoVi version transcodes, so the
-        // recommended default is the best version that *direct plays* — the 1080p.
+        // On a default (non-DoVi) profile, the conservative recommended default is
+        // the highest-quality known-native version — the 1080p.
         let versions = [
             MediaVersion(id: "4k", height: 2160, isDefault: true, videoCodec: "hevc", videoRange: "DOVI", audioCodec: "aac"),
             MediaVersion(id: "1080", height: 1080, videoCodec: "h264", videoRange: "SDR", audioCodec: "aac")

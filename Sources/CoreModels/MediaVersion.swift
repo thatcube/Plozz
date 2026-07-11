@@ -12,9 +12,9 @@ import Foundation
 /// Beyond the label/size the brief requires, this also carries the handful of
 /// technical facts (`videoCodec`, `videoRange`, `audioCodec`, `audioChannels`)
 /// needed to (a) render a tasteful "4K · Dolby Vision · Atmos" diff per row and
-/// (b) predict — against the running Apple TV's `MediaCapabilities` — whether a
-/// version will **Direct Play** or have to **Transcode** on *this* device, which
-/// powers the smart default selection and the per-row compatibility badge.
+/// (b) provide a conservative native-profile ordering hint. The actual delivery
+/// mode is known only after provider resolution and is shown in Playback
+/// Diagnostics, never guessed in the version menu.
 public struct MediaVersion: Codable, Hashable, Identifiable, Sendable {
     /// Provider media-source id; threaded into `playbackInfo(for:mediaSourceID:)`.
     public var id: String
@@ -282,33 +282,27 @@ public struct MediaVersion: Codable, Hashable, Identifiable, Sendable {
 
 // MARK: - Device compatibility prediction
 
-/// How a `MediaVersion` is predicted to play on a specific device, derived purely
-/// from the version's codec/range/audio facts and a `MediaCapabilities` snapshot.
+/// A conservative native-profile heuristic derived only from flattened
+/// codec/range/audio facts and a `MediaCapabilities` snapshot.
+///
+/// This is NOT the resolved playback outcome: it cannot account for container or
+/// subtitle constraints, a provider's final playback decision, server remuxing,
+/// or Plozzigen's broader on-device decode path. It may be used as an internal
+/// ordering hint, but must never be shown as "Direct Play" / "Transcode" in UI.
 public enum VersionPlaybackCompatibility: String, Sendable, Equatable {
-    /// Every stream is natively decodable/passable: the server can hand the file
-    /// over untouched (best quality, lowest server load).
+    /// The known flattened facts fit the native device profile.
     case directPlay
-    /// At least one stream (video codec, HDR range, or audio codec) isn't
-    /// supported by this device/route, so the server will have to transcode.
+    /// At least one known fact does not fit the native device profile. The provider
+    /// or Plozzigen may still play/remux/decode it without a server transcode.
     case transcode
     /// Not enough information to decide (e.g. the provider reported no codec).
     case unknown
-
-    /// A short tag for the picker row.
-    public var badge: String {
-        switch self {
-        case .directPlay: return "Direct Play"
-        case .transcode: return "Transcode"
-        case .unknown: return ""
-        }
-    }
 }
 
 public extension MediaVersion {
-    /// Predicts whether this version Direct Plays or Transcodes on the device
-    /// described by `capabilities`. Reuses the same policy helpers both providers
-    /// already use for their server device-profiles, so the prediction matches
-    /// what the server will actually decide.
+    /// Classifies the version against the native device profile. This is only an
+    /// ordering hint; see ``VersionPlaybackCompatibility`` for why it cannot
+    /// predict the resolved provider/Plozzigen playback mode.
     func compatibility(with capabilities: MediaCapabilities) -> VersionPlaybackCompatibility {
         // Without a video codec we can't reason about it.
         guard let videoCodec, let codec = DirectPlayVideoCodec(rawValue: videoCodec.lowercased()) else {
@@ -338,18 +332,18 @@ public extension MediaVersion {
 
 public extension Array where Element == MediaVersion {
     /// The version a freshly opened picker should select by default: the
-    /// **highest-quality version that Direct Plays** on this device, so the user
-    /// gets the best experience their Apple TV can actually present without a
-    /// server transcode. Falls back to the server default, then the
-    /// highest-quality version overall, then the first entry.
+    /// highest-quality version whose known facts fit the native device profile.
+    /// This is a conservative ordering hint, not a claim about the provider's
+    /// resolved delivery mode (Plozzigen may directly decode a version outside
+    /// that profile). Falls back to the server default, then highest quality.
     ///
     /// This is the heart of the "smart selection" creative addition — it turns a
     /// dumb list into a one-tap "right thing for *this* TV" while still letting
     /// the user override to any other version.
     func recommendedSelection(for capabilities: MediaCapabilities) -> MediaVersion? {
         guard !isEmpty else { return nil }
-        let directPlayable = filter { $0.compatibility(with: capabilities) == .directPlay }
-        if let best = directPlayable.max(by: { $0.qualityScore < $1.qualityScore }) {
+        let nativeCompatible = filter { $0.compatibility(with: capabilities) == .directPlay }
+        if let best = nativeCompatible.max(by: { $0.qualityScore < $1.qualityScore }) {
             return best
         }
         if let serverDefault = first(where: { $0.isDefault }) { return serverDefault }

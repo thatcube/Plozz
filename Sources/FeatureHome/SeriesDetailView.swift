@@ -372,6 +372,7 @@ struct SeriesDetailView: View {
             // can tell whether the active chip is already fully visible and, if not,
             // which edge it is clipped past.
             .onPreferenceChange(SeasonChipFramesKey.self) { seasonChipFrames = $0 }
+            .frame(height: SeriesEpisodeBrowserLayout.seasonBarHeight)
             // Never clip a focused chip's lift, shadow or border.
             .scrollClipDisabled()
             // Inset the whole scroll VIEWPORT to the hero keyline (rather than padding

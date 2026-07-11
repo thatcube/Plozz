@@ -29,12 +29,11 @@ enum SeriesEpisodeBrowserLayout {
     /// The matching series-only lift for the bottom-anchored hero content. Keeping
     /// this static preserves immutable focus geometry and leaves a clean gap between
     /// the hero action row and Seasons despite the deeper browser overlap.
-    static let heroContentBottomLift: CGFloat = 140
-    /// Closes the visual gap above Episodes without moving the episode rail's
-    /// full-width focus section into the Season bar. The matching increase in
-    /// `heroOverlap` preserves the Season bar's resting position while exposing
-    /// more episode artwork below the hero.
-    static let seasonContentShift: CGFloat = 100
+    static let heroContentBottomLift: CGFloat = 240
+    /// A real, fixed viewport for the horizontal tab rail. Constraining the
+    /// ScrollView itself removes its excess vertical proposal while keeping its
+    /// rendered frame and tvOS focus-section geometry identical.
+    static let seasonBarHeight: CGFloat = 88
     /// The browser owns one complete viewport before Cast/extras begin. Besides
     /// creating a deliberate episode-browsing page, the unused portion after the
     /// grouped browser is nonfocusable trailing runway. It centers the rail
@@ -69,8 +68,6 @@ struct SeriesEpisodeBrowser<SeasonContent: View, EpisodeContent: View>: View {
 
             if showsSeasons {
                 seasonContent()
-                    .padding(.top, SeriesEpisodeBrowserLayout.seasonContentShift)
-                    .padding(.bottom, -SeriesEpisodeBrowserLayout.seasonContentShift)
             }
 
             episodeContent()

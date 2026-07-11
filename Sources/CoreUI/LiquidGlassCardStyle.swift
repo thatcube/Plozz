@@ -33,7 +33,7 @@ public struct PlozzGlassCardModifier: ViewModifier {
     private var focusedGlassBacking: Color {
         guard isFocused else { return .clear }
         if addsFocusHaloBacking {
-            return palette.isLight ? .black.opacity(0.25) : .white.opacity(0.06)
+            return .red
         }
         return palette.isLight ? palette.cardOpaqueSurface : .clear
     }
@@ -59,11 +59,14 @@ public struct PlozzGlassCardModifier: ViewModifier {
                 in: .rect(cornerRadius: cornerRadius)
             )
             .background {
-                // Focus halos get a subtle opposing-tone wash behind their glass:
-                // white on dark/OLED, black on Light. This keeps the translucent
-                // ring visible without making it opaque. Full cards retain their
-                // existing Light-mode backing.
-                shape.fill(focusedGlassBacking)
+                // Full focused cards keep their existing Light-mode backing behind
+                // the glass. Focus halos use the overlay below instead.
+                shape.fill(addsFocusHaloBacking ? .clear : focusedGlassBacking)
+            }
+            .overlay {
+                // Diagnostic: render the halo wash above adaptive Liquid Glass so
+                // its shared Home/library path is unmistakable on device.
+                shape.fill(addsFocusHaloBacking ? focusedGlassBacking : .clear)
             }
     }
 

@@ -157,11 +157,6 @@ public struct PlexLinkView: View {
             ServerList(servers: servers, selected: $selectedServerIDs)
                 .onAppear { seedSelectionIfNeeded(servers) }
 
-        case .success:
-            Label("Signed in!", systemImage: "checkmark.circle.fill")
-                .font(.title)
-                .foregroundStyle(.green)
-
         case let .error(message):
             VStack(spacing: 12) {
                 Image(systemName: "exclamationmark.triangle.fill")

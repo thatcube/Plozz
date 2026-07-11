@@ -17,7 +17,6 @@ public final class PlexAuthViewModel {
         case awaitingLink(code: String, authorizationURL: URL, expiresAt: Date)
         case loadingServers
         case selectingServer([PlexServerCandidate])
-        case success
         case error(String)
     }
 
@@ -172,7 +171,6 @@ public final class PlexAuthViewModel {
                     sessions.append(try await self.service.makeSession(for: candidate, authToken: token))
                 }
                 try Task.checkCancellation()
-                self.phase = .success
                 if sessions.count == 1 {
                     self.onAuthenticated(sessions[0])
                 } else {
@@ -191,7 +189,6 @@ public final class PlexAuthViewModel {
     private func finish(with candidate: PlexServerCandidate, token: String) async throws {
         let session = try await service.makeSession(for: candidate, authToken: token)
         try Task.checkCancellation()
-        phase = .success
         onAuthenticated(session)
     }
 

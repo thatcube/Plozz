@@ -1541,9 +1541,6 @@ public final class AppState {
     /// batch. The first server drives the identity used downstream.
     public func didAuthenticatePlexMany(_ sessions: [UserSession]) {
         guard let first = sessions.first else { return }
-        // Drive `.serverSelected` first so the later library/auth transitions are
-        // legal (mirrors `didAuthenticatePlex`).
-        apply(.serverSelected(first.server))
 
         let isFirstRun = accounts.isEmpty && !profilesModel.firstRunProfileSetupComplete
         var addedIDs: [String] = []
@@ -1742,13 +1739,11 @@ public final class AppState {
 
     /// Completes a Plex sign-in started from the provider chooser.
     ///
-    /// The Plex PIN-link flow resolves the chosen server only *after* the user
-    /// links the code, so — unlike the Jellyfin path — no server was selected up
-    /// front. Drive the state machine through `.serverSelected` first so the
-    /// subsequent `.accountAuthenticated` transition is legal, then persist the
-    /// account exactly like any other provider.
+    /// The Plex PIN-link flow resolves the chosen server inside the provider
+    /// picker. Keep that picker onscreen while the account and Home users resolve,
+    /// then transition directly to the real next step; materialising the generic
+    /// `.authenticating` page here produced two rapid full-page transitions.
     public func didAuthenticatePlex(_ session: UserSession) {
-        apply(.serverSelected(session.server))
         didAuthenticate(session)
     }
 

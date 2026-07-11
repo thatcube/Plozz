@@ -142,7 +142,7 @@ struct AddAccountView: View {
         switch phase {
         case .idle, .requesting:
             return
-        case .awaitingLink, .loadingServers, .selectingServer, .success, .error:
+        case .awaitingLink, .loadingServers, .selectingServer, .error:
             isPreparingPlex = false
             transition(to: .plex, direction: .forward)
         }

@@ -136,13 +136,17 @@ public struct SessionStateMachine: Sendable {
         case (.onboarding(.authenticating, _), .accountAuthenticated):
             return .ready
         // A Plex account with 2+ Home users needs the "Which Plex user are you?"
-        // step. There is now ≥1 account behind it, so `canReturnToApp` is true.
-        case (.onboarding(.authenticating, _), .plexUserSelectionRequired):
+        // step. Plex resolves its server inside the provider flow, so it can
+        // arrive here directly from the provider picker without materialising a
+        // throwaway `.authenticating` page.
+        case (.onboarding(.selectingServer, _), .plexUserSelectionRequired),
+             (.onboarding(.authenticating, _), .plexUserSelectionRequired):
             return .onboarding(.selectPlexUser, canReturnToApp: true)
         // One or more accounts were persisted — show the "choose your libraries"
-        // step. Reachable straight from auth (Jellyfin, or Plex with <2 Home
-        // users) or after the Plex-user pick. There is now ≥1 account behind it.
-        case (.onboarding(.authenticating, _), .librarySelectionRequired),
+        // step. Plex can resolve directly from the provider picker; Jellyfin
+        // arrives from its dedicated authentication page.
+        case (.onboarding(.selectingServer, _), .librarySelectionRequired),
+             (.onboarding(.authenticating, _), .librarySelectionRequired),
              (.onboarding(.selectPlexUser, _), .librarySelectionRequired):
             return .onboarding(.selectLibraries, canReturnToApp: true)
         // Leaving the library step: first-ever account on a fresh install detours
@@ -159,7 +163,8 @@ public struct SessionStateMachine: Sendable {
         case (.onboarding(.authenticating, _), .accountAuthenticatedNeedsProfile),
              (.onboarding(.selectPlexUser, _), .accountAuthenticatedNeedsProfile):
             return .onboarding(.enableProfilesPrompt, canReturnToApp: true)
-        case let (.onboarding(.authenticating, canReturn), .authenticationFailed(error)):
+        case let (.onboarding(.selectingServer, canReturn), .authenticationFailed(error)),
+             let (.onboarding(.authenticating, canReturn), .authenticationFailed(error)):
             return .failed(error, canReturnToApp: canReturn)
 
         // Plex-user pick on a *later* add (not first run) goes straight to the app.

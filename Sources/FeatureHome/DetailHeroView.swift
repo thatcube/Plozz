@@ -1173,10 +1173,13 @@ private struct SeriesHeroFocusProxy: View {
             .focusable(true)
             .focused($focused)
             .focusEffectDisabled()
-            .opacity(0.001)
             .disabled(!model.isReceded)
             .padding(.leading, PlozzTheme.Metrics.heroLeadingPadding)
             .padding(.trailing, PlozzTheme.Metrics.screenPadding)
+            // Stand in for the receded action row as the same full-width focus
+            // section, so UP from any Season chip has a section to enter.
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .focusSection()
             // Match the real action row's bottom band. This keeps the proxy
             // strictly above Seasons/Episodes instead of inserting an invisible
             // focusable between them.
@@ -1184,8 +1187,12 @@ private struct SeriesHeroFocusProxy: View {
             .onChange(of: focused) { _, isFocused in
                 guard isFocused else { return }
                 model.restore()
-                playButtonFocus?.wrappedValue = true
                 onRestore()
+                // The action row becomes focusable after the recede-state update
+                // commits. Hand focus to Play on the following run-loop turn.
+                DispatchQueue.main.async {
+                    playButtonFocus?.wrappedValue = true
+                }
             }
     }
 }

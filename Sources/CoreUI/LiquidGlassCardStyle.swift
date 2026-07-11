@@ -33,7 +33,7 @@ public struct PlozzGlassCardModifier: ViewModifier {
     private var focusedGlassBacking: Color {
         guard isFocused else { return .clear }
         if addsFocusHaloBacking {
-            return .red
+            return palette.isLight ? .black.opacity(0.25) : .white.opacity(0.06)
         }
         return palette.isLight ? palette.cardOpaqueSurface : .clear
     }
@@ -64,8 +64,8 @@ public struct PlozzGlassCardModifier: ViewModifier {
                 shape.fill(addsFocusHaloBacking ? .clear : focusedGlassBacking)
             }
             .overlay {
-                // Diagnostic: render the halo wash above adaptive Liquid Glass so
-                // its shared Home/library path is unmistakable on device.
+                // Native Liquid Glass can hide a wash placed behind it, especially
+                // in Light mode, so halo contrast is composited above the glass.
                 shape.fill(addsFocusHaloBacking ? focusedGlassBacking : .clear)
             }
     }

@@ -58,37 +58,42 @@ struct AddAccountView: View {
     var body: some View {
         ZStack {
             if pageIsVisible {
-                switch choice {
-                case .none:
-                    chooser
-                        .transition(pageTransition)
-                case .jellyfin:
-                    ServerPickerView(
-                        signedInServers: signedInServers.filter { $0.server.provider == .jellyfin },
-                        onBack: navigateBackToChooser
-                    ) { onJellyfinServerSelected($0) }
-                        .transition(pageTransition)
-                case .plex:
-                    PlexLinkView(
-                        viewModel: PlexAuthViewModel(
-                            service: PlexAuthService(deviceID: deviceID),
-                            onAuthenticated: onPlexAuthenticated,
-                            onAuthenticatedMany: onPlexAuthenticatedMany
-                        ),
-                        onCancel: navigateBackToChooser
-                    )
-                    .transition(pageTransition)
-                case .mediaShare:
-                    AddShareView(
-                        onBack: navigateBackToChooser,
-                        onConfigured: onShareConfigured
-                    )
-                    .transition(pageTransition)
+                ZStack {
+                    pageContent
+                        .transaction { $0.animation = nil }
                 }
+                .transition(pageTransition)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipped()
+    }
+
+    @ViewBuilder
+    private var pageContent: some View {
+        switch choice {
+        case .none:
+            chooser
+        case .jellyfin:
+            ServerPickerView(
+                signedInServers: signedInServers.filter { $0.server.provider == .jellyfin },
+                onBack: navigateBackToChooser
+            ) { onJellyfinServerSelected($0) }
+        case .plex:
+            PlexLinkView(
+                viewModel: PlexAuthViewModel(
+                    service: PlexAuthService(deviceID: deviceID),
+                    onAuthenticated: onPlexAuthenticated,
+                    onAuthenticatedMany: onPlexAuthenticatedMany
+                ),
+                onCancel: navigateBackToChooser
+            )
+        case .mediaShare:
+            AddShareView(
+                onBack: navigateBackToChooser,
+                onConfigured: onShareConfigured
+            )
+        }
     }
 
     private var chooser: some View {

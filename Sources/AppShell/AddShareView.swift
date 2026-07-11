@@ -28,7 +28,19 @@ struct AddShareView: View {
     @State private var viewModel = AddShareViewModel()
     @State private var displayName = ""
     @FocusState private var focusedField: Field?
-    private enum Field { case host, port, username, password, share, name }
+    private enum Field: Hashable {
+        case back
+        case rescan
+        case server(String)
+        case host
+        case port
+        case connect
+        case username
+        case password
+        case share
+        case shareOption(String)
+        case name
+    }
 
     var body: some View {
         ScrollView {
@@ -44,10 +56,16 @@ struct AddShareView: View {
             .padding(.vertical, 32)
         }
         .scrollClipDisabled()
+        .modifier(VerticalScrollEdgeEffectHidden())
+        .defaultFocus($focusedField, .back)
         .onExitCommand {
             if viewModel.step == .chooseShare { viewModel.backToServers() } else { onBack() }
         }
-        .onAppear { viewModel.startScan() }
+        .onAppear {
+            viewModel.startScan()
+            focusedField = .back
+        }
+        .onChange(of: viewModel.step) { _, _ in focusedField = .back }
         .onDisappear { viewModel.stopScan() }
     }
 
@@ -66,6 +84,7 @@ struct AddShareView: View {
                         Label("Rescan", systemImage: "arrow.clockwise")
                     }
                     .buttonStyle(.bordered)
+                    .focused($focusedField, equals: .rescan)
                 }
             )
 
@@ -87,6 +106,7 @@ struct AddShareView: View {
                                     serverRowLabel(name: server.name, host: server.host)
                                 }
                                 .buttonStyle(SettingsFocusButtonStyle(size: .prominent))
+                                .focused($focusedField, equals: .server(server.id))
                             }
                         }
                     }
@@ -111,6 +131,7 @@ struct AddShareView: View {
                         .onSubmit { viewModel.connectManualHost() }
                     Button("Connect") { viewModel.connectManualHost() }
                         .disabled(!viewModel.canConnectManualHost)
+                        .focused($focusedField, equals: .connect)
                 }
             }
         }
@@ -196,6 +217,7 @@ struct AddShareView: View {
                                 serverRowLabel(name: share, host: nil, icon: "folder")
                             }
                             .buttonStyle(SettingsFocusButtonStyle(size: .prominent))
+                            .focused($focusedField, equals: .shareOption(share))
                         }
                     }
                 }
@@ -303,6 +325,7 @@ struct AddShareView: View {
                     Label("Back", systemImage: "chevron.backward")
                 }
                 .buttonStyle(.bordered)
+                .focused($focusedField, equals: .back)
                 Spacer(minLength: 24)
                 trailing()
             }
@@ -394,6 +417,17 @@ private struct SharePanel<Content: View, Accessory: View>: View {
             RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
                 .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
         )
+    }
+}
+
+private struct VerticalScrollEdgeEffectHidden: ViewModifier {
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(tvOS 26.0, *) {
+            content.scrollEdgeEffectHidden(for: .vertical)
+        } else {
+            content
+        }
     }
 }
 

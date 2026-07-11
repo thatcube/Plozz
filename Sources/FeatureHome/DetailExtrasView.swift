@@ -58,7 +58,7 @@ private struct SeriesCastRevealModifier: ViewModifier {
                 reduceMotion
                     ? nil
                     : (revealed
-                        ? .smooth(duration: 0.58).delay(0.28)
+                        ? .smooth(duration: 0.83).delay(0.28)
                         : .easeOut(duration: 0.14)),
                 value: revealed
             )

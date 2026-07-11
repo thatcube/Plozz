@@ -84,7 +84,7 @@ public struct QuickConnectView: View {
                 .font(.title2)
 
         case let .awaitingApproval(code, expiresAt):
-            VStack(spacing: 28) {
+            HStack(spacing: 32) {
                 Text(code)
                     .font(.plozzCode(size: 96))
                     .tracking(12)

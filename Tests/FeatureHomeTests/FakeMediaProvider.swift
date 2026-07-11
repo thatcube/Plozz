@@ -15,7 +15,7 @@ import CoreModels
 /// `stateLock`. (Production resolves a *distinct* provider per account, so this
 /// sharing — and the race it exposes — is unique to the tests.) The lock is
 /// never held across an `await`.
-final class FakeMediaProvider: MediaProvider, @unchecked Sendable {
+final class FakeMediaProvider: MediaProvider, InteractiveBrowseActivityReporting, @unchecked Sendable {
     let kind: ProviderKind = .jellyfin
     let session: UserSession
 
@@ -52,11 +52,17 @@ final class FakeMediaProvider: MediaProvider, @unchecked Sendable {
     var alwaysFail = false
     private var _requestedPages: [PageRequest] = []
     var requestedPages: [PageRequest] { withLock { _requestedPages } }
+    private var _interactiveBrowseActivityCount = 0
+    var interactiveBrowseActivityCount: Int { withLock { _interactiveBrowseActivityCount } }
     /// Optional hook called as soon as `items(in:page:)` is requested.
     var onItemsRequest: (@Sendable (PageRequest) -> Void)?
     /// Optional per-page async hook that runs before the page response is returned.
     /// Useful for tests that need to hold/cancel a page load while it is in-flight.
     var pageHooks: [Int: @Sendable () async throws -> Void] = [:]
+
+    func noteInteractiveBrowseActivity() async {
+        withLock { _interactiveBrowseActivityCount += 1 }
+    }
     /// Start indices whose page request was cancelled while awaiting `pageHooks`.
     private var _cancelledPageStartIndices: [Int] = []
     var cancelledPageStartIndices: [Int] { withLock { _cancelledPageStartIndices } }

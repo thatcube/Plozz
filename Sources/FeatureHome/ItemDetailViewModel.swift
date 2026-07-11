@@ -343,6 +343,9 @@ public final class ItemDetailViewModel {
             await refreshDiscoveryStatus()
             return
         }
+        if let interactive = provider as? any InteractiveBrowseActivityReporting {
+            await interactive.noteInteractiveBrowseActivity()
+        }
         alternateSourceEnrichmentTask?.cancel()
         alternateSourceEnrichmentTask = nil
         enrichmentTask?.cancel()

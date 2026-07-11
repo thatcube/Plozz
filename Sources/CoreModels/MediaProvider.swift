@@ -201,6 +201,14 @@ public protocol MediaProvider: Sendable {
     var connectionLocality: SourceLocality { get }
 }
 
+/// Optional provider capability used by UI surfaces to report genuine user
+/// browsing. Background indexers/fan-out never call this protocol, so providers
+/// can prioritize interactive work without mistaking internal requests for user
+/// activity.
+public protocol InteractiveBrowseActivityReporting: Sendable {
+    func noteInteractiveBrowseActivity() async
+}
+
 // MARK: - Optional subtitle capability defaults
 //
 // Providers that don't support remote subtitle search/download (or test

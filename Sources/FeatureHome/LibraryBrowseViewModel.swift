@@ -163,6 +163,7 @@ public final class LibraryBrowseViewModel {
 
     /// Loads (or reloads) the first page and sizes the grid to the full library.
     public func loadFirstPage() async {
+        await noteInteractiveBrowseActivity()
         loadGeneration += 1
         let generation = loadGeneration
         state = .loading
@@ -326,6 +327,7 @@ public final class LibraryBrowseViewModel {
     /// page) so content arrives just ahead of the user's scroll.
     public func itemAppeared(at index: Int) async {
         guard !Task.isCancelled, state.value != nil, index >= 0, index < totalCount else { return }
+        await noteInteractiveBrowseActivity()
         let page = pageForIndex(index)
         if visibleIndices.insert(index).inserted {
             visibleCellCountsByPage[page, default: 0] += 1
@@ -575,6 +577,11 @@ public final class LibraryBrowseViewModel {
     private func tagged(_ item: MediaItem) -> MediaItem {
         guard let sourceAccountID else { return item }
         return item.taggingSource(sourceAccountID)
+    }
+
+    private func noteInteractiveBrowseActivity() async {
+        guard let interactive = provider as? any InteractiveBrowseActivityReporting else { return }
+        await interactive.noteInteractiveBrowseActivity()
     }
 
     /// A fresh array of `count` empty placeholder slots. Each is a distinct

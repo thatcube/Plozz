@@ -13,6 +13,7 @@ actor ShareCatalogRegistry {
     private var stores: [String: ShareCatalogStore] = [:]
     private var scanners: [String: ShareScanner] = [:]
     private var enrichers: [String: ShareEnricher] = [:]
+    private var pacers: [String: ShareScanPacer] = [:]
     private var scanTasks: [String: Task<Void, Never>] = [:]
     /// Where scan/enrich progress is reported for the Home banner + Settings.
     /// Wired once by the app (`AppState`); `.noop` until then (tests/previews).
@@ -49,6 +50,11 @@ actor ShareCatalogRegistry {
             stores[accountKey] = created
             return created
         }()
+        let pacer = pacers[accountKey] ?? {
+            let created = ShareScanPacer()
+            pacers[accountKey] = created
+            return created
+        }()
 
         if scanners[accountKey] == nil {
             // A factory of independent scan connections: the SMB library is serial
@@ -64,7 +70,7 @@ actor ShareCatalogRegistry {
             }
             scanners[accountKey] = ShareScanner(
                 store: store, shareID: accountKey, name: displayName,
-                reporter: reporter, makeLister: makeLister
+                reporter: reporter, pacer: pacer, makeLister: makeLister
             )
         }
         if enrichers[accountKey] == nil {
@@ -107,6 +113,15 @@ actor ShareCatalogRegistry {
     func enrichItem(accountKey: String, itemID: String) {
         guard let enricher = enrichers[accountKey] else { return }
         Task { await enricher.enrichOne(itemID: itemID) }
+    }
+
+    func noteInteractiveActivity(accountKey: String) async {
+        let pacer = pacers[accountKey] ?? {
+            let created = ShareScanPacer()
+            pacers[accountKey] = created
+            return created
+        }()
+        await pacer.noteInteractiveActivity()
     }
 
     /// Spawn a throttled scan attempt (then an enrichment pass) unless one is

@@ -13,6 +13,9 @@ public struct ShareScanState: Sendable, Equatable {
     public var isEnriching: Bool
     /// Items discovered so far in the current/last scan (for optional detail).
     public var itemsFound: Int
+    /// Directories listed so far. This advances even through folders with no media,
+    /// so a slow walk never looks frozen merely because the item count is unchanged.
+    public var directoriesScanned: Int
     /// Items enriched so far in the current enrichment pass.
     public var enrichDone: Int
     /// Total items in the current enrichment pass (0 until a pass advertises one).
@@ -21,12 +24,14 @@ public struct ShareScanState: Sendable, Equatable {
     public var lastScanAt: Date?
 
     public init(name: String, isScanning: Bool = false, isEnriching: Bool = false,
-                itemsFound: Int = 0, enrichDone: Int = 0, enrichTotal: Int = 0,
+                itemsFound: Int = 0, directoriesScanned: Int = 0,
+                enrichDone: Int = 0, enrichTotal: Int = 0,
                 lastScanAt: Date? = nil) {
         self.name = name
         self.isScanning = isScanning
         self.isEnriching = isEnriching
         self.itemsFound = itemsFound
+        self.directoriesScanned = directoriesScanned
         self.enrichDone = enrichDone
         self.enrichTotal = enrichTotal
         self.lastScanAt = lastScanAt
@@ -55,6 +60,10 @@ public struct ShareScanState: Sendable, Equatable {
     /// and "1,000 of 1,000" would differ in width at the thousands boundary.)
     public var progressDetail: String? {
         if isScanning {
+            if directoriesScanned > 0, itemsFound > 0 {
+                return "\(Self.decimal(directoriesScanned)) folders · \(Self.decimal(itemsFound)) items"
+            }
+            if directoriesScanned > 0 { return "\(Self.decimal(directoriesScanned)) folders" }
             return itemsFound > 0 ? "\(Self.decimal(itemsFound)) items" : nil
         }
         if isEnriching, enrichTotal > 0 {
@@ -112,7 +121,7 @@ public final class ShareScanStatusModel {
     /// One reported scan/enrich event (see `reporter()`).
     enum Event: Sendable {
         case scanStarted(id: String, name: String)
-        case scanProgress(id: String, items: Int)
+        case scanProgress(id: String, directories: Int, items: Int)
         case scanFinished(id: String)
         case enrichStarted(id: String, total: Int)
         case enrichProgress(id: String, done: Int)
@@ -123,7 +132,8 @@ public final class ShareScanStatusModel {
     private func apply(_ event: Event) {
         switch event {
         case let .scanStarted(id, name): scanStarted(shareID: id, name: name)
-        case let .scanProgress(id, items): scanProgress(shareID: id, itemsFound: items)
+        case let .scanProgress(id, directories, items):
+            scanProgress(shareID: id, directoriesScanned: directories, itemsFound: items)
         case let .scanFinished(id): scanFinished(shareID: id)
         case let .enrichStarted(id, total): enrichStarted(shareID: id, total: total)
         case let .enrichProgress(id, done): enrichProgress(shareID: id, done: done)
@@ -163,13 +173,24 @@ public final class ShareScanStatusModel {
         state.name = name
         state.isScanning = true
         state.itemsFound = 0
+        state.directoriesScanned = 0
         byShare[shareID] = state
     }
 
-    public func scanProgress(shareID: String, itemsFound: Int) {
+    public func scanProgress(shareID: String, directoriesScanned: Int, itemsFound: Int) {
         guard var state = byShare[shareID] else { return }
+        state.directoriesScanned = directoriesScanned
         state.itemsFound = itemsFound
         byShare[shareID] = state
+    }
+
+    /// Source compatibility for direct model callers that only care about items.
+    public func scanProgress(shareID: String, itemsFound: Int) {
+        scanProgress(
+            shareID: shareID,
+            directoriesScanned: byShare[shareID]?.directoriesScanned ?? 0,
+            itemsFound: itemsFound
+        )
     }
 
     public func scanFinished(shareID: String) {
@@ -210,7 +231,9 @@ public final class ShareScanStatusModel {
         let c = continuation
         return ShareScanReporter(
             scanStarted: { id, name in c.yield(.scanStarted(id: id, name: name)) },
-            scanProgress: { id, count in c.yield(.scanProgress(id: id, items: count)) },
+            scanProgress: { id, directories, items in
+                c.yield(.scanProgress(id: id, directories: directories, items: items))
+            },
             scanFinished: { id in c.yield(.scanFinished(id: id)) },
             enrichStarted: { id, total in c.yield(.enrichStarted(id: id, total: total)) },
             enrichProgress: { id, done in c.yield(.enrichProgress(id: id, done: done)) },
@@ -224,7 +247,7 @@ public final class ShareScanStatusModel {
 /// default is a no-op (tests / previews / no status model).
 public struct ShareScanReporter: Sendable {
     public var scanStarted: @Sendable (_ shareID: String, _ name: String) -> Void
-    public var scanProgress: @Sendable (_ shareID: String, _ itemsFound: Int) -> Void
+    public var scanProgress: @Sendable (_ shareID: String, _ directoriesScanned: Int, _ itemsFound: Int) -> Void
     public var scanFinished: @Sendable (_ shareID: String) -> Void
     public var enrichStarted: @Sendable (_ shareID: String, _ total: Int) -> Void
     public var enrichProgress: @Sendable (_ shareID: String, _ done: Int) -> Void
@@ -232,7 +255,7 @@ public struct ShareScanReporter: Sendable {
 
     public init(
         scanStarted: @escaping @Sendable (String, String) -> Void,
-        scanProgress: @escaping @Sendable (String, Int) -> Void,
+        scanProgress: @escaping @Sendable (String, Int, Int) -> Void,
         scanFinished: @escaping @Sendable (String) -> Void,
         enrichStarted: @escaping @Sendable (String, Int) -> Void,
         enrichProgress: @escaping @Sendable (String, Int) -> Void,
@@ -248,7 +271,7 @@ public struct ShareScanReporter: Sendable {
 
     /// No-op sink (default when no status model is wired).
     public static let noop = ShareScanReporter(
-        scanStarted: { _, _ in }, scanProgress: { _, _ in }, scanFinished: { _ in },
+        scanStarted: { _, _ in }, scanProgress: { _, _, _ in }, scanFinished: { _ in },
         enrichStarted: { _, _ in }, enrichProgress: { _, _ in }, enrichFinished: { _ in }
     )
 }

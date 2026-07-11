@@ -117,12 +117,18 @@ public struct RootView: View {
                 )
 
             case let .onboarding(.authenticating(server), _):
-                AuthView(
-                    server: server,
-                    deviceID: appState.deviceID,
-                    onAuthenticated: { session in appState.didAuthenticate(session) },
-                    onCancel: { appState.cancelAuthentication() }
-                )
+                if server.provider == .plex {
+                    ProgressView("Finishing Plex sign-in…")
+                        .font(.title2)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    AuthView(
+                        server: server,
+                        deviceID: appState.deviceID,
+                        onAuthenticated: { session in appState.didAuthenticate(session) },
+                        onCancel: { appState.cancelAuthentication() }
+                    )
+                }
 
             case .onboarding(.selectPlexUser, _):
                 if let selection = appState.pendingPlexUserSelection {

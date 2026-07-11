@@ -127,11 +127,27 @@ struct AddAccountView: View {
     }
 }
 
+private enum ProviderChooserFocus: Hashable {
+    case back
+    case jellyfin
+    case plex
+    case mediaShare
+
+    init(provider: ProviderKind) {
+        switch provider {
+        case .jellyfin: self = .jellyfin
+        case .plex: self = .plex
+        case .mediaShare: self = .mediaShare
+        }
+    }
+}
+
 private struct ProviderChooserView: View {
     let showsBranding: Bool
     let showsBackButton: Bool
     let onBack: () -> Void
     let onSelect: (ProviderKind) -> Void
+    @FocusState private var focusedControl: ProviderChooserFocus?
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -140,7 +156,7 @@ private struct ProviderChooserView: View {
                     FirstRunBranding()
                 }
 
-                ProviderChoiceGroup(onSelect: onSelect)
+                ProviderChoiceGroup(focusedControl: $focusedControl, onSelect: onSelect)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
@@ -149,11 +165,15 @@ private struct ProviderChooserView: View {
                     Label("Back", systemImage: "chevron.backward")
                 }
                 .buttonStyle(.bordered)
+                .focused($focusedControl, equals: .back)
             }
         }
         .padding(.horizontal, 80)
         .padding(.vertical, 64)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .focusSection()
+        .defaultFocus($focusedControl, .jellyfin)
+        .onAppear { focusedControl = .jellyfin }
         .onExitCommand {
             if showsBackButton { onBack() }
         }
@@ -188,6 +208,7 @@ private struct FirstRunBranding: View {
 }
 
 private struct ProviderChoiceGroup: View {
+    let focusedControl: FocusState<ProviderChooserFocus?>.Binding
     let onSelect: (ProviderKind) -> Void
 
     var body: some View {
@@ -195,7 +216,8 @@ private struct ProviderChoiceGroup: View {
             ProviderChoiceRow(
                 provider: .jellyfin,
                 title: "Jellyfin",
-                height: 108
+                height: 108,
+                focusedControl: focusedControl
             ) {
                 onSelect(.jellyfin)
             }
@@ -205,7 +227,8 @@ private struct ProviderChoiceGroup: View {
             ProviderChoiceRow(
                 provider: .plex,
                 title: "Plex",
-                height: 108
+                height: 108,
+                focusedControl: focusedControl
             ) {
                 onSelect(.plex)
             }
@@ -215,7 +238,8 @@ private struct ProviderChoiceGroup: View {
             ProviderChoiceRow(
                 provider: .mediaShare,
                 title: "SMB Share",
-                height: 108
+                height: 108,
+                focusedControl: focusedControl
             ) {
                 onSelect(.mediaShare)
             }
@@ -232,7 +256,6 @@ private struct ProviderChoiceGroup: View {
         .clipShape(
             RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
         )
-        .focusSection()
     }
 }
 
@@ -240,6 +263,7 @@ private struct ProviderChoiceRow: View {
     let provider: ProviderKind
     let title: LocalizedStringKey
     let height: CGFloat
+    let focusedControl: FocusState<ProviderChooserFocus?>.Binding
     let action: () -> Void
 
     var body: some View {
@@ -262,6 +286,7 @@ private struct ProviderChoiceRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(SettingsFocusButtonStyle(size: .contained))
+        .focused(focusedControl, equals: ProviderChooserFocus(provider: provider))
         .padding(12)
     }
 }

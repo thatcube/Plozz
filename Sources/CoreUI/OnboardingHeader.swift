@@ -12,29 +12,28 @@ public enum OnboardingPageMotion {
         reduceMotion: Bool
     ) -> AnyTransition {
         guard !reduceMotion else { return .opacity }
-        let enteringOffset: CGFloat = direction == .forward ? 56 : -56
-        let leavingOffset: CGFloat = direction == .forward ? -36 : 36
-        let depth = AnyTransition.scale(scale: 0.99)
+        let enteringOffset: CGFloat = direction == .forward ? 84 : -84
+        let leavingOffset: CGFloat = direction == .forward ? -30 : 30
         return .asymmetric(
             insertion: .offset(x: enteringOffset)
                 .combined(with: .opacity)
-                .combined(with: depth),
+                .combined(with: .scale(scale: 0.955)),
             removal: .offset(x: leavingOffset)
                 .combined(with: .opacity)
-                .combined(with: depth)
+                .combined(with: .scale(scale: 0.975))
         )
     }
 
     public static func exitAnimation(reduceMotion: Bool) -> Animation {
         reduceMotion
             ? .easeInOut(duration: 0.10)
-            : .smooth(duration: 0.20, extraBounce: 0)
+            : .smooth(duration: 0.24, extraBounce: 0)
     }
 
     public static func entryAnimation(reduceMotion: Bool) -> Animation {
         reduceMotion
             ? .easeInOut(duration: 0.10)
-            : .smooth(duration: 0.32, extraBounce: 0)
+            : .smooth(duration: 0.36, extraBounce: 0)
     }
 }
 

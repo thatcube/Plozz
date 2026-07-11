@@ -116,7 +116,7 @@ final class ShareScanStatusModelTests: XCTestCase {
         let model = ShareScanStatusModel()
         let r = model.reporter()
         r.scanStarted("s1", "NAS")
-        r.scanProgress("s1", 4, 10)
+        r.scanDetailedProgress("s1", 4, 10)
         r.scanFinished("s1")
         r.enrichStarted("s1", 30)
         r.enrichProgress("s1", 15)

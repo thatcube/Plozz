@@ -327,12 +327,13 @@ public final class LibraryBrowseViewModel {
     /// page) so content arrives just ahead of the user's scroll.
     public func itemAppeared(at index: Int) async {
         guard !Task.isCancelled, state.value != nil, index >= 0, index < totalCount else { return }
-        await noteInteractiveBrowseActivity()
         let page = pageForIndex(index)
         if visibleIndices.insert(index).inserted {
             visibleCellCountsByPage[page, default: 0] += 1
             updateTopVisibleIndex()
         }
+        await noteInteractiveBrowseActivity()
+        guard !Task.isCancelled, visibleIndices.contains(index) else { return }
         await ensurePageLoaded(page)
         let lookAhead = prefetchLookAheadPages(for: index, inPage: page)
         if lookAhead > 0 {
@@ -341,7 +342,7 @@ public final class LibraryBrowseViewModel {
             }
         }
         pruneInFlightPages(around: page, lookAhead: lookAhead)
-        lastAppearedIndex = index
+        if visibleIndices.contains(index) { lastAppearedIndex = index }
     }
 
     private func ensurePageLoaded(_ page: Int) async {

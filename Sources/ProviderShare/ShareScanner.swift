@@ -198,7 +198,7 @@ actor ShareScanner {
                     let now = progressClock.now
                     if dirsWalked == 1
                         || lastProgressReport.duration(to: now) >= .milliseconds(250) {
-                        reporter.scanProgress(shareID, dirsWalked, filesFound)
+                        reporter.scanDetailedProgress(shareID, dirsWalked, filesFound)
                         lastProgressReport = now
                     }
                     if Task.isCancelled { continue }   // stop dispatching; let in-flight drain
@@ -218,7 +218,7 @@ actor ShareScanner {
             }
             frontier = nextFrontier
         }
-        reporter.scanProgress(shareID, dirsWalked, filesFound)
+        reporter.scanDetailedProgress(shareID, dirsWalked, filesFound)
 
         // Completed a full pass. Only prune (drop assets no longer on the share) when
         // EVERY directory listed cleanly — a partial walk (some listing failed) must

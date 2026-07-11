@@ -343,9 +343,6 @@ public final class ItemDetailViewModel {
             await refreshDiscoveryStatus()
             return
         }
-        if let interactive = provider as? any InteractiveBrowseActivityReporting {
-            await interactive.noteInteractiveBrowseActivity()
-        }
         alternateSourceEnrichmentTask?.cancel()
         alternateSourceEnrichmentTask = nil
         enrichmentTask?.cancel()
@@ -360,6 +357,9 @@ public final class ItemDetailViewModel {
         // cross-server re-select at play time, so the initial server MUST be the
         // local one or every episode streams from a remote/Tailscale merge-primary.
         applyInitialLocalityPreferenceIfNeeded()
+        if let interactive = activeProvider as? any InteractiveBrowseActivityReporting {
+            await interactive.noteInteractiveBrowseActivity()
+        }
 
         // Stale-while-revalidate restore, RACED OFF THE CRITICAL PATH. The snapshot
         // read used to be the FIRST await in load() — so a disk-contended read (the

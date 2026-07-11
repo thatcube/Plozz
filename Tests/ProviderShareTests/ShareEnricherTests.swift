@@ -72,7 +72,7 @@ final class ShareEnricherTests: XCTestCase {
         }
         let cap = Captured()
         let reporter = ShareScanReporter(
-            scanStarted: { _, _ in }, scanProgress: { _, _, _ in }, scanFinished: { _ in },
+            scanStarted: { _, _ in }, scanProgress: { _, _ in }, scanFinished: { _ in },
             enrichStarted: { _, total in cap.start(total) },
             enrichProgress: { _, done in cap.progress(done) },
             enrichFinished: { _ in cap.finish() }

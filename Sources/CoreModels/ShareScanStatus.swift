@@ -231,7 +231,10 @@ public final class ShareScanStatusModel {
         let c = continuation
         return ShareScanReporter(
             scanStarted: { id, name in c.yield(.scanStarted(id: id, name: name)) },
-            scanProgress: { id, directories, items in
+            scanProgress: { id, items in
+                c.yield(.scanProgress(id: id, directories: 0, items: items))
+            },
+            scanDetailedProgress: { id, directories, items in
                 c.yield(.scanProgress(id: id, directories: directories, items: items))
             },
             scanFinished: { id in c.yield(.scanFinished(id: id)) },
@@ -247,7 +250,10 @@ public final class ShareScanStatusModel {
 /// default is a no-op (tests / previews / no status model).
 public struct ShareScanReporter: Sendable {
     public var scanStarted: @Sendable (_ shareID: String, _ name: String) -> Void
-    public var scanProgress: @Sendable (_ shareID: String, _ directoriesScanned: Int, _ itemsFound: Int) -> Void
+    /// Source-compatible item-only progress callback.
+    public var scanProgress: @Sendable (_ shareID: String, _ itemsFound: Int) -> Void
+    /// Additive detailed progress for directory-aware scanners.
+    public var scanDetailedProgress: @Sendable (_ shareID: String, _ directoriesScanned: Int, _ itemsFound: Int) -> Void
     public var scanFinished: @Sendable (_ shareID: String) -> Void
     public var enrichStarted: @Sendable (_ shareID: String, _ total: Int) -> Void
     public var enrichProgress: @Sendable (_ shareID: String, _ done: Int) -> Void
@@ -255,7 +261,8 @@ public struct ShareScanReporter: Sendable {
 
     public init(
         scanStarted: @escaping @Sendable (String, String) -> Void,
-        scanProgress: @escaping @Sendable (String, Int, Int) -> Void,
+        scanProgress: @escaping @Sendable (String, Int) -> Void,
+        scanDetailedProgress: @escaping @Sendable (String, Int, Int) -> Void = { _, _, _ in },
         scanFinished: @escaping @Sendable (String) -> Void,
         enrichStarted: @escaping @Sendable (String, Int) -> Void,
         enrichProgress: @escaping @Sendable (String, Int) -> Void,
@@ -263,6 +270,7 @@ public struct ShareScanReporter: Sendable {
     ) {
         self.scanStarted = scanStarted
         self.scanProgress = scanProgress
+        self.scanDetailedProgress = scanDetailedProgress
         self.scanFinished = scanFinished
         self.enrichStarted = enrichStarted
         self.enrichProgress = enrichProgress
@@ -271,7 +279,8 @@ public struct ShareScanReporter: Sendable {
 
     /// No-op sink (default when no status model is wired).
     public static let noop = ShareScanReporter(
-        scanStarted: { _, _ in }, scanProgress: { _, _, _ in }, scanFinished: { _ in },
+        scanStarted: { _, _ in }, scanProgress: { _, _ in },
+        scanDetailedProgress: { _, _, _ in }, scanFinished: { _ in },
         enrichStarted: { _, _ in }, enrichProgress: { _, _ in }, enrichFinished: { _ in }
     )
 }

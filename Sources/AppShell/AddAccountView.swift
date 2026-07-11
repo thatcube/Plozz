@@ -25,6 +25,7 @@ struct AddAccountView: View {
     @State private var navigationDirection: OnboardingNavigationDirection = .forward
     @State private var pageIsReady = true
     @State private var isTransitioning = false
+    @State private var isPreparingPlex = false
 
     init(
         deviceID: String,
@@ -70,6 +71,9 @@ struct AddAccountView: View {
         // Let overflowing scroll content reach the physical window edges. The
         // window remains the final clip for the full-page directional push.
         .ignoresSafeArea(.container, edges: .vertical)
+        .onChange(of: plexAuthViewModel.phase) { _, phase in
+            continueToPreparedPlexPage(for: phase)
+        }
     }
 
     @ViewBuilder
@@ -101,7 +105,8 @@ struct AddAccountView: View {
         ProviderChooserView(
             showsBranding: !canReturnToApp,
             showsBackButton: canReturnToApp,
-            onBack: onCancel,
+            isPreparingPlex: isPreparingPlex,
+            onBack: cancelPreparationOrReturn,
             onSelect: navigate(to:)
         )
     }
@@ -124,9 +129,32 @@ struct AddAccountView: View {
 
     private func navigate(to destination: ProviderKind) {
         if destination == .plex {
+            guard !isPreparingPlex, !isTransitioning else { return }
+            isPreparingPlex = true
             plexAuthViewModel.start()
+            return
         }
         transition(to: destination, direction: .forward)
+    }
+
+    private func continueToPreparedPlexPage(for phase: PlexAuthViewModel.Phase) {
+        guard isPreparingPlex else { return }
+        switch phase {
+        case .idle, .requesting:
+            return
+        case .awaitingLink, .loadingServers, .selectingServer, .success, .error:
+            isPreparingPlex = false
+            transition(to: .plex, direction: .forward)
+        }
+    }
+
+    private func cancelPreparationOrReturn() {
+        if isPreparingPlex {
+            isPreparingPlex = false
+            plexAuthViewModel.cancel()
+        } else {
+            onCancel()
+        }
     }
 
     private func navigateBackToChooser() {
@@ -169,6 +197,7 @@ private enum ProviderChooserFocus: Hashable {
 private struct ProviderChooserView: View {
     let showsBranding: Bool
     let showsBackButton: Bool
+    let isPreparingPlex: Bool
     let onBack: () -> Void
     let onSelect: (ProviderKind) -> Void
     @FocusState private var focusedControl: ProviderChooserFocus?
@@ -180,7 +209,12 @@ private struct ProviderChooserView: View {
                     FirstRunBranding()
                 }
 
-                ProviderChoiceGroup(focusedControl: $focusedControl, onSelect: onSelect)
+                ProviderChoiceGroup(
+                    focusedControl: $focusedControl,
+                    isPreparingPlex: isPreparingPlex,
+                    onSelect: onSelect
+                )
+                .allowsHitTesting(!isPreparingPlex)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
@@ -200,7 +234,7 @@ private struct ProviderChooserView: View {
         .onAppear { focusedControl = .jellyfin }
         .onMoveCommand(perform: bridgeBackButtonFocus)
         .onExitCommand {
-            if showsBackButton { onBack() }
+            if showsBackButton || isPreparingPlex { onBack() }
         }
     }
 
@@ -248,6 +282,7 @@ private struct FirstRunBranding: View {
 
 private struct ProviderChoiceGroup: View {
     let focusedControl: FocusState<ProviderChooserFocus?>.Binding
+    let isPreparingPlex: Bool
     let onSelect: (ProviderKind) -> Void
 
     var body: some View {
@@ -267,6 +302,7 @@ private struct ProviderChoiceGroup: View {
                 provider: .plex,
                 title: "Plex",
                 height: 108,
+                isLoading: isPreparingPlex,
                 focusedControl: focusedControl
             ) {
                 onSelect(.plex)
@@ -302,6 +338,7 @@ private struct ProviderChoiceRow: View {
     let provider: ProviderKind
     let title: LocalizedStringKey
     let height: CGFloat
+    var isLoading = false
     let focusedControl: FocusState<ProviderChooserFocus?>.Binding
     let action: () -> Void
 
@@ -315,9 +352,15 @@ private struct ProviderChoiceRow: View {
 
                 Spacer(minLength: 24)
 
-                Image(systemName: "chevron.forward")
-                    .font(.system(size: 22, weight: .semibold))
-                    .settingsRowSecondary()
+                if isLoading {
+                    ProgressView()
+                        .controlSize(.regular)
+                        .accessibilityLabel("Requesting a code")
+                } else {
+                    Image(systemName: "chevron.forward")
+                        .font(.system(size: 22, weight: .semibold))
+                        .settingsRowSecondary()
+                }
             }
             .padding(.horizontal, 24)
             .frame(maxWidth: .infinity)

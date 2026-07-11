@@ -1,6 +1,12 @@
 import Foundation
 import CoreModels
 
+public typealias HeroArtworkProviding = @Sendable (MediaItem) async -> URL?
+
+public enum HeroArtworkProvider {
+    public static let none: HeroArtworkProviding = { _ in nil }
+}
+
 /// Builds the ordered list of items the Home **hero** carousel rotates through,
 /// mixing the user's enabled sources (Featured/Seerr, Continue Watching, Random,
 /// Watchlist) per their per-profile ``HeroSettings``.
@@ -34,7 +40,8 @@ public struct HeroCurator: Sendable {
         continueWatching: [MediaItem],
         watchlist: [MediaItem],
         featuredProvider: FeaturedContentProviding = HeroFeaturedProvider.none,
-        randomProvider: RandomLibraryContentProviding = HeroRandomProvider.none
+        randomProvider: RandomLibraryContentProviding = HeroRandomProvider.none,
+        artworkProvider: @escaping HeroArtworkProviding = HeroArtworkProvider.none
     ) async -> [MediaItem] {
         guard settings.isActive else { return [] }
         let limit = settings.maxItems
@@ -59,7 +66,11 @@ public struct HeroCurator: Sendable {
             }
         }
 
-        return strategy.compose(perSource, limit: limit)
+        let eligible = await HeroArtworkEligibility.resolve(
+            perSource,
+            artworkProvider: artworkProvider
+        )
+        return strategy.compose(eligible, limit: limit)
     }
 
     /// A **synchronous** seed built only from the already-loaded, non-async
@@ -84,7 +95,58 @@ public struct HeroCurator: Sendable {
             case .watchlist: return watchlist
             }
         }
-        return strategy.compose(perSource, limit: settings.maxItems)
+        return strategy.compose(
+            HeroArtworkEligibility.filterDirect(perSource),
+            limit: settings.maxItems
+        )
+    }
+}
+
+/// Keeps poster-only or artwork-free items out of the full-bleed hero. Parent
+/// backdrops remain eligible so episodes can use their series artwork.
+private enum HeroArtworkEligibility {
+    static func filterDirect(_ perSource: [[MediaItem]]) -> [[MediaItem]] {
+        perSource.map { items in
+            items.filter(hasDirectHeroArtwork)
+        }
+    }
+
+    static func resolve(
+        _ perSource: [[MediaItem]],
+        artworkProvider: @escaping HeroArtworkProviding
+    ) async -> [[MediaItem]] {
+        await withTaskGroup(of: (Int, [MediaItem]).self) { group in
+            for (sourceIndex, items) in perSource.enumerated() {
+                group.addTask {
+                    var eligible: [MediaItem] = []
+                    eligible.reserveCapacity(items.count)
+
+                    for item in items {
+                        if hasDirectHeroArtwork(item) {
+                            eligible.append(item)
+                        } else if let resolvedURL = await artworkProvider(item) {
+                            var resolvedItem = item
+                            resolvedItem.heroBackdropURL = resolvedURL
+                            eligible.append(resolvedItem)
+                        }
+                    }
+
+                    return (sourceIndex, eligible)
+                }
+            }
+
+            var resolved = Array(repeating: [MediaItem](), count: perSource.count)
+            for await (sourceIndex, items) in group {
+                resolved[sourceIndex] = items
+            }
+            return resolved
+        }
+    }
+
+    private static func hasDirectHeroArtwork(_ item: MediaItem) -> Bool {
+        item.heroBackdropURL != nil ||
+            item.backdropURL != nil ||
+            item.fallbackArtworkURL != nil
     }
 }
 

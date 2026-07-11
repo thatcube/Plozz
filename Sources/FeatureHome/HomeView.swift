@@ -2,6 +2,7 @@
 import SwiftUI
 import CoreModels
 import CoreUI
+import MetadataKit
 
 /// The Home screen: an optional cinematic **hero** carousel followed by
 /// Continue Watching, Latest, and library shortcuts.
@@ -19,6 +20,7 @@ public struct HomeView: View {
     private let heroCurator: HeroCurator
     private let heroFeaturedProvider: FeaturedContentProviding
     private let heroRandomProvider: RandomLibraryContentProviding
+    private let heroArtworkProvider: HeroArtworkProviding
     /// Whether Seerr is currently connected — threaded to the hero so a not-owned
     /// featured title only offers a Request CTA when a server is reachable.
     private let heroSeerConnected: Bool
@@ -73,6 +75,14 @@ public struct HomeView: View {
         heroCurator: HeroCurator = HeroCurator(),
         heroFeaturedProvider: @escaping FeaturedContentProviding = HeroFeaturedProvider.none,
         heroRandomProvider: @escaping RandomLibraryContentProviding = HeroRandomProvider.none,
+        heroArtworkProvider: @escaping HeroArtworkProviding = { item in
+            switch item.kind {
+            case .folder, .collection, .unknown:
+                return nil
+            default:
+                return await ArtworkRouter.shared.artworkURL(.hero, for: item)
+            }
+        },
         seerConnected: Bool = false,
         onRequestItem: ((MediaItem) async -> MediaAvailabilityStatus?)? = nil,
         navigationStyle: NavigationStyle = .default,
@@ -87,6 +97,7 @@ public struct HomeView: View {
         self.heroCurator = heroCurator
         self.heroFeaturedProvider = heroFeaturedProvider
         self.heroRandomProvider = heroRandomProvider
+        self.heroArtworkProvider = heroArtworkProvider
         self.heroSeerConnected = seerConnected
         self.onRequestItem = onRequestItem
         self.navigationStyle = navigationStyle
@@ -473,7 +484,8 @@ public struct HomeView: View {
             continueWatching: content.continueWatching,
             watchlist: content.watchlist,
             featuredProvider: heroFeaturedProvider,
-            randomProvider: heroRandomProvider
+            randomProvider: heroRandomProvider,
+            artworkProvider: heroArtworkProvider
         )
         heroItems = items
     }

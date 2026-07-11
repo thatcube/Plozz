@@ -258,10 +258,10 @@ private struct WipeImageView: UIViewRepresentable {
 
     // MARK: - Coordinator
 
-    /// Owns transition scheduling: which slide is displayed, which is the pending
-    /// target, cache-first art loading (with a monotonic token so only the newest
-    /// target can apply), and serialization of the wipe so a burst of rapid pages
-    /// coalesces to the newest target with one clean animation.
+    /// Owns transition scheduling: which slide is displayed, cache-first art loading
+    /// (with a monotonic token so only the newest target can apply), and immediate
+    /// interruption so every rapid page begins over the previously requested slide
+    /// instead of waiting for an older wipe to finish.
     @MainActor
     final class Coordinator {
         weak var container: HeroWipeContainerView?
@@ -274,6 +274,10 @@ private struct WipeImageView: UIViewRepresentable {
         private var displayedURL: URL?
         /// Identity of the latest requested slide (may still be loading).
         private var targetID: String?
+        /// Latest candidate URLs for `targetID`, retained so a same-slide artwork
+        /// upgrade arriving mid-wipe can be applied when the wipe lands.
+        private var targetURLs: [URL] = []
+        private var targetForward = true
         /// Monotonic load token; only the newest requested art may apply.
         private var loadToken = 0
         private var isAnimating = false
@@ -285,14 +289,11 @@ private struct WipeImageView: UIViewRepresentable {
         /// Its curve stays ≤ the incoming curve at every instant, so the outgoing art
         /// can never retreat past the growing reveal window (no background sliver).
         private var outgoingAnimator: UIViewPropertyAnimator?
-        /// Newest fully-resolved target that arrived while a wipe was in flight,
-        /// applied on completion. Always the most recent — never a queue.
-        private var pending: (image: UIImage, url: URL, id: String, forward: Bool)?
-        /// Newest target that resolved to *no* usable art while a wipe was in
-        /// flight. Reconciled on completion so state can't get stuck pointing at a
-        /// slide that never became `displayed` (and a later cached upgrade for it
-        /// can still apply in place).
-        private var pendingNoArtID: String?
+        /// Target owned by the in-flight wipe. Rapid paging finishes this target
+        /// immediately, then starts the newest wipe directly over it.
+        private var activeWipe: (id: String, url: URL)?
+        /// Same-slide artwork upgrade that resolved while its slide was wiping in.
+        private var pendingUpgrade: (image: UIImage, url: URL, id: String)?
 
         init(maxAspectRatio: CGFloat, duration: TimeInterval) {
             self.maxAspectRatio = maxAspectRatio
@@ -309,15 +310,32 @@ private struct WipeImageView: UIViewRepresentable {
             forward: Bool,
             asyncFallbackURL: (@Sendable () async -> URL?)?
         ) {
+            targetForward = forward
             // Same slide already shown/targeted: this is one of the countless
             // non-paging SwiftUI updates (scroll, focus, parallax). Free — except
             // we opportunistically upgrade the *displayed* slide's art if a better
             // (higher-res / router-resolved) candidate has since been cached.
             if slideID == targetID {
-                maybeUpgradeDisplayedArt(urls: urls)
+                if urls != targetURLs {
+                    targetURLs = urls
+                    resolveSameSlideUpgrade(
+                        urls: urls,
+                        slideID: slideID,
+                        asyncFallbackURL: asyncFallbackURL
+                    )
+                } else {
+                    maybeUpgradeDisplayedArt(urls: urls)
+                }
                 return
             }
+            // React to the press now, not after artwork loading. A cache miss for
+            // the newest slide must never leave an older wipe running behind input.
+            if isAnimating, let container {
+                finishActiveWipeImmediately(in: container)
+            }
             targetID = slideID
+            targetURLs = urls
+            pendingUpgrade = nil
             loadToken += 1
             let token = loadToken
 
@@ -351,11 +369,10 @@ private struct WipeImageView: UIViewRepresentable {
                 displayedURL = url
                 return
             }
-            // A wipe is in flight: stash the newest resolved target and reconcile
-            // on completion (this also covers "paged away then back" mid-wipe).
+            // Never queue behind an older wipe. Land its incoming slide immediately,
+            // then let this newest target wipe straight over it.
             if isAnimating {
-                pending = (image, url, id, forward)
-                return
+                finishActiveWipeImmediately(in: container)
             }
             // Already settled on this slide (art resolved to the same slide): just
             // ensure the freshest art, no wipe.
@@ -369,23 +386,24 @@ private struct WipeImageView: UIViewRepresentable {
             startWipe(to: image, url: url, id: id, forward: forward)
         }
 
-        /// Couldn't resolve any art for the slide. Keep whatever is on screen (never
-        /// flash to empty). If a wipe is in flight, stash the id so `drainPending`
-        /// reconciles it on completion; otherwise mark it displayed at rest.
+        /// Couldn't resolve any art for the slide. Clear stale art rather than
+        /// displaying the previous title's backdrop under the new title's metadata.
         private func noArtResolved(for id: String) {
             guard id == targetID else { return }
-            if isAnimating {
-                pendingNoArtID = id
-                return
+            if let container {
+                if isAnimating {
+                    finishActiveWipeImmediately(in: container)
+                }
+                container.frontImage = nil
             }
             displayedID = id
             displayedURL = nil
+            pendingUpgrade = nil
         }
 
         /// Upgrade the *currently displayed* slide's art in place (no wipe) if a
         /// better candidate is now cached. Guarded to the displayed slide so a
-        /// still-loading pending target can never swap the visible art without its
-        /// wipe.
+        /// still-loading target can never swap the visible art without its wipe.
         private func maybeUpgradeDisplayedArt(urls: [URL]) {
             guard !isAnimating, targetID == displayedID, let container else { return }
             guard let (image, url) = firstUsableCached(urls), url != displayedURL else { return }
@@ -396,6 +414,7 @@ private struct WipeImageView: UIViewRepresentable {
         private func startWipe(to image: UIImage, url: URL, id: String, forward: Bool) {
             guard let container else { return }
             isAnimating = true
+            activeWipe = (id, url)
             container.prepareWipe(incomingImage: image, forward: forward)
 
             // Incoming page: a strong ease-OUT (starts fast, then eases softly into
@@ -412,13 +431,16 @@ private struct WipeImageView: UIViewRepresentable {
             incomingAnimator.addAnimations { container.animateIncoming(forward: forward) }
             incomingAnimator.addCompletion { [weak self, weak container] _ in
                 guard let self, let container else { return }
+                guard self.animator === incomingAnimator else { return }
                 container.finishWipe()
                 self.displayedID = id
                 self.displayedURL = url
                 self.isAnimating = false
+                self.activeWipe = nil
                 self.animator = nil
                 self.outgoingAnimator = nil
-                self.drainPending()
+                self.applyPendingUpgrade()
+                self.maybeUpgradeDisplayedArt(urls: self.targetURLs)
             }
 
             // Outgoing page: ease-IN (lingers, then accelerates away) — a distinct
@@ -435,28 +457,64 @@ private struct WipeImageView: UIViewRepresentable {
             outgoingAnimator.startAnimation()
         }
 
-        /// After a wipe completes, reconcile with the newest requested target: if
-        /// it differs from what just settled, wipe on to it (rapid paging coalesces
-        /// to a single follow-up wipe); if it's the same slide but fresher art, swap
-        /// in place; if the newest target resolved to no art, accept it as displayed
-        /// so state never stalls and a later cached upgrade for it can still apply.
-        private func drainPending() {
-            defer { pendingNoArtID = nil }
-            if let pending, pending.id == targetID {
-                self.pending = nil
-                if pending.id != displayedID {
-                    startWipe(to: pending.image, url: pending.url, id: pending.id, forward: pending.forward)
-                } else if pending.url != displayedURL, let container {
-                    container.frontImage = pending.image
-                    displayedURL = pending.url
-                }
+        private func finishActiveWipeImmediately(in container: HeroWipeContainerView) {
+            guard let activeWipe else { return }
+            animator?.stopAnimation(true)
+            outgoingAnimator?.stopAnimation(true)
+            container.finishWipe()
+            displayedID = activeWipe.id
+            displayedURL = activeWipe.url
+            isAnimating = false
+            self.activeWipe = nil
+            animator = nil
+            outgoingAnimator = nil
+        }
+
+        private func resolveSameSlideUpgrade(
+            urls: [URL],
+            slideID: String,
+            asyncFallbackURL: (@Sendable () async -> URL?)?
+        ) {
+            loadToken += 1
+            let token = loadToken
+
+            if let (image, url) = firstUsableCached(urls) {
+                receiveSameSlideUpgrade(image, url: url, id: slideID)
                 return
             }
-            self.pending = nil
-            if let noArt = pendingNoArtID, noArt == targetID, noArt != displayedID {
-                displayedID = noArt
-                displayedURL = nil
+
+            Task { [weak self] in
+                guard let self else { return }
+                let resolved = await self.firstUsableLoaded(
+                    urls,
+                    asyncFallbackURL: asyncFallbackURL
+                )
+                guard token == self.loadToken else { return }
+                if let (image, url) = resolved {
+                    self.receiveSameSlideUpgrade(image, url: url, id: slideID)
+                } else {
+                    self.noArtResolved(for: slideID)
+                }
             }
+        }
+
+        private func receiveSameSlideUpgrade(_ image: UIImage, url: URL, id: String) {
+            guard id == targetID else { return }
+            if isAnimating {
+                pendingUpgrade = (image, url, id)
+                return
+            }
+            applyResolved(image, url: url, id: id, forward: targetForward)
+        }
+
+        private func applyPendingUpgrade() {
+            guard let pendingUpgrade else { return }
+            self.pendingUpgrade = nil
+            receiveSameSlideUpgrade(
+                pendingUpgrade.image,
+                url: pendingUpgrade.url,
+                id: pendingUpgrade.id
+            )
         }
 
         // MARK: - Loading

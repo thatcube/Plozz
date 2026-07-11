@@ -150,14 +150,14 @@ private struct SeriesRecededLogo: View {
         }
         .frame(width: 620, height: 200, alignment: .center)
         .opacity(revealed ? 1 : 0)
-        .offset(y: revealed ? 0 : 180)
+        .offset(y: revealed ? 0 : 260)
         .accessibilityHidden(!revealed)
         .animation(
             reduceMotion
                 ? nil
                 : (revealed
                     ? SeriesHeroRevealTransition.entrance
-                    : .easeOut(duration: 0.39)),
+                    : .easeOut(duration: 0.22)),
             value: revealed
         )
     }

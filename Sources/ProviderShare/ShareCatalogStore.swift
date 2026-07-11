@@ -919,7 +919,7 @@ actor ShareCatalogStore {
                ELSE 'f:' || MIN(rel_path) END AS logical_id,
           MIN(title), MAX(year)
         FROM assets
-        WHERE library='movies' AND kind='movie' AND sort_title LIKE ?
+        WHERE library='movies' AND kind='movie' AND LOWER(title) LIKE ?
         GROUP BY COALESCE(movie_group_key, movie_key, rel_path) LIMIT ?;
         """, bind: {
             self.bindText($0, 1, needle); sqlite3_bind_int64($0, 2, Int64(limit))

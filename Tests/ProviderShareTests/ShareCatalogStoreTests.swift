@@ -241,6 +241,9 @@ final class ShareCatalogStoreTests: XCTestCase {
         XCTAssertTrue(titles.contains("The Matrix"))
         XCTAssertTrue(titles.contains("Matrix Reloaded Show"))
         XCTAssertFalse(titles.contains("Unrelated"))
+
+        let fullTitleHits = await store.search(query: "The Matrix", limit: 20)
+        XCTAssertEqual(fullTitleHits.map(\.title), ["The Matrix"])
     }
 
     func testItemResolvesEveryIdShape() async {

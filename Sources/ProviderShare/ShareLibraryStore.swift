@@ -40,6 +40,19 @@ actor ShareLibraryStore {
         await browser.close()
     }
 
+    /// Raw directory listing (share-relative), for sidecar discovery at playback
+    /// time. Unlike `entries(forContainerID:)` this returns every entry (incl.
+    /// subtitle files), not just folders + videos.
+    func rawEntries(inDirectory relPath: String) async throws -> [SMBShareBrowser.Entry] {
+        try await browser.listDirectory(relPath)
+    }
+
+    /// Read a file's bytes off the share (share-relative path). Used to pull small
+    /// sidecar subtitles into a local temp for the overlay.
+    func readFile(_ relPath: String) async throws -> Data {
+        try await browser.readFile(relPath)
+    }
+
     /// A share presents exactly one browsable "library": its root folder. Kept as
     /// `.folder` so the browse UI treats every entry as navigable/​playable by its
     /// own kind rather than forcing a movie/series split.

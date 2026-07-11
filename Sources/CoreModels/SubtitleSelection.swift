@@ -260,36 +260,99 @@ public struct RemoteSubtitle: Equatable, Sendable, Identifiable {
     }
 }
 
+public extension RemoteSubtitle {
+    /// Common tokens in a subtitle's name/filename that mark it as hearing-impaired
+    /// (SDH). Word-boundary matched so "Hindi"/"Ghibli" never false-positive on
+    /// "hi". Used to enrich results from providers (Jellyfin) that don't return an
+    /// explicit SDH flag.
+    static func nameSuggestsHearingImpaired(_ name: String?) -> Bool {
+        guard let name = name?.lowercased(), !name.isEmpty else { return false }
+        if name.contains("hearing impaired") || name.contains("hearing-impaired") { return true }
+        let hiTokens: Set<String> = ["sdh", "hi", "cc", "hoh"]
+        let tokens = name.split { !$0.isLetter && !$0.isNumber }.map(String.init)
+        return tokens.contains { hiTokens.contains($0) }
+    }
+}
+
 public extension Array where Element == RemoteSubtitle {
-    /// Picks the best remote subtitle to download for `language` and `mode`:
-    /// language match first, then forced-ness matching the mode, then the
-    /// highest community rating, then the most downloads. Returns `nil` only
-    /// when the list is empty.
+    /// Filters + ranks the results for **display** in the manual picker, honouring
+    /// the SDH/Forced preference. "Only-*" levels filter the pool, "Prefer-*" levels
+    /// sort. Graceful degrade: if an "Only-*" filter would empty the list, it is
+    /// treated as the matching "Prefer-*" (sort, don't filter) so the viewer still
+    /// sees candidates (common on Jellyfin where SDH is often unlabelled) rather
+    /// than a dead-end empty screen.
+    func applying(_ preference: SubtitleSearchPreference) -> [RemoteSubtitle] {
+        guard !isEmpty else { return [] }
+        let pool = Self.filtered(self, preference: preference)
+        return pool.sorted { Self.rankKey($0, preference) > Self.rankKey($1, preference) }
+    }
+
+    /// Picks the best remote subtitle to download for `language` and the SDH/Forced
+    /// `preference`. Precedence (highest first): forced-ness under the preference →
+    /// SDH-ness under the preference → community rating → download count.
+    ///
+    /// - Parameters:
+    ///   - language: preferred language (ISO code); `nil` matches any.
+    ///   - mode: the content-type subtitle mode. `.forcedOnly` forces the forced
+    ///     preference to "only forced" (the mode is the source of truth for the
+    ///     forced-only gate; the preference refines ranking otherwise).
+    ///   - preference: the SDH/Forced accessibility preference.
+    ///   - requireLanguageMatch: when true, never fall back to a different-language
+    ///     candidate (returns `nil` if none match) — used by auto-download so it
+    ///     can't attach a wrong-language subtitle.
     func bestMatch(
         forLanguage language: String?,
-        mode: SubtitleMode = .all
+        mode: SubtitleMode = .all,
+        preference: SubtitleSearchPreference = .default,
+        requireLanguageMatch: Bool = false
     ) -> RemoteSubtitle? {
         guard !isEmpty else { return nil }
-        let wantForced = (mode == .forcedOnly)
-        let pool: [RemoteSubtitle]
+        // Language pool.
+        let languagePool: [RemoteSubtitle]
         if let language, !language.isEmpty {
             let inLanguage = filter { LanguageMatch.matches($0.language, language) }
-            pool = inLanguage.isEmpty ? self : inLanguage
+            if requireLanguageMatch {
+                languagePool = inLanguage
+            } else {
+                languagePool = inLanguage.isEmpty ? self : inLanguage
+            }
         } else {
-            pool = self
+            languagePool = self
         }
-        return pool.max { lhs, rhs in
-            if lhs.isForced != rhs.isForced, wantForced {
-                // When forced is desired, a forced candidate sorts higher.
-                return rhs.isForced && !lhs.isForced
-            }
-            if lhs.isForced != rhs.isForced, !wantForced {
-                // When full subs are desired, a non-forced candidate sorts higher.
-                return lhs.isForced && !rhs.isForced
-            }
-            let lr = lhs.communityRating ?? -1, rr = rhs.communityRating ?? -1
-            if lr != rr { return lr < rr }
-            return (lhs.downloadCount ?? -1) < (rhs.downloadCount ?? -1)
+        guard !languagePool.isEmpty else { return nil }
+
+        let effective = preference.resolvedForcedOnly(mode: mode)
+        let pool = Self.filtered(languagePool, preference: effective)
+        return pool.max { Self.rankKey($0, effective) < Self.rankKey($1, effective) }
+    }
+
+    // MARK: - Preference application (shared)
+
+    /// Applies the "Only-*" exclusive filters, with graceful degrade: a filter that
+    /// would empty the pool is skipped so the caller still has candidates.
+    private static func filtered(_ pool: [RemoteSubtitle], preference: SubtitleSearchPreference) -> [RemoteSubtitle] {
+        var result = pool
+        if preference.hearingImpaired.isExclusive {
+            let f = result.filter { preference.hearingImpaired.allows(isHearingImpaired: $0.isHearingImpaired) }
+            if !f.isEmpty { result = f }
         }
+        if preference.forced.isExclusive {
+            let f = result.filter { preference.forced.allows(isForced: $0.isForced) }
+            if !f.isEmpty { result = f }
+        }
+        return result
+    }
+
+    /// The ordering key (higher = better) combining the preference ranks with the
+    /// popularity signals. Forced-ness dominates, then SDH-ness, then rating, then
+    /// downloads — so the accessibility preference always outranks a merely
+    /// more-downloaded candidate.
+    private static func rankKey(_ s: RemoteSubtitle, _ preference: SubtitleSearchPreference) -> (Int, Int, Double, Double) {
+        (
+            preference.forced.rank(isForced: s.isForced),
+            preference.hearingImpaired.rank(isHearingImpaired: s.isHearingImpaired),
+            s.communityRating ?? -1,
+            Double(s.downloadCount ?? -1)
+        )
     }
 }

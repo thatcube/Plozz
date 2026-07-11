@@ -455,6 +455,7 @@ extension PlexProvider: MusicProvider {
 extension PlexProvider: CapabilityReporting {
     /// Plex can serve both video and music libraries. The *presence* of a music
     /// library is still detected at runtime via `musicLibraries()`, so the Music
-    /// tab stays hidden for accounts without one.
-    public var capabilities: ProviderCapability { [.video, .music] }
+    /// tab stays hidden for accounts without one. `.remoteSubtitles` advertises
+    /// the server-proxied on-demand subtitle search/download (OpenSubtitles.com).
+    public var capabilities: ProviderCapability { [.video, .music, .remoteSubtitles] }
 }

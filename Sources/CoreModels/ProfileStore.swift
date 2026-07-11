@@ -536,6 +536,16 @@ public final class ProfilesModel {
         store.activeAccountIDs(forProfile: profileID) ?? fallback
     }
 
+    /// The profile's *explicit* stored selection, or `nil` when it never chose
+    /// one. Unlike ``activeAccountIDs(for:fallback:)`` this preserves the
+    /// difference between "never chose" (`nil` ⇒ default to all servers) and
+    /// "chose to watch nothing" (`[]`) — the distinction the per-server master
+    /// toggle on Settings → Your Servers & Libraries depends on to be able to
+    /// turn a server (and the last remaining server) off.
+    public func storedActiveAccountIDs(for profileID: String) -> [String]? {
+        store.activeAccountIDs(forProfile: profileID)
+    }
+
     public func setActiveAccountIDs(_ ids: [String], for profileID: String) {
         store.setActiveAccountIDs(ids, forProfile: profileID)
     }

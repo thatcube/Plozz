@@ -46,6 +46,36 @@ public final class ItemDetailViewModel {
     /// user actually tapped. `nil` for non-season loads.
     public private(set) var preselectedSeasonID: String?
 
+    /// Stable identity for the active movie/series source. Includes the account so
+    /// switching servers re-resolves even when two backends use the same item id.
+    public var themeMusicPlaybackID: String? {
+        guard !isDiscoveryItem,
+              case let .loaded(detail) = state,
+              detail.item.kind == .movie || detail.item.kind == .series else {
+            return nil
+        }
+        return "\(activeSourceAccountID ?? activeProvider.kind.rawValue):\(activeItemID)"
+    }
+
+    /// Resolves theme audio as a best-effort decorative enhancement.
+    public func resolveThemeMusic() async -> ThemeMusic? {
+        guard themeMusicPlaybackID != nil else { return nil }
+        do {
+            let theme = try await activeProvider.themeMusic(for: activeItemID)
+            if let theme {
+                PlozzLog.app.info(
+                    "Theme music: resolved item=\(activeItemID) url=\(PlozzLog.redact(url: theme.streamURL))"
+                )
+            }
+            return theme
+        } catch {
+            PlozzLog.app.error(
+                "Theme music: resolve failed item=\(activeItemID) error=\(String(describing: error))"
+            )
+            return nil
+        }
+    }
+
     private let provider: any MediaProvider
     private let itemID: String
     private let ratingsProvider: any ExternalRatingsProviding

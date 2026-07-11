@@ -1,4 +1,5 @@
 import Foundation
+import CoreModels
 
 /// Best-effort parsing of media *filenames* into structured metadata. A media
 /// share has no server telling us what a file is, so we infer it the way Infuse
@@ -23,6 +24,94 @@ enum ShareMediaParser {
 
     static func isVideoFile(_ name: String) -> Bool {
         videoExtensions.contains((name as NSString).pathExtension.lowercased())
+    }
+
+    /// File extensions we treat as text subtitle sidecars (the overlay can parse
+    /// these). Image-based sidecars (`.sup`/`.idx`+`.sub`) are excluded — no
+    /// on-device engine renders them from a bare share.
+    static let subtitleExtensions: Set<String> = ["srt", "ass", "ssa", "vtt"]
+
+    static func isSubtitleFile(_ name: String) -> Bool {
+        subtitleExtensions.contains((name as NSString).pathExtension.lowercased())
+    }
+
+    /// A parsed sidecar subtitle filename: the video "stem" it belongs to plus the
+    /// language / forced / SDH hints teased out of the dotted suffix tokens
+    /// (`Movie (2009).en.forced.srt` → stem `Movie (2009)`, language `en`, forced).
+    struct Sidecar: Equatable {
+        var stem: String
+        var language: String?
+        var isForced: Bool
+        var isSDH: Bool
+        var ext: String
+    }
+
+    /// ISO-ish subtitle-suffix tokens that are NOT a language (so they don't get
+    /// mistaken for one). Matched case-insensitively, word-for-word.
+    private static let sidecarFlagTokens: Set<String> = [
+        "forced", "foreign", "sdh", "hi", "cc", "hoh", "full", "default"
+    ]
+
+    /// Parses a subtitle filename into its `Sidecar` parts. Returns `nil` when the
+    /// file isn't a text subtitle. The stem is everything before the first
+    /// recognised suffix token (language or flag), so it can be matched against a
+    /// video file's own stem in the same directory.
+    static func parseSidecar(_ name: String) -> Sidecar? {
+        let ns = name as NSString
+        let ext = ns.pathExtension.lowercased()
+        guard subtitleExtensions.contains(ext) else { return nil }
+        let base = ns.deletingPathExtension
+        var tokens = base.split(separator: ".").map(String.init)
+        guard !tokens.isEmpty else { return nil }
+
+        var language: String?
+        var isForced = false
+        var isSDH = false
+        // Consume trailing dotted tokens that look like language/flag qualifiers,
+        // leaving the leading tokens as the stem. Walk from the end so
+        // "Movie.Name.en.sdh" keeps "Movie.Name" as the stem.
+        while tokens.count > 1 {
+            let token = tokens[tokens.count - 1]
+            let lower = token.lowercased()
+            if sidecarFlagTokens.contains(lower) {
+                if lower == "forced" || lower == "foreign" { isForced = true }
+                if lower == "sdh" || lower == "hi" || lower == "cc" || lower == "hoh" { isSDH = true }
+                tokens.removeLast()
+                continue
+            }
+            if language == nil, let code = normalizedSubtitleLanguage(lower) {
+                language = code
+                tokens.removeLast()
+                continue
+            }
+            break
+        }
+        let stem = tokens.joined(separator: ".")
+        return Sidecar(stem: stem, language: language, isForced: isForced, isSDH: isSDH, ext: ext)
+    }
+
+    /// The video "stem" of a video filename (basename without its extension), used
+    /// to match sibling sidecars by name.
+    static func videoStem(_ name: String) -> String {
+        (name as NSString).deletingPathExtension
+    }
+
+    /// Whether `token` is a plausible subtitle language code (2- or 3-letter, or a
+    /// known English language name), returning its normalised 2-letter form.
+    private static func normalizedSubtitleLanguage(_ token: String) -> String? {
+        // Full English name (e.g. "english", "spanish").
+        if let match = SubtitleLanguageCatalog.languages.first(where: { $0.name.lowercased() == token }) {
+            return match.code
+        }
+        // 2/3-letter ISO code. Require it to normalise to a known base to avoid
+        // treating a random 2-3 char token (e.g. a release group) as a language.
+        guard token.count == 2 || token.count == 3 else { return nil }
+        guard let normalized = LanguageMatch.normalized(token) else { return nil }
+        // Only accept when it's a code we recognise, or the token was already a
+        // clean alpha string of the right length that folded to a 2-letter base.
+        let isKnown = SubtitleLanguageCatalog.languages.contains { $0.code == normalized }
+        let looksLikeCode = token.allSatisfy { $0.isLetter }
+        return (isKnown || (looksLikeCode && normalized.count == 2)) ? normalized : nil
     }
 
     struct Episode: Equatable {

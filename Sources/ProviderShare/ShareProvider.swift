@@ -303,14 +303,116 @@ public struct ShareProvider: MediaProvider {
         let record = records[canonicalItemID]
         let startPosition = (record?.played == true) ? 0 : (record?.position ?? 0)
         let playItem = (mediaSourceID != nil) ? item.selectingVersion(mediaSourceID) : item
+        // Surface any text sidecar subtitles sitting next to the video (and in a
+        // sibling Subs/Subtitles folder) as selectable tracks. Best-effort: a
+        // listing/read failure just yields no sidecars rather than blocking play.
+        let subtitleTracks = (try? await discoverSidecarSubtitles(forVideoRelPath: relPath)) ?? []
         return PlaybackRequest(
             item: playItem,
             streamURL: url,
+            subtitleTracks: subtitleTracks,
             startPosition: startPosition,
             sourceProvider: .mediaShare,
             serverName: session.server.name,
             sourceFileName: (relPath as NSString).lastPathComponent
         )
+    }
+
+    /// Finds text sidecar subtitles for a video by listing its directory (and a
+    /// sibling `Subs`/`Subtitles` folder) and matching files by stem, then
+    /// materialises each to a local `file://` temp so the player's overlay — which
+    /// fetches over HTTP/`file://`, never `smb://` — can read them. Reads are
+    /// serial (the SMB session is single-connection) and lazy-small (sidecars are
+    /// tiny). Cleans up its temp dir on player teardown is handled by the OS temp
+    /// reaper; files are namespaced per item so replays reuse them within a run.
+    private func discoverSidecarSubtitles(forVideoRelPath relPath: String) async throws -> [MediaTrack] {
+        let dir = (relPath as NSString).deletingLastPathComponent
+        let videoStem = ShareMediaParser.videoStem((relPath as NSString).lastPathComponent)
+
+        // Gather candidate (directory, entry, isDedicatedSubsFolder) triples from the
+        // video's own folder and any sibling Subs/Subtitles folder. On a
+        // case-insensitive share (Windows/NTFS/exFAT/macOS-hosted SMB) "Subs" and
+        // "subs" resolve to the same folder, so dedup the probed candidates by a
+        // lowercased (dir, name) key to avoid surfacing every sidecar 2-4×.
+        var candidates: [(dir: String, name: String, dedicated: Bool)] = []
+        var seenCandidateKeys = Set<String>()
+        let ownDir = dir
+        let subFolderNames = ["Subs", "Subtitles", "subs", "subtitles"]
+        let subDirs = subFolderNames.map { sub in dir.isEmpty ? sub : "\(dir)/\(sub)" }
+        for (listDir, dedicated) in [(ownDir, false)] + subDirs.map({ ($0, true) }) {
+            guard let entries = try? await store.rawEntries(inDirectory: listDir) else { continue }
+            for entry in entries where !entry.isDirectory && ShareMediaParser.isSubtitleFile(entry.name) {
+                let key = "\(listDir.lowercased())/\(entry.name.lowercased())"
+                guard seenCandidateKeys.insert(key).inserted else { continue }
+                candidates.append((listDir, entry.name, dedicated))
+            }
+        }
+        guard !candidates.isEmpty else { return [] }
+
+        var tracks: [MediaTrack] = []
+        var nextID = 5_000
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("plozz-sidecars", isDirectory: true)
+        try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+
+        for (candidateDir, name, dedicated) in candidates {
+            guard let sidecar = ShareMediaParser.parseSidecar(name) else { continue }
+            guard Self.sidecarMatchesVideo(sidecarStem: sidecar.stem, videoStem: videoStem, dedicatedFolder: dedicated) else { continue }
+
+            let relSidecar = candidateDir.isEmpty ? name : "\(candidateDir)/\(name)"
+            guard let data = try? await store.readFile(relSidecar), !data.isEmpty else { continue }
+            // `.magnitude` (not `abs`) so `Int.min` can't trap; hex keeps it short.
+            let stableKey = String(relSidecar.hashValue.magnitude, radix: 16)
+            let localURL = tempDir.appendingPathComponent("\(stableKey)-\(name)")
+            do {
+                try data.write(to: localURL, options: .atomic)
+            } catch {
+                continue
+            }
+            let language = sidecar.language
+            let langName = language.flatMap { SubtitleLanguageCatalog.displayName(forCode: $0) }
+            var title = langName ?? language ?? "Subtitle"
+            if sidecar.isForced { title += " (Forced)" }
+            if sidecar.isSDH { title += " (SDH)" }
+            tracks.append(MediaTrack(
+                id: nextID,
+                kind: .subtitle,
+                displayTitle: title,
+                language: language,
+                codec: sidecar.ext,
+                isForced: sidecar.isForced,
+                isHearingImpaired: sidecar.isSDH,
+                deliveryURL: localURL,
+                isImageBasedSubtitle: false,
+                isExternal: true
+            ))
+            nextID += 1
+        }
+        return tracks
+    }
+
+    /// Whether a sidecar's parsed stem belongs to the video with `videoStem`.
+    ///
+    /// In the video's **own** directory we require an *exact* stem match — a
+    /// prefix relaxation there cross-attaches sibling episodes with non-zero-padded
+    /// numbering (`Show.S01E1.srt` would prefix-match `Show.S01E10.mkv`) and movie
+    /// siblings (`Batman` vs `Batman Begins`). In a **dedicated** `Subs/Subtitles`
+    /// folder — conventionally holding a single title's subs — we allow a prefix
+    /// match, but only at a separator boundary so `E1` still can't match `E10`.
+    static func sidecarMatchesVideo(sidecarStem: String, videoStem: String, dedicatedFolder: Bool) -> Bool {
+        if sidecarStem == videoStem { return true }
+        guard dedicatedFolder else { return false }
+        return isPrefixAtBoundary(sidecarStem, of: videoStem)
+            || isPrefixAtBoundary(videoStem, of: sidecarStem)
+    }
+
+    /// Whether `prefix` is a prefix of `whole` ending at a separator boundary
+    /// (the next character is `.`, space, `-`, `_`), so `E1` can't prefix `E10`.
+    private static func isPrefixAtBoundary(_ prefix: String, of whole: String) -> Bool {
+        guard prefix.count < whole.count, whole.hasPrefix(prefix) else { return false }
+        let nextIndex = whole.index(whole.startIndex, offsetBy: prefix.count)
+        let next = whole[nextIndex]
+        return next == "." || next == " " || next == "-" || next == "_"
     }
 
     public func reportPlayback(_ progress: PlaybackProgress, event: PlaybackEvent) async throws {

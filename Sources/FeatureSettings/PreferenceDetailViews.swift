@@ -176,6 +176,13 @@ struct PlaybackDetailView: View {
     /// Per-content-type audio-language overrides ("original audio for anime,
     /// device language for everything else").
     @Bindable var audioPolicy: AudioPolicyModel
+    /// Background theme audio for movie and series detail pages.
+    @Bindable var themeMusic: ThemeMusicSettingsModel
+    /// Whether the active profile has a server that can download subtitles
+    /// (Jellyfin or Plex). A share-only profile can't — so the whole "Downloading
+    /// subtitles" row (auto-download + SDH/Forced ranking, all of which only act on
+    /// a server search) is hidden rather than shown as a dead control.
+    var canDownloadSubtitles: Bool = true
 
     /// The three classifiable content types the per-type rules apply to, in the
     /// order shown in Settings (`.other` always follows the base, so it isn't
@@ -304,6 +311,7 @@ struct PlaybackDetailView: View {
         [
             subtitlesSection,
             audioSection,
+            themeMusicSection,
             skipIntrosSection,
             skipIntervalsSection,
             resumeSection,
@@ -313,11 +321,11 @@ struct PlaybackDetailView: View {
     }
 
     private var subtitlesSection: SettingsSplitSection {
-        SettingsSplitSection(id: "subtitles", header: "Subtitles", rows: [
+        var rows: [SettingsSplitRow] = [
             SettingsSplitRow(
                 id: "subtitle-default",
                 title: "Show subtitles",
-                description: "What Plozz does with subtitles when playback starts. You can still change them while watching."
+                description: "What Plozz does with subtitles when playback starts."
             ) {
                 SubtitleModeControl(
                     baseMode: $subtitleBehavior.settings.subtitleMode,
@@ -330,7 +338,7 @@ struct PlaybackDetailView: View {
             SettingsSplitRow(
                 id: "subtitle-language",
                 title: "Subtitle language",
-                description: "The language Plozz prefers when auto-selecting or downloading subtitles.",
+                description: "The language Plozz prefers when choosing subtitles."
             ) {
                 Menu {
                     Picker("Subtitle language", selection: subtitleLanguageSelection) {
@@ -342,22 +350,59 @@ struct PlaybackDetailView: View {
                     Label(subtitleLanguageName(for: subtitleLanguageSelection.wrappedValue), systemImage: "globe")
                 }
                 .menuStyle(.button)
-            },
-            SettingsSplitRow(
-                id: "subtitle-auto-download",
-                title: "Automatically download subtitles",
-                description: "When an item has no suitable subtitle in your preferred language, Plozz asks the Jellyfin server to fetch the best match so every client benefits.",
-            ) {
-                Toggle("Auto-download subtitles", isOn: $subtitleBehavior.settings.autoDownloadSubtitles)
-            },
-            SettingsSplitRow(
-                id: "subtitle-remember",
-                title: "Remember subtitles per series",
-                description: "When you change the subtitle track while watching a series, reuse that choice for the rest of the series.",
-            ) {
-                Toggle("Remember per series", isOn: $playback.settings.rememberSubtitleTrackPerSeries)
             }
-        ])
+        ]
+
+        // "Downloading subtitles" only makes sense with a server that can actually
+        // fetch them (Jellyfin/Plex). A share-only profile can't download — it can
+        // only use sidecar files already on the share — so hide the row entirely
+        // rather than imply downloading works.
+        if canDownloadSubtitles {
+            rows.append(SettingsSplitRow(
+                id: "subtitle-downloading",
+                title: "Downloading subtitles",
+                description: "Download subtitles you don't already have."
+            ) {
+                VStack(alignment: .leading, spacing: 28) {
+                    Toggle("Automatically download", isOn: $subtitleBehavior.settings.autoDownloadSubtitles)
+                    LabeledSettingRow("Hearing-Impaired (SDH)", trailingAlignment: .trailing) {
+                        Menu {
+                            Picker("Hearing-impaired subtitles", selection: $subtitleBehavior.settings.hearingImpairedPreference) {
+                                ForEach(HearingImpairedPreference.allCases, id: \.self) { option in
+                                    Text(option.displayName).tag(option)
+                                }
+                            }
+                        } label: {
+                            Label(subtitleBehavior.settings.hearingImpairedPreference.displayName, systemImage: "ear")
+                        }
+                        .menuStyle(.button)
+                    }
+                    LabeledSettingRow("Forced", trailingAlignment: .trailing) {
+                        Menu {
+                            Picker("Forced subtitles", selection: $subtitleBehavior.settings.forcedSearchPreference) {
+                                ForEach(ForcedSubtitlePreference.allCases, id: \.self) { option in
+                                    Text(option.displayName).tag(option)
+                                }
+                            }
+                        } label: {
+                            Label(subtitleBehavior.settings.forcedSearchPreference.displayName, systemImage: "captions.bubble")
+                        }
+                        .menuStyle(.button)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            })
+        }
+
+        rows.append(SettingsSplitRow(
+            id: "subtitle-remember",
+            title: "Remember subtitles per series",
+            description: "Reuse the subtitle you pick for the rest of a series."
+        ) {
+            Toggle("Remember per series", isOn: $playback.settings.rememberSubtitleTrackPerSeries)
+        })
+
+        return SettingsSplitSection(id: "subtitles", header: "Subtitles", rows: rows)
     }
 
     private var audioSection: SettingsSplitSection {
@@ -387,6 +432,32 @@ struct PlaybackDetailView: View {
                     Toggle("Remember audio per series", isOn: $playback.settings.rememberAudioTrackPerSeries)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        ])
+    }
+
+    private var themeMusicSection: SettingsSplitSection {
+        SettingsSplitSection(id: "theme-music", header: "Detail Pages", rows: [
+            SettingsSplitRow(
+                id: "theme-music",
+                title: "Theme music",
+                description: "Play a movie or show's theme softly while you browse its detail page."
+            ) {
+                SettingsRevealSection(
+                    isOn: $themeMusic.settings.isEnabled,
+                    masterLabel: "Play theme music"
+                ) {
+                    VStack(alignment: .leading, spacing: SettingsMetrics.sectionSpacing) {
+                        SettingsDetailGroup(title: "Volume") {
+                            DescribedSegmentedPicker(
+                                options: ThemeMusicVolume.allCases,
+                                selection: $themeMusic.settings.volume,
+                                title: { $0.displayName },
+                                detail: { $0.detail }
+                            )
+                        }
+                    }
+                }
             }
         ])
     }

@@ -295,6 +295,20 @@ public struct JellyfinClient: Sendable {
         return result
     }
 
+    /// `GET /Items/{id}/ThemeSongs`. Parent inheritance lets season and episode
+    /// requests resolve their series theme when the server supports it.
+    func themeSongs(userID: String, id: String) async throws -> ItemsResponse {
+        let endpoint = Endpoint(
+            path: "/Items/\(id)/ThemeSongs",
+            queryItems: [
+                URLQueryItem(name: "UserId", value: userID),
+                URLQueryItem(name: "InheritFromParent", value: "true")
+            ],
+            headers: authHeaders
+        )
+        return try await http.decode(ItemsResponse.self, from: endpoint, baseURL: baseURL)
+    }
+
     /// `GET /MediaSegments/{itemId}` — server-detected structural segments
     /// (intro, outro, recap, …). Available on Jellyfin 10.10+ or any server with
     /// a media-segment provider plugin; older servers 404, which the provider

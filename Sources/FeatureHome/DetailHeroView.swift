@@ -343,7 +343,6 @@ struct DetailHeroView: View {
 
     var body: some View {
         let hideText = spoilerSettings.shouldHideText(for: item)
-        let hideThumbnail = spoilerSettings.shouldHideThumbnail(for: item)
         let heroHeight = Self.screenHeight * heroHeightFraction
         // When the hero fills the screen (a movie, with no children rail below to
         // provide separation) its content is pinned to the very bottom edge, which
@@ -521,7 +520,7 @@ struct DetailHeroView: View {
         // still looked correct. As a background, the image bleeds edge-to-edge
         // purely visually and the content column stays at the safe width.
         .background(alignment: .bottom) {
-            heroBackdrop(hideThumbnail: hideThumbnail)
+            heroBackdrop()
                 // Re-key on the backdrop identity so a server switch (the only
                 // thing that changes the backdrop — episode focus deliberately
                 // keeps the show-level backdrop) cross-fades the old artwork out
@@ -573,18 +572,16 @@ struct DetailHeroView: View {
     /// ignore the horizontal/top overscan safe area and span the screen edge to
     /// edge *without* inflating the hero's (and the scroll column's) layout width.
     @ViewBuilder
-    private func heroBackdrop(hideThumbnail: Bool) -> some View {
+    private func heroBackdrop() -> some View {
         // The shared `HeroBackdropLayer` (CoreUI) owns the exact scrim + dissolve
         // + full-bleed treatment, so the detail hero and the Home hero carousel
-        // render an identical backdrop. The blurred-poster placeholder lives in
-        // the layer too, driven by `backdrop.posterURL`.
+        // render an identical backdrop. Hero artwork is never spoiler-blurred;
+        // episode spoiler masking remains limited to episode text and cards.
         SeriesDetailHeroBackdrop(
             urls: [backdrop.heroBackdropURL, backdrop.backdropURL].compactMap { $0 },
             asyncFallbackURL: tmdbBackdropFallback,
-            placeholderPosterURL: backdrop.posterURL,
             height: Self.screenHeight * heroHeightFraction,
             scrimTone: scrimTone,
-            blursImage: hideThumbnail && spoilerSettings.mode == .blur,
             recedeModel: seriesRecedeModel
         )
     }
@@ -1142,10 +1139,8 @@ private struct SeriesHeroContentRecedeModifier: ViewModifier {
 private struct SeriesDetailHeroBackdrop: View {
     let urls: [URL]
     let asyncFallbackURL: (@Sendable () async -> URL?)?
-    let placeholderPosterURL: URL?
     let height: CGFloat
     let scrimTone: Color
-    let blursImage: Bool
     let recedeModel: SeriesHeroRecedeModel?
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -1155,10 +1150,8 @@ private struct SeriesDetailHeroBackdrop: View {
         HeroBackdropLayer(
             urls: urls,
             asyncFallbackURL: asyncFallbackURL,
-            placeholderPosterURL: placeholderPosterURL,
             height: height,
             scrimTone: scrimTone,
-            blursImage: blursImage,
             verticalOffset: reduceMotion ? 0 : (receded ? -260 : 0)
         )
         .animation(reduceMotion ? nil : .smooth(duration: 0.9), value: receded)

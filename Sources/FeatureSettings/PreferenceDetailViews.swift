@@ -44,8 +44,7 @@ struct AppearanceDetailView: View {
             SettingsSplitSection(id: "display", header: "Display", rows: [
                 SettingsSplitRow(
                     id: "theme",
-                    title: "Theme",
-                    description: "The overall light or dark look of the app.",
+                    title: "Theme"
                 ) {
                     themeAndTransparency
                 },

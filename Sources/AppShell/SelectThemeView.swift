@@ -68,9 +68,9 @@ struct SelectThemeView: View {
             }
             .frame(maxWidth: 1500)
             // Group the cards into one focus section so moving DOWN from any card
-            // (incl. the far-left System / far-right OLED) reliably exits to the
-            // Continue button below, instead of the focus engine giving up because
-            // the centred button isn't directly beneath the edge cards.
+            // reliably exits to the Continue button below, instead of the focus
+            // engine giving up because the centred button isn't directly beneath
+            // the edge cards.
             .focusSection()
 
             // Full-width focus region for the Continue button (via a centring

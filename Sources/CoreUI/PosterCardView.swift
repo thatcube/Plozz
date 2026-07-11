@@ -625,7 +625,7 @@ public struct PosterCardView: View {
     /// Glass rim for the watched badge. Unlike the card's `mediaEdgeColor` (which
     /// blends with the surrounding card surface), the badge floats on artwork, so
     /// it wants a translucent glass edge that reads against the poster: a bright
-    /// white highlight on dark / OLED, a soft dark edge on Light.
+    /// white highlight on dark and Pure Black, a soft dark edge on Light.
     private var watchedBadgeRim: Color {
         palette.isLight ? .black.opacity(0.15) : .white.opacity(0.4)
     }
@@ -732,7 +732,7 @@ public extension View {
     /// `Button`. On tvOS a `Button` (even `.buttonStyle(.plain)`) paints the
     /// system focus *platter* — a stark white plate behind the focused card that
     /// `.focusEffectDisabled()` can't fully remove and that buries our own glass
-    /// focus treatment (most visible on dark / OLED themes). Following Twozz's
+    /// focus treatment (most visible on dark and Pure Black themes). Following Twozz's
     /// card pattern, we instead drive focus with `.focusable` + `.onTapGesture`
     /// (the select-press fires the tap) and disable the system focus effect, so
     /// the only focus visuals are the ones we draw via `plozzGlassCard`.

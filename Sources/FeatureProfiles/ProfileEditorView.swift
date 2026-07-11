@@ -503,7 +503,7 @@ public struct ProfileEditorView: View {
                 .padding(.vertical, 18)
                 .background {
                     // A visible themed input container so the field never
-                    // disappears into the page (on OLED's pure black a bare
+                    // disappears into the page (on Pure Black's pure black a bare
                     // TextField shows nothing but the typed text). On focus we
                     // fade it out and let tvOS's own focus capsule + ring be the
                     // single focus treatment — otherwise our fill/border fights

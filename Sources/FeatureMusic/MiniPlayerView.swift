@@ -94,7 +94,7 @@ private struct NowPlayingCardContent: View {
     // Idle: liquid glass with normal theme content colors.
     // Focused: solid contrast-flip fill, so content inverts to stay legible.
     //   Light theme focus → black card, white content.
-    //   Dark / OLED focus → white card, black content.
+    //   Dark / Pure Black focus → white card, black content.
     private var focusForeground: Color { colorScheme == .dark ? .black : .white }
 
     /// The artwork's corner radius, kept concentric with the card's outer radius:
@@ -158,7 +158,7 @@ private struct NowPlayingCardContent: View {
 }
 
 /// Theme-aware focus treatment for the Now Playing card: the whole card flips
-/// contrast on focus (light theme → black fill, dark/OLED → white fill), an
+/// contrast on focus (light theme → black fill, dark and Pure Black → white fill), an
 /// opaque fill fading in over the idle material, plus a lift + shadow. Injects
 /// `\.nowPlayingCardFocused` so the card's content flips its colors to match.
 private struct NowPlayingCardButtonStyle: ButtonStyle {
@@ -180,7 +180,7 @@ private struct NowPlayingCardButtonStyle: ButtonStyle {
         }
 
         // Focused fill is the contrast flip: black card on a light theme, white
-        // card on a dark/OLED theme. Idle uses liquid glass instead.
+        // card on a dark and Pure Black theme. Idle uses liquid glass instead.
         private var focusFill: Color { colorScheme == .dark ? .white : .black }
 
         var body: some View {

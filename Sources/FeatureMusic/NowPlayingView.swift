@@ -14,7 +14,7 @@ import UIKit
 public struct NowPlayingView: View {
     @Bindable var controller: AudioPlaybackController
     /// The app's currently selected theme, passed in from the host so the
-    /// player's "Match Theme" appearance can distinguish OLED from plain Dark
+    /// player's "Match Theme" appearance can distinguish Pure Black from plain Dark
     /// (the system color scheme alone can't tell them apart).
     var appTheme: AppTheme = .system
     /// Per-profile player preferences (appearance + "show extra info"), injected
@@ -385,18 +385,18 @@ public struct NowPlayingView: View {
         // The player paints its own background, so it never blindly inherits the
         // app theme. It resolves its own look (see `playerStyle`) and forces the
         // subtree's color scheme to match so text and glass read correctly —
-        // light-on-dark for Vibrant Dark / OLED, dark-on-light for Frosted Light.
+        // light-on-dark for Vibrant Dark / Pure Black, dark-on-light for Frosted Light.
         .environment(\.colorScheme, isLightPlayer ? .light : .dark)
     }
 
     /// The resolved background treatment, collapsing `.matchTheme` against the
-    /// app's selected theme (so OLED → true black, Light → frosted, etc.).
+    /// app's selected theme (so Pure Black → true black, Light → frosted, etc.).
     private var playerStyle: LiquidArtworkBackground.Style {
         switch playerAppearance {
         case .matchTheme: return matchedThemeStyle
         case .dark: return .dark
         case .light: return .light
-        case .oled: return .oled
+        case .pureBlack: return .pureBlack
         }
     }
 
@@ -407,7 +407,7 @@ public struct NowPlayingView: View {
         switch appTheme {
         case .light: return .light
         case .dark: return .dark
-        case .oled: return .oled
+        case .pureBlack: return .pureBlack
         case .system: return systemColorScheme == .light ? .light : .dark
         }
     }

@@ -32,7 +32,7 @@ public struct MediaBadgeChip: View {
     private let badge: MediaBadge
 
     /// The active theme palette, so every badge paints with the theme's primary
-    /// text colour (white in dark/OLED, near-black in light) instead of a
+    /// text colour (white in dark and Pure Black, near-black in light) instead of a
     /// hardcoded white that vanishes against a light-mode background.
     @Environment(\.themePalette) private var palette
 
@@ -97,7 +97,7 @@ public struct MediaBadgeChip: View {
             // The eye-catching "chip": a solid fill of the theme's primary colour
             // with the background colour punched through as the text, so it stays
             // a high-contrast highlight in every theme (white-on-dark in light
-            // mode, dark-on-white in dark/OLED) rather than white-on-white.
+            // mode, dark-on-white in dark and Pure Black) rather than white-on-white.
             label(badge.label, textColor: palette.backgroundBase)
                 .background(
                     RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
@@ -219,7 +219,7 @@ public struct MediaBadgeChip: View {
 
     /// Diagonal satin sheen for the brushed-metal SDR wordmark: a mid-neutral base
     /// with a single brighter band crossing on the diagonal, theme-aware so it
-    /// stays a muted silver in dark/OLED and a muted graphite in light.
+    /// stays a muted silver in dark and Pure Black and a muted graphite in light.
     private var sdrBrushedGradient: LinearGradient {
         let stops: [Gradient.Stop] = colorScheme == .light
             ? [
@@ -324,7 +324,7 @@ public struct MediaBadgeChip: View {
     }
 
     /// HDR accent gradient (warm highlight → cool shadow) used to fill the HDR
-    /// wordmark, evoking the wide luminance range HDR represents. In dark/OLED the
+    /// wordmark, evoking the wide luminance range HDR represents. In dark and Pure Black the
     /// stops are bright (gold → pink → cyan); in light mode they're replaced with
     /// darker, deeply-saturated versions of the *same* hues so the logo keeps its
     /// vibrant identity while staying legible against a light background.

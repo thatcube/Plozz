@@ -87,14 +87,14 @@ public struct PlozzGlassCardModifier: ViewModifier {
                     }
                 }
                 // A hairline edge so a resting card reads on any theme: the frosted
-                // `.ultraThinMaterial` is translucent, so on a dark/OLED page it
+                // `.ultraThinMaterial` is translucent, so on a dark and Pure Black page it
                 // darkens to near-invisible and the card loses its edge. The
-                // theme-aware `cardOpaqueBorder` (light on dark/OLED, dark on light)
+                // theme-aware `cardOpaqueBorder` (light on dark and Pure Black, dark on light)
                 // defines that edge; drawn only at rest, since the focused glass
                 // brings its own tint + shadow. Skipped for `glassAtRest: false`.
                 .overlay {
                     if !isFocused && glassAtRest {
-                        // Soften the edge on dark/OLED — the light hairline reads
+                        // Soften the edge on dark and Pure Black — the light hairline reads
                         // stronger against a near-black page than the same value does
                         // on a light one, so trim it there while leaving Light as-is.
                         shape.strokeBorder(
@@ -256,7 +256,7 @@ public struct PlozzGlassPanelModifier: ViewModifier {
 
     public func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-        // Theme-aware scrim: black behind dark/OLED, white behind light, so the
+        // Theme-aware scrim: black behind dark and Pure Black, white behind light, so the
         // panel keeps text legible over any frame while still tracking the theme.
         let scrim = (colorScheme == .dark ? Color.black : Color.white).opacity(scrimOpacity)
 

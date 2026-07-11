@@ -37,8 +37,8 @@ final class ThemeSettingsStoreTests: XCTestCase {
         let defaults = makeDefaults()
         let model = ThemeSettingsModel(store: ThemeSettingsStore(defaults: defaults))
         XCTAssertEqual(model.theme, .dark)
-        model.theme = .oled
-        XCTAssertEqual(ThemeSettingsStore(defaults: defaults).load(), .oled)
+        model.theme = .pureBlack
+        XCTAssertEqual(ThemeSettingsStore(defaults: defaults).load(), .pureBlack)
     }
 
     func testCodableRoundTrip() throws {
@@ -77,8 +77,8 @@ final class ThemePaletteResolutionTests: XCTestCase {
         }
     }
 
-    func testOLEDHasNoGlowOthersAreThemed() {
-        XCTAssertNil(ThemePalette.oled.topGlow)
+    func testPureBlackHasNoGlowOthersAreThemed() {
+        XCTAssertNil(ThemePalette.pureBlack.topGlow)
         XCTAssertNotNil(ThemePalette.dark.topGlow)
         XCTAssertNotNil(ThemePalette.light.topGlow)
     }

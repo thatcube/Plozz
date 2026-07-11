@@ -32,7 +32,7 @@ public struct LiquidArtworkBackground: View {
     public var showsBackdrop: Bool = true
 
     /// The three background treatments the player offers.
-    public enum Style { case dark, light, oled }
+    public enum Style { case dark, light, pureBlack }
 
     public init(palette: [Color], animate: Bool = true, style: Style = .dark, paletteCrossfade: Double = 1.2, showsBackdrop: Bool = true) {
         self.palette = palette
@@ -64,11 +64,11 @@ public struct LiquidArtworkBackground: View {
         switch style {
         case .dark: return 1.0
         case .light: return 0.95
-        case .oled: return 0.5
+        case .pureBlack: return 0.5
         }
     }
 
-    /// Per-style legibility layers: dark veils + vignette for dark/OLED, a light
+    /// Per-style legibility layers: dark veils + vignette for dark and Pure Black, a light
     /// veil for the frosted look. Keeps foreground text readable regardless of
     /// how bright or busy the artwork is.
     @ViewBuilder
@@ -80,9 +80,9 @@ public struct LiquidArtworkBackground: View {
                            center: .center, startRadius: 200, endRadius: 1400)
             LinearGradient(colors: [.clear, .clear, Color.black.opacity(0.35)],
                            startPoint: .top, endPoint: .bottom)
-        case .oled:
+        case .pureBlack:
             // Push almost everything to true black, leaving the colors as faint
-            // accents — easy on OLED panels and very high contrast.
+            // accents over the pure-black base for very high contrast.
             Color.black.opacity(0.6)
             RadialGradient(colors: [.clear, Color.black.opacity(0.78)],
                            center: .center, startRadius: 160, endRadius: 1400)

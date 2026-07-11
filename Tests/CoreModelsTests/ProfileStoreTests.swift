@@ -406,8 +406,8 @@ final class SettingsNamespaceTests: XCTestCase {
     func testNilNamespaceUsesLegacyThemeKey() {
         let defaults = makeDefaults()
         // Seed the legacy key directly, as an existing install would have.
-        defaults.set(AppTheme.oled.rawValue, forKey: "com.plozz.appTheme")
-        XCTAssertEqual(ThemeSettingsStore(defaults: defaults, namespace: nil).load(), .oled)
+        defaults.set(AppTheme.pureBlack.rawValue, forKey: "com.plozz.appTheme")
+        XCTAssertEqual(ThemeSettingsStore(defaults: defaults, namespace: nil).load(), .pureBlack)
     }
 
     /// End-to-end zero-migration proof: an existing install's settings (written
@@ -418,7 +418,7 @@ final class SettingsNamespaceTests: XCTestCase {
     func testDefaultProfileReadsPreExistingLegacyKeys() {
         let defaults = makeDefaults()
         // Seed several legacy keys as a pre-profiles install would have.
-        defaults.set(AppTheme.oled.rawValue, forKey: "com.plozz.appTheme")
+        defaults.set(AppTheme.pureBlack.rawValue, forKey: "com.plozz.appTheme")
         var spoilerOff = SpoilerSettings.default
         spoilerOff.isEnabled = false
         SpoilerSettingsStore(defaults: defaults, namespace: nil).save(spoilerOff)
@@ -431,7 +431,7 @@ final class SettingsNamespaceTests: XCTestCase {
 
         // Settings stores built from that namespace read the pre-existing values.
         let ns = model.activeNamespace
-        XCTAssertEqual(ThemeSettingsStore(defaults: defaults, namespace: ns).load(), .oled)
+        XCTAssertEqual(ThemeSettingsStore(defaults: defaults, namespace: ns).load(), .pureBlack)
         XCTAssertFalse(SpoilerSettingsStore(defaults: defaults, namespace: ns).load().isEnabled)
     }
 
@@ -439,9 +439,9 @@ final class SettingsNamespaceTests: XCTestCase {
         let defaults = makeDefaults()
         let a = ThemeSettingsStore(defaults: defaults, namespace: "p1")
         let b = ThemeSettingsStore(defaults: defaults, namespace: "p2")
-        a.save(.oled)
+        a.save(.pureBlack)
         b.save(.light)
-        XCTAssertEqual(ThemeSettingsStore(defaults: defaults, namespace: "p1").load(), .oled)
+        XCTAssertEqual(ThemeSettingsStore(defaults: defaults, namespace: "p1").load(), .pureBlack)
         XCTAssertEqual(ThemeSettingsStore(defaults: defaults, namespace: "p2").load(), .light)
         // The default (nil) namespace is independent of both.
         XCTAssertEqual(ThemeSettingsStore(defaults: defaults, namespace: nil).load(), .default)

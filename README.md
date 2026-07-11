@@ -34,7 +34,7 @@ Found a bug or have an idea? [**Open an issue**](https://github.com/thatcube/Plo
 - **Watched & unwatched indicators** — Choose a watched checkmark or an unwatched corner badge (Infuse / classic-Plex style) on your posters, across Plex, Jellyfin and SMB shares.
 - **Trakt, AniList, MyAnimeList, Simkl, and Last.fm** - Full support for every tracker across your movies, tv, anime, and music.
 - **Seerr integration** - Connect a seerr account and request media from directly within the search or hero of the app.
-- **Highly customizable interface** - Change the theme of the entire app (light, dark, OLED). Change the density of media, optionally show hero content, change the navigation style. 
+- **Highly customizable interface** - Change the theme of the entire app (light, dark, Pure Black). Change the density of media, optionally show hero content, change the navigation style.
 - **Jellyfin, Plex, and local shares (SMB)**
 - **Circadian mode** - Automatically warm and dim the display at set times to help you sleep (only at the app level)
 - **Subtitle customization** — Vastly customize the subtitles directly in the player. Change font, size, color, opacity, background, font weight, HDR brightness, shadow, position.

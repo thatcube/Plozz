@@ -215,7 +215,7 @@ public struct SkeletonCardView: View {
 }
 
 public extension Color {
-    /// Adaptive neutral fill for skeleton placeholders: a light gray on dark/OLED
+    /// Adaptive neutral fill for skeleton placeholders: a light gray on dark and Pure Black
     /// backgrounds (so cards read clearly against pure black) and a darker gray in
     /// light mode. Kept low-opacity so it stays a quiet placeholder, not a solid
     /// block.

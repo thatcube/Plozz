@@ -880,7 +880,7 @@ private struct LibraryCardView: View {
     /// between the page's `backgroundBase` (top) and the opaque `cardOpaqueSurface`
     /// (bottom): close in value so the fill reads a touch brighter than the page
     /// yet never as a heavy gradient, and — because both stops come straight from
-    /// the palette — it tracks light / dark and collapses to pure black in OLED
+    /// the palette — it tracks light / dark and collapses to pure black in Pure Black
     /// (both stops are black there). Opaque, so the focus glass halo behind the
     /// card can't bleed through, and focus-independent so nothing jumps on focus.
     private var placeholder: some View {

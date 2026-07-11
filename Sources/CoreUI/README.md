@@ -6,7 +6,7 @@ cache that every feature module reuses. tvOS-only — guarded behind
 
 ## Responsibility
 
-- **Theme** — `Theme`, `ThemeOption` (System / Dark / OLED / Light) and
+- **Theme** — `Theme`, `ThemeOption` (System / Dark / Pure Black / Light) and
   the per-profile theme model, observed at the app root.
 - **Focusable building blocks** — focus-aware buttons, cards, tab bars,
   parallax containers, brand QR code rendering, code-font numerals.

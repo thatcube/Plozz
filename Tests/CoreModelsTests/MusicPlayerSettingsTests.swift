@@ -50,11 +50,11 @@ final class MusicPlayerSettingsStoreTests: XCTestCase {
     func testPrimaryProfileUsesLegacyKeys() {
         let defaults = makeDefaults()
         // Seed values directly under the legacy keys, as a pre-per-profile install would.
-        defaults.set(MusicPlayerAppearance.oled.rawValue, forKey: "musicPlayerAppearance")
+        defaults.set(MusicPlayerAppearance.pureBlack.rawValue, forKey: "musicPlayerAppearance")
         defaults.set(true, forKey: "musicShowTrackDetails")
 
         let store = MusicPlayerSettingsStore(defaults: defaults, namespace: nil)
-        XCTAssertEqual(store.loadAppearance(), .oled, "primary profile should read the legacy appearance key")
+        XCTAssertEqual(store.loadAppearance(), .pureBlack, "primary profile should read the legacy appearance key")
         XCTAssertTrue(store.loadShowTrackDetails(), "primary profile should read the legacy show-details key")
     }
 
@@ -70,7 +70,7 @@ final class MusicPlayerSettingsStoreTests: XCTestCase {
         primary.saveShowTrackDetails(false)
         alice.saveAppearance(.light)
         alice.saveShowTrackDetails(true)
-        bob.saveAppearance(.oled)
+        bob.saveAppearance(.pureBlack)
         bob.saveShowTrackDetails(false)
 
         // Each profile reads back only its own values.
@@ -78,7 +78,7 @@ final class MusicPlayerSettingsStoreTests: XCTestCase {
         XCTAssertFalse(primary.loadShowTrackDetails())
         XCTAssertEqual(alice.loadAppearance(), .light)
         XCTAssertTrue(alice.loadShowTrackDetails())
-        XCTAssertEqual(bob.loadAppearance(), .oled)
+        XCTAssertEqual(bob.loadAppearance(), .pureBlack)
         XCTAssertFalse(bob.loadShowTrackDetails())
 
         // A namespaced profile uses the suffixed key, leaving the legacy key untouched.
@@ -93,11 +93,11 @@ final class MusicPlayerSettingsStoreTests: XCTestCase {
         XCTAssertEqual(model.appearance, .default)
         XCTAssertFalse(model.showTrackDetails)
 
-        model.appearance = .oled
+        model.appearance = .pureBlack
         model.showTrackDetails = true
 
         let reloaded = MusicPlayerSettingsStore(defaults: defaults)
-        XCTAssertEqual(reloaded.loadAppearance(), .oled)
+        XCTAssertEqual(reloaded.loadAppearance(), .pureBlack)
         XCTAssertTrue(reloaded.loadShowTrackDetails())
     }
 }

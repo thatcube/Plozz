@@ -364,7 +364,6 @@ struct HomeHeroView: View {
         }
         .opacity(heroVisible ? 1 : 0)
         .onAppear {
-            Task { await resolveArtwork(around: index) }
             // Start the first dwell from appearance so the initial slide's gauge
             // and auto-advance are anchored to now, not to view construction.
             restartDwell()
@@ -415,7 +414,6 @@ struct HomeHeroView: View {
             if items.indices.contains(index) {
                 selectedButton = min(selectedButton, max(0, buttons(for: items[index]).count - 1))
             }
-            Task { await resolveArtwork(around: index) }
         }
         // Drop optimistic watchlist overrides once the authoritative loaded set
         // agrees, so a stale override can't outlive the real data.
@@ -438,6 +436,12 @@ struct HomeHeroView: View {
                     requestOverrides[item.id] = nil
                 }
             }
+        }
+        // Keep only the fronted slide's current warm pass alive. Rapid paging
+        // cancels the old five-slide window before it can keep downloading and
+        // decoding artwork the user has already skipped.
+        .task(id: ArtworkResolutionKey(slideToken: slideToken, index: index)) {
+            await resolveArtwork(around: index)
         }
         // Auto-advance: the fire is rescheduled whenever `autoAdvanceKey` changes
         // (slide change, manual page, pause/resume, or the item count settling).
@@ -1255,8 +1259,6 @@ struct HomeHeroView: View {
         restartDwell()
         metadataVisible = false
         selectedButton = min(keepButton, max(0, buttons(for: items[toItem]).count - 1))
-
-        Task { await resolveArtwork(around: toItem) }
     }
 
     /// Begins a fresh auto-advance dwell from now: the progress gauge fills from
@@ -1472,13 +1474,14 @@ struct HomeHeroView: View {
             .frame(width: active ? Self.activeDotWidth : Self.dotSize, height: Self.dotSize)
     }
 
-    /// The bright progress fill inside an indicator. Kept in a `TimelineView` for
-    /// every dot (stable identity) so the active one grows from a dot to the full
-    /// pill across the dwell; when a dot goes inactive its fill closes back down
-    /// (via the container's page animation), and when auto-advance is off the active
-    /// pill just sits fully lit.
+    /// The bright progress fill inside an indicator. Every dot keeps stable view
+    /// identity for the coordinated morph, but only the active dot's timeline ticks;
+    /// inactive dots stay paused at zero instead of each invalidating at 30 Hz.
     private func activeDotFill(active: Bool, trackWidth: CGFloat, height: CGFloat) -> some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !settings.autoAdvance || pausedAt != nil)) { timeline in
+        TimelineView(.animation(
+            minimumInterval: 1.0 / 30.0,
+            paused: !active || !settings.autoAdvance || pausedAt != nil
+        )) { timeline in
             Capsule()
                 .fill(dotTint)
                 .frame(
@@ -1540,27 +1543,58 @@ struct HomeHeroView: View {
 
     // MARK: - Artwork routing / preload
 
-    /// Resolves + preloads the best hero art for the slide at `idx` and its
-    /// immediate neighbours, so paging never animates a placeholder and every
-    /// slide shows correct, high-res art.
+    /// Resolves the fronted slide and warms a bounded two-slide window in each
+    /// direction. Five decoded hero images fit comfortably inside the shared cache
+    /// while giving sequential remote presses room to stay cache-hot regardless of
+    /// whether the carousel contains five slides or twenty.
     private func resolveArtwork(around idx: Int) async {
-        let count = items.count
-        guard count > 0 else { return }
-        let targets = [idx, (idx + 1) % count, (idx - 1 + count) % count]
-        for i in targets where items.indices.contains(i) {
-            await resolveArtwork(for: items[i])
+        let targetIndices = HeroArtworkWindow.indices(count: items.count, centeredAt: idx)
+        guard !targetIndices.isEmpty else { return }
+
+        // Resolve the visible slide immediately. Neighbor warming is speculative,
+        // so give focus a short dwell first; rapid presses cancel this task during
+        // the sleep and never start downloads for slides already skipped.
+        _ = await resolveArtworkURL(for: items[targetIndices[0]])
+        try? await Task.sleep(nanoseconds: 150_000_000)
+        guard !Task.isCancelled else { return }
+
+        var warmURLs: [URL] = []
+        for itemIndex in targetIndices.dropFirst() {
+            guard !Task.isCancelled else { return }
+            if let url = await resolveArtworkURL(for: items[itemIndex]) {
+                warmURLs.append(url)
+            }
+        }
+
+        var seen = Set<URL>()
+        let uniqueWarmURLs = warmURLs.filter { seen.insert($0).inserted }
+        await withTaskGroup(of: Void.self) { group in
+            for url in uniqueWarmURLs {
+                group.addTask(priority: .utility) {
+                    guard !Task.isCancelled else { return }
+                    await ArtworkSession.warmLimiter.run {
+                        guard !Task.isCancelled else { return }
+                        _ = await ArtworkImageCache.shared.image(
+                            for: url,
+                            variant: .heroBackdrop,
+                            background: true
+                        )
+                    }
+                }
+            }
         }
     }
 
-    /// Resolves the best hero backdrop URL for one item and warms the decoded
-    /// image cache. Mirrors `DetailHeroView`: prefer the **server's** hero art
+    /// Resolves the best hero backdrop URL for one item. Mirrors
+    /// `DetailHeroView`: prefer the **server's** hero art
     /// (for an episode/season, the series backdrop carried on `fallbackArtworkURL`
     /// — the same art the detail page shows), and only reach for the router when
     /// the server provided none. Resolving the router *first* for episodes was the
     /// "wrong / low-res image" bug.
     @MainActor
-    private func resolveArtwork(for item: MediaItem) async {
-        guard resolvedBackdrop[item.id] == nil else { return }
+    private func resolveArtworkURL(for item: MediaItem) async -> URL? {
+        guard !Task.isCancelled else { return nil }
+        if let resolved = resolvedBackdrop[item.id] { return resolved }
         var best: URL? = item.heroBackdropURL ?? item.backdropURL ?? item.fallbackArtworkURL
         switch item.kind {
         case .folder, .collection, .unknown:
@@ -1570,11 +1604,9 @@ struct HomeHeroView: View {
                 best = await ArtworkRouter.shared.artworkURL(.hero, for: item)
             }
         }
-        guard let url = best else { return }
+        guard !Task.isCancelled, let url = best else { return nil }
         resolvedBackdrop[item.id] = url
-        #if canImport(UIKit)
-        ArtworkImageCache.shared.prefetch(url, variant: .heroBackdrop)
-        #endif
+        return url
     }
 
     // MARK: - External-art fallbacks (mirror DetailHeroView)
@@ -1622,6 +1654,28 @@ struct HomeHeroView: View {
     private struct RequestStatusSignature: Equatable {
         let id: String
         let availability: MediaAvailabilityStatus?
+    }
+
+    private struct ArtworkResolutionKey: Equatable {
+        let slideToken: Int
+        let index: Int
+    }
+}
+
+/// A fixed-size, wraparound neighborhood used for hero artwork warming. Its size
+/// is independent of the user's hero item count, preventing a 20-item carousel
+/// from turning into a 20-image speculative decode.
+enum HeroArtworkWindow {
+    private static let offsets = [0, 1, -1, 2, -2]
+
+    static func indices(count: Int, centeredAt index: Int) -> [Int] {
+        guard count > 0 else { return [] }
+        let center = min(max(index, 0), count - 1)
+        var seen = Set<Int>()
+        return offsets.compactMap { offset in
+            let candidate = (center + offset + count) % count
+            return seen.insert(candidate).inserted ? candidate : nil
+        }
     }
 }
 

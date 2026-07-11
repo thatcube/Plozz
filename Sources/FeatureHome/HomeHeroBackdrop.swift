@@ -256,6 +256,10 @@ private struct WipeImageView: UIViewRepresentable {
         )
     }
 
+    static func dismantleUIView(_ uiView: HeroWipeContainerView, coordinator: Coordinator) {
+        coordinator.cancelPendingLoad()
+    }
+
     // MARK: - Coordinator
 
     /// Owns transition scheduling: which slide is displayed, cache-first art loading
@@ -280,6 +284,10 @@ private struct WipeImageView: UIViewRepresentable {
         private var targetForward = true
         /// Monotonic load token; only the newest requested art may apply.
         private var loadToken = 0
+        /// The one foreground artwork load that can still become visible. Paging
+        /// cancels the previous task so skipped cold slides release their cache
+        /// waiter, download, and decode instead of competing with the latest press.
+        private var loadTask: Task<Void, Never>?
         /// Retains every active pair until its incoming reveal finishes. Each press
         /// gets its own pair; no animator is stopped to make room for another.
         private struct ActiveAnimations {
@@ -295,6 +303,12 @@ private struct WipeImageView: UIViewRepresentable {
 
         func configure(width: CGFloat, height: CGFloat) {
             container?.slideSize = CGSize(width: width, height: height)
+        }
+
+        func cancelPendingLoad() {
+            loadToken += 1
+            loadTask?.cancel()
+            loadTask = nil
         }
 
         func update(
@@ -323,6 +337,8 @@ private struct WipeImageView: UIViewRepresentable {
             }
             targetID = slideID
             targetURLs = urls
+            loadTask?.cancel()
+            loadTask = nil
             loadToken += 1
             let token = loadToken
 
@@ -333,10 +349,11 @@ private struct WipeImageView: UIViewRepresentable {
                 return
             }
             // Not decoded yet: load, then wipe once ready — if still the target.
-            Task { [weak self] in
+            loadTask = Task { [weak self] in
                 guard let self else { return }
                 let resolved = await self.firstUsableLoaded(urls, asyncFallbackURL: asyncFallbackURL)
-                guard token == self.loadToken else { return } // superseded by a newer page
+                guard !Task.isCancelled, token == self.loadToken else { return }
+                self.loadTask = nil
                 if let (image, url) = resolved {
                     self.applyResolved(image, url: url, id: slideID, forward: forward)
                 } else {
@@ -448,6 +465,8 @@ private struct WipeImageView: UIViewRepresentable {
             slideID: String,
             asyncFallbackURL: (@Sendable () async -> URL?)?
         ) {
+            loadTask?.cancel()
+            loadTask = nil
             loadToken += 1
             let token = loadToken
 
@@ -456,13 +475,14 @@ private struct WipeImageView: UIViewRepresentable {
                 return
             }
 
-            Task { [weak self] in
+            loadTask = Task { [weak self] in
                 guard let self else { return }
                 let resolved = await self.firstUsableLoaded(
                     urls,
                     asyncFallbackURL: asyncFallbackURL
                 )
-                guard token == self.loadToken else { return }
+                guard !Task.isCancelled, token == self.loadToken else { return }
+                self.loadTask = nil
                 if let (image, url) = resolved {
                     self.receiveSameSlideUpgrade(image, url: url, id: slideID)
                 } else {
@@ -491,12 +511,19 @@ private struct WipeImageView: UIViewRepresentable {
             asyncFallbackURL: (@Sendable () async -> URL?)?
         ) async -> (UIImage, URL)? {
             for url in urls {
+                guard !Task.isCancelled else { return nil }
                 guard let loaded = await ArtworkImageCache.shared.image(for: url, variant: .heroBackdrop) else { continue }
+                guard !Task.isCancelled else { return nil }
                 if isUsable(loaded) { return (loaded, url) }
             }
-            if let asyncFallbackURL, let url = await asyncFallbackURL(),
-               let loaded = await ArtworkImageCache.shared.image(for: url, variant: .heroBackdrop), isUsable(loaded) {
-                return (loaded, url)
+            guard !Task.isCancelled else { return nil }
+            if let asyncFallbackURL, let url = await asyncFallbackURL() {
+                guard !Task.isCancelled else { return nil }
+                if let loaded = await ArtworkImageCache.shared.image(for: url, variant: .heroBackdrop),
+                   !Task.isCancelled,
+                   isUsable(loaded) {
+                    return (loaded, url)
+                }
             }
             return nil
         }

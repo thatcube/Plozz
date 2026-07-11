@@ -6,6 +6,14 @@ import CoreModels
 /// sources, cross-source de-dup, `maxItems` cap, disabled-source skipping, and
 /// the inert `.featured` (Seerr) seam.
 final class HeroCuratorTests: XCTestCase {
+    private actor ArtworkCalls {
+        private(set) var ids: [String] = []
+
+        func record(_ id: String) {
+            ids.append(id)
+        }
+    }
+
     private func item(
         _ id: String,
         kind: MediaItemKind = .movie,
@@ -166,6 +174,26 @@ final class HeroCuratorTests: XCTestCase {
 
         XCTAssertEqual(result.map(\.id), ["router"])
         XCTAssertEqual(result.first?.heroBackdropURL, resolvedURL)
+    }
+
+    func testArtworkResolutionStopsOnceSourceCanFillHero() async {
+        let curator = HeroCurator()
+        let calls = ArtworkCalls()
+        let candidates = (1...10).map { item("router-\($0)", hasHeroArtwork: false) }
+
+        let result = await curator.curate(
+            settings: settings(sources: [.continueWatching], maxItems: 3),
+            continueWatching: candidates,
+            watchlist: [],
+            artworkProvider: { item in
+                await calls.record(item.id)
+                return URL(string: "https://example.com/\(item.id)-hero.jpg")
+            }
+        )
+        let resolvedIDs = await calls.ids
+
+        XCTAssertEqual(result.map(\.id), ["router-1", "router-2", "router-3"])
+        XCTAssertEqual(resolvedIDs, ["router-1", "router-2", "router-3"])
     }
 
     // MARK: - Synchronous seed (pop-in avoidance)

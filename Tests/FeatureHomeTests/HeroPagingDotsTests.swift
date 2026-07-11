@@ -126,3 +126,19 @@ final class HeroPagingDotsTests: XCTestCase {
         XCTAssertEqual(layout(count: 20, index: 999).map(\.index), Array(12...19))
     }
 }
+
+final class HeroArtworkWindowTests: XCTestCase {
+    func testLargeCarouselWarmsOnlyFiveSlides() {
+        XCTAssertEqual(
+            HeroArtworkWindow.indices(count: 20, centeredAt: 10),
+            [10, 11, 9, 12, 8]
+        )
+    }
+
+    func testWindowWrapsAndDoesNotDuplicateSmallCarousels() {
+        XCTAssertEqual(
+            HeroArtworkWindow.indices(count: 3, centeredAt: 0),
+            [0, 1, 2]
+        )
+    }
+}

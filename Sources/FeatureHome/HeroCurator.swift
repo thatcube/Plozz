@@ -68,6 +68,7 @@ public struct HeroCurator: Sendable {
 
         let eligible = await HeroArtworkEligibility.resolve(
             perSource,
+            limitPerSource: limit,
             artworkProvider: artworkProvider
         )
         return strategy.compose(eligible, limit: limit)
@@ -113,21 +114,40 @@ private enum HeroArtworkEligibility {
 
     static func resolve(
         _ perSource: [[MediaItem]],
+        limitPerSource: Int,
         artworkProvider: @escaping HeroArtworkProviding
     ) async -> [[MediaItem]] {
-        await withTaskGroup(of: (Int, [MediaItem]).self) { group in
+        guard limitPerSource > 0 else {
+            return Array(repeating: [], count: perSource.count)
+        }
+        return await withTaskGroup(of: (Int, [MediaItem]).self) { group in
             for (sourceIndex, items) in perSource.enumerated() {
                 group.addTask {
                     var eligible: [MediaItem] = []
-                    eligible.reserveCapacity(items.count)
+                    eligible.reserveCapacity(min(items.count, limitPerSource))
+                    var seen = Set<String>()
 
                     for item in items {
+                        guard !Task.isCancelled else { break }
+                        let tokens = HeroDedupe.tokens(for: item)
+                        guard !tokens.contains(where: seen.contains) else { continue }
+
+                        let resolvedItem: MediaItem?
                         if hasDirectHeroArtwork(item) {
-                            eligible.append(item)
+                            resolvedItem = item
                         } else if let resolvedURL = await artworkProvider(item) {
-                            var resolvedItem = item
-                            resolvedItem.heroBackdropURL = resolvedURL
+                            var itemWithArtwork = item
+                            itemWithArtwork.heroBackdropURL = resolvedURL
+                            resolvedItem = itemWithArtwork
+                        } else {
+                            resolvedItem = nil
+                        }
+
+                        guard !Task.isCancelled else { break }
+                        if let resolvedItem {
+                            seen.formUnion(tokens)
                             eligible.append(resolvedItem)
+                            if eligible.count == limitPerSource { break }
                         }
                     }
 

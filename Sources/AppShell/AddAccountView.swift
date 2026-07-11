@@ -63,15 +63,13 @@ struct AddAccountView: View {
                 // Resolve the page's geometry once at this boundary instead of
                 // pushing the transition down to independently hosted focus rows.
                 .geometryGroup()
-                .compositingGroup()
                 .transition(pageTransition)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        // Expand the boundary that `.clipped()` masks; a descendant ScrollView
-        // cannot escape a clip that was already resolved to the tvOS safe area.
+        // Let overflowing scroll content reach the physical window edges. The
+        // window remains the final clip for the small horizontal page offsets.
         .ignoresSafeArea(.container, edges: .vertical)
-        .clipped()
     }
 
     @ViewBuilder
@@ -131,7 +129,7 @@ struct AddAccountView: View {
     private var pageEntryAnimation: Animation {
         reduceMotion
             ? .easeInOut(duration: 0.10)
-            : .spring(response: 0.38, dampingFraction: 0.9)
+            : .easeOut(duration: 0.24)
     }
 
     private func navigate(to destination: ProviderKind) {

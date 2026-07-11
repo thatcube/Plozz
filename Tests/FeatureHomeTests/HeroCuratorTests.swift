@@ -242,3 +242,49 @@ final class HeroCuratorTests: XCTestCase {
         XCTAssertEqual(result.map(\.id), ["art"])
     }
 }
+
+final class HomeHeroSlotStateTests: XCTestCase {
+    func testAsyncOnlyHeroReservesPlaceholderUntilCurationCompletes() {
+        XCTAssertEqual(
+            HomeHeroSlotState.resolve(
+                isConfigured: true,
+                hasItems: false,
+                recomputeComplete: false
+            ),
+            .placeholder
+        )
+    }
+
+    func testAvailableSeedOrCuratedItemsShowContentImmediately() {
+        XCTAssertEqual(
+            HomeHeroSlotState.resolve(
+                isConfigured: true,
+                hasItems: true,
+                recomputeComplete: false
+            ),
+            .content
+        )
+    }
+
+    func testCompletedEmptyCurationRemovesPlaceholder() {
+        XCTAssertEqual(
+            HomeHeroSlotState.resolve(
+                isConfigured: true,
+                hasItems: false,
+                recomputeComplete: true
+            ),
+            .hidden
+        )
+    }
+
+    func testDisabledHeroNeverReservesSlot() {
+        XCTAssertEqual(
+            HomeHeroSlotState.resolve(
+                isConfigured: false,
+                hasItems: true,
+                recomputeComplete: false
+            ),
+            .hidden
+        )
+    }
+}

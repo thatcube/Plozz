@@ -977,12 +977,17 @@ actor ShareCatalogStore {
         var library: CatalogLibrary = .tv
         var seasons: [Int] = []
         query("""
-        SELECT DISTINCT COALESCE(season,1) AS s, series_title, library FROM assets
-        WHERE series_key=? AND kind='episode' ORDER BY s;
+        SELECT COALESCE(season,1) AS s,
+               MIN(series_title) AS canonical_title,
+               MAX(CASE WHEN library='anime' THEN 1 ELSE 0 END) AS has_anime
+        FROM assets
+        WHERE series_key=? AND kind='episode'
+        GROUP BY COALESCE(season,1)
+        ORDER BY s;
         """, bind: { self.bindText($0, 1, seriesKey) }) { stmt in
             seasons.append(Int(sqlite3_column_int64(stmt, 0)))
             if let t = self.columnText(stmt, 1) { seriesTitle = t }
-            library = CatalogLibrary(rawValue: self.columnText(stmt, 2) ?? "tv") ?? .tv
+            if sqlite3_column_int64(stmt, 2) != 0 { library = .anime }
         }
         return seasons.map { n in
             MediaItem(

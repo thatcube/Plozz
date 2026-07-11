@@ -146,6 +146,40 @@ final class ShareCatalogStoreTests: XCTestCase {
         XCTAssertTrue(s1.allSatisfy { $0.kind == .episode && $0.parentTitle == "Breaking Bad" })
     }
 
+    /// Regression: normalized-equivalent episode titles/library classifications
+    /// must not emit duplicate season tabs with identical ids (which makes tvOS
+    /// focus collapse onto only one of the visually duplicated buttons).
+    func testSeasonsDeduplicateVariantSeriesMetadataBySeasonNumber() async {
+        let store = ShareCatalogStore(accountKey: "korra", directory: tempDir())
+        let canonical = "The Legend of Korra"
+        let key = ShareCatalogID.seriesKey(fromTitle: canonical)
+        let variants: [(season: Int, title: String, library: CatalogLibrary)] = [
+            (1, canonical, .tv),
+            (2, canonical, .tv),
+            (3, "The.Legend.of.Korra", .tv),
+            (3, canonical, .anime),
+            (4, "The.Legend.of.Korra", .tv),
+            (4, canonical, .anime),
+        ]
+        let assets = variants.map { value in
+            CatalogAsset(
+                relPath: "TV/Korra/S\(value.season)/E01-\(value.title)-\(value.library.rawValue).mkv",
+                basename: "E01.mkv", size: 1_000, modifiedAt: Date(),
+                kind: .episode, library: value.library,
+                title: "Episode 1", year: nil,
+                seriesTitle: value.title, seriesKey: key,
+                season: value.season, episode: 1
+            )
+        }
+        await store.upsert(assets, scanID: 1)
+
+        let seasons = await store.seasons(seriesKey: key)
+        XCTAssertEqual(seasons.map(\.seasonNumber), [1, 2, 3, 4])
+        XCTAssertEqual(Set(seasons.map(\.id)).count, 4, "season ids must be unique for stable focus")
+        XCTAssertTrue(seasons.allSatisfy { $0.parentTitle == canonical })
+        XCTAssertTrue(seasons.allSatisfy { $0.libraryID == ShareCatalogID.animeLibrary })
+    }
+
     func testAnimeAndTvLibrariesAreSeparate() async {
         let store = ShareCatalogStore(accountKey: "a", directory: tempDir())
         await store.upsert([

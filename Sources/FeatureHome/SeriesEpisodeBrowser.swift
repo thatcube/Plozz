@@ -22,6 +22,10 @@ final class SeriesHeroRecedeModel {
     }
 }
 
+enum SeriesHeroRevealTransition {
+    static var entrance: Animation { .smooth(duration: 0.7) }
+}
+
 enum SeriesEpisodeBrowserLayout {
     /// Pulls enough episode artwork above the fold to make the horizontal browser
     /// unmistakable while the full-screen backdrop still owns the resting page.
@@ -126,10 +130,9 @@ private struct SeriesRecededLogo: View {
     let recedeModel: SeriesHeroRecedeModel
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var logoVisible = false
-    @State private var logoAtRest = false
 
     var body: some View {
+        let revealed = recedeModel.isReceded
         HeroLogoArtwork(
             primaryURL: series.logoURL,
             asyncFallbackURL: logoFallback,
@@ -146,38 +149,17 @@ private struct SeriesRecededLogo: View {
                 .frame(maxWidth: 1200, alignment: .center)
         }
         .frame(width: 620, height: 200, alignment: .center)
-        .opacity(logoVisible ? 1 : 0)
-        .offset(y: logoAtRest ? 0 : 180)
-        .accessibilityHidden(!recedeModel.isReceded)
-        .task(id: animationTaskID) {
-            let shouldShow = recedeModel.isReceded
-            if reduceMotion {
-                logoVisible = shouldShow
-                logoAtRest = shouldShow
-                return
-            }
-            guard !Task.isCancelled, recedeModel.isReceded == shouldShow else { return }
-            if shouldShow {
-                withAnimation(.easeInOut(duration: 0.75)) {
-                    logoVisible = true
-                    logoAtRest = true
-                }
-            } else {
-                withAnimation(.easeOut(duration: 0.39)) {
-                    logoVisible = false
-                    logoAtRest = false
-                }
-            }
-        }
-    }
-
-    private var animationTaskID: AnimationTaskID {
-        AnimationTaskID(isReceded: recedeModel.isReceded, reduceMotion: reduceMotion)
-    }
-
-    private struct AnimationTaskID: Hashable {
-        let isReceded: Bool
-        let reduceMotion: Bool
+        .opacity(revealed ? 1 : 0)
+        .offset(y: revealed ? 0 : 180)
+        .accessibilityHidden(!revealed)
+        .animation(
+            reduceMotion
+                ? nil
+                : (revealed
+                    ? SeriesHeroRevealTransition.entrance
+                    : .easeOut(duration: 0.39)),
+            value: revealed
+        )
     }
 
     private var logoFallback: (@Sendable () async -> URL?)? {

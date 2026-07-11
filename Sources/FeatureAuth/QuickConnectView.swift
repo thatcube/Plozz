@@ -45,10 +45,14 @@ public struct QuickConnectView: View {
 
     public var body: some View {
         VStack(spacing: 32) {
-            OnboardingHeader(
-                "Sign in to \(serverName)",
-                subtitle: "Open Jellyfin on your phone or computer, go to **Quick Connect**, and enter this code."
-            )
+            VStack(spacing: 14) {
+                ProviderBrandMark(provider: .jellyfin, size: 80)
+
+                OnboardingHeader(
+                    "\(serverName)",
+                    subtitle: "Open Jellyfin on another device, choose **Quick Connect**, and enter this code."
+                )
+            }
 
             content
 

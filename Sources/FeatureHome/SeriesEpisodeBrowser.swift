@@ -71,9 +71,13 @@ struct SeriesEpisodeBrowser<SeasonContent: View, EpisodeContent: View>: View {
             }
 
             episodeContent()
+                // Keep the horizontal ScrollView from absorbing the stage's surplus
+                // height and vertically centering its cards away from Seasons.
+                .fixedSize(horizontal: false, vertical: true)
                 // Reserve the complete standard episode-column rail even while a
-                // season's episodes are loading. Centering this stable wrapper gives
-                // Seasons and Episodes the exact same vertical destination.
+                // season's episodes are loading. Keeping this wrapper a stable, fixed
+                // height gives Seasons and Episodes the exact same vertical destination
+                // for the shared center anchor.
                 .frame(minHeight: 520, alignment: .top)
                 .id(focusAnchorID)
         }

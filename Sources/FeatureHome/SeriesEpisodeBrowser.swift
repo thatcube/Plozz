@@ -25,17 +25,16 @@ final class SeriesHeroRecedeModel {
 enum SeriesEpisodeBrowserLayout {
     /// Pulls enough episode artwork above the fold to make the horizontal browser
     /// unmistakable while the full-screen backdrop still owns the resting page.
-    static let heroOverlap: CGFloat = 440
+    static let heroOverlap: CGFloat = 540
     /// The matching series-only lift for the bottom-anchored hero content. Keeping
     /// this static preserves immutable focus geometry and leaves a clean gap between
     /// the hero action row and Seasons despite the deeper browser overlap.
     static let heroContentBottomLift: CGFloat = 140
-    /// Pulls Episodes into the Season bar's unused focus clearance. Because this
-    /// is fixed layout geometry and the shared scroll target moves with the rail,
-    /// Episodes keep the same centered destination while Seasons settle closer
-    /// beneath the receded logo. At rest, the reclaimed space becomes the artwork
-    /// peek below the full-screen hero.
-    static let seasonEpisodeOverlap: CGFloat = 100
+    /// Closes the visual gap above Episodes without moving the episode rail's
+    /// full-width focus section into the Season bar. The matching increase in
+    /// `heroOverlap` preserves the Season bar's resting position while exposing
+    /// more episode artwork below the hero.
+    static let seasonContentShift: CGFloat = 100
     /// The browser owns one complete viewport before Cast/extras begin. Besides
     /// creating a deliberate episode-browsing page, the unused portion after the
     /// grouped browser is nonfocusable trailing runway. It centers the rail
@@ -70,6 +69,8 @@ struct SeriesEpisodeBrowser<SeasonContent: View, EpisodeContent: View>: View {
 
             if showsSeasons {
                 seasonContent()
+                    .padding(.top, SeriesEpisodeBrowserLayout.seasonContentShift)
+                    .padding(.bottom, -SeriesEpisodeBrowserLayout.seasonContentShift)
             }
 
             episodeContent()
@@ -78,7 +79,6 @@ struct SeriesEpisodeBrowser<SeasonContent: View, EpisodeContent: View>: View {
                 // Seasons and Episodes the exact same vertical destination.
                 .frame(minHeight: 520, alignment: .top)
                 .id(focusAnchorID)
-                .padding(.top, -SeriesEpisodeBrowserLayout.seasonEpisodeOverlap)
         }
         .frame(
             maxWidth: .infinity,

@@ -51,7 +51,11 @@ public struct CircularFocusHalo<Avatar: View>: View {
         ZStack {
             Color.clear
                 .frame(width: slot, height: slot)
-                .plozzGlassCard(cornerRadius: slot / 2, isFocused: true)
+                .plozzGlassCard(
+                    cornerRadius: slot / 2,
+                    isFocused: true,
+                    addsFocusHaloBacking: true
+                )
                 .shadow(color: .black.opacity(0.36), radius: 20, y: 10)
                 .opacity(isFocused ? 1 : 0)
 

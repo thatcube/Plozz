@@ -52,7 +52,11 @@ private struct FocusHaloModifier: ViewModifier {
                 // `pad` beyond every edge with negative padding (backgrounds draw
                 // outside the content bounds), its radius bumped to stay concentric.
                 Color.clear
-                    .plozzGlassCard(cornerRadius: cornerRadius + pad, isFocused: true)
+                    .plozzGlassCard(
+                        cornerRadius: cornerRadius + pad,
+                        isFocused: true,
+                        addsFocusHaloBacking: true
+                    )
                     .padding(-pad)
                     .shadow(color: .black.opacity(0.36), radius: 20, y: 10)
                     .opacity(isFocused ? 1 : 0)

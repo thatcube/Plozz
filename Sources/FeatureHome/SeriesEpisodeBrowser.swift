@@ -25,15 +25,18 @@ final class SeriesHeroRecedeModel {
 enum SeriesEpisodeBrowserLayout {
     /// Pulls enough episode artwork above the fold to make the horizontal browser
     /// unmistakable while the full-screen backdrop still owns the resting page.
-    static let heroOverlap: CGFloat = 540
+    static let heroOverlap: CGFloat = 420
     /// The matching series-only lift for the bottom-anchored hero content. Keeping
     /// this static preserves immutable focus geometry and leaves a clean gap between
     /// the hero action row and Seasons despite the deeper browser overlap.
-    static let heroContentBottomLift: CGFloat = 240
+    static let heroContentBottomLift: CGFloat = 160
     /// A real, fixed viewport for the horizontal tab rail. Constraining the
     /// ScrollView itself removes its excess vertical proposal while keeping its
     /// rendered frame and tvOS focus-section geometry identical.
     static let seasonBarHeight: CGFloat = 88
+    /// Prevents the episode rail from absorbing the full-screen stage's surplus
+    /// height while preserving normal size proposals for every card.
+    static let episodeRailHeight: CGFloat = 520
     /// The browser owns one complete viewport before Cast/extras begin. Besides
     /// creating a deliberate episode-browsing page, the unused portion after the
     /// grouped browser is nonfocusable trailing runway. It centers the rail
@@ -71,14 +74,10 @@ struct SeriesEpisodeBrowser<SeasonContent: View, EpisodeContent: View>: View {
             }
 
             episodeContent()
-                // Keep the horizontal ScrollView from absorbing the stage's surplus
-                // height and vertically centering its cards away from Seasons.
-                .fixedSize(horizontal: false, vertical: true)
                 // Reserve the complete standard episode-column rail even while a
-                // season's episodes are loading. Keeping this wrapper a stable, fixed
-                // height gives Seasons and Episodes the exact same vertical destination
-                // for the shared center anchor.
-                .frame(minHeight: 520, alignment: .top)
+                // season's episodes are loading. The exact height also prevents this
+                // flexible ScrollView from absorbing the stage's trailing runway.
+                .frame(height: SeriesEpisodeBrowserLayout.episodeRailHeight, alignment: .top)
                 .id(focusAnchorID)
         }
         .frame(

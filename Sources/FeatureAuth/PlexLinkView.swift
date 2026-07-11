@@ -192,9 +192,6 @@ public struct PlexLinkView: View {
             .overlay {
                 shape.fill(Color.black.opacity(palette.isLight ? 0.06 : 0.26))
             }
-            .overlay {
-                shape.strokeBorder(palette.cardBorder.opacity(0.55), lineWidth: 1)
-            }
     }
 
     @ViewBuilder

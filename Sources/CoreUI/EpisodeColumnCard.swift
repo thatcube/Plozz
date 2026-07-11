@@ -51,33 +51,35 @@ public struct EpisodeColumnCard: View {
                     isFocused: isFocused
                 )
 
-            Text(presentation.titleLine)
-                .font(.system(size: metrics.cardTitleFontSize, weight: .semibold))
-                .foregroundStyle(.primary)
-                .lineLimit(1)
-                .padding(.top, metrics.landscapeCaptionTopSpacing + metrics.focusCaptionPush)
-                .offset(y: isFocused ? 0 : -metrics.focusCaptionPush)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(presentation.titleLine)
+                    .font(.system(size: metrics.cardTitleFontSize, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .padding(.top, metrics.landscapeCaptionTopSpacing + metrics.focusCaptionPush)
 
-            Text(presentation.metadataText ?? " ")
-                .font(.system(size: metrics.cardSubtitleFontSize))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .opacity(presentation.metadataText == nil ? 0 : 1)
-                .padding(.top, 2)
+                Text(presentation.metadataText ?? " ")
+                    .font(.system(size: metrics.cardSubtitleFontSize))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .opacity(presentation.metadataText == nil ? 0 : 1)
+                    .padding(.top, 2)
 
-            SpoilerSafeOverviewText(
-                overview: presentation.overviewTreatment == .blurred
-                    ? item.overview
-                    : presentation.visibleOverview,
-                hidesSpoilers: presentation.overviewTreatment == .blurred
-                    || presentation.overviewTreatment == .placeholder,
-                mode: spoilerSettings.mode,
-                lineCount: 3,
-                fontSize: 20,
-                maxWidth: Self.artworkSize.width
-            )
-            .opacity(synopsisVisible ? 1 : 0)
-            .padding(.top, 10)
+                SpoilerSafeOverviewText(
+                    overview: presentation.overviewTreatment == .blurred
+                        ? item.overview
+                        : presentation.visibleOverview,
+                    hidesSpoilers: presentation.overviewTreatment == .blurred
+                        || presentation.overviewTreatment == .placeholder,
+                    mode: spoilerSettings.mode,
+                    lineCount: 3,
+                    fontSize: 20,
+                    maxWidth: Self.artworkSize.width
+                )
+                .opacity(synopsisVisible ? 1 : 0)
+                .padding(.top, 10)
+            }
+            .offset(y: isFocused ? 0 : -metrics.focusCaptionPush)
         }
         .frame(width: Self.artworkSize.width, alignment: .leading)
         .padding(.horizontal, Self.sideMargin)

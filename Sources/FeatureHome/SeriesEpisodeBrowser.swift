@@ -153,7 +153,7 @@ private struct SeriesRecededLogo: View {
                 : (logoVisible ? .easeOut(duration: 0.28) : .easeOut(duration: 0.39)),
             value: logoVisible
         )
-        .offset(y: logoAtRest ? 0 : 100)
+        .offset(y: logoAtRest ? 0 : 180)
         .animation(
             reduceMotion
                 ? nil

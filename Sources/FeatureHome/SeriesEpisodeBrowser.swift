@@ -146,7 +146,7 @@ private struct SeriesRecededLogo: View {
         }
         .frame(width: 620, height: 200, alignment: .center)
         .opacity(logoVisible ? 1 : 0)
-        .offset(y: logoVisible ? 0 : -100)
+        .offset(y: logoVisible ? 0 : 100)
         .accessibilityHidden(!recedeModel.isReceded)
         .task(id: animationTaskID) {
             let shouldShow = recedeModel.isReceded

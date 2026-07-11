@@ -4,16 +4,13 @@ import Foundation
 public struct ThemeMusicSettings: Codable, Equatable, Sendable {
     public var isEnabled: Bool
     public var volume: ThemeMusicVolume
-    public var loops: Bool
 
     public init(
         isEnabled: Bool = false,
-        volume: ThemeMusicVolume = .low,
-        loops: Bool = true
+        volume: ThemeMusicVolume = .low
     ) {
         self.isEnabled = isEnabled
         self.volume = volume
-        self.loops = loops
     }
 
     public static let `default` = ThemeMusicSettings()
@@ -23,7 +20,7 @@ public struct ThemeMusicSettings: Codable, Equatable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case isEnabled, volume, loops
+        case isEnabled, volume
     }
 
     public init(from decoder: Decoder) throws {
@@ -35,7 +32,6 @@ public struct ThemeMusicSettings: Codable, Equatable, Sendable {
         } else {
             volume = defaults.volume
         }
-        loops = try container.decodeIfPresent(Bool.self, forKey: .loops) ?? defaults.loops
     }
 }
 

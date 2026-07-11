@@ -18,7 +18,6 @@ public final class ThemeMusicController {
     private var endObserver: NSObjectProtocol?
     private var statusObservation: NSKeyValueObservation?
     private var fadeTimeObserver: Any?
-    private var loops = true
     private var fadeTarget: Float = 0
     private var hasFadedIn = false
     private var hasStartedPlayback = false
@@ -44,7 +43,6 @@ public final class ThemeMusicController {
         }
 
         if isPlaying, currentPlaybackID == playbackID {
-            loops = settings.loops
             fadeTarget = settings.volume.gain
             if hasFadedIn {
                 player.volume = fadeTarget
@@ -55,7 +53,6 @@ public final class ThemeMusicController {
         stopPlayback(resetItem: false)
         activateSession()
 
-        loops = settings.loops
         let item = AVPlayerItem(url: theme.streamURL)
         player.volume = 0
         fadeTarget = settings.volume.gain
@@ -68,7 +65,7 @@ public final class ThemeMusicController {
         isPlaying = true
         currentPlaybackID = playbackID
         PlozzLog.app.info(
-            "Theme music: queued item=\(theme.itemID) volume=\(settings.volume.gain) loops=\(settings.loops) url=\(PlozzLog.redact(url: theme.streamURL))"
+            "Theme music: queued item=\(theme.itemID) volume=\(settings.volume.gain) url=\(PlozzLog.redact(url: theme.streamURL))"
         )
     }
 
@@ -162,12 +159,7 @@ public final class ThemeMusicController {
     }
 
     private func handleItemDidEnd() {
-        if loops {
-            player.seek(to: .zero)
-            player.play()
-        } else {
-            stop()
-        }
+        stop()
     }
 
     private func observeStatus(of item: AVPlayerItem, themeURL: URL) {

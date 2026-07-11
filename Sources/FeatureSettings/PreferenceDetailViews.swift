@@ -456,10 +456,6 @@ struct PlaybackDetailView: View {
                                 detail: { $0.detail }
                             )
                         }
-                        Toggle(
-                            "Loop while the page is open",
-                            isOn: $themeMusic.settings.loops
-                        )
                     }
                 }
             }

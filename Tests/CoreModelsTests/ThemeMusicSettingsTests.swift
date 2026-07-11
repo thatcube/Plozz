@@ -5,7 +5,6 @@ final class ThemeMusicSettingsTests: XCTestCase {
     func testDefaultIsOptInOff() {
         let settings = ThemeMusicSettings.default
         XCTAssertFalse(settings.isEnabled)
-        XCTAssertTrue(settings.loops)
         XCTAssertFalse(settings.shouldPlay)
     }
 
@@ -27,8 +26,7 @@ final class ThemeMusicSettingsTests: XCTestCase {
     func testCodableRoundTrip() throws {
         let settings = ThemeMusicSettings(
             isEnabled: true,
-            volume: .medium,
-            loops: false
+            volume: .medium
         )
         let data = try JSONEncoder().encode(settings)
         XCTAssertEqual(
@@ -40,11 +38,10 @@ final class ThemeMusicSettingsTests: XCTestCase {
     func testLenientDecodeUsesDefaultsForMissingAndUnknownFields() throws {
         let missing = try JSONDecoder().decode(
             ThemeMusicSettings.self,
-            from: Data(#"{"isEnabled":true}"#.utf8)
+            from: Data(#"{"isEnabled":true,"loops":true}"#.utf8)
         )
         XCTAssertTrue(missing.isEnabled)
         XCTAssertEqual(missing.volume, .low)
-        XCTAssertTrue(missing.loops)
 
         let unknown = try JSONDecoder().decode(
             ThemeMusicSettings.self,
@@ -63,8 +60,7 @@ final class ThemeMusicSettingsTests: XCTestCase {
         let second = ThemeMusicSettingsStore(defaults: defaults, namespace: "profile-2")
         let saved = ThemeMusicSettings(
             isEnabled: true,
-            volume: .high,
-            loops: false
+            volume: .high
         )
 
         primary.save(saved)

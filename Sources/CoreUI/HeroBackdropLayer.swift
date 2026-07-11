@@ -34,6 +34,9 @@ public struct HeroBackdropLayer<Video: View>: View {
     private let scrimTone: Color
     /// Blurs the still image (used by spoiler-hiding). Never blurs the video slot.
     private let blursImage: Bool
+    /// Layout-neutral vertical translation used by a receding hero. Applied before
+    /// overscan breakout so the full artwork layer moves as one screen-pinned image.
+    private let verticalOffset: CGFloat
     /// Fraction of the height at which the bottom dissolve *begins* (the image is
     /// fully opaque above it and fades to transparent by the bottom edge). The
     /// item **detail** hero melts into the page early (`0.33`) because content
@@ -58,6 +61,7 @@ public struct HeroBackdropLayer<Video: View>: View {
         height: CGFloat,
         scrimTone: Color,
         blursImage: Bool = false,
+        verticalOffset: CGFloat = 0,
         dissolveStart: CGFloat = 0.33,
         ignoresOverscan: Bool = true,
         @ViewBuilder backgroundVideo: @escaping () -> Video
@@ -68,6 +72,7 @@ public struct HeroBackdropLayer<Video: View>: View {
         self.height = height
         self.scrimTone = scrimTone
         self.blursImage = blursImage
+        self.verticalOffset = verticalOffset
         self.dissolveStart = dissolveStart
         self.ignoresOverscan = ignoresOverscan
         self.backgroundVideo = backgroundVideo
@@ -96,6 +101,7 @@ public struct HeroBackdropLayer<Video: View>: View {
         .overlay { backgroundVideo() }
         .overlay(scrim)
         .mask(dissolveMask)
+        .offset(y: verticalOffset)
         // Break out of the tvOS overscan safe area so the backdrop spans the full
         // screen edge to edge — across the top too, otherwise the top overscan
         // inset shows through as a black bar above the artwork. Skipped when the
@@ -201,6 +207,7 @@ public extension HeroBackdropLayer where Video == EmptyView {
         height: CGFloat,
         scrimTone: Color,
         blursImage: Bool = false,
+        verticalOffset: CGFloat = 0,
         dissolveStart: CGFloat = 0.33,
         ignoresOverscan: Bool = true
     ) {
@@ -211,6 +218,7 @@ public extension HeroBackdropLayer where Video == EmptyView {
             height: height,
             scrimTone: scrimTone,
             blursImage: blursImage,
+            verticalOffset: verticalOffset,
             dissolveStart: dissolveStart,
             ignoresOverscan: ignoresOverscan,
             backgroundVideo: { EmptyView() }

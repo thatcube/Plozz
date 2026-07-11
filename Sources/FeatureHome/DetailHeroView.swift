@@ -36,12 +36,12 @@ struct DetailHeroView: View {
     /// series page so the seamless fade lands closer to the top of the episode
     /// rail instead of completing high up the page.
     var backdropBottomExtensionFraction: CGFloat = 0
-    /// Uses a shorter, geometry-stable content treatment for a series page whose
-    /// season tabs and episode rail share the first viewport. The logo and overview
-    /// keep fixed footprints and the rarely-populated tagline is omitted, preserving
-    /// useful episode metadata without letting focused-item differences resize the
-    /// outer page.
-    var compactPresentation: Bool = false
+    /// Stable title used when no logo resolves. A series page supplies the series
+    /// title so the fallback remains the same identity while episodes are browsed.
+    var titleFallbackOverride: String? = nil
+    /// Optional series-only cosmetic recede state. The model is consumed by leaf
+    /// modifiers so changing it never invalidates the parent page or episode rail.
+    var seriesRecedeModel: SeriesHeroRecedeModel? = nil
     let spoilerSettings: SpoilerSettings
     /// Replaces the hero's own subtitle when set. Used by a TV-show hero that is
     /// presenting the *series* (not a focused episode) to still surface the
@@ -225,7 +225,6 @@ struct DetailHeroView: View {
     /// the colour scheme into account — otherwise its white fill vanishes against
     /// the light unfocused button in light mode.
     @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.plozzMetrics) private var metrics
 
     /// The item supplying the backdrop artwork (the pinned series, when set).
     private var backdrop: MediaItem { backdropItem ?? item }
@@ -236,14 +235,7 @@ struct DetailHeroView: View {
     /// tone flips — so legibility stays consistent between appearances.
     private var scrimTone: Color { colorScheme == .dark ? .black : .white }
 
-    private var heroLogoHeight: CGFloat { compactPresentation ? 140 : 200 }
-
-    /// Huge episode cards need the extra vertical line more than the hero does.
-    /// This remains fixed for every episode at a given display size, so horizontal
-    /// browsing cannot reflow the page.
-    private var overviewLineCount: Int {
-        compactPresentation && metrics.density == .extraLarge ? 2 : 3
-    }
+    private var heroLogoHeight: CGFloat { 200 }
 
     // MARK: - Visible item actions (discoverability)
 
@@ -389,7 +381,6 @@ struct DetailHeroView: View {
             ) {
                 titleText(hideText: hideText)
             }
-            .frame(height: compactPresentation ? heroLogoHeight : nil, alignment: .bottomLeading)
             ZStack(alignment: .leading) {
                 if let subtitle = subtitleOverride ?? item.subtitle, !isYearOnlySubtitle(subtitle) {
                     Text(subtitle)
@@ -399,7 +390,6 @@ struct DetailHeroView: View {
                         .contentTransition(.opacity)
                 }
             }
-            .frame(height: compactPresentation ? 32 : nil, alignment: .leading)
             let metadata = item.metadataComponents()
             ZStack(alignment: .leading) {
                 if heroRatingBadge != nil || !metadata.isEmpty {
@@ -417,8 +407,7 @@ struct DetailHeroView: View {
                     }
                 }
             }
-            .frame(height: compactPresentation ? 36 : nil, alignment: .leading)
-            if !compactPresentation, !hideText, let tagline = item.tagline {
+            if !hideText, let tagline = item.tagline {
                 Text(tagline)
                     .font(.system(size: 24, weight: .medium))
                     .italic()
@@ -432,18 +421,17 @@ struct DetailHeroView: View {
                     MediaBadgeRow(badges: featureBadges)
                 }
             }
-            .frame(height: compactPresentation ? 36 : nil, alignment: .leading)
             ZStack(alignment: .leading) {
                 if !heroRatings.isEmpty && !spoilerSettings.shouldHideRatings(for: item) {
                     RatingsBadgeRow(ratings: heroRatings)
                 }
             }
-            .frame(height: compactPresentation ? 50 : nil, alignment: .leading)
-            HeroOverviewText(
+            SpoilerSafeOverviewText(
                 overview: item.overview,
                 hidesSpoilers: hideText,
                 mode: spoilerSettings.mode,
-                lineCount: overviewLineCount
+                lineCount: 3,
+                maxWidth: 960
             )
             if isDiscoveryItem ? showsRequestPill : ((playTitle != nil && onPlay != nil) || onPlayTrailer != nil || showsMoreMenu || hasHeroActionButtons) {
                 HStack(spacing: 24) {
@@ -508,8 +496,8 @@ struct DetailHeroView: View {
                 }
             }
         }
-        .padding(.top, compactPresentation ? 20 : PlozzTheme.Metrics.screenPadding)
-        .padding(.bottom, compactPresentation ? 20 : bottomInset)
+        .padding(.top, PlozzTheme.Metrics.screenPadding)
+        .padding(.bottom, bottomInset)
         .padding(.trailing, PlozzTheme.Metrics.screenPadding)
         .padding(.leading, PlozzTheme.Metrics.heroLeadingPadding)
         // Occupy the backdrop's height and pin the content to the bottom-leading
@@ -517,6 +505,11 @@ struct DetailHeroView: View {
         // but measured at the *safe* viewport width (`.infinity` reports the
         // proposed width), never the full 1920pt panel.
         .frame(maxWidth: .infinity, minHeight: heroHeight, alignment: .bottomLeading)
+        .frame(
+            height: seriesRecedeModel == nil ? nil : heroHeight,
+            alignment: .bottomLeading
+        )
+        .modifier(SeriesHeroContentRecedeModifier(model: seriesRecedeModel))
         // The full-bleed backdrop lives in a `.background`, which by definition is
         // sized to the host and does NOT contribute to the host's measured size.
         // That is the fix: previously the backdrop was a ZStack *sibling* whose
@@ -534,6 +527,16 @@ struct DetailHeroView: View {
                 // and the new one in instead of hard-cutting.
                 .id(backdrop.id)
                 .transition(.opacity)
+        }
+        .overlay(alignment: .bottomLeading) {
+            if let seriesRecedeModel {
+                SeriesHeroFocusProxy(
+                    model: seriesRecedeModel,
+                    playButtonFocus: playButtonFocus,
+                    bottomInset: bottomInset,
+                    onRestore: { onHeroActionFocused?() }
+                )
+            }
         }
         // Fade the whole hero (backdrop + text) in on first appearance rather
         // than hard-cutting, for a more polished open.
@@ -570,13 +573,14 @@ struct DetailHeroView: View {
         // + full-bleed treatment, so the detail hero and the Home hero carousel
         // render an identical backdrop. The blurred-poster placeholder lives in
         // the layer too, driven by `backdrop.posterURL`.
-        HeroBackdropLayer(
+        SeriesDetailHeroBackdrop(
             urls: [backdrop.heroBackdropURL, backdrop.backdropURL].compactMap { $0 },
             asyncFallbackURL: tmdbBackdropFallback,
             placeholderPosterURL: backdrop.posterURL,
             height: Self.screenHeight * (heroHeightFraction + backdropBottomExtensionFraction),
             scrimTone: scrimTone,
-            blursImage: hideThumbnail && spoilerSettings.mode == .blur
+            blursImage: hideThumbnail && spoilerSettings.mode == .blur,
+            recedeModel: seriesRecedeModel
         )
     }
 
@@ -887,7 +891,9 @@ struct DetailHeroView: View {
     /// which would blow the hero's content past the viewport and shove the whole
     /// page (title + focusable buttons) off the left edge.
     private func titleText(hideText: Bool) -> some View {
-        Text(hideText ? spoilerSettings.maskedTitle(for: item) : item.title)
+        let title = titleFallbackOverride
+            ?? (hideText ? spoilerSettings.maskedTitle(for: item) : item.title)
+        return Text(title)
             .font(.system(size: 64, weight: .bold))
             .lineLimit(2)
             .minimumScaleFactor(0.5)
@@ -1110,58 +1116,72 @@ private struct HeroMoreMenu: View, Equatable {
     }
 }
 
-/// The hero overview's geometry is identical for revealed, spoiler-hidden, and
-/// missing text. Blur mode mirrors the thumbnail treatment by obscuring the real
-/// overview; placeholder mode never puts the real overview in the view hierarchy.
-/// Both hidden forms expose only a spoiler-safe accessibility label.
-private struct HeroOverviewText: View {
-    let overview: String?
-    let hidesSpoilers: Bool
-    let mode: SpoilerSettings.Mode
-    let lineCount: Int
+private struct SeriesHeroContentRecedeModifier: ViewModifier {
+    let model: SeriesHeroRecedeModel?
 
-    private static let hiddenLabel = "Overview hidden to avoid spoilers"
+    func body(content: Content) -> some View {
+        content
+            .opacity(model?.isReceded == true ? 0 : 1)
+            .offset(y: model?.isReceded == true ? -120 : 0)
+            .disabled(model?.isReceded == true)
+            .animation(.smooth(duration: 0.45), value: model?.isReceded)
+    }
+}
+
+private struct SeriesDetailHeroBackdrop: View {
+    let urls: [URL]
+    let asyncFallbackURL: (@Sendable () async -> URL?)?
+    let placeholderPosterURL: URL?
+    let height: CGFloat
+    let scrimTone: Color
+    let blursImage: Bool
+    let recedeModel: SeriesHeroRecedeModel?
 
     var body: some View {
-        Group {
-            if hidesSpoilers {
-                hiddenOverview
-            } else {
-                Text(overview ?? "")
-                    .opacity(overview == nil ? 0 : 1)
-                    .accessibilityHidden(overview == nil)
-            }
-        }
-        .font(.system(size: 22))
-        .foregroundStyle(.secondary)
-        .lineSpacing(2)
-        .lineLimit(lineCount, reservesSpace: true)
-        .frame(maxWidth: 960, alignment: .topLeading)
-        .contentTransition(.opacity)
+        let receded = recedeModel?.isReceded == true
+        HeroBackdropLayer(
+            urls: urls,
+            asyncFallbackURL: asyncFallbackURL,
+            placeholderPosterURL: placeholderPosterURL,
+            height: height,
+            scrimTone: scrimTone,
+            blursImage: blursImage,
+            verticalOffset: receded ? -260 : 0
+        )
+        .animation(.smooth(duration: 0.9), value: receded)
     }
+}
 
-    @ViewBuilder
-    private var hiddenOverview: some View {
-        switch mode {
-        case .blur:
-            if let overview {
-                Text(overview)
-                    .blur(radius: 12)
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel(Self.hiddenLabel)
-            } else {
-                placeholderOverview
+private struct SeriesHeroFocusProxy: View {
+    let model: SeriesHeroRecedeModel
+    let playButtonFocus: FocusState<Bool>.Binding?
+    let bottomInset: CGFloat
+    let onRestore: () -> Void
+
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        Color.clear
+            .frame(maxWidth: .infinity)
+            .frame(height: 96)
+            .contentShape(Rectangle())
+            .focusable(true)
+            .focused($focused)
+            .focusEffectDisabled()
+            .opacity(0.001)
+            .disabled(!model.isReceded)
+            .padding(.leading, PlozzTheme.Metrics.heroLeadingPadding)
+            .padding(.trailing, PlozzTheme.Metrics.screenPadding)
+            // Match the real action row's bottom band. This keeps the proxy
+            // strictly above Seasons/Episodes instead of inserting an invisible
+            // focusable between them.
+            .padding(.bottom, bottomInset)
+            .onChange(of: focused) { _, isFocused in
+                guard isFocused else { return }
+                model.restore()
+                playButtonFocus?.wrappedValue = true
+                onRestore()
             }
-        case .placeholder:
-            placeholderOverview
-        }
-    }
-
-    private var placeholderOverview: some View {
-        Text(verbatim: Array(repeating: Self.hiddenLabel, count: lineCount).joined(separator: "\n"))
-            .redacted(reason: .placeholder)
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(Self.hiddenLabel)
     }
 }
 

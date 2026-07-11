@@ -41,8 +41,6 @@ struct SeriesDetailView: View {
     /// episode row to it, and parks focus on the hero Play button.
     let initialEpisode: MediaItem?
 
-    @Environment(\.plozzMetrics) private var metrics
-
     /// Which season's episodes the rail is currently showing. Driven by season
     /// tab focus; seeded to the "next up" season on first appearance.
     @State private var selectedSeasonID: String?
@@ -112,6 +110,9 @@ struct SeriesDetailView: View {
     /// each card and made scrolling the rail snap back; a stable target keeps it
     /// silky smooth while still re-pointing on open/season-change/switch.
     @State private var railTargetID: String?
+    /// Cosmetic-only series hero recede state. The parent writes it but never reads
+    /// it, so episode focus changes do not invalidate this page or its rail.
+    @State private var recedeModel = SeriesHeroRecedeModel()
 
     init(
         series: MediaItem,
@@ -154,17 +155,6 @@ struct SeriesDetailView: View {
     /// (published into `seasonChipFrames`) reflects the live scroll offset — letting
     /// us decide true visibility and the clipped edge for a minimal reveal.
     private static let seasonBarSpace = "seasonBarViewport"
-
-    /// A single hero height for the page's lifetime. The earlier focus-driven
-    /// 0.8 → 0.42 animation raced tvOS's episode focus-reveal when DOWN was pressed
-    /// twice quickly: the reveal used the rail's pre-collapse frame, then the page
-    /// shrank underneath that offset and ended up overscrolled. This density-aware
-    /// height never changes as focus moves. Smaller cards spend the reclaimed room
-    /// on the hero; larger cards progressively reserve more of the viewport for the
-    /// episode rail.
-    private var stableHeroHeightFraction: CGFloat {
-        min(0.62, max(0.36, 0.75 - 0.28 * metrics.scale))
-    }
 
     var body: some View {
         scrollContent
@@ -218,13 +208,12 @@ struct SeriesDetailView: View {
     private var scroll: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                VStack(alignment: .leading, spacing: 32) {
+                VStack(alignment: .leading, spacing: 0) {
                     DetailHeroView(
                         item: displayHeroItem,
                         backdropItem: series,
-                        heroHeightFraction: stableHeroHeightFraction,
-                        backdropBottomExtensionFraction: 0.1,
-                        compactPresentation: true,
+                        titleFallbackOverride: series.title,
+                        seriesRecedeModel: recedeModel,
                         spoilerSettings: spoilerSettings,
                         subtitleOverride: heroSubtitleOverride,
                         playTitle: playTarget.map { viewModel.playButtonTitle(for: $0) },
@@ -246,6 +235,7 @@ struct SeriesDetailView: View {
                         // scroll drift the page down. Same animation as the
                         // Play-regains-focus case below.
                         onHeroActionFocused: {
+                            recedeModel.restore()
                             withAnimation(.easeInOut(duration: 0.4)) {
                                 proxy.scrollTo(Self.topAnchorID, anchor: .top)
                             }
@@ -275,17 +265,17 @@ struct SeriesDetailView: View {
                         _ = await viewModel.enrichEpisodeBadgesIfNeeded(target)
                     }
 
-                    // Seasons and their episodes sit together as a tighter group,
-                    // with the show-level extras kept at the wider page spacing.
-                    VStack(alignment: .leading, spacing: 12) {
-                        if !seasons.isEmpty {
-                            seasonTabBar
-                        }
-
-                        episodeRail
-                    }
+                    SeriesEpisodeBrowser(
+                        series: series,
+                        recedeModel: recedeModel,
+                        showsSeasons: !seasons.isEmpty,
+                        seasonContent: { seasonTabBar },
+                        episodeContent: { episodeRail }
+                    )
+                    .padding(.top, -SeriesEpisodeBrowserLayout.heroOverlap)
 
                     DetailExtrasView(item: series, leadingInset: PlozzTheme.Metrics.heroLeadingPadding)
+                        .padding(.top, 32)
                 }
                 .padding(.bottom, PlozzTheme.Metrics.screenPadding)
                 // Cap the whole scroll column to the proposed (safe viewport)
@@ -307,6 +297,7 @@ struct SeriesDetailView: View {
             // rather than jumping instantly.
             .onChange(of: playFocused) { _, focused in
                 if focused {
+                    recedeModel.restore()
                     withAnimation(.easeInOut(duration: 0.4)) {
                         proxy.scrollTo(Self.topAnchorID, anchor: .top)
                     }
@@ -378,6 +369,7 @@ struct SeriesDetailView: View {
                 // We're now inside the bar — open every chip to focus so left/right
                 // navigation between seasons works.
                 seasonBarEngaged = true
+                recedeModel.recede()
                 // Focus has genuinely left the episode rail (it's now on the bar), so
                 // tell the rail to re-arm its entry gate for the next down-press.
                 episodeRailResetToken += 1
@@ -530,7 +522,7 @@ struct SeriesDetailView: View {
         return MediaRowView(
             title: railTitle,
             items: episodes,
-            style: .landscape,
+            presentation: .episodeColumn,
             spoilerSettings: spoilerSettings,
             // Keep focus on the hero Play button initially; pre-scroll the rail to
             // the resume/target episode and make it the row's default focus so
@@ -541,6 +533,9 @@ struct SeriesDetailView: View {
             defaultFocusID: target,
             focusResetToken: episodeRailResetToken,
             leadingInset: PlozzTheme.Metrics.heroLeadingPadding,
+            onFocusEntered: {
+                recedeModel.recede()
+            },
             onFocusChange: { focused in
                 if let focused, heroItem.id != focused.id { heroItem = focused }
             },

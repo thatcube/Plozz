@@ -1,0 +1,117 @@
+#if canImport(SwiftUI)
+import SwiftUI
+import Observation
+import CoreModels
+import CoreUI
+import MetadataKit
+#if canImport(UIKit)
+import UIKit
+#endif
+
+@MainActor
+@Observable
+final class SeriesHeroRecedeModel {
+    var isReceded = false
+
+    func recede() {
+        isReceded = true
+    }
+
+    func restore() {
+        isReceded = false
+    }
+}
+
+enum SeriesEpisodeBrowserLayout {
+    /// Pulls the stage just far enough into the full-screen hero for the episode
+    /// artwork to peek at the bottom without colliding with the bottom-anchored
+    /// hero action row. The reserved 200pt logo slot remains invisible at rest.
+    static let heroOverlap: CGFloat = 300
+}
+
+/// One fixed-geometry stage for the receded series logo, Seasons, and Episodes.
+/// Its static overlap makes the episode row peek below the resting full-screen
+/// hero; native focus scrolling moves this whole composition to its final position.
+struct SeriesEpisodeBrowser<SeasonContent: View, EpisodeContent: View>: View {
+    let series: MediaItem
+    let recedeModel: SeriesHeroRecedeModel
+    let showsSeasons: Bool
+    @ViewBuilder let seasonContent: () -> SeasonContent
+    @ViewBuilder let episodeContent: () -> EpisodeContent
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SeriesRecededLogo(series: series, recedeModel: recedeModel)
+                .frame(maxWidth: .infinity)
+                .frame(height: 200, alignment: .center)
+
+            if showsSeasons {
+                seasonContent()
+            }
+
+            episodeContent()
+        }
+        .frame(maxWidth: .infinity, minHeight: 760, alignment: .topLeading)
+        .environment(\.plozzMetrics, .standard)
+    }
+}
+
+private struct SeriesRecededLogo: View {
+    let series: MediaItem
+    let recedeModel: SeriesHeroRecedeModel
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        HeroLogoArtwork(
+            primaryURL: series.logoURL,
+            asyncFallbackURL: logoFallback,
+            backgroundSample: backgroundSample,
+            maxWidth: 620,
+            maxHeight: 200
+        ) {
+            Text(series.title)
+                .font(.system(size: 64, weight: .bold))
+                .lineLimit(2)
+                .minimumScaleFactor(0.5)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 1200, alignment: .center)
+        }
+        .frame(width: 620, height: 200, alignment: .center)
+        .opacity(recedeModel.isReceded ? 1 : 0)
+        .offset(y: recedeModel.isReceded ? 0 : -220)
+        .animation(
+            reduceMotion ? nil : .smooth(duration: 0.65),
+            value: recedeModel.isReceded
+        )
+        .accessibilityHidden(!recedeModel.isReceded)
+    }
+
+    private var logoFallback: (@Sendable () async -> URL?)? {
+        let source = series
+        return {
+            await ArtworkRouter.shared.artworkURL(.logo, for: source)
+        }
+    }
+
+    private var backgroundSample: (@Sendable () async -> HeroBackgroundSample?)? {
+        #if canImport(UIKit)
+        let urls = [series.heroBackdropURL, series.backdropURL].compactMap { $0 }
+        let source = series
+        return {
+            if let sample = await HeroBackgroundSampler.sample(urls: urls) { return sample }
+            if let resolved = await ArtworkRouter.shared.artworkURL(.hero, for: source),
+               let sample = await HeroBackgroundSampler.sample(urls: [resolved]) {
+                return sample
+            }
+            if let poster = source.posterURL {
+                return await HeroBackgroundSampler.sample(urls: [poster])
+            }
+            return nil
+        }
+        #else
+        return nil
+        #endif
+    }
+}
+#endif

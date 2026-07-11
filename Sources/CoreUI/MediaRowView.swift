@@ -5,9 +5,15 @@ import CoreModels
 /// A horizontally-scrolling, focusable row of media cards with a title.
 /// Reused by Home (Continue Watching, Latest) and detail (episodes, related).
 public struct MediaRowView: View {
+    public enum Presentation: Equatable, Sendable {
+        case poster
+        case landscape
+        case episodeColumn
+    }
+
     private let title: String
     private let items: [MediaItem]
-    private let style: PosterCardView.Style
+    private let presentation: Presentation
     private let spoilerSettings: SpoilerSettings
     /// When set, the row scrolls to and moves focus onto the matching item the
     /// first time it appears (used by series/season detail to surface the
@@ -40,6 +46,10 @@ public struct MediaRowView: View {
     /// detail to mirror the focused episode into the page hero. When set, every
     /// card becomes individually focus-tracked.
     private let onFocusChange: ((MediaItem?) -> Void)?
+    /// Fires synchronously when focus reaches any card in the row. Unlike
+    /// `onFocusChange`, this is not settle-debounced and is intended for lightweight
+    /// cosmetic state such as the series hero recede.
+    private let onFocusEntered: (() -> Void)?
     /// Stable lookup tables so focus/prefetch hot paths avoid repeated linear scans.
     private let itemIDSet: Set<String>
     private let itemIndexByID: [String: Int]
@@ -83,18 +93,50 @@ public struct MediaRowView: View {
         defaultFocusID: String? = nil,
         focusResetToken: Int = 0,
         leadingInset: CGFloat = PlozzTheme.Metrics.screenPadding,
+        onFocusEntered: (() -> Void)? = nil,
+        onFocusChange: ((MediaItem?) -> Void)? = nil,
+        onSelect: @escaping (MediaItem) -> Void
+    ) {
+        self.init(
+            title: title,
+            items: items,
+            presentation: style == .poster ? .poster : .landscape,
+            spoilerSettings: spoilerSettings,
+            initialFocusID: initialFocusID,
+            initialScrollID: initialScrollID,
+            defaultFocusID: defaultFocusID,
+            focusResetToken: focusResetToken,
+            leadingInset: leadingInset,
+            onFocusEntered: onFocusEntered,
+            onFocusChange: onFocusChange,
+            onSelect: onSelect
+        )
+    }
+
+    public init(
+        title: String,
+        items: [MediaItem],
+        presentation: Presentation,
+        spoilerSettings: SpoilerSettings = .default,
+        initialFocusID: String? = nil,
+        initialScrollID: String? = nil,
+        defaultFocusID: String? = nil,
+        focusResetToken: Int = 0,
+        leadingInset: CGFloat = PlozzTheme.Metrics.screenPadding,
+        onFocusEntered: (() -> Void)? = nil,
         onFocusChange: ((MediaItem?) -> Void)? = nil,
         onSelect: @escaping (MediaItem) -> Void
     ) {
         self.title = title
         self.items = items
-        self.style = style
+        self.presentation = presentation
         self.spoilerSettings = spoilerSettings
         self.initialFocusID = initialFocusID
         self.initialScrollID = initialScrollID
         self.defaultFocusID = defaultFocusID
         self.focusResetToken = focusResetToken
         self.leadingInset = leadingInset
+        self.onFocusEntered = onFocusEntered
         self.onFocusChange = onFocusChange
         self.onSelect = onSelect
         self.itemIDSet = Set(items.map(\.id))
@@ -149,16 +191,16 @@ public struct MediaRowView: View {
 
     public var body: some View {
         if !items.isEmpty {
-            VStack(alignment: .leading, spacing: metrics.sectionTitleSpacing) {
+            VStack(alignment: .leading, spacing: layoutMetrics.sectionTitleSpacing) {
                 if !title.isEmpty {
                     Text(title)
-                        .font(.system(size: metrics.sectionHeaderFontSize, weight: .bold))
+                        .font(.system(size: layoutMetrics.sectionHeaderFontSize, weight: .bold))
                         .padding(.leading, leadingInset)
                 }
 
                 ScrollViewReader { proxy in
                     ScrollView(.horizontal, showsIndicators: false) {
-                        LazyHStack(spacing: metrics.cardSpacing) {
+                        LazyHStack(spacing: layoutMetrics.cardSpacing) {
                             ForEach(items) { item in
                                 card(for: item)
                             }
@@ -173,10 +215,10 @@ public struct MediaRowView: View {
                         // the screen. The negative outer padding below cancels this
                         // clearance in layout, so the row's height and its gap to the
                         // neighbouring rows are unchanged; only the clip grows.
-                        .padding(.vertical, metrics.railShadowClearance)
+                        .padding(.vertical, layoutMetrics.railShadowClearance)
                     }
-                    .padding(.top, metrics.railTopClearanceOffset)
-                    .padding(.bottom, metrics.railBottomClearanceOffset)
+                    .padding(.top, layoutMetrics.railTopClearanceOffset)
+                    .padding(.bottom, layoutMetrics.railBottomClearanceOffset)
                     // Section the whole rail VIEWPORT (the full-width horizontal
                     // ScrollView) — NOT the scrolled inner LazyHStack — but ONLY for
                     // the gated single-target flow (the episode rail). tvOS only enters
@@ -233,6 +275,39 @@ public struct MediaRowView: View {
 
     @ViewBuilder
     private func card(for item: MediaItem) -> some View {
+        switch presentation {
+        case .poster:
+            trackedCard(
+                PosterCardView(
+                    item: item,
+                    style: .poster,
+                    spoilerSettings: spoilerSettings
+                ) { onSelect(item) },
+                for: item
+            )
+        case .landscape:
+            trackedCard(
+                PosterCardView(
+                    item: item,
+                    style: .landscape,
+                    spoilerSettings: spoilerSettings
+                ) { onSelect(item) },
+                for: item
+            )
+        case .episodeColumn:
+            trackedCard(
+                EpisodeColumnCard(
+                    item: item,
+                    spoilerSettings: spoilerSettings
+                ) { onSelect(item) }
+                .environment(\.plozzMetrics, .standard),
+                for: item
+            )
+        }
+    }
+
+    @ViewBuilder
+    private func trackedCard<Card: View>(_ content: Card, for item: MediaItem) -> some View {
         // Pin every card to its true rendered width so a `LazyHStack` can compute
         // the offset of a far-off initial-focus target (e.g. episode 132 of a long
         // season) without first realising every card in between — which is what
@@ -245,7 +320,7 @@ public struct MediaRowView: View {
         // is fixed and sits inside a `cardInset` glass margin, so its glass
         // is `landscapeWidth + 2 * cardInset` — pin to that so `cardSpacing`
         // is a real gap and adjacent cards never overlap at rest.
-        let card = PosterCardView(item: item, style: style, spoilerSettings: spoilerSettings) { onSelect(item) }
+        let card = content
             .frame(width: cardSlotWidth)
             .id(item.id)
             .onAppear {
@@ -265,12 +340,22 @@ public struct MediaRowView: View {
     /// The layout width reserved for one card in the rail — its full glass-surface
     /// width, so `cardSpacing` lands as a true visible gap between cards.
     private var cardSlotWidth: CGFloat {
-        switch style {
+        switch presentation {
         case .poster:
             return metrics.posterWidth
         case .landscape:
             return metrics.landscapeCardSlotWidth
+        case .episodeColumn:
+            return EpisodeColumnCard.slotWidth
         }
+    }
+
+    private var layoutMetrics: PlozzMetrics {
+        presentation == .episodeColumn ? .standard : metrics
+    }
+
+    private var artworkStyle: PosterCardView.Style {
+        presentation == .poster ? .poster : .landscape
     }
 
     /// Warms the decoded-image cache for a forward window of cards starting at the
@@ -286,16 +371,16 @@ public struct MediaRowView: View {
         let upper = min(index + lookahead, items.count - 1)
         guard index <= upper else { return }
         let variant: ArtworkImageVariant = {
-            switch style {
+            switch presentation {
             case .poster: return .posterCard
-            case .landscape: return .landscapeCard
+            case .landscape, .episodeColumn: return .landscapeCard
             }
         }()
         for i in index...upper {
             let candidate = items[i]
             guard !prefetchedIDs.contains(candidate.id) else { continue }
             prefetchedIDs.insert(candidate.id)
-            for url in candidate.artworkCandidates(for: style).prefix(2) {
+            for url in candidate.artworkCandidates(for: artworkStyle).prefix(2) {
                 ArtworkImageCache.shared.prefetch(url, variant: variant)
             }
         }
@@ -342,6 +427,7 @@ public struct MediaRowView: View {
         // strand the focus indicator. The gate now re-arms only on `focusResetToken`
         // (focus actually left the row, up to the season bar).
         guard let newValue else { return }
+        onFocusEntered?()
         lastFocusedID = newValue
         if !focusEngaged,
            let target = gateTarget,

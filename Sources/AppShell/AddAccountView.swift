@@ -174,8 +174,24 @@ private struct ProviderChooserView: View {
         .focusSection()
         .defaultFocus($focusedControl, .jellyfin)
         .onAppear { focusedControl = .jellyfin }
+        .onMoveCommand(perform: bridgeBackButtonFocus)
         .onExitCommand {
             if showsBackButton { onBack() }
+        }
+    }
+
+    private func bridgeBackButtonFocus(_ direction: MoveCommandDirection) {
+        guard showsBackButton else { return }
+        switch (focusedControl, direction) {
+        case (.some(.jellyfin), .up),
+             (.some(.jellyfin), .left),
+             (.some(.plex), .left),
+             (.some(.mediaShare), .left):
+            focusedControl = .back
+        case (.some(.back), .down), (.some(.back), .right):
+            focusedControl = .jellyfin
+        default:
+            break
         }
     }
 }

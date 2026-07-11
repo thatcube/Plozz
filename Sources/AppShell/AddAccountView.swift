@@ -189,9 +189,8 @@ private struct ProviderChoiceColumn: View {
             ProviderChoiceCard(
                 provider: .jellyfin,
                 title: "Jellyfin",
-                detail: "Find it on your network or enter an address.",
-                height: 220,
-                markSize: 88
+                height: 180,
+                markSize: 76
             ) {
                 onSelect(.jellyfin)
             }
@@ -199,19 +198,17 @@ private struct ProviderChoiceColumn: View {
             ProviderChoiceCard(
                 provider: .plex,
                 title: "Plex",
-                detail: "Link this device at plex.tv/link.",
-                height: 220,
-                markSize: 88
+                height: 180,
+                markSize: 76
             ) {
                 onSelect(.plex)
             }
 
             ProviderChoiceCard(
                 provider: .mediaShare,
-                title: "Media Share (SMB)",
-                detail: "Connect to a shared folder on your local network.",
-                height: 128,
-                markSize: 60
+                title: "SMB Share",
+                height: 108,
+                markSize: 52
             ) {
                 onSelect(.mediaShare)
             }
@@ -223,7 +220,6 @@ private struct ProviderChoiceColumn: View {
 private struct ProviderChoiceCard: View {
     let provider: ProviderKind
     let title: LocalizedStringKey
-    let detail: LocalizedStringKey
     let height: CGFloat
     let markSize: CGFloat
     let action: () -> Void
@@ -233,14 +229,8 @@ private struct ProviderChoiceCard: View {
             HStack(spacing: 28) {
                 ProviderBrandMark(provider: provider, size: markSize)
 
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(title)
-                        .font(.title2.weight(.bold))
-                    Text(detail)
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.leading)
-                }
+                Text(title)
+                    .font(.title2.weight(.bold))
 
                 Spacer(minLength: 24)
 

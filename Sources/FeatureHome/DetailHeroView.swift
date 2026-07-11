@@ -1165,35 +1165,37 @@ private struct SeriesHeroFocusProxy: View {
 
     @FocusState private var focused: Bool
 
+    @ViewBuilder
     var body: some View {
-        Color.clear
-            .frame(maxWidth: .infinity)
-            .frame(height: 96)
-            .contentShape(Rectangle())
-            .focusable(true)
-            .focused($focused)
-            .focusEffectDisabled()
-            .disabled(!model.isReceded)
-            .padding(.leading, PlozzTheme.Metrics.heroLeadingPadding)
-            .padding(.trailing, PlozzTheme.Metrics.screenPadding)
-            // Stand in for the receded action row as the same full-width focus
-            // section, so UP from any Season chip has a section to enter.
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .focusSection()
-            // Match the real action row's bottom band. This keeps the proxy
-            // strictly above Seasons/Episodes instead of inserting an invisible
-            // focusable between them.
-            .padding(.bottom, bottomInset)
-            .onChange(of: focused) { _, isFocused in
-                guard isFocused else { return }
-                model.restore()
-                onRestore()
-                // The action row becomes focusable after the recede-state update
-                // commits. Hand focus to Play on the following run-loop turn.
-                DispatchQueue.main.async {
-                    playButtonFocus?.wrappedValue = true
+        if model.isReceded {
+            Color.clear
+                .frame(maxWidth: .infinity)
+                .frame(height: 96)
+                .contentShape(Rectangle())
+                .focusable(true)
+                .focused($focused)
+                .focusEffectDisabled()
+                .padding(.leading, PlozzTheme.Metrics.heroLeadingPadding)
+                .padding(.trailing, PlozzTheme.Metrics.screenPadding)
+                // Stand in for the receded action row as the same full-width focus
+                // section, so UP from any Season chip has a section to enter.
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .focusSection()
+                // Match the real action row's bottom band. This keeps the proxy
+                // strictly above Seasons/Episodes instead of inserting an invisible
+                // focusable between them.
+                .padding(.bottom, bottomInset)
+                .onChange(of: focused) { _, isFocused in
+                    guard isFocused else { return }
+                    model.restore()
+                    onRestore()
+                    // The action row becomes focusable after the recede-state update
+                    // commits. Hand focus to Play on the following run-loop turn.
+                    DispatchQueue.main.async {
+                        playButtonFocus?.wrappedValue = true
+                    }
                 }
-            }
+        }
     }
 }
 

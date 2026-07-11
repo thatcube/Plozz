@@ -94,6 +94,8 @@ public final class PlexAuthViewModel {
 
             } catch is CancellationError {
                 // Cancelled by the user; leave phase as-is (view is dismissing).
+            } catch let error as PlexPinError {
+                self.phase = .error(error.userMessage)
             } catch let error as AppError {
                 if error == .cancelled { return }
                 self.phase = .error(error.userMessage)
@@ -123,10 +125,14 @@ public final class PlexAuthViewModel {
         expiresAt: Date
     ) async throws -> LinkOutcome {
         try await withThrowingTaskGroup(of: LinkOutcome.self) { group in
-            for pin in pins {
+            for (index, pin) in pins.enumerated() {
                 group.addTask {
                     do {
-                        return .linked(try await service.awaitLink(for: pin))
+                        let initialDelay = index == 0 ? 0 : service.pollInterval / 2
+                        return .linked(try await service.awaitLink(
+                            for: pin,
+                            initialDelay: initialDelay
+                        ))
                     } catch let error as AppError where error == .quickConnectExpired {
                         return .expired
                     }

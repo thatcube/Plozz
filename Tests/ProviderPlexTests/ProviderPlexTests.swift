@@ -1300,6 +1300,25 @@ final class PlexAuthClientTests: XCTestCase {
         XCTAssertEqual(second, .claimed(authToken: "ACCOUNT_TOKEN"))
     }
 
+    func testPollPinSurfacesRateLimitAndRetryDelay() async {
+        let stub = StubHTTPClient()
+        stub.stub(
+            pathSuffix: "/api/v2/pins/1",
+            json: "",
+            status: 429,
+            headers: ["Retry-After": "12"]
+        )
+
+        do {
+            _ = try await client(stub).pollPin(id: 1)
+            XCTFail("Expected rate limit")
+        } catch let error as PlexPinError {
+            XCTAssertEqual(error, .rateLimited(retryAfter: 12))
+        } catch {
+            XCTFail("Unexpected \(error)")
+        }
+    }
+
     func testServersFilterToServerProvidesAndPickConnection() async throws {
         let stub = StubHTTPClient()
         stub.stub(pathSuffix: "/api/v2/resources", json: """

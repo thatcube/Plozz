@@ -16,6 +16,17 @@ public struct PlexPinChallenge: Hashable, Sendable {
     }
 }
 
+public enum PlexPinError: Error, Equatable, Sendable {
+    case rateLimited(retryAfter: TimeInterval?)
+
+    public var userMessage: String {
+        switch self {
+        case .rateLimited:
+            "Plex is temporarily limiting sign-in attempts. Wait a minute and try again."
+        }
+    }
+}
+
 /// Low-level client for the **plex.tv** account API (`plex.tv/api/v2`).
 ///
 /// Handles the parts of sign-in that happen *before* a server is known: issuing
@@ -74,15 +85,39 @@ public struct PlexAuthClient: Sendable {
             queryItems: strong ? [URLQueryItem(name: "strong", value: "true")] : [],
             headers: deviceProfile.headers()
         )
-        let dto = try await http.decode(PlexPinDTO.self, from: endpoint, baseURL: baseURL)
+        let dto = try await pinDTO(from: endpoint)
         return PlexPinChallenge(id: dto.id, code: dto.code)
     }
 
     /// `GET /api/v2/pins/{id}` — one poll of a PIN's link state.
     public func pollPin(id: Int) async throws -> PlexPinFlow.Outcome {
         let endpoint = Endpoint(path: "/api/v2/pins/\(id)", headers: deviceProfile.headers())
-        let dto = try await http.decode(PlexPinDTO.self, from: endpoint, baseURL: baseURL)
+        let dto = try await pinDTO(from: endpoint)
         return PlexPinFlow.evaluate(pin: dto)
+    }
+
+    private func pinDTO(from endpoint: Endpoint) async throws -> PlexPinDTO {
+        let (data, response) = try await http.sendRaw(endpoint, baseURL: baseURL)
+        switch response.statusCode {
+        case 200...299:
+            do {
+                return try JSONDecoder.plozz.decode(PlexPinDTO.self, from: data)
+            } catch {
+                throw AppError.decoding
+            }
+        case 401, 403:
+            throw AppError.unauthorized
+        case 404:
+            throw AppError.notFound
+        case 409:
+            throw AppError.conflict
+        case 429:
+            let retryAfter = response.value(forHTTPHeaderField: "Retry-After")
+                .flatMap(TimeInterval.init)
+            throw PlexPinError.rateLimited(retryAfter: retryAfter)
+        default:
+            throw AppError.invalidResponse
+        }
     }
 
     // MARK: Account + servers

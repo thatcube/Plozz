@@ -11,6 +11,7 @@ public struct PlexLinkView: View {
     @State private var viewModel: PlexAuthViewModel
     private let onCancel: () -> Void
 
+    @Environment(\.themePalette) private var palette
     @FocusState private var focused: Control?
     private enum Control: Hashable { case cancel, retry, continueServers }
 
@@ -122,7 +123,7 @@ public struct PlexLinkView: View {
                                 .font(.body)
                                 .foregroundStyle(.secondary)
                             Text("plex.tv/link")
-                                .font(.system(size: 72, weight: .heavy, design: .rounded))
+                                .font(.system(size: 72, weight: .bold))
                                 .foregroundStyle(PlexBrand.gold)
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.5)
@@ -135,7 +136,7 @@ public struct PlexLinkView: View {
                             .minimumScaleFactor(0.6)
                             .padding(.horizontal, 48)
                             .padding(.vertical, 24)
-                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: PlozzTheme.Metrics.Radius.panel))
+                            .background { codePanel }
 
                         PlexExpiryCountdown(expiresAt: expiresAt, lifetime: viewModel.codeLifetime)
                     }
@@ -172,6 +173,21 @@ public struct PlexLinkView: View {
                     .frame(maxWidth: 900)
             }
         }
+    }
+
+    private var codePanel: some View {
+        let shape = RoundedRectangle(
+            cornerRadius: PlozzTheme.Metrics.Radius.panel,
+            style: .continuous
+        )
+        return shape
+            .fill(palette.cardSurface)
+            .overlay {
+                shape.fill(Color.black.opacity(palette.isLight ? 0.06 : 0.26))
+            }
+            .overlay {
+                shape.strokeBorder(palette.cardBorder, lineWidth: 1)
+            }
     }
 
     private var orDivider: some View {

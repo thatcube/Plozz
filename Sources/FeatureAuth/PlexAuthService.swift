@@ -13,7 +13,7 @@ public struct PlexAuthService: Sendable {
     public struct Configuration: Sendable {
         public var pollInterval: TimeInterval
         public var timeout: TimeInterval
-        public init(pollInterval: TimeInterval = 2, timeout: TimeInterval = 300) {
+        public init(pollInterval: TimeInterval = 5, timeout: TimeInterval = 300) {
             self.pollInterval = pollInterval
             self.timeout = timeout
         }
@@ -41,6 +41,8 @@ public struct PlexAuthService: Sendable {
 
     /// How long an issued code stays valid before it expires.
     public var timeout: TimeInterval { config.timeout }
+    /// Base delay between polls for one challenge.
+    public var pollInterval: TimeInterval { config.pollInterval }
 
     private var client: PlexAuthClient {
         PlexAuthClient(deviceProfile: PlexDeviceProfile(clientIdentifier: deviceID), http: http)
@@ -62,15 +64,39 @@ public struct PlexAuthService: Sendable {
     ///
     /// - Throws: `.quickConnectExpired` on timeout, `.cancelled` if the task is
     ///   cancelled, or any transport error.
-    public func awaitLink(for pin: PlexPinChallenge) async throws -> String {
+    public func awaitLink(
+        for pin: PlexPinChallenge,
+        initialDelay: TimeInterval = 0
+    ) async throws -> String {
         let deadline = now().addingTimeInterval(config.timeout)
         let client = self.client
+        var nextDelay = config.pollInterval
+        var consecutiveTransientFailures = 0
+        if initialDelay > 0 {
+            try await sleep(initialDelay)
+        }
         while now() < deadline {
             try Task.checkCancellation()
-            if case let .claimed(token) = try await client.pollPin(id: pin.id) {
-                return token
+            do {
+                if case let .claimed(token) = try await client.pollPin(id: pin.id) {
+                    return token
+                }
+                nextDelay = config.pollInterval
+                consecutiveTransientFailures = 0
+            } catch let error as PlexPinError {
+                switch error {
+                case let .rateLimited(retryAfter):
+                    nextDelay = min(max(retryAfter ?? nextDelay * 2, config.pollInterval), 30)
+                }
+            } catch let error as AppError
+                where error == .invalidResponse
+                    || error == .serverUnreachable
+                    || error == .decoding {
+                consecutiveTransientFailures += 1
+                guard consecutiveTransientFailures < 3 else { throw error }
+                nextDelay = min(max(nextDelay * 2, config.pollInterval), 30)
             }
-            try await sleep(config.pollInterval)
+            try await sleep(nextDelay)
         }
         throw AppError.quickConnectExpired
     }

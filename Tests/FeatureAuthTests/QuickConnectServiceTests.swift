@@ -33,6 +33,88 @@ final class QuickConnectServiceTests: XCTestCase {
         }
     }
 
+    final class PlexAuthServiceTests: XCTestCase {
+        func testAwaitLinkBacksOffAfterRateLimitAndRecovers() async throws {
+            let stub = StubHTTPClient()
+            stub.stubFixed(
+                pathSuffix: "/api/v2/pins",
+                json: #"{"id":1,"code":"WXYZ","authToken":null}"#
+            )
+            stub.stubSequence(pathSuffix: "/api/v2/pins/1", responses: [
+                .init(status: 429, json: "", headers: ["Retry-After": "0"]),
+                .init(
+                    status: 200,
+                    json: #"{"id":1,"code":"WXYZ","authToken":"ACCOUNT_TOKEN"}"#
+                )
+            ])
+            let service = PlexAuthService(
+                deviceID: "dev1",
+                http: stub,
+                config: .init(pollInterval: 0.01, timeout: 120),
+                sleep: { _ in }
+            )
+
+            let challenge = try await service.begin()
+            let token = try await service.awaitLink(for: challenge)
+
+            XCTAssertEqual(token, "ACCOUNT_TOKEN")
+            XCTAssertEqual(stub.callCount, 3)
+        }
+
+        func testAwaitLinkRecoversFromTransientServerResponse() async throws {
+            let stub = StubHTTPClient()
+            stub.stubFixed(
+                pathSuffix: "/api/v2/pins",
+                json: #"{"id":1,"code":"WXYZ","authToken":null}"#
+            )
+            stub.stubSequence(pathSuffix: "/api/v2/pins/1", responses: [
+                .init(status: 500, json: ""),
+                .init(
+                    status: 200,
+                    json: #"{"id":1,"code":"WXYZ","authToken":"ACCOUNT_TOKEN"}"#
+                )
+            ])
+            let service = PlexAuthService(
+                deviceID: "dev1",
+                http: stub,
+                config: .init(pollInterval: 0.01, timeout: 120),
+                sleep: { _ in }
+            )
+
+            let challenge = try await service.begin()
+            let token = try await service.awaitLink(for: challenge)
+
+            XCTAssertEqual(token, "ACCOUNT_TOKEN")
+        }
+
+        func testAwaitLinkSurfacesPersistentServerFailure() async throws {
+            let stub = StubHTTPClient()
+            stub.stubFixed(
+                pathSuffix: "/api/v2/pins",
+                json: #"{"id":1,"code":"WXYZ","authToken":null}"#
+            )
+            stub.stubSequence(pathSuffix: "/api/v2/pins/1", responses: [
+                .init(status: 500, json: ""),
+                .init(status: 500, json: ""),
+                .init(status: 500, json: "")
+            ])
+            let service = PlexAuthService(
+                deviceID: "dev1",
+                http: stub,
+                config: .init(pollInterval: 0.01, timeout: 120),
+                sleep: { _ in }
+            )
+
+            let challenge = try await service.begin()
+            do {
+                _ = try await service.awaitLink(for: challenge)
+                XCTFail("Expected persistent failure")
+            } catch let error as AppError {
+                XCTAssertEqual(error, .invalidResponse)
+            }
+        }
+    }
+
     func testBeginReturnsChallenge() async throws {
         let stub = StubHTTPClient()
         stub.stubFixed(pathSuffix: "/QuickConnect/Enabled", json: "true")

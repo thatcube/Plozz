@@ -23,6 +23,8 @@ public struct CircularFocusHalo<Avatar: View>: View {
     private let focusScale: CGFloat
     private let avatar: () -> Avatar
 
+    @Environment(\.themePalette) private var palette
+
     public init(
         isFocused: Bool,
         isPressed: Bool = false,
@@ -56,7 +58,11 @@ public struct CircularFocusHalo<Avatar: View>: View {
                     isFocused: true,
                     addsFocusHaloBacking: true
                 )
-                .shadow(color: .black.opacity(0.36), radius: 20, y: 10)
+                .shadow(
+                    color: .black.opacity(palette.isLight ? 0.44 : 0.36),
+                    radius: 20,
+                    y: 10
+                )
                 .opacity(isFocused ? 1 : 0)
 
             avatar()

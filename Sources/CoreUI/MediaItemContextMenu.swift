@@ -81,6 +81,14 @@ public struct MediaItemContextMenu: ViewModifier {
     @Environment(\.mediaItemActionHandler) private var handler
     @Environment(\.mediaItemActionContext) private var context
     @Environment(\.mediaItemNavigator) private var navigator
+    /// Navigation must wait for the native context menu's rollback animation.
+    /// tvOS keeps a snapshot of the lifted card alive for roughly 300 ms after an
+    /// action is chosen; replacing the screen during that window orphans the poster
+    /// over the destination until the system times it out. Queueing the target lets
+    /// the menu dismiss first, then the task below pushes after a small safety margin.
+    @State private var pendingNavigationTarget: MediaItem?
+
+    private static var navigationDismissalDelay: Duration { .milliseconds(450) }
 
     public init(item: MediaItem) {
         self.item = item
@@ -97,6 +105,17 @@ public struct MediaItemContextMenu: ViewModifier {
                         Label(action.title, systemImage: action.systemImage)
                     }
                 }
+            }
+            .task(id: pendingNavigationTarget) {
+                guard let target = pendingNavigationTarget else { return }
+                do {
+                    try await Task.sleep(for: Self.navigationDismissalDelay)
+                } catch {
+                    return
+                }
+                guard pendingNavigationTarget == target else { return }
+                pendingNavigationTarget = nil
+                navigator?(target)
             }
         } else {
             content
@@ -125,9 +144,9 @@ public struct MediaItemContextMenu: ViewModifier {
         switch action {
         case .goToSeason:
             guard let target = item.seasonNavigationTarget else { return }
-            navigator?(target)
+            pendingNavigationTarget = target
         case .goToMovie:
-            navigator?(item)
+            pendingNavigationTarget = item
         case .markWatched, .markUnwatched, .markWatchedUpToHere,
              .addToWatchlist, .removeFromWatchlist, .refreshMetadata:
             break

@@ -12,15 +12,13 @@ public enum OnboardingPageMotion {
         reduceMotion: Bool
     ) -> AnyTransition {
         guard !reduceMotion else { return .opacity }
-        let enteringOffset: CGFloat = direction == .forward ? 72 : -72
-        let leavingOffset: CGFloat = direction == .forward ? -24 : 24
+        let enteringEdge: Edge = direction == .forward ? .trailing : .leading
+        let leavingEdge: Edge = direction == .forward ? .leading : .trailing
         return .asymmetric(
-            insertion: .offset(x: enteringOffset)
-                .combined(with: .opacity)
-                .combined(with: .scale(scale: 0.94)),
-            removal: .offset(x: leavingOffset)
-                .combined(with: .opacity)
-                .combined(with: .scale(scale: 0.97))
+            insertion: .move(edge: enteringEdge)
+                .combined(with: .scale(scale: 0.96)),
+            removal: .move(edge: leavingEdge)
+                .combined(with: .scale(scale: 0.98))
         )
     }
 

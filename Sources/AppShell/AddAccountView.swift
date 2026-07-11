@@ -62,7 +62,7 @@ struct AddAccountView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         // Let overflowing scroll content reach the physical window edges. The
-        // window remains the final clip for the small horizontal page offsets.
+        // window remains the final clip for the full-page directional push.
         .ignoresSafeArea(.container, edges: .vertical)
     }
 

@@ -58,6 +58,9 @@ struct CatalogAsset: Sendable, Equatable {
     /// (they group as singletons until the next reparse). Never rewritten by
     /// enrichment, so `movie:<key>` ids stay stable for watch-state / TopShelf.
     var movieKey: String?
+    /// Year-independent normalized title key used to discover near-year variants.
+    /// Stacked parts append their part token so CD1/CD2 never become versions.
+    var movieTitleKey: String?
 }
 
 /// Central id scheme for catalog items so the store, scanner, and provider agree.

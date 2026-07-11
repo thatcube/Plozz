@@ -114,7 +114,14 @@ actor ShareCatalogStore {
         if !hasColumn(table: "assets", column: "movie_key") {
             exec("ALTER TABLE assets ADD COLUMN movie_key TEXT;")
         }
+        if !hasColumn(table: "assets", column: "movie_title_key") {
+            exec("ALTER TABLE assets ADD COLUMN movie_title_key TEXT;")
+        }
+        if !hasColumn(table: "assets", column: "movie_group_key") {
+            exec("ALTER TABLE assets ADD COLUMN movie_group_key TEXT;")
+        }
         exec("CREATE INDEX IF NOT EXISTS idx_assets_movie_key ON assets(library, kind, movie_key);")
+        exec("CREATE INDEX IF NOT EXISTS idx_assets_movie_group ON assets(library, kind, movie_group_key);")
     }
 
     // MARK: - Scan write path
@@ -129,14 +136,22 @@ actor ShareCatalogStore {
         let sql = """
         INSERT INTO assets
           (rel_path, basename, size, modified_at, first_seen_at, last_scan,
-           kind, library, title, sort_title, year, series_title, series_key, season, episode, movie_key)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+           kind, library, title, sort_title, year, series_title, series_key, season, episode,
+           movie_key, movie_title_key)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(rel_path) DO UPDATE SET
           basename=excluded.basename, size=excluded.size, modified_at=excluded.modified_at,
           last_scan=excluded.last_scan, kind=excluded.kind, library=excluded.library,
           title=excluded.title, sort_title=excluded.sort_title, year=excluded.year,
           series_title=excluded.series_title, series_key=excluded.series_key,
-          season=excluded.season, episode=excluded.episode, movie_key=excluded.movie_key;
+          season=excluded.season, episode=excluded.episode, movie_key=excluded.movie_key,
+          movie_title_key=excluded.movie_title_key,
+          movie_group_key=CASE
+            WHEN assets.movie_key=excluded.movie_key
+             AND assets.movie_title_key=excluded.movie_title_key
+            THEN assets.movie_group_key
+            ELSE NULL
+          END;
         """
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
@@ -161,6 +176,99 @@ actor ShareCatalogStore {
             bindOptInt(stmt, 14, a.season)
             bindOptInt(stmt, 15, a.episode)
             bindOptText(stmt, 16, a.movieKey)
+            bindOptText(stmt, 17, a.movieTitleKey)
+            _ = sqlite3_step(stmt)
+        }
+        exec("COMMIT;")
+    }
+
+    /// Rebuild persisted logical movie groups after a CLEAN full scan. Files with
+    /// the same normalized title and a release-year spread of at most one are
+    /// versions of one movie (metadata commonly differs by festival/theatrical
+    /// year); distant remakes remain separate. Existing group ids win so adding a
+    /// version later does not churn watch-state or deep-link ids.
+    func rebuildMovieGroups() {
+        ensureOpen()
+        guard db != nil else { return }
+
+        struct Row {
+            var relPath: String
+            var movieKey: String
+            var titleKey: String
+            var year: Int?
+            var existingGroup: String?
+        }
+
+        var rows: [Row] = []
+        query("""
+        SELECT rel_path, movie_key, movie_title_key, year, movie_group_key
+        FROM assets
+        WHERE library='movies' AND kind='movie'
+          AND movie_key IS NOT NULL AND movie_title_key IS NOT NULL;
+        """) { stmt in
+            guard let relPath = self.columnText(stmt, 0),
+                  let movieKey = self.columnText(stmt, 1),
+                  let titleKey = self.columnText(stmt, 2) else { return }
+            rows.append(Row(
+                relPath: relPath,
+                movieKey: movieKey,
+                titleKey: titleKey,
+                year: self.columnOptInt(stmt, 3),
+                existingGroup: self.columnText(stmt, 4)
+            ))
+        }
+
+        var assignments: [(relPath: String, group: String)] = []
+        for titleRows in Dictionary(grouping: rows, by: \.titleKey).values {
+            let known = titleRows.filter { $0.year != nil }.sorted {
+                if $0.year != $1.year { return ($0.year ?? 0) < ($1.year ?? 0) }
+                return $0.relPath < $1.relPath
+            }
+            var clusters: [[Row]] = []
+            for row in known {
+                if let last = clusters.indices.last,
+                   let firstYear = clusters[last].first?.year,
+                   let year = row.year,
+                   year - firstYear <= 1 {
+                    clusters[last].append(row)
+                } else {
+                    clusters.append([row])
+                }
+            }
+
+            let unknown = titleRows.filter { $0.year == nil }
+            if !unknown.isEmpty {
+                // A yearless variant can safely join when this title has only one
+                // known release cluster; otherwise keep it separate from remakes.
+                if clusters.count == 1 {
+                    clusters[0].append(contentsOf: unknown)
+                } else {
+                    clusters.append(unknown)
+                }
+            }
+
+            for cluster in clusters {
+                let existing = cluster.compactMap(\.existingGroup).sorted().first
+                let fallback = cluster.max {
+                    if $0.year != $1.year { return ($0.year ?? 0) < ($1.year ?? 0) }
+                    return $0.movieKey > $1.movieKey
+                }?.movieKey
+                guard let group = existing ?? fallback else { continue }
+                assignments.append(contentsOf: cluster.map { ($0.relPath, group) })
+            }
+        }
+
+        exec("BEGIN IMMEDIATE;")
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "UPDATE assets SET movie_group_key=? WHERE rel_path=?;", -1, &stmt, nil) == SQLITE_OK else {
+            exec("ROLLBACK;")
+            return
+        }
+        defer { sqlite3_finalize(stmt) }
+        for assignment in assignments {
+            sqlite3_reset(stmt)
+            bindText(stmt, 1, assignment.group)
+            bindText(stmt, 2, assignment.relPath)
             _ = sqlite3_step(stmt)
         }
         exec("COMMIT;")
@@ -315,9 +423,14 @@ actor ShareCatalogStore {
         // Logical movie → enrich its REPRESENTATIVE file (where movies() reads art),
         // so opening a movie fast-tracks the id the grid/detail actually display.
         if let mkey = ShareCatalogID.movieKey(forMovieID: id) {
+            let groupKey = resolvedMovieGroupKey(mkey)
             var rep: String?
-            query("SELECT MIN(rel_path) FROM assets WHERE movie_key=? AND library='movies' AND kind='movie';",
-                  bind: { self.bindText($0, 1, mkey) }) { stmt in rep = self.columnText(stmt, 0) }
+            query("""
+            SELECT MIN(rel_path) FROM assets
+            WHERE COALESCE(movie_group_key, movie_key)=?
+              AND library='movies' AND kind='movie';
+            """,
+                  bind: { self.bindText($0, 1, groupKey) }) { stmt in rep = self.columnText(stmt, 0) }
             guard let rep else { return nil }
             return pendingEnrichment(forItemID: ShareCatalogID.file(rep), version: version)
         }
@@ -552,9 +665,14 @@ actor ShareCatalogStore {
     /// for a logical `movie:<key>`, else the id unchanged (a legacy `f:` movie).
     private func movieEnrichmentKey(forID id: String) -> String {
         guard let mkey = ShareCatalogID.movieKey(forMovieID: id) else { return id }
+        let groupKey = resolvedMovieGroupKey(mkey)
         var rep: String?
-        query("SELECT 'f:' || MIN(rel_path) FROM assets WHERE movie_key=? AND library='movies' AND kind='movie';",
-              bind: { self.bindText($0, 1, mkey) }) { stmt in rep = self.columnText(stmt, 0) }
+        query("""
+        SELECT 'f:' || MIN(rel_path) FROM assets
+        WHERE COALESCE(movie_group_key, movie_key)=?
+          AND library='movies' AND kind='movie';
+        """,
+              bind: { self.bindText($0, 1, groupKey) }) { stmt in rep = self.columnText(stmt, 0) }
         return rep ?? id
     }
 
@@ -620,11 +738,12 @@ actor ShareCatalogStore {
         // card, dated by the FIRST version discovered (when the movie appeared).
         query("""
         SELECT
-          CASE WHEN MIN(movie_key) IS NOT NULL THEN 'movie:' || MIN(movie_key)
+          CASE WHEN MIN(COALESCE(movie_group_key, movie_key)) IS NOT NULL
+               THEN 'movie:' || MIN(COALESCE(movie_group_key, movie_key))
                ELSE 'f:' || MIN(rel_path) END AS logical_id,
           MIN(title), MAX(year), MIN(first_seen_at) AS added
         FROM assets WHERE library='movies' AND kind='movie'
-        GROUP BY COALESCE(movie_key, rel_path)
+        GROUP BY COALESCE(movie_group_key, movie_key, rel_path)
         ORDER BY added DESC LIMIT ?;
         """, bind: { sqlite3_bind_int64($0, 1, Int64(limit)) }) { stmt in
             let item = MediaItem(
@@ -662,12 +781,13 @@ actor ShareCatalogStore {
 
         query("""
         SELECT
-          CASE WHEN MIN(movie_key) IS NOT NULL THEN 'movie:' || MIN(movie_key)
+          CASE WHEN MIN(COALESCE(movie_group_key, movie_key)) IS NOT NULL
+               THEN 'movie:' || MIN(COALESCE(movie_group_key, movie_key))
                ELSE 'f:' || MIN(rel_path) END AS logical_id,
           MIN(title), MAX(year)
         FROM assets
         WHERE library='movies' AND kind='movie' AND sort_title LIKE ?
-        GROUP BY COALESCE(movie_key, rel_path) LIMIT ?;
+        GROUP BY COALESCE(movie_group_key, movie_key, rel_path) LIMIT ?;
         """, bind: {
             self.bindText($0, 1, needle); sqlite3_bind_int64($0, 2, Int64(limit))
         }) { stmt in
@@ -711,12 +831,13 @@ actor ShareCatalogStore {
                e.poster_url, e.backdrop_url, e.logo_url
         FROM (
           SELECT
-            CASE WHEN MIN(movie_key) IS NOT NULL THEN 'movie:' || MIN(movie_key)
+            CASE WHEN MIN(COALESCE(movie_group_key, movie_key)) IS NOT NULL
+                 THEN 'movie:' || MIN(COALESCE(movie_group_key, movie_key))
                  ELSE 'f:' || MIN(rel_path) END AS logical_id,
             'f:' || MIN(rel_path) AS rep_id,
             MIN(title) AS title, MAX(year) AS year, MIN(sort_title) AS gsort
           FROM assets WHERE library='movies' AND kind='movie'
-          GROUP BY COALESCE(movie_key, rel_path)
+          GROUP BY COALESCE(movie_group_key, movie_key, rel_path)
         ) g
         LEFT JOIN enrichment e ON e.item_id = g.rep_id
         ORDER BY g.gsort LIMIT ? OFFSET ?;
@@ -776,7 +897,7 @@ actor ShareCatalogStore {
         ensureOpen()
         guard db != nil else { return 0 }
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, "SELECT COUNT(DISTINCT COALESCE(movie_key, rel_path)) FROM assets WHERE library='movies' AND kind='movie';", -1, &stmt, nil) == SQLITE_OK else { return 0 }
+        guard sqlite3_prepare_v2(db, "SELECT COUNT(DISTINCT COALESCE(movie_group_key, movie_key, rel_path)) FROM assets WHERE library='movies' AND kind='movie';", -1, &stmt, nil) == SQLITE_OK else { return 0 }
         defer { sqlite3_finalize(stmt) }
         return sqlite3_step(stmt) == SQLITE_ROW ? Int(sqlite3_column_int64(stmt, 0)) : 0
     }
@@ -858,7 +979,8 @@ actor ShareCatalogStore {
         if let relPath = ShareCatalogID.relPath(forFileID: id) {
             var result: MediaItem?
             query("""
-            SELECT rel_path, title, kind, library, year, series_title, series_key, season, episode
+            SELECT rel_path, title, kind, library, year, series_title, series_key, season, episode,
+                   basename, size
             FROM assets WHERE rel_path=?;
             """, bind: { self.bindText($0, 1, relPath) }) { stmt in
                 let kind = self.columnText(stmt, 2) ?? "movie"
@@ -870,7 +992,12 @@ actor ShareCatalogStore {
                         title: self.columnText(stmt, 1) ?? relPath,
                         kind: .movie,
                         productionYear: self.columnOptInt(stmt, 4),
-                        libraryID: ShareCatalogID.moviesLibrary
+                        libraryID: ShareCatalogID.moviesLibrary,
+                        versions: [Self.movieVersion(
+                            relPath: relPath,
+                            basename: self.columnText(stmt, 9) ?? relPath,
+                            size: sqlite3_column_int64(stmt, 10)
+                        )]
                     )
                 }
             }
@@ -888,13 +1015,15 @@ actor ShareCatalogStore {
     /// item. A single-file movie exposes no versions (no picker). Enrichment is
     /// applied via the group's representative file (see `movieEnrichmentKey`).
     private func movieItem(key: String) -> MediaItem? {
+        let groupKey = resolvedMovieGroupKey(key)
         var files: [(relPath: String, basename: String, size: Int64)] = []
         var title: String?
         var year: Int?
         query("""
         SELECT rel_path, basename, size, title, year FROM assets
-        WHERE movie_key=? AND library='movies' AND kind='movie' ORDER BY rel_path;
-        """, bind: { self.bindText($0, 1, key) }) { stmt in
+        WHERE COALESCE(movie_group_key, movie_key)=?
+          AND library='movies' AND kind='movie' ORDER BY rel_path;
+        """, bind: { self.bindText($0, 1, groupKey) }) { stmt in
             let rel = self.columnText(stmt, 0) ?? ""
             files.append((rel, self.columnText(stmt, 1) ?? rel, sqlite3_column_int64(stmt, 2)))
             if title == nil { title = self.columnText(stmt, 3) }
@@ -905,15 +1034,15 @@ actor ShareCatalogStore {
             .sortedForPicker()
         if !versions.isEmpty { versions[0].isDefault = true }
         let item = MediaItem(
-            id: ShareCatalogID.movie(key),
-            title: title ?? key,
+            id: ShareCatalogID.movie(groupKey),
+            title: title ?? groupKey,
             kind: .movie,
             productionYear: year,
             libraryID: ShareCatalogID.moviesLibrary,
-            // Cards/rows leave versions empty; only the detail item carries them.
-            // A lone file needs no picker, so expose versions only when there's a
-            // genuine choice.
-            versions: versions.count > 1 ? versions : []
+            // Retain even one named SMB version. The picker still requires >1,
+            // while same-account/cross-server merging can preserve its filename
+            // and quality instead of synthesizing an anonymous "Version".
+            versions: versions
         )
         return withEnrichment(item)
     }
@@ -922,9 +1051,14 @@ actor ShareCatalogStore {
     /// specific version (play-from-card, before the detail's version picker set
     /// one): the highest parsed resolution, then the largest file.
     func defaultMovieRelPath(forKey key: String) -> String? {
+        let groupKey = resolvedMovieGroupKey(key)
         var best: (rel: String, height: Int, size: Int64)?
-        query("SELECT rel_path, basename, size FROM assets WHERE movie_key=? AND library='movies' AND kind='movie';",
-              bind: { self.bindText($0, 1, key) }) { stmt in
+        query("""
+        SELECT rel_path, basename, size FROM assets
+        WHERE COALESCE(movie_group_key, movie_key)=?
+          AND library='movies' AND kind='movie';
+        """,
+              bind: { self.bindText($0, 1, groupKey) }) { stmt in
             let rel = self.columnText(stmt, 0) ?? ""
             let h = Self.resolutionHeight(fromName: self.columnText(stmt, 1) ?? "") ?? 0
             let sz = sqlite3_column_int64(stmt, 2)
@@ -939,12 +1073,30 @@ actor ShareCatalogStore {
     /// its logical `movie:<key>` so resume/played is unified across versions; an
     /// episode file or an un-keyed movie keeps its own id.
     func canonicalItemID(_ id: String) -> String {
+        if let key = ShareCatalogID.movieKey(forMovieID: id) {
+            return ShareCatalogID.movie(resolvedMovieGroupKey(key))
+        }
         guard let rel = ShareCatalogID.relPath(forFileID: id) else { return id }
         var key: String?
-        query("SELECT movie_key FROM assets WHERE rel_path=? AND kind='movie';",
+        query("SELECT COALESCE(movie_group_key, movie_key) FROM assets WHERE rel_path=? AND kind='movie';",
               bind: { self.bindText($0, 1, rel) }) { stmt in key = self.columnText(stmt, 0) }
         if let key { return ShareCatalogID.movie(key) }
         return id
+    }
+
+    /// Resolve a pre-grouping `movie:<movie_key>` id to its persisted logical
+    /// group. Keeps v3 Continue Watching records, deep links, and queued watch
+    /// writes working after v4 combines adjacent-year variants.
+    private func resolvedMovieGroupKey(_ key: String) -> String {
+        var resolved: String?
+        query("""
+        SELECT COALESCE(movie_group_key, movie_key) FROM assets
+        WHERE movie_key=? OR movie_group_key=? LIMIT 1;
+        """, bind: {
+            self.bindText($0, 1, key)
+            self.bindText($0, 2, key)
+        }) { stmt in resolved = self.columnText(stmt, 0) }
+        return resolved ?? key
     }
 
     /// A share file → provider-agnostic ``MediaVersion``. The share has no server
@@ -958,6 +1110,7 @@ actor ShareCatalogStore {
             name: (basename as NSString).deletingPathExtension,
             height: resolutionHeight(fromName: basename),
             sizeBytes: size > 0 ? size : nil,
+            videoRange: videoRange(fromName: basename),
             container: (basename as NSString).pathExtension.lowercased()
         )
     }
@@ -972,6 +1125,28 @@ actor ShareCatalogStore {
         if l.contains("720p") { return 720 }
         if l.contains("576p") { return 576 }
         if l.contains("480p") { return 480 }
+        return nil
+    }
+
+    /// Best-effort HDR range parsed from common release-name tokens. This makes
+    /// SMB version rows distinguish a Dolby Vision file from its SDR sibling
+    /// before the optional header probe has populated full stream metadata.
+    private static func videoRange(fromName name: String) -> String? {
+        let lower = name.lowercased()
+        let compact = lower
+            .replacingOccurrences(of: ".", with: "")
+            .replacingOccurrences(of: "-", with: "")
+            .replacingOccurrences(of: "_", with: "")
+            .replacingOccurrences(of: " ", with: "")
+        let tokens = lower.components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+        if compact.contains("dolbyvision") || tokens.contains("dovi") || tokens.contains("dv") {
+            return HDRRange.dolbyVision.rawValue
+        }
+        if compact.contains("hdr10+") || compact.contains("hdr10plus") || compact.contains("hdr10") {
+            return HDRRange.hdr10.rawValue
+        }
+        if compact.contains("hlg") { return HDRRange.hlg.rawValue }
         return nil
     }
 

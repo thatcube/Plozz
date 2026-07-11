@@ -193,6 +193,7 @@ actor ShareScanner {
         // clean pass performs the deferred prune.
         if !anyListingFailed {
             await store.pruneNotSeen(inScan: scanID)
+            await store.rebuildMovieGroups()
         }
         await store.setMeta("last_full_scan_at", String(Date().timeIntervalSince1970))
         // Record the classifier the catalog was built with, so `scanIfStale` only
@@ -247,13 +248,17 @@ actor ShareScanner {
             let title = movie.title.isEmpty ? displayTitle(forFileName: name) : movie.title
             let g = ShareMediaParser.movieGrouping(relPath: relPath, parsedTitle: title, parsedYear: movie.year)
             var movieKey = ShareCatalogID.movieKey(fromTitle: g.title, year: g.year)
-            if let part = g.part { movieKey += "-\(part)" }
+            var movieTitleKey = ShareCatalogID.seriesKey(fromTitle: g.title)
+            if let part = g.part {
+                movieKey += "-\(part)"
+                movieTitleKey += "-\(part)"
+            }
             return CatalogAsset(
                 relPath: relPath, basename: name, size: Int64(entry.size),
                 modifiedAt: entry.modifiedAt, kind: .movie, library: .movies,
                 title: title, year: movie.year,
                 seriesTitle: nil, seriesKey: nil, season: nil, episode: nil,
-                movieKey: movieKey
+                movieKey: movieKey, movieTitleKey: movieTitleKey
             )
         case .episode(let ep):
             let library: CatalogLibrary = isAnimePath(relPath) ? .anime : .tv
@@ -265,7 +270,7 @@ actor ShareScanner {
                 seriesTitle: ep.series,
                 seriesKey: ShareCatalogID.seriesKey(fromTitle: ep.series),
                 season: ep.season, episode: ep.episode,
-                movieKey: nil
+                movieKey: nil, movieTitleKey: nil
             )
         }
     }

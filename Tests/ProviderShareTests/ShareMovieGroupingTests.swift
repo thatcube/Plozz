@@ -101,6 +101,51 @@ final class ShareMovieGroupingTests: XCTestCase {
         XCTAssertEqual(countYears, 2, "different years are different films")
     }
 
+    /// Real regression: release metadata disagrees by one year (festival vs
+    /// theatrical date) but both files are the same film and must become versions.
+    func testSameTitleAdjacentYearsGroupWithDescriptiveVersions() async {
+        let store = ShareCatalogStore(accountKey: "a", directory: tempDir())
+        let tree: [String: [SMBShareBrowser.Entry]] = [
+            "": [dir("Movies")],
+            "Movies": [
+                file("A.Quiet.Place.Part.II.2020.1080p.WEB.H264.AAC.5.1-CyEg.mkv", size: 4_000_000_000),
+                file("A Quiet Place Part II (2021) [imdbid-tt8332922] - [WEBDL-2160p][DV HDR10Plus][EAC3 Atmos 5.1][h265]-PIRATES.mkv", size: 18_000_000_000),
+            ],
+        ]
+        await scan(tree, into: store)
+
+        let count = await store.movieCount()
+        XCTAssertEqual(count, 1)
+        let movies = await store.movies(offset: 0, limit: 10)
+        XCTAssertEqual(movies.count, 1)
+
+        guard let detail = await store.item(id: movies[0].id) else {
+            return XCTFail("grouped movie must resolve")
+        }
+        XCTAssertEqual(detail.versions.count, 2)
+        XCTAssertTrue(detail.versions.contains { $0.displayLabel.contains("1080p") })
+        XCTAssertTrue(detail.versions.contains {
+            $0.displayLabel.contains("4K") && $0.displayLabel.contains("Dolby Vision")
+        })
+        XCTAssertFalse(detail.versions.contains { $0.displayLabel == "Version" })
+
+        let old2020ID = ShareCatalogID.movie(
+            ShareCatalogID.movieKey(fromTitle: "A Quiet Place Part II", year: 2020)
+        )
+        let canonicalOldID = await store.canonicalItemID(old2020ID)
+        XCTAssertEqual(
+            canonicalOldID,
+            movies[0].id,
+            "pre-grouping logical ids must alias to the combined movie"
+        )
+        let oldItem = await store.item(id: old2020ID)
+        XCTAssertEqual(
+            oldItem?.id,
+            movies[0].id,
+            "old deep links must resolve the combined movie"
+        )
+    }
+
     /// Stacked multi-part movie (CD1/CD2) must NOT collapse into one title whose
     /// "versions" are each half a movie.
     func testStackedPartsAreNotVersions() async {
@@ -118,8 +163,9 @@ final class ShareMovieGroupingTests: XCTestCase {
         XCTAssertEqual(countParts, 2, "CD1/CD2 are parts, not versions")
     }
 
-    /// A single-file movie shows no version picker.
-    func testSingleFileMovieHasNoVersions() async {
+    /// A single-file movie retains one named version for future cross-server /
+    /// same-account merging, but still shows no picker (`hasMultipleVersions=false`).
+    func testSingleFileMovieRetainsNamedVersionWithoutPicker() async {
         let store = ShareCatalogStore(accountKey: "a", directory: tempDir())
         let tree: [String: [SMBShareBrowser.Entry]] = [
             "": [dir("Movies")],
@@ -128,7 +174,9 @@ final class ShareMovieGroupingTests: XCTestCase {
         await scan(tree, into: store)
         let movies = await store.movies(offset: 0, limit: 10)
         let detail = await store.item(id: movies.first!.id)
-        XCTAssertEqual(detail?.versions.count, 0, "one file = no picker")
+        XCTAssertEqual(detail?.versions.count, 1)
+        XCTAssertTrue(detail?.versions.first?.displayLabel.contains("4K") ?? false)
+        XCTAssertNotEqual(detail?.versions.first?.displayLabel, "Version")
         XCTAssertFalse(detail?.hasMultipleVersions ?? true)
     }
 
@@ -151,6 +199,24 @@ final class ShareMovieGroupingTests: XCTestCase {
         // Both files fold to the SAME logical id.
         let other = await store.canonicalItemID(ShareCatalogID.file("Movies/Heat (1995)/Heat (1995) 1080p.mkv"))
         XCTAssertEqual(canonical, other)
+    }
+
+    /// A stale identity-index ref can still address an old `f:<path>` item. It
+    /// must retain filename/quality metadata instead of becoming "Version".
+    func testLegacyFileMovieLookupRetainsNamedVersion() async {
+        let store = ShareCatalogStore(accountKey: "a", directory: tempDir())
+        let path = "Movies/A Quiet Place Part II (2021) WEBDL-2160p DV.mkv"
+        let tree: [String: [SMBShareBrowser.Entry]] = [
+            "": [dir("Movies")],
+            "Movies": [file((path as NSString).lastPathComponent)],
+        ]
+        await scan(tree, into: store)
+
+        let legacy = await store.item(id: ShareCatalogID.file(path))
+        XCTAssertEqual(legacy?.versions.count, 1)
+        XCTAssertTrue(legacy?.versions[0].displayLabel.contains("4K") ?? false)
+        XCTAssertTrue(legacy?.versions[0].displayLabel.contains("Dolby Vision") ?? false)
+        XCTAssertNotEqual(legacy?.versions[0].displayLabel, "Version")
     }
 
     /// An episode id is NOT folded (episodes keep their own watch id).

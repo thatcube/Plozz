@@ -96,7 +96,7 @@ public struct PlexLinkView: View {
                 .font(.title2)
 
         case let .awaitingLink(code, authorizationURL, expiresAt):
-            HStack(alignment: .top, spacing: 56) {
+            HStack(alignment: .top, spacing: 64) {
                 VStack(spacing: 28) {
                     Text("Scan with your phone")
                         .font(.title3).bold()
@@ -108,14 +108,10 @@ public struct PlexLinkView: View {
                 }
                 .frame(maxWidth: .infinity)
 
-                orDivider
-
                 VStack(spacing: 0) {
                     Text("Or enter a code at")
                         .font(.title3).bold()
 
-                    // Center the link + code + timer in the space below the
-                    // heading so it lines up with the QR on the left.
                     Spacer(minLength: 0)
 
                     VStack(spacing: 24) {
@@ -139,10 +135,13 @@ public struct PlexLinkView: View {
 
                     Spacer(minLength: 0)
                 }
+                .padding(.horizontal, 48)
+                .padding(.vertical, 36)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background { manualLinkPanel }
             }
-            // Bound the row to the QR column's height so the divider and the
-            // right column fill exactly that (not the whole centered area).
+            // Bound the row to the QR column's height so both choices remain
+            // balanced instead of stretching into the footer.
             .fixedSize(horizontal: false, vertical: true)
 
         case .loadingServers:
@@ -171,6 +170,18 @@ public struct PlexLinkView: View {
         }
     }
 
+    private var manualLinkPanel: some View {
+        let shape = RoundedRectangle(
+            cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius,
+            style: .continuous
+        )
+        return shape
+            .fill(palette.cardSurface)
+            .overlay {
+                shape.strokeBorder(palette.cardBorder.opacity(0.45), lineWidth: 1)
+            }
+    }
+
     private var codePanel: some View {
         let shape = RoundedRectangle(
             cornerRadius: PlozzTheme.Metrics.Radius.panel,
@@ -184,23 +195,6 @@ public struct PlexLinkView: View {
             .overlay {
                 shape.strokeBorder(palette.cardBorder.opacity(0.55), lineWidth: 1)
             }
-    }
-
-    private var orDivider: some View {
-        VStack(spacing: 16) {
-            Rectangle()
-                .fill(Color.primary.opacity(0.15))
-                .frame(width: 2)
-                .frame(maxHeight: .infinity)
-            Text("OR")
-                .font(.title3).bold()
-                .foregroundStyle(.secondary)
-            Rectangle()
-                .fill(Color.primary.opacity(0.15))
-                .frame(width: 2)
-                .frame(maxHeight: .infinity)
-        }
-        .frame(maxHeight: .infinity)
     }
 
     @ViewBuilder

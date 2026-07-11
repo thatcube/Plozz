@@ -157,7 +157,7 @@ private struct SeriesRecededLogo: View {
         .animation(
             reduceMotion
                 ? nil
-                : (logoAtRest ? .smooth(duration: 0.75) : .easeOut(duration: 0.39)),
+                : (logoAtRest ? .smooth(duration: 1.0) : .easeOut(duration: 0.39)),
             value: logoAtRest
         )
         .accessibilityHidden(!recedeModel.isReceded)
@@ -170,7 +170,7 @@ private struct SeriesRecededLogo: View {
             }
             if shouldShow {
                 do {
-                    try await Task.sleep(for: .milliseconds(180))
+                    try await Task.sleep(for: .milliseconds(480))
                 } catch {
                     return
                 }

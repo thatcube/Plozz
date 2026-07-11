@@ -60,10 +60,17 @@ struct AddAccountView: View {
         ZStack {
             if pageIsVisible {
                 ZStack { pageContent }
+                // Resolve the page's geometry once at this boundary instead of
+                // pushing the transition down to independently hosted focus rows.
+                .geometryGroup()
+                .compositingGroup()
                 .transition(pageTransition)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Expand the boundary that `.clipped()` masks; a descendant ScrollView
+        // cannot escape a clip that was already resolved to the tvOS safe area.
+        .ignoresSafeArea(.container, edges: .vertical)
         .clipped()
     }
 
@@ -145,7 +152,7 @@ struct AddAccountView: View {
             pageIsVisible = false
         } completion: {
             choice = destination
-            withAnimation(pageEntryAnimation, completionCriteria: .logicallyComplete) {
+            withAnimation(pageEntryAnimation, completionCriteria: .removed) {
                 pageIsVisible = true
             } completion: {
                 pageIsReady = true

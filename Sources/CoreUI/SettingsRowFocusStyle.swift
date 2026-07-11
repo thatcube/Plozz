@@ -3,10 +3,12 @@ import SwiftUI
 
 /// Size variant for the unified list-row focus style. `.standard` is the
 /// top-level row height; `.prominent` is the taller server-list row that
-/// carries an "In use" badge and needs a larger corner radius / shadow.
+/// carries an "In use" badge and needs a larger corner radius / shadow;
+/// `.contained` keeps its highlight inside a shared grouped container.
 public enum SettingsRowSize {
     case standard
     case prominent
+    case contained
 }
 
 /// How much weight a list-row *control* carries, and therefore how tall it is.
@@ -68,9 +70,9 @@ public enum SettingsRowMetrics {
 /// - Light mode focus: BLACK fill, WHITE foreground.
 /// UNFOCUSED state is transparent and inherits normal foreground colors.
 ///
-/// The highlight card bleeds slightly OUTWARD via negative padding + a soft drop
-/// shadow and continuous rounded corners, giving the same native lift Apple TV
-/// uses while the content itself stays anchored in place (it never scales).
+/// The highlight card normally bleeds slightly outward via negative padding;
+/// `.contained` keeps it within grouped-list row bounds. Content remains anchored
+/// in place and never scales.
 ///
 /// To keep ALL row content focus + theme adaptive (not just the background) the
 /// style propagates the focused state via the environment. Helpers like
@@ -100,10 +102,29 @@ private struct SettingsFocusBody: View {
     // content padding. Extending the focus fill outward by 16pt H / 4pt V
     // leaves a UNIFORM 12pt gap on every side (28−16 = 16−4 = 12), and a focus
     // corner of 28−12 = 16 makes the fill's corners concentric with the card's.
-    // `.prominent` (taller server-list rows) keeps its own larger geometry.
-    private var corner: CGFloat { size == .prominent ? 18 : 16 }
-    private var focusInsetH: CGFloat { size == .prominent ? 10 : 16 }
-    private var focusInsetV: CGFloat { size == .prominent ? 6 : 4 }
+    // `.prominent` keeps larger geometry; `.contained` disables the bleed.
+    private var corner: CGFloat {
+        switch size {
+        case .standard: 16
+        case .prominent, .contained: 18
+        }
+    }
+
+    private var focusInsetH: CGFloat {
+        switch size {
+        case .standard: 16
+        case .prominent: 10
+        case .contained: 0
+        }
+    }
+
+    private var focusInsetV: CGFloat {
+        switch size {
+        case .standard: 4
+        case .prominent: 6
+        case .contained: 0
+        }
+    }
 
     private var focusFill: Color {
         colorScheme == .dark ? Color.white : Color.black

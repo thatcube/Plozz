@@ -162,8 +162,8 @@ private struct ProviderChooserView: View {
 
 private struct FirstRunBranding: View {
     var body: some View {
-        VStack(spacing: 28) {
-            HStack(spacing: 24) {
+        VStack(spacing: 16) {
+            VStack(spacing: 0) {
                 Image("PlozzLogo")
                     .resizable()
                     .interpolation(.none)
@@ -180,7 +180,7 @@ private struct FirstRunBranding: View {
             .accessibilityLabel("Plozz")
 
             Text("Free forever and open source.")
-                .font(.title3.weight(.semibold))
+                .font(.system(size: 22, weight: .medium))
                 .foregroundStyle(.secondary)
         }
         .frame(width: 480)
@@ -200,7 +200,7 @@ private struct ProviderChoiceGroup: View {
                 onSelect(.jellyfin)
             }
 
-            Divider().padding(.horizontal, 24)
+            Divider()
 
             ProviderChoiceRow(
                 provider: .plex,
@@ -210,7 +210,7 @@ private struct ProviderChoiceGroup: View {
                 onSelect(.plex)
             }
 
-            Divider().padding(.horizontal, 24)
+            Divider()
 
             ProviderChoiceRow(
                 provider: .mediaShare,
@@ -220,7 +220,6 @@ private struct ProviderChoiceGroup: View {
                 onSelect(.mediaShare)
             }
         }
-        .padding(.horizontal, 20)
         .padding(.vertical, 12)
         .frame(width: 720)
         .background(
@@ -231,6 +230,9 @@ private struct ProviderChoiceGroup: View {
             RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
                 .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
         }
+        .clipShape(
+            RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
+        )
         .focusSection()
     }
 }
@@ -260,7 +262,8 @@ private struct ProviderChoiceRow: View {
             .frame(height: height)
             .contentShape(Rectangle())
         }
-        .buttonStyle(SettingsFocusButtonStyle(size: .prominent))
+        .buttonStyle(SettingsFocusButtonStyle(size: .contained))
+        .padding(.horizontal, 12)
     }
 }
 

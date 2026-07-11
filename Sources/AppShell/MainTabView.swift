@@ -533,15 +533,6 @@ private func resolveOptionalProvider(_ accountID: String, in accounts: [Resolved
     accounts.first(where: { $0.account.id == accountID })?.provider
 }
 
-/// Builds the Home hero's Random source fetcher (dual-provider): given a set of
-/// concrete `"accountID:libraryID"` keys (already resolved from the user's
-/// selection or the visible-library fallback in `HomeView`), it fetches a
-/// server-shuffled page from each library — on **both** Jellyfin and Plex, which
-/// each map `SortField.random` onto their native random order — and returns a
-/// merged, capped pool for the curator to interleave. Each library's child kind
-/// is resolved from its owning provider's catalog so the typed random query is
-/// issued correctly; libraries whose kind isn't a browsable movie/series list
-/// are skipped.
 /// Builds the Home hero's **featured** provider from the Seerr service: trending
 /// titles (movies + TV) that may live outside the user's library. Returns `[]`
 /// when Seerr is unconfigured or the fetch fails, so the `.featured` hero source
@@ -600,54 +591,99 @@ private func seerRequestResult(_ outcome: SeerRequestOutcome, actingName: String
     }
 }
 
-private func makeHeroRandomProvider(accounts: [ResolvedAccount]) -> RandomLibraryContentProviding {
-    { keys, limit in
-        guard !keys.isEmpty, limit > 0 else { return [] }
-        var libraryIDsByAccount: [String: [String]] = [:]
-        for key in keys {
-            guard let separator = key.firstIndex(of: ":") else { continue }
-            let accountID = String(key[..<separator])
-            let libraryID = String(key[key.index(after: separator)...])
-            guard !accountID.isEmpty, !libraryID.isEmpty else { continue }
-            libraryIDsByAccount[accountID, default: []].append(libraryID)
+/// Builds the Home hero's Random source fetcher (dual-provider): given a set of
+/// already-resolved library descriptors (selected from Home's loaded catalog), it
+/// fetches server-shuffled pages from Jellyfin and Plex with bounded concurrency.
+/// Home carries each library's kind into this seam, so Random no longer repeats a
+/// `provider.libraries()` request before it can issue the typed item query.
+func makeHeroRandomProvider(accounts: [ResolvedAccount]) -> RandomLibraryContentProviding {
+    let providersByAccount = Dictionary(
+        accounts.map { ($0.account.id, $0.provider) },
+        uniquingKeysWith: { first, _ in first }
+    )
+    return { libraries, limit in
+        await HeroRandomLibraryLoader.load(libraries: libraries, limit: limit) { library, requestLimit in
+            guard let provider = providersByAccount[library.accountID] else { return [] }
+            let page = PageRequest(
+                startIndex: 0,
+                limit: requestLimit,
+                sort: SortDescriptor(field: .random, direction: .descending)
+            )
+            guard let result = try? await provider.items(
+                in: library.libraryID,
+                kind: library.kind,
+                page: page
+            ) else {
+                return []
+            }
+            return result.items.map {
+                $0.taggingSource(library.accountID).taggingLibrary(library.libraryID)
+            }
         }
-        guard !libraryIDsByAccount.isEmpty else { return [] }
+    }
+}
 
-        let pooled = await withTaskGroup(of: [MediaItem].self) { group in
-            for (accountID, libraryIDs) in libraryIDsByAccount {
-                guard let provider = resolveOptionalProvider(accountID, in: accounts) else { continue }
+/// Bounded, order-independent Random source fan-out. A typical Movies + TV setup
+/// now issues both native random queries concurrently instead of serially, while a
+/// large multi-server library set cannot flood the interactive networking pool.
+enum HeroRandomLibraryLoader {
+    private static let maxConcurrentFetches = 4
+
+    static func requestLimit(totalLimit: Int, libraryCount: Int) -> Int {
+        guard totalLimit > 0, libraryCount > 0 else { return 0 }
+        let desiredPool = max(12, Int((Double(totalLimit) * 1.5).rounded(.up)))
+        let distributed = Int((Double(desiredPool) / Double(libraryCount)).rounded(.up))
+        return min(max(totalLimit, 12), max(2, distributed))
+    }
+
+    static func load(
+        libraries: [HeroRandomLibrary],
+        limit: Int,
+        fetch: @escaping @Sendable (HeroRandomLibrary, Int) async -> [MediaItem]
+    ) async -> [MediaItem] {
+        guard limit > 0 else { return [] }
+        var seen = Set<HeroRandomLibrary>()
+        let eligible = libraries.filter { library in
+            guard library.kind == .movie || library.kind == .series else { return false }
+            return seen.insert(library).inserted
+        }
+        guard !eligible.isEmpty else { return [] }
+
+        let perLibraryLimit = requestLimit(
+            totalLimit: limit,
+            libraryCount: eligible.count
+        )
+        let concurrency = min(maxConcurrentFetches, eligible.count)
+        let chunks = await withTaskGroup(
+            of: (Int, [MediaItem]).self,
+            returning: [[MediaItem]].self
+        ) { group in
+            var nextIndex = 0
+            for _ in 0..<concurrency {
+                let index = nextIndex
+                nextIndex += 1
+                let library = eligible[index]
                 group.addTask {
-                    let kindByLibraryID: [String: MediaItemKind]
-                    do {
-                        let libraries = try await provider.libraries()
-                        kindByLibraryID = Dictionary(
-                            libraries.map { ($0.id, $0.kind) },
-                            uniquingKeysWith: { first, _ in first }
-                        )
-                    } catch {
-                        return []
-                    }
-                    var collected: [MediaItem] = []
-                    for libraryID in libraryIDs {
-                        guard let kind = kindByLibraryID[libraryID],
-                              kind == .movie || kind == .series else { continue }
-                        let page = PageRequest(
-                            startIndex: 0,
-                            limit: max(limit, 12),
-                            sort: SortDescriptor(field: .random, direction: .descending)
-                        )
-                        if let result = try? await provider.items(in: libraryID, kind: kind, page: page) {
-                            collected.append(contentsOf: result.items)
-                        }
-                    }
-                    return collected
+                    (index, await fetch(library, perLibraryLimit))
                 }
             }
-            var all: [MediaItem] = []
-            for await chunk in group { all.append(contentsOf: chunk) }
-            return all
+
+            var byIndex = Array<[MediaItem]?>(repeating: nil, count: eligible.count)
+            while let (index, items) = await group.next() {
+                byIndex[index] = items
+                if nextIndex < eligible.count, !Task.isCancelled {
+                    let queuedIndex = nextIndex
+                    nextIndex += 1
+                    let library = eligible[queuedIndex]
+                    group.addTask {
+                        (queuedIndex, await fetch(library, perLibraryLimit))
+                    }
+                }
+            }
+            return byIndex.compactMap { $0 }
         }
-        return Array(pooled.shuffled().prefix(max(limit, 1)))
+        guard !Task.isCancelled else { return [] }
+        return Array(chunks.flatMap { $0 }.shuffled().prefix(limit))
     }
 }
 

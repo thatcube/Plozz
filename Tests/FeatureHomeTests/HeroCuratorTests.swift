@@ -14,6 +14,14 @@ final class HeroCuratorTests: XCTestCase {
         }
     }
 
+    private actor RandomCalls {
+        private(set) var libraries: [HeroRandomLibrary] = []
+
+        func record(_ libraries: [HeroRandomLibrary]) {
+            self.libraries = libraries
+        }
+    }
+
     private func item(
         _ id: String,
         kind: MediaItemKind = .movie,
@@ -30,15 +38,14 @@ final class HeroCuratorTests: XCTestCase {
 
     private func settings(
         sources: [HeroSourceKind],
-        maxItems: Int = 8,
-        randomKeys: Set<String> = []
+        maxItems: Int = 8
     ) -> HeroSettings {
         HeroSettings(
             isEnabled: true,
             sources: sources,
             maxItems: maxItems,
             trailersEnabled: false,
-            randomLibraryKeys: randomKeys,
+            randomLibraryKeys: [],
             autoAdvance: true,
             autoAdvanceSeconds: 10
         )
@@ -109,20 +116,25 @@ final class HeroCuratorTests: XCTestCase {
         XCTAssertEqual(result.map(\.id), ["f1", "c1", "f2"])
     }
 
-    func testRandomProviderReceivesLibraryKeysAndContributes() async {
+    func testRandomProviderReceivesResolvedLibrariesAndContributes() async {
         let curator = HeroCurator()
-        let expectedKeys: Set<String> = ["acct:lib1", "acct:lib2"]
-        var seenKeys: Set<String>?
+        let expectedLibraries = [
+            HeroRandomLibrary(accountID: "acct", libraryID: "lib1", kind: .movie),
+            HeroRandomLibrary(accountID: "acct", libraryID: "lib2", kind: .series)
+        ]
+        let calls = RandomCalls()
         let result = await curator.curate(
-            settings: settings(sources: [.randomFromLibrary], randomKeys: expectedKeys),
+            settings: settings(sources: [.randomFromLibrary]),
             continueWatching: [],
             watchlist: [],
-            randomProvider: { keys, _ in
-                seenKeys = keys
+            randomLibraries: expectedLibraries,
+            randomProvider: { libraries, _ in
+                await calls.record(libraries)
                 return [self.item("r1")]
             }
         )
-        XCTAssertEqual(seenKeys, expectedKeys)
+        let seenLibraries = await calls.libraries
+        XCTAssertEqual(seenLibraries, expectedLibraries)
         XCTAssertEqual(result.map(\.id), ["r1"])
     }
 
@@ -285,6 +297,184 @@ final class HomeHeroSlotStateTests: XCTestCase {
                 recomputeComplete: false
             ),
             .hidden
+        )
+    }
+}
+
+final class HeroRecomputeKeyTests: XCTestCase {
+    private func settings(
+        sources: [HeroSourceKind],
+        trailersEnabled: Bool = false,
+        autoAdvance: Bool = true,
+        autoAdvanceSeconds: Int = 10
+    ) -> HeroSettings {
+        HeroSettings(
+            isEnabled: true,
+            sources: sources,
+            maxItems: 8,
+            trailersEnabled: trailersEnabled,
+            randomLibraryKeys: [],
+            autoAdvance: autoAdvance,
+            autoAdvanceSeconds: autoAdvanceSeconds
+        )
+    }
+
+    private func content(
+        continueWatchingID: String = "cw",
+        watchlistID: String = "wl"
+    ) -> HomeViewModel.Content {
+        HomeViewModel.Content(
+            continueWatching: [
+                MediaItem(id: continueWatchingID, title: continueWatchingID, kind: .movie)
+            ],
+            watchlist: [
+                MediaItem(id: watchlistID, title: watchlistID, kind: .movie)
+            ]
+        )
+    }
+
+    func testViewOnlySettingsDoNotRestartCuration() {
+        let original = HeroRecomputeKey(
+            content: content(),
+            settings: settings(sources: [.randomFromLibrary]),
+            randomLibraries: []
+        )
+        let changedPresentation = HeroRecomputeKey(
+            content: content(),
+            settings: settings(
+                sources: [.randomFromLibrary],
+                trailersEnabled: true,
+                autoAdvance: false,
+                autoAdvanceSeconds: 45
+            ),
+            randomLibraries: []
+        )
+
+        XCTAssertEqual(original, changedPresentation)
+    }
+
+    func testDisabledContentSourcesDoNotRestartRandomCuration() {
+        let original = HeroRecomputeKey(
+            content: content(),
+            settings: settings(sources: [.randomFromLibrary]),
+            randomLibraries: []
+        )
+        let refreshedRows = HeroRecomputeKey(
+            content: content(continueWatchingID: "new-cw", watchlistID: "new-wl"),
+            settings: settings(sources: [.randomFromLibrary]),
+            randomLibraries: []
+        )
+
+        XCTAssertEqual(original, refreshedRows)
+    }
+
+    func testEnabledContentSourceChangesRestartCuration() {
+        let original = HeroRecomputeKey(
+            content: content(),
+            settings: settings(sources: [.continueWatching]),
+            randomLibraries: []
+        )
+        let refreshedRows = HeroRecomputeKey(
+            content: content(continueWatchingID: "new-cw"),
+            settings: settings(sources: [.continueWatching]),
+            randomLibraries: []
+        )
+
+        XCTAssertNotEqual(original, refreshedRows)
+    }
+
+    func testRandomLibrariesOnlyParticipateWhenRandomSourceIsEnabled() {
+        let library = HeroRandomLibrary(
+            accountID: "account",
+            libraryID: "movies",
+            kind: .movie
+        )
+        let withoutRandom = HeroRecomputeKey(
+            content: content(),
+            settings: settings(sources: [.watchlist]),
+            randomLibraries: [library]
+        )
+        let withoutRandomOrLibrary = HeroRecomputeKey(
+            content: content(),
+            settings: settings(sources: [.watchlist]),
+            randomLibraries: []
+        )
+        let withRandom = HeroRecomputeKey(
+            content: content(),
+            settings: settings(sources: [.randomFromLibrary]),
+            randomLibraries: [library]
+        )
+        let withDifferentRandom = HeroRecomputeKey(
+            content: content(),
+            settings: settings(sources: [.randomFromLibrary]),
+            randomLibraries: []
+        )
+
+        XCTAssertEqual(withoutRandom, withoutRandomOrLibrary)
+        XCTAssertNotEqual(withRandom, withDifferentRandom)
+    }
+}
+
+final class HeroRandomLibrarySelectionTests: XCTestCase {
+    private func library(
+        accountID: String,
+        libraryID: String,
+        kind: MediaItemKind
+    ) -> AggregatedLibrary {
+        AggregatedLibrary(
+            accountID: accountID,
+            accountName: accountID,
+            serverName: accountID,
+            providerKind: .jellyfin,
+            library: MediaLibrary(id: libraryID, title: libraryID, kind: kind)
+        )
+    }
+
+    private func settings(keys: Set<String>) -> HeroSettings {
+        HeroSettings(
+            isEnabled: true,
+            sources: [.randomFromLibrary],
+            maxItems: 8,
+            trailersEnabled: false,
+            randomLibraryKeys: keys,
+            autoAdvance: true,
+            autoAdvanceSeconds: 10
+        )
+    }
+
+    func testEmptySelectionUsesOnlyVisibleLibraries() {
+        let libraries = [
+            library(accountID: "b", libraryID: "series", kind: .series),
+            library(accountID: "a", libraryID: "movies", kind: .movie)
+        ]
+
+        let resolved = HeroRandomLibrarySelection.resolve(
+            libraries,
+            settings: settings(keys: []),
+            isVisible: { $0 != "b:series" }
+        )
+
+        XCTAssertEqual(
+            resolved,
+            [HeroRandomLibrary(accountID: "a", libraryID: "movies", kind: .movie)]
+        )
+    }
+
+    func testExplicitSelectionRemainsIndependentFromHomeVisibility() {
+        let libraries = [
+            library(accountID: "b", libraryID: "series", kind: .series),
+            library(accountID: "a", libraryID: "movies", kind: .movie)
+        ]
+
+        let resolved = HeroRandomLibrarySelection.resolve(
+            libraries,
+            settings: settings(keys: ["b:series"]),
+            isVisible: { _ in false }
+        )
+
+        XCTAssertEqual(
+            resolved,
+            [HeroRandomLibrary(accountID: "b", libraryID: "series", kind: .series)]
         )
     }
 }

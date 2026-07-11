@@ -136,9 +136,15 @@ public struct HomeView: View {
             // kind, order *and* how many cards it actually showed, so the skeleton
             // matches a full row and a sparse one alike.
             let layout = rows.map { HomeRowLayout(kind: $0.kind, count: $0.cardCount) }
+            let randomLibraries = HeroRandomLibrarySelection.resolve(
+                content.libraries,
+                settings: heroSettings?.settings,
+                isVisible: { visibility.isVisible($0) }
+            )
             let heroRecomputeKey = HeroRecomputeKey(
                 content: content,
-                settings: heroSettings?.settings
+                settings: heroSettings?.settings,
+                randomLibraries: randomLibraries
             )
             // Seed the hero synchronously from the already-loaded sources
             // (Continue Watching + Watchlist) so it renders in the *same frame* as
@@ -345,7 +351,11 @@ public struct HomeView: View {
             // Recompute the curated hero set whenever Home content or the hero
             // config changes. Off the main actor via the curator's async sources.
             .task(id: heroRecomputeKey) {
-                await recomputeHero(content: content, key: heroRecomputeKey)
+                await recomputeHero(
+                    content: content,
+                    randomLibraries: randomLibraries,
+                    key: heroRecomputeKey
+                )
             }
             // Live-refresh ONLY the status of featured (Seerr) hero items — their
             // `availability` + `downloadProgress` — folding fresh values onto the
@@ -493,6 +503,7 @@ public struct HomeView: View {
     @MainActor
     private func recomputeHero(
         content: HomeViewModel.Content,
+        randomLibraries: [HeroRandomLibrary],
         key: HeroRecomputeKey
     ) async {
         let started = Date()
@@ -504,21 +515,11 @@ public struct HomeView: View {
         PlozzLog.boot(
             "HomeHero.curate START max=\(settings.maxItems) sources=\(settings.sources.count)"
         )
-        // Resolve the Random source's library scope: an empty set means "all
-        // currently-visible libraries", so expand it to concrete keys from the
-        // loaded, visibility-filtered library set before handing off to the
-        // provider (which then just fetches from the keys it's given).
-        var effective = settings
-        if settings.isEnabled(.randomFromLibrary) && settings.randomLibraryKeys.isEmpty {
-            let visibleKeys = content.libraries
-                .filter { visibility.isVisible($0.key) }
-                .map(\.key)
-            effective.randomLibraryKeys = Set(visibleKeys)
-        }
         let items = await heroCurator.curate(
-            settings: effective,
+            settings: settings,
             continueWatching: content.continueWatching,
             watchlist: content.watchlist,
+            randomLibraries: randomLibraries,
             featuredProvider: heroFeaturedProvider,
             randomProvider: heroRandomProvider,
             artworkProvider: heroArtworkProvider
@@ -686,9 +687,9 @@ public struct HomeView: View {
 }
 
 /// The `.task(id:)` key that drives hero recomputation. It intentionally depends
-/// ONLY on the inputs the hero actually consumes — Continue Watching + Watchlist
-/// (the content-backed sources), the visible library keys (Random's scope), and
-/// the hero settings — keyed by item **id**, not full value. This is deliberate:
+/// ONLY on the inputs the enabled hero sources actually consume — keyed by item
+/// **id**, not full value. View-only settings (auto-advance/trailers) and content
+/// backing disabled sources are deliberately excluded. This is important because:
 /// keying on the whole `Content` re-ran the recompute on every unrelated content
 /// republish (e.g. `latest`/artwork enrichment updating every ~second), and each
 /// re-run re-fetched the Random + Featured sources fresh, churning the hero's item
@@ -697,18 +698,69 @@ public struct HomeView: View {
 /// the focus engine crashed sending `setToViewXFlippedScreenShot:` to the freed
 /// view (`NSInvalidArgumentException`). Scoping the key to the real hero inputs
 /// stops the needless re-rolls, so the set only changes on genuine, infrequent
-/// updates. `Equatable` so SwiftUI restarts the task only on a real change.
-private struct HeroRecomputeKey: Equatable {
+/// updates. `Equatable` so SwiftUI restarts the task only on a real curation change.
+struct HeroRecomputeKey: Equatable {
     let continueWatchingIDs: [String]
     let watchlistIDs: [String]
-    let libraryKeys: [String]
-    let settings: HeroSettings?
+    let randomLibraries: [HeroRandomLibrary]
+    let sources: [HeroSourceKind]
+    let maxItems: Int
 
-    init(content: HomeViewModel.Content, settings: HeroSettings?) {
-        self.continueWatchingIDs = content.continueWatching.map(\.id)
-        self.watchlistIDs = content.watchlist.map(\.id)
-        self.libraryKeys = content.libraries.map(\.key)
-        self.settings = settings
+    init(
+        content: HomeViewModel.Content,
+        settings: HeroSettings?,
+        randomLibraries: [HeroRandomLibrary]
+    ) {
+        let activeSources = settings?.isActive == true ? settings?.sources ?? [] : []
+        self.sources = activeSources
+        self.maxItems = activeSources.isEmpty ? 0 : settings?.maxItems ?? 0
+        self.continueWatchingIDs = activeSources.contains(.continueWatching)
+            ? content.continueWatching.map(\.id)
+            : []
+        self.watchlistIDs = activeSources.contains(.watchlist)
+            ? content.watchlist.map(\.id)
+            : []
+        self.randomLibraries = activeSources.contains(.randomFromLibrary)
+            ? randomLibraries
+            : []
+    }
+}
+
+/// Resolves the Random source's persisted library selection against Home's already
+/// loaded catalog. An empty selection means every currently visible library; an
+/// explicit selection remains independent from Home row visibility, matching the
+/// existing settings behavior.
+enum HeroRandomLibrarySelection {
+    static func resolve(
+        _ libraries: [AggregatedLibrary],
+        settings: HeroSettings?,
+        isVisible: (String) -> Bool
+    ) -> [HeroRandomLibrary] {
+        guard let settings,
+              settings.isActive,
+              settings.isEnabled(.randomFromLibrary)
+        else {
+            return []
+        }
+
+        let configuredKeys = settings.randomLibraryKeys
+        return libraries.compactMap { library in
+            guard library.library.kind == .movie || library.library.kind == .series else {
+                return nil
+            }
+            let selected = configuredKeys.isEmpty
+                ? isVisible(library.key)
+                : configuredKeys.contains(library.key)
+            guard selected else { return nil }
+            return HeroRandomLibrary(
+                accountID: library.accountID,
+                libraryID: library.library.id,
+                kind: library.library.kind
+            )
+        }
+        .sorted {
+            ($0.accountID, $0.libraryID) < ($1.accountID, $1.libraryID)
+        }
     }
 }
 

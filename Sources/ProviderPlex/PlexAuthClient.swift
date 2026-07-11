@@ -42,6 +42,26 @@ public struct PlexAuthClient: Sendable {
         self.baseURL = baseURL
     }
 
+    /// Plex's hosted authorization page for a PIN challenge. Unlike
+    /// `plex.tv/link`, this URL carries the challenge and client identity, so a
+    /// phone scanning it can sign in and approve the TV without retyping the
+    /// four-character code.
+    public func authorizationURL(for pin: PlexPinChallenge) -> URL {
+        var fragmentQuery = URLComponents()
+        fragmentQuery.queryItems = [
+            URLQueryItem(name: "clientID", value: deviceProfile.clientIdentifier),
+            URLQueryItem(name: "code", value: pin.code),
+            URLQueryItem(name: "context[device][product]", value: deviceProfile.product)
+        ]
+
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = "app.plex.tv"
+        components.path = "/auth"
+        components.percentEncodedFragment = "?\(fragmentQuery.percentEncodedQuery!)"
+        return components.url!
+    }
+
     // MARK: PIN flow
 
     /// `POST /api/v2/pins` — issues a new PIN/code pair.

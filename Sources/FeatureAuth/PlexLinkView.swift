@@ -94,14 +94,14 @@ public struct PlexLinkView: View {
             ProgressView("Requesting a code…")
                 .font(.title2)
 
-        case let .awaitingLink(code, expiresAt):
+        case let .awaitingLink(code, authorizationURL, expiresAt):
             HStack(alignment: .top, spacing: 80) {
                 VStack(spacing: 28) {
                     Text("Scan with your phone")
                         .font(.title3).bold()
                         .fixedSize(horizontal: true, vertical: false)
                     BrandQRCodeView(
-                        payload: Self.linkURL(for: code),
+                        payload: authorizationURL.absoluteString,
                         size: 460
                     )
                 }
@@ -189,12 +189,6 @@ public struct PlexLinkView: View {
                 .frame(maxHeight: .infinity)
         }
         .frame(maxHeight: .infinity)
-    }
-
-    /// The activation URL the QR encodes: scanning it on a phone opens
-    /// plex.tv/link with the code pre-filled.
-    static func linkURL(for code: String) -> String {
-        "https://plex.tv/link?code=\(code)"
     }
 
     @ViewBuilder

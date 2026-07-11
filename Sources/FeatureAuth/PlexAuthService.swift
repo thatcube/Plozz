@@ -51,6 +51,12 @@ public struct PlexAuthService: Sendable {
         try await client.createPin()
     }
 
+    /// Hosted Plex authorization page for the issued PIN. The QR code uses this
+    /// instead of `plex.tv/link`, whose query string does not pre-fill the code.
+    public func authorizationURL(for pin: PlexPinChallenge) -> URL {
+        client.authorizationURL(for: pin)
+    }
+
     /// Polls until the user links the code, returning the account auth token.
     ///
     /// - Throws: `.quickConnectExpired` on timeout, `.cancelled` if the task is

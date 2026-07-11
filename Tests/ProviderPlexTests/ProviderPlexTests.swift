@@ -1242,6 +1242,27 @@ final class PlexAuthClientTests: XCTestCase {
         PlexAuthClient(deviceProfile: PlexDeviceProfile(clientIdentifier: "dev1"), http: stub, probeHTTP: UnreachableProbe())
     }
 
+    func testAuthorizationURLCarriesPinAndDeviceIdentity() {
+        let profile = PlexDeviceProfile(product: "Plozz Player", clientIdentifier: "device/id")
+        let client = PlexAuthClient(deviceProfile: profile)
+        let url = client.authorizationURL(for: PlexPinChallenge(id: 42, code: "A&B"))
+
+        XCTAssertEqual(url.scheme, "https")
+        XCTAssertEqual(url.host, "app.plex.tv")
+        XCTAssertEqual(url.path, "/auth")
+
+        let encodedFragment = URLComponents(url: url, resolvingAgainstBaseURL: false)?.percentEncodedFragment
+        let query = encodedFragment.map { String($0.dropFirst()) }
+        let queryItems = query.flatMap { URLComponents(string: "https://example.com/?\($0)")?.queryItems }
+        let values = Dictionary(uniqueKeysWithValues: (queryItems ?? []).compactMap { item in
+            item.value.map { (item.name, $0) }
+        })
+
+        XCTAssertEqual(values["clientID"], "device/id")
+        XCTAssertEqual(values["code"], "A&B")
+        XCTAssertEqual(values["context[device][product]"], "Plozz Player")
+    }
+
     func testCreatePinParsesChallenge() async throws {
         let stub = StubHTTPClient()
         stub.stub(pathSuffix: "/api/v2/pins", json: #"{"id":424242,"code":"WXYZ","authToken":null}"#)

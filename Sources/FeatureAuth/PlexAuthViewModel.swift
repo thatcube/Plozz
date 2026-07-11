@@ -14,7 +14,7 @@ public final class PlexAuthViewModel {
     public enum Phase: Equatable {
         case idle
         case requesting
-        case awaitingLink(code: String, expiresAt: Date)
+        case awaitingLink(code: String, authorizationURL: URL, expiresAt: Date)
         case loadingServers
         case selectingServer([PlexServerCandidate])
         case success
@@ -58,7 +58,11 @@ public final class PlexAuthViewModel {
                     let pin = try await service.begin()
                     try Task.checkCancellation()
                     let expiresAt = Date().addingTimeInterval(service.timeout)
-                    self.phase = .awaitingLink(code: pin.code, expiresAt: expiresAt)
+                    self.phase = .awaitingLink(
+                        code: pin.code,
+                        authorizationURL: service.authorizationURL(for: pin),
+                        expiresAt: expiresAt
+                    )
 
                     switch try await Self.awaitLinkOrExpiry(service: service, pin: pin, expiresAt: expiresAt) {
                     case let .linked(token):

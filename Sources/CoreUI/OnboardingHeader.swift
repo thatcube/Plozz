@@ -25,7 +25,7 @@ public enum OnboardingPageMotion {
     public static func animation(reduceMotion: Bool) -> Animation {
         reduceMotion
             ? .easeInOut(duration: 0.14)
-            : .smooth(duration: 0.65, extraBounce: 0)
+            : .smooth(duration: 0.55, extraBounce: 0)
     }
 }
 

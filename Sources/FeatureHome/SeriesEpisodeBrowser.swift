@@ -147,19 +147,7 @@ private struct SeriesRecededLogo: View {
         }
         .frame(width: 620, height: 200, alignment: .center)
         .opacity(logoVisible ? 1 : 0)
-        .animation(
-            reduceMotion
-                ? nil
-                : (logoVisible ? .easeOut(duration: 0.28) : .easeOut(duration: 0.39)),
-            value: logoVisible
-        )
         .offset(y: logoAtRest ? 0 : 180)
-        .animation(
-            reduceMotion
-                ? nil
-                : (logoAtRest ? .smooth(duration: 2.5) : .easeOut(duration: 0.39)),
-            value: logoAtRest
-        )
         .accessibilityHidden(!recedeModel.isReceded)
         .task(id: animationTaskID) {
             let shouldShow = recedeModel.isReceded
@@ -176,8 +164,27 @@ private struct SeriesRecededLogo: View {
                 }
             }
             guard !Task.isCancelled, recedeModel.isReceded == shouldShow else { return }
-            logoVisible = shouldShow
-            logoAtRest = shouldShow
+            if shouldShow {
+                withAnimation(.easeOut(duration: 0.28)) {
+                    logoVisible = true
+                }
+                // Keep opacity and offset in separate render transactions so tvOS
+                // cannot collapse both properties onto the faster fade animation.
+                do {
+                    try await Task.sleep(for: .milliseconds(32))
+                } catch {
+                    return
+                }
+                guard !Task.isCancelled, recedeModel.isReceded else { return }
+                withAnimation(.easeInOut(duration: 2.5)) {
+                    logoAtRest = true
+                }
+            } else {
+                withAnimation(.easeOut(duration: 0.39)) {
+                    logoVisible = false
+                    logoAtRest = false
+                }
+            }
         }
     }
 

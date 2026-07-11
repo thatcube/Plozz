@@ -74,6 +74,10 @@ struct AddAccountView: View {
 
     private var chooser: some View {
         VStack(spacing: 40) {
+            if !canReturnToApp {
+                FirstRunBrandHeader()
+            }
+
             HStack(spacing: 32) {
                 providerButton(
                     provider: .jellyfin,
@@ -135,6 +139,24 @@ struct AddAccountView: View {
         // Same focus treatment as the Settings About / Report a Problem cards:
         // accent outline + gentle lift, no contrast inversion.
         .buttonStyle(SettingsCardButtonStyle())
+    }
+}
+
+private struct FirstRunBrandHeader: View {
+    var body: some View {
+        VStack(spacing: 16) {
+            Image("PlozzLogo")
+                .resizable()
+                .interpolation(.none)
+                .scaledToFit()
+                .frame(width: 120, height: 120)
+                .accessibilityHidden(true)
+
+            OnboardingHeader(
+                "Welcome to Plozz",
+                subtitle: "Choose where your media lives to get started."
+            )
+        }
     }
 }
 

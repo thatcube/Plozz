@@ -49,9 +49,10 @@ public struct SettingsView: View {
     private static let identityTitleFont: Font = .system(size: 36, weight: .bold)
 
     #if DEBUG
-    /// Flip to `true` to show the "Reset to First Run (Debug)" row in Settings
-    /// (handy for re-testing the onboarding/first-run flow without reinstalling).
-    private static let showDebugResetFirstRunRow = false
+    /// Launch with `PLOZZ_SHOW_FIRST_RUN_RESET=1` to show the destructive
+    /// "Reset to First Run (Debug)" row without changing source between runs.
+    private static let showDebugResetFirstRunRow =
+        ProcessInfo.processInfo.environment["PLOZZ_SHOW_FIRST_RUN_RESET"] == "1"
     #endif
 
     /// Caps the root "Settings" page content and centers it, so the profile
@@ -522,7 +523,7 @@ public struct SettingsView: View {
             #if DEBUG
             // DEBUG-only: wipe accounts, profiles, recents, and the first-run
             // flag so the next server add reproduces a genuine first run.
-            // Hidden by default — flip `showDebugResetFirstRunRow` to re-enable.
+            // Hidden unless PLOZZ_SHOW_FIRST_RUN_RESET=1 is set at launch.
             if Self.showDebugResetFirstRunRow {
                 debugResetFirstRunRow
             }

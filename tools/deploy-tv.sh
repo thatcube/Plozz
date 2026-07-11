@@ -14,6 +14,8 @@
 #   tools/deploy-tv.sh --sim-build     # compile for a tvOS Simulator (fast sanity,
 #                                      #   no HDR — see AGENTS.local.md)
 #   tools/deploy-tv.sh --clean         # wipe THIS worktree's DerivedData first
+#   PLOZZ_SHOW_FIRST_RUN_RESET=1 tools/deploy-tv.sh
+#                                      # show the Debug first-run reset row
 #
 # Notes:
 #   * Editing an EXISTING file does NOT need --regen; SPM globs the module dirs.
@@ -152,6 +154,9 @@ echo "▸ Installing $BUNDLE_ID → Apple TV…"
 xcrun devicectl device install app --device "$DEVICE_ID" "$APP_PATH"
 
 echo "▸ Launching…"
+if [[ "${PLOZZ_SHOW_FIRST_RUN_RESET:-0}" == "1" ]]; then
+  export DEVICECTL_CHILD_PLOZZ_SHOW_FIRST_RUN_RESET=1
+fi
 xcrun devicectl device process launch --device "$DEVICE_ID" "$BUNDLE_ID"
 
 echo "✓ Deployed & launched: $BUNDLE_ID"

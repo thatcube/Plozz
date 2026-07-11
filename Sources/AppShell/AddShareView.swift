@@ -54,6 +54,8 @@ struct AddShareView: View {
     // MARK: - Step 1: choose a server
 
     private var serverStep: some View {
+        // Results can arrive during the parent page transition; keep the
+        // list update instant so it doesn't compete with the page motion.
         Group {
             headerRow(
                 title: "Add a Media Share",
@@ -70,23 +72,26 @@ struct AddShareView: View {
             SharePanel(title: "On your network", titleAccessory: {
                 if viewModel.scanning { ProgressView() }
             }) {
-                if viewModel.discovered.isEmpty {
-                    placeholder(
-                        viewModel.scanning
-                            ? "Searching for servers…"
-                            : "No servers found yet. Make sure the server is on and that Plozz is allowed Local Network access, then rescan — or enter an address below.",
-                        systemImage: viewModel.scanning ? "antenna.radiowaves.left.and.right" : "magnifyingglass"
-                    )
-                } else {
-                    VStack(spacing: 16) {
-                        ForEach(viewModel.discovered) { server in
-                            Button { viewModel.selectDiscovered(server) } label: {
-                                serverRowLabel(name: server.name, host: server.host)
+                Group {
+                    if viewModel.discovered.isEmpty {
+                        placeholder(
+                            viewModel.scanning
+                                ? "Searching for servers…"
+                                : "No servers found yet. Make sure the server is on and that Plozz is allowed Local Network access, then rescan — or enter an address below.",
+                            systemImage: viewModel.scanning ? "antenna.radiowaves.left.and.right" : "magnifyingglass"
+                        )
+                    } else {
+                        VStack(spacing: 16) {
+                            ForEach(viewModel.discovered) { server in
+                                Button { viewModel.selectDiscovered(server) } label: {
+                                    serverRowLabel(name: server.name, host: server.host)
+                                }
+                                .buttonStyle(SettingsFocusButtonStyle(size: .prominent))
                             }
-                            .buttonStyle(SettingsFocusButtonStyle(size: .prominent))
                         }
                     }
                 }
+                .transaction { $0.animation = nil }
             }
 
             SharePanel(

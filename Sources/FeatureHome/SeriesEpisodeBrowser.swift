@@ -156,13 +156,6 @@ private struct SeriesRecededLogo: View {
                 logoAtRest = shouldShow
                 return
             }
-            if shouldShow {
-                do {
-                    try await Task.sleep(for: .milliseconds(180))
-                } catch {
-                    return
-                }
-            }
             guard !Task.isCancelled, recedeModel.isReceded == shouldShow else { return }
             if shouldShow {
                 withAnimation(.easeInOut(duration: 0.75)) {

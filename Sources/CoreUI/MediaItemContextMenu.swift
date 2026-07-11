@@ -81,6 +81,13 @@ public struct MediaItemContextMenu: ViewModifier {
     @Environment(\.mediaItemActionHandler) private var handler
     @Environment(\.mediaItemActionContext) private var context
     @Environment(\.mediaItemNavigator) private var navigator
+    /// Navigation must not mutate the stack from inside the native context-menu
+    /// action callback. tvOS is still presenting a snapshot of the lifted card at
+    /// that point; replacing the screen synchronously can orphan that snapshot over
+    /// the destination until the system times it out. Queueing the target in state
+    /// lets the action return first, so the menu begins its normal cross-fade before
+    /// the navigation update runs.
+    @State private var pendingNavigationTarget: MediaItem?
 
     public init(item: MediaItem) {
         self.item = item
@@ -97,6 +104,11 @@ public struct MediaItemContextMenu: ViewModifier {
                         Label(action.title, systemImage: action.systemImage)
                     }
                 }
+            }
+            .onChange(of: pendingNavigationTarget) { _, target in
+                guard let target else { return }
+                pendingNavigationTarget = nil
+                navigator?(target)
             }
         } else {
             content
@@ -125,9 +137,9 @@ public struct MediaItemContextMenu: ViewModifier {
         switch action {
         case .goToSeason:
             guard let target = item.seasonNavigationTarget else { return }
-            navigator?(target)
+            pendingNavigationTarget = target
         case .goToMovie:
-            navigator?(item)
+            pendingNavigationTarget = item
         case .markWatched, .markUnwatched, .markWatchedUpToHere,
              .addToWatchlist, .removeFromWatchlist, .refreshMetadata:
             break

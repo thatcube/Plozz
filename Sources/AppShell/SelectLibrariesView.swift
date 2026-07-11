@@ -55,7 +55,7 @@ struct SelectLibrariesView: View {
         VStack(spacing: 0) {
             OnboardingHeader(
                 "Choose your libraries",
-                subtitle: "Pick which libraries appear on your Home. You can turn any of these on or off any time in Settings."
+                subtitle: "You can change this any time in Settings."
             )
             .padding(.bottom, 28)
 

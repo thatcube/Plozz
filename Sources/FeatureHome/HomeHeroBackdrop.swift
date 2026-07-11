@@ -20,8 +20,8 @@ import UIKit
 /// / Core Animation; SwiftUI only hands it a target** — but replaces the dissolve
 /// with the real Apple TV effect: a **wipe with content parallax**. See
 /// ``HeroWipeContainerView``:
-/// - two page layers with **explicit, fixed `zPosition`** (incoming always on top)
-///   so the render order is deterministic and immune to SwiftUI/​layout churn;
+/// - a transient page stack with **explicit `zPosition`** (each incoming page on
+///   top) so rapid wipes overlap without interrupting one another;
 /// - the incoming page is *revealed by a clip window that grows from the entering
 ///   edge* — the old image stays in place and is progressively covered, rather than
 ///   both sliding the full width;
@@ -259,9 +259,9 @@ private struct WipeImageView: UIViewRepresentable {
     // MARK: - Coordinator
 
     /// Owns transition scheduling: which slide is displayed, cache-first art loading
-    /// (with a monotonic token so only the newest target can apply), and immediate
-    /// interruption so every rapid page begins over the previously requested slide
-    /// instead of waiting for an older wipe to finish.
+    /// (with a monotonic token so only the newest unresolved target can apply), and a
+    /// stack of independent animators so every rapid cached page keeps playing while
+    /// the next wipe opens directly above it.
     @MainActor
     final class Coordinator {
         weak var container: HeroWipeContainerView?
@@ -280,20 +280,13 @@ private struct WipeImageView: UIViewRepresentable {
         private var targetForward = true
         /// Monotonic load token; only the newest requested art may apply.
         private var loadToken = 0
-        private var isAnimating = false
-        /// Drives the incoming page (window reveal + content glide) on an ease-*out*
-        /// curve; also owns the wipe's completion.
-        private var animator: UIViewPropertyAnimator?
-        /// Drives the outgoing page's drift on an ease-*in* curve — a deliberately
-        /// different motion character. Retained so it isn't torn down mid-flight.
-        /// Its curve stays ≤ the incoming curve at every instant, so the outgoing art
-        /// can never retreat past the growing reveal window (no background sliver).
-        private var outgoingAnimator: UIViewPropertyAnimator?
-        /// Target owned by the in-flight wipe. Rapid paging finishes this target
-        /// immediately, then starts the newest wipe directly over it.
-        private var activeWipe: (id: String, url: URL)?
-        /// Same-slide artwork upgrade that resolved while its slide was wiping in.
-        private var pendingUpgrade: (image: UIImage, url: URL, id: String)?
+        /// Retains every active pair until its incoming reveal finishes. Each press
+        /// gets its own pair; no animator is stopped to make room for another.
+        private struct ActiveAnimations {
+            let incoming: UIViewPropertyAnimator
+            let outgoing: UIViewPropertyAnimator?
+        }
+        private var activeAnimations: [UUID: ActiveAnimations] = [:]
 
         init(maxAspectRatio: CGFloat, duration: TimeInterval) {
             self.maxAspectRatio = maxAspectRatio
@@ -328,14 +321,8 @@ private struct WipeImageView: UIViewRepresentable {
                 }
                 return
             }
-            // React to the press now, not after artwork loading. A cache miss for
-            // the newest slide must never leave an older wipe running behind input.
-            if isAnimating, let container {
-                finishActiveWipeImmediately(in: container)
-            }
             targetID = slideID
             targetURLs = urls
-            pendingUpgrade = nil
             loadToken += 1
             let token = loadToken
 
@@ -363,19 +350,14 @@ private struct WipeImageView: UIViewRepresentable {
             guard let container else { return }
 
             // First real paint: place with no animation.
-            if displayedID == nil || container.frontImage == nil {
+            if !container.hasPages {
                 container.setInitialImage(image)
                 displayedID = id
                 displayedURL = url
                 return
             }
-            // Never queue behind an older wipe. Land its incoming slide immediately,
-            // then let this newest target wipe straight over it.
-            if isAnimating {
-                finishActiveWipeImmediately(in: container)
-            }
-            // Already settled on this slide (art resolved to the same slide): just
-            // ensure the freshest art, no wipe.
+            // Same target, fresher URL: swap only the top page's image. Its reveal,
+            // if still active, keeps running uninterrupted.
             if id == displayedID {
                 if url != displayedURL {
                     container.frontImage = image
@@ -384,38 +366,37 @@ private struct WipeImageView: UIViewRepresentable {
                 return
             }
             startWipe(to: image, url: url, id: id, forward: forward)
+            displayedID = id
+            displayedURL = url
         }
 
         /// Couldn't resolve any art for the slide. Clear stale art rather than
         /// displaying the previous title's backdrop under the new title's metadata.
         private func noArtResolved(for id: String) {
             guard id == targetID else { return }
-            if let container {
-                if isAnimating {
-                    finishActiveWipeImmediately(in: container)
-                }
-                container.frontImage = nil
-            }
+            container?.clear()
             displayedID = id
             displayedURL = nil
-            pendingUpgrade = nil
         }
 
         /// Upgrade the *currently displayed* slide's art in place (no wipe) if a
         /// better candidate is now cached. Guarded to the displayed slide so a
         /// still-loading target can never swap the visible art without its wipe.
         private func maybeUpgradeDisplayedArt(urls: [URL]) {
-            guard !isAnimating, targetID == displayedID, let container else { return }
+            guard targetID == displayedID, let container else { return }
             guard let (image, url) = firstUsableCached(urls), url != displayedURL else { return }
-            container.frontImage = image
+            if container.hasPages {
+                container.frontImage = image
+            } else {
+                container.setInitialImage(image)
+            }
             displayedURL = url
         }
 
         private func startWipe(to image: UIImage, url: URL, id: String, forward: Bool) {
             guard let container else { return }
-            isAnimating = true
-            activeWipe = (id, url)
-            container.prepareWipe(incomingImage: image, forward: forward)
+            let prepared = container.prepareWipe(incomingImage: image, forward: forward)
+            let animationID = UUID()
 
             // Incoming page: a strong ease-OUT (starts fast, then eases softly into
             // the landing) via a custom "expo-out" cubic. Owns completion. Its curve
@@ -428,46 +409,38 @@ private struct WipeImageView: UIViewRepresentable {
                     controlPoint2: CGPoint(x: 0.3, y: 1.0)
                 )
             )
-            incomingAnimator.addAnimations { container.animateIncoming(forward: forward) }
+            incomingAnimator.addAnimations {
+                container.animateIncoming(prepared.incoming)
+            }
             incomingAnimator.addCompletion { [weak self, weak container] _ in
                 guard let self, let container else { return }
-                guard self.animator === incomingAnimator else { return }
-                container.finishWipe()
-                self.displayedID = id
-                self.displayedURL = url
-                self.isAnimating = false
-                self.activeWipe = nil
-                self.animator = nil
-                self.outgoingAnimator = nil
-                self.applyPendingUpgrade()
-                self.maybeUpgradeDisplayedArt(urls: self.targetURLs)
+                container.finishWipe(prepared.incoming)
+                self.activeAnimations[animationID] = nil
+                if self.targetID == id {
+                    self.maybeUpgradeDisplayedArt(urls: self.targetURLs)
+                }
             }
 
             // Outgoing page: ease-IN (lingers, then accelerates away) — a distinct
-            // motion character from the incoming page. No completion of its own.
-            let outgoingAnimator = UIViewPropertyAnimator(
-                duration: duration,
-                timingParameters: UICubicTimingParameters(animationCurve: .easeIn)
+            // motion character from the incoming page. It animates a nested content
+            // wrapper, so an outgoing drift never interrupts that page's own reveal.
+            let outgoingAnimator = prepared.outgoing.map { outgoing in
+                let animator = UIViewPropertyAnimator(
+                    duration: duration,
+                    timingParameters: UICubicTimingParameters(animationCurve: .easeIn)
+                )
+                animator.addAnimations {
+                    container.animateOutgoing(outgoing, forward: forward)
+                }
+                return animator
+            }
+
+            activeAnimations[animationID] = ActiveAnimations(
+                incoming: incomingAnimator,
+                outgoing: outgoingAnimator
             )
-            outgoingAnimator.addAnimations { container.animateOutgoing(forward: forward) }
-
-            self.animator = incomingAnimator
-            self.outgoingAnimator = outgoingAnimator
             incomingAnimator.startAnimation()
-            outgoingAnimator.startAnimation()
-        }
-
-        private func finishActiveWipeImmediately(in container: HeroWipeContainerView) {
-            guard let activeWipe else { return }
-            animator?.stopAnimation(true)
-            outgoingAnimator?.stopAnimation(true)
-            container.finishWipe()
-            displayedID = activeWipe.id
-            displayedURL = activeWipe.url
-            isAnimating = false
-            self.activeWipe = nil
-            animator = nil
-            outgoingAnimator = nil
+            outgoingAnimator?.startAnimation()
         }
 
         private func resolveSameSlideUpgrade(
@@ -500,21 +473,7 @@ private struct WipeImageView: UIViewRepresentable {
 
         private func receiveSameSlideUpgrade(_ image: UIImage, url: URL, id: String) {
             guard id == targetID else { return }
-            if isAnimating {
-                pendingUpgrade = (image, url, id)
-                return
-            }
             applyResolved(image, url: url, id: id, forward: targetForward)
-        }
-
-        private func applyPendingUpgrade() {
-            guard let pendingUpgrade else { return }
-            self.pendingUpgrade = nil
-            receiveSameSlideUpgrade(
-                pendingUpgrade.image,
-                url: pendingUpgrade.url,
-                id: pendingUpgrade.id
-            )
         }
 
         // MARK: - Loading
@@ -550,9 +509,9 @@ private struct WipeImageView: UIViewRepresentable {
     }
 }
 
-/// The UIKit view that owns the Apple TV **parallax wipe**. Hosts two "page"
-/// layers that role-swap (`front` = settled/outgoing, `back` = incoming). Each page
-/// is a clipping window containing an oversized inner `UIImageView`.
+/// The UIKit view that owns the Apple TV **parallax wipe**. Hosts a transient stack
+/// of pages: each new press adds an incoming page above every active wipe, so older
+/// reveals continue underneath instead of being completed or cancelled.
 ///
 /// The transition is a *wipe*, not a push:
 /// - The **incoming** page is on top and is *revealed by a clip window that grows
@@ -563,16 +522,20 @@ private struct WipeImageView: UIViewRepresentable {
 /// - The **outgoing** page sits underneath, essentially in place, drifting only a
 ///   little (and slowly) as it is progressively *covered* by the wipe.
 ///
-/// Both pages' geometry is driven purely by animating their (and their inner image
-/// views') `frame`s — no transforms — so it can never decompose into the wrong-order
-/// artifact. The incoming and outgoing pages ride *separate* animators with distinct
-/// curves (incoming ease-out, outgoing ease-in), chosen so the outgoing progress is
-/// always ≤ the incoming progress and the reveal window can never fall behind the
-/// drifting outgoing art (no background sliver). Z-order is committed synchronously
-/// via explicit `layer.zPosition` before every wipe (incoming always on top), so
-/// render order is deterministic and immune to SwiftUI / `layoutSubviews` / animator
-/// churn.
+/// Each page isolates its reveal geometry from its outgoing drift: the clip window
+/// and content center animate on separate views, so a page can keep revealing while
+/// the next page starts drifting it underneath. Completed pages prune only layers
+/// they fully cover; active layers above them remain untouched.
 final class HeroWipeContainerView: UIView {
+    struct WipeHandle {
+        fileprivate let page: SlidePage
+    }
+
+    struct PreparedWipe {
+        let incoming: WipeHandle
+        let outgoing: WipeHandle?
+    }
+
     /// Tiny horizontal overscan on each inner image view, purely to avoid a
     /// sub-pixel seam shimmer during the wipe. Coverage does *not* depend on it in
     /// the wipe model, so it stays small to avoid zooming the resting image.
@@ -583,44 +546,36 @@ final class HeroWipeContainerView: UIView {
     /// How far the *outgoing* content drifts (slowly) away as it is covered.
     private let driftOut: CGFloat
 
-    private let pageA = SlidePage()
-    private let pageB = SlidePage()
-    /// The page currently showing the settled art.
-    private var front: SlidePage
-    private var back: SlidePage { front === pageA ? pageB : pageA }
+    private var pages: [SlidePage] = []
+    private var revealingPages = Set<ObjectIdentifier>()
+
+    var hasPages: Bool { !pages.isEmpty }
+    var pageCount: Int { pages.count }
+    var activeWipeCount: Int { revealingPages.count }
 
     /// Authoritative slide size (from SwiftUI's frame). Preferred over `bounds` so
     /// offset math is correct even before the first layout pass.
     var slideSize: CGSize = .zero {
         didSet {
-            guard !isAnimating, slideSize != oldValue else { return }
+            guard revealingPages.isEmpty, slideSize != oldValue else { return }
             layoutAtRest()
         }
     }
-    private var isAnimating = false
 
     init(bleed: CGFloat, parallaxIn: CGFloat, driftOut: CGFloat) {
         self.bleed = bleed
         self.parallaxIn = parallaxIn
         self.driftOut = driftOut
-        self.front = pageA
         super.init(frame: .zero)
         clipsToBounds = true
         backgroundColor = .clear
-        pageA.bleed = bleed
-        pageB.bleed = bleed
-        addSubview(pageA)
-        addSubview(pageB)
-        pageB.isHidden = true
-        pageA.layer.zPosition = 1
-        pageB.layer.zPosition = 0
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        guard !isAnimating else { return }
+        guard revealingPages.isEmpty else { return }
         layoutAtRest()
     }
 
@@ -628,29 +583,41 @@ final class HeroWipeContainerView: UIView {
         slideSize == .zero ? bounds.size : slideSize
     }
 
-    /// Rest state: `front` fills the container with its image centered; `back` is
-    /// hidden and parked full-screen.
+    /// Rest state: only the top page remains and fills the container.
     private func layoutAtRest() {
+        guard let front = pages.last else { return }
+        for obsolete in pages.dropLast() {
+            obsolete.removeFromSuperview()
+        }
+        pages = [front]
         let size = effectiveSize
         let full = CGRect(origin: .zero, size: size)
+        front.resetOutgoingDrift()
         front.setWindow(full, contentX: 0, size: size)
-        front.isHidden = false
-        front.layer.zPosition = 1
-        back.setWindow(full, contentX: 0, size: size)
-        back.isHidden = true
-        back.layer.zPosition = 0
+        front.layer.zPosition = 0
     }
 
     // MARK: - Front image accessor (no animation)
 
     var frontImage: UIImage? {
-        get { front.image }
-        set { front.image = newValue }
+        get { pages.last?.image }
+        set { pages.last?.image = newValue }
     }
 
-    func setInitialImage(_ image: UIImage) {
-        front.image = image
+    func setInitialImage(_ image: UIImage?) {
+        clear()
+        let page = makePage(image: image)
+        addSubview(page)
+        pages = [page]
         layoutAtRest()
+    }
+
+    func clear() {
+        for page in pages {
+            page.removeFromSuperview()
+        }
+        revealingPages.removeAll()
+        pages.removeAll()
     }
 
     // MARK: - Wipe lifecycle
@@ -658,68 +625,70 @@ final class HeroWipeContainerView: UIView {
     /// Stage the incoming page as a *zero-width window* pinned to the entering edge,
     /// on top, with its content pre-shifted toward that edge for the parallax glide.
     /// Called synchronously, before the animation, so z-order is deterministic.
-    func prepareWipe(incomingImage: UIImage, forward: Bool) {
-        isAnimating = true
+    func prepareWipe(incomingImage: UIImage, forward: Bool) -> PreparedWipe {
+        if pages.isEmpty {
+            setInitialImage(nil)
+        }
         let size = effectiveSize
-        let incoming = back
-        let outgoing = front
-
-        // Deterministic z-order: incoming always on top.
-        incoming.layer.zPosition = 1
-        outgoing.layer.zPosition = 0
-
-        // Outgoing: full-screen, content at rest, underneath.
-        outgoing.setWindow(CGRect(origin: .zero, size: size), contentX: 0, size: size)
-        outgoing.isHidden = false
+        let outgoing = pages.last
+        let incoming = makePage(image: incomingImage)
 
         // Incoming: zero-width window on the entering edge (forward → right edge,
         // opening leftward; backward → left edge, opening rightward). Content is
         // shifted toward the entering edge so it glides in as the window opens.
-        incoming.image = incomingImage
         let startWindow = forward
             ? CGRect(x: size.width, y: 0, width: 0, height: size.height)
             : CGRect(x: 0, y: 0, width: 0, height: size.height)
         incoming.setWindow(startWindow, contentX: forward ? parallaxIn : -parallaxIn, size: size)
-        incoming.isHidden = false
+        incoming.layer.zPosition = CGFloat(pages.count)
+        addSubview(incoming)
+        pages.append(incoming)
+        revealingPages.insert(ObjectIdentifier(incoming))
+
+        return PreparedWipe(
+            incoming: WipeHandle(page: incoming),
+            outgoing: outgoing.map { WipeHandle(page: $0) }
+        )
     }
 
     /// The animatable step, split so each page can ride its own timing curve.
     /// `animateIncoming` opens the reveal window to full-screen while the incoming
-    /// content settles to center (driven ease-out); `animateOutgoing` drifts the
-    /// outgoing content slowly the other way as it is covered (driven ease-in).
-    /// Only `frame`s change — no transforms. The two curves are chosen so the
-    /// outgoing progress never exceeds the incoming, keeping coverage gap-free.
-    func animateIncoming(forward: Bool) {
+    /// content settles to center (driven ease-out); `animateOutgoing` translates a
+    /// nested content wrapper slowly the other way (driven ease-in).
+    func animateIncoming(_ handle: WipeHandle) {
         let size = effectiveSize
-        back.setWindow(CGRect(origin: .zero, size: size), contentX: 0, size: size)
+        handle.page.setWindow(CGRect(origin: .zero, size: size), contentX: 0, size: size)
     }
 
-    func animateOutgoing(forward: Bool) {
-        let size = effectiveSize
-        front.setWindow(
-            CGRect(origin: .zero, size: size),
-            contentX: forward ? -driftOut : driftOut,
-            size: size
-        )
+    func animateOutgoing(_ handle: WipeHandle, forward: Bool) {
+        handle.page.setOutgoingDrift(forward ? -driftOut : driftOut)
     }
 
-    /// Promote the incoming page to `front`, reset and hide the outgoing page.
-    func finishWipe() {
-        let incoming = back
-        let outgoing = front
-        front = incoming
-
+    /// Settle this incoming page and remove only pages below it. Any later pages
+    /// remain above it with their independent animations untouched.
+    func finishWipe(_ handle: WipeHandle) {
+        let incoming = handle.page
+        guard let incomingIndex = pages.firstIndex(where: { $0 === incoming }) else { return }
         let size = effectiveSize
         let full = CGRect(origin: .zero, size: size)
         incoming.setWindow(full, contentX: 0, size: size)
-        incoming.layer.zPosition = 1
+        revealingPages.remove(ObjectIdentifier(incoming))
 
-        outgoing.isHidden = true
-        outgoing.image = nil
-        outgoing.setWindow(full, contentX: 0, size: size)
-        outgoing.layer.zPosition = 0
+        for obsolete in pages[..<incomingIndex] {
+            revealingPages.remove(ObjectIdentifier(obsolete))
+            obsolete.removeFromSuperview()
+        }
+        pages.removeFirst(incomingIndex)
+        for (index, page) in pages.enumerated() {
+            page.layer.zPosition = CGFloat(index)
+        }
+    }
 
-        isAnimating = false
+    private func makePage(image: UIImage?) -> SlidePage {
+        let page = SlidePage()
+        page.bleed = bleed
+        page.image = image
+        return page
     }
 }
 
@@ -728,7 +697,8 @@ final class HeroWipeContainerView: UIView {
 /// image is positioned so its content maps to a fixed spot in *container* space
 /// regardless of the window. It carries a tiny `bleed` overscan on each side only
 /// to avoid a sub-pixel seam shimmer while the window animates.
-private final class SlidePage: UIView {
+fileprivate final class SlidePage: UIView {
+    private let contentView = UIView()
     private let imageView = UIImageView()
     var bleed: CGFloat = 0
 
@@ -736,10 +706,12 @@ private final class SlidePage: UIView {
         super.init(frame: frame)
         clipsToBounds = true
         backgroundColor = .clear
+        contentView.backgroundColor = .clear
         imageView.contentMode = .scaleAspectFill
         imageView.clipsToBounds = true
         imageView.backgroundColor = .clear
-        addSubview(imageView)
+        contentView.addSubview(imageView)
+        addSubview(contentView)
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -751,22 +723,31 @@ private final class SlidePage: UIView {
 
     /// Set this page's clip `window` (container coords) and position the image so
     /// its logical left edge lands at `contentX` in *container* coords. Both the
-    /// page frame and the inner image frame are set here; animating a `setWindow`
-    /// call from one state to another (within one animator's curve) interpolates
-    /// both together, so the content stays correctly anchored at every frame.
+    /// page frame and the content wrapper's center are set here; animating a
+    /// `setWindow` call interpolates both together, so the content stays correctly
+    /// anchored at every frame.
     ///
-    /// No transform is used — only `frame` — so this is safe to animate and never
-    /// hits the frame/transform corruption gotcha.
+    /// Outgoing drift uses the wrapper's transform while this uses center/bounds,
+    /// avoiding concurrent writes to the same animatable property.
     func setWindow(_ window: CGRect, contentX: CGFloat, size: CGSize) {
         frame = window
         // The image spans [contentX - bleed, contentX + size.width + bleed] in
         // container coords; convert to this page's local coords (subtract origin).
-        imageView.frame = CGRect(
-            x: contentX - bleed - window.origin.x,
-            y: 0,
-            width: size.width + 2 * bleed,
-            height: size.height
+        let contentSize = CGSize(width: size.width + 2 * bleed, height: size.height)
+        contentView.bounds = CGRect(origin: .zero, size: contentSize)
+        contentView.center = CGPoint(
+            x: contentX - bleed - window.origin.x + contentSize.width / 2,
+            y: contentSize.height / 2
         )
+        imageView.frame = contentView.bounds
+    }
+
+    func setOutgoingDrift(_ x: CGFloat) {
+        contentView.transform = CGAffineTransform(translationX: x, y: 0)
+    }
+
+    func resetOutgoingDrift() {
+        contentView.transform = .identity
     }
 }
 #endif

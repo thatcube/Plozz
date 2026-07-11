@@ -259,7 +259,7 @@ private struct ProviderChoiceGroup: View {
                 onSelect(.jellyfin)
             }
 
-            Divider()
+            Divider().padding(.horizontal, 1)
 
             ProviderChoiceRow(
                 provider: .plex,
@@ -270,7 +270,7 @@ private struct ProviderChoiceGroup: View {
                 onSelect(.plex)
             }
 
-            Divider()
+            Divider().padding(.horizontal, 1)
 
             ProviderChoiceRow(
                 provider: .mediaShare,

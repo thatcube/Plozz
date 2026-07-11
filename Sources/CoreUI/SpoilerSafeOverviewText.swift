@@ -29,21 +29,27 @@ public struct SpoilerSafeOverviewText: View {
     }
 
     public var body: some View {
-        Group {
+        ZStack(alignment: .topLeading) {
+            Text(verbatim: layoutReservation)
+                .hidden()
+                .accessibilityHidden(true)
+
             if hidesSpoilers {
                 hiddenOverview
-            } else {
-                Text(overview ?? "")
-                    .opacity(overview == nil ? 0 : 1)
-                    .accessibilityHidden(overview == nil)
+            } else if let overview {
+                Text(overview)
             }
         }
         .font(.system(size: fontSize))
         .foregroundStyle(.secondary)
         .lineSpacing(2)
-        .lineLimit(lineCount, reservesSpace: true)
+        .lineLimit(lineCount)
         .frame(maxWidth: maxWidth, alignment: .topLeading)
         .contentTransition(.opacity)
+    }
+
+    private var layoutReservation: String {
+        Array(repeating: "M", count: lineCount).joined(separator: "\n")
     }
 
     @ViewBuilder

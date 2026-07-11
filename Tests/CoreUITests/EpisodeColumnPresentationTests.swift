@@ -91,6 +91,25 @@ final class EpisodeColumnPresentationTests: XCTestCase {
         XCTAssertNil(presentation.visibleOverview)
     }
 
+    func testMissingOverviewNeverCreatesSpoilerPlaceholder() {
+        for mode in [SpoilerSettings.Mode.blur, .placeholder] {
+            for isPlayed in [false, true] {
+                let presentation = EpisodeColumnPresentation(
+                    item: episode(isPlayed: isPlayed, overview: " \n "),
+                    spoilerSettings: SpoilerSettings(isEnabled: true, mode: mode)
+                )
+
+                XCTAssertEqual(presentation.overviewTreatment, .missing)
+                XCTAssertNil(presentation.visibleOverview)
+                XCTAssertFalse(
+                    presentation.accessibilityLabel.contains(
+                        EpisodeColumnPresentation.hiddenOverviewLabel
+                    )
+                )
+            }
+        }
+    }
+
     func testAirDateAndContentRatingAreExcluded() {
         let item = MediaItem(
             id: "rated",
@@ -117,13 +136,14 @@ final class EpisodeColumnPresentationTests: XCTestCase {
         runtime: TimeInterval? = 2_700,
         resumePosition: TimeInterval? = nil,
         playedPercentage: Double? = nil,
-        isPlayed: Bool = false
+        isPlayed: Bool = false,
+        overview: String? = "A secret is revealed."
     ) -> MediaItem {
         MediaItem(
             id: "episode-4",
             title: "The Hidden Room",
             kind: .episode,
-            overview: "A secret is revealed.",
+            overview: overview,
             parentTitle: "Example Show",
             seasonNumber: 1,
             episodeNumber: 4,

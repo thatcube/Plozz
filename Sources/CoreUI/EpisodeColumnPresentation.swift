@@ -56,12 +56,14 @@ public struct EpisodeColumnPresentation: Equatable, Sendable, CustomDebugStringC
             artworkTreatment = .visible
         }
 
-        if hidesText {
-            overviewTreatment = spoilerSettings.mode == .blur ? .blurred : .placeholder
-            visibleOverview = nil
-        } else if let trimmedOverview {
-            overviewTreatment = .visible
-            visibleOverview = trimmedOverview
+        if let trimmedOverview {
+            if hidesText {
+                overviewTreatment = spoilerSettings.mode == .blur ? .blurred : .placeholder
+                visibleOverview = nil
+            } else {
+                overviewTreatment = .visible
+                visibleOverview = trimmedOverview
+            }
         } else {
             overviewTreatment = .missing
             visibleOverview = nil

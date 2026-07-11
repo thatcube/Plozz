@@ -21,6 +21,7 @@ public struct ShareProvider: MediaProvider {
     private let host: String
     private let port: Int?
     private let share: String
+    private let catalogOverride: ShareCatalogStore?
     /// Injected engine-side SMB header prober (nil in tests / when the engine layer
     /// isn't wired). Used to obtain real per-file stream facts for a share that has
     /// no server metadata. Currently drives an opt-in on-device timing measurement
@@ -35,9 +36,15 @@ public struct ShareProvider: MediaProvider {
     /// `watchDirectory` instead of Application Support, so the reportPlayback →
     /// persist → continueWatching path can be exercised end-to-end (including a
     /// simulated relaunch) without touching the real app container.
-    init(session: UserSession, watchDirectory: URL?, streamProber: SMBStreamProbing? = nil) {
+    init(
+        session: UserSession,
+        watchDirectory: URL?,
+        streamProber: SMBStreamProbing? = nil,
+        catalogStore: ShareCatalogStore? = nil
+    ) {
         self.session = session
         self.streamProber = streamProber
+        self.catalogOverride = catalogStore
         let parsed = Self.parse(session.server.baseURL)
         self.host = parsed.host
         self.port = parsed.port
@@ -60,7 +67,8 @@ public struct ShareProvider: MediaProvider {
     /// throttled background scan.
     private var catalog: ShareCatalogStore {
         get async {
-            await ShareCatalogRegistry.shared.store(
+            if let catalogOverride { return catalogOverride }
+            return await ShareCatalogRegistry.shared.store(
                 accountKey: session.server.id,
                 displayName: session.server.name,
                 host: host, port: port, share: share,
@@ -83,7 +91,7 @@ public struct ShareProvider: MediaProvider {
         // Movies / TV Shows / Anime libraries appear ONLY once the scan has found
         // content for them (no empty rows on a fresh share); the raw file-tree
         // library (named after the share) is always present and browsed live.
-        let catalog = await catalog
+        let catalog = await self.catalog
         let counts = await catalog.libraryCounts()
         var result: [MediaLibrary] = []
         if counts.movies > 0 {
@@ -101,22 +109,12 @@ public struct ShareProvider: MediaProvider {
     }
 
     public func continueWatching(limit: Int) async throws -> [MediaItem] {
-        // Resume row is served entirely from local watch state — no network, so
-        // it's safe on the Home hot path. Fetch a generous window and FOLD each
-        // resumable file into its canonical (logical movie) id BEFORE applying the
-        // limit, so several versions of one film collapse to a single card and
-        // folding can never push a distinct title off the row. Episodes keep their
-        // own id. Each surviving id is rebuilt from the catalog (id → item, no scan).
-        let raw = await watchStore.resumable(limit: max(limit * 4, 40))
-        var byCanonical: [String: ShareWatchStore.Record] = [:]
-        for entry in raw {
-            let canonical = await catalog.canonicalItemID(entry.itemID)
-            if let existing = byCanonical[canonical], existing.updatedAt >= entry.record.updatedAt {
-                continue // keep the most-recently-updated record for the collapsed title
-            }
-            byCanonical[canonical] = entry.record
-        }
-        let ranked = byCanonical
+        // Canonicalize ALL stored state before filtering/limiting so several legacy
+        // file-version records collapse to one movie without pushing distinct
+        // titles off the row.
+        let byCanonical = await canonicalWatchRecords()
+        let resumable = byCanonical.filter { !$0.value.played && $0.value.position > 1 }
+        let ranked = resumable
             .sorted { $0.value.updatedAt > $1.value.updatedAt }
             .prefix(limit)
 
@@ -138,7 +136,7 @@ public struct ShareProvider: MediaProvider {
         }
         // Device-observable (in-app log ring) so a missing Continue Watching row
         // can be traced to "no resumable state on disk" vs "rebuild dropped it".
-        PlozzLog.playback.info("share.continueWatching account=\(session.server.id) resumable=\(raw.count) folded=\(byCanonical.count) rebuilt=\(items.count)")
+        PlozzLog.playback.info("share.continueWatching account=\(session.server.id) resumable=\(resumable.count) folded=\(byCanonical.count) rebuilt=\(items.count)")
         return items
     }
 
@@ -216,7 +214,7 @@ public struct ShareProvider: MediaProvider {
         // small (delegate to `children`); the raw file tree lists the directory.
         if let library = ShareCatalogID.catalogLibrary(forID: containerID) {
             let t0 = Date()
-            let catalog = await catalog
+            let catalog = await self.catalog
             let items: [MediaItem]
             let total: Int
             switch library {
@@ -292,11 +290,12 @@ public struct ShareProvider: MediaProvider {
             throw AppError.unknown("Couldn't build a stream URL for \(relPath)")
         }
         let item = try await item(id: itemID)
-        // Resume where the user left off. Prefer the logical item's record; fall
-        // back to the chosen file's own `f:<rel>` record so a movie watched BEFORE
-        // version-grouping (resume stored per file) still resumes after the upgrade.
-        var record = await watchStore.record(for: itemID)
-        if record == nil { record = await watchStore.record(for: ShareCatalogID.file(relPath)) }
+        // Resume from the newest canonical/legacy member-file state so a movie
+        // watched before version grouping still resumes after the upgrade.
+        let records = await canonicalWatchRecords()
+        let catalog = await self.catalog
+        let canonicalID = await catalog.canonicalItemID(itemID)
+        let record = records[canonicalID]
         let startPosition = (record?.played == true) ? 0 : (record?.position ?? 0)
         let playItem = (mediaSourceID != nil) ? item.selectingVersion(mediaSourceID) : item
         return PlaybackRequest(
@@ -340,15 +339,45 @@ public struct ShareProvider: MediaProvider {
         default:
             break
         }
-        let record = await watchStore.record(for: item.id)
+        let records = await canonicalWatchRecords()
+        let catalog = await self.catalog
+        let canonicalID = await catalog.canonicalItemID(item.id)
+        let record = records[canonicalID]
         return Self.stamped(item, with: record)
     }
 
-    private func stampWatchState(_ items: [MediaItem]) async -> [MediaItem] {
-        var result: [MediaItem] = []
-        result.reserveCapacity(items.count)
-        for item in items { result.append(await stampWatchState(item)) }
+    /// Fold the small persisted watch dictionary onto current logical ids once per
+    /// operation. This preserves legacy `f:` state without N catalog queries per
+    /// visible grid card.
+    private func canonicalWatchRecords() async -> [String: ShareWatchStore.Record] {
+        let snapshot = await watchStore.recordsSnapshot()
+        let catalog = await self.catalog
+        var result: [String: ShareWatchStore.Record] = [:]
+        for (id, record) in snapshot {
+            let canonical = await catalog.canonicalItemID(id)
+            if let existing = result[canonical], existing.updatedAt >= record.updatedAt {
+                continue
+            }
+            result[canonical] = record
+        }
         return result
+    }
+
+    private func stampWatchState(_ items: [MediaItem]) async -> [MediaItem] {
+        let records = await canonicalWatchRecords()
+        let catalog = await self.catalog
+        var stamped: [MediaItem] = []
+        stamped.reserveCapacity(items.count)
+        for item in items {
+            switch item.kind {
+            case .folder, .collection, .series, .season:
+                stamped.append(item)
+            default:
+                let canonical = await catalog.canonicalItemID(item.id)
+                stamped.append(Self.stamped(item, with: records[canonical]))
+            }
+        }
+        return stamped
     }
 
     private static func stamped(_ item: MediaItem, with record: ShareWatchStore.Record?) -> MediaItem {

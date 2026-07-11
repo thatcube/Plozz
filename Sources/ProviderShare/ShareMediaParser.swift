@@ -105,6 +105,16 @@ enum ShareMediaParser {
         let context = libraryContext(ancestors)
         if seasonAncestor != nil || context == .seriesLibrary {
             if let ep = parseBareEpisode(stem: stem, seasonFolder: seasonAncestor, showFolder: showHint) {
+                // Mixed Anime/Series roots often contain films too. A year-bearing
+                // parent folder is a movie signal when the apparent episode number
+                // is actually part of that parent title ("Ghost in the Shell 2",
+                // "Blade Runner 2049"). A new number absent from the parent remains
+                // an episode (`TV/Show (2024)/Show 01.mkv`).
+                if seasonAncestor == nil,
+                   let parent = ancestors.last,
+                   yearBearingMovieFolder(parent, containsTitleNumber: ep.episode) {
+                    return .movie(parseMovie(stem: stem, parentFolder: parent))
+                }
                 return .episode(ep)
             }
         }
@@ -151,6 +161,14 @@ enum ShareMediaParser {
             if seriesLibraryNames.contains(name) { return .seriesLibrary }
         }
         return .unknown
+    }
+
+    private static func yearBearingMovieFolder(_ folder: String, containsTitleNumber number: Int) -> Bool {
+        let parsed = parseMovie(stem: folder, parentFolder: nil)
+        guard parsed.year != nil else { return false }
+        let numbers = parsed.title.components(separatedBy: CharacterSet.decimalDigits.inverted)
+            .compactMap(Int.init)
+        return numbers.contains(number)
     }
 
     // MARK: - Episode

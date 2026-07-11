@@ -116,6 +116,23 @@ final class ShareMediaParserTests: XCTestCase {
         XCTAssertEqual(m?.year, 2016)
     }
 
+    func testNumberedAnimeFilmInsideMixedAnimeRootIsMovie() {
+        let ghost = movie("Anime/Ghost in the Shell 2 (2004)/Ghost in the Shell 2 (2004).mkv")
+        XCTAssertEqual(ghost?.title, "Ghost in the Shell 2")
+        XCTAssertEqual(ghost?.year, 2004)
+
+        let bladeRunner = movie("Anime/Blade Runner 2049 (2017)/Blade Runner 2049 (2017).mkv")
+        XCTAssertEqual(bladeRunner?.title, "Blade Runner 2049")
+        XCTAssertEqual(bladeRunner?.year, 2017)
+    }
+
+    func testYearBearingSeriesFolderStillAcceptsBareEpisodeNumber() {
+        let ep = episode("TV/Show (2024)/Show 01.mkv")
+        XCTAssertEqual(ep?.series, "Show")
+        XCTAssertEqual(ep?.season, 1)
+        XCTAssertEqual(ep?.episode, 1)
+    }
+
     // MARK: - No TV context ⇒ conservative (bare numbers stay movies)
 
     func testBareNumberWithoutSeriesContextStaysMovie() {

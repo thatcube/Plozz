@@ -71,6 +71,13 @@ public actor ShareWatchStore {
         loaded()[itemID]
     }
 
+    /// Immutable snapshot for batch canonicalization. A share page can stamp all
+    /// cards with one disk/load read, then fold legacy file ids in memory instead
+    /// of issuing catalog queries per visible item.
+    func recordsSnapshot() -> [String: Record] {
+        loaded()
+    }
+
     /// The resumable items — started but not finished — newest first, capped at
     /// `limit`. Backs the share's Continue Watching row.
     public func resumable(limit: Int) -> [(itemID: String, record: Record)] {

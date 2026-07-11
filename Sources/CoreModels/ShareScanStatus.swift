@@ -262,7 +262,7 @@ public struct ShareScanReporter: Sendable {
     public init(
         scanStarted: @escaping @Sendable (String, String) -> Void,
         scanProgress: @escaping @Sendable (String, Int) -> Void,
-        scanDetailedProgress: @escaping @Sendable (String, Int, Int) -> Void = { _, _, _ in },
+        scanDetailedProgress: (@Sendable (String, Int, Int) -> Void)? = nil,
         scanFinished: @escaping @Sendable (String) -> Void,
         enrichStarted: @escaping @Sendable (String, Int) -> Void,
         enrichProgress: @escaping @Sendable (String, Int) -> Void,
@@ -270,7 +270,9 @@ public struct ShareScanReporter: Sendable {
     ) {
         self.scanStarted = scanStarted
         self.scanProgress = scanProgress
-        self.scanDetailedProgress = scanDetailedProgress
+        self.scanDetailedProgress = scanDetailedProgress ?? { id, _, items in
+            scanProgress(id, items)
+        }
         self.scanFinished = scanFinished
         self.enrichStarted = enrichStarted
         self.enrichProgress = enrichProgress

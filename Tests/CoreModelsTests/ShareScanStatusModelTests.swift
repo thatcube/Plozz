@@ -131,4 +131,25 @@ final class ShareScanStatusModelTests: XCTestCase {
         XCTAssertNotNil(s?.lastScanAt, "finish stamped a last-scanned time")
         XCTAssertFalse(model.isAnyBusy, "enrich finish applied — indicator cleared")
     }
+
+    func testLegacyReporterReceivesDetailedScannerProgress() {
+        final class Capture: @unchecked Sendable {
+            private let lock = NSLock()
+            private var value: Int?
+            func set(_ value: Int) { lock.lock(); self.value = value; lock.unlock() }
+            func get() -> Int? { lock.lock(); defer { lock.unlock() }; return value }
+        }
+        let captured = Capture()
+        let reporter = ShareScanReporter(
+            scanStarted: { _, _ in },
+            scanProgress: { _, items in captured.set(items) },
+            scanFinished: { _ in },
+            enrichStarted: { _, _ in },
+            enrichProgress: { _, _ in },
+            enrichFinished: { _ in }
+        )
+
+        reporter.scanDetailedProgress("s1", 42, 123)
+        XCTAssertEqual(captured.get(), 123)
+    }
 }

@@ -193,6 +193,7 @@ actor ShareScanner {
         // permanently-inaccessible folder can't cause a perpetual re-scan); the next
         // clean pass performs the deferred prune.
         if !anyListingFailed {
+            await store.preserveMovieAliasesBeforePrune()
             await store.pruneNotSeen(inScan: scanID)
             await store.rebuildMovieGroups()
         }
@@ -259,7 +260,7 @@ actor ShareScanner {
             return CatalogAsset(
                 relPath: relPath, basename: name, size: Int64(entry.size),
                 modifiedAt: entry.modifiedAt, kind: .movie, library: .movies,
-                title: title, year: movie.year,
+                title: g.title, year: g.year,
                 seriesTitle: nil, seriesKey: nil, season: nil, episode: nil,
                 movieKey: movieKey, movieTitleKey: movieTitleKey
             )

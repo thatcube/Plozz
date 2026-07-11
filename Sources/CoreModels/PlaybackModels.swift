@@ -344,6 +344,20 @@ public struct PlaybackRequest: Hashable, Sendable {
         self.serverName = serverName
         self.sourceFileName = sourceFileName
     }
+
+    /// Basename from either POSIX or Windows server paths. Darwin's
+    /// `NSString.lastPathComponent` only recognizes `/`, so using it directly can
+    /// expose a full `D:\Media\Movie.mkv` path in diagnostics.
+    public static func sourceFileName(from path: String?) -> String? {
+        guard let path else { return nil }
+        let value = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else { return nil }
+        return value
+            .replacingOccurrences(of: "\\", with: "/")
+            .split(separator: "/", omittingEmptySubsequences: true)
+            .last
+            .map(String.init)
+    }
 }
 
 /// A point-in-time playback progress report.

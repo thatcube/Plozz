@@ -181,6 +181,7 @@ public struct MediaVersion: Codable, Hashable, Identifiable, Sendable {
         if let sourceMetadata {
             return sourceMetadata.dynamicRangeBadges.contains { $0.style == .hdr || $0.style == .dolby }
         }
+        if normalizedVideoRange == "HDR10PLUS" { return true }
         guard let token = videoRange, let range = HDRRange(rawValue: token) else { return false }
         return range != .sdr
     }
@@ -195,6 +196,7 @@ public struct MediaVersion: Codable, Hashable, Identifiable, Sendable {
             if let hdr = range.first(where: { $0.style == .hdr }) { return hdr.label }
             return nil
         }
+        if normalizedVideoRange == "HDR10PLUS" { return "HDR10+" }
         guard let token = videoRange, let range = HDRRange(rawValue: token) else { return nil }
         switch range {
         case .sdr: return nil
@@ -203,6 +205,14 @@ public struct MediaVersion: Codable, Hashable, Identifiable, Sendable {
         case .dolbyVision, .dolbyVisionWithHDR10, .dolbyVisionWithHLG, .dolbyVisionWithSDR:
             return "Dolby Vision"
         }
+    }
+
+    private var normalizedVideoRange: String {
+        (videoRange ?? "").uppercased()
+            .replacingOccurrences(of: "+", with: "PLUS")
+            .replacingOccurrences(of: " ", with: "")
+            .replacingOccurrences(of: "_", with: "")
+            .replacingOccurrences(of: "-", with: "")
     }
 
     /// A compact audio badge label, e.g. `Atmos`, `7.1`, `5.1`, `Stereo`.
@@ -314,6 +324,9 @@ public extension MediaVersion {
         // non-DoVi display) forces a tone-mapped transcode.
         if let token = videoRange, let range = HDRRange(rawValue: token) {
             if !capabilities.allowedHDRRanges.contains(range) { return .transcode }
+        } else if normalizedVideoRange == "HDR10PLUS",
+                  !capabilities.allowedHDRRanges.contains(.hdr10) {
+            return .transcode
         }
 
         // Audio: lossy AAC/MP3/etc. are always decodable on-device; the codecs

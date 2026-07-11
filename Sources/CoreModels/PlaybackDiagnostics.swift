@@ -42,6 +42,7 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
         case sdr
         case hlg
         case hdr10
+        case hdr10Plus
         case dolbyVision
         case unknown
 
@@ -50,6 +51,7 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
             case .sdr: return "SDR"
             case .hlg: return "HDR (HLG)"
             case .hdr10: return "HDR10 (PQ)"
+            case .hdr10Plus: return "HDR10+"
             case .dolbyVision: return "Dolby Vision"
             case .unknown: return "Unknown"
             }
@@ -62,6 +64,7 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
             case .sdr: return "SDR"
             case .hlg: return "HLG"
             case .hdr10: return "HDR10"
+            case .hdr10Plus: return "HDR10+"
             case .dolbyVision: return "Dolby Vision"
             case .unknown: return nil
             }
@@ -383,6 +386,10 @@ public extension PlaybackDiagnostics {
 
         if isDolbyVision || type.contains("DOVI") || type.contains("DOLBY") || range.contains("DOVI") {
             return .dolbyVision
+        }
+        if type.contains("HDR10PLUS") || type.contains("HDR10+")
+            || range.contains("HDR10PLUS") || range.contains("HDR10+") {
+            return .hdr10Plus
         }
         if type.contains("HLG") || transfer.contains("ARIB") || transfer.contains("B67") || transfer.contains("HLG") {
             return .hlg

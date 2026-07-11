@@ -273,12 +273,19 @@ public struct ShareProvider: MediaProvider {
     /// `movie:<key>` with no chosen version plays its best default file; a bare
     /// `f:<rel>` (raw browser / episode) plays directly.
     public func playbackInfo(for itemID: String, mediaSourceID: String?, forceTranscode: Bool) async throws -> PlaybackRequest {
+        let catalog = await self.catalog
+        let canonicalItemID = await catalog.canonicalItemID(itemID)
         let relPath: String
         if let ms = mediaSourceID, !ms.isEmpty {
             relPath = ms
-        } else if let key = ShareCatalogID.movieKey(forMovieID: itemID) {
+        } else if ShareCatalogID.relPath(forFileID: itemID) != nil,
+                  await catalog.containsFileAsset(id: itemID),
+                  let path = await store.path(forItemID: itemID) {
+            // A live raw-file id means the user selected that exact file in Files.
+            relPath = path
+        } else if let key = ShareCatalogID.movieKey(forMovieID: canonicalItemID) {
             guard let def = await catalog.defaultMovieRelPath(forKey: key) else {
-                throw AppError.unknown("No playable version for \(itemID)")
+                throw AppError.unknown("No playable version for \(canonicalItemID)")
             }
             relPath = def
         } else if let p = await store.path(forItemID: itemID) {
@@ -289,13 +296,11 @@ public struct ShareProvider: MediaProvider {
         guard let url = smbURL(forRelativePath: relPath) else {
             throw AppError.unknown("Couldn't build a stream URL for \(relPath)")
         }
-        let item = try await item(id: itemID)
+        let item = try await item(id: canonicalItemID)
         // Resume from the newest canonical/legacy member-file state so a movie
         // watched before version grouping still resumes after the upgrade.
         let records = await canonicalWatchRecords()
-        let catalog = await self.catalog
-        let canonicalID = await catalog.canonicalItemID(itemID)
-        let record = records[canonicalID]
+        let record = records[canonicalItemID]
         let startPosition = (record?.played == true) ? 0 : (record?.position ?? 0)
         let playItem = (mediaSourceID != nil) ? item.selectingVersion(mediaSourceID) : item
         return PlaybackRequest(

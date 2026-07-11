@@ -32,6 +32,26 @@ actor ShareCatalogStore {
     /// reads while a large share is scanning.
     private static let writeChunkSize = 200
 
+    private struct MovieGroupingRow: Sendable {
+        var relPath: String
+        var movieKey: String
+        var titleKey: String
+        var year: Int?
+        var existingGroup: String?
+    }
+    private struct MovieGroupAssignment: Sendable {
+        var relPath: String
+        var group: String
+    }
+    private struct MovieAlias: Sendable {
+        var id: String
+        var group: String
+    }
+    private struct MovieGroupingPlan: Sendable {
+        var assignments: [MovieGroupAssignment]
+        var aliases: [MovieAlias]
+    }
+
     /// - Parameters:
     ///   - accountKey: stable per-share id (`server.id`) — names the DB file so two
     ///     shares keep separate catalogs. Shares the key with `ShareWatchStore`.
@@ -125,6 +145,15 @@ actor ShareCatalogStore {
         }
         exec("CREATE INDEX IF NOT EXISTS idx_assets_movie_key ON assets(library, kind, movie_key);")
         exec("CREATE INDEX IF NOT EXISTS idx_assets_movie_group ON assets(library, kind, movie_group_key);")
+        exec("CREATE INDEX IF NOT EXISTS idx_assets_movie_key_direct ON assets(movie_key);")
+        exec("CREATE INDEX IF NOT EXISTS idx_assets_movie_group_direct ON assets(movie_group_key);")
+        exec("""
+        CREATE TABLE IF NOT EXISTS movie_alias(
+            alias_id  TEXT PRIMARY KEY,
+            group_key TEXT NOT NULL
+        );
+        """)
+        exec("CREATE INDEX IF NOT EXISTS idx_movie_alias_group ON movie_alias(group_key);")
         exec("""
         CREATE INDEX IF NOT EXISTS idx_assets_movie_logical_sort
         ON assets(
@@ -220,19 +249,7 @@ actor ShareCatalogStore {
         guard db != nil else { return }
         let started = Date()
 
-        struct Row: Sendable {
-            var relPath: String
-            var movieKey: String
-            var titleKey: String
-            var year: Int?
-            var existingGroup: String?
-        }
-        struct Assignment: Sendable {
-            var relPath: String
-            var group: String
-        }
-
-        var rows: [Row] = []
+        var rows: [MovieGroupingRow] = []
         query("""
         SELECT rel_path, movie_key, movie_title_key, year, movie_group_key
         FROM assets
@@ -242,7 +259,7 @@ actor ShareCatalogStore {
             guard let relPath = self.columnText(stmt, 0),
                   let movieKey = self.columnText(stmt, 1),
                   let titleKey = self.columnText(stmt, 2) else { return }
-            rows.append(Row(
+            rows.append(MovieGroupingRow(
                 relPath: relPath,
                 movieKey: movieKey,
                 titleKey: titleKey,
@@ -255,14 +272,15 @@ actor ShareCatalogStore {
         // detail query can use the SQLite connection while a large catalog is
         // computing assignments.
         let computeStarted = Date()
-        let assignments: [Assignment] = await Task.detached(priority: .utility) {
-            var result: [Assignment] = []
+        let plan: MovieGroupingPlan = await Task.detached(priority: .utility) {
+            var assignments: [MovieGroupAssignment] = []
+            var aliases: [MovieAlias] = []
             for titleRows in Dictionary(grouping: rows, by: \.titleKey).values {
                 let known = titleRows.filter { $0.year != nil }.sorted {
                     if $0.year != $1.year { return ($0.year ?? 0) < ($1.year ?? 0) }
                     return $0.relPath < $1.relPath
                 }
-                var clusters: [[Row]] = []
+                var clusters: [[MovieGroupingRow]] = []
                 for row in known {
                     if let last = clusters.indices.last,
                        let firstYear = clusters[last].first?.year,
@@ -292,16 +310,22 @@ actor ShareCatalogStore {
                     guard let group = existing ?? fallback else { continue }
                     // Re-scans usually produce zero writes. Only changed/new group
                     // members enter the bounded SQLite update phase.
-                    result.append(contentsOf: cluster.compactMap { row in
-                        row.existingGroup == group ? nil : Assignment(relPath: row.relPath, group: group)
+                    assignments.append(contentsOf: cluster.compactMap { row in
+                        row.existingGroup == group ? nil : MovieGroupAssignment(relPath: row.relPath, group: group)
                     })
+                    for row in cluster {
+                        aliases.append(MovieAlias(id: row.movieKey, group: group))
+                        aliases.append(MovieAlias(id: ShareCatalogID.file(row.relPath), group: group))
+                    }
                 }
             }
-            return result
+            return MovieGroupingPlan(assignments: assignments, aliases: aliases)
         }.value
         let computeMs = Int(Date().timeIntervalSince(computeStarted) * 1_000)
 
-        guard !assignments.isEmpty else {
+        await persistMovieAliases(plan.aliases)
+
+        guard !plan.assignments.isEmpty else {
             PlozzLog.boot(
                 "share.catalog regroup rows=\(rows.count) changed=0 compute=\(computeMs)ms total=\(Int(Date().timeIntervalSince(started) * 1_000))ms"
             )
@@ -315,11 +339,11 @@ actor ShareCatalogStore {
 
         var index = 0
         var slowestChunkMs = 0
-        while index < assignments.count {
-            let end = min(index + Self.writeChunkSize, assignments.count)
+        while index < plan.assignments.count {
+            let end = min(index + Self.writeChunkSize, plan.assignments.count)
             let chunkStarted = Date()
             exec("BEGIN IMMEDIATE;")
-            for assignment in assignments[index..<end] {
+            for assignment in plan.assignments[index..<end] {
                 sqlite3_reset(stmt)
                 bindText(stmt, 1, assignment.group)
                 bindText(stmt, 2, assignment.relPath)
@@ -328,11 +352,59 @@ actor ShareCatalogStore {
             exec("COMMIT;")
             slowestChunkMs = max(slowestChunkMs, Int(Date().timeIntervalSince(chunkStarted) * 1_000))
             index = end
-            if index < assignments.count { await Task.yield() }
+            if index < plan.assignments.count { await Task.yield() }
         }
         PlozzLog.boot(
-            "share.catalog regroup rows=\(rows.count) changed=\(assignments.count) compute=\(computeMs)ms total=\(Int(Date().timeIntervalSince(started) * 1_000))ms maxChunk=\(slowestChunkMs)ms"
+            "share.catalog regroup rows=\(rows.count) changed=\(plan.assignments.count) compute=\(computeMs)ms total=\(Int(Date().timeIntervalSince(started) * 1_000))ms maxChunk=\(slowestChunkMs)ms"
         )
+    }
+
+    /// Capture aliases from the pre-prune catalog so a removed movie version's
+    /// legacy file id still resolves to the surviving logical group.
+    func preserveMovieAliasesBeforePrune() {
+        ensureOpen()
+        guard db != nil else { return }
+        exec("BEGIN IMMEDIATE;")
+        exec("""
+        INSERT INTO movie_alias(alias_id, group_key)
+        SELECT movie_key, COALESCE(movie_group_key, movie_key)
+        FROM assets
+        WHERE library='movies' AND kind='movie' AND movie_key IS NOT NULL
+        ON CONFLICT(alias_id) DO UPDATE SET group_key=excluded.group_key;
+        """)
+        exec("""
+        INSERT INTO movie_alias(alias_id, group_key)
+        SELECT 'f:' || rel_path, COALESCE(movie_group_key, movie_key)
+        FROM assets
+        WHERE library='movies' AND kind='movie' AND movie_key IS NOT NULL
+        ON CONFLICT(alias_id) DO UPDATE SET group_key=excluded.group_key;
+        """)
+        exec("COMMIT;")
+    }
+
+    private func persistMovieAliases(_ aliases: [MovieAlias]) async {
+        guard !aliases.isEmpty else { return }
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, """
+        INSERT INTO movie_alias(alias_id, group_key) VALUES(?,?)
+        ON CONFLICT(alias_id) DO UPDATE SET group_key=excluded.group_key;
+        """, -1, &stmt, nil) == SQLITE_OK else { return }
+        defer { sqlite3_finalize(stmt) }
+
+        var index = 0
+        while index < aliases.count {
+            let end = min(index + Self.writeChunkSize, aliases.count)
+            exec("BEGIN IMMEDIATE;")
+            for alias in aliases[index..<end] {
+                sqlite3_reset(stmt)
+                bindText(stmt, 1, alias.id)
+                bindText(stmt, 2, alias.group)
+                _ = sqlite3_step(stmt)
+            }
+            exec("COMMIT;")
+            index = end
+            if index < aliases.count { await Task.yield() }
+        }
     }
 
     /// Delete rows not seen by `scanID` — assets removed from the share since the
@@ -1067,7 +1139,9 @@ actor ShareCatalogStore {
                     )
                 }
             }
-            return result.map(withEnrichment)
+            if let result { return withEnrichment(result) }
+            if let group = movieAliasGroup(for: id) { return movieItem(key: group) }
+            return nil
         }
         return nil
     }
@@ -1117,6 +1191,8 @@ actor ShareCatalogStore {
     /// specific version (play-from-card, before the detail's version picker set
     /// one): the highest parsed resolution, then the largest file.
     func defaultMovieRelPath(forKey key: String) -> String? {
+        ensureOpen()
+        guard db != nil else { return nil }
         let groupKey = resolvedMovieGroupKey(key)
         var best: (rel: String, height: Int, size: Int64)?
         query("""
@@ -1139,6 +1215,8 @@ actor ShareCatalogStore {
     /// its logical `movie:<key>` so resume/played is unified across versions; an
     /// episode file or an un-keyed movie keeps its own id.
     func canonicalItemID(_ id: String) -> String {
+        ensureOpen()
+        guard db != nil else { return id }
         if let key = ShareCatalogID.movieKey(forMovieID: id) {
             return ShareCatalogID.movie(resolvedMovieGroupKey(key))
         }
@@ -1147,22 +1225,53 @@ actor ShareCatalogStore {
         query("SELECT COALESCE(movie_group_key, movie_key) FROM assets WHERE rel_path=? AND kind='movie';",
               bind: { self.bindText($0, 1, rel) }) { stmt in key = self.columnText(stmt, 0) }
         if let key { return ShareCatalogID.movie(key) }
+        if let group = movieAliasGroup(for: id) { return ShareCatalogID.movie(group) }
         return id
+    }
+
+    /// Whether a legacy/raw `f:` id still has a live catalog row. Playback uses
+    /// this to preserve exact-file selection for existing files while routing a
+    /// deleted legacy file alias to the surviving logical movie.
+    func containsFileAsset(id: String) -> Bool {
+        ensureOpen()
+        guard db != nil, let relPath = ShareCatalogID.relPath(forFileID: id) else { return false }
+        var found = false
+        query("SELECT 1 FROM assets WHERE rel_path=? LIMIT 1;",
+              bind: { self.bindText($0, 1, relPath) }) { _ in found = true }
+        return found
     }
 
     /// Resolve a pre-grouping `movie:<movie_key>` id to its persisted logical
     /// group. Keeps v3 Continue Watching records, deep links, and queued watch
     /// writes working after v4 combines adjacent-year variants.
     private func resolvedMovieGroupKey(_ key: String) -> String {
+        ensureOpen()
+        guard db != nil else { return key }
         var resolved: String?
         query("""
         SELECT COALESCE(movie_group_key, movie_key) FROM assets
-        WHERE movie_key=? OR movie_group_key=? LIMIT 1;
-        """, bind: {
-            self.bindText($0, 1, key)
-            self.bindText($0, 2, key)
-        }) { stmt in resolved = self.columnText(stmt, 0) }
-        return resolved ?? key
+        WHERE library='movies' AND kind='movie' AND movie_key=? LIMIT 1;
+        """, bind: { self.bindText($0, 1, key) }) { stmt in
+            resolved = self.columnText(stmt, 0)
+        }
+        if let resolved { return resolved }
+        query("""
+        SELECT movie_group_key FROM assets
+        WHERE library='movies' AND kind='movie' AND movie_group_key=? LIMIT 1;
+        """, bind: { self.bindText($0, 1, key) }) { stmt in
+            resolved = self.columnText(stmt, 0)
+        }
+        if let resolved { return resolved }
+        return movieAliasGroup(for: key) ?? key
+    }
+
+    private func movieAliasGroup(for aliasID: String) -> String? {
+        var group: String?
+        query("SELECT group_key FROM movie_alias WHERE alias_id=? LIMIT 1;",
+              bind: { self.bindText($0, 1, aliasID) }) { stmt in
+            group = self.columnText(stmt, 0)
+        }
+        return group
     }
 
     /// A share file → provider-agnostic ``MediaVersion``. The share has no server

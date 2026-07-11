@@ -569,8 +569,8 @@ public struct JellyfinProvider: MediaProvider {
             scrubPreview: trickplayManifest(itemID: itemID, source: source, trickplay: detail.Trickplay).map(ScrubPreviewSource.tiled),
             sourceProvider: .jellyfin,
             serverName: session.server.name,
-            sourceFileName: originalSource.Path.map { ($0 as NSString).lastPathComponent }
-                ?? originalSource.Name
+            sourceFileName: PlaybackRequest.sourceFileName(from: originalSource.Path)
+                ?? PlaybackRequest.sourceFileName(from: originalSource.Name)
         )
     }
 

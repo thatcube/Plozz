@@ -424,8 +424,8 @@ public struct PlexProvider: MediaProvider {
             scrubPreview: scrubPreview(for: part),
             sourceProvider: .plex,
             serverName: session.server.name,
-            sourceFileName: part.file.map { ($0 as NSString).lastPathComponent }
-                ?? part.key.map { ($0 as NSString).lastPathComponent }
+            sourceFileName: PlaybackRequest.sourceFileName(from: part.file)
+                ?? PlaybackRequest.sourceFileName(from: part.key)
         )
     }
 

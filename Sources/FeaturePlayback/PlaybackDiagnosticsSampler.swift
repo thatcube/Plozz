@@ -263,7 +263,8 @@ public final class PlaybackDiagnosticsSampler {
         switch range {
         case .sdr: return .sdr
         case .hlg: return .hlg
-        case .hdr10, .hdr10Plus: return .hdr10
+        case .hdr10: return .hdr10
+        case .hdr10Plus: return .hdr10Plus
         case .dolbyVision: return .dolbyVision
         }
     }

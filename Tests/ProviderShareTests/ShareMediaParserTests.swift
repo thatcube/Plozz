@@ -57,6 +57,12 @@ final class ShareMediaParserTests: XCTestCase {
         XCTAssertEqual(episode("TV/Show/Show #18.mkv")?.episode, 18)
     }
 
+    func testBracketedBareEpisode() {
+        let ep = episode("Anime/Show/Show [18].mkv")
+        XCTAssertEqual(ep?.series, "Show")
+        XCTAssertEqual(ep?.episode, 18)
+    }
+
     func testSpecialsFolderIsSeasonZero() {
         let ep = episode("TV/Show/Specials/Show 02.mkv")
         XCTAssertEqual(ep?.season, 0)
@@ -108,6 +114,16 @@ final class ShareMediaParserTests: XCTestCase {
         let m = movie("Movies/Star Wars (1977)/Star Wars (1977) Bluray-1080p.mkv")
         XCTAssertEqual(m?.title, "Star Wars")
         XCTAssertEqual(m?.year, 1977)
+    }
+
+    func testYearOnlyFolderDoesNotBecomeMovieIdentity() {
+        let grouping = ShareMediaParser.movieGrouping(
+            relPath: "Movies/2024/Actual Movie (2019).mkv",
+            parsedTitle: "Actual Movie",
+            parsedYear: 2019
+        )
+        XCTAssertEqual(grouping.title, "Actual Movie")
+        XCTAssertEqual(grouping.year, 2019)
     }
 
     func testAnimeMovieIsMovieNotEpisode() {

@@ -101,6 +101,39 @@ final class ShareMovieGroupingTests: XCTestCase {
         XCTAssertEqual(countYears, 2, "different years are different films")
     }
 
+    func testGenericFilenamesPersistDedicatedFolderTitleAndYear() async {
+        let store = ShareCatalogStore(accountKey: "folder-meta", directory: tempDir())
+        let tree: [String: [SMBShareBrowser.Entry]] = [
+            "": [dir("Movies")],
+            "Movies": [dir("The Thing (1982)"), dir("The Thing (2011)")],
+            "Movies/The Thing (1982)": [file("movie.mkv")],
+            "Movies/The Thing (2011)": [file("movie.mkv")],
+        ]
+        await scan(tree, into: store)
+
+        let movies = await store.movies(offset: 0, limit: 10)
+        XCTAssertEqual(movies.count, 2)
+        XCTAssertEqual(Set(movies.map(\.title)), ["The Thing"])
+        XCTAssertEqual(Set(movies.compactMap(\.productionYear)), [1982, 2011])
+    }
+
+    func testYearBucketDoesNotCollapseUnrelatedMovies() async {
+        let store = ShareCatalogStore(accountKey: "year-bucket", directory: tempDir())
+        let tree: [String: [SMBShareBrowser.Entry]] = [
+            "": [dir("Movies")],
+            "Movies": [dir("2024")],
+            "Movies/2024": [
+                file("Arrival (2016).mkv"),
+                file("Dune (2021).mkv"),
+            ],
+        ]
+        await scan(tree, into: store)
+
+        let movies = await store.movies(offset: 0, limit: 10)
+        XCTAssertEqual(movies.map(\.title), ["Arrival", "Dune"])
+        XCTAssertEqual(movies.compactMap(\.productionYear), [2016, 2021])
+    }
+
     /// Real regression: release metadata disagrees by one year (festival vs
     /// theatrical date) but both files are the same film and must become versions.
     func testSameTitleAdjacentYearsGroupWithDescriptiveVersions() async {
@@ -217,6 +250,45 @@ final class ShareMovieGroupingTests: XCTestCase {
         XCTAssertTrue(legacy?.versions[0].displayLabel.contains("4K") ?? false)
         XCTAssertTrue(legacy?.versions[0].displayLabel.contains("Dolby Vision") ?? false)
         XCTAssertNotEqual(legacy?.versions[0].displayLabel, "Version")
+    }
+
+    func testRemovedVersionLegacyIDsResolveSurvivingMovieAcrossRelaunch() async {
+        let directory = tempDir()
+        let store = ShareCatalogStore(accountKey: "alias", directory: directory)
+        let deletedPath = "Movies/Heat (1995)/Heat (1995) 1080p.mkv"
+        let survivingPath = "Movies/Heat (1995)/Heat (1995) 2160p.mkv"
+        let originalTree: [String: [SMBShareBrowser.Entry]] = [
+            "": [dir("Movies")],
+            "Movies": [dir("Heat (1995)")],
+            "Movies/Heat (1995)": [
+                file((deletedPath as NSString).lastPathComponent),
+                file((survivingPath as NSString).lastPathComponent),
+            ],
+        ]
+        await scan(originalTree, into: store)
+        let originalMovies = await store.movies(offset: 0, limit: 10)
+        let originalMovie = try! XCTUnwrap(originalMovies.first)
+
+        let updatedTree: [String: [SMBShareBrowser.Entry]] = [
+            "": [dir("Movies")],
+            "Movies": [dir("Heat (1995)")],
+            "Movies/Heat (1995)": [file((survivingPath as NSString).lastPathComponent)],
+        ]
+        await scan(updatedTree, into: store)
+
+        // A fresh actor proves aliases and cold-open lookups are persisted, not
+        // retained only in the first store's memory.
+        let reopened = ShareCatalogStore(accountKey: "alias", directory: directory)
+        let deletedID = ShareCatalogID.file(deletedPath)
+        let canonical = await reopened.canonicalItemID(deletedID)
+        XCTAssertEqual(canonical, originalMovie.id)
+        let aliasedItem = await reopened.item(id: deletedID)
+        XCTAssertEqual(aliasedItem?.id, originalMovie.id)
+        guard let key = ShareCatalogID.movieKey(forMovieID: canonical) else {
+            return XCTFail("alias must resolve a logical movie")
+        }
+        let defaultPath = await reopened.defaultMovieRelPath(forKey: key)
+        XCTAssertEqual(defaultPath, survivingPath)
     }
 
     /// An episode id is NOT folded (episodes keep their own watch id).

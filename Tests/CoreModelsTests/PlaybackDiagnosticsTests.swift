@@ -50,6 +50,7 @@ final class PlaybackDiagnosticsHDRTests: XCTestCase {
         XCTAssertEqual(PlaybackDiagnostics.classifyHDR(videoRange: "HDR", videoRangeType: "HDR10"), .hdr10)
         XCTAssertEqual(PlaybackDiagnostics.classifyHDR(videoRange: "HDR", videoRangeType: "HLG"), .hlg)
         XCTAssertEqual(PlaybackDiagnostics.classifyHDR(videoRange: "SDR", videoRangeType: "SDR"), .sdr)
+        XCTAssertEqual(PlaybackDiagnostics.classifyHDR(videoRange: "HDR", videoRangeType: "HDR10Plus"), .hdr10Plus)
         XCTAssertEqual(
             PlaybackDiagnostics.classifyHDR(videoRange: nil, videoRangeType: nil, colorTransfer: "smpte2084"),
             .hdr10
@@ -59,6 +60,17 @@ final class PlaybackDiagnosticsHDRTests: XCTestCase {
             .dolbyVision
         )
         XCTAssertEqual(PlaybackDiagnostics.classifyHDR(videoRange: nil, videoRangeType: nil), .unknown)
+    }
+
+    func testSourceFilenameHandlesWindowsAndPOSIXPaths() {
+        XCTAssertEqual(
+            PlaybackRequest.sourceFileName(from: #"D:\Media\Movies\Film.mkv"#),
+            "Film.mkv"
+        )
+        XCTAssertEqual(
+            PlaybackRequest.sourceFileName(from: "/media/movies/Film.mkv"),
+            "Film.mkv"
+        )
     }
 
     func testFriendlyContainerNames() {

@@ -13,7 +13,7 @@ enum ShareMediaParser {
     /// from them) change, so a share's catalog can force a one-time full re-walk
     /// that reclassifies every already-indexed file under the new rules instead of
     /// waiting for each file to change on disk. See `ShareScanner.scanIfStale`.
-    static let classifierVersion = 5
+    static let classifierVersion = 6
 
     /// File extensions we treat as playable video.
     static let videoExtensions: Set<String> = [
@@ -164,11 +164,24 @@ enum ShareMediaParser {
     }
 
     private static func yearBearingMovieFolder(_ folder: String, containsTitleNumber number: Int) -> Bool {
-        let parsed = parseMovie(stem: folder, parentFolder: nil)
-        guard parsed.year != nil else { return false }
+        guard let parsed = movieFolderIdentity(folder) else { return false }
         let numbers = parsed.title.components(separatedBy: CharacterSet.decimalDigits.inverted)
             .compactMap(Int.init)
         return numbers.contains(number)
+    }
+
+    /// A dedicated `Title (Year)` folder. A bare year bucket (`Movies/2024/`) is
+    /// NOT a movie identity — it contains unrelated titles and must not collapse
+    /// them into versions of a movie called "2024".
+    private static func movieFolderIdentity(_ folder: String) -> Movie? {
+        let ns = folder as NSString
+        let full = NSRange(location: 0, length: ns.length)
+        guard let match = yearPattern.matches(in: folder, range: full).last,
+              let year = Int(ns.substring(with: match.range)) else { return nil }
+        let title = clean(ns.substring(to: match.range.location))
+        guard !title.isEmpty,
+              title.unicodeScalars.contains(where: CharacterSet.letters.contains) else { return nil }
+        return Movie(title: title, year: year)
     }
 
     // MARK: - Episode
@@ -228,6 +241,17 @@ enum ShareMediaParser {
     /// last standalone integer in the (lightly de-tagged) stem. Returns `nil` when
     /// no plausible number remains — so a title that is only words stays a movie.
     static func bareEpisodeNumber(fromStem stem: String) -> (episode: Int, before: String)? {
+        // Numeric square brackets are a common anime absolute-number convention
+        // (`Show [18]`). Extract them before removing bracketed release tags.
+        let originalNS = stem as NSString
+        let originalRange = NSRange(location: 0, length: originalNS.length)
+        if let bracketed = try? NSRegularExpression(pattern: #"\[(\d{1,3})\]"#),
+           let match = bracketed.matches(in: stem, range: originalRange).last,
+           let number = Int(originalNS.substring(with: match.range(at: 1))),
+           number > 0 {
+            return (number, originalNS.substring(to: match.range.location))
+        }
+
         // Strip bracket groups and resolution/quality tokens first, so a `1080p` /
         // `[Group]` / `(2016)` can't be mistaken for the episode number. Preserve
         // offsets is unnecessary — we only need the surviving text + its own layout.
@@ -369,12 +393,9 @@ enum ShareMediaParser {
         if let parent = ancestors.last {
             let name = parent.lowercased().trimmingCharacters(in: .whitespaces)
             let isRoot = seriesLibraryNames.contains(name) || movieLibraryNames.contains(name)
-            if !isRoot, !isSeasonFolder(parent) {
-                let folder = parseMovie(stem: parent, parentFolder: nil)
-                if folder.year != nil, !folder.title.isEmpty {
-                    title = folder.title
-                    year = folder.year
-                }
+            if !isRoot, !isSeasonFolder(parent), let folder = movieFolderIdentity(parent) {
+                title = folder.title
+                year = folder.year
             }
         }
         return (title, year, stackedPartToken(fileName: fileName))

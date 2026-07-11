@@ -29,6 +29,12 @@ final class MediaVersionTests: XCTestCase {
         XCTAssertFalse(sdr51.isHDR)
         XCTAssertNil(sdr51.hdrLabel)
         XCTAssertEqual(sdr51.audioLabel, "5.1")
+
+        let hdr10Plus = MediaVersion(id: "3", height: 2160, videoRange: "HDR10Plus")
+        XCTAssertTrue(hdr10Plus.isHDR)
+        XCTAssertEqual(hdr10Plus.hdrLabel, "HDR10+")
+        XCTAssertTrue(hdr10Plus.displayLabel.contains("HDR10+"))
+        XCTAssertEqual(hdr10Plus.technicalBadges.map(\.label), ["4K", "HDR10+"])
     }
 
     func testTechnicalBadgesUseDolbyGroupedOrder() {

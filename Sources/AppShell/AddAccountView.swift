@@ -22,6 +22,8 @@ struct AddAccountView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var choice: ProviderKind?
     @State private var navigationDirection: NavigationDirection = .forward
+    @State private var pageIsVisible = true
+    @State private var isTransitioning = false
 
     private enum NavigationDirection {
         case forward
@@ -55,32 +57,34 @@ struct AddAccountView: View {
 
     var body: some View {
         ZStack {
-            switch choice {
-            case .none:
-                chooser
+            if pageIsVisible {
+                switch choice {
+                case .none:
+                    chooser
+                        .transition(pageTransition)
+                case .jellyfin:
+                    ServerPickerView(
+                        signedInServers: signedInServers.filter { $0.server.provider == .jellyfin },
+                        onBack: navigateBackToChooser
+                    ) { onJellyfinServerSelected($0) }
+                        .transition(pageTransition)
+                case .plex:
+                    PlexLinkView(
+                        viewModel: PlexAuthViewModel(
+                            service: PlexAuthService(deviceID: deviceID),
+                            onAuthenticated: onPlexAuthenticated,
+                            onAuthenticatedMany: onPlexAuthenticatedMany
+                        ),
+                        onCancel: navigateBackToChooser
+                    )
                     .transition(pageTransition)
-            case .jellyfin:
-                ServerPickerView(
-                    signedInServers: signedInServers.filter { $0.server.provider == .jellyfin },
-                    onBack: navigateBackToChooser
-                ) { onJellyfinServerSelected($0) }
+                case .mediaShare:
+                    AddShareView(
+                        onBack: navigateBackToChooser,
+                        onConfigured: onShareConfigured
+                    )
                     .transition(pageTransition)
-            case .plex:
-                PlexLinkView(
-                    viewModel: PlexAuthViewModel(
-                        service: PlexAuthService(deviceID: deviceID),
-                        onAuthenticated: onPlexAuthenticated,
-                        onAuthenticatedMany: onPlexAuthenticatedMany
-                    ),
-                    onCancel: navigateBackToChooser
-                )
-                .transition(pageTransition)
-            case .mediaShare:
-                AddShareView(
-                    onBack: navigateBackToChooser,
-                    onConfigured: onShareConfigured
-                )
-                .transition(pageTransition)
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -106,23 +110,40 @@ struct AddAccountView: View {
         )
     }
 
-    private var pageAnimation: Animation {
+    private var pageExitAnimation: Animation {
         reduceMotion
-            ? .easeInOut(duration: 0.18)
-            : .spring(response: 0.42, dampingFraction: 0.9)
+            ? .easeInOut(duration: 0.10)
+            : .easeIn(duration: 0.18)
+    }
+
+    private var pageEntryAnimation: Animation {
+        reduceMotion
+            ? .easeInOut(duration: 0.10)
+            : .spring(response: 0.38, dampingFraction: 0.9)
     }
 
     private func navigate(to destination: ProviderKind) {
-        withAnimation(pageAnimation) {
-            navigationDirection = .forward
-            choice = destination
-        }
+        transition(to: destination, direction: .forward)
     }
 
     private func navigateBackToChooser() {
-        withAnimation(pageAnimation) {
-            navigationDirection = .backward
-            choice = nil
+        transition(to: nil, direction: .backward)
+    }
+
+    private func transition(to destination: ProviderKind?, direction: NavigationDirection) {
+        guard !isTransitioning else { return }
+
+        isTransitioning = true
+        navigationDirection = direction
+        withAnimation(pageExitAnimation, completionCriteria: .removed) {
+            pageIsVisible = false
+        } completion: {
+            choice = destination
+            withAnimation(pageEntryAnimation, completionCriteria: .logicallyComplete) {
+                pageIsVisible = true
+            } completion: {
+                isTransitioning = false
+            }
         }
     }
 }

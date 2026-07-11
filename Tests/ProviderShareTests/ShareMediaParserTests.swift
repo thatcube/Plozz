@@ -165,6 +165,13 @@ final class ShareMediaParserTests: XCTestCase {
         XCTAssertEqual(ep?.episode, 1)
     }
 
+    func testNumericSeriesTitleStillAcceptsBareEpisodeNumber() {
+        let ep = episode("TV/1923/1923 - 05.mkv")
+        XCTAssertEqual(ep?.series, "1923")
+        XCTAssertEqual(ep?.season, 1)
+        XCTAssertEqual(ep?.episode, 5)
+    }
+
     // MARK: - No TV context ⇒ conservative (bare numbers stay movies)
 
     func testBareNumberWithoutSeriesContextStaysMovie() {

@@ -13,7 +13,7 @@ enum ShareMediaParser {
     /// from them) change, so a share's catalog can force a one-time full re-walk
     /// that reclassifies every already-indexed file under the new rules instead of
     /// waiting for each file to change on disk. See `ShareScanner.scanIfStale`.
-    static let classifierVersion = 7
+    static let classifierVersion = 8
 
     /// File extensions we treat as playable video.
     static let videoExtensions: Set<String> = [
@@ -108,6 +108,7 @@ enum ShareMediaParser {
                 if seasonAncestor == nil {
                     let fileMovie = parseMovie(stem: stem, parentFolder: nil)
                     if fileMovie.year != nil,
+                       fileMovie.title.unicodeScalars.contains(where: CharacterSet.letters.contains),
                        title(fileMovie.title, containsStandaloneNumber: ep.episode) {
                         return .movie(fileMovie)
                     }

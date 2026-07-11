@@ -75,7 +75,7 @@ struct AddAccountView: View {
     private var chooser: some View {
         VStack(spacing: 40) {
             if !canReturnToApp {
-                FirstRunBrandHeader()
+                FirstRunBrandMark()
             }
 
             HStack(spacing: 32) {
@@ -142,21 +142,14 @@ struct AddAccountView: View {
     }
 }
 
-private struct FirstRunBrandHeader: View {
+private struct FirstRunBrandMark: View {
     var body: some View {
-        VStack(spacing: 16) {
-            Image("PlozzLogo")
-                .resizable()
-                .interpolation(.none)
-                .scaledToFit()
-                .frame(width: 120, height: 120)
-                .accessibilityHidden(true)
-
-            OnboardingHeader(
-                "Welcome to Plozz",
-                subtitle: "Choose where your media lives to get started."
-            )
-        }
+        Image("PlozzLogo")
+            .resizable()
+            .interpolation(.none)
+            .scaledToFit()
+            .frame(width: 96, height: 96)
+            .accessibilityHidden(true)
     }
 }
 

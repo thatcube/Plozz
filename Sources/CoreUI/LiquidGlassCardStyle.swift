@@ -13,29 +13,14 @@ public struct PlozzGlassCardModifier: ViewModifier {
     private let cornerRadius: CGFloat
     private let isFocused: Bool
     private let glassAtRest: Bool
-    private let addsFocusHaloBacking: Bool
 
     @Environment(\.plozzReduceTransparency) private var reduceTransparency
     @Environment(\.themePalette) private var palette
 
-    public init(
-        cornerRadius: CGFloat,
-        isFocused: Bool,
-        glassAtRest: Bool = true,
-        addsFocusHaloBacking: Bool = false
-    ) {
+    public init(cornerRadius: CGFloat, isFocused: Bool, glassAtRest: Bool = true) {
         self.cornerRadius = cornerRadius
         self.isFocused = isFocused
         self.glassAtRest = glassAtRest
-        self.addsFocusHaloBacking = addsFocusHaloBacking
-    }
-
-    private var focusedGlassBacking: Color {
-        guard isFocused else { return .clear }
-        if addsFocusHaloBacking {
-            return .white.opacity(palette.isLight ? 0.20 : 0.06)
-        }
-        return palette.isLight ? palette.cardOpaqueSurface : .clear
     }
 
     /// tvOS 27 hangs the **main thread** (not a crash — animations keep running,
@@ -59,14 +44,9 @@ public struct PlozzGlassCardModifier: ViewModifier {
                 in: .rect(cornerRadius: cornerRadius)
             )
             .background {
-                // Full focused cards keep their existing Light-mode backing behind
-                // the glass. Focus halos use the overlay below instead.
-                shape.fill(addsFocusHaloBacking ? .clear : focusedGlassBacking)
-            }
-            .overlay {
-                // Native Liquid Glass can hide a wash placed behind it, especially
-                // in Light mode, so halo contrast is composited above the glass.
-                shape.fill(addsFocusHaloBacking ? focusedGlassBacking : .clear)
+                // Light mode + focus: opaque backing so the focus drop shadow can't
+                // bleed *through* the glass and read as a muddy haze inside the card.
+                if isFocused && palette.isLight { shape.fill(palette.cardOpaqueSurface) }
             }
     }
 
@@ -203,18 +183,8 @@ public extension View {
     /// resting cards skip the per-frame backdrop blur a live `.glassEffect` costs —
     /// the focused card still gets full glass. Defaults to `true` so every existing
     /// caller keeps its resting glass.
-    func plozzGlassCard(
-        cornerRadius: CGFloat,
-        isFocused: Bool,
-        glassAtRest: Bool = true,
-        addsFocusHaloBacking: Bool = false
-    ) -> some View {
-        modifier(PlozzGlassCardModifier(
-            cornerRadius: cornerRadius,
-            isFocused: isFocused,
-            glassAtRest: glassAtRest,
-            addsFocusHaloBacking: addsFocusHaloBacking
-        ))
+    func plozzGlassCard(cornerRadius: CGFloat, isFocused: Bool, glassAtRest: Bool = true) -> some View {
+        modifier(PlozzGlassCardModifier(cornerRadius: cornerRadius, isFocused: isFocused, glassAtRest: glassAtRest))
     }
 
     /// Draws Twozz's hairline "inner glass" rim around a clipped media thumbnail:

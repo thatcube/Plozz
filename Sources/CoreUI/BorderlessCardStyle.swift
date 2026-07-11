@@ -42,7 +42,6 @@ private struct FocusHaloModifier: ViewModifier {
     let isFocused: Bool
 
     @Environment(\.plozzMetrics) private var metrics
-    @Environment(\.themePalette) private var palette
 
     func body(content: Content) -> some View {
         let pad = metrics.circleFocusPadding
@@ -53,17 +52,9 @@ private struct FocusHaloModifier: ViewModifier {
                 // `pad` beyond every edge with negative padding (backgrounds draw
                 // outside the content bounds), its radius bumped to stay concentric.
                 Color.clear
-                    .plozzGlassCard(
-                        cornerRadius: cornerRadius + pad,
-                        isFocused: true,
-                        addsFocusHaloBacking: true
-                    )
+                    .plozzGlassCard(cornerRadius: cornerRadius + pad, isFocused: true)
                     .padding(-pad)
-                    .shadow(
-                        color: .black.opacity(palette.isLight ? 0.44 : 0.36),
-                        radius: 20,
-                        y: 10
-                    )
+                    .shadow(color: .black.opacity(0.36), radius: 20, y: 10)
                     .opacity(isFocused ? 1 : 0)
             }
             .scaleEffect(isFocused ? focusScale : 1)

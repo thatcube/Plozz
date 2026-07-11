@@ -353,9 +353,7 @@ private struct ProviderChoiceRow: View {
                 Spacer(minLength: 24)
 
                 if isLoading {
-                    ProgressView()
-                        .controlSize(.regular)
-                        .accessibilityLabel("Requesting a code")
+                    ProviderLoadingIndicator()
                 } else {
                     Image(systemName: "chevron.forward")
                         .font(.system(size: 22, weight: .semibold))
@@ -370,6 +368,18 @@ private struct ProviderChoiceRow: View {
         .buttonStyle(SettingsFocusButtonStyle(size: .contained))
         .focused(focusedControl, equals: ProviderChooserFocus(provider: provider))
         .padding(12)
+    }
+}
+
+private struct ProviderLoadingIndicator: View {
+    @Environment(\.settingsRowIsFocused) private var isFocused
+    @Environment(\.settingsRowFocusForeground) private var focusForeground
+
+    var body: some View {
+        ProgressView()
+            .controlSize(.regular)
+            .tint(isFocused ? focusForeground : .accentColor)
+            .accessibilityLabel("Requesting a code")
     }
 }
 

@@ -30,12 +30,6 @@ struct DetailHeroView: View {
     /// the season tabs and episode row peek above the fold, signalling there's
     /// more to scroll to.
     var heroHeightFraction: CGFloat = 1.0
-    /// Extends *only the backdrop image* (and its dissolve-to-background) below
-    /// the hero content by this fraction of the screen height, without moving the
-    /// title/Play (which stay pinned within `heroHeightFraction`). Used by the
-    /// series page so the seamless fade lands closer to the top of the episode
-    /// rail instead of completing high up the page.
-    var backdropBottomExtensionFraction: CGFloat = 0
     /// Stable title used when no logo resolves. A series page supplies the series
     /// title so the fallback remains the same identity while episodes are browsed.
     var titleFallbackOverride: String? = nil
@@ -189,6 +183,7 @@ struct DetailHeroView: View {
     /// the value-keyed `.animation` on `item.id`/`backdrop.id`.
     @State private var heroVisible = false
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// The app-installed action handler (the SAME one the press-and-hold context
     /// menu reads). Drives the visible Watchlist / Watched / Refresh hero buttons
     /// so they are byte-for-byte consistent with the long-press menu — optimistic
@@ -525,7 +520,7 @@ struct DetailHeroView: View {
         // leading-aligned title/Play off the left edge while the centred image
         // still looked correct. As a background, the image bleeds edge-to-edge
         // purely visually and the content column stays at the safe width.
-        .background(alignment: backdropBottomExtensionFraction > 0 ? .top : .bottom) {
+        .background(alignment: .bottom) {
             heroBackdrop(hideThumbnail: hideThumbnail)
                 // Re-key on the backdrop identity so a server switch (the only
                 // thing that changes the backdrop — episode focus deliberately
@@ -549,7 +544,11 @@ struct DetailHeroView: View {
         .opacity(heroVisible ? 1 : 0)
         .onAppear {
             guard !heroVisible else { return }
-            withAnimation(.easeInOut(duration: 0.35)) { heroVisible = true }
+            if reduceMotion {
+                heroVisible = true
+            } else {
+                withAnimation(.easeInOut(duration: 0.35)) { heroVisible = true }
+            }
         }
         // Cross-fade the hero text as the focused context changes, while the
         // backdrop swaps underneath it.
@@ -583,7 +582,7 @@ struct DetailHeroView: View {
             urls: [backdrop.heroBackdropURL, backdrop.backdropURL].compactMap { $0 },
             asyncFallbackURL: tmdbBackdropFallback,
             placeholderPosterURL: backdrop.posterURL,
-            height: Self.screenHeight * (heroHeightFraction + backdropBottomExtensionFraction),
+            height: Self.screenHeight * heroHeightFraction,
             scrimTone: scrimTone,
             blursImage: hideThumbnail && spoilerSettings.mode == .blur,
             recedeModel: seriesRecedeModel
@@ -1125,11 +1124,18 @@ private struct HeroMoreMenu: View, Equatable {
 private struct SeriesHeroContentRecedeModifier: ViewModifier {
     let model: SeriesHeroRecedeModel?
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     func body(content: Content) -> some View {
+        let receded = model?.isReceded == true
         content
-            .opacity(model?.isReceded == true ? 0 : 1)
-            .offset(y: model?.isReceded == true ? -120 : 0)
-            .animation(.smooth(duration: 0.45), value: model?.isReceded)
+            .opacity(receded ? 0 : 1)
+            .offset(y: reduceMotion ? 0 : (receded ? -120 : 0))
+            .accessibilityHidden(receded)
+            .animation(
+                reduceMotion ? nil : .smooth(duration: 0.45),
+                value: receded
+            )
     }
 }
 
@@ -1142,6 +1148,8 @@ private struct SeriesDetailHeroBackdrop: View {
     let blursImage: Bool
     let recedeModel: SeriesHeroRecedeModel?
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var body: some View {
         let receded = recedeModel?.isReceded == true
         HeroBackdropLayer(
@@ -1151,9 +1159,9 @@ private struct SeriesDetailHeroBackdrop: View {
             height: height,
             scrimTone: scrimTone,
             blursImage: blursImage,
-            verticalOffset: receded ? -260 : 0
+            verticalOffset: reduceMotion ? 0 : (receded ? -260 : 0)
         )
-        .animation(.smooth(duration: 0.9), value: receded)
+        .animation(reduceMotion ? nil : .smooth(duration: 0.9), value: receded)
     }
 }
 

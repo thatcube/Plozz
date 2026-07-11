@@ -41,6 +41,8 @@ struct SeriesDetailView: View {
     /// episode row to it, and parks focus on the hero Play button.
     let initialEpisode: MediaItem?
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     /// Which season's episodes the rail is currently showing. Driven by season
     /// tab focus; seeded to the "next up" season on first appearance.
     @State private var selectedSeasonID: String?
@@ -78,13 +80,12 @@ struct SeriesDetailView: View {
     /// when it isn't, which edge it is clipped past. `0` until first layout.
     @State private var seasonBarViewportWidth: CGFloat = 0
 
-    /// Live frame of each season chip in the bar's own coordinate space
+    /// Live frame of the pending reveal target in the bar's own coordinate space
     /// (`seasonBarSpace`). Lets us tell whether the active chip is already fully
     /// visible — so we DON'T shift an already-on-screen bar — and, when it isn't,
     /// which edge it is clipped past so we reveal it minimally to that edge instead
-    /// of yanking it to the leading keyline. Populated by a per-chip GeometryReader;
-    /// the bar uses an eager `HStack`, so `MediaRowView`'s onAppear/onDisappear
-    /// visibility trick can't work here (every chip is realised at once).
+    /// of yanking it to the leading keyline. Measurement exists only while the
+    /// one-shot reveal is pending; normal horizontal scrolling publishes no frames.
     @State private var seasonChipFrames: [String: CGRect] = [:]
 
     /// One-shot arm for the active-season reveal. Set when the bar appears or the
@@ -239,8 +240,12 @@ struct SeriesDetailView: View {
                         // Play-regains-focus case below.
                         onHeroActionFocused: {
                             recedeModel.restore()
-                            withAnimation(.easeInOut(duration: 0.4)) {
+                            if reduceMotion {
                                 proxy.scrollTo(Self.topAnchorID, anchor: .top)
+                            } else {
+                                withAnimation(.easeInOut(duration: 0.4)) {
+                                    proxy.scrollTo(Self.topAnchorID, anchor: .top)
+                                }
                             }
                         }
                     )
@@ -315,8 +320,12 @@ struct SeriesDetailView: View {
             .onChange(of: playFocused) { _, focused in
                 if focused {
                     recedeModel.restore()
-                    withAnimation(.easeInOut(duration: 0.4)) {
+                    if reduceMotion {
                         proxy.scrollTo(Self.topAnchorID, anchor: .top)
+                    } else {
+                        withAnimation(.easeInOut(duration: 0.4)) {
+                            proxy.scrollTo(Self.topAnchorID, anchor: .top)
+                        }
                     }
                 }
             }
@@ -333,8 +342,12 @@ struct SeriesDetailView: View {
     /// cannot produce a different resting offset from a slow navigation.
     private func centerEpisodeBrowser(using proxy: ScrollViewProxy) {
         recedeModel.recede()
-        withAnimation(.smooth(duration: 0.55)) {
+        if reduceMotion {
             proxy.scrollTo(Self.browserFocusAnchorID, anchor: .center)
+        } else {
+            withAnimation(.smooth(duration: 0.55)) {
+                proxy.scrollTo(Self.browserFocusAnchorID, anchor: .center)
+            }
         }
     }
 
@@ -367,16 +380,25 @@ struct SeriesDetailView: View {
             .background(
                 GeometryReader { geo in
                     Color.clear
-                        .onAppear { seasonBarViewportWidth = geo.size.width }
+                        .onAppear {
+                            if seasonBarViewportWidth != geo.size.width {
+                                seasonBarViewportWidth = geo.size.width
+                            }
+                        }
                         .onChange(of: geo.size.width) { _, width in
-                            seasonBarViewportWidth = width
+                            if seasonBarViewportWidth != width {
+                                seasonBarViewportWidth = width
+                            }
                         }
                 }
             )
-            // Collect each chip's live frame (published by `seasonChip`) so the reveal
-            // can tell whether the active chip is already fully visible and, if not,
-            // which edge it is clipped past.
-            .onPreferenceChange(SeasonChipFramesKey.self) { seasonChipFrames = $0 }
+            // Collect the pending target's frame (published by `seasonChip`) so the
+            // reveal can tell whether it is already fully visible and, if not, which
+            // edge it is clipped past.
+            .onPreferenceChange(SeasonChipFramesKey.self) { frames in
+                guard pendingSeasonReveal, frames != seasonChipFrames else { return }
+                seasonChipFrames = frames
+            }
             .frame(height: SeriesEpisodeBrowserLayout.seasonBarHeight)
             // Never clip a focused chip's lift, shadow or border.
             .scrollClipDisabled()
@@ -420,11 +442,13 @@ struct SeriesDetailView: View {
             // user is navigating the bar) — once the user has scrolled the bar it
             // stays where they left it.
             .onAppear {
+                seasonChipFrames = [:]
                 pendingSeasonReveal = true
                 fulfilSeasonRevealIfPending(using: proxy)
             }
             .onChange(of: selectedSeasonID) { _, _ in
                 guard !seasonBarEngaged else { return }
+                seasonChipFrames = [:]
                 pendingSeasonReveal = true
                 fulfilSeasonRevealIfPending(using: proxy)
             }
@@ -454,17 +478,18 @@ struct SeriesDetailView: View {
         // We have geometry — consume the arm (whether or not we end up scrolling).
         pendingSeasonReveal = false
 
-        let viewport = seasonBarViewportWidth
-        let eps: CGFloat = 0.5
-        // Already fully within the viewport → leave the bar exactly where it is.
-        if frame.minX >= -eps, frame.maxX <= viewport + eps { return }
-
-        // Otherwise reveal minimally to the edge it is clipped past: flush-right when
-        // it overflows the trailing edge, flush to the keyline when it's off the left.
-        let anchor: UnitPoint = frame.maxX > viewport ? .trailing : .leading
+        guard let edge = SeriesSeasonRevealEdge.clippedEdge(
+            frame: frame,
+            viewportWidth: seasonBarViewportWidth
+        ) else { return }
+        let anchor: UnitPoint = edge == .trailing ? .trailing : .leading
         DispatchQueue.main.async {
-            withAnimation(.easeInOut(duration: 0.25)) {
+            if reduceMotion {
                 proxy.scrollTo(id, anchor: anchor)
+            } else {
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    proxy.scrollTo(id, anchor: anchor)
+                }
             }
         }
     }
@@ -494,17 +519,19 @@ struct SeriesDetailView: View {
         // Stable scroll target so the season bar can programmatically scroll the
         // active chip into view (see `fulfilSeasonRevealIfPending`).
         .id(season.id)
-        // Publish this chip's live frame (in the bar's viewport coordinate space) so
-        // the reveal can tell whether the active chip is already fully on-screen and,
-        // if not, which edge it is clipped past.
-        .background(
-            GeometryReader { geo in
-                Color.clear.preference(
-                    key: SeasonChipFramesKey.self,
-                    value: [season.id: geo.frame(in: .named(Self.seasonBarSpace))]
-                )
+        // Measure only the pending reveal target. Once the one-shot decision is
+        // consumed, no chip publishes live scroll frames, so horizontal movement
+        // cannot invalidate the full series page on every animation frame.
+        .background {
+            if pendingSeasonReveal, season.id == activeID {
+                GeometryReader { geo in
+                    Color.clear.preference(
+                        key: SeasonChipFramesKey.self,
+                        value: [season.id: geo.frame(in: .named(Self.seasonBarSpace))]
+                    )
+                }
             }
-        )
+        }
         // Remove non-active seasons from the focus system until the bar is engaged,
         // so directional entry can only ever land on the active season (no snap).
         .disabled(!isFocusable)
@@ -986,8 +1013,25 @@ struct SeriesDetailView: View {
 
 }
 
-/// Collects each season chip's frame (in the season bar's viewport coordinate
-/// space) so `SeriesDetailView` can decide whether the active chip is already
+enum SeriesSeasonRevealEdge: Equatable {
+    case leading
+    case trailing
+
+    static func clippedEdge(
+        frame: CGRect,
+        viewportWidth: CGFloat,
+        tolerance: CGFloat = 0.5
+    ) -> Self? {
+        guard viewportWidth > 0 else { return nil }
+        if frame.minX >= -tolerance, frame.maxX <= viewportWidth + tolerance {
+            return nil
+        }
+        return frame.maxX > viewportWidth ? .trailing : .leading
+    }
+}
+
+/// Collects the pending season chip's frame (in the season bar's viewport
+/// coordinate space) so `SeriesDetailView` can decide whether it is already
 /// fully visible — and, if not, which edge it is clipped past for a minimal reveal.
 private struct SeasonChipFramesKey: PreferenceKey {
     static var defaultValue: [String: CGRect] = [:]

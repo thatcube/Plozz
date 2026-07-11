@@ -11,11 +11,13 @@ public struct EpisodeColumnCard: View {
 
     private let item: MediaItem
     private let spoilerSettings: SpoilerSettings
+    private let presentation: EpisodeColumnPresentation
     private let action: () -> Void
 
     @FocusState private var isFocused: Bool
     @State private var synopsisVisible = false
     @State private var synopsisAtRest = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.plozzWatchStatusIndicator) private var watchStatusIndicator
     @Environment(\.themePalette) private var palette
 
@@ -28,11 +30,11 @@ public struct EpisodeColumnCard: View {
     ) {
         self.item = item
         self.spoilerSettings = spoilerSettings
+        self.presentation = EpisodeColumnPresentation(
+            item: item,
+            spoilerSettings: spoilerSettings
+        )
         self.action = action
-    }
-
-    private var presentation: EpisodeColumnPresentation {
-        EpisodeColumnPresentation(item: item, spoilerSettings: spoilerSettings)
     }
 
     public var body: some View {
@@ -48,7 +50,7 @@ public struct EpisodeColumnCard: View {
                 .plozzMediaEdge(cornerRadius: metrics.landscapeCardCornerRadius)
                 .plozzFocusHalo(
                     cornerRadius: metrics.landscapeCardCornerRadius,
-                    focusScale: PlozzTheme.Metrics.mediumFocusedCardScale,
+                    focusScale: reduceMotion ? 1 : PlozzTheme.Metrics.mediumFocusedCardScale,
                     isFocused: isFocused
                 )
 
@@ -78,12 +80,18 @@ public struct EpisodeColumnCard: View {
                     maxWidth: Self.artworkSize.width
                 )
                 .opacity(synopsisVisible ? 1 : 0)
-                .animation(.easeOut(duration: 0.12), value: synopsisVisible)
-                .offset(y: synopsisAtRest ? 0 : -metrics.focusCaptionPush)
-                .animation(.smooth(duration: 0.28), value: synopsisAtRest)
+                .animation(
+                    reduceMotion ? nil : .easeOut(duration: 0.12),
+                    value: synopsisVisible
+                )
+                .offset(y: reduceMotion || synopsisAtRest ? 0 : -metrics.focusCaptionPush)
+                .animation(
+                    reduceMotion ? nil : .smooth(duration: 0.28),
+                    value: synopsisAtRest
+                )
                 .padding(.top, 10)
             }
-            .offset(y: isFocused ? 0 : -metrics.focusCaptionPush)
+            .offset(y: reduceMotion || isFocused ? 0 : -metrics.focusCaptionPush)
         }
         .frame(width: Self.artworkSize.width, alignment: .leading)
         .padding(.horizontal, Self.sideMargin)
@@ -94,11 +102,16 @@ public struct EpisodeColumnCard: View {
         )
         .compositingGroup()
         .zIndex(isFocused ? 2 : 0)
-        .animation(.easeOut(duration: 0.18), value: isFocused)
-        .task(id: isFocused) {
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: isFocused)
+        .task(id: synopsisTaskID) {
             synopsisVisible = false
             synopsisAtRest = false
             guard isFocused else { return }
+            if reduceMotion {
+                synopsisVisible = true
+                synopsisAtRest = true
+                return
+            }
             try? await Task.sleep(for: .milliseconds(110))
             guard !Task.isCancelled else { return }
             synopsisVisible = true
@@ -107,6 +120,15 @@ public struct EpisodeColumnCard: View {
         .mediaItemContextMenu(for: item)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(presentation.accessibilityLabel)
+    }
+
+    private var synopsisTaskID: SynopsisTaskID {
+        SynopsisTaskID(isFocused: isFocused, reduceMotion: reduceMotion)
+    }
+
+    private struct SynopsisTaskID: Hashable {
+        let isFocused: Bool
+        let reduceMotion: Bool
     }
 
     @ViewBuilder

@@ -153,7 +153,19 @@ public struct MediaRowView: View {
     /// Whether each card needs an individual focus binding installed — required
     /// to drive initial/default focus and to report focus changes to the hero.
     private var tracksFocus: Bool {
-        initialFocusID != nil || onFocusChange != nil || defaultFocusID != nil
+        MediaRowFocusPolicy.observesFocus(
+            initialFocusID: initialFocusID,
+            defaultFocusID: defaultFocusID,
+            hasOnFocusEntered: onFocusEntered != nil,
+            hasOnFocusChange: onFocusChange != nil
+        )
+    }
+
+    /// Focus observation and directional entry gating are separate concerns.
+    /// A callback-only row needs per-card bindings, but must retain tvOS's normal
+    /// column-aligned navigation rather than becoming a remembered focus section.
+    private var usesFocusEntryGate: Bool {
+        MediaRowFocusPolicy.usesEntryGate(defaultFocusID: defaultFocusID)
     }
 
     /// The card the entry gate targets: the card focus last settled on in this row
@@ -163,6 +175,7 @@ public struct MediaRowView: View {
     /// arrived on. A stale `lastFocusedID` from another season is ignored because
     /// it won't be present in the current `items`.
     private var gateTarget: String? {
+        guard usesFocusEntryGate else { return nil }
         if let lastFocusedID, itemIDSet.contains(lastFocusedID) {
             return lastFocusedID
         }
@@ -236,10 +249,10 @@ public struct MediaRowView: View {
                     // repositioning. This mirrors the season bar's own ScrollView-level
                     // `.focusSection()` (which makes UP work the same way) and the hero
                     // action row (commit eddd937e). Ordinary rows (Home, detail children —
-                    // `tracksFocus == false`) stay UNsectioned so vertical navigation
+                    // `gatesFocus == false`) stay UNsectioned so vertical navigation
                     // keeps tvOS's column-aligned X-projection (the "focus jumps to the
                     // opposite side" bug, commit f812fe64).
-                    .focusSectionIf(tracksFocus)
+                    .focusSectionIf(gatesFocus)
                     .onAppear { applyInitialFocus(using: proxy) }
                     .onChange(of: focusedID) { _, newValue in
                         handleFocusChange(to: newValue, using: proxy)
@@ -380,7 +393,11 @@ public struct MediaRowView: View {
             let candidate = items[i]
             guard !prefetchedIDs.contains(candidate.id) else { continue }
             prefetchedIDs.insert(candidate.id)
-            for url in candidate.artworkCandidates(for: artworkStyle).prefix(2) {
+            for url in MediaRowArtworkPrefetchPolicy.candidates(
+                for: candidate,
+                style: artworkStyle,
+                spoilerSettings: spoilerSettings
+            ).prefix(2) {
                 ArtworkImageCache.shared.prefetch(url, variant: variant)
             }
         }
@@ -485,6 +502,38 @@ public struct MediaRowView: View {
         } else {
             proxy.scrollTo(target, anchor: anchor)
         }
+    }
+}
+
+enum MediaRowFocusPolicy {
+    static func observesFocus(
+        initialFocusID: String?,
+        defaultFocusID: String?,
+        hasOnFocusEntered: Bool,
+        hasOnFocusChange: Bool
+    ) -> Bool {
+        initialFocusID != nil
+            || defaultFocusID != nil
+            || hasOnFocusEntered
+            || hasOnFocusChange
+    }
+
+    static func usesEntryGate(defaultFocusID: String?) -> Bool {
+        defaultFocusID != nil
+    }
+}
+
+enum MediaRowArtworkPrefetchPolicy {
+    static func candidates(
+        for item: MediaItem,
+        style: PosterCardView.Style,
+        spoilerSettings: SpoilerSettings
+    ) -> [URL] {
+        if spoilerSettings.mode == .placeholder,
+           spoilerSettings.shouldHideThumbnail(for: item) {
+            return [item.fallbackArtworkURL].compactMap { $0 }
+        }
+        return item.artworkCandidates(for: style)
     }
 }
 

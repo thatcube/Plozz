@@ -340,6 +340,25 @@ private enum OnboardingPage: Equatable {
         case .selectTheme: 6
         }
     }
+
+    var transitionID: String {
+        switch self {
+        case let .selectingServer(canReturnToApp):
+            "selectingServer-\(canReturnToApp)"
+        case let .authenticating(server):
+            "authenticating-\(server.id)"
+        case let .selectPlexUser(selection):
+            "selectPlexUser-\(selection?.accountID ?? "pending")"
+        case .selectLibraries:
+            "selectLibraries"
+        case .enableProfilesPrompt:
+            "enableProfilesPrompt"
+        case .confirmProfile:
+            "confirmProfile"
+        case .selectTheme:
+            "selectTheme"
+        }
+    }
 }
 
 private struct OnboardingFlowView: View {
@@ -352,7 +371,6 @@ private struct OnboardingFlowView: View {
     @State private var displayedPage: OnboardingPage
     @State private var pendingPage: OnboardingPage?
     @State private var navigationDirection: OnboardingNavigationDirection = .forward
-    @State private var pageIsVisible = true
     @State private var isTransitioning = false
 
     init(
@@ -374,15 +392,15 @@ private struct OnboardingFlowView: View {
 
     var body: some View {
         ZStack {
-            if pageIsVisible {
-                OnboardingPageContent(
-                    page: displayedPage,
-                    appState: appState,
-                    deviceColorScheme: deviceColorScheme
-                )
-                .geometryGroup()
-                .transition(pageTransition)
-            }
+            OnboardingPageContent(
+                page: displayedPage,
+                appState: appState,
+                deviceColorScheme: deviceColorScheme
+            )
+            .id(displayedPage.transitionID)
+            .geometryGroup()
+            .transition(pageTransition)
+            .allowsHitTesting(!isTransitioning)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onChange(of: currentPage) { _, newPage in
@@ -422,32 +440,17 @@ private struct OnboardingFlowView: View {
         isTransitioning = true
 
         withAnimation(
-            OnboardingPageMotion.exitAnimation(reduceMotion: reduceMotion),
-            completionCriteria: .removed
+            OnboardingPageMotion.animation(reduceMotion: reduceMotion),
+            completionCriteria: .logicallyComplete
         ) {
-            pageIsVisible = false
+            displayedPage = nextPage
         } completion: {
-            // Plex can advance from its finishing state to user selection while
-            // the old page is still leaving. Insert only the newest destination
-            // so an obsolete intermediate page never flashes on screen.
-            let destination = pendingPage ?? nextPage
-            pendingPage = nil
-            navigationDirection = direction(from: outgoingPage, to: destination)
-            displayedPage = destination
-
-            withAnimation(
-                OnboardingPageMotion.entryAnimation(reduceMotion: reduceMotion),
-                completionCriteria: .removed
-            ) {
-                pageIsVisible = true
-            } completion: {
-                isTransitioning = false
-                if pendingPage == displayedPage {
-                    pendingPage = nil
-                }
-                if pendingPage != nil {
-                    transitionToPendingPage()
-                }
+            isTransitioning = false
+            if pendingPage == displayedPage {
+                pendingPage = nil
+            }
+            if pendingPage != nil {
+                transitionToPendingPage()
             }
         }
     }

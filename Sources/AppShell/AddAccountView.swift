@@ -22,7 +22,6 @@ struct AddAccountView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var choice: ProviderKind?
     @State private var navigationDirection: OnboardingNavigationDirection = .forward
-    @State private var pageIsVisible = true
     @State private var pageIsReady = true
     @State private var isTransitioning = false
 
@@ -53,13 +52,13 @@ struct AddAccountView: View {
 
     var body: some View {
         ZStack {
-            if pageIsVisible {
-                ZStack { pageContent }
+            ZStack { pageContent }
+                .id(pageID)
                 // Resolve the page's geometry once at this boundary instead of
                 // pushing the transition down to independently hosted focus rows.
                 .geometryGroup()
                 .transition(pageTransition)
-            }
+                .allowsHitTesting(!isTransitioning)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         // Let overflowing scroll content reach the physical window edges. The
@@ -112,12 +111,13 @@ struct AddAccountView: View {
         )
     }
 
-    private var pageExitAnimation: Animation {
-        OnboardingPageMotion.exitAnimation(reduceMotion: reduceMotion)
-    }
-
-    private var pageEntryAnimation: Animation {
-        OnboardingPageMotion.entryAnimation(reduceMotion: reduceMotion)
+    private var pageID: String {
+        switch choice {
+        case .none: "providerChooser"
+        case .jellyfin: "jellyfin"
+        case .plex: "plex"
+        case .mediaShare: "mediaShare"
+        }
     }
 
     private func navigate(to destination: ProviderKind) {
@@ -134,16 +134,14 @@ struct AddAccountView: View {
         isTransitioning = true
         pageIsReady = false
         navigationDirection = direction
-        withAnimation(pageExitAnimation, completionCriteria: .removed) {
-            pageIsVisible = false
-        } completion: {
+        withAnimation(
+            OnboardingPageMotion.animation(reduceMotion: reduceMotion),
+            completionCriteria: .logicallyComplete
+        ) {
             choice = destination
-            withAnimation(pageEntryAnimation, completionCriteria: .removed) {
-                pageIsVisible = true
-            } completion: {
-                pageIsReady = true
-                isTransitioning = false
-            }
+        } completion: {
+            pageIsReady = true
+            isTransitioning = false
         }
     }
 }

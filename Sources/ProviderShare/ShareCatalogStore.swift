@@ -1229,6 +1229,42 @@ actor ShareCatalogStore {
         return id
     }
 
+    /// Stored watch-state ids relevant to the requested current items, mapped to
+    /// their canonical ids. Normal grid/detail/search stamping uses this bounded
+    /// alias set instead of canonicalizing the entire watch history.
+    func watchStateAliases(for itemIDs: [String]) -> [String: String] {
+        ensureOpen()
+        guard db != nil, !itemIDs.isEmpty else { return [:] }
+
+        var aliases: [String: String] = [:]
+        var canonicalByGroup: [String: String] = [:]
+        for id in itemIDs {
+            let canonical = canonicalItemID(id)
+            aliases[id] = canonical
+            aliases[canonical] = canonical
+            if let group = ShareCatalogID.movieKey(forMovieID: canonical) {
+                canonicalByGroup[group] = canonical
+            }
+        }
+
+        let groups = Array(canonicalByGroup.keys)
+        guard !groups.isEmpty else { return aliases }
+        let placeholders = Array(repeating: "?", count: groups.count).joined(separator: ",")
+        query("SELECT alias_id, group_key FROM movie_alias WHERE group_key IN (\(placeholders));",
+              bind: { stmt in
+                  for (offset, group) in groups.enumerated() {
+                      self.bindText(stmt, Int32(offset + 1), group)
+                  }
+              }) { stmt in
+            guard let alias = self.columnText(stmt, 0),
+                  let group = self.columnText(stmt, 1),
+                  let canonical = canonicalByGroup[group] else { return }
+            let storedID = alias.hasPrefix("f:") ? alias : ShareCatalogID.movie(alias)
+            aliases[storedID] = canonical
+        }
+        return aliases
+    }
+
     /// Whether a legacy/raw `f:` id still has a live catalog row. Playback uses
     /// this to preserve exact-file selection for existing files while routing a
     /// deleted legacy file alias to the surviving logical movie.

@@ -112,7 +112,7 @@ public struct ShareProvider: MediaProvider {
         // Canonicalize ALL stored state before filtering/limiting so several legacy
         // file-version records collapse to one movie without pushing distinct
         // titles off the row.
-        let byCanonical = await canonicalWatchRecords()
+        let byCanonical = await allCanonicalWatchRecords()
         let resumable = byCanonical.filter { !$0.value.played && $0.value.position > 1 }
         let ranked = resumable
             .sorted { $0.value.updatedAt > $1.value.updatedAt }
@@ -299,7 +299,7 @@ public struct ShareProvider: MediaProvider {
         let item = try await item(id: canonicalItemID)
         // Resume from the newest canonical/legacy member-file state so a movie
         // watched before version grouping still resumes after the upgrade.
-        let records = await canonicalWatchRecords()
+        let records = await watchRecords(for: [canonicalItemID])
         let record = records[canonicalItemID]
         let startPosition = (record?.played == true) ? 0 : (record?.position ?? 0)
         let playItem = (mediaSourceID != nil) ? item.selectingVersion(mediaSourceID) : item
@@ -344,17 +344,15 @@ public struct ShareProvider: MediaProvider {
         default:
             break
         }
-        let records = await canonicalWatchRecords()
-        let catalog = await self.catalog
-        let canonicalID = await catalog.canonicalItemID(item.id)
+        let records = await watchRecords(for: [item.id])
+        let canonicalID = await self.catalog.canonicalItemID(item.id)
         let record = records[canonicalID]
         return Self.stamped(item, with: record)
     }
 
-    /// Fold the small persisted watch dictionary onto current logical ids once per
-    /// operation. This preserves legacy `f:` state without N catalog queries per
-    /// visible grid card.
-    private func canonicalWatchRecords() async -> [String: ShareWatchStore.Record] {
+    /// Full-history fold used only by Continue Watching, which inherently needs all
+    /// resumable state before sorting/limiting.
+    private func allCanonicalWatchRecords() async -> [String: ShareWatchStore.Record] {
         let snapshot = await watchStore.recordsSnapshot()
         let catalog = await self.catalog
         var result: [String: ShareWatchStore.Record] = [:]
@@ -368,8 +366,30 @@ public struct ShareProvider: MediaProvider {
         return result
     }
 
+    /// Bounded watch lookup for normal item/page operations. The catalog returns
+    /// only aliases relevant to requested ids; the watch store then performs direct
+    /// dictionary lookups for that small set.
+    private func watchRecords(for itemIDs: [String]) async -> [String: ShareWatchStore.Record] {
+        let catalog = await self.catalog
+        let aliases = await catalog.watchStateAliases(for: itemIDs)
+        let stored = await watchStore.records(for: aliases.keys)
+        var result: [String: ShareWatchStore.Record] = [:]
+        for (storedID, canonicalID) in aliases {
+            guard let record = stored[storedID] else { continue }
+            if let existing = result[canonicalID], existing.updatedAt >= record.updatedAt { continue }
+            result[canonicalID] = record
+        }
+        return result
+    }
+
     private func stampWatchState(_ items: [MediaItem]) async -> [MediaItem] {
-        let records = await canonicalWatchRecords()
+        let playableIDs = items.compactMap { item -> String? in
+            switch item.kind {
+            case .folder, .collection, .series, .season: return nil
+            default: return item.id
+            }
+        }
+        let records = await watchRecords(for: playableIDs)
         let catalog = await self.catalog
         var stamped: [MediaItem] = []
         stamped.reserveCapacity(items.count)

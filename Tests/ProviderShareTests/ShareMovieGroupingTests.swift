@@ -234,6 +234,30 @@ final class ShareMovieGroupingTests: XCTestCase {
         XCTAssertEqual(canonical, other)
     }
 
+    func testWatchAliasLookupIsBoundedToRequestedMovie() async {
+        let store = ShareCatalogStore(accountKey: "watch-alias-page", directory: tempDir())
+        let tree: [String: [SMBShareBrowser.Entry]] = [
+            "": [dir("Movies")],
+            "Movies": [dir("Heat (1995)"), dir("Dune (2021)")],
+            "Movies/Heat (1995)": [
+                file("Heat (1995) 2160p.mkv"),
+                file("Heat (1995) 1080p.mkv"),
+            ],
+            "Movies/Dune (2021)": [
+                file("Dune (2021) 2160p.mkv"),
+                file("Dune (2021) 1080p.mkv"),
+            ],
+        ]
+        await scan(tree, into: store)
+        let movies = await store.movies(offset: 0, limit: 10)
+        let heat = try! XCTUnwrap(movies.first { $0.title == "Heat" })
+
+        let aliases = await store.watchStateAliases(for: [heat.id])
+        XCTAssertEqual(Set(aliases.values), [heat.id])
+        XCTAssertTrue(aliases.keys.contains { $0.contains("Heat (1995) 2160p") })
+        XCTAssertFalse(aliases.keys.contains { $0.contains("Dune") })
+    }
+
     /// A stale identity-index ref can still address an old `f:<path>` item. It
     /// must retain filename/quality metadata instead of becoming "Version".
     func testLegacyFileMovieLookupRetainsNamedVersion() async {

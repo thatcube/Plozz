@@ -462,17 +462,80 @@ public struct HomeAggregator: Sendable {
         let musicLibraryIDs = Set(rawLibs.filter(\.isMusic).map(\.id))
         let cwFiltered = musicLibraryIDs.isEmpty ? cw : cw.filter { $0.libraryID.map { !musicLibraryIDs.contains($0) } ?? true }
         let ltFiltered = musicLibraryIDs.isEmpty ? lt : lt.filter { $0.libraryID.map { !musicLibraryIDs.contains($0) } ?? true }
+        let seriesIDsByItemID = await seriesProviderIDs(
+            for: cwFiltered + ltFiltered,
+            provider: provider
+        )
+        let resolvedContinueWatching = stampSeriesProviderIDs(
+            seriesIDsByItemID,
+            onto: cwFiltered
+        )
+        let resolvedLatest = stampSeriesProviderIDs(
+            seriesIDsByItemID,
+            onto: ltFiltered
+        )
 
-        if cwFiltered.isEmpty && ltFiltered.isEmpty && rawLibs.isEmpty {
+        if resolvedContinueWatching.isEmpty && resolvedLatest.isEmpty && rawLibs.isEmpty {
             PlozzLog.app.error("Aggregation: no content from account \(accountID)")
         }
 
         return AccountContent(
-            continueWatching: cwFiltered.map { $0.taggingSource(accountID) },
-            latest: ltFiltered.map { $0.taggingSource(accountID) },
+            continueWatching: resolvedContinueWatching.map { $0.taggingSource(accountID) },
+            latest: resolvedLatest.map { $0.taggingSource(accountID) },
             watchlist: wl.map { $0.taggingSource(accountID) },
             libraries: rawLibs.map { aggregated($0, from: resolved) }
         )
+    }
+
+    /// Resolves each distinct parent series once so episode rows carry explicit
+    /// show IDs. Managed providers expose episode IDs while filesystem enrichment
+    /// exposes series IDs; stamping both under `Series*` gives Home one safe shared
+    /// identity when combined with exact season/episode numbers.
+    private static func seriesProviderIDs(
+        for items: [MediaItem],
+        provider: any MediaProvider
+    ) async -> [String: [String: String]] {
+        var seen = Set<String>()
+        let seriesIDs = items.compactMap { item -> String? in
+            guard item.kind == .episode,
+                  let seriesID = item.seriesID,
+                  seen.insert(seriesID).inserted else { return nil }
+            return seriesID
+        }
+        let resolved: [(String, [String: String])] = await loadBounded(
+            seriesIDs,
+            maxConcurrent: 4
+        ) { seriesID in
+            let ids = (try? await provider.item(id: seriesID))?.providerIDs ?? [:]
+            return (seriesID, ids)
+        }
+        return Dictionary(uniqueKeysWithValues: resolved)
+    }
+
+    private static func stampSeriesProviderIDs(
+        _ resolved: [String: [String: String]],
+        onto items: [MediaItem]
+    ) -> [MediaItem] {
+        let mappings: [(ProviderIDNamespace, String)] = [
+            (.imdb, "SeriesImdb"),
+            (.tmdb, "SeriesTmdb"),
+            (.tvdb, "SeriesTvdb"),
+            (.tvmaze, "SeriesTvmaze"),
+            (.aniList, "SeriesAniList"),
+            (.myAnimeList, "SeriesMal"),
+            (.aniDB, "SeriesAniDB")
+        ]
+        return items.map { item in
+            guard let seriesID = item.seriesID,
+                  let sourceIDs = resolved[seriesID] else { return item }
+            var copy = item
+            for (namespace, key) in mappings {
+                guard copy.providerIDs[key] == nil,
+                      let value = sourceIDs.providerID(namespace) else { continue }
+                copy.providerIDs[key] = value
+            }
+            return copy
+        }
     }
 
     /// Best-effort watchlist fetch for one provider: `[]` when the provider can't

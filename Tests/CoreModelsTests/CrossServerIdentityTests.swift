@@ -113,7 +113,7 @@ final class MediaItemIdentityTests: XCTestCase {
         XCTAssertEqual(Set(merged[0].sources.map(\.id)), ["plex:plex-e5", "smb:smb-e5"])
     }
 
-    func testEpisodeFingerprintBridgesManagedAndFilesystemIDs() {
+    func testSeriesEpisodeIdentityBridgesManagedAndFilesystemIDs() {
         let plex = MediaItem(
             id: "plex-e4",
             title: "The Water Falls, the Stones Emerge",
@@ -122,7 +122,10 @@ final class MediaItemIdentityTests: XCTestCase {
             seasonNumber: 2,
             episodeNumber: 4,
             productionYear: 2026,
-            providerIDs: ["Tvdb": "11597652"],
+            providerIDs: [
+                "Tvdb": "11597652",
+                "SeriesTvdb": "385925"
+            ],
             sourceAccountID: "plex"
         )
         let share = MediaItem(
@@ -133,7 +136,10 @@ final class MediaItemIdentityTests: XCTestCase {
             seasonNumber: 2,
             episodeNumber: 4,
             productionYear: nil,
-            providerIDs: ["Tvdb": "385925"],
+            providerIDs: [
+                "Tvdb": "385925",
+                "SeriesTvdb": "385925"
+            ],
             sourceAccountID: "share"
         )
 
@@ -143,7 +149,7 @@ final class MediaItemIdentityTests: XCTestCase {
         XCTAssertEqual(Set(merged[0].sources.map(\.id)), ["plex:plex-e4", "share:share-e4"])
     }
 
-    func testEpisodeFingerprintDoesNotMergeDifferentAirYears() {
+    func testSeriesEpisodeIdentityDoesNotMergeDifferentSeriesIDs() {
         let original = MediaItem(
             id: "original",
             title: "The Cave of Two Lovers",
@@ -152,6 +158,7 @@ final class MediaItemIdentityTests: XCTestCase {
             seasonNumber: 2,
             episodeNumber: 2,
             productionYear: 2006,
+            providerIDs: ["SeriesTvdb": "74852"],
             sourceAccountID: "original"
         )
         let remake = MediaItem(
@@ -162,6 +169,7 @@ final class MediaItemIdentityTests: XCTestCase {
             seasonNumber: 2,
             episodeNumber: 2,
             productionYear: 2026,
+            providerIDs: ["SeriesTvdb": "385925"],
             sourceAccountID: "remake"
         )
 

@@ -69,11 +69,10 @@ public enum MediaItemIdentity {
     ///    top risks bridging two completely different shows that merely share a
     ///    name/year via a false transitive merge (anime vs live-action remake with
     ///    bad year metadata).
-    /// 2. **Title identity is movies-only, plus a strict episode fingerprint.** Two
-    ///    films with the same title/year are almost certainly the same release.
-    ///    Episodes may bridge incompatible provider ID levels only when series
-    ///    title, episode title, series/air year, season, and episode all match after
-    ///    normalization. Whole series never use a title identity.
+    /// 2. **Title identity is movies-only.** Two films with the same title and
+    ///    year are almost certainly the same release; episodes and whole series
+    ///    require external IDs. Episodes may additionally use explicit `Series*`
+    ///    IDs scoped by exact season/episode numbers.
     /// 3. **No bare `.sameItemID`.** A raw item id is only unique *within one
     ///    server* — Plex `ratingKey`s are small per-server integers that collide
     ///    across unrelated servers, so emitting `.sameItemID(item.id)` here would
@@ -114,13 +113,9 @@ public enum MediaItemIdentity {
             }
         }
 
-        if let episodeIdentity = episodeTitleIdentity(for: item) {
-            // Always append this bridge even when external ids exist. Managed
-            // providers expose episode-level IDs, while filesystem enrichment
-            // exposes the parent series' IDs; the strict fingerprint is their only
-            // shared key.
-            result.append(episodeIdentity)
-        } else if result.isEmpty, let titleIdentity = titleIdentity(for: item) {
+        result.append(contentsOf: seriesEpisodeIdentities(for: item))
+
+        if result.isEmpty, let titleIdentity = titleIdentity(for: item) {
             result.append(titleIdentity)
         }
         return result
@@ -149,40 +144,30 @@ public enum MediaItemIdentity {
         return .title(normalizedTitle: normalized, year: year, kind: item.kind)
     }
 
-    private static func episodeTitleIdentity(for item: MediaItem) -> MediaIdentity? {
+    private static func seriesEpisodeIdentities(
+        for item: MediaItem
+    ) -> [MediaIdentity] {
         guard item.kind == .episode,
-              let parentTitle = item.parentTitle,
               let season = item.seasonNumber,
-              let episode = item.episodeNumber else { return nil }
-        let seriesIdentity = normalizedSeriesIdentity(parentTitle)
-        let year = seriesIdentity.displayYear ?? item.productionYear
-        guard let year else { return nil }
-        let series = seriesIdentity.title
-        let title = normalizedTitle(item.title)
-        guard !series.isEmpty, !title.isEmpty else { return nil }
-        return .title(
-            normalizedTitle: "\(series)|s\(season)e\(episode)|\(title)",
-            year: year,
-            kind: .episode
-        )
-    }
-
-    /// Removes a trailing display-only year from series titles so
-    /// `Avatar: The Last Airbender (2024)` and `Avatar The Last Airbender 2024`
-    /// normalize together. That explicit series year wins over the episode air year.
-    private static func normalizedSeriesIdentity(
-        _ raw: String
-    ) -> (title: String, displayYear: Int?) {
-        var parts = normalizedTitle(raw).split(separator: " ").map(String.init)
-        var displayYear: Int?
-        if let last = parts.last,
-           last.count == 4,
-           let year = Int(last),
-           (1900...2100).contains(year) {
-            displayYear = year
-            parts.removeLast()
+              let episode = item.episodeNumber else { return [] }
+        let namespaces: [(ProviderIDNamespace, String)] = [
+            (.seriesImdb, "imdb"),
+            (.seriesTmdb, "tmdb"),
+            (.seriesTvdb, "tvdb"),
+            (.seriesTvmaze, "tvmaze"),
+            (.seriesAniList, "anilist"),
+            (.seriesMal, "myanimelist"),
+            (.seriesAniDB, "anidb")
+        ]
+        return namespaces.compactMap { namespace, canonical in
+            guard let value = item.providerIDs.providerID(namespace) else {
+                return nil
+            }
+            return .external(
+                source: "series-\(canonical):s\(season)e\(episode)",
+                value: value.lowercased()
+            )
         }
-        return (parts.joined(separator: " "), displayYear)
     }
 
     /// Whether two items almost certainly refer to **different works** despite

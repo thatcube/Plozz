@@ -39,6 +39,24 @@ packages:
     path: .
 
 targets:
+  # Development-only host for running the fully local SearchIndexKit Phase-0
+  # benchmark on physical Apple TV hardware. It is a separate bundle and is not
+  # embedded in, linked from, or shipped with Plozz.
+  SearchIndexSpikeHost:
+    type: application
+    platform: tvOS
+    deploymentTarget: "18.0"
+    sources:
+      - path: tools/SearchIndexSpikeHost
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.thatcube.Plozz.SearchIndexSpike
+        PRODUCT_NAME: SearchIndexSpikeHost
+        GENERATE_INFOPLIST_FILE: YES
+    dependencies:
+      - package: Plozz
+        product: SearchIndexKit
+
   Plozz:
     type: application
     platform: tvOS
@@ -330,6 +348,13 @@ targets:
         product: AppShelliOS
 
 schemes:
+  SearchIndexSpikeHost:
+    build:
+      targets:
+        SearchIndexSpikeHost: all
+    run:
+      config: Debug
+
   Plozz:
     build:
       targets:

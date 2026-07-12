@@ -25,6 +25,7 @@ let package = Package(
         .library(name: "CoreUI", targets: ["CoreUI"]),
         .library(name: "MetadataKit", targets: ["MetadataKit"]),
         .library(name: "FeatureDiscoveryCore", targets: ["FeatureDiscoveryCore"]),
+        .library(name: "SearchIndexKit", targets: ["SearchIndexKit"]),
         .library(name: "FeatureDiscovery", targets: ["FeatureDiscovery"]),
         .library(name: "ProviderJellyfin", targets: ["ProviderJellyfin"]),
         .library(name: "ProviderPlex", targets: ["ProviderPlex"]),
@@ -175,6 +176,18 @@ let package = Package(
         .target(
             name: "MetadataKit",
             dependencies: ["CoreModels", "CoreNetworking"]
+        ),
+        // MARK: Fully local natural-language search
+        //
+        // Provider-neutral document construction, Apple sentence embeddings,
+        // compact vector persistence/ranking, and a rebuildable SQLite index.
+        // No query or library metadata leaves the device.
+        .target(
+            name: "SearchIndexKit",
+            dependencies: ["CoreModels"],
+            linkerSettings: [
+                .linkedLibrary("sqlite3")
+            ]
         ),
 
         // MARK: Providers
@@ -623,6 +636,16 @@ let package = Package(
         .testTarget(
             name: "MetadataKitTests",
             dependencies: ["MetadataKit", "CoreModels"]
+        ),
+        .testTarget(
+            name: "SearchIndexKitTests",
+            dependencies: ["SearchIndexKit", "CoreModels"]
+        ),
+        // Explicitly invoked Phase-0 device/scale harness. Kept out of the default
+        // test sweep because callers choose the synthetic catalog size.
+        .testTarget(
+            name: "SearchIndexSpikeTests",
+            dependencies: ["SearchIndexKit", "CoreModels"]
         ),
         .testTarget(
             name: "FeatureDiscoveryTests",

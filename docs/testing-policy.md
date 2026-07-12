@@ -59,20 +59,14 @@ suites and the reason each was selected.
 ## SOURCE → TEST map (illustrative — computed live, do not hand-maintain)
 
 Each `Sources/<Module>` is covered by `Tests/<Module>Tests` when that test target
-exists. Modules with **no** test target (e.g. `FeatureSettings`, `TopShelfKit`,
-`CrashReporting`, the metadata `*Service` shims) map to nothing directly but are
-still covered transitively by `AppShellTests` and any feature that depends on them.
+exists. Modules with no direct test target map to nothing directly but are still
+covered transitively by `AppShellTests` and any feature that depends on them.
 Run `tools/test-impact.py --list-tests` for the authoritative current list, or
 `tools/test-fast.sh --dry-run <Module>` to see what a change would select.
 
-At time of writing there are 23 test targets: `AppShellTests`, `CoreModelsTests`,
-`CoreNetworkingTests`, `CoreUITests`, `EnginePlozzigenTests`, `FeatureAuthTests`,
-`FeatureDiscoveryTests`, `FeatureHomeTests`, `FeatureMusicTests`,
-`FeaturePlaybackTests`, `FeatureProfilesTests`, `FeatureSearchTests`,
-`MediaTransportCoreTests`, `MediaTransportHTTPTests`, `MediaTransportSMBTests`,
-`MetadataKitTests`, `ProviderJellyfinTests`, `ProviderPlexTests`,
-`ProviderShareTests`, `ProviderTrailersTests`, `RatingsServiceTests`,
-`SeerServiceTests`, `TraktServiceTests`.
+`SearchIndexSpikeTests` is the explicit local-semantic-search quality/scale
+harness. It participates in the data-driven full sweep and can also be invoked
+alone; set `PLOZZ_SPIKE_DOCUMENT_COUNT` to pin its synthetic catalog size.
 
 ## Tiered policy — which command when
 

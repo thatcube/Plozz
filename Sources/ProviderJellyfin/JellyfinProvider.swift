@@ -700,12 +700,17 @@ public struct JellyfinProvider: MediaProvider {
             guard let id = selectedSource.id, !id.isEmpty else { return nil }
             return id
         }()
-        let tileURLs = (0..<tileCount).compactMap {
-            client.trickplayTileURL(itemID: itemID, mediaSourceID: tileSourceID, width: chosen.width, tileIndex: $0)
+        let tileResources = (0..<tileCount).compactMap { tileIndex in
+            try? trickplayTileResource(
+                itemID: itemID,
+                mediaSourceID: tileSourceID,
+                width: chosen.width,
+                tileIndex: tileIndex
+            )
         }
-        guard tileURLs.count == tileCount else {
+        guard tileResources.count == tileCount else {
             PlozzLog.playback.debug(
-                "Jellyfin trickplay unavailable: tile URL generation mismatch itemID=\(itemID) expected=\(tileCount) got=\(tileURLs.count)"
+                "Jellyfin trickplay unavailable: tile resource generation mismatch itemID=\(itemID) expected=\(tileCount) got=\(tileResources.count)"
             )
             return nil
         }
@@ -717,7 +722,47 @@ public struct JellyfinProvider: MediaProvider {
             tileRows: tileRows,
             thumbnailCount: count,
             intervalMs: interval,
-            tileURLs: tileURLs
+            tileResources: tileResources
+        )
+    }
+
+    private func trickplayTileResource(
+        itemID: String,
+        mediaSourceID: String?,
+        width: Int,
+        tileIndex: Int
+    ) throws -> ScrubPreviewResource {
+        var pathComponents = URLComponents()
+        pathComponents.path =
+            "/Videos/\(itemID)/Trickplay/\(width)/\(tileIndex).jpg"
+        var queryItems: [AuthenticatedHTTPQueryItem] = []
+        if let mediaSourceID, !mediaSourceID.isEmpty {
+            queryItems.append(
+                try AuthenticatedHTTPQueryItem(
+                    name: "mediaSourceId",
+                    value: mediaSourceID
+                )
+            )
+        }
+        let resource = try AuthenticatedHTTPResource(
+            pathBase: .configuredBaseURL,
+            path: String(
+                pathComponents.percentEncodedPath.drop(while: { $0 == "/" })
+            ),
+            queryItems: queryItems
+        )
+        return .authenticatedHTTP(
+            try AuthenticatedHTTPPlaybackLocator(
+                provider: .jellyfin,
+                accountID: accountID,
+                credentialRevision: credentialRevision,
+                itemID: itemID,
+                mediaSourceID: mediaSourceID,
+                deliveryMode: .directFile,
+                formatHint: MediaFormatHint(container: "jpg"),
+                purpose: .scrubPreview,
+                resource: resource
+            )
         )
     }
 

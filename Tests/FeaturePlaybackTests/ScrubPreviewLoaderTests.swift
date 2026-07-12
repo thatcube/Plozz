@@ -25,7 +25,9 @@ final class ScrubPreviewLoaderTests: XCTestCase {
                 tileRows: 1,
                 thumbnailCount: 2,
                 intervalMs: 10_000,
-                tileURLs: [tileURL]
+                tileResources: [
+                    .publicURL(try SecretFreeURLSource(url: tileURL))
+                ]
             ),
             session: makeSession()
         )
@@ -52,7 +54,9 @@ final class ScrubPreviewLoaderTests: XCTestCase {
                 tileRows: 1,
                 thumbnailCount: 1,
                 intervalMs: 10_000,
-                tileURLs: [tileURL]
+                tileResources: [
+                    .publicURL(try! SecretFreeURLSource(url: tileURL))
+                ]
             ),
             session: makeSession()
         )
@@ -68,7 +72,10 @@ final class ScrubPreviewLoaderTests: XCTestCase {
             [.init(statusCode: 200, data: try makeBIFData(frames: [makeJPEGData(color: .red), makeJPEGData(color: .blue)]))],
             for: bifURL
         )
-        let loader = PlexBIFThumbnailLoader(url: bifURL, session: makeSession())
+        let loader = PlexBIFThumbnailLoader(
+            resource: .publicURL(try SecretFreeURLSource(url: bifURL)),
+            session: makeSession()
+        )
 
         let first = await loader.thumbnail(forSeconds: 0)
         XCTAssertNotNil(first)
@@ -87,13 +94,75 @@ final class ScrubPreviewLoaderTests: XCTestCase {
             ],
             for: bifURL
         )
-        let loader = PlexBIFThumbnailLoader(url: bifURL, session: makeSession())
+        let loader = PlexBIFThumbnailLoader(
+            resource: .publicURL(try SecretFreeURLSource(url: bifURL)),
+            session: makeSession()
+        )
 
         let first = await loader.thumbnail(forSeconds: 0)
         XCTAssertNil(first)
         let second = await loader.thumbnail(forSeconds: 0)
         XCTAssertNotNil(second)
         XCTAssertEqual(URLSessionStubProtocol.requestCount(for: bifURL), 2)
+    }
+
+    func testTrickplayLoaderResolvesAuthenticatedResourceAtFetch() async throws {
+        let resolvedURL = URL(string: "https://media.test/trickplay/0.jpg?api_key=current")!
+        URLSessionStubProtocol.setResponses(
+            [.init(statusCode: 200, data: try makeTileImageData())],
+            for: resolvedURL
+        )
+        let locator = try scrubLocator(
+            provider: .jellyfin,
+            path: "Videos/item/Trickplay/320/0.jpg"
+        )
+        let resolver = RecordingScrubResolver(url: resolvedURL)
+        let loader = TrickplayThumbnailLoader(
+            manifest: TrickplayManifest(
+                thumbnailWidth: 10,
+                thumbnailHeight: 10,
+                tileColumns: 2,
+                tileRows: 1,
+                thumbnailCount: 2,
+                intervalMs: 10_000,
+                tileResources: [.authenticatedHTTP(locator)]
+            ),
+            authenticatedHTTPResolver: resolver,
+            session: makeSession()
+        )
+
+        let image = await loader.thumbnail(forSeconds: 0)
+        XCTAssertNotNil(image)
+        XCTAssertEqual(resolver.locators, [locator])
+    }
+
+    func testBIFLoaderResolvesAuthenticatedResourceAtFetch() async throws {
+        let resolvedURL = URL(
+            string: "https://plex.test/library/parts/42/indexes/sd?X-Plex-Token=current"
+        )!
+        URLSessionStubProtocol.setResponses(
+            [
+                .init(
+                    statusCode: 200,
+                    data: try makeBIFData(frames: [makeJPEGData(color: .green)])
+                )
+            ],
+            for: resolvedURL
+        )
+        let locator = try scrubLocator(
+            provider: .plex,
+            path: "library/parts/42/indexes/sd"
+        )
+        let resolver = RecordingScrubResolver(url: resolvedURL)
+        let loader = PlexBIFThumbnailLoader(
+            resource: .authenticatedHTTP(locator),
+            authenticatedHTTPResolver: resolver,
+            session: makeSession()
+        )
+
+        let image = await loader.thumbnail(forSeconds: 0)
+        XCTAssertNotNil(image)
+        XCTAssertEqual(resolver.locators, [locator])
     }
 
     func testControlsModelSignalsPreviewFrameAvailability() {
@@ -111,6 +180,24 @@ final class ScrubPreviewLoaderTests: XCTestCase {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [URLSessionStubProtocol.self]
         return URLSession(configuration: configuration)
+    }
+
+    private func scrubLocator(
+        provider: ProviderKind,
+        path: String
+    ) throws -> AuthenticatedHTTPPlaybackLocator {
+        try AuthenticatedHTTPPlaybackLocator(
+            provider: provider,
+            accountID: "account",
+            credentialRevision: CredentialRevision(),
+            itemID: "item",
+            deliveryMode: .directFile,
+            purpose: .scrubPreview,
+            resource: try AuthenticatedHTTPResource(
+                pathBase: .configuredBaseURL,
+                path: path
+            )
+        )
     }
 
     private func makeTileImageData() throws -> Data {
@@ -183,6 +270,25 @@ final class ScrubPreviewLoaderTests: XCTestCase {
             bytes.append(contentsOf: frame)
         }
         return Data(bytes)
+    }
+}
+
+@MainActor
+private final class RecordingScrubResolver:
+    AuthenticatedHTTPResourceResolving
+{
+    let url: URL
+    private(set) var locators: [AuthenticatedHTTPPlaybackLocator] = []
+
+    init(url: URL) {
+        self.url = url
+    }
+
+    func resolve(
+        _ locator: AuthenticatedHTTPPlaybackLocator
+    ) async throws -> URL {
+        locators.append(locator)
+        return url
     }
 }
 

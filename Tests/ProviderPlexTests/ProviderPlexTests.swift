@@ -1235,7 +1235,7 @@ final class PlexProviderMappingTests: XCTestCase {
     func testPlaybackInfoBuildsPlexBIFScrubPreviewWhenIndexed() async throws {
         // A part the server has generated BIF preview thumbnails for advertises
         // `indexes:"sd"`, so the provider should expose a Plex BIF scrub source
-        // pointing at /library/parts/{id}/indexes/sd with the auth token.
+        // pointing at /library/parts/{id}/indexes/sd without storing the token.
         let stub = StubHTTPClient()
         stub.stub(pathSuffix: "/library/metadata/99", json: """
         {"MediaContainer":{"Metadata":[
@@ -1249,9 +1249,13 @@ final class PlexProviderMappingTests: XCTestCase {
         let provider = PlexProvider(session: makeSession(), http: stub)
 
         let request = try await provider.playbackInfo(for: "99")
-        let bifURL = try XCTUnwrap(request.scrubPreview?.plexBIFURL?.absoluteString)
-        XCTAssertTrue(bifURL.hasPrefix("https://plex.host:32400/library/parts/42/indexes/sd"), bifURL)
-        XCTAssertTrue(bifURL.contains("X-Plex-Token=TOKEN"), bifURL)
+        guard case .some(.authenticatedHTTP(let locator)) =
+            request.scrubPreview?.plexBIFResource else {
+            return XCTFail("expected authenticated BIF resource")
+        }
+        XCTAssertEqual(locator.resource.path, "library/parts/42/indexes/sd")
+        XCTAssertEqual(locator.purpose, .scrubPreview)
+        XCTAssertFalse(String(describing: locator).contains("TOKEN"))
     }
 
     func testAudioPlaybackInfoReturnsCredentialFreeSource() async throws {
@@ -1305,8 +1309,11 @@ final class PlexProviderMappingTests: XCTestCase {
         let provider = PlexProvider(session: makeSession(), http: stub)
 
         let request = try await provider.playbackInfo(for: "101")
-        let bifURL = try XCTUnwrap(request.scrubPreview?.plexBIFURL?.absoluteString)
-        XCTAssertTrue(bifURL.hasPrefix("https://plex.host:32400/library/parts/55/indexes/hd"), bifURL)
+        guard case .some(.authenticatedHTTP(let locator)) =
+            request.scrubPreview?.plexBIFResource else {
+            return XCTFail("expected authenticated BIF resource")
+        }
+        XCTAssertEqual(locator.resource.path, "library/parts/55/indexes/hd")
     }
 
     func testPlaybackInfoBuildsBIFScrubPreviewForEpisode() async throws {
@@ -1323,9 +1330,12 @@ final class PlexProviderMappingTests: XCTestCase {
         let provider = PlexProvider(session: makeSession(), http: stub)
 
         let request = try await provider.playbackInfo(for: "102")
-        let bifURL = try XCTUnwrap(request.scrubPreview?.plexBIFURL?.absoluteString)
-        XCTAssertTrue(bifURL.hasPrefix("https://plex.host:32400/library/parts/99/indexes/hd"), bifURL)
-        XCTAssertTrue(bifURL.contains("X-Plex-Token=TOKEN"), bifURL)
+        guard case .some(.authenticatedHTTP(let locator)) =
+            request.scrubPreview?.plexBIFResource else {
+            return XCTFail("expected authenticated BIF resource")
+        }
+        XCTAssertEqual(locator.resource.path, "library/parts/99/indexes/hd")
+        XCTAssertFalse(String(describing: locator).contains("TOKEN"))
     }
 
     func testPlaybackInfoHasNoScrubPreviewWhenPartNotIndexed() async throws {

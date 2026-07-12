@@ -15,11 +15,19 @@ import CoreNetworking
 final class TrickplayThumbnailLoader: ScrubThumbnailProviding {
     private let manifest: TrickplayManifest
     private let session: URLSession
-    private var tileCache: [URL: CGImage] = [:]
-    private var inFlight: [URL: Task<CGImage?, Never>] = [:]
+    private let authenticatedHTTPResolver:
+        (any AuthenticatedHTTPResourceResolving)?
+    private var tileCache: [ScrubPreviewResource: CGImage] = [:]
+    private var inFlight: [ScrubPreviewResource: Task<CGImage?, Never>] = [:]
 
-    init(manifest: TrickplayManifest, session: URLSession = .shared) {
+    init(
+        manifest: TrickplayManifest,
+        authenticatedHTTPResolver:
+            (any AuthenticatedHTTPResourceResolving)? = nil,
+        session: URLSession = .shared
+    ) {
         self.manifest = manifest
+        self.authenticatedHTTPResolver = authenticatedHTTPResolver
         self.session = session
     }
 
@@ -27,10 +35,10 @@ final class TrickplayThumbnailLoader: ScrubThumbnailProviding {
     func thumbnail(forSeconds seconds: TimeInterval) async -> CGImage? {
         guard let tile = manifest.tile(forSeconds: seconds) else { return nil }
         let tileImage: CGImage?
-        if let cached = tileCache[tile.url] {
+        if let cached = tileCache[tile.resource] {
             tileImage = cached
         } else {
-            tileImage = await loadTile(tile.url)
+            tileImage = await loadTile(tile.resource)
         }
         guard let tileImage else { return nil }
         return crop(tileImage, to: tile)
@@ -41,15 +49,24 @@ final class TrickplayThumbnailLoader: ScrubThumbnailProviding {
     /// awaiting. Returns `nil` when the tile still needs downloading.
     func cachedThumbnail(forSeconds seconds: TimeInterval) -> CGImage? {
         guard let tile = manifest.tile(forSeconds: seconds),
-              let tileImage = tileCache[tile.url] else { return nil }
+              let tileImage = tileCache[tile.resource] else { return nil }
         return crop(tileImage, to: tile)
     }
 
-    private func loadTile(_ url: URL) async -> CGImage? {
-        if let existing = inFlight[url] { return await existing.value }
+    private func loadTile(_ resource: ScrubPreviewResource) async -> CGImage? {
+        if let existing = inFlight[resource] { return await existing.value }
         let session = self.session
+        let resolver = authenticatedHTTPResolver
         let task = Task<CGImage?, Never> {
             do {
+                let url: URL
+                switch resource {
+                case .publicURL(let source):
+                    url = source.url
+                case .authenticatedHTTP(let locator):
+                    guard let resolver else { return nil }
+                    url = try await resolver.resolve(locator)
+                }
                 let (data, response) = try await session.data(from: url)
                 if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
                     PlozzLog.playback.debug(
@@ -63,16 +80,17 @@ final class TrickplayThumbnailLoader: ScrubThumbnailProviding {
                 }
                 return image
             } catch {
+                let error = error as NSError
                 PlozzLog.playback.debug(
-                    "Trickplay tile request error=\(String(reflecting: error)) url=\(PlozzLog.redact(url: url))"
+                    "Trickplay tile request failed domain=\(error.domain) code=\(error.code)"
                 )
                 return nil
             }
         }
-        inFlight[url] = task
+        inFlight[resource] = task
         let result = await task.value
-        inFlight[url] = nil
-        if let result { tileCache[url] = result }
+        inFlight[resource] = nil
+        if let result { tileCache[resource] = result }
         return result
     }
 

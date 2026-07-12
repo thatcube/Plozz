@@ -183,7 +183,7 @@ public final class PlayerViewModel {
     /// Builds the engine for a routed ``PlaybackEngineKind``. Injected by the
     /// composition root so this module never depends on the VLCKit engine.
     private let engineFactory: EngineFactory
-    private let authenticatedHTTPResolver:
+    let authenticatedHTTPResolver:
         (any AuthenticatedHTTPResourceResolving)?
     /// Device/display/audio policy the router uses to pick an engine.
     private let capabilities: MediaCapabilities

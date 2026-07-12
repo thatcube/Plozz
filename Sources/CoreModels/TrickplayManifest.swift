@@ -12,7 +12,7 @@ import Foundation
 ///  * a single thumbnail is `thumbnailWidth × thumbnailHeight` px;
 ///  * each tile image packs `tileColumns × tileRows` thumbnails in row-major order;
 ///  * thumbnail *n* covers playback time `n × intervalMs` … `(n+1) × intervalMs`;
-///  * `tileURLs[i]` is the i-th tile image (the tiles in playback order).
+///  * `tileResources[i]` is the i-th tile image (the tiles in playback order).
 public struct TrickplayManifest: Hashable, Sendable {
     /// Width of a single thumbnail, in pixels.
     public var thumbnailWidth: Int
@@ -27,7 +27,7 @@ public struct TrickplayManifest: Hashable, Sendable {
     /// Milliseconds of playback between consecutive thumbnails.
     public var intervalMs: Int
     /// The tile images, in playback order. Index with `tileIndex(forThumbnail:)`.
-    public var tileURLs: [URL]
+    public var tileResources: [ScrubPreviewResource]
 
     public init(
         thumbnailWidth: Int,
@@ -36,7 +36,7 @@ public struct TrickplayManifest: Hashable, Sendable {
         tileRows: Int,
         thumbnailCount: Int,
         intervalMs: Int,
-        tileURLs: [URL]
+        tileResources: [ScrubPreviewResource]
     ) {
         self.thumbnailWidth = thumbnailWidth
         self.thumbnailHeight = thumbnailHeight
@@ -44,7 +44,7 @@ public struct TrickplayManifest: Hashable, Sendable {
         self.tileRows = tileRows
         self.thumbnailCount = thumbnailCount
         self.intervalMs = intervalMs
-        self.tileURLs = tileURLs
+        self.tileResources = tileResources
     }
 
     /// Number of thumbnails packed into one tile image.
@@ -56,7 +56,7 @@ public struct TrickplayManifest: Hashable, Sendable {
             && intervalMs > 0
             && thumbnailWidth > 0
             && thumbnailHeight > 0
-            && !tileURLs.isEmpty
+            && !tileResources.isEmpty
     }
 
     /// The thumbnail index covering a playback position (clamped to range).
@@ -74,12 +74,12 @@ public struct TrickplayManifest: Hashable, Sendable {
         let thumbnailIndex = thumbnailIndex(forSeconds: seconds)
         let perTile = thumbnailsPerTile
         let tileIndex = thumbnailIndex / perTile
-        guard tileURLs.indices.contains(tileIndex) else { return nil }
+        guard tileResources.indices.contains(tileIndex) else { return nil }
         let indexInTile = thumbnailIndex % perTile
         let column = indexInTile % tileColumns
         let row = indexInTile / tileColumns
         return TrickplayTile(
-            url: tileURLs[tileIndex],
+            resource: tileResources[tileIndex],
             cropX: column * thumbnailWidth,
             cropY: row * thumbnailHeight,
             cropWidth: thumbnailWidth,
@@ -91,8 +91,8 @@ public struct TrickplayManifest: Hashable, Sendable {
 /// A resolved trickplay thumbnail: which tile image to load and the pixel
 /// rectangle to crop out of it.
 public struct TrickplayTile: Hashable, Sendable {
-    /// The tile image to download (cache by this URL).
-    public var url: URL
+    /// The tile image to download (cache by this credential-free resource).
+    public var resource: ScrubPreviewResource
     /// Left edge of the thumbnail within the tile image, in pixels.
     public var cropX: Int
     /// Top edge of the thumbnail within the tile image, in pixels.
@@ -102,8 +102,14 @@ public struct TrickplayTile: Hashable, Sendable {
     /// Thumbnail height, in pixels.
     public var cropHeight: Int
 
-    public init(url: URL, cropX: Int, cropY: Int, cropWidth: Int, cropHeight: Int) {
-        self.url = url
+    public init(
+        resource: ScrubPreviewResource,
+        cropX: Int,
+        cropY: Int,
+        cropWidth: Int,
+        cropHeight: Int
+    ) {
+        self.resource = resource
         self.cropX = cropX
         self.cropY = cropY
         self.cropWidth = cropWidth

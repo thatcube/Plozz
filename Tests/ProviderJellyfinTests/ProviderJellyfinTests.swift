@@ -734,11 +734,19 @@ final class JellyfinProviderMappingTests: XCTestCase {
         XCTAssertEqual(manifest.thumbnailCount, 250)
         XCTAssertEqual(manifest.intervalMs, 10000)
         // 250 thumbs / 100 per tile -> 3 tiles.
-        XCTAssertEqual(manifest.tileURLs.count, 3)
-        let first = manifest.tileURLs[0].absoluteString
-        XCTAssertTrue(first.contains("/Videos/i1/Trickplay/320/0.jpg"), first)
-        XCTAssertTrue(first.contains("api_key=TOKEN"), first)
-        XCTAssertTrue(first.contains("mediaSourceId=src1"), first)
+        XCTAssertEqual(manifest.tileResources.count, 3)
+        guard case .authenticatedHTTP(let first) =
+            manifest.tileResources[0] else {
+            return XCTFail("expected authenticated trickplay resource")
+        }
+        XCTAssertEqual(
+            first.resource.path,
+            "Videos/i1/Trickplay/320/0.jpg"
+        )
+        XCTAssertEqual(first.purpose, .scrubPreview)
+        XCTAssertEqual(first.resource.queryItems.first?.name, "mediaSourceId")
+        XCTAssertEqual(first.resource.queryItems.first?.value, "src1")
+        XCTAssertFalse(String(describing: first).contains("TOKEN"))
     }
 
     func testPlaybackInfoParsesTrickplayManifestForEpisode() async throws {
@@ -757,7 +765,11 @@ final class JellyfinProviderMappingTests: XCTestCase {
         let request = try await provider.playbackInfo(for: "e1")
         let manifest = try XCTUnwrap(request.scrubPreview?.tiledManifest)
         XCTAssertEqual(manifest.thumbnailCount, 150)
-        XCTAssertTrue(manifest.tileURLs[0].absoluteString.contains("/Videos/e1/Trickplay/320/0.jpg"))
+        guard case .authenticatedHTTP(let first) =
+            manifest.tileResources[0] else {
+            return XCTFail("expected authenticated trickplay resource")
+        }
+        XCTAssertEqual(first.resource.path, "Videos/e1/Trickplay/320/0.jpg")
     }
 
     func testPlaybackInfoTrickplayFallbackUsesManifestSourceID() async throws {
@@ -775,9 +787,11 @@ final class JellyfinProviderMappingTests: XCTestCase {
 
         let request = try await provider.playbackInfo(for: "i2")
         let manifest = try XCTUnwrap(request.scrubPreview?.tiledManifest)
-        let first = manifest.tileURLs[0].absoluteString
-        XCTAssertTrue(first.contains("mediaSourceId=actual-src"), first)
-        XCTAssertFalse(first.contains("mediaSourceId=playback-src"), first)
+        guard case .authenticatedHTTP(let first) =
+            manifest.tileResources[0] else {
+            return XCTFail("expected authenticated trickplay resource")
+        }
+        XCTAssertEqual(first.resource.queryItems.first?.value, "actual-src")
     }
 
     func testPlaybackInfoTrickplayParsesCompositeWidthKey() async throws {
@@ -796,7 +810,11 @@ final class JellyfinProviderMappingTests: XCTestCase {
         let request = try await provider.playbackInfo(for: "i3")
         let manifest = try XCTUnwrap(request.scrubPreview?.tiledManifest)
         XCTAssertEqual(manifest.thumbnailWidth, 320)
-        XCTAssertTrue(manifest.tileURLs[0].absoluteString.contains("/Trickplay/320/0.jpg"))
+        guard case .authenticatedHTTP(let first) =
+            manifest.tileResources[0] else {
+            return XCTFail("expected authenticated trickplay resource")
+        }
+        XCTAssertTrue(first.resource.path.contains("/Trickplay/320/0.jpg"))
     }
 
     func testPlaybackInfoHasNoTrickplayWhenServerOmitsIt() async throws {

@@ -502,7 +502,11 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
                 mediaVideoDisplayTitle: media.videoStreamDisplayTitle
             ),
             localRemuxSource: localRemuxSource,
-            scrubPreview: scrubPreview(for: part),
+            scrubPreview: scrubPreview(
+                for: part,
+                itemID: itemID,
+                mediaSourceID: selectedMediaSourceID
+            ),
             sourceProvider: .plex,
             serverName: session.server.name,
             sourceFileName: PlaybackRequest.sourceFileName(from: part.file)
@@ -514,7 +518,11 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
     /// server has generated "video preview thumbnails" (signalled by the part's
     /// `indexes` list). Returns `nil` otherwise so the player simply
     /// shows no preview.
-    func scrubPreview(for part: PlexPart) -> ScrubPreviewSource? {
+    func scrubPreview(
+        for part: PlexPart,
+        itemID: String,
+        mediaSourceID: String?
+    ) -> ScrubPreviewSource? {
         guard let partID = part.id else {
             PlozzLog.playback.debug("Plex scrub preview unavailable: missing part id")
             return nil
@@ -535,13 +543,25 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
         // Prefer higher-resolution previews when the server advertises them.
         let preferredOrder = ["hd", "sd"]
         let quality = preferredOrder.first(where: { availableQualities.contains($0) }) ?? availableQualities.first
-        guard let quality, let url = client.bifIndexURL(partID: partID, quality: quality) else {
-            PlozzLog.playback.debug("Plex scrub preview unavailable: failed to build BIF URL partID=\(partID)")
+        guard let quality else { return nil }
+        let serverPath = "/library/parts/\(partID)/indexes/\(quality)"
+        guard let locator = try? authenticatedPlaybackLocator(
+            itemID: itemID,
+            mediaSourceID: mediaSourceID,
+            serverPath: serverPath,
+            deliveryMode: .directFile,
+            purpose: .scrubPreview,
+            playSessionID: nil,
+            formatHint: "bif"
+        ) else {
+            PlozzLog.playback.debug(
+                "Plex scrub preview unavailable: failed to build BIF resource partID=\(partID)"
+            )
             return nil
         }
 
         PlozzLog.playback.debug("Plex scrub preview selected partID=\(partID) quality=\(quality)")
-        return .plexBIF(url: url)
+        return .plexBIF(resource: .authenticatedHTTP(locator))
     }
 
     /// Plex reports bitrates in kbps; the diagnostics model wants bits/sec.

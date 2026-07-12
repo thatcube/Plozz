@@ -81,6 +81,8 @@ public struct PlayerView: View {
                         dismiss: { dismissSmoothly() }
                     ),
                     scrubPreview: viewModel.scrubPreview,
+                    authenticatedHTTPResolver:
+                        viewModel.authenticatedHTTPResolver,
                     themePalette: ThemePaletteBox(
                         makeControls: { model, actions, onExitToSurface in
                             AnyView(PlayerControls(

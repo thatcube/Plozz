@@ -889,21 +889,6 @@ public struct JellyfinClient: Sendable {
         return components.url
     }
 
-    /// Absolute URL for one trickplay tile image
-    /// (`GET /Videos/{itemId}/Trickplay/{width}/{index}.jpg`). The endpoint
-    /// requires auth, so we embed the token as `api_key` because image loaders
-    /// (URLSession data tasks here) don't carry our auth headers.
-    func trickplayTileURL(itemID: String, mediaSourceID: String?, width: Int, tileIndex: Int) -> URL? {
-        guard var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else { return nil }
-        let basePath = components.path.hasSuffix("/") ? String(components.path.dropLast()) : components.path
-        components.path = basePath + "/Videos/\(itemID)/Trickplay/\(width)/\(tileIndex).jpg"
-        var query = [URLQueryItem(name: "api_key", value: token ?? "")]
-        if let mediaSourceID, !mediaSourceID.isEmpty {
-            query.append(URLQueryItem(name: "mediaSourceId", value: mediaSourceID))
-        }
-        components.queryItems = query
-        return components.url
-    }
 }
 
 private struct PlaybackProgressBody: Encodable {

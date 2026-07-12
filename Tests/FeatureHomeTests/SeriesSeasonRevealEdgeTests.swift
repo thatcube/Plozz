@@ -162,4 +162,21 @@ final class SeriesDetailBrowserPolicyTests: XCTestCase {
         )
     }
 
+    func testDiscoverySeriesInactiveCopyDistinguishesLoadingFromEmpty() {
+        XCTAssertEqual(
+            SeasonRequestHeroPresentation.inactiveTitle(
+                availabilityLoaded: false,
+                resolved: false
+            ),
+            "Loading Seasons…"
+        )
+        XCTAssertEqual(
+            SeasonRequestHeroPresentation.inactiveTitle(
+                availabilityLoaded: true,
+                resolved: true
+            ),
+            "No Seasons to Request"
+        )
+    }
+
 }

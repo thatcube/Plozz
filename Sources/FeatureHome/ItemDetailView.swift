@@ -76,6 +76,8 @@ public struct ItemDetailView: View {
     @State private var pendingAdminRequest: PendingRequestIntent?
     @State private var seasonRequestAvailability: MediaRequestAvailability?
     @State private var seasonRequestAvailabilityResolved = false
+    @State private var seasonRequestAvailabilityFailed = false
+    @State private var seasonRequestRetryToken = 0
     @State private var isSeasonRequestInFlight = false
     /// One-time acknowledgement of the "requests as unrestricted admin" explainer.
     /// Device-wide (shared with any other request surface via this key): once the
@@ -273,9 +275,13 @@ public struct ItemDetailView: View {
                     : nil,
                 seasonRequestAvailability: detail.item.kind == .series ? seasonRequestAvailability : nil,
                 seasonRequestAvailabilityResolved: seasonRequestAvailabilityResolved,
+                seasonRequestAvailabilityFailed: seasonRequestAvailabilityFailed,
                 isRequestingSeasons: isSeasonRequestInFlight,
                 onRequestSeasons: onRequestSeasons == nil ? nil : { seasons in
                     requestTapped(detail.item, seasons: seasons)
+                },
+                onRetrySeasonRequestAvailability: {
+                    seasonRequestRetryToken &+= 1
                 }
             )
             .id(Self.topAnchorID)
@@ -348,7 +354,7 @@ public struct ItemDetailView: View {
               item.providerIDs["Tmdb"] != nil
         else { return "disabled" }
         let sources = viewModel.sources.map(\.id).sorted().joined(separator: ",")
-        return "\(item.sourceAccountID ?? "_")|\(item.id)|\(item.providerIDs["Tmdb"] ?? "")|\(sources)"
+        return "\(item.sourceAccountID ?? "_")|\(item.id)|\(item.providerIDs["Tmdb"] ?? "")|\(sources)|\(seasonRequestRetryToken)"
     }
 
     private func refreshSeasonRequestAvailability() async {
@@ -358,13 +364,16 @@ public struct ItemDetailView: View {
         else {
             seasonRequestAvailability = nil
             seasonRequestAvailabilityResolved = true
+            seasonRequestAvailabilityFailed = false
             return
         }
         seasonRequestAvailability = nil
         seasonRequestAvailabilityResolved = false
+        seasonRequestAvailabilityFailed = false
         guard let availability = await requestAvailabilityRefresh(item) else {
             guard !Task.isCancelled else { return }
             seasonRequestAvailabilityResolved = true
+            seasonRequestAvailabilityFailed = true
             return
         }
         let ownedSeasonNumbers = isDiscoveryItem
@@ -373,6 +382,7 @@ public struct ItemDetailView: View {
         guard !Task.isCancelled else { return }
         seasonRequestAvailability = availability.markingAvailable(Array(ownedSeasonNumbers))
         seasonRequestAvailabilityResolved = true
+        seasonRequestAvailabilityFailed = false
     }
 
     private func container(_ detail: ItemDetailViewModel.Detail) -> some View {

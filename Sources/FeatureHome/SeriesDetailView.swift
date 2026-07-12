@@ -1172,6 +1172,13 @@ enum SeriesRequestAccessoryPresentation {
     }
 }
 
+enum SeasonRequestHeroPresentation {
+    static func inactiveTitle(availabilityLoaded: Bool, resolved: Bool) -> String {
+        if availabilityLoaded { return "No Seasons to Request" }
+        return resolved ? "Seasons Unavailable" : "Loading Seasons…"
+    }
+}
+
 private struct SeasonRequestBoundaryModifier: ViewModifier {
     let enabled: Bool
 

@@ -117,8 +117,10 @@ struct DetailHeroView: View {
     /// replaces its one-tap title request with the shared season request menu.
     var seasonRequestAvailability: MediaRequestAvailability? = nil
     var seasonRequestAvailabilityResolved: Bool = false
+    var seasonRequestAvailabilityFailed: Bool = false
     var isRequestingSeasons: Bool = false
     var onRequestSeasons: (([Int]) -> Void)? = nil
+    var onRetrySeasonRequestAvailability: (() -> Void)? = nil
 
     /// Local focus state of the Play button, so the inline resume progress bar
     /// can flip its colours to stay visible against the button's focused (white)
@@ -674,10 +676,20 @@ struct DetailHeroView: View {
             .focused($heroActionRowFocus, equals: .request)
             .disabled(onRequestSeasons == nil || isRequestingSeasons)
             .accessibilityLabel(requestActingName.map { "\(label) as \($0)" } ?? label)
+        } else if seasonRequestAvailabilityFailed {
+            Button { onRetrySeasonRequestAvailability?() } label: {
+                Label("Retry Seasons", systemImage: "arrow.clockwise")
+            }
+            .modifier(HeroActionButtonStyle(prominent: true))
+            .prefersDefaultFocus(true, in: heroActionsScope)
+            .focused($heroActionRowFocus, equals: .request)
+            .disabled(onRetrySeasonRequestAvailability == nil)
+            .accessibilityLabel("Retry loading seasons")
         } else {
-            let label = seasonRequestAvailability != nil
-                ? "No Seasons to Request"
-                : (seasonRequestAvailabilityResolved ? "Seasons Unavailable" : "Loading Seasons…")
+            let label = SeasonRequestHeroPresentation.inactiveTitle(
+                availabilityLoaded: seasonRequestAvailability != nil,
+                resolved: seasonRequestAvailabilityResolved
+            )
             Button {} label: {
                 Label(label, systemImage: seasonRequestAvailabilityResolved ? "exclamationmark.circle" : "clock")
             }

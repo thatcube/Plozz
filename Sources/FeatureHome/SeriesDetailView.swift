@@ -435,8 +435,10 @@ struct SeriesDetailView: View {
                 guard pendingSeasonReveal, frames != seasonChipFrames else { return }
                 seasonChipFrames = frames
             }
-            // Never clip a focused chip's lift, shadow or border.
-            .scrollClipDisabled()
+            // Keep horizontally-scrolled tabs inside their reserved viewport so
+            // they never render underneath the fixed "+ Seasons" accessory. The
+            // content already carries 12pt of vertical headroom for focus lift.
+            .scrollClipDisabled(false)
             // Inset the whole scroll VIEWPORT to the hero keyline (rather than padding
             // the content), so a chip revealed to `.leading` aligns to the keyline —
             // where "S·E"/Play start — instead of the column edge.

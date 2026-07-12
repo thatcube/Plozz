@@ -48,7 +48,7 @@ public struct PlayerEngineCapabilities: OptionSet, Sendable {
     /// cues via `onSecondarySubtitleCues`, so the dual/second line can be drawn
     /// from the container itself (AetherEngine/Plozzigen) — no fetchable sidecar
     /// URL required. Engines without this fall back to the sidecar overlay, which
-    /// needs a provider-supplied `deliveryURL` on the secondary track.
+    /// needs a provider-supplied delivery source on the secondary track.
     public static let dualSubtitleDecode = PlayerEngineCapabilities(rawValue: 1 << 4)
 }
 

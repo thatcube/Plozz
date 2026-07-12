@@ -440,11 +440,24 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
         }
         let mappedItem = map(metadata: detail)
         let streams = part.Stream ?? []
-        let audio = streams.filter { $0.streamType == 2 }.map(map(stream:))
-        let subs = streams.filter { $0.streamType == 3 }.map(map(stream:))
+        let selectedMediaSourceID = media.id.map(String.init)
+        let audio = try streams.filter { $0.streamType == 2 }.map {
+            try map(
+                stream: $0,
+                itemID: itemID,
+                mediaSourceID: selectedMediaSourceID
+            )
+        }
+        let subs = try streams.filter { $0.streamType == 3 }.map {
+            try map(
+                stream: $0,
+                itemID: itemID,
+                mediaSourceID: selectedMediaSourceID
+            )
+        }
         let playbackLocator = try authenticatedPlaybackLocator(
             itemID: itemID,
-            mediaSourceID: media.id.map(String.init),
+            mediaSourceID: selectedMediaSourceID,
             url: resolved.url,
             deliveryMode: resolved.isTranscoding ? .serverTranscode : .directFile,
             purpose: .mediaStream,
@@ -909,13 +922,20 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
         try await client.downloadRemoteSubtitle(ratingKey: itemID, key: subtitleID)
     }
 
-    /// The item's current subtitle tracks (text sidecars carry a `deliveryURL`),
+    /// The item's current subtitle tracks (text sidecars carry delivery sources),
     /// from a single `metadata` fetch — no transcode session. Used to observe a
     /// just-downloaded subtitle so it can be hot-loaded into the running player.
     public func subtitleTracks(forItemID itemID: String) async throws -> [MediaTrack] {
         let detail = try await client.metadata(ratingKey: itemID)
-        let streams = detail.Media?.first?.Part?.first?.Stream ?? []
-        return streams.filter { $0.streamType == 3 }.map(map(stream:))
+        let media = detail.Media?.first
+        let streams = media?.Part?.first?.Stream ?? []
+        return try streams.filter { $0.streamType == 3 }.map {
+            try map(
+                stream: $0,
+                itemID: itemID,
+                mediaSourceID: media?.id.map(String.init)
+            )
+        }
     }
 
     // MARK: - Mapping
@@ -1313,15 +1333,34 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
         )
     }
 
-    private func map(stream dto: PlexStream) -> MediaTrack {
+    private func map(
+        stream dto: PlexStream,
+        itemID: String,
+        mediaSourceID: String?
+    ) throws -> MediaTrack {
         let language = dto.languageTag ?? dto.language
         let isSubtitle = dto.streamType == 3
         // External/sidecar subtitles expose a `key` we can fetch as text and
         // normalise to WebVTT for the native picker. Embedded subs (no key) and
         // image-based subs can't be delivered this way.
-        let deliveryURL: URL? = (isSubtitle && isTextSubtitleCodec(dto.codec))
-            ? dto.key.flatMap { client.streamURL(forPartKey: $0) }
-            : nil
+        let deliverySource: SubtitleDeliverySource?
+        if isSubtitle,
+           isTextSubtitleCodec(dto.codec),
+           let serverPath = dto.key {
+            deliverySource = .authenticatedHTTP(
+                try authenticatedPlaybackLocator(
+                    itemID: itemID,
+                    mediaSourceID: mediaSourceID,
+                    serverPath: serverPath,
+                    deliveryMode: .directFile,
+                    purpose: .subtitle,
+                    playSessionID: nil,
+                    formatHint: dto.codec
+                )
+            )
+        } else {
+            deliverySource = nil
+        }
         return MediaTrack(
             id: dto.index ?? dto.id ?? 0,
             kind: isSubtitle ? .subtitle : .audio,
@@ -1331,7 +1370,7 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
             isDefault: dto.default ?? dto.selected ?? false,
             isForced: dto.forced ?? false,
             channels: isSubtitle ? nil : dto.channels,
-            deliveryURL: deliveryURL,
+            deliverySource: deliverySource,
             isImageBasedSubtitle: isSubtitle && !isTextSubtitleCodec(dto.codec)
         )
     }

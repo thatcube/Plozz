@@ -592,8 +592,8 @@ public struct JellyfinProvider: MediaProvider {
         let streams = source.MediaStreams ?? detail.MediaStreams ?? []
         let audio = streams.filter { $0.`Type` == "Audio" }.map(map(stream:))
         let sourceID = source.Id ?? itemID
-        let subs = streams.filter { $0.`Type` == "Subtitle" }.map { stream in
-            map(subtitleStream: stream, itemID: itemID, sourceID: sourceID)
+        let subs = try streams.filter { $0.`Type` == "Subtitle" }.map { stream in
+            try map(subtitleStream: stream, itemID: itemID, sourceID: sourceID)
         }
         let localRemuxSource = try? localRemuxSourceDescriptor(
             itemID: itemID,
@@ -886,7 +886,7 @@ public struct JellyfinProvider: MediaProvider {
         try await client.downloadRemoteSubtitle(itemID: itemID, subtitleID: subtitleID)
     }
 
-    /// The item's current subtitle tracks (text sidecars get a VTT `deliveryURL`),
+    /// The item's current subtitle tracks (text sidecars get VTT delivery sources),
     /// fetched via a plain item lookup — no `PlaybackInfo`/transcode. Used to
     /// observe a just-downloaded subtitle so it can be hot-loaded.
     public func subtitleTracks(forItemID itemID: String) async throws -> [MediaTrack] {
@@ -894,9 +894,9 @@ public struct JellyfinProvider: MediaProvider {
         let source = dto.MediaSources?.first
         let sourceID = source?.Id ?? itemID
         let streams = source?.MediaStreams ?? dto.MediaStreams ?? []
-        return streams
+        return try streams
             .filter { $0.`Type` == "Subtitle" }
-            .map { map(subtitleStream: $0, itemID: itemID, sourceID: sourceID) }
+            .map { try map(subtitleStream: $0, itemID: itemID, sourceID: sourceID) }
     }
 
     // MARK: - Mapping
@@ -1211,13 +1211,23 @@ public struct JellyfinProvider: MediaProvider {
         )
     }
 
-    /// Maps a subtitle stream, attaching a WebVTT delivery URL for text-based
+    /// Maps a subtitle stream, attaching a WebVTT delivery source for text-based
     /// subtitles so the player can inject them into the native picker even on
     /// direct play. Image-based subs (PGS/VOBSUB) get no URL — they need server
     /// burn-in, which the native picker can't drive.
-    private func map(subtitleStream dto: MediaStreamDto, itemID: String, sourceID: String) -> MediaTrack {
+    private func map(
+        subtitleStream dto: MediaStreamDto,
+        itemID: String,
+        sourceID: String
+    ) throws -> MediaTrack {
         let isText = dto.IsTextSubtitleStream ?? isTextSubtitleCodec(dto.Codec)
-        let deliveryURL = isText ? subtitleVTTURL(itemID: itemID, sourceID: sourceID, streamIndex: dto.Index) : nil
+        let deliverySource = isText
+            ? try subtitleDeliverySource(
+                itemID: itemID,
+                sourceID: sourceID,
+                streamIndex: dto.Index
+            )
+            : nil
         return MediaTrack(
             id: dto.Index,
             kind: .subtitle,
@@ -1226,7 +1236,7 @@ public struct JellyfinProvider: MediaProvider {
             codec: dto.Codec,
             isDefault: dto.IsDefault ?? false,
             isForced: dto.IsForced ?? false,
-            deliveryURL: deliveryURL,
+            deliverySource: deliverySource,
             isImageBasedSubtitle: !isText
         )
     }
@@ -1240,14 +1250,33 @@ public struct JellyfinProvider: MediaProvider {
 
     /// `GET /Videos/{itemId}/{mediaSourceId}/Subtitles/{index}/0/Stream.vtt` —
     /// the server converts SRT/ASS/embedded-text subtitles to WebVTT on the fly.
-    private func subtitleVTTURL(itemID: String, sourceID: String, streamIndex: Int) -> URL? {
-        guard var components = URLComponents(url: session.server.baseURL, resolvingAgainstBaseURL: false) else {
-            return nil
-        }
-        let basePath = components.path.hasSuffix("/") ? String(components.path.dropLast()) : components.path
-        components.path = basePath + "/Videos/\(itemID)/\(sourceID)/Subtitles/\(streamIndex)/0/Stream.vtt"
-        components.queryItems = [URLQueryItem(name: "api_key", value: session.accessToken)]
-        return components.url
+    private func subtitleDeliverySource(
+        itemID: String,
+        sourceID: String,
+        streamIndex: Int
+    ) throws -> SubtitleDeliverySource {
+        var pathComponents = URLComponents()
+        pathComponents.path =
+            "/Videos/\(itemID)/\(sourceID)/Subtitles/\(streamIndex)/0/Stream.vtt"
+        let resource = try AuthenticatedHTTPResource(
+            pathBase: .configuredBaseURL,
+            path: String(
+                pathComponents.percentEncodedPath.drop(while: { $0 == "/" })
+            )
+        )
+        return .authenticatedHTTP(
+            try AuthenticatedHTTPPlaybackLocator(
+                provider: .jellyfin,
+                accountID: accountID,
+                credentialRevision: credentialRevision,
+                itemID: itemID,
+                mediaSourceID: sourceID,
+                deliveryMode: .directFile,
+                formatHint: MediaFormatHint(container: "vtt"),
+                purpose: .subtitle,
+                resource: resource
+            )
+        )
     }
 
     private func map(remoteSubtitle dto: RemoteSubtitleInfoDto) -> RemoteSubtitle {

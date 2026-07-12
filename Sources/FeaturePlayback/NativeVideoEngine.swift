@@ -190,7 +190,12 @@ public final class NativeVideoEngine: VideoEngine {
             return
         }
 
-        let asset = makeAsset(for: request, streamURL: streamURL)
+        let injectableSubtitles = await resolveInjectableSubtitles(for: request)
+        let asset = makeAsset(
+            for: request,
+            streamURL: streamURL,
+            injectableSubtitles: injectableSubtitles
+        )
         let item = AVPlayerItem(asset: asset)
         // Apply in-app subtitle styling overrides if the user set any.
         item.textStyleRules = style.textStyleRules()
@@ -319,33 +324,57 @@ public final class NativeVideoEngine: VideoEngine {
     /// otherwise never see, wrap the stream in a synthesized HLS playlist that
     /// adds those subtitles as selectable renditions. Otherwise play the stream
     /// URL directly (transcoded HLS already carries subtitles in its manifest).
-    private func makeAsset(for request: PlaybackRequest, streamURL: URL) -> AVURLAsset {
+    private func makeAsset(
+        for request: PlaybackRequest,
+        streamURL: URL,
+        injectableSubtitles: [InjectableSubtitle]
+    ) -> AVURLAsset {
         subtitleLoader = nil
         guard !request.isManifestStream else {
             return AVURLAsset(url: streamURL)
         }
-        let injectables: [InjectableSubtitle] = request.subtitleTracks.compactMap { track in
-            guard track.kind == .subtitle, let url = track.deliveryURL else { return nil }
-            return InjectableSubtitle(
-                index: track.id,
-                name: track.displayTitle,
-                languageTag: track.language,
-                isDefault: track.isDefault,
-                isForced: track.isForced,
-                sourceURL: url
-            )
-        }
-        guard !injectables.isEmpty, let duration = request.item.runtime, duration > 0 else {
+        guard !injectableSubtitles.isEmpty,
+              let duration = request.item.runtime,
+              duration > 0 else {
             return AVURLAsset(url: streamURL)
         }
         let composer = SubtitleHLSComposer(
             videoURL: streamURL,
             durationSeconds: duration,
-            subtitles: injectables
+            subtitles: injectableSubtitles
         )
         let loader = SubtitleInjectingResourceLoader(composer: composer)
         subtitleLoader = loader
         return loader.makeAsset()
+    }
+
+    private func resolveInjectableSubtitles(
+        for request: PlaybackRequest
+    ) async -> [InjectableSubtitle] {
+        guard !request.isManifestStream else { return [] }
+        var result: [InjectableSubtitle] = []
+        for track in request.subtitleTracks where track.kind == .subtitle {
+            guard let source = track.deliverySource else { continue }
+            let url: URL?
+            switch source {
+            case .localFile(let localURL):
+                url = localURL
+            case .authenticatedHTTP(let locator):
+                url = try? await authenticatedHTTPResolver?.resolve(locator)
+            }
+            guard let url else { continue }
+            result.append(
+                InjectableSubtitle(
+                    index: track.id,
+                    name: track.displayTitle,
+                    languageTag: track.language,
+                    isDefault: track.isDefault,
+                    isForced: track.isForced,
+                    sourceURL: url
+                )
+            )
+        }
+        return result
     }
 
     public func play() {

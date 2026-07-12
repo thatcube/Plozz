@@ -1,7 +1,18 @@
 import Foundation
 
+/// Credential-free instructions for loading a text subtitle sidecar.
+public enum SubtitleDeliverySource: Hashable, Sendable {
+    case localFile(URL)
+    case authenticatedHTTP(AuthenticatedHTTPPlaybackLocator)
+
+    public var immediateURL: URL? {
+        guard case .localFile(let url) = self else { return nil }
+        return url
+    }
+}
+
 /// A selectable audio or subtitle track exposed by a stream.
-public struct MediaTrack: Codable, Hashable, Identifiable, Sendable {
+public struct MediaTrack: Hashable, Identifiable, Sendable {
     public enum Kind: String, Codable, Sendable {
         case audio
         case subtitle
@@ -33,17 +44,15 @@ public struct MediaTrack: Codable, Hashable, Identifiable, Sendable {
     /// `true` for commentary tracks (director/cast). Surfaces a "Commentary"
     /// qualifier on audio and subtitle labels.
     public var isCommentary: Bool
-    /// For subtitle tracks: an absolute URL that yields the subtitle text
-    /// (WebVTT, or SRT which the player normalises to WebVTT). When non-`nil`
-    /// the player can inject this track into the native picker even on direct
-    /// play. `nil` for audio tracks and for subtitles that can't be delivered
-    /// as text (e.g. image-based PGS/VOBSUB, which need server burn-in).
-    public var deliveryURL: URL?
+    /// For subtitle tracks: credential-free instructions for loading subtitle
+    /// text. Managed-provider credentials are resolved only when the engine or
+    /// overlay begins I/O; local share sidecars reference their temporary file.
+    public var deliverySource: SubtitleDeliverySource?
     /// `true` for image-based subtitles (PGS/VOBSUB/DVDSUB) that no on-device
     /// engine can render — only a server burn-in transcode shows them. A *text*
-    /// subtitle embedded in the container (so it has no `deliveryURL`) is **not**
+    /// subtitle embedded in the container (so it has no delivery source) is **not**
     /// image-based: Plozzigen remuxes it into the playback stream. Routing must
-    /// key off this flag, not `deliveryURL == nil`, or embedded SRT gets pushed
+    /// key off this flag, not a missing delivery source, or embedded SRT gets pushed
     /// to the hybrid engine (and crashes on multichannel) needlessly.
     public var isImageBasedSubtitle: Bool
     /// `true` for a subtitle that isn't embedded in the media file — a subtitle the
@@ -65,7 +74,7 @@ public struct MediaTrack: Codable, Hashable, Identifiable, Sendable {
         isAtmos: Bool = false,
         isHearingImpaired: Bool = false,
         isCommentary: Bool = false,
-        deliveryURL: URL? = nil,
+        deliverySource: SubtitleDeliverySource? = nil,
         isImageBasedSubtitle: Bool = false,
         isExternal: Bool = false
     ) {
@@ -80,7 +89,7 @@ public struct MediaTrack: Codable, Hashable, Identifiable, Sendable {
         self.isAtmos = isAtmos
         self.isHearingImpaired = isHearingImpaired
         self.isCommentary = isCommentary
-        self.deliveryURL = deliveryURL
+        self.deliverySource = deliverySource
         self.isImageBasedSubtitle = isImageBasedSubtitle
         self.isExternal = isExternal
     }

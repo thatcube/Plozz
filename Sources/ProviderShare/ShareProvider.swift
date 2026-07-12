@@ -441,7 +441,7 @@ public struct ShareProvider: MediaProvider {
                 codec: sidecar.ext,
                 isForced: sidecar.isForced,
                 isHearingImpaired: sidecar.isSDH,
-                deliveryURL: localURL,
+                deliverySource: .localFile(localURL),
                 isImageBasedSubtitle: false,
                 isExternal: true
             ))

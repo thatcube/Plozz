@@ -203,7 +203,7 @@ public extension Array where Element == MediaTrack {
     /// When a text equivalent exists, the native/Plozzigen engine can show that
     /// instead, so we stay there and keep its advantages (e.g. true Dolby Vision,
     /// no multichannel crash). Keyed off `isImageBasedSubtitle` — **not**
-    /// `deliveryURL == nil` — so an embedded text SRT (no sidecar URL, but
+    /// a missing delivery source — so an embedded text SRT (no sidecar, but
     /// Plozzigen-renderable) is never mistaken for a bitmap sub.
     func defaultSubtitleNeedsHybridEngine(
         mode: SubtitleMode,

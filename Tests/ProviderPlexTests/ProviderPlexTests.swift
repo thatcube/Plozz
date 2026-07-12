@@ -1069,7 +1069,9 @@ final class PlexProviderMappingTests: XCTestCase {
            "Media":[{"id":1,"container":"mkv","videoCodec":"h264","audioCodec":"ac3","Part":[{"id":2,"key":"/library/parts/2/16000/file.mkv","container":"mkv","Stream":[
              {"id":10,"streamType":1,"index":0,"codec":"h264"},
              {"id":11,"streamType":2,"index":1,"codec":"ac3","language":"English","languageTag":"en","displayTitle":"English (AC3)","selected":true},
-             {"id":12,"streamType":3,"index":2,"language":"English","displayTitle":"English (SRT)","forced":false}
+             {"id":12,"streamType":3,"index":2,"codec":"srt","language":"English",
+              "displayTitle":"English (SRT)","forced":false,
+              "key":"/library/streams/12/subtitle.srt"}
            ]}]}]}
         ]}}
         """)
@@ -1080,6 +1082,20 @@ final class PlexProviderMappingTests: XCTestCase {
         XCTAssertEqual(request.startPosition, 600)
         XCTAssertEqual(request.audioTracks.count, 1)
         XCTAssertEqual(request.subtitleTracks.count, 1)
+        guard case .some(.authenticatedHTTP(let subtitleLocator)) =
+            request.subtitleTracks.first?.deliverySource else {
+            return XCTFail("expected authenticated subtitle source")
+        }
+        XCTAssertEqual(subtitleLocator.purpose, .subtitle)
+        XCTAssertEqual(
+            subtitleLocator.resource.path,
+            "library/streams/12/subtitle.srt"
+        )
+        XCTAssertEqual(
+            subtitleLocator.resource.pathBase,
+            .configuredBaseURL
+        )
+        XCTAssertFalse(String(describing: subtitleLocator).contains("TOKEN"))
         XCTAssertEqual(request.audioTracks.first?.language, "en")
         XCTAssertTrue(request.audioTracks.first?.isDefault == true)
         XCTAssertTrue(request.isTranscoding)

@@ -6,7 +6,7 @@ import CoreGraphics
 ///
 /// This is the **one cue model** the whole subtitle pipeline converges on. Every
 /// source — embedded text or bitmap tracks decoded by Plozzigen (AetherEngine),
-/// provider sidecar files (Jellyfin/Plex `deliveryURL`), searched/downloaded
+/// provider sidecar files (Jellyfin/Plex delivery sources), searched/downloaded
 /// `.srt/.ass/.vtt/.sup` files, and (future) on-device generated subtitles — is
 /// normalized into a stream of these. Nothing downstream of the normalizer needs
 /// to know where a cue came from.

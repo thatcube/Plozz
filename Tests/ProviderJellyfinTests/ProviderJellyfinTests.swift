@@ -587,7 +587,8 @@ final class JellyfinProviderMappingTests: XCTestCase {
         {"MediaSources":[{"Id":"src1","ETag":"etag9","Container":"mp4","SupportsDirectPlay":true,
         "MediaStreams":[{"Index":0,"Type":"Video","Codec":"h264","IsInterlaced":true},
         {"Index":1,"Type":"Audio","Language":"eng","DisplayTitle":"English"},
-        {"Index":2,"Type":"Subtitle","Language":"eng","DisplayTitle":"English (SRT)"}]}],
+        {"Index":2,"Type":"Subtitle","Language":"eng","Codec":"srt",
+         "IsTextSubtitleStream":true,"DisplayTitle":"English (SRT)"}]}],
         "PlaySessionId":"ps1"}
         """)
         let provider = JellyfinProvider(session: makeSession(), http: stub)
@@ -596,6 +597,17 @@ final class JellyfinProviderMappingTests: XCTestCase {
         XCTAssertEqual(request.playSessionID, "ps1")
         XCTAssertEqual(request.audioTracks.count, 1)
         XCTAssertEqual(request.subtitleTracks.count, 1)
+        guard case .some(.authenticatedHTTP(let subtitleLocator)) =
+            request.subtitleTracks.first?.deliverySource else {
+            return XCTFail("expected authenticated subtitle source")
+        }
+        XCTAssertEqual(subtitleLocator.purpose, .subtitle)
+        XCTAssertEqual(
+            subtitleLocator.resource.path,
+            "Videos/i1/src1/Subtitles/2/0/Stream.vtt"
+        )
+        XCTAssertTrue(subtitleLocator.resource.queryItems.isEmpty)
+        XCTAssertFalse(String(describing: subtitleLocator).contains("TOKEN"))
         guard case .authenticatedHTTP(let locator) = request.playbackSource else {
             return XCTFail("expected authenticated HTTP locator")
         }

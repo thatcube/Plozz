@@ -1133,6 +1133,7 @@ private func makePlayerViewModel(
             startPosition: request.startPosition,
             scrobbler: scrobbler,
             engineFactory: engineFactory,
+            authenticatedHTTPResolver: authenticatedHTTPResolver,
             autoDismissOnEnd: true
         )
         trailerViewModel.onSubtitleStyleChanged = onSubtitleStyleChanged
@@ -1194,6 +1195,7 @@ private func makePlayerViewModel(
             networkFileResolver: networkFileResolver,
             authenticatedHTTPResolver: authenticatedHTTPResolver
         ),
+        authenticatedHTTPResolver: authenticatedHTTPResolver,
         neighborResolver: neighborResolver,
         seriesIDResolver: seriesIDResolver,
         onPlaybackStopped: makePlaybackStoppedHandler(

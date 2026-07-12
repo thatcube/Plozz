@@ -28,25 +28,22 @@ cd "$(dirname "$0")/.."
 # Keep the git config workaround that the rest of the build chain expects.
 export GIT_CONFIG_PARAMETERS="${GIT_CONFIG_PARAMETERS-'safe.bareRepository=all'}"
 
-DEFAULT_SCHEMES=(
-  CoreModelsTests
-  CoreNetworkingTests
-  CoreUITests
-  MetadataKitTests
-  FeatureDiscoveryTests
-  ProviderJellyfinTests
-  ProviderPlexTests
-  ProviderTrailersTests
-  RatingsServiceTests
-  TraktServiceTests
-  SeerServiceTests
-  FeatureAuthTests
-  FeatureHomeTests
-  FeatureSearchTests
-  FeatureProfilesTests
-  FeatureMusicTests
-  FeaturePlaybackTests
+DEFAULT_SCHEMES=()
+while IFS= read -r SCHEME; do
+  [[ -n "$SCHEME" ]] && DEFAULT_SCHEMES+=("$SCHEME")
+done < <(
+  swift package dump-package | python3 -c '
+import json,sys
+manifest=json.load(sys.stdin)
+for target in manifest.get("targets", []):
+    if target.get("type") == "test":
+        print(target["name"])
+'
 )
+if [[ ${#DEFAULT_SCHEMES[@]} -eq 0 ]]; then
+  echo "run-tests.sh: FAILED to discover any test targets from Package.swift."
+  exit 1
+fi
 
 SCHEMES=("$@")
 if [[ ${#SCHEMES[@]} -eq 0 ]]; then

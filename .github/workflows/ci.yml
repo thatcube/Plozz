@@ -39,6 +39,9 @@ jobs:
       - name: Install XcodeGen
         run: brew install xcodegen
 
+      - name: Run complete tvOS test matrix
+        run: tools/run-tests.sh
+
       - name: Generate Xcode project
         run: xcodegen generate
 

@@ -288,6 +288,34 @@ final class ItemDetailViewModelTests: XCTestCase {
         XCTAssertTrue(vm.isLibraryOriginPinned)
     }
 
+    func testLibraryOriginWinsOverMoreLocalDetailSource() {
+        let jellyfin = MediaSourceRef(
+            accountID: "jellyfin",
+            itemID: "jellyfin-movie",
+            locality: .local
+        )
+        let plex = MediaSourceRef(
+            accountID: "plex",
+            itemID: "plex-movie",
+            locality: .remote
+        )
+
+        let selected = preferredDetailSource(
+            sourceOverride: nil,
+            libraryOrigin: "plex",
+            itemSourceAccountID: "plex",
+            sources: [jellyfin, plex],
+            serverChoices: [jellyfin, plex],
+            capabilities: .detected()
+        )
+
+        XCTAssertEqual(
+            selected?.accountID,
+            "plex",
+            "A source-specific library is authoritative even when another copy ranks as more local"
+        )
+    }
+
     func testSeriesWatchMutationCascadesToLoadedEpisodes() async {
         let series = MediaItem(id: "series", title: "Series", kind: .series)
         let season = MediaItem(id: "season", title: "Season 1", kind: .season)

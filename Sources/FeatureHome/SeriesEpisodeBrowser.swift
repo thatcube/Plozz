@@ -39,6 +39,10 @@ enum SeriesEpisodeBrowserLayout {
     /// ScrollView itself removes its excess vertical proposal while keeping its
     /// rendered frame and tvOS focus-section geometry identical.
     static let seasonBarHeight: CGFloat = 88
+    /// Horizontal runway inside the season scroller for a focused pill's scale,
+    /// outline, and shadow. The viewport shifts left by the same amount so the
+    /// first resting label remains on the hero keyline.
+    static let seasonFocusHorizontalClearance: CGFloat = 24
     /// Softens the clipped boundary before the fixed season-request accessory.
     static let seasonRequestFadeWidth: CGFloat = 72
     /// Prevents the episode rail from absorbing the full-screen stage's surplus

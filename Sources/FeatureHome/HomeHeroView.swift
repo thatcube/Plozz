@@ -1827,7 +1827,7 @@ final class HeroDirectionalRepeatController {
     }
 }
 
-/// A short original UI tick for app-driven Hero moves. tvOS exposes no public API
+/// A short original UI tone for app-driven Hero moves. tvOS exposes no public API
 /// for replaying its native focus click, so this stays in memory and never changes
 /// the shared audio-session category.
 @MainActor
@@ -1875,20 +1875,26 @@ final class HeroNavigationClickPlayer {
 
     private static func makeClickWAV() -> Data {
         let sampleRate = 48_000
-        let frameCount = Int(Double(sampleRate) * 0.018)
+        let duration = 0.058
+        let frameCount = Int(Double(sampleRate) * duration)
         var samples = Data()
         samples.reserveCapacity(frameCount * MemoryLayout<Int16>.size)
-        var noiseState: UInt32 = 0x504C_4F5A
 
         for frame in 0..<frameCount {
             let time = Double(frame) / Double(sampleRate)
-            noiseState = 1_664_525 &* noiseState &+ 1_013_904_223
-            let noise = Double(noiseState & 0xFFFF) / 32_767.5 - 1
-            let tone = sin(2 * .pi * 2_150 * time)
-                + 0.35 * sin(2 * .pi * 3_900 * time)
-            let attack = min(1, time / 0.0007)
-            let envelope = attack * exp(-time * 260)
-            let value = max(-1, min(1, (0.52 * noise + 0.48 * tone) * envelope * 0.30))
+            let startFrequency = 640.0
+            let endFrequency = 500.0
+            let sweep = (endFrequency - startFrequency) / duration
+            let phase = 2 * Double.pi * (
+                startFrequency * time + 0.5 * sweep * time * time
+            )
+            let tone = sin(phase) + 0.12 * sin(2 * phase)
+            let attack = min(1, time / 0.004)
+            let releaseStart = 0.042
+            let releaseProgress = max(0, min(1, (time - releaseStart) / (duration - releaseStart)))
+            let release = 0.5 * (1 + cos(Double.pi * releaseProgress))
+            let envelope = attack * exp(-time * 35) * release
+            let value = max(-1, min(1, tone * envelope * 0.16))
             var sample = Int16((value * Double(Int16.max)).rounded()).littleEndian
             withUnsafeBytes(of: &sample) { samples.append(contentsOf: $0) }
         }

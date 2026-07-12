@@ -64,14 +64,15 @@ let package = Package(
         // decodes cleanly (#92), software-path seek holds last frame (#90). See
         // AGENTS.local.md › "Playback engine (AetherEngine / Plozzigen)".
         //
-        // Pinned to the fork commit containing PR #94's backward-seek muxer wedge
-        // fix. SMB now enters AetherEngine only through Plozz's protocol-neutral
-        // custom-source bridge; the engine's legacy SMB URL product is not linked.
+        // Experimental 5.0.1 validation pin: carries Plozz's local patches,
+        // including PR #94's backward-seek muxer fix, plus the bounded stalled-seek
+        // and sparse-cache recovery fix from 2026-07-12. SMB enters AetherEngine
+        // only through Plozz's protocol-neutral custom-source bridge.
         // Under +delay_moov,
         // the fMP4 muxer needs a PARSED audio packet to build the AC-3/E-AC-3/TrueHD
         // sample entry, else a mid-file backward seek wedged the muxer. See
         // docs/media-share-proposal.md § 5.1.
-        .package(url: "https://github.com/thatcube/AetherEngine", revision: "b62837d52e78af494746d616202426654a956dda"),
+        .package(url: "https://github.com/thatcube/AetherEngine", revision: "d97fad242c069711fb3065df449444cc31267251"),
         // NOTE: FFmpegBuild (FFmpeg n8.1.x decode-only) and LibDovi (Dolby Vision
         // RPU parser) are pulled in TRANSITIVELY by AetherEngine — its own manifest
         // declares and consumes them. Plozz used to declare them directly only for

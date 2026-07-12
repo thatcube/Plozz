@@ -43,6 +43,11 @@ let package = Package(
         .library(name: "FeatureMusic", targets: ["FeatureMusic"]),
         .library(name: "TopShelfKit", targets: ["TopShelfKit"]),
         .library(name: "CrashReporting", targets: ["CrashReporting"]),
+        // Phase 0A feasibility spike (see Sources/MediaTransportHTTP/README.md).
+        // Deliberately not consumed by AppShell yet — declared so it builds
+        // and its test suite runs like every other module, but it is not
+        // part of the shipping app graph.
+        .library(name: "MediaTransportHTTP", targets: ["MediaTransportHTTP"]),
         .library(name: "AppShell", targets: ["AppShell"])
     ],
     dependencies: [
@@ -274,6 +279,28 @@ let package = Package(
             ]
         ),
 
+        // MARK: WebDAV/HTTP transport feasibility spike (Phase 0A)
+        //
+        // Foundation-only, zero-dependency primitives for a future WebDAV/
+        // plain-HTTP media-share transport: origin/redirect discipline,
+        // credential preflight + password/Bearer auth policy, exact-leaf TLS
+        // pinning, per-(account, credential revision, origin, trust
+        // revision, role) ephemeral session isolation, bounded PROPFIND
+        // parsing, and validated ranged reads. See
+        // `Sources/MediaTransportHTTP/README.md` for the full scope and
+        // (deliberately narrow) proof boundary.
+        //
+        // NOT consumed by AppShell/the App target — this is a standalone,
+        // independently-testable module, not shipping app behavior yet.
+        // Strict concurrency is opted into explicitly for this target only
+        // (the package as a whole stays pinned to Swift 5 language mode; see
+        // `swiftLanguageModes` below) so this new surface is held to a
+        // stricter bar from day one.
+        .target(
+            name: "MediaTransportHTTP",
+            swiftSettings: [.unsafeFlags(["-strict-concurrency=complete"])]
+        ),
+
         // MARK: AetherEngine integration (native HLS-fMP4 remux engine)
         //
         // Wraps AetherEngine (the upstream media-player library) behind Plozz's
@@ -408,6 +435,11 @@ let package = Package(
         .testTarget(
             name: "ProviderShareTests",
             dependencies: ["ProviderShare", "CoreModels"]
+        ),
+        .testTarget(
+            name: "MediaTransportHTTPTests",
+            dependencies: ["MediaTransportHTTP"],
+            swiftSettings: [.unsafeFlags(["-strict-concurrency=complete"])]
         ),
         .testTarget(
             name: "EnginePlozzigenTests",

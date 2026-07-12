@@ -660,7 +660,7 @@ struct DetailHeroView: View {
             let hasRequestable = !seasonRequestAvailability.requestableSeasonNumbers.isEmpty
             let label = isRequestingSeasons
                 ? "Requesting…"
-                : (hasRequestable ? "Request Seasons…" : "Season Requests")
+                : (hasRequestable ? "Request Seasons" : "Season Requests")
             SeasonRequestMenu(
                 availability: seasonRequestAvailability,
                 requestAllTitle: "Request All Seasons",

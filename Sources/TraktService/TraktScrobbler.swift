@@ -178,14 +178,45 @@ public actor TraktScrobbler: TraktScrobbling {
     /// identified on Trakt (no usable external ids).
     static func scrobbleBody(for item: MediaItem, progress: Double) -> TraktScrobbleBody? {
         let clamped = min(max(progress, 0), 100)
-        let ids = traktIDs(from: item.providerIDs)
 
         switch item.kind {
         case .episode:
-            guard !ids.isEmpty else { return nil }
-            let episode = TraktEpisodeRef(season: item.seasonNumber, number: item.episodeNumber, ids: ids)
+            guard let season = item.seasonNumber, let number = item.episodeNumber else {
+                return nil
+            }
+            let seriesIDs = traktSeriesIDs(from: item.providerIDs)
+            if !seriesIDs.isEmpty {
+                // Plex and some Jellyfin metadata agents put SHOW ids in an
+                // episode's plain ID namespace. Passing those as episode ids makes
+                // Trakt resolve an unrelated episode whose id happens to match.
+                // The Series* namespace is explicit: identify the show there, then
+                // identify its episode only by season/number.
+                let show = TraktShowRef(
+                    title: item.parentTitle,
+                    year: item.productionYear,
+                    ids: seriesIDs
+                )
+                let episode = TraktEpisodeRef(
+                    season: season,
+                    number: number,
+                    ids: TraktIDs()
+                )
+                return TraktScrobbleBody(
+                    show: show,
+                    episode: episode,
+                    progress: clamped
+                )
+            }
+            let episodeIDs = traktIDs(from: item.providerIDs)
+            guard !episodeIDs.isEmpty else { return nil }
+            let episode = TraktEpisodeRef(
+                season: season,
+                number: number,
+                ids: episodeIDs
+            )
             return TraktScrobbleBody(episode: episode, progress: clamped)
         case .movie, .video:
+            let ids = traktIDs(from: item.providerIDs)
             guard !ids.isEmpty else { return nil }
             let movie = TraktMovieRef(title: item.title, year: item.productionYear, ids: ids)
             return TraktScrobbleBody(movie: movie, progress: clamped)
@@ -210,6 +241,29 @@ public actor TraktScrobbler: TraktScrobbling {
             case "tvdb":
                 ids.tvdb = Int(value)
             case "trakt":
+                ids.trakt = Int(value)
+            default:
+                continue
+            }
+        }
+        return ids
+    }
+
+    /// Extracts explicit show-level IDs stamped under the `Series*` namespace.
+    /// These must never be passed as episode IDs.
+    static func traktSeriesIDs(from providerIDs: [String: String]) -> TraktIDs {
+        var ids = TraktIDs()
+        for (key, rawValue) in providerIDs {
+            let value = rawValue.trimmingCharacters(in: .whitespaces)
+            guard !value.isEmpty else { continue }
+            switch key.lowercased() {
+            case "seriesimdb":
+                if value.hasPrefix("tt") { ids.imdb = value }
+            case "seriestmdb":
+                ids.tmdb = Int(value)
+            case "seriestvdb":
+                ids.tvdb = Int(value)
+            case "seriestrakt":
                 ids.trakt = Int(value)
             default:
                 continue

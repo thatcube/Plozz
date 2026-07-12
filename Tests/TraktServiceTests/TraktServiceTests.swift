@@ -86,6 +86,39 @@ final class TraktScrobblerMappingTests: XCTestCase {
         XCTAssertNil(body?.movie)
     }
 
+    func testEpisodeWithSeriesIDsUsesShowPlusSeasonAndNumber() {
+        let item = MediaItem(
+            id: "avatar-s2e5",
+            title: "Ten Thousand Things",
+            kind: .episode,
+            parentTitle: "Avatar: The Last Airbender",
+            seasonNumber: 2,
+            episodeNumber: 5,
+            productionYear: 2024,
+            providerIDs: [
+                // Plex supplied these show-level values in the plain namespace too.
+                "Imdb": "tt9018736",
+                "Tmdb": "82452",
+                "Tvdb": "385925",
+                "SeriesImdb": "tt9018736",
+                "SeriesTmdb": "82452",
+                "SeriesTvdb": "385925"
+            ]
+        )
+
+        let body = TraktScrobbler.scrobbleBody(for: item, progress: 10)
+
+        XCTAssertEqual(body?.show?.ids.imdb, "tt9018736")
+        XCTAssertEqual(body?.show?.ids.tmdb, 82452)
+        XCTAssertEqual(body?.show?.ids.tvdb, 385925)
+        XCTAssertEqual(body?.episode?.season, 2)
+        XCTAssertEqual(body?.episode?.number, 5)
+        XCTAssertTrue(
+            body?.episode?.ids.isEmpty == true,
+            "Show-level IDs must never be sent in Trakt's episode ID field"
+        )
+    }
+
     func testNoBodyWithoutUsableIDs() {
         XCTAssertNil(TraktScrobbler.scrobbleBody(for: movie(imdb: nil), progress: 50))
         XCTAssertNil(TraktScrobbler.scrobbleBody(for: episode(tvdb: nil), progress: 50))

@@ -1904,7 +1904,7 @@ final class HeroDirectionalPressGate {
     private var rightBeganAt: TimeInterval = 0
 
     init(
-        repeatDelay: TimeInterval = 0.75,
+        repeatDelay: TimeInterval = 5.0,
         now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
     ) {
         self.repeatDelay = repeatDelay

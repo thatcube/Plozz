@@ -117,10 +117,10 @@ final class HeroDirectionalPressGateTests: XCTestCase {
         gate.began(.right)
         XCTAssertTrue(gate.shouldHandle(.right))
 
-        now += 0.45
+        now += 4.99
         XCTAssertFalse(gate.shouldHandle(.right))
 
-        now += 0.30
+        now += 0.01
         XCTAssertTrue(gate.shouldHandle(.right))
 
         now += 0.1

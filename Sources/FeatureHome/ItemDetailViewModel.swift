@@ -239,6 +239,28 @@ public final class ItemDetailViewModel {
     /// detail server picker; each entry's `versions` fill in as alternate servers
     /// resolve. Empty for a single-server title (no picker shown).
     public private(set) var sources: [MediaSourceRef] = []
+
+    /// Numbered seasons owned across every currently-known server copy of this
+    /// series. Seerr may be connected to only one library server; reconciling all
+    /// Plozz sources prevents offering a season that is already playable elsewhere.
+    public func ownedSeasonNumbersAcrossSources() async -> Set<Int> {
+        var numbers = Set(state.value?.children.compactMap { child in
+            child.kind == .season || child.kind == .episode ? child.seasonNumber : nil
+        } ?? [])
+        let sourceSnapshot = sources
+        for source in sourceSnapshot {
+            if source.accountID == activeSourceAccountID, source.itemID == activeItemID {
+                continue
+            }
+            guard let provider = alternateProviderResolver(source.accountID),
+                  let children = try? await provider.children(of: source.itemID)
+            else { continue }
+            numbers.formUnion(children.compactMap { child in
+                child.kind == .season || child.kind == .episode ? child.seasonNumber : nil
+            })
+        }
+        return numbers
+    }
     /// In-flight enrichment pass for alternate sources. Kept cancellable so a
     /// reload/navigation change can drop stale work promptly.
     // `nonisolated(unsafe)` so the nonisolated `deinit` can cancel these handles.

@@ -1546,7 +1546,15 @@ private struct HomeTab: View {
                     spoilerSettings: spoilerSettings,
                     onPlay: { requestPlay($0) },
                     onSelectChild: { navigate($0) },
-                    initialEpisode: route.episode
+                    initialEpisode: route.episode,
+                    seerConnected: seer.isConfigured,
+                    requestAvailabilityRefresh: { await seer.requestAvailability(for: $0) },
+                    onRequestSeasons: { item, seasons in
+                        let outcome = await seer.request(item, seasons: seasons, actingUserID: activeSeerrUserID)
+                        return seerRequestResult(outcome, actingName: activeSeerrUserName)
+                    },
+                    requestActingName: activeSeerrUserName,
+                    confirmAdminRequest: confirmAdminRequest
                 )
             }
             .navigationDestination(for: SeasonContextRoute.self) { route in
@@ -1569,7 +1577,15 @@ private struct HomeTab: View {
                     spoilerSettings: spoilerSettings,
                     onPlay: { requestPlay($0) },
                     onSelectChild: { navigate($0) },
-                    initialSeasonID: route.season.id
+                    initialSeasonID: route.season.id,
+                    seerConnected: seer.isConfigured,
+                    requestAvailabilityRefresh: { await seer.requestAvailability(for: $0) },
+                    onRequestSeasons: { item, seasons in
+                        let outcome = await seer.request(item, seasons: seasons, actingUserID: activeSeerrUserID)
+                        return seerRequestResult(outcome, actingName: activeSeerrUserName)
+                    },
+                    requestActingName: activeSeerrUserName,
+                    confirmAdminRequest: confirmAdminRequest
                 )
             }
         }
@@ -1652,6 +1668,11 @@ private struct HomeTab: View {
             seerConnected: seer.isConfigured,
             onRequest: { item in
                 let outcome = await seer.request(item, actingUserID: activeSeerrUserID)
+                return seerRequestResult(outcome, actingName: activeSeerrUserName)
+            },
+            requestAvailabilityRefresh: { await seer.requestAvailability(for: $0) },
+            onRequestSeasons: { item, seasons in
+                let outcome = await seer.request(item, seasons: seasons, actingUserID: activeSeerrUserID)
                 return seerRequestResult(outcome, actingName: activeSeerrUserName)
             },
             requestActingName: activeSeerrUserName,
@@ -1909,7 +1930,10 @@ private struct SearchTab: View {
                     // Fold Seerr discovery hits into a trailing "Not in Your Library"
                     // section. Swallows errors to [] so a Seerr outage never breaks
                     // library search; returns [] when Seerr is unconfigured.
-                    seerSearch: { [seer] query in (try? await seer.search(query)) ?? [] }
+                    seerSearch: { [seer] query in (try? await seer.search(query)) ?? [] },
+                    seerRequestAvailability: { [seer] item in
+                        await seer.requestAvailability(for: item)
+                    }
                 ),
                 spoilerSettings: spoilerSettings,
                 onSelect: { open($0) }
@@ -1945,6 +1969,11 @@ private struct SearchTab: View {
                         let outcome = await seer.request(item, actingUserID: activeSeerrUserID)
                         return seerRequestResult(outcome, actingName: activeSeerrUserName)
                     },
+                    requestAvailabilityRefresh: { await seer.requestAvailability(for: $0) },
+                    onRequestSeasons: { item, seasons in
+                        let outcome = await seer.request(item, seasons: seasons, actingUserID: activeSeerrUserID)
+                        return seerRequestResult(outcome, actingName: activeSeerrUserName)
+                    },
                     requestActingName: activeSeerrUserName,
                     confirmAdminRequest: confirmAdminRequest
                 )
@@ -1969,7 +1998,15 @@ private struct SearchTab: View {
                     spoilerSettings: spoilerSettings,
                     onPlay: { requestPlay($0) },
                     onSelectChild: { open($0) },
-                    initialEpisode: route.episode
+                    initialEpisode: route.episode,
+                    seerConnected: seer.isConfigured,
+                    requestAvailabilityRefresh: { await seer.requestAvailability(for: $0) },
+                    onRequestSeasons: { item, seasons in
+                        let outcome = await seer.request(item, seasons: seasons, actingUserID: activeSeerrUserID)
+                        return seerRequestResult(outcome, actingName: activeSeerrUserName)
+                    },
+                    requestActingName: activeSeerrUserName,
+                    confirmAdminRequest: confirmAdminRequest
                 )
             }
             .navigationDestination(for: SeasonContextRoute.self) { route in
@@ -1992,7 +2029,15 @@ private struct SearchTab: View {
                     spoilerSettings: spoilerSettings,
                     onPlay: { requestPlay($0) },
                     onSelectChild: { open($0) },
-                    initialSeasonID: route.season.id
+                    initialSeasonID: route.season.id,
+                    seerConnected: seer.isConfigured,
+                    requestAvailabilityRefresh: { await seer.requestAvailability(for: $0) },
+                    onRequestSeasons: { item, seasons in
+                        let outcome = await seer.request(item, seasons: seasons, actingUserID: activeSeerrUserID)
+                        return seerRequestResult(outcome, actingName: activeSeerrUserName)
+                    },
+                    requestActingName: activeSeerrUserName,
+                    confirmAdminRequest: confirmAdminRequest
                 )
             }
         }

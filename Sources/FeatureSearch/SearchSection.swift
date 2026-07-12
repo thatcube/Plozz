@@ -33,6 +33,40 @@ public struct SearchSection: Identifiable, Equatable, Sendable {
     /// the library sections when Seerr is connected and returns requestable hits.
     public static let notInLibraryTitle = "Not in Your Library"
 
+    /// Compact Search-only cue for a playable series whose Seerr match says only
+    /// part of the show is available. Ordinary library cards have no availability,
+    /// and fully absent discovery cards remain in "Not in Your Library".
+    public static func availabilityCue(for item: MediaItem) -> String? {
+        guard item.kind == .series, item.availability == .partiallyAvailable else { return nil }
+        return "More Seasons"
+    }
+
+    /// Transfers Seerr's partial-series state onto the matching playable library
+    /// item without changing its provider id, sources, ordering, or navigation.
+    /// The discovery duplicate is still filtered from "Not in Your Library".
+    public static func mergingDiscoveryAvailability(
+        into libraryResults: [MediaItem],
+        discoveryResults: [MediaItem],
+        requestableSeriesTmdbIDs: Set<String>
+    ) -> [MediaItem] {
+        let partialSeriesTmdbIDs = Set(discoveryResults.compactMap { item -> String? in
+            guard item.kind == .series, item.availability == .partiallyAvailable else { return nil }
+            guard let tmdbID = item.providerIDs["Tmdb"],
+                  requestableSeriesTmdbIDs.contains(tmdbID) else { return nil }
+            return tmdbID
+        })
+        guard !partialSeriesTmdbIDs.isEmpty else { return libraryResults }
+        return libraryResults.map { item in
+            guard item.kind == .series,
+                  let tmdbID = item.providerIDs["Tmdb"],
+                  partialSeriesTmdbIDs.contains(tmdbID)
+            else { return item }
+            var updated = item
+            updated.availability = .partiallyAvailable
+            return updated
+        }
+    }
+
     /// Builds the "Not in Your Library" section from Seerr discovery results,
     /// filtering out anything that is really in the user's library:
     ///

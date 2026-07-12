@@ -106,6 +106,54 @@ enum SeerMapper {
         return Array(mapped.prefix(limit))
     }
 
+    /// Combines TMDB's complete numbered-season list with Seerr's tracked-season
+    /// statuses. A numbered season absent from `mediaInfo.seasons` is untracked and
+    /// therefore requestable (`unknown`). Specials (season 0) stay out of Plozz's
+    /// simple request picker.
+    static func requestAvailability(from details: SeerMediaDetails) -> MediaRequestAvailability {
+        var tracked = Dictionary(
+            uniqueKeysWithValues: (details.mediaInfo?.seasons ?? []).map {
+                ($0.seasonNumber, $0.status.flatMap(MediaAvailabilityStatus.init(rawValue:)) ?? .unknown)
+            }
+        )
+        var failedRequestSeasons: Set<Int> = []
+        // MediaRequestStatus: pending=1, approved=2, declined=3, failed=4,
+        // completed=5. Seerr blocks duplicate requests for pending/approved/failed
+        // seasons, so preserve those as in-flight even if the availability scanner
+        // has not created a `mediaInfo.seasons` row yet.
+        for request in details.mediaInfo?.requests ?? [] where request.is4k != true {
+            guard let requestStatus = request.status, [1, 2, 4].contains(requestStatus) else { continue }
+            for season in request.seasons {
+                guard let seasonStatus = season.status, [1, 2, 4].contains(seasonStatus) else { continue }
+                let current = tracked[season.seasonNumber] ?? .unknown
+                guard current.isRequestable else { continue }
+                if requestStatus == 4 {
+                    tracked[season.seasonNumber] = .pending
+                    failedRequestSeasons.insert(season.seasonNumber)
+                } else {
+                    tracked[season.seasonNumber] = seasonStatus == 2 ? .processing : .pending
+                }
+            }
+        }
+        let seasons = details.seasons
+            .filter { $0.seasonNumber > 0 }
+            .sorted { $0.seasonNumber < $1.seasonNumber }
+            .map { season in
+                MediaSeasonRequestState(
+                    number: season.seasonNumber,
+                    title: season.name?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty
+                        ?? "Season \(season.seasonNumber)",
+                    status: tracked[season.seasonNumber] ?? .unknown,
+                    requestFailed: failedRequestSeasons.contains(season.seasonNumber)
+                )
+            }
+        return MediaRequestAvailability(
+            status: details.mediaInfo?.status.flatMap(MediaAvailabilityStatus.init(rawValue:)) ?? .unknown,
+            downloadProgress: downloadProgress(from: details.mediaInfo?.downloadStatus),
+            seasons: seasons
+        )
+    }
+
     // MARK: - Request derivation
 
     /// The Seerr `mediaType` string for a `MediaItem`, or `nil` when the item
@@ -129,4 +177,8 @@ enum SeerMapper {
         }
         return nil
     }
+}
+
+private extension String {
+    var nonEmpty: String? { isEmpty ? nil : self }
 }

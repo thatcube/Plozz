@@ -368,29 +368,45 @@ struct SeriesDetailView: View {
     // MARK: Season tabs
 
     private func seasonTabBar(onFocusEntered: @escaping () -> Void) -> some View {
-        ScrollViewReader { proxy in
-            HStack(spacing: 18) {
-                if !seasons.isEmpty {
-                    seasonScroller(using: proxy, onFocusEntered: onFocusEntered)
+        let hasRequestAccessory = requestAvailability?.hasSeasonRequestContent == true
+        return ScrollViewReader { proxy in
+            if hasRequestAccessory {
+                HStack(spacing: 18) {
+                    if !seasons.isEmpty {
+                        seasonScroller(
+                            using: proxy,
+                            hasRequestAccessory: true,
+                            onFocusEntered: onFocusEntered
+                        )
                         .frame(maxWidth: .infinity)
-                } else {
-                    Spacer(minLength: PlozzTheme.Metrics.heroLeadingPadding)
-                }
+                    } else {
+                        Spacer(minLength: PlozzTheme.Metrics.heroLeadingPadding)
+                    }
 
-                if requestAvailability?.hasSeasonRequestContent == true {
                     seasonRequestMenu(onFocusEntered: onFocusEntered)
                         .padding(.trailing, PlozzTheme.Metrics.screenPadding)
                 }
+                .frame(height: SeriesEpisodeBrowserLayout.seasonBarHeight)
+                .focusSection()
+            } else {
+                // Preserve the original season rail geometry from 2593bfa4:
+                // selected seasons are measured in this viewport and minimally
+                // revealed to its trailing edge. Wrapping this in the accessory
+                // HStack changed that geometry and regressed long-show entry.
+                seasonScroller(
+                    using: proxy,
+                    hasRequestAccessory: false,
+                    onFocusEntered: onFocusEntered
+                )
+                    .frame(height: SeriesEpisodeBrowserLayout.seasonBarHeight)
+                    .focusSection()
             }
-            .frame(height: SeriesEpisodeBrowserLayout.seasonBarHeight)
-            // Seasons and the fixed request accessory form one horizontal focus
-            // section, but entry is still gated to the active owned season.
-            .focusSection()
         }
     }
 
     private func seasonScroller(
         using proxy: ScrollViewProxy,
+        hasRequestAccessory: Bool,
         onFocusEntered: @escaping () -> Void
     ) -> some View {
             ScrollView(.horizontal, showsIndicators: false) {
@@ -405,14 +421,11 @@ struct SeriesDetailView: View {
                 }
                 .padding(
                     .trailing,
-                    requestAvailability?.hasSeasonRequestContent == true
+                    hasRequestAccessory
                         ? PlozzTheme.Metrics.screenPadding + SeriesEpisodeBrowserLayout.seasonRequestFadeWidth
                         : PlozzTheme.Metrics.screenPadding
                 )
-                // Align the first season to the hero keyline INSIDE the ScrollView,
-                // leaving the viewport itself full-width so clipping/fading happens
-                // at the page edge rather than through a season label.
-                .padding(.leading, PlozzTheme.Metrics.heroLeadingPadding)
+                .padding(.leading, hasRequestAccessory ? PlozzTheme.Metrics.heroLeadingPadding : 0)
                 // Headroom for the focused chip's lift so it is never clipped.
                 .padding(.vertical, 12)
             }
@@ -447,7 +460,7 @@ struct SeriesDetailView: View {
                 seasonChipFrames = frames
             }
             .modifier(SeasonRequestBoundaryModifier(
-                enabled: requestAvailability?.hasSeasonRequestContent == true
+                enabled: hasRequestAccessory
             ))
             .onChange(of: focusedSeasonID) { _, newValue in
                 guard let id = newValue else { return }
@@ -1183,9 +1196,11 @@ private struct SeasonRequestBoundaryModifier: ViewModifier {
                     }
                 }
         } else {
-            // No accessory means no collision. Preserve the original overflow so
-            // the first/last focused season pill and its shadow are never cut off.
-            content.scrollClipDisabled()
+            // Exact pre-request rail geometry: the viewport begins at the hero
+            // keyline and allows focused pills to overflow its bounds.
+            content
+                .scrollClipDisabled()
+                .padding(.leading, PlozzTheme.Metrics.heroLeadingPadding)
         }
     }
 }

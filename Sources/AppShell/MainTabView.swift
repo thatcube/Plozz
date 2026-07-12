@@ -213,6 +213,8 @@ struct MainTabView: View {
     @State private var librariesStore = DiscoveredLibrariesStore()
     @State private var musicAvailability = MusicAvailabilityModel()
     @State private var themeMusicController = ThemeMusicController()
+    /// Retains loaded Hero content across tvOS tab subtree recreation.
+    @State private var homeHeroRuntime = HomeHeroRuntimeState()
     /// Hosts the full-screen Now Playing player as a `fullScreenCover` on the root
     /// TabView rather than inside the Music tab's navigation stack — the latter
     /// presents unreliably under the sidebar tab style (the cover only appears
@@ -265,6 +267,7 @@ struct MainTabView: View {
                 homeLayoutStore: homeLayoutStore,
                 homeContentStore: homeContentStore,
                 heroSettings: heroSettingsModel,
+                heroRuntime: homeHeroRuntime,
                 navigationStyle: navigationStyle,
                 behavior: subtitleBehaviorModel.settings,
                 style: subtitleStyleModel.style,
@@ -1639,6 +1642,7 @@ private struct HomeTab: View {
     let homeContentStore: HomeContentStoring
     /// Per-profile hero carousel settings driving the Home featured section.
     let heroSettings: HeroSettingsModel
+    let heroRuntime: HomeHeroRuntimeState
     /// App-wide navigation style, so the carousel's left-edge focus behaviour
     /// (escape to sidebar vs. wrap) matches the surrounding chrome.
     let navigationStyle: NavigationStyle
@@ -1692,6 +1696,7 @@ private struct HomeTab: View {
                 visibility: homeVisibility,
                 spoilerSettings: spoilerSettings,
                 heroSettings: heroSettings,
+                heroRuntime: heroRuntime,
                 heroFeaturedProvider: makeHeroFeaturedProvider(
                     seer: seer,
                     accounts: accounts,

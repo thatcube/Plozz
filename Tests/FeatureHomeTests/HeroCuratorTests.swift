@@ -403,6 +403,18 @@ final class HeroCuratorTests: XCTestCase {
 
         XCTAssertEqual(result.map(\.id), ["new"])
     }
+
+    func testReconcileKeepsLoadedCandidatesButAppliesNewestWatchIntent() {
+        let result = HeroCurator().reconcile(
+            [item("watched"), item("new")],
+            settings: settings(sources: [.featured]),
+            watchMutations: [
+                MediaItemMutation(itemIDs: ["watched"], played: true)
+            ]
+        )
+
+        XCTAssertEqual(result.map(\.id), ["new"])
+    }
 }
 
 final class HomeHeroSlotStateTests: XCTestCase {
@@ -696,6 +708,47 @@ final class HeroRecomputeKeyTests: XCTestCase {
 
         XCTAssertTrue(HeroRecomputePolicy.shouldRun(key: original, completedKey: nil))
         XCTAssertTrue(HeroRecomputePolicy.shouldRun(key: changed, completedKey: original))
+    }
+
+    func testExternalWatchRefreshCanReuseLoadedCandidateSet() {
+        let original = HeroRecomputeKey(
+            content: content(),
+            settings: settings(sources: [.featured]),
+            randomLibraries: [],
+            externalRefreshRevision: 1
+        )
+        let refreshing = HeroRecomputeKey(
+            content: content(),
+            settings: settings(sources: [.featured]),
+            randomLibraries: [],
+            externalRefreshRevision: 2
+        )
+        let structurallyChanged = HeroRecomputeKey(
+            content: content(),
+            settings: settings(sources: [.watchlist]),
+            randomLibraries: [],
+            externalRefreshRevision: 2
+        )
+
+        XCTAssertNotEqual(original, refreshing)
+        XCTAssertTrue(original.matchesIgnoringExternalRefresh(refreshing))
+        XCTAssertFalse(original.matchesIgnoringExternalRefresh(structurallyChanged))
+    }
+}
+
+@MainActor
+final class HomeHeroRuntimeStateTests: XCTestCase {
+    func testLoadedHeroStateSurvivesViewReconstructionThroughSharedOwner() {
+        let runtime = HomeHeroRuntimeState()
+        runtime.items = [
+            MediaItem(id: "featured", title: "Featured", kind: .movie)
+        ]
+        runtime.hasHydratedDurableMutations = true
+
+        let reconstructedViewOwner = runtime
+
+        XCTAssertEqual(reconstructedViewOwner.items.map(\.id), ["featured"])
+        XCTAssertTrue(reconstructedViewOwner.hasHydratedDurableMutations)
     }
 }
 

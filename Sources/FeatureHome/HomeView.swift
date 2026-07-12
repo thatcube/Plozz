@@ -5,6 +5,22 @@ import CoreNetworking
 import CoreUI
 import MetadataKit
 
+/// Profile-scoped Hero state owned above the transient Home tab subtree. tvOS may
+/// recreate a tab's view when switching away and back; retaining the last curated
+/// items here prevents loaded content from regressing to a non-focusable skeleton.
+@MainActor
+@Observable
+public final class HomeHeroRuntimeState {
+    var items: [MediaItem] = []
+    var completedKey: HeroRecomputeKey?
+    var externalRefreshRevision = 0
+    var watchMutations: [MediaItemMutation] = []
+    var durableWatchMutations: [MediaItemMutation] = []
+    var hasHydratedDurableMutations = false
+
+    public init() {}
+}
+
 /// The Home screen: an optional cinematic **hero** carousel followed by
 /// Continue Watching, Latest, and library shortcuts.
 public struct HomeView: View {
@@ -35,25 +51,9 @@ public struct HomeView: View {
     /// (escape to sidebar vs. wrap) matches the surrounding chrome.
     private let navigationStyle: NavigationStyle
 
-    /// The curated hero items, recomputed as Home content or settings change.
-    @State private var heroItems: [MediaItem] = []
-    /// The latest curation input that completed (including a valid empty result).
-    /// A cached Home snapshot can render rows before async-only hero sources finish;
-    /// comparing this with the current input distinguishes "still curating" from
-    /// "curation completed with no eligible hero items."
-    @State private var completedHeroRecomputeKey: HeroRecomputeKey?
-    /// Coalesced invalidation for async-only hero inputs that are intentionally
-    /// absent from Home content: provider watch mutations and identity-index warms.
-    @State private var heroExternalRefreshRevision = 0
-    /// Session-local user intent overlaid before hero filtering. Provider writes
-    /// drain asynchronously and may be offline, so a fresh read cannot resurrect
-    /// a title the user just marked watched.
-    @State private var heroWatchMutations: [MediaItemMutation] = []
-    /// Persisted intents hydrate asynchronously from the outbox. The synchronous
-    /// seed waits for this lightweight read when watched filtering is enabled so
-    /// relaunch never flashes a stale watched title before full curation starts.
-    @State private var durableHeroWatchMutations: [MediaItemMutation] = []
-    @State private var durableHeroMutationOwner: ObjectIdentifier?
+    /// Retained above the tab so switching away and back never throws away a
+    /// completed curation or its durable/session-local watch overlays.
+    private let heroRuntime: HomeHeroRuntimeState
 
     /// Whether the hero is receded (focus moved down onto the Continue Watching
     /// row). Driven by the page scroll crossing `recedeScrollThreshold` (see
@@ -93,6 +93,7 @@ public struct HomeView: View {
         visibility: HomeLibraryVisibilityModel,
         spoilerSettings: SpoilerSettings = .default,
         heroSettings: HeroSettingsModel? = nil,
+        heroRuntime: HomeHeroRuntimeState,
         heroCurator: HeroCurator = HeroCurator(),
         heroFeaturedProvider: @escaping FeaturedContentProviding = HeroFeaturedProvider.none,
         heroFeaturedStatusProvider: FeaturedContentProviding? = nil,
@@ -116,6 +117,7 @@ public struct HomeView: View {
         self.visibility = visibility
         self.spoilerSettings = spoilerSettings
         self.heroSettings = heroSettings
+        self.heroRuntime = heroRuntime
         self.heroCurator = heroCurator
         self.heroFeaturedProvider = heroFeaturedProvider
         self.heroFeaturedStatusProvider = heroFeaturedStatusProvider ?? heroFeaturedProvider
@@ -162,19 +164,31 @@ public struct HomeView: View {
                 content: content,
                 settings: heroSettings?.settings,
                 randomLibraries: randomLibraries,
-                externalRefreshRevision: heroExternalRefreshRevision
+                externalRefreshRevision: heroRuntime.externalRefreshRevision
             )
             // Seed the hero synchronously from the already-loaded sources
             // (Continue Watching + Watchlist) so it renders in the *same frame* as
             // the rows — no pop-in. Once `recomputeHero` finishes, `heroItems`
             // (which also includes the async Featured/Random sources) takes over.
-            let hasCurrentAsyncItems = completedHeroRecomputeKey == heroRecomputeKey
-                && !heroItems.isEmpty
+            let watchMutations = heroRuntime.durableWatchMutations
+                + heroRuntime.watchMutations
+            let hasCurrentAsyncItems = heroRuntime.completedKey == heroRecomputeKey
+                && !heroRuntime.items.isEmpty
+            let canReuseLoadedItems = heroRuntime.completedKey?.matchesIgnoringExternalRefresh(
+                heroRecomputeKey
+            ) == true && !heroRuntime.items.isEmpty
+            let reconciledLoadedItems = hasCurrentAsyncItems || canReuseLoadedItems
+                ? heroCurator.reconcile(
+                    heroRuntime.items,
+                    settings: heroSettings?.settings,
+                    watchMutations: watchMutations
+                )
+                : []
             let durableReplayReady = heroSettings?.settings.hideWatched != true
-                || durableHeroMutationOwner == ObjectIdentifier(viewModel)
+                || heroRuntime.hasHydratedDurableMutations
             let displayHeroItems: [MediaItem] = {
-                if hasCurrentAsyncItems {
-                    return heroItems
+                if !reconciledLoadedItems.isEmpty {
+                    return reconciledLoadedItems
                 }
                 guard durableReplayReady else { return [] }
                 return heroSettings.map {
@@ -182,14 +196,14 @@ public struct HomeView: View {
                         settings: $0.settings,
                         continueWatching: content.continueWatching,
                         watchlist: content.watchlist,
-                        watchMutations: durableHeroWatchMutations + heroWatchMutations
+                        watchMutations: watchMutations
                     )
                 } ?? []
             }()
             let heroSlotState = HomeHeroSlotState.resolve(
                 isConfigured: heroSettings?.settings.isActive ?? false,
                 hasItems: !displayHeroItems.isEmpty,
-                recomputeComplete: completedHeroRecomputeKey == heroRecomputeKey
+                recomputeComplete: heroRuntime.completedKey == heroRecomputeKey
             )
             let heroActive = heroSlotState == .content
             let heroLayoutActive = heroSlotState != .hidden
@@ -413,9 +427,9 @@ public struct HomeView: View {
             if let mutation = MediaItemMutation.from(note) {
                 viewModel.applyWatchedState(mutation)
                 if mutation.played != nil {
-                    heroWatchMutations.append(mutation)
+                    heroRuntime.watchMutations.append(mutation)
                     if shouldRefreshAsyncWatchHistory {
-                        heroExternalRefreshRevision &+= 1
+                        heroRuntime.externalRefreshRevision &+= 1
                     }
                 }
             } else {
@@ -432,7 +446,7 @@ public struct HomeView: View {
             let refreshAsyncHistory = shouldRefreshAsyncWatchHistory
             viewModel.scheduleReenrich {
                 if refreshAsyncHistory {
-                    heroExternalRefreshRevision &+= 1
+                    heroRuntime.externalRefreshRevision &+= 1
                 }
             }
         }
@@ -558,15 +572,15 @@ public struct HomeView: View {
     ) async {
         guard HeroRecomputePolicy.shouldRun(
             key: key,
-            completedKey: completedHeroRecomputeKey
+            completedKey: heroRuntime.completedKey
         ) else {
             PlozzLog.boot("HomeHero.curate SKIP unchanged input")
             return
         }
         let started = Date()
         guard let settings = heroSettings?.settings, settings.isActive else {
-            heroItems = []
-            completedHeroRecomputeKey = key
+            heroRuntime.items = []
+            heroRuntime.completedKey = key
             return
         }
         PlozzLog.boot(
@@ -574,14 +588,14 @@ public struct HomeView: View {
         )
         let durableWatchMutations = await viewModel.pendingHeroWatchMutations()
         guard !Task.isCancelled else { return }
-        durableHeroWatchMutations = durableWatchMutations
-        durableHeroMutationOwner = ObjectIdentifier(viewModel)
+        heroRuntime.durableWatchMutations = durableWatchMutations
+        heroRuntime.hasHydratedDurableMutations = true
         let items = await heroCurator.curate(
             settings: settings,
             continueWatching: content.continueWatching,
             watchlist: content.watchlist,
             randomLibraries: randomLibraries,
-            watchMutations: durableWatchMutations + heroWatchMutations,
+            watchMutations: durableWatchMutations + heroRuntime.watchMutations,
             featuredProvider: heroFeaturedProvider,
             randomProvider: heroRandomProvider,
             artworkProvider: heroArtworkProvider
@@ -591,8 +605,8 @@ public struct HomeView: View {
             PlozzLog.boot("HomeHero.curate CANCEL ms=\(elapsedMS)")
             return
         }
-        heroItems = items
-        completedHeroRecomputeKey = key
+        heroRuntime.items = items
+        heroRuntime.completedKey = key
         let elapsedMS = Int(Date().timeIntervalSince(started) * 1_000)
         PlozzLog.boot("HomeHero.curate DONE ms=\(elapsedMS) items=\(items.count)")
     }
@@ -622,7 +636,7 @@ public struct HomeView: View {
             if Task.isCancelled { return }
             guard let settings = heroSettings?.settings, settings.isActive,
                   settings.isEnabled(.featured),
-                  heroItems.contains(where: { $0.availability != nil })
+                  heroRuntime.items.contains(where: { $0.availability != nil })
             else { continue }
 
             let fresh = await heroFeaturedStatusProvider(settings.maxItems)
@@ -631,7 +645,7 @@ public struct HomeView: View {
             var statusByID: [String: (availability: MediaAvailabilityStatus?, progress: Double?)] = [:]
             for item in fresh { statusByID[item.id] = (item.availability, item.downloadProgress) }
 
-            var updated = heroItems
+            var updated = heroRuntime.items
             var changed = false
             for index in updated.indices {
                 guard let status = statusByID[updated[index].id] else { continue }
@@ -642,7 +656,7 @@ public struct HomeView: View {
                     changed = true
                 }
             }
-            if changed { heroItems = updated }
+            if changed { heroRuntime.items = updated }
         }
     }
 
@@ -798,6 +812,17 @@ struct HeroRecomputeKey: Equatable {
         let needsExternalWatchHistory = settings?.hideWatched == true
             && (activeSources.contains(.featured) || activeSources.contains(.randomFromLibrary))
         self.externalRefreshRevision = needsExternalWatchHistory ? externalRefreshRevision : 0
+    }
+
+    /// Whether the loaded candidate set is still structurally valid while only
+    /// external watch-history enrichment is being refreshed.
+    func matchesIgnoringExternalRefresh(_ other: HeroRecomputeKey) -> Bool {
+        continueWatching == other.continueWatching
+            && watchlist == other.watchlist
+            && randomLibraries == other.randomLibraries
+            && sources == other.sources
+            && maxItems == other.maxItems
+            && hideWatched == other.hideWatched
     }
 }
 

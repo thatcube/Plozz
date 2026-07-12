@@ -113,9 +113,26 @@ public struct HeroCurator: Sendable {
                 mutations: watchMutations
             )
         }
+
         return strategy.compose(
             HeroArtworkEligibility.filterDirect(perSource),
             limit: settings.maxItems
+        )
+    }
+
+    /// Reapplies current watched-state intent to an already-curated Hero while an
+    /// async watch-history refresh is in flight. The candidate set and artwork stay
+    /// stable, so focus is preserved, but a newly watched title cannot linger.
+    public func reconcile(
+        _ items: [MediaItem],
+        settings: HeroSettings?,
+        watchMutations: [MediaItemMutation]
+    ) -> [MediaItem] {
+        guard let settings, settings.isActive else { return [] }
+        return HeroWatchEligibility.filter(
+            items,
+            settings: settings,
+            mutations: watchMutations
         )
     }
 

@@ -1072,9 +1072,17 @@ public final class PlayerViewModel {
             // Leave `phase` as `.loading`; the view is dismissing.
             return
         } catch let error as AppError {
+            HandoffDiagnostics.emit(
+                "bringup FAILED item=\(itemID) provider=\(provider.kind.rawValue) "
+                    + "error=\(HandoffDiagnostics.errorCode(error))"
+            )
             clearFirstFrameWait()
             phase = .failed(error)
         } catch {
+            HandoffDiagnostics.emit(
+                "bringup FAILED item=\(itemID) provider=\(provider.kind.rawValue) "
+                    + "error=nonAppError"
+            )
             clearFirstFrameWait()
             phase = .failed(.unknown(""))
         }
@@ -1585,6 +1593,10 @@ public final class PlayerViewModel {
     /// fires at most once so the chain can never loop.
     private func handleEngineFailure(_ error: AppError) async {
         guard let request else {
+            HandoffDiagnostics.emit(
+                "engine FAILED item=\(itemID) request=nil "
+                    + "error=\(HandoffDiagnostics.errorCode(error))"
+            )
             phase = .failed(error)
             return
         }
@@ -1623,6 +1635,10 @@ public final class PlayerViewModel {
         }
 
         // 3) Already transcoding (or out of options): surface the error.
+        HandoffDiagnostics.emit(
+            "engine FAILED item=\(itemID) engine=\(currentEngineKind.rawValue) "
+                + "error=\(HandoffDiagnostics.errorCode(error)) exhausted=true"
+        )
         clearFirstFrameWait()
         phase = .failed(error)
     }

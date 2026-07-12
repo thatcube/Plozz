@@ -1084,19 +1084,47 @@ final class PlexProviderMappingTests: XCTestCase {
         XCTAssertTrue(request.audioTracks.first?.isDefault == true)
         XCTAssertTrue(request.isTranscoding)
 
-        let url = try XCTUnwrap(request.streamURL).absoluteString
-        XCTAssertTrue(url.hasPrefix("https://plex.host:32400/video/:/transcode/universal/start.m3u8"), url)
-        XCTAssertTrue(url.contains("protocol=hls"), url)
-        XCTAssertTrue(url.contains("path=/library/metadata/77"), url)
-        XCTAssertTrue(url.contains("X-Plex-Token=TOKEN"), url)
+        guard case .authenticatedHTTP(let locator) = request.playbackSource else {
+            return XCTFail("expected authenticated HTTP locator")
+        }
+        XCTAssertEqual(locator.provider, .plex)
+        XCTAssertEqual(
+            locator.resource.path,
+            "/video/:/transcode/universal/start.m3u8"
+        )
+        XCTAssertEqual(locator.deliveryMode, .serverTranscode)
+        XCTAssertEqual(locator.playSessionID, "plozz-d1-77")
+        XCTAssertEqual(
+            locator.resource.queryItems.first { $0.name == "protocol" }?.value,
+            "hls"
+        )
+        XCTAssertEqual(
+            locator.resource.queryItems.first { $0.name == "path" }?.value,
+            "/library/metadata/77"
+        )
+        XCTAssertFalse(
+            locator.resource.queryItems.contains {
+                $0.name.localizedCaseInsensitiveContains("token")
+            }
+        )
         let localRemux = try XCTUnwrap(request.localRemuxSource)
-        let original = localRemux.originalURL.absoluteString
-        XCTAssertTrue(original.hasPrefix("https://plex.host:32400/library/parts/2/16000/file.mkv"), original)
-        XCTAssertTrue(original.contains("download=1"), original)
-        XCTAssertTrue(original.contains("X-Plex-Token=TOKEN"), original)
-        let reference = try XCTUnwrap(localRemux.referencePlaybackURL?.absoluteString)
-        XCTAssertTrue(reference.hasPrefix("https://plex.host:32400/video/:/transcode/universal/start.m3u8"), reference)
-        XCTAssertTrue(reference.contains("directStream=1"), reference)
+        guard case .authenticatedHTTP(let original) = localRemux.originalSource,
+              case .authenticatedHTTP(let reference) = localRemux.referencePlaybackSource else {
+            return XCTFail("expected typed local remux sources")
+        }
+        XCTAssertEqual(original.resource.path, "/library/parts/2/16000/file.mkv")
+        XCTAssertEqual(
+            original.resource.queryItems.first { $0.name == "download" }?.value,
+            "1"
+        )
+        XCTAssertEqual(
+            reference.resource.path,
+            "/video/:/transcode/universal/start.m3u8"
+        )
+        XCTAssertEqual(
+            reference.resource.queryItems.first { $0.name == "directStream" }?.value,
+            "1"
+        )
     }
 
     func testPlaybackInfoDirectPlaysSupportedContainer() async throws {
@@ -1106,7 +1134,7 @@ final class PlexProviderMappingTests: XCTestCase {
         stub.stub(pathSuffix: "/library/metadata/88", json: """
         {"MediaContainer":{"Metadata":[
           {"ratingKey":"88","type":"movie","title":"Movie","duration":3600000,
-           "Media":[{"id":1,"container":"mp4","videoCodec":"h264","audioCodec":"aac","Part":[{"id":2,"key":"/library/parts/2/16000/file.mp4","container":"mp4","Stream":[
+           "Media":[{"id":1,"container":"mp4","videoCodec":"h264","audioCodec":"aac","Part":[{"id":2,"key":"/library/parts/2/16000/file name.mp4","container":"mp4","Stream":[
              {"id":10,"streamType":1,"index":0,"codec":"h264"},
              {"id":11,"streamType":2,"index":1,"codec":"aac","language":"English","languageTag":"en","selected":true}
            ]}]}]}
@@ -1116,9 +1144,76 @@ final class PlexProviderMappingTests: XCTestCase {
 
         let request = try await provider.playbackInfo(for: "88")
         XCTAssertFalse(request.isTranscoding)
-        let url = try XCTUnwrap(request.streamURL).absoluteString
-        XCTAssertTrue(url.hasPrefix("https://plex.host:32400/library/parts/2/16000/file.mp4"), url)
-        XCTAssertTrue(url.contains("X-Plex-Token=TOKEN"), url)
+        guard case .authenticatedHTTP(let locator) = request.playbackSource else {
+            return XCTFail("expected authenticated HTTP locator")
+        }
+        XCTAssertEqual(
+            locator.resource.path,
+            "/library/parts/2/16000/file%20name.mp4"
+        )
+        XCTAssertEqual(locator.deliveryMode, .directFile)
+        XCTAssertNil(locator.playSessionID)
+        XCTAssertFalse(
+            locator.resource.queryItems.contains {
+                $0.name.localizedCaseInsensitiveContains("token")
+            }
+        )
+
+        let forced = try await provider.playbackInfo(
+            for: "88",
+            forceTranscode: true
+        )
+        XCTAssertTrue(forced.isTranscoding)
+        guard case .authenticatedHTTP(let forcedLocator) = forced.playbackSource else {
+            return XCTFail("expected authenticated HTTP locator")
+        }
+        XCTAssertEqual(
+            forcedLocator.resource.path,
+            "/video/:/transcode/universal/start.m3u8"
+        )
+        XCTAssertEqual(forcedLocator.deliveryMode, .serverTranscode)
+    }
+
+    func testPlaybackInfoUsesSelectedPlexMediaIndex() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/library/metadata/89", json: """
+        {"MediaContainer":{"Metadata":[
+          {"ratingKey":"89","type":"movie","title":"Movie","duration":3600000,
+           "Media":[
+             {"id":11,"container":"mkv","videoCodec":"h264","audioCodec":"aac",
+              "Part":[{"id":1,"key":"/library/parts/1/first.mkv","container":"mkv"}]},
+             {"id":22,"container":"mkv","videoCodec":"hevc","audioCodec":"eac3",
+              "Part":[{"id":2,"key":"/library/parts/2/selected.mkv","container":"mkv"}]}
+           ]}
+        ]}}
+        """)
+        let provider = PlexProvider(session: makeSession(), http: stub)
+
+        let request = try await provider.playbackInfo(
+            for: "89",
+            mediaSourceID: "22",
+            forceTranscode: true
+        )
+        guard case .authenticatedHTTP(let locator) = request.playbackSource else {
+            return XCTFail("expected authenticated HTTP locator")
+        }
+        XCTAssertEqual(locator.mediaSourceID, "22")
+        XCTAssertEqual(
+            locator.resource.queryItems.first { $0.name == "mediaIndex" }?.value,
+            "1"
+        )
+        XCTAssertEqual(
+            locator.resource.queryItems.first { $0.name == "partIndex" }?.value,
+            "0"
+        )
+        let localRemux = try XCTUnwrap(request.localRemuxSource)
+        guard case .authenticatedHTTP(let original) = localRemux.originalSource else {
+            return XCTFail("expected authenticated original source")
+        }
+        XCTAssertEqual(
+            original.resource.path,
+            "/library/parts/2/selected.mkv"
+        )
     }
 
     func testPlaybackInfoBuildsPlexBIFScrubPreviewWhenIndexed() async throws {

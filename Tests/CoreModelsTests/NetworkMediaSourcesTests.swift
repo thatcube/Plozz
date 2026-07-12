@@ -156,7 +156,12 @@ final class NetworkMediaSourcesTests: XCTestCase {
             itemID: "item",
             mediaSourceID: "source",
             deliveryMode: .serverTranscode,
-            formatHint: MediaFormatHint(container: "ts")
+            formatHint: MediaFormatHint(container: "ts"),
+            resource: try AuthenticatedHTTPResource(
+                pathBase: .configuredBaseURL,
+                path: "Videos/item/master.m3u8"
+            ),
+            playSessionID: "play-session"
         )
         let source = PlaybackSource.authenticatedHTTP(locator)
 
@@ -172,12 +177,46 @@ final class NetworkMediaSourcesTests: XCTestCase {
                 accountID: "account",
                 credentialRevision: revision,
                 itemID: "item",
-                deliveryMode: .directFile
+                deliveryMode: .directFile,
+                resource: try AuthenticatedHTTPResource(
+                    pathBase: .configuredBaseURL,
+                    path: "Videos/item/stream.mkv"
+                )
             )
         ) { error in
             XCTAssertEqual(
                 error as? MediaSourceModelError,
                 .unsupportedProvider(.mediaShare)
+            )
+        }
+    }
+
+    func testAuthenticatedHTTPResourceRejectsCredentialQueryItems() throws {
+        XCTAssertThrowsError(
+            try AuthenticatedHTTPQueryItem(name: "api_key", value: "secret")
+        ) { error in
+            XCTAssertEqual(
+                error as? MediaSourceModelError,
+                .sensitiveQueryItem(name: "api_key")
+            )
+        }
+        XCTAssertThrowsError(
+            try AuthenticatedHTTPQueryItem(name: "X-Plex-Token", value: "secret")
+        ) { error in
+            XCTAssertEqual(
+                error as? MediaSourceModelError,
+                .sensitiveQueryItem(name: "X-Plex-Token")
+            )
+        }
+        XCTAssertThrowsError(
+            try AuthenticatedHTTPQueryItem(
+                name: "X-Plex-Session-Identifier",
+                value: "session"
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? MediaSourceModelError,
+                .sensitiveQueryItem(name: "X-Plex-Session-Identifier")
             )
         }
     }

@@ -90,6 +90,8 @@ public final class NativeVideoEngine: VideoEngine {
 
     @ObservationIgnored private var player: AVPlayer?
     @ObservationIgnored private var request: PlaybackRequest?
+    @ObservationIgnored private let authenticatedHTTPResolver:
+        (any AuthenticatedHTTPResourceResolving)?
     @ObservationIgnored private var timeObserver: Any?
     @ObservationIgnored private let reportInterval: TimeInterval = 10
     @ObservationIgnored private var lastReportedSecond: Int = -1
@@ -137,8 +139,12 @@ public final class NativeVideoEngine: VideoEngine {
     @ObservationIgnored private weak var displayCriteriaWindow: UIWindow?
     #endif
 
-    public init(style: SubtitleStyle = .default) {
+    public init(
+        style: SubtitleStyle = .default,
+        authenticatedHTTPResolver: (any AuthenticatedHTTPResourceResolving)? = nil
+    ) {
         self.style = style
+        self.authenticatedHTTPResolver = authenticatedHTTPResolver
         PlaybackInstrumentation.increment(.nativeEngine)
     }
 
@@ -164,7 +170,20 @@ public final class NativeVideoEngine: VideoEngine {
         teardownPlayer()
 
         self.request = request
-        guard let streamURL = request.streamURL else {
+        let streamURL: URL?
+        if case .some(.authenticatedHTTP(let locator)) = request.playbackSource {
+            do {
+                streamURL = try await authenticatedHTTPResolver?.resolve(locator)
+            } catch {
+                let appError = AppError.unknown(String(describing: error))
+                status = .failed(appError)
+                onFailure?(appError)
+                return
+            }
+        } else {
+            streamURL = request.streamURL ?? request.playbackSource?.publicURL
+        }
+        guard let streamURL else {
             let error = AppError.unknown("Native playback requires a URL source")
             status = .failed(error)
             onFailure?(error)

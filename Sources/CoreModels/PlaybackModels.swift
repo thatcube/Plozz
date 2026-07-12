@@ -367,8 +367,10 @@ public struct PlaybackRequest: Hashable, Sendable {
         audioTracks: [MediaTrack] = [],
         subtitleTracks: [MediaTrack] = [],
         startPosition: TimeInterval = 0,
+        isTranscoding: Bool? = nil,
         deliveryMode: PlaybackDiagnostics.PlaybackMode = .directPlay,
         sourceMetadata: MediaSourceMetadata? = nil,
+        localRemuxSource: LocalRemuxSourceDescriptor? = nil,
         scrubPreview: ScrubPreviewSource? = nil,
         sourceProvider: ProviderKind? = nil,
         serverName: String? = nil,
@@ -382,10 +384,10 @@ public struct PlaybackRequest: Hashable, Sendable {
         self.audioTracks = audioTracks
         self.subtitleTracks = subtitleTracks
         self.startPosition = startPosition
-        self.isTranscoding = false
+        self.isTranscoding = isTranscoding ?? (deliveryMode == .transcode)
         self.deliveryMode = deliveryMode
         self.sourceMetadata = sourceMetadata
-        self.localRemuxSource = nil
+        self.localRemuxSource = localRemuxSource
         self.scrubPreview = scrubPreview
         self.isManifestStream = playbackSource.isManifestStream
         self.sourceProvider = sourceProvider

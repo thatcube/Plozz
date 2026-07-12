@@ -15,8 +15,16 @@ final class LocalRemuxModelsTests: XCTestCase {
             itemID: "item1",
             mediaSourceID: "src1",
             provider: .jellyfin,
-            originalURL: URL(string: "http://host/Videos/item1/stream.mkv?static=true&api_key=TOKEN")!,
-            referencePlaybackURL: URL(string: "http://host/videos/item1/master.m3u8?api_key=TOKEN")!,
+            originalSource: .publicURL(
+                try! SecretFreeURLSource(
+                    url: URL(string: "https://example.test/Videos/item1/stream.mkv")!
+                )
+            ),
+            referencePlaybackSource: .publicURL(
+                try! SecretFreeURLSource(
+                    url: URL(string: "https://example.test/videos/item1/master.m3u8")!
+                )
+            ),
             durationSeconds: 7200,
             byteRangeSupported: true,
             sourceMetadata: MediaSourceMetadata(
@@ -120,7 +128,11 @@ final class LocalRemuxModelsTests: XCTestCase {
         meta.video = .init(codec: "h264", videoRangeType: "SDR")
         let source = LocalRemuxSourceDescriptor(
             itemID: "item1", provider: .jellyfin,
-            originalURL: URL(string: "http://host/x.mkv")!,
+            originalSource: .publicURL(
+                try! SecretFreeURLSource(
+                    url: URL(string: "https://example.test/x.mkv")!
+                )
+            ),
             byteRangeSupported: true, sourceMetadata: meta)
         let eligibility = source.eligibility(
             capabilities: nonDoViCaps, allowAnyDecodableHEVC: true)

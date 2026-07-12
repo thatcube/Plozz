@@ -283,6 +283,89 @@ public enum AuthenticatedHTTPDeliveryMode: String, Hashable, Sendable {
     }
 }
 
+public enum AuthenticatedHTTPResourcePurpose: String, Hashable, Sendable {
+    case mediaStream
+    case originalFile
+    case audioStream
+    case themeMusic
+    case subtitle
+    case scrubPreview
+}
+
+public struct AuthenticatedHTTPQueryItem: Hashable, Sendable {
+    public let name: String
+    public let value: String?
+
+    public init(name: String, value: String?) throws {
+        let normalizedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedName.isEmpty,
+              normalizedName.rangeOfCharacter(from: .controlCharacters) == nil else {
+            throw MediaSourceModelError.invalidRelativePath
+        }
+        guard !SensitiveQueryPolicy.isSensitive(normalizedName) else {
+            throw MediaSourceModelError.sensitiveQueryItem(name: normalizedName)
+        }
+        if let value,
+           value.rangeOfCharacter(from: .controlCharacters) != nil {
+            throw MediaSourceModelError.invalidRelativePath
+        }
+        self.name = normalizedName
+        self.value = value
+    }
+}
+
+/// A token-free provider resource path that can be rebound to the account's
+/// current server origin at the moment I/O begins.
+public struct AuthenticatedHTTPResource: Hashable, Sendable {
+    public enum PathBase: String, Hashable, Sendable {
+        case configuredBaseURL
+        case serverRoot
+    }
+
+    public let pathBase: PathBase
+    public let path: String
+    public let queryItems: [AuthenticatedHTTPQueryItem]
+
+    public init(
+        pathBase: PathBase,
+        path: String,
+        queryItems: [AuthenticatedHTTPQueryItem] = []
+    ) throws {
+        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        switch pathBase {
+        case .configuredBaseURL:
+            guard !trimmed.isEmpty, !trimmed.hasPrefix("/") else {
+                throw MediaSourceModelError.invalidRelativePath
+            }
+        case .serverRoot:
+            guard trimmed.hasPrefix("/") else {
+                throw MediaSourceModelError.invalidRelativePath
+            }
+        }
+        guard !trimmed.contains("\\"),
+              !trimmed.contains("?"),
+              !trimmed.contains("#"),
+              URL(string: trimmed)?.scheme == nil else {
+            throw MediaSourceModelError.invalidRelativePath
+        }
+        let components = trimmed.split(separator: "/", omittingEmptySubsequences: true)
+        guard !components.isEmpty,
+              components.allSatisfy({
+                  guard let decoded = String($0).removingPercentEncoding else { return false }
+                  return decoded != "."
+                      && decoded != ".."
+                      && !decoded.contains("/")
+                      && !decoded.contains("\\")
+                      && !decoded.contains("\0")
+              }) else {
+            throw MediaSourceModelError.invalidRelativePath
+        }
+        self.pathBase = pathBase
+        self.path = trimmed
+        self.queryItems = queryItems
+    }
+}
+
 /// Credential-free instructions for resolving a managed provider's stream.
 public struct AuthenticatedHTTPPlaybackLocator: Hashable, Sendable {
     public let provider: ProviderKind
@@ -292,6 +375,9 @@ public struct AuthenticatedHTTPPlaybackLocator: Hashable, Sendable {
     public let mediaSourceID: String?
     public let deliveryMode: AuthenticatedHTTPDeliveryMode
     public let formatHint: MediaFormatHint
+    public let purpose: AuthenticatedHTTPResourcePurpose
+    public let resource: AuthenticatedHTTPResource
+    public let playSessionID: String?
 
     public init(
         provider: ProviderKind,
@@ -300,7 +386,10 @@ public struct AuthenticatedHTTPPlaybackLocator: Hashable, Sendable {
         itemID: String,
         mediaSourceID: String? = nil,
         deliveryMode: AuthenticatedHTTPDeliveryMode,
-        formatHint: MediaFormatHint = MediaFormatHint()
+        formatHint: MediaFormatHint = MediaFormatHint(),
+        purpose: AuthenticatedHTTPResourcePurpose = .mediaStream,
+        resource: AuthenticatedHTTPResource,
+        playSessionID: String? = nil
     ) throws {
         guard provider != .mediaShare else {
             throw MediaSourceModelError.unsupportedProvider(provider)
@@ -314,7 +403,23 @@ public struct AuthenticatedHTTPPlaybackLocator: Hashable, Sendable {
         }
         self.deliveryMode = deliveryMode
         self.formatHint = formatHint
+        self.purpose = purpose
+        self.resource = resource
+        self.playSessionID = try playSessionID.map {
+            try ModelIdentifier.validated($0, field: "playSessionID")
+        }
     }
+}
+
+@MainActor
+public protocol AuthenticatedHTTPResourceResolving: Sendable {
+    func resolve(_ locator: AuthenticatedHTTPPlaybackLocator) async throws -> URL
+}
+
+/// Optional provider capability for managed servers whose reachable origin can
+/// differ from the account's persisted primary URL.
+public protocol AuthenticatedHTTPOriginProviding: Sendable {
+    var authenticatedHTTPOrigin: URL { get }
 }
 
 /// Scheme, host, and effective port accepted for one DLNA resource.
@@ -619,6 +724,7 @@ private enum SensitiveQueryPolicy {
         "signature",
         "ticket",
         "token",
+        "x-plex-session-identifier",
         "x-plex-token"
     ]
 

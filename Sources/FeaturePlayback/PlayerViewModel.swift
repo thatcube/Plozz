@@ -1113,7 +1113,7 @@ public final class PlayerViewModel {
             // Plozzigen handles the full pipeline: FFmpeg demux → HLS-fMP4 →
             // localhost → AVPlayer. Covers HEVC/H.264/VP9/AV1 video with any
             // audio (stream-copy or lossless bridge). The engine reads
-            // localRemuxSource.originalURL directly.
+            // localRemuxSource.originalSource directly.
             kind = .plozzigen
         } else {
             kind = EngineRouter.selectEngine(

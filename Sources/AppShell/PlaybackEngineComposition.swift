@@ -45,13 +45,21 @@ enum HybridPlayback {
     /// engine when linked; otherwise the native-only default.
     @MainActor
     static func engineFactory(
-        networkFileResolver: any MediaTransportNetworkFileResolving
+        networkFileResolver: any MediaTransportNetworkFileResolving,
+        authenticatedHTTPResolver: any AuthenticatedHTTPResourceResolving
     ) -> EngineFactory {
         #if canImport(UIKit)
         return EngineFactory(
+            makeNative: {
+                NativeVideoEngine(
+                    style: $0,
+                    authenticatedHTTPResolver: authenticatedHTTPResolver
+                )
+            },
             makePlozzigen: {
                 PlozzigenVideoEngineFactory.makeEngine(
-                    networkFileResolver: networkFileResolver
+                    networkFileResolver: networkFileResolver,
+                    authenticatedHTTPResolver: authenticatedHTTPResolver
                 )
             }
         )

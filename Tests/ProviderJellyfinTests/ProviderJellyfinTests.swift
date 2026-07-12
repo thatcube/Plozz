@@ -577,7 +577,7 @@ final class JellyfinProviderMappingTests: XCTestCase {
         XCTAssertTrue(item.providerIDs.isEmpty)
     }
 
-    func testPlaybackInfoResolvesDirectStreamWithApiKey() async throws {
+    func testPlaybackInfoReturnsCredentialFreeDirectStreamLocator() async throws {
         let stub = StubHTTPClient()
         stub.stub(pathSuffix: "/Users/u1/Items/i1", json: """
         {"Id":"i1","Name":"Movie","Type":"Movie","RunTimeTicks":0,
@@ -596,12 +596,21 @@ final class JellyfinProviderMappingTests: XCTestCase {
         XCTAssertEqual(request.playSessionID, "ps1")
         XCTAssertEqual(request.audioTracks.count, 1)
         XCTAssertEqual(request.subtitleTracks.count, 1)
-        let url = try XCTUnwrap(request.streamURL).absoluteString
-        XCTAssertTrue(url.contains("/Videos/i1/stream.mp4"))
-        XCTAssertTrue(url.contains("api_key=TOKEN"))
-        XCTAssertTrue(url.contains("mediaSourceId=src1"))
-        XCTAssertTrue(url.contains("playSessionId=ps1"))
-        XCTAssertTrue(url.contains("tag=etag9"))
+        guard case .authenticatedHTTP(let locator) = request.playbackSource else {
+            return XCTFail("expected authenticated HTTP locator")
+        }
+        XCTAssertEqual(locator.resource.path, "Videos/i1/stream.mp4")
+        XCTAssertEqual(locator.playSessionID, "ps1")
+        XCTAssertEqual(
+            locator.resource.queryItems,
+            [
+                try AuthenticatedHTTPQueryItem(name: "static", value: "true"),
+                try AuthenticatedHTTPQueryItem(name: "mediaSourceId", value: "src1"),
+                try AuthenticatedHTTPQueryItem(name: "tag", value: "etag9")
+            ]
+        )
+        XCTAssertFalse(String(describing: locator).contains("TOKEN"))
+        XCTAssertNil(request.streamURL)
         XCTAssertEqual(request.sourceMetadata?.video?.isInterlaced, true)
     }
 
@@ -626,11 +635,17 @@ final class JellyfinProviderMappingTests: XCTestCase {
 
         let request = try await provider.playbackInfo(for: "i1")
         let source = try XCTUnwrap(request.localRemuxSource)
-        let url = source.originalURL.absoluteString
-        XCTAssertTrue(url.contains("/Videos/i1/stream.mkv"), url)
-        XCTAssertTrue(url.contains("static=true"), url)
-        XCTAssertTrue(url.contains("mediaSourceId=src1"), url)
-        XCTAssertTrue(url.contains("api_key=TOKEN"), url)
+        guard case .authenticatedHTTP(let locator) = source.originalSource else {
+            return XCTFail("expected typed original source")
+        }
+        XCTAssertEqual(locator.resource.path, "Videos/i1/stream.mkv")
+        XCTAssertTrue(locator.resource.queryItems.contains {
+            $0.name == "static" && $0.value == "true"
+        })
+        XCTAssertTrue(locator.resource.queryItems.contains {
+            $0.name == "mediaSourceId" && $0.value == "src1"
+        })
+        XCTAssertFalse(String(describing: locator).contains("TOKEN"))
     }
 
     func testPlaybackInfoPrefersTranscodingHLSURL() async throws {
@@ -642,16 +657,19 @@ final class JellyfinProviderMappingTests: XCTestCase {
         stub.stub(pathSuffix: "/Items/i1/PlaybackInfo", json: """
         {"MediaSources":[{"Id":"src1","Container":"mkv","SupportsDirectPlay":false,
         "SupportsTranscoding":true,"TranscodingSubProtocol":"hls",
-        "TranscodingUrl":"/videos/i1/master.m3u8?api_key=TOKEN&PlaySessionId=ps1"}],
+        "TranscodingUrl":"/videos/My%20Movie/master.m3u8?api_key=TOKEN&PlaySessionId=ps1"}],
         "PlaySessionId":"ps1"}
         """)
         let provider = JellyfinProvider(session: makeSession(), http: stub)
 
         let request = try await provider.playbackInfo(for: "i1")
-        let url = try XCTUnwrap(request.streamURL).absoluteString
-        XCTAssertTrue(url.contains("/videos/i1/master.m3u8"), url)
-        XCTAssertTrue(url.hasPrefix("http://host:8096"), url)
-        XCTAssertFalse(url.contains("static=true"))
+        guard case .authenticatedHTTP(let locator) = request.playbackSource else {
+            return XCTFail("expected authenticated HTTP locator")
+        }
+        XCTAssertEqual(locator.resource.path, "videos/My%20Movie/master.m3u8")
+        XCTAssertEqual(locator.playSessionID, "ps1")
+        XCTAssertTrue(locator.resource.queryItems.isEmpty)
+        XCTAssertNil(request.streamURL)
     }
 
     func testStopReleasesActiveEncoding() async throws {

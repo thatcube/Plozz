@@ -1,6 +1,7 @@
 import XCTest
 import CoreModels
 import FeatureAuth
+import MediaTransportCore
 @testable import AppShell
 
 /// End-to-end coverage for the per-profile "Your Servers & Libraries" master
@@ -40,12 +41,24 @@ final class ServerToggleTests: XCTestCase {
             }
         }
 
-        private final class StubProvider: MediaProvider, @unchecked Sendable {
-            let kind: ProviderKind = .mediaShare
+        private final class StubProvider:
+            MediaProvider,
+            AuthenticatedHTTPOriginProviding,
+            @unchecked Sendable
+        {
+            let kind: ProviderKind
             let session: UserSession
+            let authenticatedHTTPOrigin: URL
 
-            init(session: UserSession) {
+            init(
+                kind: ProviderKind = .mediaShare,
+                session: UserSession,
+                authenticatedHTTPOrigin: URL? = nil
+            ) {
+                self.kind = kind
                 self.session = session
+                self.authenticatedHTTPOrigin =
+                    authenticatedHTTPOrigin ?? session.server.baseURL
             }
 
             func libraries() async throws -> [MediaLibrary] { [] }
@@ -130,6 +143,163 @@ final class ServerToggleTests: XCTestCase {
             let second = try XCTUnwrap(recorder.contexts.last)
             XCTAssertEqual(second.localMediaContext?.profileID, secondProfile.id)
             XCTAssertEqual(second.localMediaContext?.profileNamespace, secondProfile.id)
+        }
+
+        func testPlexHomeUserTokenRotatesRuntimeCredentialIdentity() async throws {
+            let accountStore = AccountStore(secureStore: InMemorySecureStore())
+            let account = Account(
+                id: "plex-account",
+                server: MediaServer(
+                    id: "plex-server",
+                    name: "Plex",
+                    baseURL: URL(string: "https://plex.example.test:32400")!,
+                    provider: .plex
+                ),
+                userID: "owner",
+                userName: "Owner",
+                deviceID: "device"
+            )
+            try accountStore.add(account, token: "owner-token")
+            let persistedAccount = try XCTUnwrap(accountStore.loadAccounts().first)
+            let recorder = ContextRecorder()
+            let registry = ProviderRegistry()
+            registry.register(.plex) { context in
+                recorder.append(context)
+                return StubProvider(
+                    kind: .plex,
+                    session: context.session,
+                    authenticatedHTTPOrigin: URL(
+                        string: "https://reachable.plex.test:32400"
+                    )!
+                )
+            }
+            let state = AppState(
+                accountStore: accountStore,
+                registry: registry,
+                profilesModel: ProfilesModel(store: ProfileStore(defaults: makeDefaults()))
+            )
+            state.plexHomeUserSwitch = { homeUserID, _, _, _ in
+                "account-token-\(homeUserID)"
+            }
+            state.plexServerTokenResolve = { _, userToken, _ in
+                "server-\(userToken)"
+            }
+            state.bootstrap()
+
+            XCTAssertNotNil(state.provider(forAccountID: account.id))
+            let ownerContext = try XCTUnwrap(recorder.contexts.last)
+            XCTAssertEqual(ownerContext.credentialRevision, persistedAccount.credentialRevision)
+            XCTAssertEqual(ownerContext.session.accessToken, "owner-token")
+
+            let firstUser = PlexHomeUser(
+                id: "child-a",
+                name: "Child A",
+                requiresPIN: false
+            )
+            state.setPlexHomeUserForActiveProfile(accountID: account.id, user: firstUser)
+            let firstContext = try await waitForPlexContext(
+                token: "server-account-token-child-a",
+                state: state,
+                accountID: account.id,
+                recorder: recorder
+            )
+            XCTAssertNotEqual(
+                firstContext.credentialRevision,
+                persistedAccount.credentialRevision
+            )
+
+            let resource = try AuthenticatedHTTPResource(
+                pathBase: .serverRoot,
+                path: "/video/:/transcode/universal/start.m3u8"
+            )
+            let firstLocator = try AuthenticatedHTTPPlaybackLocator(
+                provider: .plex,
+                accountID: account.id,
+                credentialRevision: firstContext.credentialRevision,
+                itemID: "item",
+                deliveryMode: .serverTranscode,
+                resource: resource,
+                playSessionID: "plozz-device-item"
+            )
+            let firstURL = try await state.authenticatedHTTPResolver.resolve(firstLocator)
+            XCTAssertEqual(firstURL.host, "reachable.plex.test")
+            let firstQuery = URLComponents(
+                url: firstURL,
+                resolvingAgainstBaseURL: false
+            )?.queryItems ?? []
+            XCTAssertEqual(
+                firstQuery.first { $0.name == "X-Plex-Token" }?.value,
+                "server-account-token-child-a"
+            )
+            XCTAssertEqual(
+                firstQuery.first { $0.name == "session" }?.value,
+                "plozz-device-item"
+            )
+            XCTAssertEqual(
+                firstQuery.first { $0.name == "X-Plex-Session-Identifier" }?.value,
+                "plozz-device-item"
+            )
+
+            state.setPlexHomeUserForActiveProfile(
+                accountID: account.id,
+                user: PlexHomeUser(
+                    id: "child-b",
+                    name: "Child B",
+                    requiresPIN: false
+                )
+            )
+            let secondContext = try await waitForPlexContext(
+                token: "server-account-token-child-b",
+                state: state,
+                accountID: account.id,
+                recorder: recorder
+            )
+            XCTAssertNotEqual(
+                secondContext.credentialRevision,
+                firstContext.credentialRevision
+            )
+            do {
+                _ = try await state.authenticatedHTTPResolver.resolve(firstLocator)
+                XCTFail("stale Plex Home-user locator resolved")
+            } catch let error as MediaTransportError {
+                XCTAssertEqual(
+                    error,
+                    .authentication(reason: "inactive authenticated HTTP identity")
+                )
+            }
+
+            state.setPlexHomeUserForActiveProfile(accountID: account.id, user: nil)
+            XCTAssertNotNil(state.provider(forAccountID: account.id))
+            let restoredOwner = try XCTUnwrap(recorder.contexts.last)
+            XCTAssertEqual(
+                restoredOwner.credentialRevision,
+                persistedAccount.credentialRevision
+            )
+            XCTAssertEqual(restoredOwner.session.accessToken, "owner-token")
+        }
+
+        private func waitForPlexContext(
+            token: String,
+            state: AppState,
+            accountID: String,
+            recorder: ContextRecorder
+        ) async throws -> ProviderResolutionContext {
+            for _ in 0..<100 {
+                _ = state.provider(forAccountID: accountID)
+                if let context = recorder.contexts.last,
+                   context.session.accessToken == token {
+                    return context
+                }
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            throw NSError(
+                domain: "ProviderResolutionContextWiringTests",
+                code: 1,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "Timed out waiting for Plex identity token \(token)"
+                ]
+            )
         }
     }
 
@@ -242,5 +412,57 @@ final class ServerToggleTests: XCTestCase {
             Set(profiles.storedActiveAccountIDs(for: profiles.activeProfileID) ?? []),
             ["b"]
         )
+    }
+
+    func testAuthenticatedHTTPResolverUsesFreshAccountAndRejectsOldRevision() async throws {
+        let store = AccountStore(secureStore: InMemorySecureStore())
+        try store.add(account(id: "a", host: "old.example.com"), token: "token-a")
+        let initial = try XCTUnwrap(store.loadAccounts().first)
+        let state = AppState(
+            accountStore: store,
+            profilesModel: ProfilesModel(store: ProfileStore(defaults: makeDefaults()))
+        )
+        let resource = try AuthenticatedHTTPResource(
+            pathBase: .configuredBaseURL,
+            path: "Videos/My%20Movie/stream.mkv",
+            queryItems: [
+                try AuthenticatedHTTPQueryItem(name: "static", value: "true")
+            ]
+        )
+        let locator = try AuthenticatedHTTPPlaybackLocator(
+            provider: .jellyfin,
+            accountID: initial.id,
+            credentialRevision: initial.credentialRevision,
+            itemID: "item",
+            deliveryMode: .directFile,
+            resource: resource,
+            playSessionID: "play-session"
+        )
+
+        let firstURL = try await state.authenticatedHTTPResolver.resolve(locator)
+        XCTAssertEqual(firstURL.host, "old.example.com")
+        XCTAssertEqual(
+            URLComponents(
+                url: firstURL,
+                resolvingAgainstBaseURL: false
+            )?.percentEncodedPath,
+            "/Videos/My%20Movie/stream.mkv"
+        )
+        XCTAssertTrue(firstURL.absoluteString.contains("api_key=token-a"))
+
+        try store.add(account(id: "a", host: "new.example.com"), token: "token-a")
+        let movedURL = try await state.authenticatedHTTPResolver.resolve(locator)
+        XCTAssertEqual(movedURL.host, "new.example.com")
+
+        try store.add(account(id: "a", host: "new.example.com"), token: "token-b")
+        do {
+            _ = try await state.authenticatedHTTPResolver.resolve(locator)
+            XCTFail("stale credential revision resolved")
+        } catch let error as MediaTransportError {
+            XCTAssertEqual(
+                error,
+                .authentication(reason: "inactive authenticated HTTP identity")
+            )
+        }
     }
 }

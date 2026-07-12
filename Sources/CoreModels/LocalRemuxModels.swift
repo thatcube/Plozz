@@ -7,12 +7,11 @@ public struct LocalRemuxSourceDescriptor: Hashable, Sendable {
     public var itemID: String
     public var mediaSourceID: String?
     public var provider: ProviderKind
-    /// The original range-readable media bytes (typically an MKV part/download URL)
-    /// with whatever auth the provider requires already embedded.
-    public var originalURL: URL
-    /// An already-playable AVPlayer URL for the same title, used by the shared
+    /// Credential-free original range-readable media bytes.
+    public var originalSource: PlaybackSource
+    /// An already-playable source for the same title, used by the shared
     /// reference strategy until a true local-remux engine replaces it.
-    public var referencePlaybackURL: URL?
+    public var referencePlaybackSource: PlaybackSource?
     public var durationSeconds: TimeInterval?
     public var byteRangeSupported: Bool
     public var sourceMetadata: MediaSourceMetadata
@@ -21,8 +20,8 @@ public struct LocalRemuxSourceDescriptor: Hashable, Sendable {
         itemID: String,
         mediaSourceID: String? = nil,
         provider: ProviderKind,
-        originalURL: URL,
-        referencePlaybackURL: URL? = nil,
+        originalSource: PlaybackSource,
+        referencePlaybackSource: PlaybackSource? = nil,
         durationSeconds: TimeInterval? = nil,
         byteRangeSupported: Bool = true,
         sourceMetadata: MediaSourceMetadata
@@ -30,8 +29,8 @@ public struct LocalRemuxSourceDescriptor: Hashable, Sendable {
         self.itemID = itemID
         self.mediaSourceID = mediaSourceID
         self.provider = provider
-        self.originalURL = originalURL
-        self.referencePlaybackURL = referencePlaybackURL
+        self.originalSource = originalSource
+        self.referencePlaybackSource = referencePlaybackSource
         self.durationSeconds = durationSeconds
         self.byteRangeSupported = byteRangeSupported
         self.sourceMetadata = sourceMetadata

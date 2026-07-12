@@ -157,6 +157,7 @@ public struct RootView: View {
                     MainTabView(
                         accounts: accounts,
                         networkFileResolver: appState.networkFileResolver,
+                        authenticatedHTTPResolver: appState.authenticatedHTTPResolver,
                         subtitleBehaviorModel: appState.subtitleBehaviorModel,
                         subtitleStyleModel: appState.subtitleStyleModel,
                         spoilerModel: appState.spoilerModel,

@@ -697,13 +697,26 @@ public struct PlexClient: Sendable {
     /// container (e.g. MKV) or codec must be remuxed/transcoded to HLS, because
     /// AVPlayer cannot play it directly. Handing AVPlayer the raw MKV part was
     /// why Plex items "didn't play" while the same files played via Jellyfin.
-    func playbackURL(ratingKey: String, media: PlexMedia, part: PlexPart, sessionID: String, forceTranscode: Bool = false) -> (url: URL, isTranscoding: Bool)? {
+    func playbackURL(
+        ratingKey: String,
+        media: PlexMedia,
+        part: PlexPart,
+        sessionID: String,
+        mediaIndex: Int = 0,
+        partIndex: Int = 0,
+        forceTranscode: Bool = false
+    ) -> (url: URL, isTranscoding: Bool)? {
         // Forcing a transcode (player fallback after a failed direct play): skip
         // the direct-play path entirely and go straight to the universal
         // transcoder. If even that can't be built, fail rather than silently
         // handing back the same direct URL that just failed.
         if forceTranscode {
-            if let transcode = transcodeURL(ratingKey: ratingKey, sessionID: sessionID) {
+            if let transcode = transcodeURL(
+                ratingKey: ratingKey,
+                sessionID: sessionID,
+                mediaIndex: mediaIndex,
+                partIndex: partIndex
+            ) {
                 return (transcode, true)
             }
             return nil
@@ -711,7 +724,12 @@ public struct PlexClient: Sendable {
         if canDirectPlay(media: media, part: part), let key = part.key, let direct = streamURL(forPartKey: key) {
             return (direct, false)
         }
-        if let transcode = transcodeURL(ratingKey: ratingKey, sessionID: sessionID) {
+        if let transcode = transcodeURL(
+            ratingKey: ratingKey,
+            sessionID: sessionID,
+            mediaIndex: mediaIndex,
+            partIndex: partIndex
+        ) {
             return (transcode, true)
         }
         // Last-resort fallback: better to attempt direct play than fail outright.
@@ -725,11 +743,16 @@ public struct PlexClient: Sendable {
     /// `start.m3u8` and its segments are produced on demand by the server and
     /// are fully seekable in AVPlayer. Identity + token travel as query params
     /// because the transcoder reads them from the query string for HLS sessions.
-    func transcodeURL(ratingKey: String, sessionID: String) -> URL? {
+    func transcodeURL(
+        ratingKey: String,
+        sessionID: String,
+        mediaIndex: Int = 0,
+        partIndex: Int = 0
+    ) -> URL? {
         var query: [URLQueryItem] = [
             URLQueryItem(name: "path", value: "/library/metadata/\(ratingKey)"),
-            URLQueryItem(name: "mediaIndex", value: "0"),
-            URLQueryItem(name: "partIndex", value: "0"),
+            URLQueryItem(name: "mediaIndex", value: String(mediaIndex)),
+            URLQueryItem(name: "partIndex", value: String(partIndex)),
             URLQueryItem(name: "protocol", value: "hls"),
             URLQueryItem(name: "fastSeek", value: "1"),
             URLQueryItem(name: "directPlay", value: "0"),

@@ -78,6 +78,7 @@ struct MainTabView: View {
 
     let accounts: [ResolvedAccount]
     let networkFileResolver: any MediaTransportNetworkFileResolving
+    let authenticatedHTTPResolver: any AuthenticatedHTTPResourceResolving
     /// Subtitle behaviour (mode / language / auto-download) and appearance
     /// (`SubtitleStyle`) split out of the retired `CaptionSettings`. Behaviour
     /// feeds the policy resolver; style seeds the player + live overlay.
@@ -413,6 +414,7 @@ struct MainTabView: View {
             resumePrompt: $resumePrompt,
             accounts: accounts,
             networkFileResolver: networkFileResolver,
+            authenticatedHTTPResolver: authenticatedHTTPResolver,
             behavior: subtitleBehaviorModel.settings,
             style: subtitleStyleModel.style,
             playbackSettings: playbackModel.settings,
@@ -1037,6 +1039,7 @@ private func makePlayerViewModel(
     for request: PlayRequest,
     accounts: [ResolvedAccount],
     networkFileResolver: any MediaTransportNetworkFileResolving,
+    authenticatedHTTPResolver: any AuthenticatedHTTPResourceResolving,
     behavior: SubtitleBehavior,
     style: SubtitleStyle,
     playbackSettings: PlaybackSettings,
@@ -1054,7 +1057,8 @@ private func makePlayerViewModel(
         let trailerItem = request.item
         let onlineTrailerResolver = ItemDetailViewModel.defaultOnlineTrailerResolver
         let engineFactory = HybridPlayback.engineFactory(
-            networkFileResolver: networkFileResolver
+            networkFileResolver: networkFileResolver,
+            authenticatedHTTPResolver: authenticatedHTTPResolver
         )
         let trailerViewModel = PlayerViewModel(
             provider: YouTubeTrailerProvider(
@@ -1146,7 +1150,8 @@ private func makePlayerViewModel(
         startPosition: request.startPosition,
         scrobbler: scrobbler,
         engineFactory: HybridPlayback.engineFactory(
-            networkFileResolver: networkFileResolver
+            networkFileResolver: networkFileResolver,
+            authenticatedHTTPResolver: authenticatedHTTPResolver
         ),
         neighborResolver: neighborResolver,
         seriesIDResolver: seriesIDResolver,
@@ -1712,6 +1717,7 @@ private extension View {
         resumePrompt: Binding<MediaItem?>,
         accounts: [ResolvedAccount],
         networkFileResolver: any MediaTransportNetworkFileResolving,
+        authenticatedHTTPResolver: any AuthenticatedHTTPResourceResolving,
         behavior: SubtitleBehavior,
         style: SubtitleStyle,
         playbackSettings: PlaybackSettings,
@@ -1734,6 +1740,7 @@ private extension View {
                         for: request,
                         accounts: accounts,
                         networkFileResolver: networkFileResolver,
+                        authenticatedHTTPResolver: authenticatedHTTPResolver,
                         behavior: behavior,
                         style: style,
                         playbackSettings: playbackSettings,

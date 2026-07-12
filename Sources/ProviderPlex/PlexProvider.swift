@@ -7,14 +7,20 @@ import CoreNetworking
 /// Holds an authenticated `PlexClient` and maps Plex `Metadata`/`Directory`
 /// onto the provider-agnostic `CoreModels` types. Feature modules depend only on
 /// `MediaProvider`; this is the single place Plex specifics live.
-public struct PlexProvider: MediaProvider {
+public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
     public let kind: ProviderKind = .plex
     public let session: UserSession
+    public let accountID: String
+    public let credentialRevision: CredentialRevision
     let client: PlexClient
     let themeArchiveResolver: @Sendable (String?) async -> URL?
 
+    public var authenticatedHTTPOrigin: URL { client.baseURL }
+
     public init(
         session: UserSession,
+        accountID: String? = nil,
+        credentialRevision: CredentialRevision = CredentialRevision(),
         http: HTTPClient = URLSessionHTTPClient(),
         interactiveHTTP: HTTPClient? = nil,
         hybridEngineEnabled: Bool = false,
@@ -25,6 +31,8 @@ public struct PlexProvider: MediaProvider {
         }
     ) {
         self.session = session
+        self.accountID = accountID ?? session.server.id
+        self.credentialRevision = credentialRevision
         self.themeArchiveResolver = themeArchiveResolver
         let deviceProfile = PlexDeviceProfile(clientIdentifier: session.deviceID)
         // Probe the persisted connection list (or the single saved URL) and stay
@@ -390,13 +398,17 @@ public struct PlexProvider: MediaProvider {
         // early as possible.
         let detail = try await client.metadata(ratingKey: itemID)
         // Pick the chosen Media element (version) by id, else Plex's first.
-        let chosenMedia = mediaSourceID.flatMap { id in
-            detail.Media?.first { $0.id.map(String.init) == id }
-        } ?? detail.Media?.first
-        guard let media = chosenMedia,
-              let part = media.Part?.first else {
+        let mediaList = detail.Media ?? []
+        let mediaIndex = mediaSourceID.flatMap { id in
+            mediaList.firstIndex { $0.id.map(String.init) == id }
+        } ?? mediaList.indices.first
+        guard let mediaIndex,
+              mediaList.indices.contains(mediaIndex),
+              let part = mediaList[mediaIndex].Part?.first else {
             throw AppError.notFound
         }
+        let media = mediaList[mediaIndex]
+        let partIndex = 0
         // A stable per-(device,item) session id ties the transcode m3u8 to its
         // segments; deterministic so it's traceable and testable.
         let transcodeSessionID = "plozz-\(session.deviceID)-\(itemID)"
@@ -405,6 +417,8 @@ public struct PlexProvider: MediaProvider {
             media: media,
             part: part,
             sessionID: transcodeSessionID,
+            mediaIndex: mediaIndex,
+            partIndex: partIndex,
             forceTranscode: forceTranscode
         ) else {
             throw AppError.notFound
@@ -413,12 +427,28 @@ public struct PlexProvider: MediaProvider {
         let streams = part.Stream ?? []
         let audio = streams.filter { $0.streamType == 2 }.map(map(stream:))
         let subs = streams.filter { $0.streamType == 3 }.map(map(stream:))
-        let localRemuxSource = Self.localRemuxSourceDescriptor(
+        let playbackLocator = try authenticatedPlaybackLocator(
+            itemID: itemID,
+            mediaSourceID: media.id.map(String.init),
+            url: resolved.url,
+            deliveryMode: resolved.isTranscoding ? .serverTranscode : .directFile,
+            purpose: .mediaStream,
+            playSessionID: resolved.isTranscoding ? transcodeSessionID : nil,
+            formatHint: media.container ?? part.container
+        )
+        let referenceURL = client.transcodeURL(
+            ratingKey: itemID,
+            sessionID: transcodeSessionID,
+            mediaIndex: mediaIndex,
+            partIndex: partIndex
+        ) ?? resolved.url
+        let localRemuxSource = localRemuxSourceDescriptor(
             itemID: itemID,
             mediaSourceID: media.id.map(String.init),
             client: client,
             part: part,
-            referencePlaybackURL: client.transcodeURL(ratingKey: itemID, sessionID: transcodeSessionID) ?? resolved.url,
+            referencePlaybackURL: referenceURL,
+            referencePlaySessionID: transcodeSessionID,
             durationSeconds: mappedItem.runtime,
             container: media.container ?? part.container,
             streams: streams,
@@ -428,7 +458,7 @@ public struct PlexProvider: MediaProvider {
 
         return PlaybackRequest(
             item: mappedItem,
-            streamURL: resolved.url,
+            playbackSource: .authenticatedHTTP(playbackLocator),
             // Plex correlates timeline reports by ratingKey; a per-play session
             // id isn't required, so reuse the item id for traceability.
             playSessionID: itemID,
@@ -436,6 +466,7 @@ public struct PlexProvider: MediaProvider {
             subtitleTracks: subs,
             startPosition: mappedItem.resumePosition ?? 0,
             isTranscoding: resolved.isTranscoding,
+            deliveryMode: resolved.isTranscoding ? .transcode : .directPlay,
             sourceMetadata: Self.sourceMetadata(
                 container: media.container ?? part.container,
                 streams: streams,
@@ -659,12 +690,13 @@ public struct PlexProvider: MediaProvider {
         return metadata.isEmpty ? nil : metadata
     }
 
-    static func localRemuxSourceDescriptor(
+    func localRemuxSourceDescriptor(
         itemID: String,
         mediaSourceID: String?,
         client: PlexClient,
         part: PlexPart,
         referencePlaybackURL: URL?,
+        referencePlaySessionID: String,
         durationSeconds: TimeInterval?,
         container: String?,
         streams: [PlexStream],
@@ -673,7 +705,7 @@ public struct PlexProvider: MediaProvider {
     ) -> LocalRemuxSourceDescriptor? {
         guard let key = part.key,
               let originalURL = client.downloadURL(forPartKey: key),
-              let metadata = sourceMetadata(
+              let metadata = Self.sourceMetadata(
                 container: container,
                 streams: streams,
                 mediaAudioProfile: mediaAudioProfile,
@@ -681,15 +713,81 @@ public struct PlexProvider: MediaProvider {
               ) else {
             return nil
         }
+        guard let originalLocator = try? authenticatedPlaybackLocator(
+            itemID: itemID,
+            mediaSourceID: mediaSourceID,
+            url: originalURL,
+            deliveryMode: .directFile,
+            purpose: .originalFile,
+            playSessionID: nil,
+            formatHint: container
+        ), let referencePlaybackURL,
+              let referenceLocator = try? authenticatedPlaybackLocator(
+                  itemID: itemID,
+                  mediaSourceID: mediaSourceID,
+                  url: referencePlaybackURL,
+                  deliveryMode: .serverTranscode,
+                  purpose: .mediaStream,
+                  playSessionID: referencePlaySessionID,
+                  formatHint: "m3u8"
+              ) else {
+            return nil
+        }
         return LocalRemuxSourceDescriptor(
             itemID: itemID,
             mediaSourceID: mediaSourceID,
             provider: .plex,
-            originalURL: originalURL,
-            referencePlaybackURL: referencePlaybackURL,
+            originalSource: .authenticatedHTTP(originalLocator),
+            referencePlaybackSource: .authenticatedHTTP(referenceLocator),
             durationSeconds: durationSeconds,
             byteRangeSupported: true,
             sourceMetadata: metadata
+        )
+    }
+
+    private func authenticatedPlaybackLocator(
+        itemID: String,
+        mediaSourceID: String?,
+        url: URL,
+        deliveryMode: AuthenticatedHTTPDeliveryMode,
+        purpose: AuthenticatedHTTPResourcePurpose,
+        playSessionID: String?,
+        formatHint: String?
+    ) throws -> AuthenticatedHTTPPlaybackLocator {
+        guard let components = URLComponents(
+            url: url,
+            resolvingAgainstBaseURL: false
+        ), !components.percentEncodedPath.isEmpty else {
+            throw AppError.invalidResponse
+        }
+        var queryItems: [AuthenticatedHTTPQueryItem] = []
+        for item in components.queryItems ?? [] {
+            let normalized = item.name.lowercased()
+            if normalized.contains("token")
+                || normalized == "session"
+                || normalized == "x-plex-session-identifier" {
+                continue
+            }
+            queryItems.append(
+                try AuthenticatedHTTPQueryItem(name: item.name, value: item.value)
+            )
+        }
+        let resource = try AuthenticatedHTTPResource(
+            pathBase: .serverRoot,
+            path: components.percentEncodedPath,
+            queryItems: queryItems
+        )
+        return try AuthenticatedHTTPPlaybackLocator(
+            provider: .plex,
+            accountID: accountID,
+            credentialRevision: credentialRevision,
+            itemID: itemID,
+            mediaSourceID: mediaSourceID,
+            deliveryMode: deliveryMode,
+            formatHint: MediaFormatHint(container: formatHint),
+            purpose: purpose,
+            resource: resource,
+            playSessionID: playSessionID
         )
     }
 

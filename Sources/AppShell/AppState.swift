@@ -179,6 +179,93 @@ public final class AppState {
         public let isFirstRun: Bool
     }
 
+    @MainActor
+    private final class AppAuthenticatedHTTPResourceResolver: AuthenticatedHTTPResourceResolving {
+        struct Context {
+            let provider: ProviderKind
+            let accountID: String
+            let credentialRevision: CredentialRevision
+            let baseURL: URL
+            let token: String
+        }
+
+        typealias ContextProvider = @MainActor @Sendable (
+            AuthenticatedHTTPPlaybackLocator
+        ) throws -> Context
+
+        private var contextProvider: ContextProvider?
+
+        func configure(contextProvider: @escaping ContextProvider) {
+            self.contextProvider = contextProvider
+        }
+
+        func resolve(_ locator: AuthenticatedHTTPPlaybackLocator) async throws -> URL {
+            guard let contextProvider else {
+                throw MediaTransportError.unsupportedCapability(
+                    "authenticated HTTP resolver"
+                )
+            }
+            let context = try contextProvider(locator)
+            guard context.provider == locator.provider,
+                  context.accountID == locator.accountID,
+                  context.credentialRevision == locator.credentialRevision,
+                  var components = URLComponents(
+                      url: context.baseURL,
+                      resolvingAgainstBaseURL: false
+                  ) else {
+                throw MediaTransportError.authentication(
+                    reason: "authenticated HTTP identity mismatch"
+                )
+            }
+
+            let encodedPath = locator.resource.path
+            switch locator.resource.pathBase {
+            case .configuredBaseURL:
+                let basePath = components.percentEncodedPath.hasSuffix("/")
+                    ? String(components.percentEncodedPath.dropLast())
+                    : components.percentEncodedPath
+                components.percentEncodedPath = basePath + "/" + encodedPath
+            case .serverRoot:
+                components.percentEncodedPath = encodedPath
+            }
+
+            var queryItems = locator.resource.queryItems.map {
+                URLQueryItem(name: $0.name, value: $0.value)
+            }
+            switch locator.provider {
+            case .jellyfin:
+                queryItems.append(URLQueryItem(name: "api_key", value: context.token))
+                if let playSessionID = locator.playSessionID {
+                    queryItems.append(
+                        URLQueryItem(name: "playSessionId", value: playSessionID)
+                    )
+                }
+            case .plex:
+                queryItems.append(URLQueryItem(name: "X-Plex-Token", value: context.token))
+                if let playSessionID = locator.playSessionID {
+                    queryItems.append(URLQueryItem(name: "session", value: playSessionID))
+                    queryItems.append(
+                        URLQueryItem(
+                            name: "X-Plex-Session-Identifier",
+                            value: playSessionID
+                        )
+                    )
+                }
+            case .mediaShare:
+                throw MediaTransportError.invalidInput(
+                    reason: "media shares cannot resolve authenticated HTTP resources"
+                )
+            }
+            components.queryItems = queryItems
+            guard let url = components.url else {
+                throw MediaTransportError.invalidInput(
+                    reason: "invalid authenticated HTTP resource"
+                )
+            }
+            return url
+        }
+    }
+
     /// Accounts just added in the current add flow whose libraries the
     /// "choose your libraries" step should offer. `RootView` renders that step
     /// from this; empty when none is pending.
@@ -847,6 +934,7 @@ public final class AppState {
     private let accountStore: AccountPersisting
     private let registry: ProviderRegistry
     public let networkFileResolver: any MediaTransportNetworkFileResolving
+    public let authenticatedHTTPResolver: any AuthenticatedHTTPResourceResolving
     private let networkFileResolverRegistry: MediaTransportResolverRegistry?
     private let shareCatalogCoordinator: ShareCatalogCoordinator
     /// Optional tvOS system-user seam (default app-owned no-op). See
@@ -863,6 +951,9 @@ public final class AppState {
     /// users are seeded synchronously from `plexHomeUserTokenCache` (see below)
     /// so their identity paints instantly without the startup double-load.
     private var plexTokenOverrides: [String: String] = [:]
+    /// Runtime revision for the effective Plex Home-user credential. Owner
+    /// credentials continue to use the account's persisted revision.
+    private var plexOverrideCredentialRevisions: [String: CredentialRevision] = [:]
 
     /// For each account, the Plex Home-user UUID the current override resolves to.
     /// Lets the reconciler tell an already-satisfied protected switch apart from a
@@ -916,6 +1007,7 @@ public final class AppState {
         accountStore: AccountPersisting? = nil,
         registry: ProviderRegistry? = nil,
         networkFileResolver: (any MediaTransportNetworkFileResolving)? = nil,
+        authenticatedHTTPResolver: (any AuthenticatedHTTPResourceResolving)? = nil,
         shareCatalogCoordinator: ShareCatalogCoordinator? = nil,
         profilesModel: ProfilesModel? = nil,
         systemBridge: SystemProfileBridging? = nil,
@@ -947,6 +1039,15 @@ public final class AppState {
         let resolvedShareCatalogCoordinator = shareCatalogCoordinator
             ?? ShareCatalogCoordinator()
         self.shareCatalogCoordinator = resolvedShareCatalogCoordinator
+        let defaultAuthenticatedHTTPResolver: AppAuthenticatedHTTPResourceResolver?
+        if let authenticatedHTTPResolver {
+            self.authenticatedHTTPResolver = authenticatedHTTPResolver
+            defaultAuthenticatedHTTPResolver = nil
+        } else {
+            let resolver = AppAuthenticatedHTTPResourceResolver()
+            self.authenticatedHTTPResolver = resolver
+            defaultAuthenticatedHTTPResolver = resolver
+        }
         let resolvedNetworkFileResolver: any MediaTransportNetworkFileResolving
         if let networkFileResolver {
             resolvedNetworkFileResolver = networkFileResolver
@@ -1047,6 +1148,42 @@ public final class AppState {
         Task {
             await resolvedShareCatalogCoordinator.configure(reporter: scanReporter)
         }
+        defaultAuthenticatedHTTPResolver?.configure { [weak self] locator in
+            guard let self,
+                  let account = self.accountStore.loadAccounts().first(where: {
+                      $0.id == locator.accountID
+                  }),
+                  account.server.provider == locator.provider,
+                  self.effectiveCredentialRevision(for: account)
+                    == locator.credentialRevision,
+                  let token = self.resolvedToken(for: account.id),
+                  !token.isEmpty else {
+                throw MediaTransportError.authentication(
+                    reason: "inactive authenticated HTTP identity"
+                )
+            }
+            let baseURL: URL
+            if account.server.provider == .plex {
+                let provider = try self.registry.provider(
+                    for: self.providerResolutionContext(for: account, token: token)
+                )
+                guard let originProvider = provider as? AuthenticatedHTTPOriginProviding else {
+                    throw MediaTransportError.unsupportedCapability(
+                        "dynamic authenticated HTTP origin"
+                    )
+                }
+                baseURL = originProvider.authenticatedHTTPOrigin
+            } else {
+                baseURL = account.server.baseURL
+            }
+            return AppAuthenticatedHTTPResourceResolver.Context(
+                provider: account.server.provider,
+                accountID: account.id,
+                credentialRevision: self.effectiveCredentialRevision(for: account),
+                baseURL: baseURL,
+                token: token
+            )
+        }
     }
 
     /// Force a fresh scan + enrichment of a media share now (Settings "Scan now").
@@ -1131,6 +1268,8 @@ public final class AppState {
         registry.register(.jellyfin) { context in
             JellyfinProvider(
                 session: context.session,
+                accountID: context.accountID,
+                credentialRevision: context.credentialRevision,
                 interactiveHTTP: URLSessionHTTPClient(session: .plozzInteractive),
                 hybridEngineEnabled: HybridPlayback.enabled
             )
@@ -1138,6 +1277,8 @@ public final class AppState {
         registry.register(.plex) { context in
             PlexProvider(
                 session: context.session,
+                accountID: context.accountID,
+                credentialRevision: context.credentialRevision,
                 interactiveHTTP: URLSessionHTTPClient(session: .plozzInteractive),
                 hybridEngineEnabled: HybridPlayback.enabled,
                 connectionRefresh: PlexProvider.connectionRefresh(for: context.session)
@@ -1407,9 +1548,31 @@ public final class AppState {
         return ProviderResolutionContext(
             session: account.session(token: token),
             accountID: account.id,
-            credentialRevision: account.credentialRevision,
+            credentialRevision: effectiveCredentialRevision(for: account),
             localMediaContext: localMediaContext
         )
+    }
+
+    private func effectiveCredentialRevision(for account: Account) -> CredentialRevision {
+        guard account.server.provider == .plex,
+              plexTokenOverrides[account.id] != nil else {
+            return account.credentialRevision
+        }
+        if let revision = plexOverrideCredentialRevisions[account.id] {
+            return revision
+        }
+        let revision = CredentialRevision()
+        plexOverrideCredentialRevisions[account.id] = revision
+        return revision
+    }
+
+    private func setPlexTokenOverride(_ token: String?, for accountID: String) {
+        if plexTokenOverrides[accountID] != token {
+            plexOverrideCredentialRevisions[accountID] = token == nil
+                ? nil
+                : CredentialRevision()
+        }
+        plexTokenOverrides[accountID] = token
     }
 
     // MARK: Plex Home users ("Who's watching?")
@@ -1524,7 +1687,7 @@ public final class AppState {
                     }
                     // Stale override for a DIFFERENT user — drop before prompting.
                     if plexTokenOverrides[account.id] != nil {
-                        plexTokenOverrides[account.id] = nil
+                        setPlexTokenOverride(nil, for: account.id)
                         plexResolvedHomeUser[account.id] = nil
                         registry.invalidate(accountID: account.id)
                         plexIdentityGeneration += 1
@@ -1550,7 +1713,7 @@ public final class AppState {
                     // once when the switch lands; that token is then cached so it
                     // never happens again.
                     if let cached = plexHomeUserTokenCache.token(account: account.id, homeUser: binding.homeUserID) {
-                        plexTokenOverrides[account.id] = cached
+                        setPlexTokenOverride(cached, for: account.id)
                         plexResolvedHomeUser[account.id] = binding.homeUserID
                         registry.invalidate(accountID: account.id)
                         PlozzLog.boot("ensure.cachedOverride acct=\(account.id) home=\(binding.homeUserID) — instant paint")
@@ -1565,7 +1728,7 @@ public final class AppState {
                 }
             } else {
                 if plexTokenOverrides[account.id] != nil {
-                    plexTokenOverrides[account.id] = nil
+                    setPlexTokenOverride(nil, for: account.id)
                     plexResolvedHomeUser[account.id] = nil
                     registry.invalidate(accountID: account.id)
                     plexIdentityGeneration += 1
@@ -1596,6 +1759,7 @@ public final class AppState {
         if !plexTokenOverrides.isEmpty {
             let accountIDs = Array(plexTokenOverrides.keys)
             plexTokenOverrides.removeAll()
+            plexOverrideCredentialRevisions.removeAll()
             plexResolvedHomeUser.removeAll()
             for accountID in accountIDs {
                 registry.invalidate(accountID: accountID)
@@ -1645,7 +1809,7 @@ public final class AppState {
                 if pin != nil { ensurePlexIdentityForActiveProfile() }
                 return
             }
-            plexTokenOverrides[accountID] = resolvedToken
+            setPlexTokenOverride(resolvedToken, for: accountID)
             plexResolvedHomeUser[accountID] = homeUserID
             // Cache unprotected (no-PIN) switches so future launches install this
             // identity synchronously. PIN-protected switches are never persisted.
@@ -2049,7 +2213,7 @@ public final class AppState {
                 await self.shareCatalogCoordinator.invalidate(accountKey: shareAccountKey)
             }
         }
-        plexTokenOverrides[id] = nil
+        setPlexTokenOverride(nil, for: id)
         plexResolvedHomeUser[id] = nil
         plexHomeUserTokenCache.removeAll(account: id)
         reloadAccounts()
@@ -2077,6 +2241,7 @@ public final class AppState {
             }
         }
         plexTokenOverrides.removeAll()
+        plexOverrideCredentialRevisions.removeAll()
         plexResolvedHomeUser.removeAll()
         plexHomeUserTokenCache.removeAll()
         reloadAccounts()
@@ -2100,6 +2265,7 @@ public final class AppState {
             }
         }
         plexTokenOverrides.removeAll()
+        plexOverrideCredentialRevisions.removeAll()
         plexResolvedHomeUser.removeAll()
         plexHomeUserTokenCache.removeAll()
         profilesModel.resetToPristineDefaultForDebugging()

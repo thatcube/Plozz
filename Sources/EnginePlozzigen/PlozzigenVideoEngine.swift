@@ -135,6 +135,7 @@ public final class PlozzigenVideoEngine: VideoEngine {
 
     private let engine: AEEngine
     private let networkFileResolver: (any MediaTransportNetworkFileResolving)?
+    private let authenticatedHTTPResolver: (any AuthenticatedHTTPResourceResolving)?
     private var cancellables = Set<AnyCancellable>()
     private var progressTimer: Task<Void, Never>?
     #if canImport(UIKit)
@@ -144,10 +145,12 @@ public final class PlozzigenVideoEngine: VideoEngine {
     // MARK: - Init
 
     public init(
-        networkFileResolver: (any MediaTransportNetworkFileResolving)? = nil
+        networkFileResolver: (any MediaTransportNetworkFileResolving)? = nil,
+        authenticatedHTTPResolver: (any AuthenticatedHTTPResourceResolving)? = nil
     ) throws {
         self.engine = try AEEngine()
         self.networkFileResolver = networkFileResolver
+        self.authenticatedHTTPResolver = authenticatedHTTPResolver
         #if canImport(UIKit)
         let surface = AetherPlayerView()
         engine.bind(view: surface)
@@ -220,7 +223,21 @@ public final class PlozzigenVideoEngine: VideoEngine {
                     options: options
                 )
             } else {
-                guard let url = request.localRemuxSource?.originalURL ?? request.streamURL else {
+                let source = request.localRemuxSource?.originalSource
+                    ?? request.playbackSource
+                let resolvedURL: URL?
+                if case .some(.authenticatedHTTP(let locator)) = source {
+                    guard let authenticatedHTTPResolver else {
+                        throw MediaTransportError.unsupportedCapability(
+                            "authenticated HTTP resolver"
+                        )
+                    }
+                    resolvedURL = try await authenticatedHTTPResolver.resolve(locator)
+                } else {
+                    resolvedURL = request.streamURL
+                        ?? source?.publicURL
+                }
+                guard let url = resolvedURL else {
                     throw MediaTransportError.invalidInput(reason: "missing playback source")
                 }
                 try await engine.load(
@@ -544,9 +561,13 @@ public final class PlozzigenVideoEngine: VideoEngine {
 public enum PlozzigenVideoEngineFactory {
     @MainActor
     public static func makeEngine(
-        networkFileResolver: any MediaTransportNetworkFileResolving
+        networkFileResolver: any MediaTransportNetworkFileResolving,
+        authenticatedHTTPResolver: any AuthenticatedHTTPResourceResolving
     ) -> (any VideoEngine)? {
-        try? PlozzigenVideoEngine(networkFileResolver: networkFileResolver)
+        try? PlozzigenVideoEngine(
+            networkFileResolver: networkFileResolver,
+            authenticatedHTTPResolver: authenticatedHTTPResolver
+        )
     }
 }
 #endif

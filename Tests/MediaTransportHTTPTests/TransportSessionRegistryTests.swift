@@ -8,8 +8,8 @@ final class TransportSessionRegistryTests: XCTestCase {
         origin: TransportOrigin = TransportOrigin(url: URL(string: "https://nas.example.com/")!)!,
         trustRevision: UUID = UUID(),
         role: TransportRole = .scanner
-    ) -> TransportSessionKey {
-        TransportSessionKey(
+    ) throws -> TransportSessionKey {
+        try TransportSessionKey(
             accountID: accountID,
             credentialRevision: credentialRevision,
             origin: origin,
@@ -20,7 +20,7 @@ final class TransportSessionRegistryTests: XCTestCase {
 
     func testEqualKeyReturnsSameSessionInstance() async throws {
         let registry = TransportSessionRegistry()
-        let key = makeKey()
+        let key = try makeKey()
         let first = try await registry.session(for: key, credential: .anonymous, trustPolicy: .system)
         let second = try await registry.session(for: key, credential: .anonymous, trustPolicy: .system)
         XCTAssertTrue(first === second)
@@ -32,8 +32,8 @@ final class TransportSessionRegistryTests: XCTestCase {
         let registry = TransportSessionRegistry()
         let revision = UUID()
         let origin = TransportOrigin(url: URL(string: "https://nas.example.com/")!)!
-        let keyA = makeKey(accountID: "account-A", credentialRevision: revision, origin: origin, trustRevision: revision)
-        let keyB = makeKey(accountID: "account-B", credentialRevision: revision, origin: origin, trustRevision: revision)
+        let keyA = try makeKey(accountID: "account-A", credentialRevision: revision, origin: origin, trustRevision: revision)
+        let keyB = try makeKey(accountID: "account-B", credentialRevision: revision, origin: origin, trustRevision: revision)
 
         let sessionA = try await registry.session(for: keyA, credential: .anonymous, trustPolicy: .system)
         let sessionB = try await registry.session(for: keyB, credential: .anonymous, trustPolicy: .system)
@@ -46,8 +46,8 @@ final class TransportSessionRegistryTests: XCTestCase {
         let registry = TransportSessionRegistry()
         let origin = TransportOrigin(url: URL(string: "https://nas.example.com/")!)!
         let trust = UUID()
-        let keyA = makeKey(credentialRevision: UUID(), origin: origin, trustRevision: trust)
-        let keyB = makeKey(credentialRevision: UUID(), origin: origin, trustRevision: trust)
+        let keyA = try makeKey(credentialRevision: UUID(), origin: origin, trustRevision: trust)
+        let keyB = try makeKey(credentialRevision: UUID(), origin: origin, trustRevision: trust)
 
         let sessionA = try await registry.session(for: keyA, credential: .anonymous, trustPolicy: .system)
         let sessionB = try await registry.session(for: keyB, credential: .anonymous, trustPolicy: .system)
@@ -57,12 +57,12 @@ final class TransportSessionRegistryTests: XCTestCase {
     func testDifferentOriginYieldsDistinctSession() async throws {
         let registry = TransportSessionRegistry()
         let revision = UUID()
-        let keyA = makeKey(
+        let keyA = try makeKey(
             credentialRevision: revision,
             origin: TransportOrigin(url: URL(string: "https://nas-a.example.com/")!)!,
             trustRevision: revision
         )
-        let keyB = makeKey(
+        let keyB = try makeKey(
             credentialRevision: revision,
             origin: TransportOrigin(url: URL(string: "https://nas-b.example.com/")!)!,
             trustRevision: revision
@@ -77,8 +77,8 @@ final class TransportSessionRegistryTests: XCTestCase {
         let registry = TransportSessionRegistry()
         let origin = TransportOrigin(url: URL(string: "https://nas.example.com/")!)!
         let credentialRevision = UUID()
-        let keyA = makeKey(credentialRevision: credentialRevision, origin: origin, trustRevision: UUID())
-        let keyB = makeKey(credentialRevision: credentialRevision, origin: origin, trustRevision: UUID())
+        let keyA = try makeKey(credentialRevision: credentialRevision, origin: origin, trustRevision: UUID())
+        let keyB = try makeKey(credentialRevision: credentialRevision, origin: origin, trustRevision: UUID())
 
         let sessionA = try await registry.session(for: keyA, credential: .anonymous, trustPolicy: .system)
         let sessionB = try await registry.session(for: keyB, credential: .anonymous, trustPolicy: .system)
@@ -89,8 +89,8 @@ final class TransportSessionRegistryTests: XCTestCase {
         let registry = TransportSessionRegistry()
         let origin = TransportOrigin(url: URL(string: "https://nas.example.com/")!)!
         let revision = UUID()
-        let keyScanner = makeKey(credentialRevision: revision, origin: origin, trustRevision: revision, role: .scanner)
-        let keyPlayback = makeKey(credentialRevision: revision, origin: origin, trustRevision: revision, role: .playback)
+        let keyScanner = try makeKey(credentialRevision: revision, origin: origin, trustRevision: revision, role: .scanner)
+        let keyPlayback = try makeKey(credentialRevision: revision, origin: origin, trustRevision: revision, role: .playback)
 
         let scannerSession = try await registry.session(for: keyScanner, credential: .anonymous, trustPolicy: .system)
         let playbackSession = try await registry.session(for: keyPlayback, credential: .anonymous, trustPolicy: .system)
@@ -99,7 +99,7 @@ final class TransportSessionRegistryTests: XCTestCase {
 
     func testInvalidateRemovesSessionSoANewOneIsMintedNextTime() async throws {
         let registry = TransportSessionRegistry()
-        let key = makeKey()
+        let key = try makeKey()
         let first = try await registry.session(for: key, credential: .anonymous, trustPolicy: .system)
         await registry.invalidate(key)
         let countAfterInvalidate = await registry.liveSessionCount
@@ -112,8 +112,8 @@ final class TransportSessionRegistryTests: XCTestCase {
     func testInvalidateAllRemovesOnlyMatchingSessions() async throws {
         let registry = TransportSessionRegistry()
         let origin = TransportOrigin(url: URL(string: "https://nas.example.com/")!)!
-        let keyA = makeKey(accountID: "keep-me", origin: origin)
-        let keyB = makeKey(accountID: "remove-me", origin: origin)
+        let keyA = try makeKey(accountID: "keep-me", origin: origin)
+        let keyB = try makeKey(accountID: "remove-me", origin: origin)
         _ = try await registry.session(for: keyA, credential: .anonymous, trustPolicy: .system)
         _ = try await registry.session(for: keyB, credential: .anonymous, trustPolicy: .system)
 
@@ -124,8 +124,8 @@ final class TransportSessionRegistryTests: XCTestCase {
 
     func testDrainAllRemovesEverySession() async throws {
         let registry = TransportSessionRegistry()
-        _ = try await registry.session(for: makeKey(accountID: "a"), credential: .anonymous, trustPolicy: .system)
-        _ = try await registry.session(for: makeKey(accountID: "b"), credential: .anonymous, trustPolicy: .system)
+        _ = try await registry.session(for: try makeKey(accountID: "a"), credential: .anonymous, trustPolicy: .system)
+        _ = try await registry.session(for: try makeKey(accountID: "b"), credential: .anonymous, trustPolicy: .system)
         await registry.drainAll()
         let count = await registry.liveSessionCount
         XCTAssertEqual(count, 0)
@@ -133,7 +133,7 @@ final class TransportSessionRegistryTests: XCTestCase {
 
     func testEqualRevisionCannotBeReusedWithDifferentCredentialMaterial() async throws {
         let registry = TransportSessionRegistry()
-        let key = makeKey()
+        let key = try makeKey()
         _ = try await registry.session(
             for: key,
             credential: .password(username: "user", password: "first", policy: .automatic),
@@ -152,9 +152,9 @@ final class TransportSessionRegistryTests: XCTestCase {
         }
     }
 
-    func testPinnedTrustRevisionMustMatchSessionKey() async {
+    func testPinnedTrustRevisionMustMatchSessionKey() async throws {
         let registry = TransportSessionRegistry()
-        let key = makeKey(trustRevision: UUID())
+        let key = try makeKey(trustRevision: UUID())
         let policy = TrustPolicy.pinnedLeaf(sha256: Data(repeating: 1, count: 32), revision: UUID())
 
         do {
@@ -169,7 +169,7 @@ final class TransportSessionRegistryTests: XCTestCase {
 
     func testInvalidatedSessionRejectsNewTaskWithoutCallingURLSession() async throws {
         let registry = TransportSessionRegistry(testProtocolClasses: [StubURLProtocol.self])
-        let key = makeKey()
+        let key = try makeKey()
         let session = try await registry.session(for: key, credential: .anonymous, trustPolicy: .system)
         session.invalidateAndCancel()
 
@@ -186,8 +186,8 @@ final class TransportSessionRegistryTests: XCTestCase {
 
     // MARK: - Redacted description
 
-    func testSessionKeyDescriptionDoesNotLeakCredentialOrTrustMaterial() {
-        let key = makeKey(accountID: "household-nas")
+    func testSessionKeyDescriptionDoesNotLeakCredentialOrTrustMaterial() throws {
+        let key = try makeKey(accountID: "household-nas")
         let description = key.description
         // Only opaque identifiers/origin/role are present — nothing that
         // resolves to a password/token/certificate.

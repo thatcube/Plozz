@@ -9,7 +9,7 @@ import FoundationNetworking
 /// always preflighted through ``CredentialPreflight`` before a request is
 /// built.
 ///
-/// This is the "feasibility spike" integration point: it composes the other
+/// This is the HTTP adapter integration point: it composes the other
 /// primitives in this module but is not adopted by any provider yet.
 public struct WebDAVClient: Sendable {
     private let registry: TransportSessionRegistry

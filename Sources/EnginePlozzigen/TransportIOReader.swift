@@ -3,116 +3,9 @@ import Foundation
 import os
 import AetherEngine
 import AetherEngineSMB
+import MediaTransportCore
 
-public protocol TransportByteSource: AnyObject, Sendable {
-    var byteSize: Int64 { get }
-
-    func read(at offset: Int64, length: Int) async throws -> Data
-    func shutdown() async
-}
-
-final class TransportSourceLease: @unchecked Sendable {
-    private struct State {
-        var readerCount = 1
-        var operationCount = 0
-        var isDraining = false
-        var hasStartedShutdown = false
-        var isShutdownComplete = false
-        var waiters: [CheckedContinuation<Void, Never>] = []
-    }
-
-    private let source: TransportByteSource
-    private let state = OSAllocatedUnfairLock(initialState: State())
-
-    init(source: TransportByteSource) {
-        self.source = source
-    }
-
-    var byteSize: Int64 {
-        source.byteSize
-    }
-
-    func retainReader() -> Bool {
-        state.withLock { state in
-            guard !state.isDraining else { return false }
-            state.readerCount += 1
-            return true
-        }
-    }
-
-    func beginOperation() -> Bool {
-        state.withLock { state in
-            guard !state.isDraining else { return false }
-            state.operationCount += 1
-            return true
-        }
-    }
-
-    func endOperation() {
-        let shouldShutdown = state.withLock { state in
-            precondition(state.operationCount > 0)
-            state.operationCount -= 1
-            return Self.shouldBeginShutdown(&state)
-        }
-        if shouldShutdown {
-            beginShutdown()
-        }
-    }
-
-    func releaseReader() {
-        let shouldShutdown = state.withLock { state in
-            precondition(state.readerCount > 0)
-            state.readerCount -= 1
-            if state.readerCount == 0 {
-                state.isDraining = true
-            }
-            return Self.shouldBeginShutdown(&state)
-        }
-        if shouldShutdown {
-            beginShutdown()
-        }
-    }
-
-    func waitForFinalShutdown() async {
-        await withCheckedContinuation { continuation in
-            let resumeImmediately = state.withLock { state in
-                if state.isShutdownComplete {
-                    return true
-                }
-                state.waiters.append(continuation)
-                return false
-            }
-            if resumeImmediately {
-                continuation.resume()
-            }
-        }
-    }
-
-    private static func shouldBeginShutdown(_ state: inout State) -> Bool {
-        guard state.isDraining,
-              state.readerCount == 0,
-              state.operationCount == 0,
-        !state.hasStartedShutdown
-        else {
-            return false
-        }
-        state.hasStartedShutdown = true
-        return true
-    }
-
-    private func beginShutdown() {
-        Task.detached(priority: .utility) { [self, source] in
-            await source.shutdown()
-            let waiters = state.withLock { state in
-          state.isShutdownComplete = true
-          let waiters = state.waiters
-          state.waiters.removeAll()
-          return waiters
-            }
-            waiters.forEach { $0.resume() }
-        }
-    }
-}
+public typealias TransportByteSource = MediaTransportByteSource
 
 private final class TransportReadOutcome: @unchecked Sendable {
     var result: Result<Data, Error> = .success(Data())
@@ -157,19 +50,20 @@ public final class TransportIOReader: IOReader, @unchecked Sendable {
         var isClosed = false
     }
 
-    private let source: TransportByteSource
-    private let lease: TransportSourceLease
+    private let cursor: MediaTransportSourceCursor
+    private let lease: MediaTransportSourceLease
     private let readerState = OSAllocatedUnfairLock(initialState: ReaderState())
     private let inflight = OSAllocatedUnfairLock<TransportInflightRead?>(initialState: nil)
     private let avseekSize: Int32 = 65_536
 
     public init(source: TransportByteSource) {
-        self.source = source
-        self.lease = TransportSourceLease(source: source)
+        let lease = MediaTransportSourceLease(source: source)
+        self.lease = lease
+        self.cursor = lease.makeCursor()!
     }
 
-    private init(source: TransportByteSource, lease: TransportSourceLease) {
-        self.source = source
+    private init(cursor: MediaTransportSourceCursor, lease: MediaTransportSourceLease) {
+        self.cursor = cursor
         self.lease = lease
     }
 
@@ -184,8 +78,6 @@ public final class TransportIOReader: IOReader, @unchecked Sendable {
         }) else {
             return -1
         }
-        guard lease.beginOperation() else { return -1 }
-
         let requestedLength = Int(size)
         let outcome = TransportReadOutcome()
         let operation = TransportInflightRead()
@@ -195,21 +87,19 @@ public final class TransportIOReader: IOReader, @unchecked Sendable {
             return true
         }
         guard wasPublished else {
-            lease.endOperation()
             return -1
         }
         if readerState.withLock({ $0.isClosed }) {
             operation.cancel()
         }
 
-        let task = Task.detached(priority: .userInitiated) { [source, lease] in
+        let task = Task.detached(priority: .userInitiated) { [cursor] in
             defer {
-                lease.endOperation()
                 operation.semaphore.signal()
             }
             do {
                 outcome.result = .success(
-                    try await source.read(at: offset, length: requestedLength)
+                    try await cursor.read(at: offset, length: requestedLength)
                 )
             } catch {
                 outcome.result = .failure(error)
@@ -270,11 +160,11 @@ public final class TransportIOReader: IOReader, @unchecked Sendable {
 
     public func makeIndependentReader() -> IOReader? {
         guard !readerState.withLock({ $0.isClosed }),
-              lease.retainReader()
+              let cursor = cursor.clone()
         else {
             return nil
         }
-        return TransportIOReader(source: source, lease: lease)
+        return TransportIOReader(cursor: cursor, lease: lease)
     }
 
     public func close() {
@@ -285,7 +175,7 @@ public final class TransportIOReader: IOReader, @unchecked Sendable {
         }
         guard shouldRelease else { return }
         cancel()
-        lease.releaseReader()
+        cursor.close()
     }
 
     public func waitForFinalShutdown() async {

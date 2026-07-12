@@ -43,10 +43,7 @@ let package = Package(
         .library(name: "FeatureMusic", targets: ["FeatureMusic"]),
         .library(name: "TopShelfKit", targets: ["TopShelfKit"]),
         .library(name: "CrashReporting", targets: ["CrashReporting"]),
-        // Phase 0A feasibility spike (see Sources/MediaTransportHTTP/README.md).
-        // Deliberately not consumed by AppShell yet — declared so it builds
-        // and its test suite runs like every other module, but it is not
-        // part of the shipping app graph.
+        .library(name: "MediaTransportCore", targets: ["MediaTransportCore"]),
         .library(name: "MediaTransportHTTP", targets: ["MediaTransportHTTP"]),
         .library(name: "AppShell", targets: ["AppShell"])
     ],
@@ -279,16 +276,22 @@ let package = Package(
             ]
         ),
 
-        // MARK: WebDAV/HTTP transport feasibility spike (Phase 0A)
+        // MARK: Protocol-neutral media transport
+        .target(
+            name: "MediaTransportCore",
+            dependencies: ["CoreModels"],
+            swiftSettings: [.unsafeFlags(["-strict-concurrency=complete"])]
+        ),
+
+        // MARK: WebDAV/HTTP transport
         //
-        // Foundation-only, zero-dependency primitives for a future WebDAV/
-        // plain-HTTP media-share transport: origin/redirect discipline,
+        // Foundation-only WebDAV/plain-HTTP adapter primitives built on the
+        // protocol-neutral MediaTransportCore: origin/redirect discipline,
         // credential preflight + password/Bearer auth policy, exact-leaf TLS
         // pinning, per-(account, credential revision, origin, trust
         // revision, role) ephemeral session isolation, bounded PROPFIND
         // parsing, and validated ranged reads. See
-        // `Sources/MediaTransportHTTP/README.md` for the full scope and
-        // (deliberately narrow) proof boundary.
+        // `Sources/MediaTransportHTTP/README.md` for the adapter's scope.
         //
         // NOT consumed by AppShell/the App target — this is a standalone,
         // independently-testable module, not shipping app behavior yet.
@@ -298,6 +301,7 @@ let package = Package(
         // stricter bar from day one.
         .target(
             name: "MediaTransportHTTP",
+            dependencies: ["CoreModels", "MediaTransportCore"],
             swiftSettings: [.unsafeFlags(["-strict-concurrency=complete"])]
         ),
 
@@ -314,6 +318,7 @@ let package = Package(
             name: "EnginePlozzigen",
             dependencies: [
                 "CoreModels",
+                "MediaTransportCore",
                 "FeaturePlayback",
                 .product(name: "AetherEngine", package: "AetherEngine"),
                 // SMB2/3 byte-source product. Lets the engine wrapper play a
@@ -437,14 +442,20 @@ let package = Package(
             dependencies: ["ProviderShare", "CoreModels"]
         ),
         .testTarget(
+            name: "MediaTransportCoreTests",
+            dependencies: ["MediaTransportCore", "CoreModels"],
+            swiftSettings: [.unsafeFlags(["-strict-concurrency=complete"])]
+        ),
+        .testTarget(
             name: "MediaTransportHTTPTests",
-            dependencies: ["MediaTransportHTTP"],
+            dependencies: ["MediaTransportHTTP", "MediaTransportCore"],
             swiftSettings: [.unsafeFlags(["-strict-concurrency=complete"])]
         ),
         .testTarget(
             name: "EnginePlozzigenTests",
             dependencies: [
                 "EnginePlozzigen",
+                "MediaTransportCore",
                 .product(name: "AetherEngine", package: "AetherEngine"),
             ]
         ),

@@ -157,7 +157,7 @@ public actor TransportSessionRegistry {
             }
             return existing
         }
-        let created = makeSession(key: key, credential: credential, trustPolicy: trustPolicy)
+        let created = try makeSession(key: key, credential: credential, trustPolicy: trustPolicy)
         sessions[key] = created
         return created
     }
@@ -195,7 +195,10 @@ public actor TransportSessionRegistry {
         key: TransportSessionKey,
         credential: WebDAVCredential,
         trustPolicy: TrustPolicy
-    ) -> TransportSession {
+    ) throws -> TransportSession {
+        guard let origin = key.origin else {
+            throw TransportError.invalidOrigin(reason: "session key is not an HTTP endpoint")
+        }
         let configuration = URLSessionConfiguration.ephemeral
         // Belt-and-suspenders on top of `.ephemeral`: explicit, so the
         // no-reuse guarantee doesn't silently depend on a platform default
@@ -213,7 +216,7 @@ public actor TransportSessionRegistry {
         let delegate = TransportSessionDelegate(
             credential: credential,
             trustPolicy: trustPolicy,
-            origin: key.origin
+            origin: origin
         )
         let urlSession = URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil)
         return TransportSession(

@@ -28,12 +28,23 @@ public struct TransportOrigin: Hashable, Sendable {
         guard let rawHost = url.host?.lowercased(), !rawHost.isEmpty else {
             return nil
         }
+        let effectivePort = url.port ?? TransportOrigin.defaultPort(forScheme: rawScheme)
+        guard (1...65_535).contains(effectivePort) else {
+            return nil
+        }
         self.scheme = rawScheme
         self.host = rawHost
-        self.port = url.port ?? TransportOrigin.defaultPort(forScheme: rawScheme)
+        self.port = effectivePort
     }
 
-    init(scheme: String, host: String, port: Int) {
+    init?(scheme: String, host: String, port: Int) {
+        let scheme = scheme.lowercased()
+        let host = host.lowercased()
+        guard scheme == "http" || scheme == "https",
+              !host.isEmpty,
+              (1...65_535).contains(port) else {
+            return nil
+        }
         self.scheme = scheme
         self.host = host
         self.port = port

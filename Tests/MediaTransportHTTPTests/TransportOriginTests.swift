@@ -38,6 +38,26 @@ final class TransportOriginTests: XCTestCase {
         XCTAssertNil(TransportOrigin(url: URL(string: "https://user:password@nas.example.com/dav")!))
     }
 
+    func testOriginRejectsOutOfRangePort() {
+        XCTAssertNil(TransportOrigin(url: URL(string: "https://example.com:99999/")!))
+    }
+
+    func testErrorDescriptionsDoNotEchoAssociatedServerText() {
+        let marker = "sensitive-server-text"
+        let errors: [TransportError] = [
+            .invalidOrigin(reason: marker),
+            .crossOriginRedirectRejected(from: marker, to: marker),
+            .authenticationFailed(reason: marker),
+            .trustEvaluationFailed(reason: marker),
+            .protocolError(status: 500, detail: marker),
+            .sourceChanged(reason: marker),
+        ]
+
+        for error in errors {
+            XCTAssertFalse(error.description.contains(marker))
+        }
+    }
+
     // MARK: - Redirect policy
 
     func testRedirectSameOriginRetainsAuthorizationHeader() {

@@ -1,12 +1,12 @@
 # MediaTransportHTTP
 
-**Status: Phase 0A feasibility spike — NOT wired into `AppShell` or the shipping
-app graph.** This target exists to prove out the hard, security-sensitive
-primitives a future WebDAV/plain-HTTP media-share transport would need, in
-isolation, before any provider/UI work commits to a design. Nothing in this
-module is reachable from the running app yet.
+**Status: HTTP/WebDAV adapter foundation — NOT wired into `AppShell` or the
+shipping app graph.** Shared ownership, identity, resolver, and byte-source
+contracts now live in `MediaTransportCore`; HTTP/WebDAV-specific errors,
+security, and protocol primitives remain isolated in this target. Nothing in
+this module is reachable from the running app yet.
 
-## What this proves
+## Adapter guarantees
 
 - **Origin discipline**: exact scheme/host/port normalization
   (``TransportOrigin``) and a pure, unit-testable same-origin **redirect

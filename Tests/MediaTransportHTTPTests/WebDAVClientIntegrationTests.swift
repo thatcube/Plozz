@@ -11,8 +11,8 @@ final class WebDAVClientIntegrationTests: XCTestCase {
         origin: TransportOrigin,
         accountID: String = "test-account",
         role: TransportRole = .scanner
-    ) -> TransportSessionKey {
-        TransportSessionKey(
+    ) throws -> TransportSessionKey {
+        try TransportSessionKey(
             accountID: accountID,
             credentialRevision: UUID(),
             origin: origin,
@@ -62,7 +62,7 @@ final class WebDAVClientIntegrationTests: XCTestCase {
             root: root,
             path: "/dav/movies",
             depth: .one,
-            sessionKey: makeKey(origin: origin),
+            sessionKey: try makeKey(origin: origin),
             credential: .anonymous,
             trustPolicy: .system
         )
@@ -93,7 +93,7 @@ final class WebDAVClientIntegrationTests: XCTestCase {
             root: root,
             path: "/dav",
             depth: .one,
-            sessionKey: makeKey(origin: origin),
+            sessionKey: try makeKey(origin: origin),
             credential: .anonymous,
             trustPolicy: .system
         )
@@ -123,7 +123,7 @@ final class WebDAVClientIntegrationTests: XCTestCase {
             root: root,
             path: "/dav/movies",
             depth: .one,
-            sessionKey: makeKey(origin: origin),
+            sessionKey: try makeKey(origin: origin),
             credential: .anonymous,
             trustPolicy: .system
         )
@@ -147,7 +147,7 @@ final class WebDAVClientIntegrationTests: XCTestCase {
                 root: root,
                 path: "/dav",
                 depth: .one,
-                sessionKey: makeKey(origin: origin),
+                sessionKey: try makeKey(origin: origin),
                 credential: .password(username: "u", password: "p", policy: .automatic),
                 trustPolicy: .system
             )
@@ -170,7 +170,7 @@ final class WebDAVClientIntegrationTests: XCTestCase {
         do {
             _ = try await client.capabilities(
                 url: url,
-                sessionKey: makeKey(origin: origin),
+                sessionKey: try makeKey(origin: origin),
                 credential: .bearerToken("must-not-leak"),
                 trustPolicy: .system
             )
@@ -198,7 +198,7 @@ final class WebDAVClientIntegrationTests: XCTestCase {
 
         let headers = try await client.capabilities(
             url: url,
-            sessionKey: makeKey(origin: origin),
+            sessionKey: try makeKey(origin: origin),
             credential: .anonymous,
             trustPolicy: .system
         )
@@ -215,7 +215,7 @@ final class WebDAVClientIntegrationTests: XCTestCase {
         do {
             _ = try await client.capabilities(
                 url: url,
-                sessionKey: makeKey(origin: origin),
+                sessionKey: try makeKey(origin: origin),
                 credential: .anonymous,
                 trustPolicy: .system
             )
@@ -240,7 +240,7 @@ final class WebDAVClientIntegrationTests: XCTestCase {
                 root: root,
                 path: "/dav",
                 depth: .one,
-                sessionKey: makeKey(origin: origin),
+                sessionKey: try makeKey(origin: origin),
                 credential: .anonymous,
                 trustPolicy: .system,
                 limits: PropfindParseLimits(maxResponseBytes: 32, maxEntries: 10)
@@ -263,7 +263,7 @@ final class WebDAVClientIntegrationTests: XCTestCase {
                 root: root,
                 path: "/dav/../outside",
                 depth: .one,
-                sessionKey: makeKey(origin: origin),
+                sessionKey: try makeKey(origin: origin),
                 credential: .anonymous,
                 trustPolicy: .system
             )
@@ -299,7 +299,7 @@ final class WebDAVClientIntegrationTests: XCTestCase {
 
         let probeResult = try await client.probeRange(
             url: url,
-            sessionKey: makeKey(origin: origin, role: .playback),
+            sessionKey: try makeKey(origin: origin, role: .playback),
             credential: .anonymous,
             trustPolicy: .system
         )
@@ -330,7 +330,7 @@ final class WebDAVClientIntegrationTests: XCTestCase {
             start: 100,
             end: 199,
             representation: probeResult,
-            sessionKey: makeKey(origin: origin, role: .playback),
+            sessionKey: try makeKey(origin: origin, role: .playback),
             credential: .anonymous,
             trustPolicy: .system
         )
@@ -357,7 +357,7 @@ final class WebDAVClientIntegrationTests: XCTestCase {
 
         let result = try await client.probeRange(
             url: originalURL,
-            sessionKey: makeKey(origin: origin, role: .playback),
+            sessionKey: try makeKey(origin: origin, role: .playback),
             credential: .anonymous,
             trustPolicy: .system
         )
@@ -382,7 +382,7 @@ final class WebDAVClientIntegrationTests: XCTestCase {
                 start: 0,
                 end: 9,
                 representation: representation,
-                sessionKey: makeKey(origin: origin, role: .playback),
+                sessionKey: try makeKey(origin: origin, role: .playback),
                 credential: .anonymous,
                 trustPolicy: .system
             )
@@ -408,7 +408,7 @@ final class WebDAVClientIntegrationTests: XCTestCase {
                 root: root,
                 path: "/dav",
                 depth: .one,
-                sessionKey: makeKey(origin: origin),
+                sessionKey: try makeKey(origin: origin),
                 credential: .anonymous,
                 trustPolicy: .system
             )
@@ -432,7 +432,7 @@ final class WebDAVClientIntegrationTests: XCTestCase {
         do {
             _ = try await client.probeRange(
                 url: probeURL,
-                sessionKey: makeKey(origin: origin, role: .playback),
+                sessionKey: try makeKey(origin: origin, role: .playback),
                 credential: .anonymous,
                 trustPolicy: .system
             )
@@ -453,7 +453,7 @@ final class WebDAVClientIntegrationTests: XCTestCase {
                     totalLength: 100,
                     resourceURL: readURL
                 ),
-                sessionKey: makeKey(origin: origin, role: .playback),
+                sessionKey: try makeKey(origin: origin, role: .playback),
                 credential: .anonymous,
                 trustPolicy: .system
             )
@@ -483,7 +483,7 @@ final class WebDAVClientIntegrationTests: XCTestCase {
                     totalLength: 1_000,
                     resourceURL: url
                 ),
-                sessionKey: makeKey(origin: origin, role: .playback),
+                sessionKey: try makeKey(origin: origin, role: .playback),
                 credential: .anonymous,
                 trustPolicy: .system
             )
@@ -516,7 +516,7 @@ final class WebDAVClientIntegrationTests: XCTestCase {
                     totalLength: 100,
                     resourceURL: url
                 ),
-                sessionKey: makeKey(origin: origin, role: .playback),
+                sessionKey: try makeKey(origin: origin, role: .playback),
                 credential: .anonymous,
                 trustPolicy: .system
             )
@@ -549,7 +549,7 @@ final class WebDAVClientIntegrationTests: XCTestCase {
 
         _ = try await client.capabilities(
             url: originalURL,
-            sessionKey: makeKey(origin: origin),
+            sessionKey: try makeKey(origin: origin),
             credential: .bearerToken("integration-test-bearer-token"),
             trustPolicy: .system
         )
@@ -572,7 +572,7 @@ final class WebDAVClientIntegrationTests: XCTestCase {
         do {
             _ = try await client.capabilities(
                 url: originalURL,
-                sessionKey: makeKey(origin: origin),
+                sessionKey: try makeKey(origin: origin),
                 credential: .anonymous,
                 trustPolicy: .system
             )
@@ -592,7 +592,7 @@ final class WebDAVClientIntegrationTests: XCTestCase {
         let crossOriginURL = URL(string: "https://evil.example.net/dav/")!
         let registry = TransportSessionRegistry(testProtocolClasses: [StubURLProtocol.self])
         let client = WebDAVClient(registry: registry)
-        let key = makeKey(origin: origin)
+        let key = try makeKey(origin: origin)
 
         StubURLProtocol.queue(redirect: StubRedirect(location: crossOriginURL), for: url)
         do {

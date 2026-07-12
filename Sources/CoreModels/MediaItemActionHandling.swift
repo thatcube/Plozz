@@ -25,6 +25,13 @@ public extension Notification.Name {
     /// in place. Read the payload via `Notification.mediaItemMutation`.
     static let mediaItemDidMutate = Notification.Name("PlozzMediaItemDidMutate")
 
+    /// Posted after the player has persisted its final progress report. Detail
+    /// pages quietly re-fetch so provider-specific canonical IDs/version aliases
+    /// cannot leave the still-mounted hero stale after dismissal.
+    static let playbackProgressDidPersist = Notification.Name(
+        "PlozzPlaybackProgressDidPersist"
+    )
+
     /// Posted each time the cross-server identity index warms a little more (a new
     /// account finishes indexing, so the shared source-of-truth membership grows).
     /// Screens that merged their rows against an earlier, sparser snapshot observe

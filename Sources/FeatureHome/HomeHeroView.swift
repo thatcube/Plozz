@@ -1882,14 +1882,14 @@ final class HeroNavigationClickPlayer {
 
         for frame in 0..<frameCount {
             let time = Double(frame) / Double(sampleRate)
-            let startFrequency = 620.0
-            let endFrequency = 460.0
+            let startFrequency = 500.0
+            let endFrequency = 380.0
             let sweep = (endFrequency - startFrequency) / duration
             let phase = 2 * Double.pi * (
                 startFrequency * time + 0.5 * sweep * time * time
             )
             let body = sin(phase) * exp(-time * 70)
-            let onset = 0.18 * sin(2 * phase) * exp(-time * 190)
+            let onset = 0.08 * sin(2 * phase) * exp(-time * 190)
             let attackDuration = 0.0015
             let attackProgress = min(1, time / attackDuration)
             let attack = pow(sin(0.5 * Double.pi * attackProgress), 2)

@@ -950,6 +950,53 @@ final class ItemDetailViewModelTests: XCTestCase {
                        "Enabled cross-server source must remain in the restored picker")
     }
 
+    func testSnapshotRestoredEpisodesRefreshLiveWatchStateOnSeasonOpen() async {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("plozz-watch-refresh-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        let cache = DetailSnapshotCache(directory: tempDir)
+
+        let show = series("show")
+        let seasonItem = season("season-2", "Season 2")
+        var staleEpisode = episode("episode-1", number: 1)
+        staleEpisode.isPlayed = false
+        var liveEpisode = staleEpisode
+        liveEpisode.isPlayed = true
+        let snapshot = DetailSnapshotCache.Snapshot(
+            item: show.taggingSource("share"),
+            children: [seasonItem.taggingSource("share")],
+            seasonEpisodes: [
+                seasonItem.id: [staleEpisode.taggingSource("share")]
+            ]
+        )
+        await cache.store(snapshot, for: "share|show")
+
+        let provider = FakeMediaProvider(allItems: [show, seasonItem, liveEpisode])
+        provider.childrenByParent = [
+            show.id: [seasonItem],
+            seasonItem.id: [liveEpisode]
+        ]
+        let vm = ItemDetailViewModel(
+            provider: provider,
+            itemID: show.id,
+            sourceAccountID: "share",
+            snapshotCache: cache
+        )
+        await vm.load()
+        await waitUntil { vm.episodes(for: seasonItem.id) != nil }
+        XCTAssertEqual(vm.episodes(for: seasonItem.id)?.first?.isPlayed, false)
+
+        await vm.loadEpisodes(for: seasonItem.id)
+
+        XCTAssertEqual(vm.episodes(for: seasonItem.id)?.first?.isPlayed, true)
+        XCTAssertGreaterThanOrEqual(
+            provider.childrenCallCount[seasonItem.id, default: 0],
+            1,
+            "A cached episode rail must still refresh live watch state"
+        )
+    }
+
     /// The Plex episode-badge bug: a season's `/children` listing can return a
     /// trimmed, SDR-looking episode (no per-stream DoVi/HDR, no Media-level Atmos
     /// hint), while the full per-item fetch carries the real 4K Dolby Vision /

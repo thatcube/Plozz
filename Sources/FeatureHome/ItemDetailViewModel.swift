@@ -31,6 +31,10 @@ public final class ItemDetailViewModel {
     /// season is shown/focused and cached so re-focusing a tab is instant. Keyed
     /// by season id. Observed by `SeriesDetailView` to populate its episode rail.
     public private(set) var seasonEpisodes: [String: [MediaItem]] = [:]
+    /// Seasons painted from the stale-while-revalidate snapshot. They render
+    /// instantly, but the first `loadEpisodes` must still fetch live provider state
+    /// so watched/resume changes made since the snapshot are not frozen on revisit.
+    private var snapshotRestoredSeasonIDs: Set<String> = []
     private final class SeasonLoad: @unchecked Sendable {
         enum WaitResult: Sendable {
             case completed
@@ -981,6 +985,7 @@ public final class ItemDetailViewModel {
         loadedSeasonIDs.append(contentsOf: seasonLoads.keys.filter { !loadedSeasonIDs.contains($0) })
         cancelSeasonLoads(retryWaiters: true)
         seasonEpisodes = [:]
+        snapshotRestoredSeasonIDs = []
         for seasonID in loadedSeasonIDs {
             guard !Task.isCancelled, isCurrent() else { return }
             await loadEpisodes(for: seasonID)
@@ -1142,6 +1147,7 @@ public final class ItemDetailViewModel {
         seasonLoadingResumeSourceGeneration = sourceGeneration
         cancelSeasonLoads()
         seasonEpisodes = [:]
+        snapshotRestoredSeasonIDs = []
         preselectedSeasonID = nil
 
         await reload()
@@ -1187,6 +1193,7 @@ public final class ItemDetailViewModel {
         // Drop the old server's per-season episode caches so the rail reloads from
         // the new server (its ids differ); the season list reloads via reload().
         seasonEpisodes = [:]
+        snapshotRestoredSeasonIDs = []
         preselectedSeasonID = nil
 
         // Reload the new server's detail + children in place over the existing
@@ -1207,12 +1214,12 @@ public final class ItemDetailViewModel {
               activeItemID == sourceItemID,
               activeSourceAccountID == sourceAccountID {
             guard isCurrentSeasonID(seasonID) else { return }
-            if seasonEpisodes[seasonID] != nil { return }
-
             let load: SeasonLoad
             if let existing = seasonLoads[seasonID] {
                 load = existing
             } else {
+                let requiresLiveRefresh = snapshotRestoredSeasonIDs.remove(seasonID) != nil
+                if seasonEpisodes[seasonID] != nil, !requiresLiveRefresh { return }
                 let provider = activeProvider
                 let token = UUID()
                 load = SeasonLoad(token: token)
@@ -1385,6 +1392,7 @@ public final class ItemDetailViewModel {
         state = .loaded(Detail(item: item, children: snapshot.children.map(tagged), childrenLoaded: true))
         if !snapshot.seasonEpisodes.isEmpty {
             seasonEpisodes = snapshot.seasonEpisodes.mapValues { stampSeriesTMDb(into: $0.map(tagged)) }
+            snapshotRestoredSeasonIDs.formUnion(snapshot.seasonEpisodes.keys)
         }
         if snapshot.sources.count > 1 {
             let restored = prunedToActiveAccounts(snapshot.sources)
@@ -1417,6 +1425,7 @@ public final class ItemDetailViewModel {
         }
         if seasonEpisodes.isEmpty, !snapshot.seasonEpisodes.isEmpty {
             seasonEpisodes = snapshot.seasonEpisodes.mapValues { stampSeriesTMDb(into: $0.map(tagged)) }
+            snapshotRestoredSeasonIDs.formUnion(snapshot.seasonEpisodes.keys)
         }
         if sources.count <= 1, snapshot.sources.count > 1 {
             let restored = prunedToActiveAccounts(snapshot.sources)

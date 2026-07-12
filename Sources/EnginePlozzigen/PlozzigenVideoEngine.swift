@@ -288,6 +288,31 @@ public final class PlozzigenVideoEngine: VideoEngine {
         isPaused = true
     }
 
+    public func restoreAfterBackground() async {
+        guard status != .idle else { return }
+        status = .loading
+        do {
+            try await engine.reloadAtCurrentPosition()
+            // stop() may have torn the session down while reload was suspended.
+            guard status == .loading else { return }
+            if intendsPause {
+                engine.pause()
+                isPaused = true
+            } else {
+                engine.play()
+                isPaused = false
+            }
+            status = .ready
+            syncTracks()
+        } catch {
+            // A stop or engine-published failure already owns the terminal state.
+            guard status == .loading else { return }
+            let err: AppError = .unknown(String(describing: error))
+            status = .failed(err)
+            onFailure?(err)
+        }
+    }
+
     public func seek(to seconds: TimeInterval) async {
         await engine.seek(to: seconds)
     }

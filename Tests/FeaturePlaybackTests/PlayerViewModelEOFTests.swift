@@ -8,6 +8,70 @@ import UIKit
 
 @MainActor
 final class PlayerViewModelEOFTests: XCTestCase {
+    func testBackgroundReturnRestoresPipelineOnceAndRemainsPaused() async {
+        let item = MediaItem(id: "movie", title: "Movie", kind: .movie, runtime: 120)
+        let request = PlaybackRequest(
+            item: item,
+            streamURL: URL(string: "https://example.test/movie.m3u8")!
+        )
+        let provider = RecordingPlaybackProvider(request: request)
+        let engine = SpyVideoEngine()
+        let viewModel = PlayerViewModel(
+            provider: provider,
+            itemID: item.id,
+            engineFactory: EngineFactory(makeNative: { _ in engine })
+        )
+
+        await viewModel.load()
+        engine.currentTime = 42
+
+        viewModel.suspendForBackground()
+        viewModel.suspendForBackground(requiresPipelineRestore: true)
+        await viewModel.restoreAfterBackground()
+        await viewModel.restoreAfterBackground()
+
+        XCTAssertEqual(engine.restoreAfterBackgroundCallCount, 1)
+        XCTAssertTrue(engine.isPaused)
+        XCTAssertTrue(viewModel.controls.isPaused)
+        XCTAssertTrue(viewModel.controls.intendsPause)
+        XCTAssertEqual(viewModel.controls.currentSeconds, 42)
+        XCTAssertEqual(viewModel.phase, .ready)
+
+        viewModel.setPaused(false)
+        XCTAssertTrue(viewModel.controls.isResumeConfirming)
+        viewModel.setPaused(true)
+    }
+
+    func testBackgroundDuringLoadingStillRestoresAfterLoadCompletes() async {
+        let item = MediaItem(id: "movie", title: "Movie", kind: .movie, runtime: 120)
+        let request = PlaybackRequest(
+            item: item,
+            streamURL: URL(string: "https://example.test/movie.m3u8")!
+        )
+        let provider = RecordingPlaybackProvider(request: request)
+        let engine = SpyVideoEngine()
+        engine.blocksLoad = true
+        let viewModel = PlayerViewModel(
+            provider: provider,
+            itemID: item.id,
+            engineFactory: EngineFactory(makeNative: { _ in engine })
+        )
+
+        for _ in 0..<100 where !engine.loadStarted {
+            try? await Task.sleep(for: .milliseconds(1))
+        }
+        XCTAssertTrue(engine.loadStarted)
+        XCTAssertEqual(viewModel.phase, .loading)
+
+        viewModel.suspendForBackground(requiresPipelineRestore: true)
+        engine.finishLoad()
+        await viewModel.load()
+        await viewModel.restoreAfterBackground()
+
+        XCTAssertEqual(engine.restoreAfterBackgroundCallCount, 1)
+        XCTAssertEqual(viewModel.phase, .ready)
+    }
+
     func testStopAfterNaturalEndStillWritesFinalFurthestPosition() async {
         let item = MediaItem(id: "movie", title: "Movie", kind: .movie, runtime: 120)
         let request = PlaybackRequest(
@@ -99,6 +163,10 @@ private final class SpyVideoEngine: VideoEngine {
     var furthestObservedPosition: TimeInterval = 0
     var audioTracks: [MediaTrack] = []
     var subtitleTracks: [MediaTrack] = []
+    var restoreAfterBackgroundCallCount = 0
+    var blocksLoad = false
+    private(set) var loadStarted = false
+    private var loadContinuation: CheckedContinuation<Void, Never>?
     var onProgress: (@MainActor () -> Void)?
     var onFailure: (@MainActor (AppError) -> Void)?
     var onEnded: (@MainActor () -> Void)?
@@ -107,13 +175,30 @@ private final class SpyVideoEngine: VideoEngine {
     var onSecondarySubtitleCues: (@MainActor ([SubtitleCue]) -> Void)?
 
     func load(request: PlaybackRequest, startPosition: TimeInterval) async {
+        loadStarted = true
+        if blocksLoad {
+            await withCheckedContinuation { continuation in
+                loadContinuation = continuation
+            }
+        }
         status = .ready
         currentTime = startPosition
         furthestObservedPosition = max(furthestObservedPosition, startPosition)
     }
 
+    func finishLoad() {
+        blocksLoad = false
+        loadContinuation?.resume()
+        loadContinuation = nil
+    }
+
     func play() { isPaused = false }
     func pause() { isPaused = true }
+    func restoreAfterBackground() async {
+        restoreAfterBackgroundCallCount += 1
+        status = .ready
+        isPaused = true
+    }
     func seek(to seconds: TimeInterval) async {
         currentTime = seconds
         furthestObservedPosition = max(furthestObservedPosition, seconds)

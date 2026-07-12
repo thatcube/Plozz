@@ -90,6 +90,7 @@ public final class NativeVideoEngine: VideoEngine {
 
     @ObservationIgnored private var player: AVPlayer?
     @ObservationIgnored private var request: PlaybackRequest?
+    @ObservationIgnored private var loadGeneration = 0
     @ObservationIgnored private var timeObserver: Any?
     @ObservationIgnored private let reportInterval: TimeInterval = 10
     @ObservationIgnored private var lastReportedSecond: Int = -1
@@ -116,6 +117,11 @@ public final class NativeVideoEngine: VideoEngine {
     /// native engine. Cancelled on teardown so a stale selection never applies to a
     /// replaced player item.
     @ObservationIgnored private var preferredAudioSelectionTask: Task<Void, Never>?
+    /// Manual track choices survive a background rebuild of the AVPlayerItem.
+    @ObservationIgnored private var selectedAudioTrackOverride: MediaTrack?
+    @ObservationIgnored private var selectedSubtitleTrackOverride: MediaTrack?
+    @ObservationIgnored private var hasSelectedAudioTrackOverride = false
+    @ObservationIgnored private var hasSelectedSubtitleTrackOverride = false
     #if !os(macOS)
     @ObservationIgnored private var routeChangeObserver: NSObjectProtocol?
     @ObservationIgnored private var endOfPlaybackObserver: NSObjectProtocol?
@@ -157,6 +163,16 @@ public final class NativeVideoEngine: VideoEngine {
     // MARK: - Lifecycle
 
     public func load(request: PlaybackRequest, startPosition: TimeInterval) async {
+        await load(request: request, startPosition: startPosition, startsPaused: false)
+    }
+
+    private func load(
+        request: PlaybackRequest,
+        startPosition: TimeInterval,
+        startsPaused: Bool
+    ) async {
+        loadGeneration &+= 1
+        let generation = loadGeneration
         status = .loading
         configureAudioSession()
         // Tear down any previous player (e.g. a failed direct-play attempt being
@@ -184,6 +200,7 @@ public final class NativeVideoEngine: VideoEngine {
         if startPosition > 1 {
             await seekWhenReady(player: player, to: startPosition)
         }
+        guard generation == loadGeneration, status == .loading else { return }
 
         // Watch for a direct-play item that can't actually be decoded so we can
         // transparently re-resolve via a server transcode.
@@ -204,8 +221,12 @@ public final class NativeVideoEngine: VideoEngine {
 
         installTimeObserver(on: player)
         status = .ready
-        isPaused = false
-        player.playImmediately(atRate: Float(currentPlaybackRate))
+        isPaused = startsPaused
+        if startsPaused {
+            player.pause()
+        } else {
+            player.playImmediately(atRate: Float(currentPlaybackRate))
+        }
 
         // Plozz owns subtitle SELECTION and DRAWING through its SDR overlay (see
         // PlayerViewModel.applyInitialSubtitleSelectionIfReady). The native engine
@@ -335,6 +356,21 @@ public final class NativeVideoEngine: VideoEngine {
         isPaused = true
     }
 
+    public func restoreAfterBackground() async {
+        guard let request else { return }
+        let resumePosition = currentTime
+        await load(request: request, startPosition: resumePosition, startsPaused: true)
+        guard status == .ready, let item = player?.currentItem else { return }
+        if hasSelectedAudioTrackOverride {
+            await preferredAudioSelectionTask?.value
+            await applyAudioSelection(selectedAudioTrackOverride, to: item)
+        }
+        if hasSelectedSubtitleTrackOverride {
+            await defaultSubtitleSelectionTask?.value
+            await applySubtitleSelection(selectedSubtitleTrackOverride, to: item)
+        }
+    }
+
     // MARK: - Tunables
 
     /// AVPlayer can change `rate` live with no reload, so we advertise speed.
@@ -358,6 +394,7 @@ public final class NativeVideoEngine: VideoEngine {
     }
 
     public func stop() {
+        loadGeneration &+= 1
         fallbackMonitorTask?.cancel()
         fallbackMonitorTask = nil
         #if !os(macOS)
@@ -384,16 +421,17 @@ public final class NativeVideoEngine: VideoEngine {
     /// blocks or fails playback — any error is swallowed.
     private func configureAudioSession() {
         #if !os(macOS)
-        guard !audioSessionConfigured else { return }
-        audioSessionConfigured = true
         let session = AVAudioSession.sharedInstance()
         do {
-            try session.setCategory(.playback, mode: .moviePlayback)
+            if !audioSessionConfigured {
+                try session.setCategory(.playback, mode: .moviePlayback)
+                audioSessionConfigured = true
+                observeAudioRouteChanges(session)
+            }
             try session.setActive(true)
         } catch {
             PlozzLog.playback.debug("Audio session configuration failed (non-fatal)")
         }
-        observeAudioRouteChanges(session)
         #endif
     }
 
@@ -762,11 +800,17 @@ public final class NativeVideoEngine: VideoEngine {
     /// by the UI; it exists so a future custom picker (or non-native engine) can
     /// switch tracks through the `VideoEngine` abstraction.
     public func selectSubtitleTrack(_ track: MediaTrack?) {
+        hasSelectedSubtitleTrackOverride = true
+        selectedSubtitleTrackOverride = track
         guard let player, let item = player.currentItem else { return }
         Task { [weak self] in
-            guard let self, let group = await self.legibleGroup(for: item.asset) else { return }
-            self.select(track: track, in: group, on: item)
+            await self?.applySubtitleSelection(track, to: item)
         }
+    }
+
+    private func applySubtitleSelection(_ track: MediaTrack?, to item: AVPlayerItem) async {
+        guard let group = await legibleGroup(for: item.asset), player?.currentItem === item else { return }
+        select(track: track, in: group, on: item)
     }
 
     /// Re-applies subtitle styling to the *current* player item so an in-player
@@ -782,12 +826,18 @@ public final class NativeVideoEngine: VideoEngine {
     /// Best-effort manual audio selection. As with subtitles, the native picker
     /// currently owns audio switching; this rounds out the abstraction.
     public func selectAudioTrack(_ track: MediaTrack?) {
+        hasSelectedAudioTrackOverride = true
+        selectedAudioTrackOverride = track
         guard let player, let item = player.currentItem else { return }
         Task { [weak self] in
-            guard let self,
-                  let group = try? await item.asset.loadMediaSelectionGroup(for: .audible) else { return }
-            self.select(track: track, in: group, on: item)
+            await self?.applyAudioSelection(track, to: item)
         }
+    }
+
+    private func applyAudioSelection(_ track: MediaTrack?, to item: AVPlayerItem) async {
+        guard let group = try? await item.asset.loadMediaSelectionGroup(for: .audible),
+              player?.currentItem === item else { return }
+        select(track: track, in: group, on: item)
     }
 
     private func select(track: MediaTrack?, in group: AVMediaSelectionGroup, on item: AVPlayerItem) {

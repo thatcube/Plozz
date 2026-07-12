@@ -191,14 +191,18 @@ public struct PlayerView: View {
         }
         .modifier(DisplaySettleObserver { hdrTransition.displayDidSettle() })
         .onChange(of: scenePhase) { _, phase in
-            // The TV Home button / sleep / app suspension never fires the view's
-            // onDisappear, so stop() (and its final convergence write) would never
-            // run on that path — and the engine would keep decoding audio behind the
-            // Home screen until the OS suspends us. Take a durable checkpoint at the
-            // live position AND pause playback as we leave active, so the latest
-            // position is captured and audio doesn't keep playing in the background.
-            if phase != .active {
+            switch phase {
+            case .active:
+                Task { await viewModel.restoreAfterBackground() }
+            case .inactive:
+                // Pause/checkpoint as soon as the app starts leaving active.
                 viewModel.suspendForBackground()
+            case .background:
+                // The engine's tvOS resources are invalid after real suspension,
+                // unlike a brief inactive transition, so mark them for reload.
+                viewModel.suspendForBackground(requiresPipelineRestore: true)
+            @unknown default:
+                break
             }
         }
         .onDisappear {

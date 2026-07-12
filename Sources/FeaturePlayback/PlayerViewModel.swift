@@ -212,6 +212,15 @@ public final class PlayerViewModel {
     private let watchdogTimeout: TimeInterval = 30
 
     private var request: PlaybackRequest?
+    /// Set only after the scene reaches the real background (not a brief inactive
+    /// transition). tvOS invalidates decoder/network resources during suspension,
+    /// so the active engine must rebuild them when the scene becomes active again.
+    private var backgroundRestoreRequired = false
+    private var isRestoringAfterBackground = false
+    private var sceneIsActive = true
+    /// The first Play after a background rebuild verifies that the engine clock
+    /// advances; a dead rebuilt session enters the normal engine fallback chain.
+    private var confirmNextResumeAfterBackground = false
     private var subtitleDownloadTask: Task<Void, Never>?
     /// In-flight manual subtitle search (separate from the download task so a
     /// re-search cancels the previous search without touching a running download).
@@ -1585,6 +1594,7 @@ public final class PlayerViewModel {
     /// a server transcode (once); if even that fails, surface the error. Each step
     /// fires at most once so the chain can never loop.
     private func handleEngineFailure(_ error: AppError) async {
+        guard !didStop else { return }
         guard let request else {
             phase = .failed(error)
             return
@@ -1728,10 +1738,14 @@ public final class PlayerViewModel {
     /// first takes a durable checkpoint at the **live** position (while still
     /// playing, so the checkpoint guard passes), then **pauses** the engine so audio
     /// doesn't keep decoding/playing in the background until the OS suspends the
-    /// process. Deliberately one-way: returning to the foreground leaves playback
-    /// paused so the user resumes intentionally, rather than audio springing back
-    /// to life on its own.
-    public func suspendForBackground() {
+    /// process. When `requiresPipelineRestore` is true, the scene reached the real
+    /// background and the engine must rebuild suspension-invalidated resources on
+    /// return. Playback still remains paused until the user resumes intentionally.
+    public func suspendForBackground(requiresPipelineRestore: Bool = false) {
+        sceneIsActive = false
+        if requiresPipelineRestore, request != nil, !didStop {
+            backgroundRestoreRequired = true
+        }
         emitCheckpoint()
         // Key off intent, not `engine.isPaused`: if we mean to be playing (even
         // while the engine is mid post-seek settle), pause for real — this also
@@ -1739,6 +1753,51 @@ public final class PlayerViewModel {
         // engine back up as the app suspends.
         if intendsPlayback {
             setPaused(true)
+        }
+    }
+
+    /// Reopens the active engine at its preserved playhead after a real tvOS
+    /// background suspension. AetherEngine deliberately tears its video pipeline
+    /// down in the background to avoid wedging `mediaserverd`; its host must call
+    /// `reloadAtCurrentPosition()` on return. The protocol hook gives every engine
+    /// the same recovery path and leaves playback paused by policy.
+    public func restoreAfterBackground() async {
+        sceneIsActive = true
+        guard backgroundRestoreRequired, !isRestoringAfterBackground, !didStop else { return }
+        isRestoringAfterBackground = true
+        defer { isRestoringAfterBackground = false }
+
+        // A second background can arrive while the engine is awaiting its reload.
+        // It re-arms `backgroundRestoreRequired`; drain that request only after a
+        // later active event sets `sceneIsActive` again.
+        while sceneIsActive, backgroundRestoreRequired, !didStop {
+            backgroundRestoreRequired = false
+            cancelSeekCommit()
+            seekTask?.cancel()
+            seekTask = nil
+            latestSeekTarget = nil
+            cancelResumeConfirm()
+            controls.isSeeking = false
+            controls.pendingSeekTarget = nil
+            clearFirstFrameWait()
+            phase = .loading
+
+            PlozzLog.playback.info("Restoring playback pipeline after background suspension")
+            await engine.restoreAfterBackground()
+            guard !didStop else { return }
+            if case .failed = engine.status { return }
+
+            engine.pause()
+            intendsPlayback = false
+            controls.intendsPause = true
+            controls.isPaused = true
+            controls.currentSeconds = engine.currentTime
+            controls.bufferedSeconds = engine.bufferedPosition
+            phase = .ready
+            diagnosticsToken = UUID()
+            confirmNextResumeAfterBackground = true
+            loadTrackOptions()
+            PlozzLog.playback.info("Playback pipeline restored after background suspension")
         }
     }
 
@@ -1857,7 +1916,7 @@ public final class PlayerViewModel {
             // mirror can have flipped to a transient paused during the drain): so
             // scrubbing while paused — or a user pause mid-seek — stays paused.
             if !Task.isCancelled, !self.didStop, self.intendsPlayback {
-                self.confirmResumeAfterSeek()
+                self.confirmPlaybackResume()
             } else {
                 self.controls.isResumeConfirming = false
                 // We do NOT intend playback (pause-to-seek mode, or a user pause
@@ -1887,7 +1946,7 @@ public final class PlayerViewModel {
     /// "landed but frozen" state where playback settles at rate 0 post-seek and a
     /// single `play()` is swallowed. Self-cancels the moment the clock advances,
     /// the user pauses, or a new seek supersedes it.
-    private func confirmResumeAfterSeek() {
+    private func confirmPlaybackResume(escalateOnFailure: Bool = false) {
         resumeConfirmTask?.cancel()
         // We intend to play from here on; mark it so the container stops
         // mirroring the engine's transient post-seek paused state into the model
@@ -1969,7 +2028,13 @@ public final class PlayerViewModel {
             // (Two-consecutive-advance success gating means a false give-up here
             // would require the engine to be effectively frozen anyway, so pausing
             // it is safe.)
-            self.setPaused(true)
+            if escalateOnFailure {
+                self.controls.isResumeConfirming = false
+                self.resumeConfirmTask = nil
+                await self.handleEngineFailure(.invalidResponse)
+            } else {
+                self.setPaused(true)
+            }
         }
     }
 
@@ -2072,6 +2137,8 @@ public final class PlayerViewModel {
         // that the engine's transient post-seek pause can't corrupt.
         intendsPlayback = !paused
         controls.intendsPause = paused
+        let shouldConfirmBackgroundResume = !paused && confirmNextResumeAfterBackground
+        if !paused { confirmNextResumeAfterBackground = false }
         if paused { engine.pause() } else { engine.play() }
         // A user pause means "no progress" is expected — don't let the stall
         // watchdog misfire, and stop any post-seek resume nudging so we don't
@@ -2081,6 +2148,9 @@ public final class PlayerViewModel {
             cancelResumeConfirm()
         }
         controls.isPaused = paused
+        if shouldConfirmBackgroundResume {
+            confirmPlaybackResume(escalateOnFailure: true)
+        }
         Task { await report(event: paused ? .pause : .unpause, isPaused: paused) }
     }
 
@@ -2097,6 +2167,8 @@ public final class PlayerViewModel {
         HandoffDiagnostics.emit("stop preserveDisplayMode=\(preserveDisplayMode) contentMode=\(contentDisplayMode) (false ⇒ panel should reset to SDR)")
         PlaybackTrace.note("stop() teardown curr=\(String(format: "%.2f", engine.currentTime)) shouldDismiss=\(shouldDismiss) pendingNext=\(pendingNextEpisode != nil) isSeeking=\(controls.isSeeking)")
         didStop = true
+        backgroundRestoreRequired = false
+        confirmNextResumeAfterBackground = false
         prefetchTask?.cancel()
         prefetchTask = nil
         // Cancel the next-episode prefetch; its session (if any) is released

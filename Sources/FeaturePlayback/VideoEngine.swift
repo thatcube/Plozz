@@ -111,6 +111,11 @@ public protocol VideoEngine: AnyObject {
     /// protocol extension so existing engines need no change.
     func stop(preserveDisplayMode: Bool)
 
+    /// Rebuilds playback resources invalidated by an OS background suspension,
+    /// preserving the current position and leaving transport paused. Engines that
+    /// survive suspension intact can use the default no-op.
+    func restoreAfterBackground() async
+
     // MARK: Live tunables
 
     /// What this engine supports beyond baseline transport. The options menu
@@ -306,6 +311,9 @@ public extension VideoEngine {
     /// the `preserveDisplayMode` hint is only meaningful to the on-device engine,
     /// which drives `AVDisplayManager` for HDR/Dolby Vision.
     func stop(preserveDisplayMode: Bool) { stop() }
+
+    /// Default: this engine's playback resources survive background suspension.
+    func restoreAfterBackground() async {}
 
     /// Default no-op: only engines advertising
     /// ``PlayerEngineCapabilities/dualSubtitleDecode`` decode a second subtitle

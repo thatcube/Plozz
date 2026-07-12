@@ -254,18 +254,33 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
     public func themeMusic(for itemID: String) async throws -> ThemeMusic? {
         let metadata = try await client.metadata(ratingKey: itemID)
         if let path = metadata.theme?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !path.isEmpty,
-           let streamURL = client.themeStreamURL(forThemePath: path) {
+           !path.isEmpty {
             return ThemeMusic(
                 itemID: itemID,
-                streamURL: streamURL,
+                playbackSource: .authenticatedHTTP(
+                    try authenticatedPlaybackLocator(
+                        itemID: itemID,
+                        mediaSourceID: nil,
+                        serverPath: path,
+                        deliveryMode: .directFile,
+                        purpose: .themeMusic,
+                        playSessionID: nil,
+                        formatHint: "mp3"
+                    )
+                ),
                 title: metadata.title
             )
         }
 
         let tvdbID = Self.providerIDs(from: metadata)["Tvdb"]
         guard let archiveURL = await themeArchiveResolver(tvdbID) else { return nil }
-        return ThemeMusic(itemID: itemID, streamURL: archiveURL, title: metadata.title)
+        return ThemeMusic(
+            itemID: itemID,
+            playbackSource: .publicURL(
+                try SecretFreeURLSource(url: archiveURL)
+            ),
+            title: metadata.title
+        )
     }
 
     public func children(of itemID: String) async throws -> [MediaItem] {
@@ -760,6 +775,58 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
         ), !components.percentEncodedPath.isEmpty else {
             throw AppError.invalidResponse
         }
+        return try authenticatedPlaybackLocator(
+            itemID: itemID,
+            mediaSourceID: mediaSourceID,
+            deliveryMode: deliveryMode,
+            purpose: purpose,
+            playSessionID: playSessionID,
+            formatHint: formatHint,
+            pathBase: .serverRoot,
+            components: components
+        )
+    }
+
+    private func authenticatedPlaybackLocator(
+        itemID: String,
+        mediaSourceID: String?,
+        serverPath: String,
+        deliveryMode: AuthenticatedHTTPDeliveryMode,
+        purpose: AuthenticatedHTTPResourcePurpose,
+        playSessionID: String?,
+        formatHint: String?
+    ) throws -> AuthenticatedHTTPPlaybackLocator {
+        guard let components = URLComponents(string: serverPath),
+              components.scheme == nil,
+              components.host == nil,
+              components.user == nil,
+              components.password == nil,
+              components.fragment == nil,
+              !components.percentEncodedPath.isEmpty else {
+            throw AppError.invalidResponse
+        }
+        return try authenticatedPlaybackLocator(
+            itemID: itemID,
+            mediaSourceID: mediaSourceID,
+            deliveryMode: deliveryMode,
+            purpose: purpose,
+            playSessionID: playSessionID,
+            formatHint: formatHint,
+            pathBase: .configuredBaseURL,
+            components: components
+        )
+    }
+
+    private func authenticatedPlaybackLocator(
+        itemID: String,
+        mediaSourceID: String?,
+        deliveryMode: AuthenticatedHTTPDeliveryMode,
+        purpose: AuthenticatedHTTPResourcePurpose,
+        playSessionID: String?,
+        formatHint: String?,
+        pathBase: AuthenticatedHTTPResource.PathBase,
+        components: URLComponents
+    ) throws -> AuthenticatedHTTPPlaybackLocator {
         var queryItems: [AuthenticatedHTTPQueryItem] = []
         for item in components.queryItems ?? [] {
             let normalized = item.name.lowercased()
@@ -772,9 +839,18 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
                 try AuthenticatedHTTPQueryItem(name: item.name, value: item.value)
             )
         }
+        let path: String
+        switch pathBase {
+        case .configuredBaseURL:
+            path = String(
+                components.percentEncodedPath.drop(while: { $0 == "/" })
+            )
+        case .serverRoot:
+            path = components.percentEncodedPath
+        }
         let resource = try AuthenticatedHTTPResource(
-            pathBase: .serverRoot,
-            path: components.percentEncodedPath,
+            pathBase: pathBase,
+            path: path,
             queryItems: queryItems
         )
         return try AuthenticatedHTTPPlaybackLocator(

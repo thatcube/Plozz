@@ -1033,3 +1033,71 @@ private final class LockedFlag: @unchecked Sendable {
     func set() { lock.lock(); flag = true; lock.unlock() }
     var value: Bool { lock.lock(); defer { lock.unlock() }; return flag }
 }
+
+@MainActor
+final class ThemeMusicSourceResolutionTests: XCTestCase {
+    func testAuthenticatedThemeResolvesAtPlaybackBoundary() async throws {
+        let locator = try AuthenticatedHTTPPlaybackLocator(
+            provider: .plex,
+            accountID: "account",
+            credentialRevision: CredentialRevision(rawValue: UUID()),
+            itemID: "movie",
+            deliveryMode: .directFile,
+            purpose: .themeMusic,
+            resource: try AuthenticatedHTTPResource(
+                pathBase: .serverRoot,
+                path: "/library/metadata/movie/theme/1"
+            )
+        )
+        let theme = ThemeMusic(
+            itemID: "movie",
+            playbackSource: .authenticatedHTTP(locator)
+        )
+        let expected = URL(
+            string: "https://plex.example/library/metadata/movie/theme/1?X-Plex-Token=secret"
+        )!
+        let resolver = ThemeMusicResolverStub(url: expected)
+
+        let result = try await resolveThemeMusicURL(
+            theme,
+            authenticatedHTTPResolver: resolver
+        )
+
+        XCTAssertEqual(result, expected)
+        XCTAssertEqual(resolver.locator, locator)
+    }
+
+    func testPublicThemeDoesNotRequireAuthenticatedResolver() async throws {
+        let expected = URL(string: "https://themes.example/movie.mp3")!
+        let theme = ThemeMusic(
+            itemID: "movie",
+            playbackSource: .publicURL(
+                try SecretFreeURLSource(url: expected)
+            )
+        )
+
+        let result = try await resolveThemeMusicURL(
+            theme,
+            authenticatedHTTPResolver: nil
+        )
+
+        XCTAssertEqual(result, expected)
+    }
+}
+
+@MainActor
+private final class ThemeMusicResolverStub:
+    AuthenticatedHTTPResourceResolving
+{
+    let url: URL
+    private(set) var locator: AuthenticatedHTTPPlaybackLocator?
+
+    init(url: URL) {
+        self.url = url
+    }
+
+    func resolve(_ locator: AuthenticatedHTTPPlaybackLocator) async throws -> URL {
+        self.locator = locator
+        return url
+    }
+}

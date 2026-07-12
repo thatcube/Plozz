@@ -2,6 +2,23 @@ import XCTest
 @testable import CoreModels
 
 final class ThemeMusicSettingsTests: XCTestCase {
+    func testThemeMusicCarriesCredentialFreeSource() throws {
+        let source = try SecretFreeURLSource(
+            url: URL(string: "https://themes.example/title.mp3")!
+        )
+        let theme = ThemeMusic(
+            itemID: "title",
+            playbackSource: .publicURL(source),
+            title: "Main Theme"
+        )
+
+        XCTAssertEqual(
+            theme.playbackSource.publicURL,
+            URL(string: "https://themes.example/title.mp3")
+        )
+        XCTAssertEqual(theme.title, "Main Theme")
+    }
+
     func testDefaultIsOptInOff() {
         let settings = ThemeMusicSettings.default
         XCTAssertFalse(settings.isEnabled)

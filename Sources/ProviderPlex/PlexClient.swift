@@ -656,14 +656,6 @@ public struct PlexClient: Sendable {
         absoluteURL(serverPath: key, extraQuery: [URLQueryItem(name: "X-Plex-Token", value: token)])
     }
 
-    /// Builds an absolute, token-bearing URL from a metadata `theme` path.
-    func themeStreamURL(forThemePath path: String) -> URL? {
-        absoluteURL(
-            serverPath: path,
-            extraQuery: [URLQueryItem(name: "X-Plex-Token", value: token)]
-        )
-    }
-
     /// Builds the absolute raw-file URL for a part `key`, explicitly asking Plex
     /// for the original file bytes (`download=1`). Used by the local-remux seam,
     /// which needs stable range-readable access to the untouched MKV.

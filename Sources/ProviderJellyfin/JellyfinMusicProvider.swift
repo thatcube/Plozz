@@ -365,9 +365,7 @@ extension JellyfinProvider: MusicProvider {
 
     public func audioPlaybackInfo(for trackID: String, queueContext: [String]?) async throws -> AudioPlaybackRequest {
         let playSessionID = UUID().uuidString
-        guard let streamURL = client.audioStreamURL(itemID: trackID, playSessionID: playSessionID) else {
-            throw AppError.invalidResponse
-        }
+        let resource = try client.audioStreamResource(itemID: trackID)
         // Best-effort metadata for the request's own track (the queue itself is
         // supplied by the caller, which already holds the loaded track list).
         let track: MusicTrack
@@ -392,9 +390,7 @@ extension JellyfinProvider: MusicProvider {
                     : quality?.container
             ),
             purpose: .audioStream,
-            resource: try credentialFreeResource(
-                fromServerPath: streamURL.absoluteString
-            ),
+            resource: resource,
             playSessionID: playSessionID
         )
         return AudioPlaybackRequest(

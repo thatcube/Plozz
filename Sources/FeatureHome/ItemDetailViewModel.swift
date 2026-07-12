@@ -64,7 +64,7 @@ public final class ItemDetailViewModel {
             let theme = try await activeProvider.themeMusic(for: activeItemID)
             if let theme {
                 PlozzLog.app.info(
-                    "Theme music: resolved item=\(activeItemID) url=\(PlozzLog.redact(url: theme.streamURL))"
+                    "Theme music: resolved item=\(activeItemID) source=\(theme.playbackSource.redactedLabel)"
                 )
             }
             return theme

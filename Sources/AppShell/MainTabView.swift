@@ -432,6 +432,10 @@ struct MainTabView: View {
         )
         .environment(\.themeMusicController, themeMusicController)
         .environment(\.themeMusicSettings, themeMusicModel.settings)
+        .environment(
+            \.themeMusicAuthenticatedHTTPResolver,
+            authenticatedHTTPResolver
+        )
         .onChange(of: audioController.hasActivePlayback, initial: true) { _, active in
             themeMusicController.setBlocked(active)
         }

@@ -19,7 +19,7 @@ final class PlexThemeMusicTests: XCTestCase {
         )
     }
 
-    func testThemeMusicBuildsTokenedStreamFromMetadata() async throws {
+    func testThemeMusicBuildsCredentialFreeStreamFromMetadata() async throws {
         let stub = StubHTTPClient()
         stub.stub(pathSuffix: "/library/metadata/movie1", json: """
         {"MediaContainer":{"Metadata":[
@@ -33,13 +33,21 @@ final class PlexThemeMusicTests: XCTestCase {
         let theme = try XCTUnwrap(resolved)
         XCTAssertEqual(theme.itemID, "movie1")
         XCTAssertEqual(theme.title, "The Movie")
-        XCTAssertEqual(theme.streamURL.path, "/library/metadata/movie1/theme/9876")
-        let query = URLComponents(
-            url: theme.streamURL,
-            resolvingAgainstBaseURL: false
-        )?.queryItems ?? []
-        XCTAssertTrue(
-            query.contains { $0.name == "X-Plex-Token" && $0.value == "SECRET_TOKEN" }
+        guard case .authenticatedHTTP(let locator) = theme.playbackSource else {
+            return XCTFail("expected authenticated HTTP theme source")
+        }
+        XCTAssertEqual(locator.itemID, "movie1")
+        XCTAssertEqual(locator.purpose, .themeMusic)
+        XCTAssertEqual(locator.deliveryMode, .directFile)
+        XCTAssertEqual(locator.resource.pathBase, .configuredBaseURL)
+        XCTAssertEqual(
+            locator.resource.path,
+            "library/metadata/movie1/theme/9876"
+        )
+        XCTAssertFalse(
+            locator.resource.queryItems.contains {
+                $0.name.localizedCaseInsensitiveContains("token")
+            }
         )
     }
 
@@ -60,7 +68,7 @@ final class PlexThemeMusicTests: XCTestCase {
 
         let resolved = try await provider.themeMusic(for: "show1")
         let theme = try XCTUnwrap(resolved)
-        XCTAssertEqual(theme.streamURL, archiveURL)
+        XCTAssertEqual(theme.playbackSource.publicURL, archiveURL)
         XCTAssertEqual(theme.title, "Sailor Moon")
     }
 

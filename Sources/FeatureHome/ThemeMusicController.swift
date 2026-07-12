@@ -34,6 +34,7 @@ public final class ThemeMusicController {
 
     public func play(
         _ theme: ThemeMusic,
+        resolvedURL: URL,
         playbackID: String,
         settings: ThemeMusicSettings
     ) {
@@ -53,19 +54,19 @@ public final class ThemeMusicController {
         stopPlayback(resetItem: false)
         activateSession()
 
-        let item = AVPlayerItem(url: theme.streamURL)
+        let item = AVPlayerItem(url: resolvedURL)
         player.volume = 0
         fadeTarget = settings.volume.gain
         hasFadedIn = false
         hasStartedPlayback = false
         observeEnd(of: item)
-        observeStatus(of: item, themeURL: theme.streamURL)
+        observeStatus(of: item, themeURL: resolvedURL)
         player.replaceCurrentItem(with: item)
 
         isPlaying = true
         currentPlaybackID = playbackID
         PlozzLog.app.info(
-            "Theme music: queued item=\(theme.itemID) volume=\(settings.volume.gain) url=\(PlozzLog.redact(url: theme.streamURL))"
+            "Theme music: queued item=\(theme.itemID) volume=\(settings.volume.gain) url=\(PlozzLog.redact(url: resolvedURL))"
         )
     }
 

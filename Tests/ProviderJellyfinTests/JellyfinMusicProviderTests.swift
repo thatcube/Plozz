@@ -108,7 +108,7 @@ final class JellyfinMusicProviderTests: XCTestCase {
         guard case .authenticatedHTTP(let locator) = request.playbackSource else {
             return XCTFail("expected authenticated HTTP audio locator")
         }
-        XCTAssertEqual(locator.resource.path, "/Audio/t1/universal")
+        XCTAssertEqual(locator.resource.path, "Audio/t1/universal")
         XCTAssertEqual(locator.purpose, .audioStream)
         XCTAssertEqual(locator.playSessionID, request.playSessionID)
         XCTAssertFalse(

@@ -91,102 +91,80 @@ final class HeroCarouselFocusTests: XCTestCase {
 }
 
 @MainActor
-final class HeroDirectionalPressGateTests: XCTestCase {
-    func testIndirectTouchMovesRemainUnrestricted() {
-        let gate = HeroDirectionalPressGate()
+final class HeroDirectionalRepeatControllerTests: XCTestCase {
+    func testEdgeHoldWaitsFiveSecondsBeforeRapidPaging() async {
+        let repeated = expectation(description: "edge repeat")
+        var sleeps: [TimeInterval] = []
+        let controller = HeroDirectionalRepeatController(sleep: {
+            sleeps.append($0)
+        })
+        controller.onRepeat = { direction in
+            XCTAssertEqual(direction, .right)
+            controller.ended(.right)
+            repeated.fulfill()
+            return .advance(toItem: 2, keepButton: 2)
+        }
 
-        XCTAssertTrue(gate.shouldAllowFocusUpdate(.right, outcome: .advance(toItem: 1, keepButton: 2)))
-        XCTAssertTrue(gate.shouldAllowFocusUpdate(.right, outcome: .advance(toItem: 2, keepButton: 2)))
-        XCTAssertTrue(gate.shouldAllowFocusUpdate(.left, outcome: .advance(toItem: 1, keepButton: 0)))
+        controller.began(.right, initialOutcome: .advance(toItem: 1, keepButton: 2))
+
+        await fulfillment(of: [repeated], timeout: 1)
+        XCTAssertEqual(sleeps, [5.0])
     }
 
-    func testHeldPhysicalPressAllowsOnlyFirstPageBeforeDelay() {
-        let gate = HeroDirectionalPressGate()
+    func testInteriorHoldTraversesButtonsThenPausesAtFirstPage() async {
+        let repeated = expectation(description: "interior and page repeats")
+        repeated.expectedFulfillmentCount = 3
+        var sleeps: [TimeInterval] = []
+        var outcomes: [HeroFocusOutcome] = [
+            .moveButton(2),
+            .advance(toItem: 1, keepButton: 2),
+            .advance(toItem: 2, keepButton: 2)
+        ]
+        let controller = HeroDirectionalRepeatController(sleep: {
+            sleeps.append($0)
+        })
+        controller.onRepeat = { direction in
+            XCTAssertEqual(direction, .right)
+            let outcome = outcomes.removeFirst()
+            repeated.fulfill()
+            if outcomes.isEmpty {
+                controller.ended(.right)
+            }
+            return outcome
+        }
 
-        gate.began(.right)
+        controller.began(.right, initialOutcome: .moveButton(1))
 
-        XCTAssertTrue(gate.shouldAllowFocusUpdate(.right, outcome: .advance(toItem: 1, keepButton: 2)))
-        gate.didCommitFocusUpdate(.right, outcome: .advance(toItem: 1, keepButton: 2))
-        XCTAssertFalse(gate.shouldAllowFocusUpdate(.right, outcome: .advance(toItem: 2, keepButton: 2)))
-        XCTAssertFalse(gate.shouldAllowFocusUpdate(.right, outcome: .advance(toItem: 0, keepButton: 2)))
+        await fulfillment(of: [repeated], timeout: 1)
+        XCTAssertEqual(sleeps, [0.35, 0.12, 5.0])
     }
 
-    func testRepeatedPreflightQueriesDoNotConsumeFirstPage() {
-        let gate = HeroDirectionalPressGate()
+    func testLeftHoldUsesTheSameRepeatPath() async {
+        let repeated = expectation(description: "left repeat")
+        let controller = HeroDirectionalRepeatController(sleep: { _ in })
+        controller.onRepeat = { direction in
+            XCTAssertEqual(direction, .left)
+            controller.ended(.left)
+            repeated.fulfill()
+            return .advance(toItem: 0, keepButton: 0)
+        }
 
-        gate.began(.right)
+        controller.began(.left, initialOutcome: .advance(toItem: 1, keepButton: 0))
 
-        XCTAssertTrue(gate.shouldAllowFocusUpdate(.right, outcome: .advance(toItem: 1, keepButton: 2)))
-        XCTAssertTrue(gate.shouldAllowFocusUpdate(.right, outcome: .advance(toItem: 1, keepButton: 2)))
-        gate.didCommitFocusUpdate(.right, outcome: .advance(toItem: 1, keepButton: 2))
-        XCTAssertFalse(gate.shouldAllowFocusUpdate(.right, outcome: .advance(toItem: 2, keepButton: 2)))
+        await fulfillment(of: [repeated], timeout: 1)
     }
 
-    func testHeldPhysicalPressDoesNotThrottleInteriorButtons() {
-        let gate = HeroDirectionalPressGate()
+    func testEscapeAndBlockedMovesDoNotStartRepeating() {
+        let controller = HeroDirectionalRepeatController()
+        var repeatCount = 0
+        controller.onRepeat = { _ in
+            repeatCount += 1
+            return .blocked
+        }
 
-        gate.began(.right)
+        controller.began(.left, initialOutcome: .escape)
+        controller.began(.right, initialOutcome: .blocked)
 
-        XCTAssertTrue(gate.shouldAllowFocusUpdate(.right, outcome: .moveButton(1)))
-        gate.didCommitFocusUpdate(.right, outcome: .moveButton(1))
-        XCTAssertTrue(gate.shouldAllowFocusUpdate(.right, outcome: .moveButton(2)))
-        gate.didCommitFocusUpdate(.right, outcome: .moveButton(2))
-        XCTAssertTrue(gate.shouldAllowFocusUpdate(.right, outcome: .advance(toItem: 1, keepButton: 2)))
-        gate.didCommitFocusUpdate(.right, outcome: .advance(toItem: 1, keepButton: 2))
-        XCTAssertFalse(gate.shouldAllowFocusUpdate(.right, outcome: .advance(toItem: 2, keepButton: 2)))
-    }
-
-    func testBlockedEdgeNeverMovesFocus() {
-        let gate = HeroDirectionalPressGate()
-
-        XCTAssertFalse(gate.shouldAllowFocusUpdate(.right, outcome: .blocked))
-        XCTAssertFalse(gate.shouldAllowFocusUpdate(.left, outcome: .blocked))
-    }
-
-    func testHeldPhysicalPressRepeatsAfterDeliberateDelay() {
-        var now: TimeInterval = 100
-        let gate = HeroDirectionalPressGate(now: { now })
-
-        gate.began(.right)
-        XCTAssertTrue(gate.shouldAllowFocusUpdate(.right, outcome: .advance(toItem: 1, keepButton: 2)))
-        gate.didCommitFocusUpdate(.right, outcome: .advance(toItem: 1, keepButton: 2))
-
-        now += 4.99
-        XCTAssertFalse(gate.shouldAllowFocusUpdate(.right, outcome: .advance(toItem: 2, keepButton: 2)))
-
-        now += 0.01
-        XCTAssertTrue(gate.shouldAllowFocusUpdate(.right, outcome: .advance(toItem: 0, keepButton: 2)))
-
-        now += 0.1
-        XCTAssertTrue(gate.shouldAllowFocusUpdate(.right, outcome: .advance(toItem: 1, keepButton: 2)))
-    }
-
-    func testRepeatedBeginDoesNotRearmUntilRelease() {
-        let gate = HeroDirectionalPressGate()
-
-        gate.began(.right)
-        XCTAssertTrue(gate.shouldAllowFocusUpdate(.right, outcome: .advance(toItem: 1, keepButton: 2)))
-        gate.didCommitFocusUpdate(.right, outcome: .advance(toItem: 1, keepButton: 2))
-
-        gate.began(.right)
-        XCTAssertFalse(gate.shouldAllowFocusUpdate(.right, outcome: .advance(toItem: 2, keepButton: 2)))
-
-        gate.ended(.right)
-        gate.began(.right)
-        XCTAssertTrue(gate.shouldAllowFocusUpdate(.right, outcome: .advance(toItem: 2, keepButton: 2)))
-    }
-
-    func testDirectionsAreTrackedIndependently() {
-        let gate = HeroDirectionalPressGate()
-
-        gate.began(.left)
-        gate.began(.right)
-
-        XCTAssertTrue(gate.shouldAllowFocusUpdate(.left, outcome: .advance(toItem: 0, keepButton: 0)))
-        XCTAssertTrue(gate.shouldAllowFocusUpdate(.right, outcome: .advance(toItem: 2, keepButton: 2)))
-        gate.didCommitFocusUpdate(.left, outcome: .advance(toItem: 0, keepButton: 0))
-        gate.didCommitFocusUpdate(.right, outcome: .advance(toItem: 2, keepButton: 2))
-        XCTAssertFalse(gate.shouldAllowFocusUpdate(.left, outcome: .advance(toItem: 2, keepButton: 0)))
-        XCTAssertFalse(gate.shouldAllowFocusUpdate(.right, outcome: .advance(toItem: 0, keepButton: 2)))
+        XCTAssertEqual(repeatCount, 0)
     }
 }

@@ -31,12 +31,10 @@ struct SettingsAboutSection: View {
                         .scaledToFit()
                         .frame(width: 72, height: 72)
 
-                    VStack(alignment: .leading, spacing: 10) {
-                        infoRow("Version", version)
-                        infoRow("Build", build)
-                    }
+                    Text("Version \(version) · Build \(build)")
+                        .font(.headline)
 
-                    Text("Bring your media together and enjoy it in one unified experience. Free forever and open source.")
+                    Text("Bring all of your media together into one unified experience. Free forever and open source.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -54,20 +52,10 @@ struct SettingsAboutSection: View {
                 }
             }
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel("About Plozz. Version \(version), build \(build). Bring your media together and enjoy it in one unified experience. Free forever and open source. Scan the on-screen code to view the GitHub repository.")
+            .accessibilityLabel("About Plozz. Version \(version), build \(build). Bring all of your media together into one unified experience. Free forever and open source. Scan the on-screen code to view the GitHub repository.")
         }
     }
 
-    private func infoRow(_ label: String, _ value: String) -> some View {
-        HStack(spacing: 16) {
-            Text(label)
-                .foregroundStyle(.secondary)
-                .frame(width: 140, alignment: .leading)
-            Text(value)
-            Spacer(minLength: 0)
-        }
-        .font(.headline)
-    }
 }
 
 #endif

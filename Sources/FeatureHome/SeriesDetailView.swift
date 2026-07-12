@@ -409,6 +409,7 @@ struct SeriesDetailView: View {
                         ? PlozzTheme.Metrics.screenPadding + SeriesEpisodeBrowserLayout.seasonRequestFadeWidth
                         : PlozzTheme.Metrics.screenPadding
                 )
+                .padding(.leading, SeriesEpisodeBrowserLayout.seasonFocusHorizontalClearance)
                 // Headroom for the focused chip's lift so it is never clipped.
                 .padding(.vertical, 12)
             }
@@ -442,31 +443,20 @@ struct SeriesDetailView: View {
                 guard pendingSeasonReveal, frames != seasonChipFrames else { return }
                 seasonChipFrames = frames
             }
-            // Keep horizontally-scrolled tabs inside their reserved viewport so
-            // they never render underneath the fixed "+ Seasons" accessory. The
-            // content already carries 12pt of vertical headroom for focus lift.
-            .scrollClipDisabled(false)
-            .mask {
-                if requestAvailability?.hasSeasonRequestContent == true {
-                    HStack(spacing: 0) {
-                        Rectangle()
-                            .fill(.white)
-                        LinearGradient(
-                            colors: [.white, .clear],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                        .frame(width: SeriesEpisodeBrowserLayout.seasonRequestFadeWidth)
-                    }
-                } else {
-                    Rectangle()
-                        .fill(.white)
-                }
-            }
+            .modifier(SeasonRequestBoundaryModifier(
+                enabled: requestAvailability?.hasSeasonRequestContent == true
+            ))
             // Inset the whole scroll VIEWPORT to the hero keyline (rather than padding
             // the content), so a chip revealed to `.leading` aligns to the keyline —
             // where "S·E"/Play start — instead of the column edge.
-            .padding(.leading, PlozzTheme.Metrics.heroLeadingPadding)
+            .padding(
+                .leading,
+                max(
+                    PlozzTheme.Metrics.heroLeadingPadding
+                        - SeriesEpisodeBrowserLayout.seasonFocusHorizontalClearance,
+                    0
+                )
+            )
             .onChange(of: focusedSeasonID) { _, newValue in
                 guard let id = newValue else { return }
                 let isEntering = !seasonBarEngaged
@@ -1169,6 +1159,36 @@ enum SeriesRequestAccessoryPresentation {
 
     static func systemImage(hasRequestable: Bool, isRequesting: Bool) -> String {
         isRequesting || hasRequestable ? "plus" : "list.bullet.rectangle"
+    }
+}
+
+private struct SeasonRequestBoundaryModifier: ViewModifier {
+    let enabled: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if enabled {
+            // A fixed request control owns the trailing edge: contain the tabs and
+            // soften that boundary so labels never render beneath the accessory.
+            content
+                .scrollClipDisabled(false)
+                .mask {
+                    HStack(spacing: 0) {
+                        Rectangle()
+                            .fill(.white)
+                        LinearGradient(
+                            colors: [.white, .clear],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                        .frame(width: SeriesEpisodeBrowserLayout.seasonRequestFadeWidth)
+                    }
+                }
+        } else {
+            // No accessory means no collision. Preserve the original overflow so
+            // the first/last focused season pill and its shadow are never cut off.
+            content.scrollClipDisabled()
+        }
     }
 }
 

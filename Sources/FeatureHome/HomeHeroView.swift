@@ -1,7 +1,9 @@
 #if canImport(SwiftUI) && canImport(UIKit)
+import AudioToolbox
 import SwiftUI
 import UIKit
 import CoreModels
+import CoreNetworking
 import CoreUI
 import MetadataKit
 
@@ -109,21 +111,28 @@ struct HomeHeroView: View {
     /// backward/left). Set in `page(to:forward:)` alongside `index` so the backdrop
     /// receives the new slide id and its entering direction in the same update.
     @State private var lastPageForward: Bool = true
-    /// Mirrors the logical index of the real UIKit focus slot. SwiftUI uses it for
-    /// visuals/actions; edge detection and movement remain inside the focus engine.
+    /// The logical action-button selection (`0` = Play), **owned by us** rather
+    /// than by the focus engine. The hero's button row is a *single* focus target
+    /// (see `actionRow`), so Left/Right are resolved against this plain `@State` —
+    /// never a `@FocusState` the engine mutates behind our back. Reading it inside
+    /// `onMoveCommand` is therefore always the true PRE-move value, which is what
+    /// makes edge detection deterministic. (The old per-button `@FocusState` +
+    /// container `onMoveCommand` read the *post-move* button on device and paged
+    /// the instant focus merely landed on an edge button — the bug this fixes.)
     @State private var selectedButton: Int = 0
     /// Optimistic per-item availability overrides applied the instant the user
     /// taps Request, so the pill flips to Requested/Downloading without waiting
     /// for the next trending refresh. Keyed by `MediaItem.id`; reconciled with the
     /// server's returned status when the request completes.
     @State private var requestOverrides: [String: MediaAvailabilityStatus] = [:]
-    /// Mirrored from the UIKit focus rail. Real slot-to-slot focus updates provide
-    /// native tvOS movement sounds; SwiftUI only uses this to draw pill selection.
-    @State private var heroHasFocus = false
-    /// True while the focus rail observes a physical Left/Right press. Keeps
-    /// auto-advance paused across the tunable hold-to-rapid-page delay.
+    /// Whether the Hero's single UIKit action surface holds focus.
+    @FocusState private var focus: HeroFocus?
+    /// True while the focused UIKit surface owns a physical Left/Right press.
+    /// Keeps auto-advance paused across the full hold, including the five-second
+    /// paging delay, rather than letting the shorter idle timer resume underneath.
     @State private var directionalHoldActive = false
 
+    private enum HeroFocus: Hashable { case row }
     /// Bumped on every manual page so the auto-advance `.task` restarts its dwell
     /// from the fresh slide instead of firing early.
     @State private var advanceToken = 0
@@ -528,8 +537,8 @@ struct HomeHeroView: View {
     /// with the Continue Watching row centered below — the Apple TV "recede".
     static let recedeAnchorID = "home-hero-recede"
 
-    /// Constant identity for the UIKit focus rail. Its three banks persist while
-    /// item identities rotate through them.
+    /// Constant identity for the single focusable action row. Never changes — so
+    /// focus is retained across a page (item id changes).
     static let actionRowFocusID = "home-hero-action-row"
 
     @ViewBuilder
@@ -699,12 +708,13 @@ struct HomeHeroView: View {
             case .next: return ("Next", { advanceForward() })
             }
         }
-        // The visible pills are non-interactive renderings. A transparent UIKit rail
-        // overlays four persistent real focus slots, so every logical move is one
-        // real focus update and therefore one native tvOS movement sound.
+        // The visible pills remain one stable focus target even when their count
+        // changes across slides. UIKit claims horizontal presses with press-typed
+        // recognizers before the focus engine can create duplicate moves or sounds,
+        // while Up/Down and the one Sidebar escape path still fall through natively.
         HStack(spacing: 24) {
             ForEach(Array(itemButtons.enumerated()), id: \.element) { offset, button in
-                heroButtonVisual(button, for: item, selected: heroHasFocus && selectedButton == offset)
+                heroButtonVisual(button, for: item, selected: focus != nil && selectedButton == offset)
             }
         }
         .background {
@@ -716,22 +726,14 @@ struct HomeHeroView: View {
         .transaction { if !metadataVisible { $0.animation = nil } }
         .allowsHitTesting(false)
         .overlay {
-            HeroActionFocusRail(
-                configuration: focusRailConfiguration(for: item),
-                onSelectionChanged: { selection in
-                    selectedButton = selection
-                    noteInteraction()
-                },
-                onPage: { direction, landingButton in
-                    handleRailPage(direction, landingButton: landingButton)
-                },
-                onFocusChanged: { focused in
-                    let wasFocused = heroHasFocus
-                    heroHasFocus = focused
-                    if focused, !wasFocused {
-                        onFocusGained()
+            HeroActionPressSurface(
+                onMove: { direction in
+                    switch direction {
+                    case .left: handleLeft()
+                    case .right: handleRight()
                     }
                 },
+                canHandleDirection: { resolveMove($0) != .escape },
                 onHorizontalHoldChanged: { setDirectionalHoldActive($0) },
                 onSelect: { activateSelected() },
                 onPlayPause: {
@@ -739,6 +741,7 @@ struct HomeHeroView: View {
                     if let item = current { onPlay(item) }
                 }
             )
+            .focused($focus, equals: .row)
             .prefersDefaultFocus(true, in: focusScope)
             .focusEffectDisabled()
             .accessibilityElement(children: .ignore)
@@ -752,9 +755,31 @@ struct HomeHeroView: View {
         .padding(.top, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
         .focusSection()
-        .onMoveCommand { direction in
-            if direction == .up || direction == .down {
-                handleMove()
+        .onMoveCommand { _ in handleMove() }
+        .onChange(of: focus) { old, new in
+            let oldName = old.map { "\($0)" } ?? "nil"
+            let newName = new.map { "\($0)" } ?? "nil"
+            HeroFocusDiagnostics.emit("focus \(oldName)->\(newName) | \(hfState())")
+            switch new {
+            case .row:
+                // Focus arriving into the hero from *outside* (a row below / the
+                // tab bar): snap back to full-screen and scroll the page to the top.
+                // Auto-advance pause/resume is NOT driven from here — it's keyed off
+                // the `receded` state (see `.onChange(of: receded)` below), which is
+                // the reliable "focus moved DOWN to Continue Watching" signal.
+                if old == nil {
+                    HeroFocusDiagnostics.emit("focus ENTER hero (row, from outside) | \(hfState())")
+                    if let item = current {
+                        selectedButton = min(selectedButton, max(0, buttons(for: item).count - 1))
+                    }
+                    onFocusGained()
+                }
+            case .none:
+                // Focus left the hero (down to a row, up to the tab bar, or out to
+                // the sidebar). Nothing to do here: the auto-advance pause is keyed
+                // off `receded` (down-only), and the recede itself is driven by the
+                // page scroll in `HomeView`.
+                HeroFocusDiagnostics.emit("focus LEFT hero (->nil) from \(oldName) | \(hfState())")
             }
         }
         // Pause the auto-advance whenever the hero is RECEDED — i.e. focus moved
@@ -781,66 +806,89 @@ struct HomeHeroView: View {
     /// safe to call from any focus/paging site. Temporary debugging aid.
     private func hfState() -> String {
         let btnCount = current.map { buttons(for: $0).count } ?? 0
+        let focusName = focus.map { "\($0)" } ?? "nil"
         return "idx=\(index)/\(items.count) selBtn=\(selectedButton)/\(btnCount) "
-            + "focus=\(heroHasFocus) metaVisible=\(metadataVisible)"
+            + "focus=\(focusName) metaVisible=\(metadataVisible)"
     }
 
-    private func focusRailConfiguration(for item: MediaItem) -> HeroFocusRailConfiguration {
-        let current = HeroFocusRailItem(id: item.id, buttonCount: buttons(for: item).count)
-        let previousIndex = HeroFocusRailTopology.previousIndex(
-            currentIndex: index,
+    private func resolveMove(_ direction: HeroFocusDirection) -> HeroFocusOutcome {
+        guard let item = current else { return .blocked }
+        let buttonCount = buttons(for: item).count
+        return HeroCarouselFocus.resolve(
+            direction: direction,
+            itemIndex: index,
             itemCount: items.count,
+            focusedButton: min(selectedButton, max(0, buttonCount - 1)),
+            buttonCount: buttonCount,
             navigationStyle: navigationStyle
         )
-        let nextIndex = HeroFocusRailTopology.nextIndex(
-            currentIndex: index,
-            itemCount: items.count
-        )
-        let previous = previousIndex.map {
-            HeroFocusRailItem(id: items[$0].id, buttonCount: buttons(for: items[$0]).count)
-        }
-        let next = nextIndex.map {
-            HeroFocusRailItem(id: items[$0].id, buttonCount: buttons(for: items[$0]).count)
-        }
-        return HeroFocusRailConfiguration(
-            current: current,
-            previous: previous,
-            next: next,
-            selectedButton: min(selectedButton, max(0, current.buttonCount - 1))
-        )
     }
 
-    private func handleRailPage(
-        _ direction: HeroFocusDirection,
-        landingButton: Int
-    ) {
+    /// Resolves one Left input from the UIKit surface. Returning `.escape` lets the
+    /// surface forward that press to the focus engine for Sidebar navigation.
+    @discardableResult
+    private func handleLeft() -> HeroFocusOutcome {
         noteInteraction()
-        guard items.count > 1 else { return }
-        let destination: Int
-        switch direction {
-        case .left:
-            guard let previous = HeroFocusRailTopology.previousIndex(
-                currentIndex: index,
-                itemCount: items.count,
-                navigationStyle: navigationStyle
-            ) else { return }
-            destination = previous
-        case .right:
-            guard let next = HeroFocusRailTopology.nextIndex(
-                currentIndex: index,
-                itemCount: items.count
-            ) else { return }
-            destination = next
+        defer { focus = .row }
+        guard let item = current else { return .blocked }
+        let buttonCount = buttons(for: item).count
+        selectedButton = min(selectedButton, max(0, buttonCount - 1))
+        let outcome = resolveMove(.left)
+        HeroFocusDiagnostics.emit("handleLeft outcome=\(outcome) | \(hfState())")
+        switch outcome {
+        case let .moveButton(newIndex):
+            selectedButton = newIndex
+        case let .advance(toItem, keepButton):
+            page(to: toItem, keepButton: keepButton, forward: false)
+            restoreFocusAfterPage()
+        case .escape, .blocked:
+            break
         }
-        selectedButton = min(
-            landingButton,
-            max(0, buttons(for: items[destination]).count - 1)
-        )
-        page(
-            to: destination,
-            keepButton: selectedButton,
-            forward: direction == .right
-        )
+        playNavigationFeedback(for: outcome)
+        return outcome
+    }
+
+    /// Backstop for any transient focus drop while a slide with a different action
+    /// count commits. The stable UIKit responder normally keeps focus throughout.
+    private func restoreFocusAfterPage() {
+        let token = advanceToken
+        DispatchQueue.main.async {
+            guard focus == nil, token == advanceToken else { return }
+            HeroFocusDiagnostics.emit("restoreFocusAfterPage: focus was dropped, reasserting .row | \(hfState())")
+            focus = .row
+        }
+    }
+
+    /// Resolves one Right input from the UIKit surface.
+    @discardableResult
+    private func handleRight() -> HeroFocusOutcome {
+        noteInteraction()
+        defer { focus = .row }
+        guard let item = current else { return .blocked }
+        let buttonCount = buttons(for: item).count
+        selectedButton = min(selectedButton, max(0, buttonCount - 1))
+        let outcome = resolveMove(.right)
+        HeroFocusDiagnostics.emit("handleRight outcome=\(outcome) | \(hfState())")
+        switch outcome {
+        case let .moveButton(newIndex):
+            selectedButton = newIndex
+        case let .advance(toItem, keepButton):
+            page(to: toItem, keepButton: keepButton, forward: true)
+            restoreFocusAfterPage()
+        case .escape, .blocked:
+            break
+        }
+        playNavigationFeedback(for: outcome)
+        return outcome
+    }
+
+    private func playNavigationFeedback(for outcome: HeroFocusOutcome) {
+        switch outcome {
+        case .moveButton, .advance:
+            HeroNavigationClickPlayer.shared.play()
+        case .escape, .blocked:
+            break
+        }
     }
 
     /// Fires the currently-selected pill's action (remote Select / Play-Pause).
@@ -1702,98 +1750,64 @@ enum HeroPreviewWarmOrder {
     }
 }
 
-struct HeroFocusRailItem: Equatable {
-    let id: String
-    let buttonCount: Int
-}
-
-struct HeroFocusRailConfiguration: Equatable {
-    let current: HeroFocusRailItem
-    let previous: HeroFocusRailItem?
-    let next: HeroFocusRailItem?
-    let selectedButton: Int
-}
-
-enum HeroFocusRailTopology {
-    static func previousIndex(
-        currentIndex: Int,
-        itemCount: Int,
-        navigationStyle: NavigationStyle
-    ) -> Int? {
-        guard itemCount > 1, (0..<itemCount).contains(currentIndex) else { return nil }
-        if currentIndex > 0 { return currentIndex - 1 }
-        return navigationStyle == .tabBar ? itemCount - 1 : nil
-    }
-
-    static func nextIndex(currentIndex: Int, itemCount: Int) -> Int? {
-        guard itemCount > 1, (0..<itemCount).contains(currentIndex) else { return nil }
-        return (currentIndex + 1) % itemCount
-    }
-}
-
-/// Tracks physical Left/Right lifecycle without consuming it. After the first
-/// native edge page, repeated moves are vetoed until this tunable delay expires;
-/// rapid mode then requests real focus moves, preserving native focus sounds.
+/// Owns deterministic Left/Right hold timing after UIKit claims the physical
+/// press. Interior actions repeat normally; the first page
+/// starts a deliberate pause, then rapid paging continues until release.
 @MainActor
-final class HeroHeldPagingController {
-    private let delay: TimeInterval
-    private let interval: TimeInterval
+final class HeroDirectionalRepeatController {
+    private let interiorInitialDelay: TimeInterval
+    private let pageDelay: TimeInterval
+    private let repeatInterval: TimeInterval
     private let sleep: (TimeInterval) async throws -> Void
-    private var leftHeld = false
-    private var rightHeld = false
-    private(set) var activeDirection: HeroFocusDirection?
+    private var activeDirection: HeroFocusDirection?
     private var repeatTask: Task<Void, Never>?
-    var onRapidPage: ((HeroFocusDirection) -> Void)?
+    var onRepeat: ((HeroFocusDirection) -> HeroFocusOutcome)?
 
     init(
-        delay: TimeInterval = 0.75,
-        interval: TimeInterval = 0.12,
+        interiorInitialDelay: TimeInterval = 0.35,
+        pageDelay: TimeInterval = 5.0,
+        repeatInterval: TimeInterval = 0.12,
         sleep: @escaping (TimeInterval) async throws -> Void = { duration in
             try await Task.sleep(for: .seconds(duration))
         }
     ) {
-        self.delay = delay
-        self.interval = interval
+        self.interiorInitialDelay = interiorInitialDelay
+        self.pageDelay = pageDelay
+        self.repeatInterval = repeatInterval
         self.sleep = sleep
     }
 
-    func began(_ direction: HeroFocusDirection) {
-        switch direction {
-        case .left: leftHeld = true
-        case .right: rightHeld = true
-        }
-        if activeDirection != nil, activeDirection != direction {
-            cancelRapidPaging()
-        }
-    }
-
-    func ended(_ direction: HeroFocusDirection) {
-        switch direction {
-        case .left: leftHeld = false
-        case .right: rightHeld = false
-        }
-        if activeDirection == direction {
-            cancelRapidPaging()
-        }
-    }
-
-    func didCommitEdgePage(_ direction: HeroFocusDirection) {
-        guard isHeld(direction), activeDirection == nil else { return }
+    func began(_ direction: HeroFocusDirection, initialOutcome: HeroFocusOutcome) {
+        cancel()
+        guard initialOutcome != .escape, initialOutcome != .blocked else { return }
         activeDirection = direction
-        let delay = delay
-        let interval = interval
+
+        let interiorInitialDelay = interiorInitialDelay
+        let pageDelay = pageDelay
+        let repeatInterval = repeatInterval
         let sleep = sleep
         repeatTask = Task { [weak self] in
+            var rapidPaging = {
+                if case .advance = initialOutcome { return true }
+                return false
+            }()
+            var delay = rapidPaging ? pageDelay : interiorInitialDelay
+
             do {
-                try await sleep(delay)
-                while !Task.isCancelled,
-                      self?.activeDirection == direction,
-                      self?.isHeld(direction) == true {
-                    self?.onRapidPage?(direction)
+                while !Task.isCancelled, self?.activeDirection == direction {
+                    try await sleep(delay)
                     guard !Task.isCancelled,
                           self?.activeDirection == direction,
-                          self?.isHeld(direction) == true else { return }
-                    try await sleep(interval)
+                          let outcome = self?.onRepeat?(direction) else { return }
+                    switch outcome {
+                    case .moveButton:
+                        delay = repeatInterval
+                    case .advance:
+                        delay = rapidPaging ? repeatInterval : pageDelay
+                        rapidPaging = true
+                    case .escape, .blocked:
+                        return
+                    }
                 }
             } catch {
                 return
@@ -1801,130 +1815,183 @@ final class HeroHeldPagingController {
         }
     }
 
-    func cancelAll() {
-        leftHeld = false
-        rightHeld = false
-        cancelRapidPaging()
+    func ended(_ direction: HeroFocusDirection) {
+        guard activeDirection == direction else { return }
+        cancel()
     }
 
-    private func cancelRapidPaging() {
+    func cancel() {
         activeDirection = nil
         repeatTask?.cancel()
         repeatTask = nil
     }
+}
 
-    private func isHeld(_ direction: HeroFocusDirection) -> Bool {
-        switch direction {
-        case .left: leftHeld
-        case .right: rightHeld
+/// A short original UI tone for app-driven Hero moves. tvOS exposes no public API
+/// for replaying its native focus click, so this stays in memory and never changes
+/// the shared audio-session category.
+@MainActor
+final class HeroNavigationClickPlayer {
+    static let shared = HeroNavigationClickPlayer()
+
+    private var soundID: SystemSoundID = 0
+    private var soundURL: URL?
+
+    private init() {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("plozz-hero-navigation-click.wav")
+        do {
+            try Self.makeClickWAV().write(to: url, options: .atomic)
+            var createdSoundID: SystemSoundID = 0
+            let status = AudioServicesCreateSystemSoundID(url as CFURL, &createdSoundID)
+            guard status == kAudioServicesNoError else {
+                PlozzLog.app.error(
+                    "Hero navigation click registration failed status=\(status)"
+                )
+                return
+            }
+            soundID = createdSoundID
+            soundURL = url
+        } catch {
+            PlozzLog.app.error(
+                "Hero navigation click initialization failed error=\(String(describing: error))"
+            )
         }
+    }
+
+    func play() {
+        guard soundID != 0 else { return }
+        AudioServicesPlaySystemSound(soundID)
+    }
+
+    deinit {
+        if soundID != 0 {
+            AudioServicesDisposeSystemSoundID(soundID)
+        }
+        if let soundURL {
+            try? FileManager.default.removeItem(at: soundURL)
+        }
+    }
+
+    private static func makeClickWAV() -> Data {
+        let sampleRate = 48_000
+        let duration = 0.038
+        let frameCount = Int(Double(sampleRate) * duration)
+        var samples = Data()
+        samples.reserveCapacity(frameCount * MemoryLayout<Int16>.size)
+
+        for frame in 0..<frameCount {
+            let time = Double(frame) / Double(sampleRate)
+            let startFrequency = 500.0
+            let endFrequency = 380.0
+            let sweep = (endFrequency - startFrequency) / duration
+            let phase = 2 * Double.pi * (
+                startFrequency * time + 0.5 * sweep * time * time
+            )
+            let body = sin(phase) * exp(-time * 70)
+            let onset = 0.08 * sin(2 * phase) * exp(-time * 190)
+            let attackDuration = 0.0015
+            let attackProgress = min(1, time / attackDuration)
+            let attack = pow(sin(0.5 * Double.pi * attackProgress), 2)
+            let releaseStart = 0.026
+            let releaseProgress = max(
+                0,
+                min(1, (time - releaseStart) / (duration - releaseStart))
+            )
+            let release = pow(cos(0.5 * Double.pi * releaseProgress), 2)
+            let value = max(-1, min(1, (body + onset) * attack * release * 0.19))
+            var sample = Int16((value * Double(Int16.max)).rounded()).littleEndian
+            withUnsafeBytes(of: &sample) { samples.append(contentsOf: $0) }
+        }
+
+        var wav = Data()
+        wav.append(contentsOf: "RIFF".utf8)
+        appendLittleEndian(UInt32(36 + samples.count), to: &wav)
+        wav.append(contentsOf: "WAVEfmt ".utf8)
+        appendLittleEndian(UInt32(16), to: &wav)
+        appendLittleEndian(UInt16(1), to: &wav)
+        appendLittleEndian(UInt16(1), to: &wav)
+        appendLittleEndian(UInt32(sampleRate), to: &wav)
+        appendLittleEndian(UInt32(sampleRate * MemoryLayout<Int16>.size), to: &wav)
+        appendLittleEndian(UInt16(MemoryLayout<Int16>.size), to: &wav)
+        appendLittleEndian(UInt16(16), to: &wav)
+        wav.append(contentsOf: "data".utf8)
+        appendLittleEndian(UInt32(samples.count), to: &wav)
+        wav.append(samples)
+        return wav
+    }
+
+    private static func appendLittleEndian<T: FixedWidthInteger>(
+        _ value: T,
+        to data: inout Data
+    ) {
+        var value = value.littleEndian
+        withUnsafeBytes(of: &value) { data.append(contentsOf: $0) }
     }
 }
 
-private struct HeroActionFocusRail: UIViewRepresentable {
-    let configuration: HeroFocusRailConfiguration
-    let onSelectionChanged: (Int) -> Void
-    let onPage: (HeroFocusDirection, Int) -> Void
-    let onFocusChanged: (Bool) -> Void
+/// The Hero's single focus target and directional-input owner. Zero-duration,
+/// press-typed recognizers claim Left/Right at press-down, before the focus engine
+/// can emit duplicate moves or false navigation feedback.
+private struct HeroActionPressSurface: UIViewRepresentable {
+    let onMove: (HeroFocusDirection) -> HeroFocusOutcome
+    let canHandleDirection: (HeroFocusDirection) -> Bool
     let onHorizontalHoldChanged: (Bool) -> Void
     let onSelect: () -> Void
     let onPlayPause: () -> Void
 
-    func makeUIView(context: Context) -> RailView {
-        let view = RailView()
+    func makeUIView(context: Context) -> PressView {
+        let view = PressView()
         update(view)
         return view
     }
 
-    func updateUIView(_ uiView: RailView, context: Context) {
+    func updateUIView(_ uiView: PressView, context: Context) {
         update(uiView)
     }
 
-    static func dismantleUIView(_ uiView: RailView, coordinator: ()) {
+    static func dismantleUIView(_ uiView: PressView, coordinator: ()) {
         uiView.cancelInput()
     }
 
-    private func update(_ view: RailView) {
-        view.onSelectionChanged = onSelectionChanged
-        view.onPage = onPage
-        view.onFocusChanged = onFocusChanged
+    private func update(_ view: PressView) {
+        view.onMove = onMove
+        view.canHandleDirection = canHandleDirection
         view.onHorizontalHoldChanged = onHorizontalHoldChanged
         view.onSelect = onSelect
         view.onPlayPause = onPlayPause
-        view.apply(configuration)
     }
 
-    final class RailView: UIView {
-        private static let slotCount = 4
-        private static let edgeGuideWidth: CGFloat = 8
-
-        var onSelectionChanged: (Int) -> Void = { _ in }
-        var onPage: (HeroFocusDirection, Int) -> Void = { _, _ in }
-        var onFocusChanged: (Bool) -> Void = { _ in }
+    final class PressView: UIView, UIGestureRecognizerDelegate {
+        var onMove: (HeroFocusDirection) -> HeroFocusOutcome = { _ in .blocked }
+        var canHandleDirection: (HeroFocusDirection) -> Bool = { _ in true }
         var onHorizontalHoldChanged: (Bool) -> Void = { _ in }
         var onSelect: () -> Void = {}
         var onPlayPause: () -> Void = {}
 
-        private let banks: [Bank]
-        private let leftGuide = UIFocusGuide()
-        private let rightGuide = UIFocusGuide()
-        private let holdController = HeroHeldPagingController()
-        private let pressMonitor = PressLifecycleRecognizer()
-        private var currentBank: Bank
-        private var previousBank: Bank?
-        private var nextBank: Bank?
-        private var configuration: HeroFocusRailConfiguration?
-        private var selectedButton = 0
-        private var awaitingConfiguration = false
-        private var isProgrammaticMove = false
-        private var leftHeld = false
-        private var rightHeld = false
+        private let repeatController = HeroDirectionalRepeatController()
+        private var consumesLeft = false
+        private var consumesRight = false
         private var resignActiveObserver: NSObjectProtocol?
 
-        override var canBecomeFocused: Bool { false }
-
-        override var preferredFocusEnvironments: [UIFocusEnvironment] {
-            guard let slot = currentBank.slot(forLogicalIndex: selectedButton) else { return [] }
-            return [slot]
-        }
+        override var canBecomeFocused: Bool { true }
 
         override init(frame: CGRect) {
-            let banks = (0..<3).map { Bank(index: $0, slotCount: Self.slotCount) }
-            self.banks = banks
-            currentBank = banks[1]
             super.init(frame: frame)
-
             backgroundColor = .clear
             isOpaque = false
-            clipsToBounds = false
-            for bank in banks {
-                for slot in bank.slots {
-                    slot.owner = self
-                    addSubview(slot)
-                }
+            _ = HeroNavigationClickPlayer.shared
+            repeatController.onRepeat = { [weak self] direction in
+                self?.onMove(direction) ?? .blocked
             }
 
-            addLayoutGuide(leftGuide)
-            addLayoutGuide(rightGuide)
-            NSLayoutConstraint.activate([
-                leftGuide.leadingAnchor.constraint(equalTo: leadingAnchor),
-                leftGuide.topAnchor.constraint(equalTo: topAnchor),
-                leftGuide.bottomAnchor.constraint(equalTo: bottomAnchor),
-                leftGuide.widthAnchor.constraint(equalToConstant: Self.edgeGuideWidth),
-                rightGuide.trailingAnchor.constraint(equalTo: trailingAnchor),
-                rightGuide.topAnchor.constraint(equalTo: topAnchor),
-                rightGuide.bottomAnchor.constraint(equalTo: bottomAnchor),
-                rightGuide.widthAnchor.constraint(equalToConstant: Self.edgeGuideWidth)
-            ])
-
-            pressMonitor.owner = self
-            addGestureRecognizer(pressMonitor)
             addPressRecognizer(.select, action: #selector(selected))
             addPressRecognizer(.playPause, action: #selector(playPaused))
+            addDirectionalPressRecognizer(.leftArrow, direction: .left)
+            addDirectionalPressRecognizer(.rightArrow, direction: .right)
+            addSwipeRecognizer(.left)
+            addSwipeRecognizer(.right)
 
-            holdController.onRapidPage = { [weak self] direction in
-                self?.requestRapidPage(direction)
-            }
             resignActiveObserver = NotificationCenter.default.addObserver(
                 forName: UIApplication.willResignActiveNotification,
                 object: nil,
@@ -1938,84 +2005,9 @@ private struct HeroActionFocusRail: UIViewRepresentable {
             fatalError("init(coder:) has not been implemented")
         }
 
-        func apply(_ configuration: HeroFocusRailConfiguration) {
-            self.configuration = configuration
-            selectedButton = min(
-                configuration.selectedButton,
-                max(0, configuration.current.buttonCount - 1)
-            )
-
-            if currentBank.item?.id != configuration.current.id {
-                if containsFocusedSlot {
-                    currentBank.item = configuration.current
-                } else if let matching = banks.first(where: {
-                    $0.item?.id == configuration.current.id
-                }) {
-                    currentBank = matching
-                } else {
-                    currentBank = banks[1]
-                    currentBank.item = configuration.current
-                }
-            } else {
-                currentBank.item = configuration.current
-            }
-
-            var available = banks.filter { $0 !== currentBank }
-            previousBank = takeBank(for: configuration.previous, from: &available)
-            nextBank = takeBank(for: configuration.next, from: &available)
-            previousBank?.item = configuration.previous
-            nextBank?.item = configuration.next
-            for bank in available {
-                bank.item = nil
-            }
-
-            awaitingConfiguration = false
-            configureFocusability()
-            setNeedsLayout()
-            layoutIfNeeded()
-        }
-
-        override func layoutSubviews() {
-            super.layoutSubviews()
-            let inset = Self.edgeGuideWidth
-            let contentRect = bounds.insetBy(dx: inset, dy: 0)
-            let count = max(1, currentBank.item?.buttonCount ?? 1)
-            let slotWidth = contentRect.width / CGFloat(count)
-
-            for bank in banks {
-                for slot in bank.slots {
-                    slot.frame = .zero
-                }
-            }
-            for slot in currentBank.slots where slot.isEligible {
-                slot.frame = CGRect(
-                    x: contentRect.minX + CGFloat(slot.logicalIndex) * slotWidth,
-                    y: contentRect.minY,
-                    width: slotWidth,
-                    height: contentRect.height
-                )
-            }
-            if let slot = previousLandingSlot {
-                slot.frame = leftGuide.layoutFrame
-            }
-            if let slot = nextLandingSlot {
-                slot.frame = rightGuide.layoutFrame
-            }
-        }
-
-        override func shouldUpdateFocus(in context: UIFocusUpdateContext) -> Bool {
-            if awaitingConfiguration,
-               context.focusHeading.contains(.left) || context.focusHeading.contains(.right) {
-                return false
-            }
-            guard !isProgrammaticMove,
-                  let activeDirection = holdController.activeDirection else {
-                return super.shouldUpdateFocus(in: context)
-            }
-            if heading(context.focusHeading, matches: activeDirection) {
-                return false
-            }
-            return super.shouldUpdateFocus(in: context)
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            if window == nil { cancelInput() }
         }
 
         override func didUpdateFocus(
@@ -2023,69 +2015,30 @@ private struct HeroActionFocusRail: UIViewRepresentable {
             with coordinator: UIFocusAnimationCoordinator
         ) {
             super.didUpdateFocus(in: context, with: coordinator)
-            let previous = context.previouslyFocusedItem as? SlotView
-            guard let next = context.nextFocusedItem as? SlotView,
-                  next.owner === self else {
-                if previous?.owner === self {
-                    onFocusChanged(false)
-                    cancelInput()
-                }
-                return
-            }
-
-            if previous?.owner !== self {
-                onFocusChanged(true)
-            }
-            let bank = banks[next.bankIndex]
-            if bank === currentBank {
-                selectedButton = next.logicalIndex
-                onSelectionChanged(selectedButton)
-                return
-            }
-            if bank === previousBank {
-                commitPage(.left, landingSlot: next)
-            } else if bank === nextBank {
-                commitPage(.right, landingSlot: next)
+            if context.previouslyFocusedItem === self, context.nextFocusedItem !== self {
+                cancelInput()
             }
         }
 
-        func pressBegan(_ direction: HeroFocusDirection) {
-            let wasHolding = leftHeld || rightHeld
-            switch direction {
-            case .left: leftHeld = true
-            case .right: rightHeld = true
+        override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+            if let directional = gestureRecognizer as? DirectionalLongPressRecognizer {
+                return canHandleDirection(directional.heroDirection)
             }
-            holdController.began(direction)
-            if !wasHolding {
-                onHorizontalHoldChanged(true)
+            if let swipe = gestureRecognizer as? UISwipeGestureRecognizer,
+               let direction = heroDirection(for: swipe.direction) {
+                return canHandleDirection(direction)
             }
-        }
-
-        func pressEnded(_ direction: HeroFocusDirection) {
-            let wasHolding = leftHeld || rightHeld
-            switch direction {
-            case .left: leftHeld = false
-            case .right: rightHeld = false
-            }
-            holdController.ended(direction)
-            if wasHolding, !leftHeld, !rightHeld {
-                onHorizontalHoldChanged(false)
-            }
+            return true
         }
 
         func cancelInput() {
-            let wasHolding = leftHeld || rightHeld
-            leftHeld = false
-            rightHeld = false
-            holdController.cancelAll()
+            let wasHolding = consumesLeft || consumesRight
+            repeatController.cancel()
+            consumesLeft = false
+            consumesRight = false
             if wasHolding {
                 onHorizontalHoldChanged(false)
             }
-        }
-
-        override func didMoveToWindow() {
-            super.didMoveToWindow()
-            if window == nil { cancelInput() }
         }
 
         deinit {
@@ -2103,137 +2056,29 @@ private struct HeroActionFocusRail: UIViewRepresentable {
             onPlayPause()
         }
 
-        private var containsFocusedSlot: Bool {
-            focusedSlot != nil
+        @objc private func swiped(_ recognizer: UISwipeGestureRecognizer) {
+            guard let direction = heroDirection(for: recognizer.direction) else { return }
+            _ = onMove(direction)
         }
 
-        private var focusedSlot: SlotView? {
-            banks.lazy.flatMap(\.slots).first(where: \.isFocused)
-        }
-
-        private var previousLandingSlot: SlotView? {
-            guard let previousBank,
-                  let count = previousBank.item?.buttonCount,
-                  count > 0 else { return nil }
-            return previousBank.slot(forLogicalIndex: min(selectedButton, count - 1))
-        }
-
-        private var nextLandingSlot: SlotView? {
-            guard let nextBank,
-                  let count = nextBank.item?.buttonCount,
-                  count > 0 else { return nil }
-            return nextBank.slot(forLogicalIndex: min(selectedButton, count - 1))
-        }
-
-        private func configureFocusability() {
-            for bank in banks {
-                for slot in bank.slots {
-                    slot.isEligible = false
-                    slot.logicalIndex = slot.slotIndex
+        @objc private func directionPressed(_ recognizer: DirectionalLongPressRecognizer) {
+            let direction = recognizer.heroDirection
+            switch recognizer.state {
+            case .began:
+                let wasHolding = consumesLeft || consumesRight
+                let outcome = onMove(direction)
+                switch direction {
+                case .left: consumesLeft = true
+                case .right: consumesRight = true
                 }
-            }
-            if let count = currentBank.item?.buttonCount {
-                let desired = min(selectedButton, max(0, count - 1))
-                selectedButton = desired
-                if let focused = focusedSlot, focused.bankIndex == currentBank.index {
-                    focused.logicalIndex = desired
-                    focused.isEligible = true
-                    var remainingLogical = Array(0..<count).filter { $0 != desired }
-                    for slot in currentBank.slots where slot !== focused {
-                        guard !remainingLogical.isEmpty else { break }
-                        slot.logicalIndex = remainingLogical.removeFirst()
-                        slot.isEligible = true
-                    }
-                } else {
-                    for slot in currentBank.slots where slot.slotIndex < count {
-                        slot.logicalIndex = slot.slotIndex
-                        slot.isEligible = true
-                    }
+                if !wasHolding {
+                    onHorizontalHoldChanged(true)
                 }
-            }
-            if !awaitingConfiguration {
-                configureLandingSlot(in: previousBank)
-                configureLandingSlot(in: nextBank)
-            }
-            leftGuide.isEnabled = !awaitingConfiguration && previousLandingSlot != nil
-            rightGuide.isEnabled = !awaitingConfiguration && nextLandingSlot != nil
-            leftGuide.preferredFocusEnvironments = previousLandingSlot.map { [$0] } ?? []
-            rightGuide.preferredFocusEnvironments = nextLandingSlot.map { [$0] } ?? []
-        }
-
-        private func configureLandingSlot(in bank: Bank?) {
-            guard let bank,
-                  let count = bank.item?.buttonCount,
-                  count > 0 else { return }
-            let logicalIndex = min(selectedButton, count - 1)
-            let slot = bank.slots[min(logicalIndex, bank.slots.count - 1)]
-            slot.logicalIndex = logicalIndex
-            slot.isEligible = true
-        }
-
-        private func takeBank(
-            for item: HeroFocusRailItem?,
-            from available: inout [Bank]
-        ) -> Bank? {
-            guard let item, !available.isEmpty else { return nil }
-            if let index = available.firstIndex(where: { $0.item?.id == item.id }) {
-                return available.remove(at: index)
-            }
-            return available.removeFirst()
-        }
-
-        private func commitPage(
-            _ direction: HeroFocusDirection,
-            landingSlot: SlotView
-        ) {
-            guard !awaitingConfiguration else { return }
-            let oldCurrent = currentBank
-            switch direction {
-            case .left:
-                guard let destination = previousBank else { return }
-                currentBank = destination
-                nextBank = oldCurrent
-                previousBank = banks.first {
-                    $0 !== currentBank && $0 !== nextBank
-                }
-            case .right:
-                guard let destination = nextBank else { return }
-                currentBank = destination
-                previousBank = oldCurrent
-                nextBank = banks.first {
-                    $0 !== currentBank && $0 !== previousBank
-                }
-            }
-            selectedButton = landingSlot.logicalIndex
-            awaitingConfiguration = true
-            configureFocusability()
-            setNeedsLayout()
-            layoutIfNeeded()
-            onSelectionChanged(selectedButton)
-            onPage(direction, selectedButton)
-            DispatchQueue.main.async { [weak self] in
-                self?.holdController.didCommitEdgePage(direction)
-            }
-        }
-
-        private func requestRapidPage(_ direction: HeroFocusDirection) {
-            guard !awaitingConfiguration else { return }
-            let target = direction == .left ? previousLandingSlot : nextLandingSlot
-            guard let target, target.canBecomeFocused else { return }
-            isProgrammaticMove = true
-            defer { isProgrammaticMove = false }
-            guard let focusSystem = UIFocusSystem.focusSystem(for: self) else { return }
-            focusSystem.requestFocusUpdate(to: target)
-            focusSystem.updateFocusIfNeeded()
-        }
-
-        private func heading(
-            _ heading: UIFocusHeading,
-            matches direction: HeroFocusDirection
-        ) -> Bool {
-            switch direction {
-            case .left: heading.contains(.left)
-            case .right: heading.contains(.right)
+                repeatController.began(direction, initialOutcome: outcome)
+            case .ended, .cancelled, .failed:
+                endHold(direction)
+            default:
+                break
             }
         }
 
@@ -2244,123 +2089,60 @@ private struct HeroActionFocusRail: UIViewRepresentable {
             addGestureRecognizer(recognizer)
         }
 
-        final class Bank {
-            let index: Int
-            let slots: [SlotView]
-            var item: HeroFocusRailItem?
+        private func addDirectionalPressRecognizer(
+            _ type: UIPress.PressType,
+            direction: HeroFocusDirection
+        ) {
+            let recognizer = DirectionalLongPressRecognizer(
+                direction: direction,
+                target: self,
+                action: #selector(directionPressed(_:))
+            )
+            recognizer.minimumPressDuration = 0
+            recognizer.allowedPressTypes = [NSNumber(value: type.rawValue)]
+            recognizer.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
+            recognizer.delegate = self
+            addGestureRecognizer(recognizer)
+        }
 
-            init(index: Int, slotCount: Int) {
-                self.index = index
-                slots = (0..<slotCount).map {
-                    SlotView(bankIndex: index, slotIndex: $0)
-                }
+        private func addSwipeRecognizer(_ direction: UISwipeGestureRecognizer.Direction) {
+            let recognizer = UISwipeGestureRecognizer(target: self, action: #selector(swiped(_:)))
+            recognizer.direction = direction
+            recognizer.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.indirect.rawValue)]
+            recognizer.delegate = self
+            addGestureRecognizer(recognizer)
+        }
+
+        private func endHold(_ direction: HeroFocusDirection) {
+            let wasHolding = consumesLeft || consumesRight
+            repeatController.ended(direction)
+            switch direction {
+            case .left: consumesLeft = false
+            case .right: consumesRight = false
             }
-
-            func slot(forLogicalIndex index: Int) -> SlotView? {
-                slots.first { $0.logicalIndex == index && $0.isEligible }
+            if wasHolding, !consumesLeft, !consumesRight {
+                onHorizontalHoldChanged(false)
             }
         }
 
-        final class SlotView: UIView {
-            weak var owner: RailView?
-            let bankIndex: Int
-            let slotIndex: Int
-            var logicalIndex: Int
-            var isEligible = false
+        private func heroDirection(
+            for direction: UISwipeGestureRecognizer.Direction
+        ) -> HeroFocusDirection? {
+            if direction.contains(.left) { return .left }
+            if direction.contains(.right) { return .right }
+            return nil
+        }
 
-            init(bankIndex: Int, slotIndex: Int) {
-                self.bankIndex = bankIndex
-                self.slotIndex = slotIndex
-                logicalIndex = slotIndex
-                super.init(frame: .zero)
-                backgroundColor = .clear
-                isOpaque = false
-                isAccessibilityElement = false
+        final class DirectionalLongPressRecognizer: UILongPressGestureRecognizer {
+            let heroDirection: HeroFocusDirection
+
+            init(direction: HeroFocusDirection, target: Any?, action: Selector?) {
+                heroDirection = direction
+                super.init(target: target, action: action)
             }
 
             required init?(coder: NSCoder) {
                 fatalError("init(coder:) has not been implemented")
-            }
-
-            override var canBecomeFocused: Bool {
-                isEligible
-            }
-
-            override func soundIdentifierForFocusUpdate(
-                in context: UIFocusUpdateContext
-            ) -> UIFocusSoundIdentifier? {
-                .default
-            }
-        }
-
-        final class PressLifecycleRecognizer: UIGestureRecognizer {
-            weak var owner: RailView?
-
-            override init(target: Any?, action: Selector?) {
-                super.init(target: target, action: action)
-                allowedPressTypes = [
-                    NSNumber(value: UIPress.PressType.leftArrow.rawValue),
-                    NSNumber(value: UIPress.PressType.rightArrow.rawValue)
-                ]
-                cancelsTouchesInView = false
-                delaysTouchesBegan = false
-                delaysTouchesEnded = false
-            }
-
-            convenience init() {
-                self.init(target: nil, action: nil)
-            }
-
-            override func pressesBegan(
-                _ presses: Set<UIPress>,
-                with event: UIPressesEvent
-            ) {
-                for press in presses {
-                    switch press.type {
-                    case .leftArrow: owner?.pressBegan(.left)
-                    case .rightArrow: owner?.pressBegan(.right)
-                    default: break
-                    }
-                }
-            }
-
-            override func pressesChanged(
-                _ presses: Set<UIPress>,
-                with event: UIPressesEvent
-            ) {}
-
-            override func pressesEnded(
-                _ presses: Set<UIPress>,
-                with event: UIPressesEvent
-            ) {
-                finish(presses)
-                state = .failed
-            }
-
-            override func pressesCancelled(
-                _ presses: Set<UIPress>,
-                with event: UIPressesEvent
-            ) {
-                finish(presses)
-                state = .failed
-            }
-
-            override func canPrevent(
-                _ preventedGestureRecognizer: UIGestureRecognizer
-            ) -> Bool { false }
-
-            override func canBePrevented(
-                by preventingGestureRecognizer: UIGestureRecognizer
-            ) -> Bool { false }
-
-            private func finish(_ presses: Set<UIPress>) {
-                for press in presses {
-                    switch press.type {
-                    case .leftArrow: owner?.pressEnded(.left)
-                    case .rightArrow: owner?.pressEnded(.right)
-                    default: break
-                    }
-                }
             }
         }
     }

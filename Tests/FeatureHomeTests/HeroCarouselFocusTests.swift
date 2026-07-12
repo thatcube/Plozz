@@ -90,99 +90,80 @@ final class HeroCarouselFocusTests: XCTestCase {
     }
 }
 
-final class HeroFocusRailTopologyTests: XCTestCase {
-    func testForwardWrapsForBothNavigationStyles() {
-        XCTAssertEqual(HeroFocusRailTopology.nextIndex(currentIndex: 2, itemCount: 3), 0)
-    }
-
-    func testBackwardWrapsOnlyForTopBarNavigation() {
-        XCTAssertEqual(
-            HeroFocusRailTopology.previousIndex(
-                currentIndex: 0,
-                itemCount: 3,
-                navigationStyle: .tabBar
-            ),
-            2
-        )
-        XCTAssertNil(
-            HeroFocusRailTopology.previousIndex(
-                currentIndex: 0,
-                itemCount: 3,
-                navigationStyle: .sidebar
-            )
-        )
-    }
-
-    func testInteriorPreviousAndNextIndices() {
-        XCTAssertEqual(
-            HeroFocusRailTopology.previousIndex(
-                currentIndex: 1,
-                itemCount: 3,
-                navigationStyle: .sidebar
-            ),
-            0
-        )
-        XCTAssertEqual(HeroFocusRailTopology.nextIndex(currentIndex: 1, itemCount: 3), 2)
-    }
-
-    func testDegenerateTopologiesHaveNoNeighbors() {
-        XCTAssertNil(
-            HeroFocusRailTopology.previousIndex(
-                currentIndex: 0,
-                itemCount: 1,
-                navigationStyle: .tabBar
-            )
-        )
-        XCTAssertNil(HeroFocusRailTopology.nextIndex(currentIndex: 0, itemCount: 1))
-        XCTAssertNil(HeroFocusRailTopology.nextIndex(currentIndex: 3, itemCount: 3))
-    }
-}
-
 @MainActor
-final class HeroHeldPagingControllerTests: XCTestCase {
-    func testEdgeHoldWaitsConfiguredDelayBeforeRapidPaging() async {
+final class HeroDirectionalRepeatControllerTests: XCTestCase {
+    func testEdgeHoldWaitsFiveSecondsBeforeRapidPaging() async {
         let repeated = expectation(description: "edge repeat")
         var sleeps: [TimeInterval] = []
-        let controller = HeroHeldPagingController(sleep: {
+        let controller = HeroDirectionalRepeatController(sleep: {
             sleeps.append($0)
         })
-        controller.onRapidPage = { direction in
+        controller.onRepeat = { direction in
             XCTAssertEqual(direction, .right)
             controller.ended(.right)
             repeated.fulfill()
+            return .advance(toItem: 2, keepButton: 2)
         }
 
-        controller.began(.right)
-        controller.didCommitEdgePage(.right)
+        controller.began(.right, initialOutcome: .advance(toItem: 1, keepButton: 2))
 
         await fulfillment(of: [repeated], timeout: 1)
-        XCTAssertEqual(sleeps, [0.75])
+        XCTAssertEqual(sleeps, [5.0])
+    }
+
+    func testInteriorHoldTraversesButtonsThenPausesAtFirstPage() async {
+        let repeated = expectation(description: "interior and page repeats")
+        repeated.expectedFulfillmentCount = 3
+        var sleeps: [TimeInterval] = []
+        var outcomes: [HeroFocusOutcome] = [
+            .moveButton(2),
+            .advance(toItem: 1, keepButton: 2),
+            .advance(toItem: 2, keepButton: 2)
+        ]
+        let controller = HeroDirectionalRepeatController(sleep: {
+            sleeps.append($0)
+        })
+        controller.onRepeat = { direction in
+            XCTAssertEqual(direction, .right)
+            let outcome = outcomes.removeFirst()
+            repeated.fulfill()
+            if outcomes.isEmpty {
+                controller.ended(.right)
+            }
+            return outcome
+        }
+
+        controller.began(.right, initialOutcome: .moveButton(1))
+
+        await fulfillment(of: [repeated], timeout: 1)
+        XCTAssertEqual(sleeps, [0.35, 0.12, 5.0])
     }
 
     func testLeftHoldUsesTheSameRepeatPath() async {
         let repeated = expectation(description: "left repeat")
-        let controller = HeroHeldPagingController(sleep: { _ in })
-        controller.onRapidPage = { direction in
+        let controller = HeroDirectionalRepeatController(sleep: { _ in })
+        controller.onRepeat = { direction in
             XCTAssertEqual(direction, .left)
             controller.ended(.left)
             repeated.fulfill()
+            return .advance(toItem: 0, keepButton: 0)
         }
 
-        controller.began(.left)
-        controller.didCommitEdgePage(.left)
+        controller.began(.left, initialOutcome: .advance(toItem: 1, keepButton: 0))
 
         await fulfillment(of: [repeated], timeout: 1)
     }
 
-    func testHoldingWithoutAnEdgePageDoesNotStartRepeating() {
-        let controller = HeroHeldPagingController()
+    func testEscapeAndBlockedMovesDoNotStartRepeating() {
+        let controller = HeroDirectionalRepeatController()
         var repeatCount = 0
-        controller.onRapidPage = { _ in
+        controller.onRepeat = { _ in
             repeatCount += 1
+            return .blocked
         }
 
-        controller.began(.left)
-        controller.ended(.left)
+        controller.began(.left, initialOutcome: .escape)
+        controller.began(.right, initialOutcome: .blocked)
 
         XCTAssertEqual(repeatCount, 0)
     }

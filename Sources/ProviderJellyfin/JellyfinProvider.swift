@@ -994,6 +994,11 @@ public struct JellyfinProvider: MediaProvider {
         }
         var queryItems: [AuthenticatedHTTPQueryItem] = []
         for item in components.queryItems ?? [] {
+            guard !item.name.trimmingCharacters(
+                in: .whitespacesAndNewlines
+            ).isEmpty else {
+                continue
+            }
             let normalized = item.name.lowercased()
             if normalized == "api_key" || normalized == "apikey"
                 || normalized == "playsessionid" {

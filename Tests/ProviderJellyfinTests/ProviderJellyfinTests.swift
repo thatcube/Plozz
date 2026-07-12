@@ -657,7 +657,7 @@ final class JellyfinProviderMappingTests: XCTestCase {
         stub.stub(pathSuffix: "/Items/i1/PlaybackInfo", json: """
         {"MediaSources":[{"Id":"src1","Container":"mkv","SupportsDirectPlay":false,
         "SupportsTranscoding":true,"TranscodingSubProtocol":"hls",
-        "TranscodingUrl":"/videos/My%20Movie/master.m3u8?api_key=TOKEN&PlaySessionId=ps1"}],
+        "TranscodingUrl":"/videos/My%20Movie/master.m3u8?api_key=TOKEN&PlaySessionId=ps1&"}],
         "PlaySessionId":"ps1"}
         """)
         let provider = JellyfinProvider(session: makeSession(), http: stub)

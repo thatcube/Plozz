@@ -37,8 +37,13 @@ final class PlayerViewModelEOFTests: XCTestCase {
         XCTAssertEqual(viewModel.controls.currentSeconds, 42)
         XCTAssertEqual(viewModel.phase, .ready)
 
+        let playsBeforeResume = engine.playCallCount
+        let pausesBeforeResume = engine.pauseCallCount
         viewModel.setPaused(false)
         XCTAssertTrue(viewModel.controls.isResumeConfirming)
+        try? await Task.sleep(for: .milliseconds(700))
+        XCTAssertEqual(engine.playCallCount, playsBeforeResume + 1)
+        XCTAssertEqual(engine.pauseCallCount, pausesBeforeResume)
         viewModel.setPaused(true)
     }
 
@@ -164,6 +169,8 @@ private final class SpyVideoEngine: VideoEngine {
     var audioTracks: [MediaTrack] = []
     var subtitleTracks: [MediaTrack] = []
     var restoreAfterBackgroundCallCount = 0
+    var playCallCount = 0
+    var pauseCallCount = 0
     var blocksLoad = false
     private(set) var loadStarted = false
     private var loadContinuation: CheckedContinuation<Void, Never>?
@@ -192,8 +199,14 @@ private final class SpyVideoEngine: VideoEngine {
         loadContinuation = nil
     }
 
-    func play() { isPaused = false }
-    func pause() { isPaused = true }
+    func play() {
+        playCallCount += 1
+        isPaused = false
+    }
+    func pause() {
+        pauseCallCount += 1
+        isPaused = true
+    }
     func restoreAfterBackground() async {
         restoreAfterBackgroundCallCount += 1
         status = .ready

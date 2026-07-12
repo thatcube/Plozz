@@ -219,7 +219,8 @@ public final class PlayerViewModel {
     private var isRestoringAfterBackground = false
     private var sceneIsActive = true
     /// The first Play after a background rebuild verifies that the engine clock
-    /// advances; a dead rebuilt session enters the normal engine fallback chain.
+    /// advances with cold-start timing; a dead rebuilt session enters the normal
+    /// engine fallback chain.
     private var confirmNextResumeAfterBackground = false
     private var subtitleDownloadTask: Task<Void, Never>?
     /// In-flight manual subtitle search (separate from the download task so a
@@ -1946,7 +1947,7 @@ public final class PlayerViewModel {
     /// "landed but frozen" state where playback settles at rate 0 post-seek and a
     /// single `play()` is swallowed. Self-cancels the moment the clock advances,
     /// the user pauses, or a new seek supersedes it.
-    private func confirmPlaybackResume(escalateOnFailure: Bool = false) {
+    private func confirmPlaybackResume() {
         resumeConfirmTask?.cancel()
         // We intend to play from here on; mark it so the container stops
         // mirroring the engine's transient post-seek paused state into the model
@@ -2028,13 +2029,61 @@ public final class PlayerViewModel {
             // (Two-consecutive-advance success gating means a false give-up here
             // would require the engine to be effectively frozen anyway, so pausing
             // it is safe.)
-            if escalateOnFailure {
-                self.controls.isResumeConfirming = false
-                self.resumeConfirmTask = nil
-                await self.handleEngineFailure(.invalidResponse)
-            } else {
-                self.setPaused(true)
+            self.setPaused(true)
+        }
+    }
+
+    /// Verifies the first Play after a suspension rebuild without applying the
+    /// aggressive pause/play kicks used for a post-seek rate-0 stall. A rebuilt
+    /// pipeline is a cold start: Dolby Vision mode negotiation, probing, and
+    /// buffering can legitimately take several seconds, and repeatedly pausing it
+    /// can prevent AVPlayer from ever reaching its first frame. Give it the same
+    /// grace period as initial playback, then enter the normal fallback chain only
+    /// if its clock still has not advanced.
+    private func confirmBackgroundPlaybackResume() {
+        resumeConfirmTask?.cancel()
+        controls.isResumeConfirming = true
+        let timeout = watchdogTimeout
+        resumeConfirmTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            ScrubDiagnostics.note(
+                "background-resume-confirm: start t=\(String(format: "%.2f", self.engine.currentTime)) "
+                + "enginePaused=\(self.engine.isPaused)"
+            )
+
+            let deadline = Date().addingTimeInterval(timeout)
+            var lastTime = self.engine.currentTime
+            var advancingStreak = 0
+            while Date() < deadline {
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                if Task.isCancelled { return }
+
+                if case .failed = self.engine.status {
+                    self.controls.isResumeConfirming = false
+                    self.resumeConfirmTask = nil
+                    return
+                }
+
+                let now = self.engine.currentTime
+                if now > lastTime + 0.05 {
+                    advancingStreak += 1
+                    lastTime = now
+                    if advancingStreak >= 2 {
+                        ScrubDiagnostics.note("background-resume-confirm: playback advancing")
+                        self.controls.isResumeConfirming = false
+                        self.resumeConfirmTask = nil
+                        return
+                    }
+                } else {
+                    advancingStreak = 0
+                    lastTime = now
+                }
             }
+
+            ScrubDiagnostics.note("background-resume-confirm: timed out without clock progress")
+            self.controls.isResumeConfirming = false
+            self.resumeConfirmTask = nil
+            await self.handleEngineFailure(.invalidResponse)
         }
     }
 
@@ -2149,7 +2198,7 @@ public final class PlayerViewModel {
         }
         controls.isPaused = paused
         if shouldConfirmBackgroundResume {
-            confirmPlaybackResume(escalateOnFailure: true)
+            confirmBackgroundPlaybackResume()
         }
         Task { await report(event: paused ? .pause : .unpause, isPaused: paused) }
     }

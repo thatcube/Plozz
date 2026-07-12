@@ -1061,11 +1061,17 @@ public struct JellyfinProvider: MediaProvider {
     }
 
     private func map(item dto: BaseItemDto) -> MediaItem {
-        MediaItem(
+        let kind = Self.kind(forItemType: dto.`Type`)
+        let resumePosition = JellyfinTicks.seconds(fromTicks: dto.UserData?.PlaybackPositionTicks)
+        let playedPercentage = dto.UserData?.PlayedPercentage.map { $0 / 100.0 }
+        let serverPlayed = dto.UserData?.Played ?? false
+        let isRewatching = (resumePosition ?? 0) > 0
+        let hasSeriesHistory = kind == .series && (playedPercentage ?? 0) > 0
+        return MediaItem(
             id: dto.Id,
             title: dto.Name ?? "Untitled",
             originalTitle: dto.OriginalTitle,
-            kind: Self.kind(forItemType: dto.`Type`),
+            kind: kind,
             overview: dto.Overview,
             parentTitle: dto.SeriesName ?? dto.SeasonName,
             // A season's own ordinal is its `IndexNumber`; for an episode that field
@@ -1073,7 +1079,7 @@ public struct JellyfinProvider: MediaProvider {
             // Populating `seasonNumber` for season items lets SeriesDetailView match a
             // target season by NUMBER across servers (per-server season ids differ)
             // instead of collapsing to the first season.
-            seasonNumber: Self.kind(forItemType: dto.`Type`) == .season ? dto.IndexNumber : dto.ParentIndexNumber,
+            seasonNumber: kind == .season ? dto.IndexNumber : dto.ParentIndexNumber,
             episodeNumber: dto.IndexNumber,
             productionYear: dto.ProductionYear,
             officialRating: dto.OfficialRating,
@@ -1082,12 +1088,13 @@ public struct JellyfinProvider: MediaProvider {
             studios: dto.Studios?.compactMap(\.Name).filter { !$0.isEmpty } ?? [],
             tags: dto.Tags ?? [],
             taglines: dto.Taglines ?? [],
-            seriesID: dto.SeriesId ?? (Self.kind(forItemType: dto.`Type`) == .season ? dto.ParentId : nil),
+            seriesID: dto.SeriesId ?? (kind == .season ? dto.ParentId : nil),
             seasonID: dto.SeasonId,
             runtime: JellyfinTicks.seconds(fromTicks: dto.RunTimeTicks),
-            resumePosition: JellyfinTicks.seconds(fromTicks: dto.UserData?.PlaybackPositionTicks),
-            playedPercentage: dto.UserData?.PlayedPercentage.map { $0 / 100.0 },
-            isPlayed: dto.UserData?.Played ?? false,
+            resumePosition: resumePosition,
+            playedPercentage: playedPercentage,
+            isPlayed: serverPlayed && !isRewatching,
+            hasBeenPlayed: serverPlayed || hasSeriesHistory,
             posterURL: Self.imageURL(for: dto, kind: .primary, maxWidth: 500, client: client),
             seriesPosterURL: dto.SeriesId.flatMap {
                 client.imageURL(itemID: $0, kind: .primary, maxWidth: 500)

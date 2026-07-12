@@ -623,6 +623,48 @@ final class PlexProviderMappingTests: XCTestCase {
         XCTAssertEqual(item.posterURL?.absoluteString, "https://plex.host:32400/photo/:/transcode?width=500&height=750&minSize=1&upscale=1&url=%2Fshow.png%3FX-Plex-Token%3DTOKEN&X-Plex-Token=TOKEN")
     }
 
+    func testRewatchPreservesResumeWhileRecordingHistoricalWatch() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/library/metadata/56", json: """
+        {"MediaContainer":{"Metadata":[
+          {"ratingKey":"56","type":"movie","title":"Rewatch",
+           "duration":7200000,"viewOffset":1800000,"viewCount":1}
+        ]}}
+        """)
+        let provider = PlexProvider(session: makeSession(), http: stub)
+
+        let item = try await provider.item(id: "56")
+
+        XCTAssertFalse(item.isPlayed)
+        XCTAssertTrue(item.hasBeenPlayed)
+        XCTAssertEqual(item.resumePosition, 1800)
+    }
+
+    func testSeriesRollupMapsHistoricalAndCompletedState() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/library/metadata/57", json: """
+        {"MediaContainer":{"Metadata":[
+          {"ratingKey":"57","type":"show","title":"Started Show",
+           "leafCount":10,"viewedLeafCount":2}
+        ]}}
+        """)
+        stub.stub(pathSuffix: "/library/metadata/58", json: """
+        {"MediaContainer":{"Metadata":[
+          {"ratingKey":"58","type":"show","title":"Finished Show",
+           "leafCount":10,"viewedLeafCount":10}
+        ]}}
+        """)
+        let provider = PlexProvider(session: makeSession(), http: stub)
+
+        let started = try await provider.item(id: "57")
+        let finished = try await provider.item(id: "58")
+
+        XCTAssertTrue(started.hasBeenPlayed)
+        XCTAssertFalse(started.isPlayed)
+        XCTAssertTrue(finished.hasBeenPlayed)
+        XCTAssertTrue(finished.isPlayed)
+    }
+
     func testItemMapsTechBadgesRatingGenresAndRatings() async throws {
         let stub = StubHTTPClient()
         stub.stub(pathSuffix: "/library/metadata/77", json: """

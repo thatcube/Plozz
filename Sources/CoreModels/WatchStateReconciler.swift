@@ -184,6 +184,9 @@ public actor WatchStateReconciler {
         // Union targets, incoming first (keeps freshest providerKind), de-duped by id.
         var seen = Set<String>()
         merged.targets = (incoming.targets + existing.targets).filter { seen.insert($0.id).inserted }
+        seen.removeAll(keepingCapacity: true)
+        merged.optimisticTargets = (incoming.optimisticTargets + existing.optimisticTargets)
+            .filter { seen.insert($0.id).inserted }
         if incoming.played == false {
             // An explicit unwatch supersedes any queued finished-watch mirror. The
             // media servers are being set unwatched, so carrying the older tracker
@@ -290,6 +293,10 @@ public actor WatchStateReconciler {
             var seen = Set(mutation.targets.map(\.id))
             for target in expansion.targets where seen.insert(target.id).inserted {
                 mutation.targets.append(target)
+            }
+            var optimisticSeen = Set(mutation.optimisticTargets.map(\.id))
+            for target in expansion.targets where optimisticSeen.insert(target.id).inserted {
+                mutation.optimisticTargets.append(target)
             }
             if expansion.isConclusive {
                 mutation.expansionPending = false

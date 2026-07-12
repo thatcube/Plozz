@@ -31,6 +31,10 @@ public struct HeroSettings: Codable, Equatable, Sendable {
     /// played once that feature ships.
     public var trailersEnabled: Bool
 
+    /// Whether previously completed movies, series, and episodes are excluded
+    /// from every hero source.
+    public var hideWatched: Bool
+
     /// The `AggregatedLibrary.key`s the Random source may draw from. **Empty
     /// means "all currently-visible libraries"** (the sensible default), so a
     /// fresh profile needs no configuration.
@@ -50,6 +54,7 @@ public struct HeroSettings: Codable, Equatable, Sendable {
         sources: HeroSourceKind.allCases,
         maxItems: 8,
         trailersEnabled: false,
+        hideWatched: true,
         randomLibraryKeys: [],
         autoAdvance: true,
         autoAdvanceSeconds: 12
@@ -65,6 +70,7 @@ public struct HeroSettings: Codable, Equatable, Sendable {
         sources: [HeroSourceKind],
         maxItems: Int,
         trailersEnabled: Bool,
+        hideWatched: Bool = true,
         randomLibraryKeys: Set<String>,
         autoAdvance: Bool,
         autoAdvanceSeconds: Int
@@ -76,13 +82,15 @@ public struct HeroSettings: Codable, Equatable, Sendable {
         self.sources = sources.filter { seen.insert($0).inserted }
         self.maxItems = maxItems.clamped(to: HeroSettings.maxItemsRange)
         self.trailersEnabled = trailersEnabled
+        self.hideWatched = hideWatched
         self.randomLibraryKeys = randomLibraryKeys
         self.autoAdvance = autoAdvance
         self.autoAdvanceSeconds = autoAdvanceSeconds.clamped(to: HeroSettings.autoAdvanceRange)
     }
 
     private enum CodingKeys: String, CodingKey {
-        case isEnabled, sources, maxItems, trailersEnabled, randomLibraryKeys, autoAdvance, autoAdvanceSeconds
+        case isEnabled, sources, maxItems, trailersEnabled, hideWatched
+        case randomLibraryKeys, autoAdvance, autoAdvanceSeconds
     }
 
     public init(from decoder: Decoder) throws {
@@ -100,6 +108,7 @@ public struct HeroSettings: Codable, Equatable, Sendable {
             sources: value([HeroSourceKind].self, .sources, d.sources),
             maxItems: value(Int.self, .maxItems, d.maxItems),
             trailersEnabled: value(Bool.self, .trailersEnabled, d.trailersEnabled),
+            hideWatched: value(Bool.self, .hideWatched, d.hideWatched),
             randomLibraryKeys: value(Set<String>.self, .randomLibraryKeys, d.randomLibraryKeys),
             autoAdvance: value(Bool.self, .autoAdvance, d.autoAdvance),
             autoAdvanceSeconds: value(Int.self, .autoAdvanceSeconds, d.autoAdvanceSeconds)

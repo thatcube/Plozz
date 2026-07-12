@@ -224,6 +224,12 @@ struct CustomizeHomeDetailView: View {
                 .toggleStyle(SettingsSwitchToggleStyle())
 
             if hero.settings.isEnabled {
+                Toggle(
+                    "Hide watched movies, shows, and episodes",
+                    isOn: $hero.settings.hideWatched
+                )
+                .toggleStyle(SettingsSwitchToggleStyle())
+
                 SettingsDetailGroup(title: "Sources") {
                     SettingsCheckList(
                         options: orderedHeroSources,

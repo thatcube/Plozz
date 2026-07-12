@@ -143,6 +143,11 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
     /// Fractional watched progress in `0...1`, if the backend reports it.
     public var playedPercentage: Double?
     public var isPlayed: Bool
+    /// Whether this profile has completed the title before, independent of its
+    /// current resume/completion state. A Plex rewatch can be both historically
+    /// watched and currently in progress; keeping those facts separate lets
+    /// recommendation surfaces hide seen media without breaking Resume behavior.
+    public var hasBeenPlayed: Bool
 
     /// Primary (poster) artwork.
     public var posterURL: URL?
@@ -318,6 +323,7 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         resumePosition: TimeInterval? = nil,
         playedPercentage: Double? = nil,
         isPlayed: Bool = false,
+        hasBeenPlayed: Bool? = nil,
         posterURL: URL? = nil,
         seriesPosterURL: URL? = nil,
         backdropURL: URL? = nil,
@@ -361,6 +367,7 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         self.resumePosition = resumePosition
         self.playedPercentage = playedPercentage
         self.isPlayed = isPlayed
+        self.hasBeenPlayed = hasBeenPlayed ?? isPlayed
         self.posterURL = posterURL
         self.seriesPosterURL = seriesPosterURL
         self.backdropURL = backdropURL
@@ -392,7 +399,7 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         case id, title, kind, overview, parentTitle, seasonNumber, episodeNumber
         case originalTitle
         case productionYear, officialRating, genres, people, studios, tags, taglines
-        case seriesID, seasonID, runtime, resumePosition, playedPercentage, isPlayed
+        case seriesID, seasonID, runtime, resumePosition, playedPercentage, isPlayed, hasBeenPlayed
         case posterURL, seriesPosterURL, backdropURL, heroBackdropURL
         case fallbackArtworkURL, logoURL, ratings, providerIDs, mediaInfo
         case availability
@@ -427,6 +434,7 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         resumePosition = try container.decodeIfPresent(TimeInterval.self, forKey: .resumePosition)
         playedPercentage = try container.decodeIfPresent(Double.self, forKey: .playedPercentage)
         isPlayed = try container.decodeIfPresent(Bool.self, forKey: .isPlayed) ?? false
+        hasBeenPlayed = try container.decodeIfPresent(Bool.self, forKey: .hasBeenPlayed) ?? isPlayed
         posterURL = try container.decodeIfPresent(URL.self, forKey: .posterURL)
         seriesPosterURL = try container.decodeIfPresent(URL.self, forKey: .seriesPosterURL)
         backdropURL = try container.decodeIfPresent(URL.self, forKey: .backdropURL)
@@ -570,6 +578,7 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         copy.resumePosition = source.resumePosition
         copy.playedPercentage = source.playedPercentage
         copy.isPlayed = source.isPlayed
+        copy.hasBeenPlayed = source.hasBeenPlayed
         copy.isFavorite = source.isFavorite
         copy.lastPlayedAt = source.lastPlayedAt
         if let versionID, source.versions.contains(where: { $0.id == versionID }) {

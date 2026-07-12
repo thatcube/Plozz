@@ -336,6 +336,8 @@ public enum MediaItemMerger {
         primary.resumePosition = unified.resumePosition
         primary.playedPercentage = unified.playedPercentage
         primary.isPlayed = unified.isPlayed
+        primary.hasBeenPlayed = sources.contains(where: \.hasBeenPlayed)
+            || duplicates.contains(where: \.hasBeenPlayed)
         primary.lastPlayedAt = unified.lastPlayedAt
         primary.isFavorite = sources.contains { $0.isFavorite } || primary.isFavorite
 
@@ -385,6 +387,7 @@ public enum MediaItemMerger {
             resumePosition: item.resumePosition,
             playedPercentage: item.playedPercentage,
             isPlayed: item.isPlayed,
+            hasBeenPlayed: item.hasBeenPlayed,
             isFavorite: item.isFavorite,
             lastPlayedAt: item.lastPlayedAt
         )

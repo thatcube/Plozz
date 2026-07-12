@@ -55,6 +55,9 @@ public struct MediaSourceRef: Codable, Hashable, Identifiable, Sendable {
     public var playedPercentage: Double?
     /// Whether this server considers the title fully played.
     public var isPlayed: Bool
+    /// Whether this server reports that the title was completed previously,
+    /// independent of a current rewatch resume point.
+    public var hasBeenPlayed: Bool
     /// Whether this server has the title favourited / watchlisted.
     public var isFavorite: Bool
     /// When the title was last played on this server, used as the most-recent-wins
@@ -73,6 +76,7 @@ public struct MediaSourceRef: Codable, Hashable, Identifiable, Sendable {
         resumePosition: TimeInterval? = nil,
         playedPercentage: Double? = nil,
         isPlayed: Bool = false,
+        hasBeenPlayed: Bool? = nil,
         isFavorite: Bool = false,
         lastPlayedAt: Date? = nil
     ) {
@@ -87,8 +91,33 @@ public struct MediaSourceRef: Codable, Hashable, Identifiable, Sendable {
         self.resumePosition = resumePosition
         self.playedPercentage = playedPercentage
         self.isPlayed = isPlayed
+        self.hasBeenPlayed = hasBeenPlayed ?? isPlayed
         self.isFavorite = isFavorite
         self.lastPlayedAt = lastPlayedAt
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case accountID, itemID, libraryID, providerKind, serverName, accountName
+        case locality, versions, resumePosition, playedPercentage, isPlayed
+        case hasBeenPlayed, isFavorite, lastPlayedAt
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        accountID = try container.decode(String.self, forKey: .accountID)
+        itemID = try container.decode(String.self, forKey: .itemID)
+        libraryID = try container.decodeIfPresent(String.self, forKey: .libraryID)
+        providerKind = try container.decodeIfPresent(ProviderKind.self, forKey: .providerKind)
+        serverName = try container.decodeIfPresent(String.self, forKey: .serverName)
+        accountName = try container.decodeIfPresent(String.self, forKey: .accountName)
+        locality = try container.decodeIfPresent(SourceLocality.self, forKey: .locality)
+        versions = try container.decodeIfPresent([MediaVersion].self, forKey: .versions) ?? []
+        resumePosition = try container.decodeIfPresent(TimeInterval.self, forKey: .resumePosition)
+        playedPercentage = try container.decodeIfPresent(Double.self, forKey: .playedPercentage)
+        isPlayed = try container.decodeIfPresent(Bool.self, forKey: .isPlayed) ?? false
+        hasBeenPlayed = try container.decodeIfPresent(Bool.self, forKey: .hasBeenPlayed) ?? isPlayed
+        isFavorite = try container.decodeIfPresent(Bool.self, forKey: .isFavorite) ?? false
+        lastPlayedAt = try container.decodeIfPresent(Date.self, forKey: .lastPlayedAt)
     }
 
     /// Stable identity: a title appears at most once per (account, item) pair.

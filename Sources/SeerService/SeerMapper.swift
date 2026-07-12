@@ -25,9 +25,12 @@ enum SeerMapper {
         return URL(string: "\(tmdbImageBase)\(size)\(normalized)")
     }
 
-    /// The stable `MediaItem.id` for a Seerr title, namespaced by its TMDB id so
-    /// it never collides with a Jellyfin/Plex library id.
-    static func itemID(tmdbID: Int) -> String { "seer:\(tmdbID)" }
+    /// The stable `MediaItem.id` for a Seerr title. TMDB movie and TV identifiers
+    /// occupy separate namespaces, so kind must be included to keep discovery
+    /// slides and their artwork/request state uniquely addressable.
+    static func itemID(tmdbID: Int, kind: MediaItemKind) -> String {
+        "seer:\(kind.rawValue):\(tmdbID)"
+    }
 
     /// Extracts a production year from a TMDB date string (`YYYY-MM-DD`).
     static func year(from date: String?) -> Int? {
@@ -59,7 +62,7 @@ enum SeerMapper {
         let status = result.mediaInfo?.status.flatMap(MediaAvailabilityStatus.init(rawValue:)) ?? .unknown
 
         return MediaItem(
-            id: itemID(tmdbID: result.id),
+            id: itemID(tmdbID: result.id, kind: kind),
             title: title,
             originalTitle: result.originalTitle ?? result.originalName,
             kind: kind,
@@ -167,12 +170,16 @@ enum SeerMapper {
     }
 
     /// The TMDB id to request for an item: prefers the `Tmdb` provider id, then
-    /// parses a `seer:<id>` synthetic id. `nil` when neither yields an integer.
+    /// parses either a current `seer:<kind>:<id>` or legacy `seer:<id>` synthetic
+    /// id. `nil` when neither yields an integer.
     static func tmdbID(for item: MediaItem) -> Int? {
         if let raw = item.providerIDs["Tmdb"], let value = Int(raw) {
             return value
         }
-        if item.id.hasPrefix("seer:"), let value = Int(item.id.dropFirst("seer:".count)) {
+        if item.id.hasPrefix("seer:"),
+           let raw = item.id.split(separator: ":").last,
+           let value = Int(raw)
+        {
             return value
         }
         return nil

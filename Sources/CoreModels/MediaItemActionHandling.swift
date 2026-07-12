@@ -102,6 +102,23 @@ public struct MediaItemMutation: Sendable, Equatable {
         self.playedPercentage = playedPercentage
     }
 
+    /// Reconstructs the optimistic UI portion of a durable outbox mutation. This
+    /// lets a relaunched surface preserve the user's watched/unwatched intent while
+    /// a server is offline, without coupling UI code to outbox persistence details.
+    public init?(watchMutation: WatchMutation) {
+        guard let played = watchMutation.played,
+              !watchMutation.optimisticTargets.isEmpty
+        else {
+            return nil
+        }
+        self.init(
+            itemIDs: Set(watchMutation.optimisticTargets.map(\.itemID)),
+            scopedItemIDs: Set(watchMutation.optimisticTargets.map(\.id)),
+            played: played,
+            resumePosition: watchMutation.resumePosition
+        )
+    }
+
     private enum Key {
         static let itemIDs = "itemIDs"
         static let scopedItemIDs = "scopedItemIDs"
@@ -154,7 +171,9 @@ public struct MediaItemMutation: Sendable, Equatable {
     public func applied(to item: MediaItem) -> MediaItem {
         guard targets(item) else { return item }
         var copy = item
-        if let played { copy.isPlayed = played }
+        if let played {
+            copy.isPlayed = played
+        }
         if let favorite { copy.isFavorite = favorite }
         if let resumePosition { copy.resumePosition = resumePosition > 0 ? resumePosition : nil }
         if let playedPercentage { copy.playedPercentage = playedPercentage }
@@ -169,12 +188,20 @@ public struct MediaItemMutation: Sendable, Equatable {
             copy.sources = copy.sources.map { ref in
                 guard matches(accountID: ref.accountID, itemID: ref.itemID) else { return ref }
                 var updated = ref
-                if let played { updated.isPlayed = played }
+                if let played {
+                    updated.isPlayed = played
+                    updated.hasBeenPlayed = played
+                }
                 if let favorite { updated.isFavorite = favorite }
                 if let resumePosition { updated.resumePosition = resumePosition > 0 ? resumePosition : nil }
                 if let playedPercentage { updated.playedPercentage = playedPercentage }
                 return updated
             }
+        }
+        if let played {
+            // Historical state is watched-anywhere across a merged title. Marking
+            // one physical copy unwatched must not erase another copy's history.
+            copy.hasBeenPlayed = played || copy.sources.contains(where: \.hasBeenPlayed)
         }
         return copy
     }

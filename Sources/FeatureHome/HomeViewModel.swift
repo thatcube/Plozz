@@ -704,13 +704,25 @@ public final class HomeViewModel {
     /// merges. A prior pending pass is cancelled so only the latest snapshot is
     /// folded. Callers that need a synchronous fold (tests, explicit refresh) call
     /// ``reenrich()`` directly.
-    public func scheduleReenrich() {
+    public func scheduleReenrich(
+        onSettled: @escaping @MainActor () -> Void = {}
+    ) {
         reenrichTask?.cancel()
         reenrichTask = Task { [weak self] in
             try? await Task.sleep(for: Self.reenrichDebounce)
             guard !Task.isCancelled, let self else { return }
             self.reenrich()
+            onSettled()
         }
+    }
+
+    /// Current durable watched/unwatched intents, projected into the same
+    /// optimistic mutation shape visible surfaces already consume.
+    public func pendingHeroWatchMutations() async -> [MediaItemMutation] {
+        let pending = await pendingWatchMutations()
+        return pending
+            .sorted { $0.capturedAt < $1.capturedAt }
+            .compactMap(MediaItemMutation.init(watchMutation:))
     }
 
     private func apply(_ mutation: MediaItemMutation, to item: MediaItem) -> MediaItem {

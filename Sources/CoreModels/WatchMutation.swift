@@ -112,6 +112,10 @@ public struct WatchMutation: Codable, Hashable, Sendable, Identifiable {
     /// Servers still needing this write. The reconciler removes a target as it
     /// succeeds, so a partial fan-out resumes exactly where it left off.
     public var targets: [WatchMutationTarget]
+    /// Every server copy this intent has targeted, retained after successful writes
+    /// are removed from ``targets``. UI replay uses this immutable history so a
+    /// partially drained offline mutation still matches already-written copies.
+    public var optimisticTargets: [WatchMutationTarget]
     /// Optional durable Trakt mirror, drained once (idempotency-keyed).
     public var trakt: TraktScrobbleIntent?
     /// Whether the Trakt mirror still needs writing (cleared on success).
@@ -201,6 +205,7 @@ public struct WatchMutation: Codable, Hashable, Sendable, Identifiable {
         self.played = played
         self.clearResume = clearResume
         self.targets = targets
+        self.optimisticTargets = targets
         self.trakt = trakt
         self.traktPending = trakt != nil
         self.simklPending = simklPending ?? (trakt != nil)
@@ -219,7 +224,7 @@ public struct WatchMutation: Codable, Hashable, Sendable, Identifiable {
 
     private enum CodingKeys: String, CodingKey {
         case id, capturedAt, canonicalMediaID, seasonNumber, episodeNumber
-        case resumePosition, played, clearResume, targets, trakt, traktPending
+        case resumePosition, played, clearResume, targets, optimisticTargets, trakt, traktPending
         case simklPending, anilistPending, malPending
         case attempts, episodeOrigin, expansionPending, identities, kind
         case anchorTitle, anchorYear
@@ -240,6 +245,10 @@ public struct WatchMutation: Codable, Hashable, Sendable, Identifiable {
         played = try container.decodeIfPresent(Bool.self, forKey: .played)
         clearResume = try container.decodeIfPresent(Bool.self, forKey: .clearResume) ?? false
         targets = try container.decodeIfPresent([WatchMutationTarget].self, forKey: .targets) ?? []
+        optimisticTargets = try container.decodeIfPresent(
+            [WatchMutationTarget].self,
+            forKey: .optimisticTargets
+        ) ?? targets
         trakt = try container.decodeIfPresent(TraktScrobbleIntent.self, forKey: .trakt)
         traktPending = try container.decodeIfPresent(Bool.self, forKey: .traktPending) ?? (trakt != nil)
         simklPending = try container.decodeIfPresent(Bool.self, forKey: .simklPending) ?? false

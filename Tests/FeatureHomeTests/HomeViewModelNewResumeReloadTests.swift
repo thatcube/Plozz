@@ -67,6 +67,31 @@ final class HomeViewModelNewResumeReloadTests: XCTestCase {
         XCTAssertTrue(cw(vm).contains { $0.id == "m1" })
     }
 
+    func testPendingHeroMutationsApplyInCaptureOrder() async {
+        let target = WatchMutationTarget(accountID: "a", itemID: "m1")
+        let older = WatchMutation(
+            capturedAt: Date(timeIntervalSince1970: 1_000),
+            canonicalMediaID: "tmdb:1",
+            played: true,
+            targets: [target]
+        )
+        let newer = WatchMutation(
+            capturedAt: Date(timeIntervalSince1970: 2_000),
+            canonicalMediaID: "tmdb:1",
+            played: false,
+            targets: [target]
+        )
+        let viewModel = HomeViewModel(
+            accounts: [],
+            pendingWatchMutations: { [newer, older] }
+        )
+
+        let projected = await viewModel.pendingHeroWatchMutations()
+
+        XCTAssertEqual(projected.map(\.played), [true, false],
+                       "Newest durable intent must be reduced last regardless of queue slot order")
+    }
+
     func testReWatchOfExistingCardDoesNotReload() async {
         let provider = FakeMediaProvider(allItems: [])
         provider.continueWatchingItems = [MediaItem(id: "m1", title: "Movie", kind: .movie)]

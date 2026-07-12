@@ -41,6 +41,7 @@ public struct HeroCurator: Sendable {
         continueWatching: [MediaItem],
         watchlist: [MediaItem],
         randomLibraries: [HeroRandomLibrary] = [],
+        watchMutations: [MediaItemMutation] = [],
         featuredProvider: FeaturedContentProviding = HeroFeaturedProvider.none,
         randomProvider: RandomLibraryContentProviding = HeroRandomProvider.none,
         artworkProvider: @escaping HeroArtworkProviding = HeroArtworkProvider.none
@@ -58,7 +59,8 @@ public struct HeroCurator: Sendable {
         let featured = await featuredItems
         let random = await randomItems
 
-        // Assemble per-source candidate lists in the user's configured order.
+        // Filter before artwork resolution so rejected watched titles never spend
+        // router/cache/network work finding a full-bleed backdrop.
         let perSource: [[MediaItem]] = settings.sources.map { source in
             switch source {
             case .featured: return featured
@@ -66,6 +68,12 @@ public struct HeroCurator: Sendable {
             case .randomFromLibrary: return random
             case .watchlist: return watchlist
             }
+        }.map {
+            HeroWatchEligibility.filter(
+                $0,
+                settings: settings,
+                mutations: watchMutations
+            )
         }
 
         let eligible = await HeroArtworkEligibility.resolve(
@@ -88,7 +96,8 @@ public struct HeroCurator: Sendable {
     public func curateSync(
         settings: HeroSettings,
         continueWatching: [MediaItem],
-        watchlist: [MediaItem]
+        watchlist: [MediaItem],
+        watchMutations: [MediaItemMutation] = []
     ) -> [MediaItem] {
         guard settings.isActive else { return [] }
         let perSource: [[MediaItem]] = settings.sources.map { source in
@@ -97,11 +106,38 @@ public struct HeroCurator: Sendable {
             case .continueWatching: return continueWatching
             case .watchlist: return watchlist
             }
+        }.map {
+            HeroWatchEligibility.filter(
+                $0,
+                settings: settings,
+                mutations: watchMutations
+            )
         }
         return strategy.compose(
             HeroArtworkEligibility.filterDirect(perSource),
             limit: settings.maxItems
         )
+    }
+
+    private enum HeroWatchEligibility {
+        static func filter(
+            _ items: [MediaItem],
+            settings: HeroSettings,
+            mutations: [MediaItemMutation]
+        ) -> [MediaItem] {
+            let reconciled = mutations.reduce(items) { current, mutation in
+                current.map { mutation.applied(to: $0) }
+            }
+            guard settings.hideWatched else { return reconciled }
+            return reconciled.filter { item in
+                switch item.kind {
+                case .movie, .series, .episode:
+                    return !item.hasBeenPlayed
+                default:
+                    return true
+                }
+            }
+        }
     }
 }
 
@@ -218,15 +254,16 @@ enum HeroDedupe {
     /// an exact same-server twin). Two items are "the same" when any token
     /// overlaps.
     static func tokens(for item: MediaItem) -> Set<String> {
-        var tokens: Set<String> = ["id:\(item.id)"]
+        let accountScope = item.sourceAccountID ?? "unscoped"
+    var tokens: Set<String> = ["id:\(item.kind.rawValue):\(accountScope):\(item.id)"]
         for identity in MediaItemIdentity.identities(for: item) {
             switch identity {
             case let .external(source, value):
-                tokens.insert("ext:\(source):\(value)")
+                tokens.insert("ext:\(item.kind.rawValue):\(source):\(value)")
             case let .title(normalizedTitle, year, kind):
                 tokens.insert("title:\(normalizedTitle):\(year.map(String.init) ?? "?"):\(kind.rawValue)")
             case let .sameItemID(value):
-                tokens.insert("id:\(value)")
+                tokens.insert("id:\(item.kind.rawValue):\(value)")
             }
         }
         return tokens

@@ -66,6 +66,36 @@ final class JellyfinProviderMappingTests: XCTestCase {
         )
     }
 
+    func testSeriesProgressMapsHistoricalWatchWithoutCompletion() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Users/u1/Items/show1", json: """
+        {"Id":"show1","Name":"Started Show","Type":"Series",
+         "UserData":{"PlaybackPositionTicks":0,"PlayedPercentage":20.0,"Played":false}}
+        """)
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        let item = try await provider.item(id: "show1")
+
+        XCTAssertTrue(item.hasBeenPlayed)
+        XCTAssertFalse(item.isPlayed)
+    }
+
+    func testRewatchPreservesResumeWhileRecordingHistoricalWatch() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Users/u1/Items/movie1", json: """
+        {"Id":"movie1","Name":"Rewatch","Type":"Movie",
+         "UserData":{"PlaybackPositionTicks":18000000000,
+                     "PlayedPercentage":50.0,"Played":true}}
+        """)
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        let item = try await provider.item(id: "movie1")
+
+        XCTAssertTrue(item.hasBeenPlayed)
+        XCTAssertFalse(item.isPlayed)
+        XCTAssertEqual(item.resumePosition, 1800)
+    }
+
     func testImageURLsIncludeCacheBustingTag() async throws {
         // When the server advertises an image tag (a content hash that changes
         // whenever the art changes), Plozz must include it in the image URL so a

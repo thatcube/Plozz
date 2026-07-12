@@ -21,6 +21,7 @@ private final class FakeWatchApplier: WatchMutationApplying, @unchecked Sendable
     var failingAccounts: Set<String> = []
     /// When true, Trakt mirroring throws (simulating an offline tracker).
     var traktFails = false
+    var targetExpansion: WatchTargetExpansion = .none
 
     func setPlayed(_ played: Bool, on target: WatchMutationTarget) async throws {
         if failingAccounts.contains(target.accountID) { throw AppError.serverUnreachable }
@@ -47,6 +48,10 @@ private final class FakeWatchApplier: WatchMutationApplying, @unchecked Sendable
 
     func scrobbleMAL(_ intent: TraktScrobbleIntent) async throws {
         lock.lock(); malScrobbles.append(intent); lock.unlock()
+    }
+
+    func expandTargets(for mutation: WatchMutation) async -> WatchTargetExpansion {
+        targetExpansion
     }
 }
 
@@ -366,6 +371,23 @@ final class WatchOutboxDurabilityTests: XCTestCase {
         XCTAssertEqual(converged, 0, "Converged on relaunch, then pruned")
     }
 
+    func testLegacyPayloadUsesRemainingTargetsForOptimisticReplay() throws {
+        let original = playedMutation(
+            capturedAt: Date(timeIntervalSince1970: 1_000),
+            targets: [target("jellyfin", "j1")]
+        )
+        let encoded = try JSONEncoder().encode(original)
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        )
+        object.removeValue(forKey: "optimisticTargets")
+
+        let legacyData = try JSONSerialization.data(withJSONObject: object)
+        let decoded = try JSONDecoder().decode(WatchMutation.self, from: legacyData)
+
+        XCTAssertEqual(decoded.optimisticTargets, original.targets)
+    }
+
     /// "Fail toward writing": if one of two servers is down, the reachable one
     /// converges immediately and the unreachable target stays queued (the watch is
     /// never dropped), then lands on the next drain.
@@ -381,12 +403,46 @@ final class WatchOutboxDurabilityTests: XCTestCase {
         XCTAssertEqual(applier.playedWrites, [.init(played: true, accountID: "jellyfin", itemID: "j1")])
         let pendingAfterFail = await reconciler.pendingCount
         XCTAssertEqual(pendingAfterFail, 1, "Only the unreachable server stays queued")
+        let partial = await reconciler.snapshot().pending
+        XCTAssertEqual(partial.first?.targets, [target("plex", "p1")])
+        XCTAssertEqual(
+            Set(partial.first?.optimisticTargets ?? []),
+            Set([target("jellyfin", "j1"), target("plex", "p1")]),
+            "UI replay must retain both copies after the successful target is drained"
+        )
 
         applier.failingAccounts = []
         await reconciler.drain()
         let pendingAfterRetry = await reconciler.pendingCount
         XCTAssertEqual(pendingAfterRetry, 0)
         XCTAssertEqual(applier.playedWrites.last, .init(played: true, accountID: "plex", itemID: "p1"))
+    }
+
+    func testExpandedTargetsRemainAvailableForOptimisticReplay() async throws {
+        let store = InMemoryWatchMutationStore()
+        let applier = FakeWatchApplier()
+        applier.failingAccounts = ["plex"]
+        applier.targetExpansion = WatchTargetExpansion(targets: [target("plex", "p1")])
+        let reconciler = WatchStateReconciler(store: store, applier: applier)
+        let mutation = WatchMutation(
+            capturedAt: Date(),
+            canonicalMediaID: "tmdb:1",
+            played: true,
+            targets: [target("jellyfin", "j1")],
+            expansionPending: true,
+            identities: [.external(source: "tmdb", value: "1")],
+            kind: .movie
+        )
+
+        await reconciler.enqueue(mutation)
+        await reconciler.drain()
+
+        let pending = await reconciler.snapshot().pending
+        XCTAssertEqual(pending.first?.targets, [target("plex", "p1")])
+        XCTAssertEqual(
+            Set(pending.first?.optimisticTargets ?? []),
+            Set([target("jellyfin", "j1"), target("plex", "p1")])
+        )
     }
 }
 
@@ -427,14 +483,21 @@ final class WatchOutboxStaleWriteTests: XCTestCase {
         let t2 = Date(timeIntervalSince1970: 2_000)
 
         await reconciler.enqueue(playedMutation(canonical: "imdb:tt9", played: false, capturedAt: t1, targets: [target("a", "x")]))
-        await reconciler.enqueue(playedMutation(canonical: "imdb:tt9", played: true, capturedAt: t2, targets: [target("a", "x")]))
+        await reconciler.enqueue(playedMutation(canonical: "imdb:tt9", played: true, capturedAt: t2, targets: [target("b", "y")]))
         let coalesced = await reconciler.pendingCount
         XCTAssertEqual(coalesced, 1, "Same title coalesces to one entry")
+        let queued = await reconciler.snapshot().pending
+        XCTAssertEqual(
+            Set(queued.first?.optimisticTargets ?? []),
+            Set([target("a", "x"), target("b", "y")]),
+            "Coalescing must preserve every title copy for optimistic replay"
+        )
 
         applier.failingAccounts = []
         await reconciler.drain()
-        XCTAssertEqual(applier.playedWrites, [.init(played: true, accountID: "a", itemID: "x")],
-                       "The newer played=true wins; played=false is never written")
+        XCTAssertEqual(Set(applier.playedWrites.map(\.accountID)), Set(["a", "b"]))
+        XCTAssertTrue(applier.playedWrites.allSatisfy(\.played),
+                      "The newer played=true wins on every coalesced target")
     }
 }
 

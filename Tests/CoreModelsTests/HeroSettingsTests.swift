@@ -24,6 +24,7 @@ final class HeroSettingsTests: XCTestCase {
         let d = HeroSettings.default
         XCTAssertTrue(d.isActive)
         XCTAssertEqual(d.sources, HeroSourceKind.allCases)
+        XCTAssertTrue(d.hideWatched)
     }
 
     func testMaxItemsIsClamped() {
@@ -55,7 +56,7 @@ final class HeroSettingsTests: XCTestCase {
 
     func testStoreRoundTrip() {
         let store = HeroSettingsStore(defaults: defaults, namespace: nil)
-        let settings = HeroSettings(isEnabled: true, sources: [.featured, .randomFromLibrary], maxItems: 6, trailersEnabled: true, randomLibraryKeys: ["a:1", "a:2"], autoAdvance: false, autoAdvanceSeconds: 20)
+        let settings = HeroSettings(isEnabled: true, sources: [.featured, .randomFromLibrary], maxItems: 6, trailersEnabled: true, hideWatched: false, randomLibraryKeys: ["a:1", "a:2"], autoAdvance: false, autoAdvanceSeconds: 20)
         store.save(settings)
         XCTAssertEqual(store.load(), settings)
     }
@@ -85,6 +86,7 @@ final class HeroSettingsTests: XCTestCase {
         XCTAssertEqual(decoded.maxItems, 4)
         XCTAssertEqual(decoded.sources, HeroSettings.default.sources)
         XCTAssertEqual(decoded.autoAdvanceSeconds, HeroSettings.default.autoAdvanceSeconds)
+        XCTAssertTrue(decoded.hideWatched)
     }
 
     func testInMemoryStoreRoundTrips() {

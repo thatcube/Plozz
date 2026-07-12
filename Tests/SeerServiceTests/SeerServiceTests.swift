@@ -24,7 +24,7 @@ final class SeerMapperTests: XCTestCase {
 
         let item = SeerMapper.mediaItem(from: result)
         XCTAssertNotNil(item)
-        XCTAssertEqual(item?.id, "seer:550")
+        XCTAssertEqual(item?.id, "seer:movie:550")
         XCTAssertEqual(item?.title, "Fight Club")
         XCTAssertEqual(item?.kind, .movie)
         XCTAssertEqual(item?.productionYear, 1999)
@@ -46,7 +46,7 @@ final class SeerMapperTests: XCTestCase {
         )
 
         let item = SeerMapper.mediaItem(from: result)
-        XCTAssertEqual(item?.id, "seer:1396")
+        XCTAssertEqual(item?.id, "seer:series:1396")
         XCTAssertEqual(item?.title, "Breaking Bad")
         XCTAssertEqual(item?.kind, .series)
         XCTAssertEqual(item?.productionYear, 2008)
@@ -56,6 +56,14 @@ final class SeerMapperTests: XCTestCase {
     func testPersonResultIsSkipped() {
         let result = SeerDiscoverResult(id: 1, mediaType: "person", name: "Some Actor")
         XCTAssertNil(SeerMapper.mediaItem(from: result))
+    }
+
+    func testMovieAndSeriesTMDBNamespacesProduceDistinctIDs() {
+        let movie = SeerDiscoverResult(id: 42, mediaType: "movie", title: "Movie")
+        let series = SeerDiscoverResult(id: 42, mediaType: "tv", name: "Series")
+
+        XCTAssertEqual(SeerMapper.mediaItem(from: movie)?.id, "seer:movie:42")
+        XCTAssertEqual(SeerMapper.mediaItem(from: series)?.id, "seer:series:42")
     }
 
     func testEmptyTitleIsSkipped() {
@@ -112,6 +120,8 @@ final class SeerMapperTests: XCTestCase {
 
         let fromSynthetic = MediaItem(id: "seer:604", title: "T", kind: .movie)
         XCTAssertEqual(SeerMapper.tmdbID(for: fromSynthetic), 604)
+        let fromKindScopedSynthetic = MediaItem(id: "seer:series:605", title: "T", kind: .series)
+        XCTAssertEqual(SeerMapper.tmdbID(for: fromKindScopedSynthetic), 605)
 
         let none = MediaItem(id: "jf:abc", title: "T", kind: .movie)
         XCTAssertNil(SeerMapper.tmdbID(for: none))
@@ -125,9 +135,9 @@ final class SeerMapperTests: XCTestCase {
             SeerDiscoverResult(id: 4, mediaType: "movie", title: "C")
         ])
         let all = SeerMapper.mediaItems(from: page)
-        XCTAssertEqual(all.map(\.id), ["seer:1", "seer:3", "seer:4"])
+        XCTAssertEqual(all.map(\.id), ["seer:movie:1", "seer:series:3", "seer:movie:4"])
         let capped = SeerMapper.mediaItems(from: page, limit: 2)
-        XCTAssertEqual(capped.map(\.id), ["seer:1", "seer:3"])
+        XCTAssertEqual(capped.map(\.id), ["seer:movie:1", "seer:series:3"])
     }
 
     func testRequestAvailabilityCombinesTrackedAndMissingSeasons() {
@@ -228,7 +238,7 @@ final class SeerServiceTests: XCTestCase {
         """)
         let service = makeConnectedService(http)
         let items = try await service.trending(limit: 5)
-        XCTAssertEqual(items.map(\.id), ["seer:10", "seer:12"])
+        XCTAssertEqual(items.map(\.id), ["seer:movie:10", "seer:series:12"])
         XCTAssertEqual(items.first?.availability, .available)
         // Auth header injected; browse runs as ADMIN (no X-API-User).
         let sent = http.lastSent(pathSuffix: "/discover/trending")

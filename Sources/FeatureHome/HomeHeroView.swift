@@ -1,7 +1,9 @@
 #if canImport(SwiftUI) && canImport(UIKit)
+import AudioToolbox
 import SwiftUI
 import UIKit
 import CoreModels
+import CoreNetworking
 import CoreUI
 import MetadataKit
 
@@ -842,6 +844,7 @@ struct HomeHeroView: View {
         case .escape, .blocked:
             break
         }
+        playNavigationFeedback(for: outcome)
         return outcome
     }
 
@@ -875,7 +878,17 @@ struct HomeHeroView: View {
         case .escape, .blocked:
             break
         }
+        playNavigationFeedback(for: outcome)
         return outcome
+    }
+
+    private func playNavigationFeedback(for outcome: HeroFocusOutcome) {
+        switch outcome {
+        case .moveButton, .advance:
+            HeroNavigationClickPlayer.shared.play()
+        case .escape, .blocked:
+            break
+        }
     }
 
     /// Fires the currently-selected pill's action (remote Select / Play-Pause).
@@ -1814,6 +1827,98 @@ final class HeroDirectionalRepeatController {
     }
 }
 
+/// A short original UI tick for app-driven Hero moves. tvOS exposes no public API
+/// for replaying its native focus click, so this stays in memory and never changes
+/// the shared audio-session category.
+@MainActor
+final class HeroNavigationClickPlayer {
+    static let shared = HeroNavigationClickPlayer()
+
+    private var soundID: SystemSoundID = 0
+    private var soundURL: URL?
+
+    private init() {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("plozz-hero-navigation-click.wav")
+        do {
+            try Self.makeClickWAV().write(to: url, options: .atomic)
+            var createdSoundID: SystemSoundID = 0
+            let status = AudioServicesCreateSystemSoundID(url as CFURL, &createdSoundID)
+            guard status == kAudioServicesNoError else {
+                PlozzLog.app.error(
+                    "Hero navigation click registration failed status=\(status)"
+                )
+                return
+            }
+            soundID = createdSoundID
+            soundURL = url
+        } catch {
+            PlozzLog.app.error(
+                "Hero navigation click initialization failed error=\(String(describing: error))"
+            )
+        }
+    }
+
+    func play() {
+        guard soundID != 0 else { return }
+        AudioServicesPlaySystemSound(soundID)
+    }
+
+    deinit {
+        if soundID != 0 {
+            AudioServicesDisposeSystemSoundID(soundID)
+        }
+        if let soundURL {
+            try? FileManager.default.removeItem(at: soundURL)
+        }
+    }
+
+    private static func makeClickWAV() -> Data {
+        let sampleRate = 48_000
+        let frameCount = Int(Double(sampleRate) * 0.018)
+        var samples = Data()
+        samples.reserveCapacity(frameCount * MemoryLayout<Int16>.size)
+        var noiseState: UInt32 = 0x504C_4F5A
+
+        for frame in 0..<frameCount {
+            let time = Double(frame) / Double(sampleRate)
+            noiseState = 1_664_525 &* noiseState &+ 1_013_904_223
+            let noise = Double(noiseState & 0xFFFF) / 32_767.5 - 1
+            let tone = sin(2 * .pi * 2_150 * time)
+                + 0.35 * sin(2 * .pi * 3_900 * time)
+            let attack = min(1, time / 0.0007)
+            let envelope = attack * exp(-time * 260)
+            let value = max(-1, min(1, (0.52 * noise + 0.48 * tone) * envelope * 0.30))
+            var sample = Int16((value * Double(Int16.max)).rounded()).littleEndian
+            withUnsafeBytes(of: &sample) { samples.append(contentsOf: $0) }
+        }
+
+        var wav = Data()
+        wav.append(contentsOf: "RIFF".utf8)
+        appendLittleEndian(UInt32(36 + samples.count), to: &wav)
+        wav.append(contentsOf: "WAVEfmt ".utf8)
+        appendLittleEndian(UInt32(16), to: &wav)
+        appendLittleEndian(UInt16(1), to: &wav)
+        appendLittleEndian(UInt16(1), to: &wav)
+        appendLittleEndian(UInt32(sampleRate), to: &wav)
+        appendLittleEndian(UInt32(sampleRate * MemoryLayout<Int16>.size), to: &wav)
+        appendLittleEndian(UInt16(MemoryLayout<Int16>.size), to: &wav)
+        appendLittleEndian(UInt16(16), to: &wav)
+        wav.append(contentsOf: "data".utf8)
+        appendLittleEndian(UInt32(samples.count), to: &wav)
+        wav.append(samples)
+        return wav
+    }
+
+    private static func appendLittleEndian<T: FixedWidthInteger>(
+        _ value: T,
+        to data: inout Data
+    ) {
+        var value = value.littleEndian
+        withUnsafeBytes(of: &value) { data.append(contentsOf: $0) }
+    }
+}
+
 /// The Hero's single focus target and directional-input owner. Zero-duration,
 /// press-typed recognizers claim Left/Right at press-down, before the focus engine
 /// can emit duplicate moves or false navigation feedback.
@@ -1864,6 +1969,7 @@ private struct HeroActionPressSurface: UIViewRepresentable {
             super.init(frame: frame)
             backgroundColor = .clear
             isOpaque = false
+            _ = HeroNavigationClickPlayer.shared
             repeatController.onRepeat = { [weak self] direction in
                 self?.onMove(direction) ?? .blocked
             }

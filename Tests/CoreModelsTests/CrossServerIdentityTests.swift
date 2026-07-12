@@ -112,6 +112,61 @@ final class MediaItemIdentityTests: XCTestCase {
         XCTAssertEqual(merged.count, 1)
         XCTAssertEqual(Set(merged[0].sources.map(\.id)), ["plex:plex-e5", "smb:smb-e5"])
     }
+
+    func testEpisodeFingerprintBridgesManagedAndFilesystemIDs() {
+        let plex = MediaItem(
+            id: "plex-e4",
+            title: "The Water Falls, the Stones Emerge",
+            kind: .episode,
+            parentTitle: "Avatar: The Last Airbender (2024)",
+            seasonNumber: 2,
+            episodeNumber: 4,
+            productionYear: 2026,
+            providerIDs: ["Tvdb": "11597652"],
+            sourceAccountID: "plex"
+        )
+        let share = MediaItem(
+            id: "share-e4",
+            title: "The Water Falls the Stones Emerge",
+            kind: .episode,
+            parentTitle: "Avatar The Last Airbender 2024",
+            seasonNumber: 2,
+            episodeNumber: 4,
+            productionYear: nil,
+            providerIDs: ["Tvdb": "385925"],
+            sourceAccountID: "share"
+        )
+
+        let merged = MediaItemMerger.merge([plex, share])
+
+        XCTAssertEqual(merged.count, 1)
+        XCTAssertEqual(Set(merged[0].sources.map(\.id)), ["plex:plex-e4", "share:share-e4"])
+    }
+
+    func testEpisodeFingerprintDoesNotMergeDifferentAirYears() {
+        let original = MediaItem(
+            id: "original",
+            title: "The Cave of Two Lovers",
+            kind: .episode,
+            parentTitle: "Avatar: The Last Airbender",
+            seasonNumber: 2,
+            episodeNumber: 2,
+            productionYear: 2006,
+            sourceAccountID: "original"
+        )
+        let remake = MediaItem(
+            id: "remake",
+            title: "The Cave of Two Lovers",
+            kind: .episode,
+            parentTitle: "Avatar: The Last Airbender (2024)",
+            seasonNumber: 2,
+            episodeNumber: 2,
+            productionYear: 2026,
+            sourceAccountID: "remake"
+        )
+
+        XCTAssertEqual(MediaItemMerger.merge([original, remake]).count, 2)
+    }
 }
 
 final class MediaItemMergerTests: XCTestCase {

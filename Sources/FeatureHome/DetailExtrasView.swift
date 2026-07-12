@@ -22,6 +22,7 @@ struct DetailExtrasView: View {
     /// A series with a definitively empty season/episode browser has no lower
     /// focus target that could trigger recede, so Cast must be available directly.
     var revealsSeriesCastWithoutBrowser = false
+    var onCastFocusEntered: (() -> Void)? = nil
 
     private var hasContent: Bool {
         !item.cast.isEmpty || !item.studios.isEmpty || !item.tags.isEmpty
@@ -31,7 +32,11 @@ struct DetailExtrasView: View {
         if hasContent {
             VStack(alignment: .leading, spacing: 28) {
                 if !item.cast.isEmpty {
-                    CastRowView(people: item.cast, leadingInset: leadingInset)
+                    CastRowView(
+                        people: item.cast,
+                        leadingInset: leadingInset,
+                        onFocusEntered: onCastFocusEntered
+                    )
                         .modifier(SeriesCastRevealModifier(
                             model: seriesRecedeModel,
                             revealsWithoutBrowser: revealsSeriesCastWithoutBrowser

@@ -75,6 +75,7 @@ public struct ItemDetailView: View {
     @State private var showingAdminConfirm = false
     @State private var pendingAdminRequest: PendingRequestIntent?
     @State private var seasonRequestAvailability: MediaRequestAvailability?
+    @State private var seasonRequestAvailabilityResolved = false
     @State private var isSeasonRequestInFlight = false
     /// One-time acknowledgement of the "requests as unrestricted admin" explainer.
     /// Device-wide (shared with any other request surface via this key): once the
@@ -267,7 +268,15 @@ public struct ItemDetailView: View {
                 // Show "Request as <name>" before the press so a shared-TV
                 // request's identity is visible up front.
                 requestActingName: requestActingName,
-                onRequest: (onRequest != nil && cta == .request) ? { requestTapped(detail.item) } : nil
+                onRequest: (detail.item.kind == .movie && onRequest != nil && cta == .request)
+                    ? { requestTapped(detail.item) }
+                    : nil,
+                seasonRequestAvailability: detail.item.kind == .series ? seasonRequestAvailability : nil,
+                seasonRequestAvailabilityResolved: seasonRequestAvailabilityResolved,
+                isRequestingSeasons: isSeasonRequestInFlight,
+                onRequestSeasons: onRequestSeasons == nil ? nil : { seasons in
+                    requestTapped(detail.item, seasons: seasons)
+                }
             )
             .id(Self.topAnchorID)
         }
@@ -334,7 +343,6 @@ public struct ItemDetailView: View {
 
     private var seasonRequestRefreshKey: String {
         guard seerConnected,
-              !isDiscoveryItem,
               let item = viewModel.state.value?.item,
               item.kind == .series,
               item.providerIDs["Tmdb"] != nil
@@ -349,13 +357,22 @@ public struct ItemDetailView: View {
               let requestAvailabilityRefresh
         else {
             seasonRequestAvailability = nil
+            seasonRequestAvailabilityResolved = true
             return
         }
         seasonRequestAvailability = nil
-        guard let availability = await requestAvailabilityRefresh(item) else { return }
-        let ownedSeasonNumbers = await viewModel.ownedSeasonNumbersAcrossSources()
+        seasonRequestAvailabilityResolved = false
+        guard let availability = await requestAvailabilityRefresh(item) else {
+            guard !Task.isCancelled else { return }
+            seasonRequestAvailabilityResolved = true
+            return
+        }
+        let ownedSeasonNumbers = isDiscoveryItem
+            ? Set<Int>()
+            : await viewModel.ownedSeasonNumbersAcrossSources()
         guard !Task.isCancelled else { return }
         seasonRequestAvailability = availability.markingAvailable(Array(ownedSeasonNumbers))
+        seasonRequestAvailabilityResolved = true
     }
 
     private func container(_ detail: ItemDetailViewModel.Detail) -> some View {

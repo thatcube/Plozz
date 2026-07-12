@@ -97,18 +97,4 @@ final class SeriesDetailBrowserPolicyTests: XCTestCase {
         ))
     }
 
-    func testSeasonBandStaysEngagedWhileEitherControlOwnsFocus() {
-        XCTAssertFalse(SeriesRequestFocusPolicy.shouldResetBand(
-            focusedSeasonID: "season-1",
-            requestAccessoryFocused: false
-        ))
-        XCTAssertFalse(SeriesRequestFocusPolicy.shouldResetBand(
-            focusedSeasonID: nil,
-            requestAccessoryFocused: true
-        ))
-        XCTAssertTrue(SeriesRequestFocusPolicy.shouldResetBand(
-            focusedSeasonID: nil,
-            requestAccessoryFocused: false
-        ))
-    }
 }

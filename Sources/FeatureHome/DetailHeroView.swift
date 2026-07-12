@@ -113,6 +113,12 @@ struct DetailHeroView: View {
     /// One-tap request action, invoked when the user activates the "Request" pill.
     /// `nil` disables requesting (e.g. Seerr disconnected), leaving the pill inert.
     var onRequest: (() -> Void)? = nil
+    /// Season-level request state for a discovery series. When present, the hero
+    /// replaces its one-tap title request with the shared season request menu.
+    var seasonRequestAvailability: MediaRequestAvailability? = nil
+    var seasonRequestAvailabilityResolved: Bool = false
+    var isRequestingSeasons: Bool = false
+    var onRequestSeasons: (([Int]) -> Void)? = nil
 
     /// Local focus state of the Play button, so the inline resume progress bar
     /// can flip its colours to stay visible against the button's focused (white)
@@ -641,6 +647,49 @@ struct DetailHeroView: View {
     /// preferred default focus so entering the row lands on it.
     @ViewBuilder
     private func requestPill() -> some View {
+        if item.kind == .series {
+            seriesRequestPill()
+        } else {
+            titleRequestPill()
+        }
+    }
+
+    @ViewBuilder
+    private func seriesRequestPill() -> some View {
+        if let seasonRequestAvailability, seasonRequestAvailability.hasSeasonRequestContent {
+            let hasRequestable = !seasonRequestAvailability.requestableSeasonNumbers.isEmpty
+            let label = isRequestingSeasons
+                ? "Requesting…"
+                : (hasRequestable ? "Request Seasons…" : "Season Requests")
+            SeasonRequestMenu(
+                availability: seasonRequestAvailability,
+                requestAllTitle: "Request All Seasons",
+                onRequest: { onRequestSeasons?($0) }
+            ) {
+                Label(label, systemImage: "plus.circle")
+            }
+            .menuStyle(.button)
+            .modifier(HeroActionButtonStyle(prominent: hasRequestable))
+            .prefersDefaultFocus(true, in: heroActionsScope)
+            .focused($heroActionRowFocus, equals: .request)
+            .disabled(onRequestSeasons == nil || isRequestingSeasons)
+            .accessibilityLabel(requestActingName.map { "\(label) as \($0)" } ?? label)
+        } else {
+            let label = seasonRequestAvailability != nil
+                ? "No Seasons to Request"
+                : (seasonRequestAvailabilityResolved ? "Seasons Unavailable" : "Loading Seasons…")
+            Button {} label: {
+                Label(label, systemImage: seasonRequestAvailabilityResolved ? "exclamationmark.circle" : "clock")
+            }
+            .modifier(HeroActionButtonStyle(prominent: false))
+            .prefersDefaultFocus(true, in: heroActionsScope)
+            .focused($heroActionRowFocus, equals: .request)
+            .accessibilityLabel(label)
+        }
+    }
+
+    @ViewBuilder
+    private func titleRequestPill() -> some View {
         switch requestCTA {
         case .request:
             let label = requestActingName.map { "Request as \($0)" } ?? "Request"

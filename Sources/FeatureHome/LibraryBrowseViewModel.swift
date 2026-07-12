@@ -269,6 +269,19 @@ public final class LibraryBrowseViewModel {
         }
     }
 
+    /// Applies the app's provider-neutral watch-state mutation directly to loaded
+    /// slots. Plex, Jellyfin, SMB, and future share transports all use this path, so
+    /// badges and progress bars update immediately without a provider refetch.
+    public func applyWatchedState(_ mutation: MediaItemMutation) {
+        for slot in loaded {
+            guard let item = slot.item else { continue }
+            let updated = mutation.applied(to: item)
+            if updated != item {
+                slot.item = updated
+            }
+        }
+    }
+
     /// Builds the alphabet fast-scroll index in the background when the grid is
     /// sorted by name and large enough to warrant it. The provider returns an
     /// empty index for any other sort (or when it can't compute one), so the

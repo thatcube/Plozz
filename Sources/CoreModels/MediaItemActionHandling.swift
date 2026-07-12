@@ -25,13 +25,6 @@ public extension Notification.Name {
     /// in place. Read the payload via `Notification.mediaItemMutation`.
     static let mediaItemDidMutate = Notification.Name("PlozzMediaItemDidMutate")
 
-    /// Posted after the player has persisted its final progress report. Detail
-    /// pages quietly re-fetch so provider-specific canonical IDs/version aliases
-    /// cannot leave the still-mounted hero stale after dismissal.
-    static let playbackProgressDidPersist = Notification.Name(
-        "PlozzPlaybackProgressDidPersist"
-    )
-
     /// Posted each time the cross-server identity index warms a little more (a new
     /// account finishes indexing, so the shared source-of-truth membership grows).
     /// Screens that merged their rows against an earlier, sparser snapshot observe
@@ -46,6 +39,11 @@ public extension Notification.Name {
 /// what about them changed. Screens use it to update the affected cards in place
 /// — flipping a badge without rebuilding the rail — so the user's focus is never
 /// yanked back to the top of the screen after a menu action.
+///
+/// This is the single UI-facing watch-state channel for every managed provider,
+/// filesystem share, and tracker-backed playback. New source types participate by
+/// producing the same account-scoped mutation; views never need provider-specific
+/// refresh logic.
 ///
 /// A mutation can carry a watched-state change (`played`), a watchlist change
 /// (`favorite`), a resume-progress change (`resumePosition` / `playedPercentage`),

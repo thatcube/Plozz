@@ -535,10 +535,6 @@ public final class AppState {
         // any title, so the stop's targets could only be origin-only.
         FanoutDiagnostics.emit(FanoutDiagnostics.indexStateLine(identitySnapshotStore.current, phase: "stop-index"))
         publishOptimisticWatchState(itemID: itemID, mutation: mutation, watchedPercent: watchedPercent)
-        NotificationCenter.default.post(
-            name: .playbackProgressDidPersist,
-            object: nil
-        )
         Task {
             if let accountID {
                 await reconciler.endLiveSession(accountID: accountID, itemID: itemID)

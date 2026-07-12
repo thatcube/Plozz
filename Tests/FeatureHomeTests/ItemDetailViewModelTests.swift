@@ -251,6 +251,38 @@ final class ItemDetailViewModelTests: XCTestCase {
                        "A library-tile open keeps its own server, locality notwithstanding")
     }
 
+    func testSeriesWatchMutationCascadesToLoadedEpisodes() async {
+        let series = MediaItem(id: "series", title: "Series", kind: .series)
+        let season = MediaItem(id: "season", title: "Season 1", kind: .season)
+        let episodes = [
+            MediaItem(id: "episode-1", title: "One", kind: .episode),
+            MediaItem(id: "episode-2", title: "Two", kind: .episode)
+        ]
+        let provider = FakeMediaProvider(allItems: [series, season] + episodes)
+        provider.childrenByParent = [
+            series.id: [season],
+            season.id: episodes
+        ]
+        let vm = ItemDetailViewModel(
+            provider: provider,
+            itemID: series.id,
+            sourceAccountID: "jellyfin"
+        )
+        await vm.load()
+        await vm.loadEpisodes(for: season.id)
+
+        vm.applyWatchedState(
+            MediaItemMutation(
+                itemIDs: [series.id],
+                scopedItemIDs: ["jellyfin:\(series.id)"],
+                played: true
+            )
+        )
+
+        XCTAssertTrue(vm.state.value?.item.isPlayed ?? false)
+        XCTAssertTrue(vm.episodes(for: season.id)?.allSatisfy(\.isPlayed) ?? false)
+    }
+
     func testSwitchToSourceIsNotOverriddenByInitialLocalityPreference() async {
         // After a user explicitly switches servers, a later load() must NOT re-apply
         // the automatic local-first preference and drag them back.

@@ -72,6 +72,52 @@ final class LibraryBrowseViewModelTests: XCTestCase {
         XCTAssertEqual(vm.item(at: 0)?.id, "scanned0")
     }
 
+    func testWatchMutationUpdatesLoadedGridSlotInPlace() async {
+        let item = MediaItem(id: "movie", title: "Movie", kind: .movie)
+        let provider = FakeMediaProvider(allItems: [item])
+        let vm = LibraryBrowseViewModel(
+            provider: provider,
+            containerID: "lib1",
+            containerKind: .movie,
+            sourceAccountID: "plex"
+        )
+        await vm.loadFirstPage()
+
+        vm.applyWatchedState(
+            MediaItemMutation(
+                itemIDs: ["movie"],
+                scopedItemIDs: ["plex:movie"],
+                resumePosition: 600,
+                playedPercentage: 0.25
+            )
+        )
+
+        XCTAssertEqual(vm.item(at: 0)?.resumePosition, 600)
+        XCTAssertEqual(vm.item(at: 0)?.playedPercentage, 0.25)
+    }
+
+    func testWatchMutationDoesNotCrossAccountBoundary() async {
+        let item = MediaItem(id: "42", title: "Server A Movie", kind: .movie)
+        let provider = FakeMediaProvider(allItems: [item])
+        let vm = LibraryBrowseViewModel(
+            provider: provider,
+            containerID: "lib1",
+            containerKind: .movie,
+            sourceAccountID: "server-a"
+        )
+        await vm.loadFirstPage()
+
+        vm.applyWatchedState(
+            MediaItemMutation(
+                itemIDs: ["42"],
+                scopedItemIDs: ["server-b:42"],
+                played: true
+            )
+        )
+
+        XCTAssertFalse(vm.item(at: 0)?.isPlayed ?? false)
+    }
+
     func testItemAppearedLoadsOwningPage() async {
         let (vm, provider) = makeVM(itemCount: 100, pageSize: 10)
         await vm.loadFirstPage()

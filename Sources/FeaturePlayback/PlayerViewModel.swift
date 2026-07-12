@@ -1718,8 +1718,8 @@ public final class PlayerViewModel {
     /// so a paused or stuck player never re-writes the same position to N servers.
     /// Pure enqueue (no network on this path); safe to call from the timer or, on
     /// app background, from `checkpointNow()`.
-    private func emitCheckpoint() {
-        guard request != nil, !engine.isPaused else { return }
+    private func emitCheckpoint(includingPaused: Bool = false) {
+        guard request != nil, includingPaused || !engine.isPaused else { return }
         let position = max(engine.furthestObservedPosition, engine.currentTime)
         guard position > 1, position - lastCheckpointPosition >= 1 else { return }
         lastCheckpointPosition = position
@@ -1731,7 +1731,7 @@ public final class PlayerViewModel {
     /// sleep path, which never fires the view's `onDisappear`/`stop()`), so the
     /// latest position is durably captured before the process can be killed.
     public func checkpointNow() {
-        emitCheckpoint()
+        emitCheckpoint(includingPaused: true)
     }
 
     /// Handles the app leaving the foreground (TV Home button, sleep, or app
@@ -1743,7 +1743,7 @@ public final class PlayerViewModel {
     /// paused so the user resumes intentionally, rather than audio springing back
     /// to life on its own.
     public func suspendForBackground() {
-        emitCheckpoint()
+        emitCheckpoint(includingPaused: true)
         // Key off intent, not `engine.isPaused`: if we mean to be playing (even
         // while the engine is mid post-seek settle), pause for real — this also
         // routes through `cancelResumeConfirm()` so a recovery loop can't wake the

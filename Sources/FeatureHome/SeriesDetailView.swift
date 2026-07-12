@@ -205,9 +205,14 @@ struct SeriesDetailView: View {
             // Watched button), flip the same flags on `heroItem` in place so the
             // visible hero button reflects the new state immediately.
             .onReceive(NotificationCenter.default.publisher(for: .mediaItemDidMutate)) { note in
-                guard let mutation = MediaItemMutation.from(note),
-                      mutation.targets(heroItem) else { return }
-                heroItem = mutation.applied(to: heroItem)
+                guard let mutation = MediaItemMutation.from(note) else { return }
+                if mutation.targets(heroItem) {
+                    heroItem = mutation.applied(to: heroItem)
+                } else if heroItem.kind == .episode,
+                          mutation.targets(series),
+                          let played = mutation.played {
+                    heroItem.isPlayed = played
+                }
             }
     }
 

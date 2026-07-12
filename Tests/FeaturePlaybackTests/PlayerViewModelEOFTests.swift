@@ -41,6 +41,35 @@ final class PlayerViewModelEOFTests: XCTestCase {
         XCTAssertEqual(stopped.onlyCall?.position, 120)
         XCTAssertEqual(stopped.onlyCall?.percent, 100)
     }
+
+    func testForcedCheckpointCapturesPausedPosition() async {
+        let item = MediaItem(id: "movie", title: "Movie", kind: .movie, runtime: 120)
+        let request = PlaybackRequest(
+            item: item,
+            streamURL: URL(string: "https://example.test/movie.m3u8")!
+        )
+        let provider = RecordingPlaybackProvider(request: request)
+        let engine = SpyVideoEngine()
+        let checkpoints = PlaybackStoppedRecorder()
+        let viewModel = PlayerViewModel(
+            provider: provider,
+            itemID: item.id,
+            engineFactory: EngineFactory(makeNative: { _ in engine }),
+            onPlaybackCheckpoint: { position, percent in
+                checkpoints.record(position: position, percent: percent)
+            }
+        )
+        await viewModel.load()
+        engine.duration = 120
+        engine.currentTime = 30
+        engine.furthestObservedPosition = 30
+        engine.isPaused = true
+
+        viewModel.checkpointNow()
+
+        XCTAssertEqual(checkpoints.onlyCall?.position, 30)
+        XCTAssertEqual(checkpoints.onlyCall?.percent, 25)
+    }
 }
 
 private actor RecordingPlaybackProvider: MediaProvider {

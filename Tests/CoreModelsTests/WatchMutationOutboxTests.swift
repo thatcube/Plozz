@@ -13,6 +13,9 @@ private final class FakeWatchApplier: WatchMutationApplying, @unchecked Sendable
     private(set) var playedWrites: [PlayedWrite] = []
     private(set) var resumeWrites: [ResumeWrite] = []
     private(set) var traktScrobbles: [TraktScrobbleIntent] = []
+    private(set) var simklScrobbles: [TraktScrobbleIntent] = []
+    private(set) var anilistScrobbles: [TraktScrobbleIntent] = []
+    private(set) var malScrobbles: [TraktScrobbleIntent] = []
 
     /// Accounts whose writes currently fail (simulating an offline / asleep server).
     var failingAccounts: Set<String> = []
@@ -32,6 +35,18 @@ private final class FakeWatchApplier: WatchMutationApplying, @unchecked Sendable
     func scrobbleTrakt(_ intent: TraktScrobbleIntent) async throws {
         if traktFails { throw AppError.serverUnreachable }
         lock.lock(); traktScrobbles.append(intent); lock.unlock()
+    }
+
+    func scrobbleSimkl(_ intent: TraktScrobbleIntent) async throws {
+        lock.lock(); simklScrobbles.append(intent); lock.unlock()
+    }
+
+    func scrobbleAniList(_ intent: TraktScrobbleIntent) async throws {
+        lock.lock(); anilistScrobbles.append(intent); lock.unlock()
+    }
+
+    func scrobbleMAL(_ intent: TraktScrobbleIntent) async throws {
+        lock.lock(); malScrobbles.append(intent); lock.unlock()
     }
 }
 
@@ -442,6 +457,62 @@ final class WatchOutboxTraktTests: XCTestCase {
         await reconciler.drain() // a second foreground drain must not double-post
 
         XCTAssertEqual(applier.traktScrobbles.count, 1)
+    }
+
+    func testFinishedWatchMirrorsThroughEveryTrackerAdapter() async {
+        let applier = FakeWatchApplier()
+        let reconciler = WatchStateReconciler(
+            store: InMemoryWatchMutationStore(),
+            applier: applier
+        )
+
+        await reconciler.enqueue(
+            playedMutation(
+                capturedAt: Date(),
+                targets: [target("share", "movie")],
+                trakt: intent()
+            )
+        )
+        await reconciler.drain()
+
+        XCTAssertEqual(applier.traktScrobbles.count, 1)
+        XCTAssertEqual(applier.simklScrobbles.count, 1)
+        XCTAssertEqual(applier.anilistScrobbles.count, 1)
+        XCTAssertEqual(applier.malScrobbles.count, 1)
+    }
+
+    func testNewerUnwatchCancelsQueuedFinishedWatchForEveryTracker() async {
+        let applier = FakeWatchApplier()
+        let reconciler = WatchStateReconciler(
+            store: InMemoryWatchMutationStore(),
+            applier: applier
+        )
+        let finishTime = Date(timeIntervalSince1970: 1_000)
+        await reconciler.enqueue(
+            playedMutation(
+                capturedAt: finishTime,
+                targets: [target("share", "movie")],
+                trakt: intent()
+            )
+        )
+        await reconciler.enqueue(
+            playedMutation(
+                played: false,
+                capturedAt: finishTime.addingTimeInterval(1),
+                targets: [target("share", "movie")]
+            )
+        )
+
+        await reconciler.drain()
+
+        XCTAssertEqual(
+            applier.playedWrites,
+            [.init(played: false, accountID: "share", itemID: "movie")]
+        )
+        XCTAssertTrue(applier.traktScrobbles.isEmpty)
+        XCTAssertTrue(applier.simklScrobbles.isEmpty)
+        XCTAssertTrue(applier.anilistScrobbles.isEmpty)
+        XCTAssertTrue(applier.malScrobbles.isEmpty)
     }
 
     /// A Trakt failure keeps the mirror pending (server target may already be done)

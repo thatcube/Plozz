@@ -60,13 +60,14 @@ final class WatchFanOutParityTests: XCTestCase {
         }
     }
 
-    /// N-account (3 servers, both providers): the played-toggle mutation built
-    /// from the snapshot reaches all of them, with no 2-account hard-coding.
+    /// N-account (managed providers plus a filesystem share): the played-toggle
+    /// mutation reaches every matching copy with no provider-specific fan-out.
     func testPlayedToggleCarriesAllKnownAccounts() async {
         let index = IdentityIndex()
         await index.ingest([movie("1", account: "jf-mine")], accountID: "jf-mine", serverInfo: server(.jellyfin))
         await index.ingest([movie("2", account: "jf-sis")], accountID: "jf-sis", serverInfo: server(.jellyfin))
         await index.ingest([movie("3", account: "plex-sis")], accountID: "plex-sis", serverInfo: server(.plex))
+        await index.ingest([movie("4", account: "smb")], accountID: "smb", serverInfo: server(.mediaShare))
         let snapshot = await index.snapshot()
 
         let played = movie("1", account: "jf-mine") // entered from one server's row
@@ -78,8 +79,8 @@ final class WatchFanOutParityTests: XCTestCase {
         )
         XCTAssertEqual(
             Set((mutation?.targets ?? []).map(\.id)),
-            ["jf-mine:1", "jf-sis:2", "plex-sis:3"],
-            "Marking watched must fan out to every account the index knows, not just two"
+            ["jf-mine:1", "jf-sis:2", "plex-sis:3", "smb:4"],
+            "Marking watched must fan out through the same path for managed servers and shares"
         )
     }
 

@@ -206,13 +206,6 @@ public struct ItemDetailView: View {
                 Task { await viewModel.reload() }
             }
         }
-        .onReceive(
-            NotificationCenter.default.publisher(
-                for: .playbackProgressDidPersist
-            )
-        ) { _ in
-            Task { await viewModel.reload() }
-        }
         .task(id: seasonRequestRefreshKey) {
             await refreshSeasonRequestAvailability()
         }

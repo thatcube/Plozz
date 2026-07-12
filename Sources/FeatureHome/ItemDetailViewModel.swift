@@ -904,13 +904,29 @@ public final class ItemDetailViewModel {
     /// SwiftUI updates just the affected cards and the user's focus stays exactly
     /// where it was.
     public func applyWatchedState(_ mutation: MediaItemMutation) {
+        var seriesPlayedCascade: Bool?
         if case var .loaded(detail) = state {
+            if detail.item.kind == .series, mutation.targets(detail.item) {
+                seriesPlayedCascade = mutation.played
+            }
             detail.item = mutation.applied(to: detail.item)
-            detail.children = detail.children.map { mutation.applied(to: $0) }
+            detail.children = detail.children.map { child in
+                var updated = mutation.applied(to: child)
+                if let seriesPlayedCascade {
+                    updated.isPlayed = seriesPlayedCascade
+                }
+                return updated
+            }
             state = .loaded(detail)
         }
         for (seasonID, episodes) in seasonEpisodes {
-            seasonEpisodes[seasonID] = episodes.map { mutation.applied(to: $0) }
+            seasonEpisodes[seasonID] = episodes.map { episode in
+                var updated = mutation.applied(to: episode)
+                if let seriesPlayedCascade {
+                    updated.isPlayed = seriesPlayedCascade
+                }
+                return updated
+            }
         }
     }
 

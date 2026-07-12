@@ -141,13 +141,10 @@ public struct LibraryBrowseView: View {
                 }
             }
         }
-        .onReceive(
-            NotificationCenter.default.publisher(
-                for: .playbackProgressDidPersist
-            )
-        ) { _ in
-            guard viewModel.isMediaShare else { return }
-            Task { await viewModel.refreshAfterCatalogChange() }
+        .onReceive(NotificationCenter.default.publisher(for: .mediaItemDidMutate)) { note in
+            if let mutation = MediaItemMutation.from(note) {
+                viewModel.applyWatchedState(mutation)
+            }
         }
         .task {
             // Opt-in (PLZXMEM=1) memory/background-activity sampler. Fully inert

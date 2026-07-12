@@ -409,7 +409,10 @@ struct SeriesDetailView: View {
                         ? PlozzTheme.Metrics.screenPadding + SeriesEpisodeBrowserLayout.seasonRequestFadeWidth
                         : PlozzTheme.Metrics.screenPadding
                 )
-                .padding(.leading, SeriesEpisodeBrowserLayout.seasonFocusHorizontalClearance)
+                // Align the first season to the hero keyline INSIDE the ScrollView,
+                // leaving the viewport itself full-width so clipping/fading happens
+                // at the page edge rather than through a season label.
+                .padding(.leading, PlozzTheme.Metrics.heroLeadingPadding)
                 // Headroom for the focused chip's lift so it is never clipped.
                 .padding(.vertical, 12)
             }
@@ -446,17 +449,6 @@ struct SeriesDetailView: View {
             .modifier(SeasonRequestBoundaryModifier(
                 enabled: requestAvailability?.hasSeasonRequestContent == true
             ))
-            // Inset the whole scroll VIEWPORT to the hero keyline (rather than padding
-            // the content), so a chip revealed to `.leading` aligns to the keyline —
-            // where "S·E"/Play start — instead of the column edge.
-            .padding(
-                .leading,
-                max(
-                    PlozzTheme.Metrics.heroLeadingPadding
-                        - SeriesEpisodeBrowserLayout.seasonFocusHorizontalClearance,
-                    0
-                )
-            )
             .onChange(of: focusedSeasonID) { _, newValue in
                 guard let id = newValue else { return }
                 let isEntering = !seasonBarEngaged
@@ -1174,6 +1166,12 @@ private struct SeasonRequestBoundaryModifier: ViewModifier {
                 .scrollClipDisabled(false)
                 .mask {
                     HStack(spacing: 0) {
+                        LinearGradient(
+                            colors: [.clear, .white],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                        .frame(width: SeriesEpisodeBrowserLayout.seasonRequestFadeWidth)
                         Rectangle()
                             .fill(.white)
                         LinearGradient(

@@ -164,8 +164,53 @@ final class AccountStoreTests: XCTestCase {
         Account(id: id, server: server, userID: "u-\(id)", userName: user, deviceID: "dev", addedAt: Date(timeIntervalSince1970: added))
     }
 
+    private func shareAccount(
+        _ id: String = "share",
+        username: String = "alice"
+    ) -> Account {
+        Account(
+            id: id,
+            server: MediaServer(
+                id: "share:server/media",
+                name: "Media",
+                baseURL: URL(string: "smb://server/media")!,
+                provider: .mediaShare
+            ),
+            userID: username.isEmpty ? "guest" : username,
+            userName: username,
+            deviceID: "dev"
+        )
+    }
+
+    private func makeShareStore(
+        secure: InMemorySecureStore = InMemorySecureStore(),
+        stateSecure: InMemorySecureStore = InMemorySecureStore()
+    ) throws -> (
+        store: AccountStore,
+        vault: MediaCredentialVault,
+        journal: CredentialMutationJournal,
+        secure: InMemorySecureStore,
+        stateSecure: InMemorySecureStore
+    ) {
+        let vault = MediaCredentialVault(secureStore: secure)
+        let journal = try CredentialMutationJournal(
+            store: DurableLocalStateStore(secureStore: stateSecure)
+        )
+        return (
+            AccountStore(
+                secureStore: secure,
+                mediaCredentialVault: vault,
+                credentialJournal: journal
+            ),
+            vault,
+            journal,
+            secure,
+            stateSecure
+        )
+    }
+
     func testAddLoadRoundTrip() throws {
-        let store = AccountStore(secureStore: InMemorySecureStore(), defaults: makeDefaults())
+        let store = AccountStore(secureStore: InMemorySecureStore())
         let acc = account("a1")
         try store.add(acc, token: "TOK1")
         XCTAssertEqual(store.loadAccounts(), [acc])
@@ -173,7 +218,7 @@ final class AccountStoreTests: XCTestCase {
     }
 
     func testReplacingTokenRotatesCredentialRevision() throws {
-        let store = AccountStore(secureStore: InMemorySecureStore(), defaults: makeDefaults())
+        let store = AccountStore(secureStore: InMemorySecureStore())
         let acc = account("a1")
         try store.add(acc, token: "OLD")
 
@@ -185,7 +230,7 @@ final class AccountStoreTests: XCTestCase {
     }
 
     func testMetadataUpdateWithSameTokenPreservesCredentialRevision() throws {
-        let store = AccountStore(secureStore: InMemorySecureStore(), defaults: makeDefaults())
+        let store = AccountStore(secureStore: InMemorySecureStore())
         var acc = account("a1")
         try store.add(acc, token: "TOKEN")
         let originalRevision = acc.credentialRevision
@@ -199,30 +244,16 @@ final class AccountStoreTests: XCTestCase {
     }
 
     func testMultipleAccountsPersistInAddedOrder() throws {
-        let store = AccountStore(secureStore: InMemorySecureStore(), defaults: makeDefaults())
+        let store = AccountStore(secureStore: InMemorySecureStore())
         try store.add(account("a2", added: 200), token: "T2")
         try store.add(account("a1", added: 100), token: "T1")
         XCTAssertEqual(store.loadAccounts().map(\.id), ["a1", "a2"])
         XCTAssertTrue(Set(store.activeAccountIDs()) == ["a1", "a2"])
     }
 
-    func testTokenIsNeverWrittenToUserDefaults() throws {
-        let defaults = makeDefaults()
-        let store = AccountStore(secureStore: InMemorySecureStore(), defaults: defaults)
-        try store.add(account("a1"), token: "TOPSECRET")
-        for (_, value) in defaults.dictionaryRepresentation() {
-            if let data = value as? Data, let text = String(data: data, encoding: .utf8) {
-                XCTAssertFalse(text.contains("TOPSECRET"), "Token leaked into UserDefaults")
-            }
-            if let text = value as? String {
-                XCTAssertFalse(text.contains("TOPSECRET"), "Token leaked into UserDefaults")
-            }
-        }
-    }
-
     func testRemoveDeletesAccountAndToken() throws {
         let secure = InMemorySecureStore()
-        let store = AccountStore(secureStore: secure, defaults: makeDefaults())
+        let store = AccountStore(secureStore: secure)
         try store.add(account("a1"), token: "T1")
         try store.add(account("a2", added: 50), token: "T2")
         try store.remove(id: "a1")
@@ -233,7 +264,7 @@ final class AccountStoreTests: XCTestCase {
     }
 
     func testActiveSetPersistsAndFiltersStaleIDs() throws {
-        let store = AccountStore(secureStore: InMemorySecureStore(), defaults: makeDefaults())
+        let store = AccountStore(secureStore: InMemorySecureStore())
         try store.add(account("a1"), token: "T1")
         try store.add(account("a2", added: 50), token: "T2")
         store.setActiveAccountIDs(["a2", "ghost"])
@@ -241,7 +272,7 @@ final class AccountStoreTests: XCTestCase {
     }
 
     func testClearAllRemovesEverything() throws {
-        let store = AccountStore(secureStore: InMemorySecureStore(), defaults: makeDefaults())
+        let store = AccountStore(secureStore: InMemorySecureStore())
         try store.add(account("a1"), token: "T1")
         try store.add(account("a2", added: 50), token: "T2")
         try store.clearAll()
@@ -251,125 +282,385 @@ final class AccountStoreTests: XCTestCase {
     }
 
     func testDeviceIDIsStable() {
-        let store = AccountStore(secureStore: InMemorySecureStore(), defaults: makeDefaults())
+        let store = AccountStore(secureStore: InMemorySecureStore())
         XCTAssertEqual(store.deviceID(), store.deviceID())
     }
 
-    // MARK: Migration
-
-    /// Seeds the legacy single-session keys the way `SessionStore` would.
-    private func seedLegacySession(defaults: UserDefaults, secure: InMemorySecureStore, token: String) throws {
-        let legacy = UserSession(server: server, userID: "u1", userName: "Legacy", deviceID: "dev1", accessToken: token)
-        let store = SessionStore(secureStore: secure, defaults: defaults)
-        try store.save(legacy)
-    }
-
-    func testMigratesLegacySingleSession() throws {
-        let defaults = makeDefaults()
+    func testPreviousAccountSchemaIsIgnored() throws {
         let secure = InMemorySecureStore()
-        try seedLegacySession(defaults: defaults, secure: secure, token: "LEGACYTOK")
-
-        let store = AccountStore(secureStore: secure, defaults: defaults)
-        XCTAssertTrue(store.migrateLegacySessionIfNeeded())
-
-        let accounts = store.loadAccounts()
-        XCTAssertEqual(accounts.count, 1)
-        let migrated = try XCTUnwrap(accounts.first)
-        XCTAssertEqual(migrated.userName, "Legacy")
-        XCTAssertEqual(store.token(for: migrated.id), "LEGACYTOK")
-        XCTAssertEqual(store.activeAccountIDs(), [migrated.id])
-        // Legacy keys retired.
-        XCTAssertNil(secure.string(for: "com.plozz.session.accessToken"))
-        XCTAssertNil(defaults.data(forKey: "com.plozz.session.metadata"))
-    }
-
-    func testMigrationIsIdempotent() throws {
-        let defaults = makeDefaults()
-        let secure = InMemorySecureStore()
-        try seedLegacySession(defaults: defaults, secure: secure, token: "LEGACYTOK")
-
-        let store = AccountStore(secureStore: secure, defaults: defaults)
-        XCTAssertTrue(store.migrateLegacySessionIfNeeded())
-        // Second call must be a no-op (accounts schema already present).
-        XCTAssertFalse(store.migrateLegacySessionIfNeeded())
-        XCTAssertEqual(store.loadAccounts().count, 1)
-    }
-
-    func testMigrationNoOpsOnFreshInstall() {
-        let store = AccountStore(secureStore: InMemorySecureStore(), defaults: makeDefaults())
-        XCTAssertFalse(store.migrateLegacySessionIfNeeded())
-        XCTAssertTrue(store.loadAccounts().isEmpty)
-    }
-
-    func testMigrationDoesNotClobberExistingAccounts() throws {
-        let defaults = makeDefaults()
-        let secure = InMemorySecureStore()
-        let store = AccountStore(secureStore: secure, defaults: defaults)
-        try store.add(account("a1"), token: "T1")
-        try seedLegacySession(defaults: defaults, secure: secure, token: "LEGACYTOK")
-        // Accounts schema already exists → migration must not run.
-        XCTAssertFalse(store.migrateLegacySessionIfNeeded())
-        XCTAssertEqual(store.loadAccounts().map(\.id), ["a1"])
-    }
-
-    /// Existing installs kept account metadata in `UserDefaults`. Once the
-    /// `user-management` entitlement partitions `UserDefaults` per Apple TV user,
-    /// that metadata must be lifted into the shared `SecureStore` so the
-    /// household stays signed in.
-    func testMigratesUserDefaultsMetadataIntoSecureStore() throws {
-        let defaults = makeDefaults()
-        let acc = account("a1")
-        defaults.set(try JSONEncoder().encode([acc]), forKey: "com.plozz.accounts.v1")
-        defaults.set(try JSONEncoder().encode(["a1"]), forKey: "com.plozz.accounts.activeIDs")
-        defaults.set("device-123", forKey: "com.plozz.session.deviceID")
-
-        let secure = InMemorySecureStore()
-        let store = AccountStore(secureStore: secure, defaults: defaults)
-        // Reading triggers the one-time UserDefaults → SecureStore lift.
-        XCTAssertEqual(store.loadAccounts(), [acc])
-        XCTAssertEqual(store.activeAccountIDs(), ["a1"])
-        XCTAssertEqual(store.deviceID(), "device-123")
-        // Metadata now lives in the shared store and is cleared from per-user defaults.
-        XCTAssertNotNil(secure.string(for: "com.plozz.accounts.v1"))
-        XCTAssertNil(defaults.data(forKey: "com.plozz.accounts.v1"))
-        XCTAssertNil(defaults.string(forKey: "com.plozz.session.deviceID"))
-    }
-
-    func testLegacyAccountMetadataGainsOneStableCredentialRevision() throws {
-        struct LegacyAccount: Codable {
-            let id: String
-            let server: MediaServer
-            let userID: String
-            let userName: String
-            let avatarURL: URL?
-            let deviceID: String
-            let addedAt: Date
-        }
-
-        let secure = InMemorySecureStore()
-        let legacy = LegacyAccount(
-            id: "legacy",
-            server: server,
-            userID: "u",
-            userName: "Legacy",
-            avatarURL: nil,
-            deviceID: "device",
-            addedAt: Date(timeIntervalSince1970: 1)
-        )
-        let encoded = try JSONEncoder().encode([legacy])
+        let encoded = try JSONEncoder().encode([account("old")])
         try secure.setString(
             try XCTUnwrap(String(data: encoded, encoding: .utf8)),
             for: "com.plozz.accounts.v1"
         )
+        XCTAssertTrue(AccountStore(secureStore: secure).loadAccounts().isEmpty)
+    }
 
-        let firstStore = AccountStore(secureStore: secure, defaults: makeDefaults())
-        let firstRevision = try XCTUnwrap(firstStore.loadAccounts().first).credentialRevision
-        let secondStore = AccountStore(secureStore: secure, defaults: makeDefaults())
-        let secondRevision = try XCTUnwrap(secondStore.loadAccounts().first).credentialRevision
+    func testSMBCredentialUsesRevisionedVaultInsteadOfLegacyTokenSlot() throws {
+        let setup = try makeShareStore()
+        let account = shareAccount()
+        try setup.store.add(account, token: "PASSWORD")
 
-        XCTAssertEqual(firstRevision, secondRevision)
-        XCTAssertTrue(
-            secure.string(for: "com.plozz.accounts.v1")?.contains("credentialRevision") == true
+        XCTAssertEqual(setup.store.loadAccounts(), [account])
+        XCTAssertEqual(setup.store.token(for: account.id), "PASSWORD")
+        XCTAssertNil(setup.secure.string(for: "com.plozz.account.token.\(account.id)"))
+        XCTAssertEqual(
+            try setup.journal.activeRevision(accountID: account.id),
+            account.credentialRevision
+        )
+        XCTAssertEqual(
+            try setup.vault.credential(
+                accountID: account.id,
+                revision: account.credentialRevision,
+                expectedTransport: .smb
+            ).authentication,
+            .password(username: "alice", password: "PASSWORD")
+        )
+    }
+
+    func testSMBGuestCredentialRoundTripsAsAnonymous() throws {
+        let setup = try makeShareStore()
+        let account = shareAccount(username: "")
+        try setup.store.add(account, token: "")
+
+        XCTAssertEqual(setup.store.token(for: account.id), "")
+        XCTAssertEqual(
+            try setup.store.mediaShareCredential(for: account.id).authentication,
+            .anonymous
+        )
+    }
+
+    func testReplacingSMBCredentialCommitsNewRevisionAndRetiresOld() throws {
+        let setup = try makeShareStore()
+        let account = shareAccount()
+        try setup.store.add(account, token: "OLD")
+        try setup.store.add(account, token: "NEW")
+
+        let updated = try XCTUnwrap(setup.store.loadAccounts().first)
+        XCTAssertNotEqual(updated.credentialRevision, account.credentialRevision)
+        XCTAssertEqual(setup.store.token(for: account.id), "NEW")
+        XCTAssertEqual(
+            try setup.journal.activeRevision(accountID: account.id),
+            updated.credentialRevision
+        )
+        XCTAssertThrowsError(
+            try setup.vault.credential(
+                accountID: account.id,
+                revision: account.credentialRevision,
+                expectedTransport: .smb
+            )
+        ) {
+            XCTAssertEqual($0 as? MediaCredentialError, .credentialNotFound)
+        }
+    }
+
+    func testSameSMBCredentialPreservesRevision() throws {
+        let setup = try makeShareStore()
+        var account = shareAccount()
+        try setup.store.add(account, token: "SAME")
+        account.server.name = "Renamed"
+        try setup.store.add(account, token: "SAME")
+
+        let updated = try XCTUnwrap(setup.store.loadAccounts().first)
+        XCTAssertEqual(updated.credentialRevision, account.credentialRevision)
+        XCTAssertEqual(updated.server.name, "Renamed")
+    }
+
+    func testRemovingSMBAccountRetiresCredentialAndPointer() throws {
+        let setup = try makeShareStore()
+        let account = shareAccount()
+        try setup.store.add(account, token: "PASSWORD")
+        try setup.store.remove(id: account.id)
+
+        XCTAssertTrue(setup.store.loadAccounts().isEmpty)
+        XCTAssertNil(try setup.journal.activeRevision(accountID: account.id))
+        XCTAssertThrowsError(
+            try setup.vault.credential(
+                accountID: account.id,
+                revision: account.credentialRevision,
+                expectedTransport: .smb
+            )
+        )
+    }
+
+    func testStagedSMBReplacementRollsBackAfterRelaunch() throws {
+        let setup = try makeShareStore()
+        let account = shareAccount()
+        try setup.store.add(account, token: "OLD")
+        let pendingRevision = CredentialRevision()
+        let pendingCredential = try MediaShareCredentialEnvelope(
+            transport: .smb,
+            authentication: .password(username: "alice", password: "NEW")
+        )
+        _ = try setup.journal.begin(
+            kind: .credentialReplacement,
+            accountID: account.id,
+            previousRevision: account.credentialRevision,
+            pendingRevision: pendingRevision
+        )
+        try setup.vault.store(
+            pendingCredential,
+            accountID: account.id,
+            revision: pendingRevision
+        )
+        var stagedAccount = account
+        stagedAccount.credentialRevision = pendingRevision
+        try persistAccounts([stagedAccount], secure: setup.secure)
+
+        let relaunched = try makeShareStore(
+            secure: setup.secure,
+            stateSecure: setup.stateSecure
+        )
+        try relaunched.store.recoverCredentialMutations()
+
+        XCTAssertEqual(
+            try XCTUnwrap(relaunched.store.loadAccounts().first).credentialRevision,
+            account.credentialRevision
+        )
+        XCTAssertEqual(relaunched.store.token(for: account.id), "OLD")
+        XCTAssertTrue(try relaunched.journal.mutations().isEmpty)
+        XCTAssertThrowsError(
+            try relaunched.vault.credential(
+                accountID: account.id,
+                revision: pendingRevision,
+                expectedTransport: .smb
+            )
+        )
+    }
+
+    func testPreparedSMBReplacementCompletesAfterRelaunch() throws {
+        let setup = try makeShareStore()
+        let account = shareAccount()
+        try setup.store.add(account, token: "OLD")
+        let pendingRevision = CredentialRevision()
+        let pendingCredential = try MediaShareCredentialEnvelope(
+            transport: .smb,
+            authentication: .password(username: "alice", password: "NEW")
+        )
+        let entry = try setup.journal.begin(
+            kind: .credentialReplacement,
+            accountID: account.id,
+            previousRevision: account.credentialRevision,
+            pendingRevision: pendingRevision
+        )
+        try setup.vault.store(
+            pendingCredential,
+            accountID: account.id,
+            revision: pendingRevision
+        )
+        var preparedAccount = account
+        preparedAccount.credentialRevision = pendingRevision
+        try persistAccounts([preparedAccount], secure: setup.secure)
+        _ = try setup.journal.markPrepared(entry.id)
+
+        let relaunched = try makeShareStore(
+            secure: setup.secure,
+            stateSecure: setup.stateSecure
+        )
+        try relaunched.store.recoverCredentialMutations()
+
+        XCTAssertEqual(
+            try XCTUnwrap(relaunched.store.loadAccounts().first).credentialRevision,
+            pendingRevision
+        )
+        XCTAssertEqual(relaunched.store.token(for: account.id), "NEW")
+        XCTAssertTrue(try relaunched.journal.mutations().isEmpty)
+        XCTAssertThrowsError(
+            try relaunched.vault.credential(
+                accountID: account.id,
+                revision: account.credentialRevision,
+                expectedTransport: .smb
+            )
+        )
+    }
+
+    func testPreparedSMBRemovalCompletesAfterRelaunch() throws {
+        let setup = try makeShareStore()
+        let account = shareAccount()
+        try setup.store.add(account, token: "PASSWORD")
+        let entry = try setup.journal.begin(
+            kind: .accountRemoval,
+            accountID: account.id,
+            previousRevision: account.credentialRevision,
+            pendingRevision: nil
+        )
+        _ = try setup.journal.markPrepared(entry.id)
+
+        let relaunched = try makeShareStore(
+            secure: setup.secure,
+            stateSecure: setup.stateSecure
+        )
+        try relaunched.store.recoverCredentialMutations()
+
+        XCTAssertTrue(relaunched.store.loadAccounts().isEmpty)
+        XCTAssertNil(try relaunched.journal.activeRevision(accountID: account.id))
+        XCTAssertTrue(try relaunched.journal.mutations().isEmpty)
+    }
+
+    func testSMBAccountRequiresCredentialInfrastructure() {
+        let store = AccountStore(secureStore: InMemorySecureStore())
+        XCTAssertThrowsError(try store.add(shareAccount(), token: "PASSWORD")) {
+            XCTAssertEqual(
+                $0 as? AccountStoreError,
+                .mediaShareCredentialInfrastructureUnavailable
+            )
+        }
+    }
+
+    func testWebDAVRollbackDoesNotRequireAccountMetadataToInferTransport() throws {
+        let setup = try makeShareStore()
+        let revision = CredentialRevision()
+        let accountID = "webdav"
+        let credential = try MediaShareCredentialEnvelope(
+            transport: .webDAV,
+            authentication: .password(username: "alice", password: "PASSWORD")
+        )
+        _ = try setup.journal.begin(
+            kind: .credentialReplacement,
+            accountID: accountID,
+            previousRevision: nil,
+            pendingRevision: revision
+        )
+        try setup.vault.store(
+            credential,
+            accountID: accountID,
+            revision: revision
+        )
+
+        let relaunched = try makeShareStore(
+            secure: setup.secure,
+            stateSecure: setup.stateSecure
+        )
+        try relaunched.store.recoverCredentialMutations()
+
+        XCTAssertTrue(try relaunched.journal.mutations().isEmpty)
+        XCTAssertThrowsError(
+            try relaunched.vault.credential(
+                accountID: accountID,
+                revision: revision,
+                expectedTransport: .webDAV
+            )
+        )
+    }
+
+    func testGeneratedSFTPKeyIsStagedAndRetiredWithCredential() throws {
+        let setup = try makeShareStore()
+        let keyID = try CredentialChildItemID(rawValue: "key-one")
+        let fingerprint = try SHA256Fingerprint(bytes: Data(repeating: 7, count: 32))
+        let account = Account(
+            id: "sftp",
+            server: MediaServer(
+                id: "sftp:server/media",
+                name: "SFTP",
+                baseURL: URL(string: "sftp://server/media")!,
+                provider: .mediaShare
+            ),
+            userID: "alice",
+            userName: "alice",
+            deviceID: "device"
+        )
+        let credential = try MediaShareCredentialEnvelope(
+            transport: .sftp,
+            authentication: .generatedKey(username: "alice", keyID: keyID),
+            trust: MediaShareTrustMaterial(sshHostKeySHA256: fingerprint)
+        )
+        try setup.store.addMediaShare(
+            account,
+            credential: credential,
+            generatedPrivateKey: "PRIVATE KEY"
+        )
+        XCTAssertEqual(try setup.vault.privateKey(id: keyID), "PRIVATE KEY")
+
+        try setup.store.remove(id: account.id)
+
+        XCTAssertThrowsError(try setup.vault.privateKey(id: keyID))
+        XCTAssertThrowsError(
+            try setup.vault.storePrivateKey("REPLACEMENT", id: keyID)
+        ) {
+            XCTAssertEqual($0 as? MediaCredentialError, .childItemRetired)
+        }
+    }
+
+    func testGeneratedSFTPKeyCannotBeSharedAcrossCredentialRevisions() throws {
+        let setup = try makeShareStore()
+        let keyID = try CredentialChildItemID(rawValue: "shared-key")
+        let firstFingerprint = try SHA256Fingerprint(bytes: Data(repeating: 1, count: 32))
+        let secondFingerprint = try SHA256Fingerprint(bytes: Data(repeating: 2, count: 32))
+        let account = Account(
+            id: "sftp",
+            server: MediaServer(
+                id: "sftp:server/media",
+                name: "SFTP",
+                baseURL: URL(string: "sftp://server/media")!,
+                provider: .mediaShare
+            ),
+            userID: "alice",
+            userName: "alice",
+            deviceID: "device"
+        )
+        let first = try MediaShareCredentialEnvelope(
+            transport: .sftp,
+            authentication: .generatedKey(username: "alice", keyID: keyID),
+            trust: MediaShareTrustMaterial(sshHostKeySHA256: firstFingerprint)
+        )
+        try setup.store.addMediaShare(
+            account,
+            credential: first,
+            generatedPrivateKey: "PRIVATE KEY"
+        )
+        let replacement = try MediaShareCredentialEnvelope(
+            transport: .sftp,
+            authentication: .generatedKey(username: "alice", keyID: keyID),
+            trust: MediaShareTrustMaterial(sshHostKeySHA256: secondFingerprint)
+        )
+
+        XCTAssertThrowsError(
+            try setup.store.addMediaShare(
+                account,
+                credential: replacement,
+                generatedPrivateKey: "PRIVATE KEY"
+            )
+        ) {
+            XCTAssertEqual($0 as? AccountStoreError, .generatedKeyReuse)
+        }
+        XCTAssertEqual(try setup.vault.privateKey(id: keyID), "PRIVATE KEY")
+    }
+
+    func testStagedGeneratedKeyWithoutEnvelopeIsRetiredDuringRecovery() throws {
+        let setup = try makeShareStore()
+        let keyID = try CredentialChildItemID(rawValue: "orphan-key")
+        let revision = CredentialRevision()
+        _ = try setup.journal.begin(
+            kind: .generatedKeyPromotion,
+            accountID: "sftp",
+            previousRevision: nil,
+            pendingRevision: revision,
+            pendingChildItemIDs: [keyID]
+        )
+        try setup.vault.storePrivateKey("PRIVATE KEY", id: keyID)
+
+        let relaunched = try makeShareStore(
+            secure: setup.secure,
+            stateSecure: setup.stateSecure
+        )
+        try relaunched.store.recoverCredentialMutations()
+
+        XCTAssertThrowsError(try relaunched.vault.privateKey(id: keyID))
+        XCTAssertThrowsError(
+            try relaunched.vault.storePrivateKey("REPLACEMENT", id: keyID)
+        ) {
+            XCTAssertEqual($0 as? MediaCredentialError, .childItemRetired)
+        }
+    }
+
+    private func persistAccounts(
+        _ accounts: [Account],
+        secure: InMemorySecureStore
+    ) throws {
+        let data = try JSONEncoder().encode(accounts)
+        try secure.setString(
+            try XCTUnwrap(String(data: data, encoding: .utf8)),
+            for: "com.plozz.accounts.v2"
         )
     }
 }

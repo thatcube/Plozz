@@ -88,46 +88,6 @@ public struct Account: Codable, Hashable, Identifiable, Sendable {
     }
 }
 
-extension Account {
-    private enum CodingKeys: String, CodingKey {
-        case id
-        case server
-        case userID
-        case userName
-        case avatarURL
-        case deviceID
-        case credentialRevision
-        case addedAt
-    }
-
-    public init(from decoder: Decoder) throws {
-        let values = try decoder.container(keyedBy: CodingKeys.self)
-        id = try values.decode(String.self, forKey: .id)
-        server = try values.decode(MediaServer.self, forKey: .server)
-        userID = try values.decode(String.self, forKey: .userID)
-        userName = try values.decode(String.self, forKey: .userName)
-        avatarURL = try values.decodeIfPresent(URL.self, forKey: .avatarURL)
-        deviceID = try values.decode(String.self, forKey: .deviceID)
-        credentialRevision = try values.decodeIfPresent(
-            CredentialRevision.self,
-            forKey: .credentialRevision
-        ) ?? CredentialRevision()
-        addedAt = try values.decode(Date.self, forKey: .addedAt)
-    }
-
-    public func encode(to encoder: Encoder) throws {
-        var values = encoder.container(keyedBy: CodingKeys.self)
-        try values.encode(id, forKey: .id)
-        try values.encode(server, forKey: .server)
-        try values.encode(userID, forKey: .userID)
-        try values.encode(userName, forKey: .userName)
-        try values.encodeIfPresent(avatarURL, forKey: .avatarURL)
-        try values.encode(deviceID, forKey: .deviceID)
-        try values.encode(credentialRevision, forKey: .credentialRevision)
-        try values.encode(addedAt, forKey: .addedAt)
-    }
-}
-
 extension Account: CustomStringConvertible {
     /// Account identities carry no secret, but keep logging terse and stable.
     public var description: String {

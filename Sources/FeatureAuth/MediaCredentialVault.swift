@@ -238,6 +238,23 @@ public enum MediaShareCredentialCodec {
             )
         }
 
+        let envelope = try decodeVersioned(storedValue)
+        guard envelope.transport == expectedTransport else {
+            throw MediaCredentialError.transportMismatch
+        }
+        return envelope
+    }
+
+    /// Decodes only Plozz's exact self-describing versioned format.
+    ///
+    /// Retirement and recovery use this path because account metadata may have
+    /// been removed before a crash. Unversioned legacy values are never accepted.
+    public static func decodeVersioned(
+        _ storedValue: String
+    ) throws -> MediaShareCredentialEnvelope {
+        guard storedValue.hasPrefix(prefix) else {
+            throw MediaCredentialError.unversionedCredentialNotSupported
+        }
         let encoded = String(storedValue.dropFirst(prefix.count))
         guard encoded.utf8.count <= maximumEncodedPayloadBytes else {
             throw MediaCredentialError.payloadTooLarge
@@ -268,11 +285,7 @@ public enum MediaShareCredentialCodec {
               canonicalData == data else {
             throw MediaCredentialError.malformedEnvelope
         }
-        let envelope = try serialized.envelope()
-        guard envelope.transport == expectedTransport else {
-            throw MediaCredentialError.transportMismatch
-        }
-        return envelope
+        return try serialized.envelope()
     }
 }
 
@@ -341,6 +354,26 @@ public final class MediaCredentialVault: @unchecked Sendable {
         let key = try credentialKey(accountID: accountID, revision: revision)
         lock.lock()
         defer { lock.unlock() }
+        try secureStore.removeValue(for: key)
+    }
+
+    /// Permanently removes a credential revision and any generated private key
+    /// it references. The retirement marker is written before either item is
+    /// deleted, so retrying after a crash cannot resurrect or substitute a key.
+    public func retire(
+        accountID: String,
+        revision: CredentialRevision
+    ) throws {
+        let key = try credentialKey(accountID: accountID, revision: revision)
+        lock.lock()
+        defer { lock.unlock() }
+
+        guard let encoded = secureStore.string(for: key) else { return }
+        let envelope = try MediaShareCredentialCodec.decodeVersioned(encoded)
+        if case .generatedKey(_, let keyID) = envelope.authentication {
+            _ = try secureStore.insertStringIfAbsent("retired", for: retiredChildKey(keyID))
+            try secureStore.removeValue(for: childKey(keyID))
+        }
         try secureStore.removeValue(for: key)
     }
 

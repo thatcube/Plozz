@@ -79,9 +79,15 @@ final class ServerToggleTests: XCTestCase {
         }
 
         func testShareResolutionCarriesActiveProfileAndAccountIdentity() throws {
+            let secureStore = InMemorySecureStore()
+            let vault = MediaCredentialVault(secureStore: secureStore)
+            let journal = try CredentialMutationJournal(
+                store: DurableLocalStateStore(secureStore: InMemorySecureStore())
+            )
             let accountStore = AccountStore(
-                secureStore: InMemorySecureStore(),
-                defaults: makeDefaults()
+                secureStore: secureStore,
+                mediaCredentialVault: vault,
+                credentialJournal: journal
             )
             let account = Account(
                 id: "share-account",
@@ -144,7 +150,7 @@ final class ServerToggleTests: XCTestCase {
 
     /// Builds an AppState over in-memory stores seeded with the given accounts.
     private func makeAppState(accountIDs: [(String, String)]) throws -> AppState {
-        let store = AccountStore(secureStore: InMemorySecureStore(), defaults: makeDefaults())
+        let store = AccountStore(secureStore: InMemorySecureStore())
         for (id, host) in accountIDs {
             try store.add(account(id: id, host: host), token: "token-\(id)")
         }
@@ -215,8 +221,7 @@ final class ServerToggleTests: XCTestCase {
     /// value, or removing a visible account becomes a no-op.
     func testTurningOffServerRepairsStaleStoredSelection() throws {
         let accountStore = AccountStore(
-            secureStore: InMemorySecureStore(),
-            defaults: makeDefaults()
+            secureStore: InMemorySecureStore()
         )
         try accountStore.add(account(id: "a", host: "a.example.com"), token: "token-a")
         try accountStore.add(account(id: "b", host: "b.example.com"), token: "token-b")

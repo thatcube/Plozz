@@ -1036,7 +1036,18 @@ public final class AppState {
 
     private static func makeDefaultAccountStore() -> AccountPersisting {
         #if canImport(Security)
-        return AccountStore(secureStore: KeychainStore())
+        let secureStore = KeychainStore()
+        do {
+            let localStateStore = try DurableLocalStateStoreFactory.userIndependent()
+            return AccountStore(
+                secureStore: secureStore,
+                mediaCredentialVault: MediaCredentialVault(secureStore: secureStore),
+                credentialJournal: try CredentialMutationJournal(store: localStateStore)
+            )
+        } catch {
+            PlozzLog.auth.error("Media-share credential infrastructure unavailable")
+            return AccountStore(secureStore: secureStore)
+        }
         #else
         return AccountStore(secureStore: InMemorySecureStore())
         #endif
@@ -1110,11 +1121,14 @@ public final class AppState {
         return registry
     }
 
-    /// Restores stored accounts on launch (relaunch without re-login), migrating
-    /// any legacy single session first. Shows the profile picker when the
-    /// household has opted into "ask on startup".
+    /// Restores stored accounts on launch (relaunch without re-login). Shows the
+    /// profile picker when the household has opted into "ask on startup".
     public func bootstrap() {
-        accountStore.migrateLegacySessionIfNeeded()
+        do {
+            try accountStore.recoverCredentialMutations()
+        } catch {
+            PlozzLog.auth.error("Credential recovery failed; incomplete shares remain hidden")
+        }
         reloadAccounts()
         PlozzLog.boot("bootstrap accounts=\(accounts.count) activeIDs=\(activeAccountIDs.count)")
         // The "Ask which profile on startup" toggle is the single source of

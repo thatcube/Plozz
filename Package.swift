@@ -60,11 +60,14 @@ let package = Package(
         // gated VOD segment cutting so a seek landing on a segment boundary
         // decodes cleanly (#92), software-path seek holds last frame (#90), and
         // bounded backward-scrub detour reads so a cold source reconnects instead
-        // of stalling for 10–20 seconds (#93/#96). See
+        // of stalling for 10–20 seconds, an eight-second hard cap on native seeks,
+        // and immediate producer restarts for unreachable sparse-cache holes
+        // (#93/#96). See
         // AGENTS.local.md › "Playback engine (AetherEngine / Plozzigen)".
         //
-        // Pinned to a fork commit that carries the tvOS SMB transport fix on top
-        // of the backward-seek muxer wedge fix. AetherEngine's stock SMB transport
+        // Pinned to a fork commit that carries the tvOS SMB transport and stalled-
+        // seek recovery fixes on top of the backward-seek muxer wedge fix.
+        // AetherEngine's stock SMB transport
         // (`SMBConnection`, AMSMB2/libsmb2) fails POSIX EPERM on tvOS — a known,
         // unfixed libsmb2-on-iOS/tvOS bug (AMSMB2 #32/#63/#64). The fork swaps that
         // transport to kishikawakatsumi/SMBClient (pure-Swift, MIT, speaks SMB2
@@ -77,7 +80,7 @@ let package = Package(
         // the fMP4 muxer needs a PARSED audio packet to build the AC-3/E-AC-3/TrueHD
         // sample entry, else a mid-file backward seek wedged the muxer.) See
         // docs/media-share-proposal.md § 5.1.
-        .package(url: "https://github.com/thatcube/AetherEngine", revision: "9fb4907156273270b67b2e457ad75462cabd46a1"),
+        .package(url: "https://github.com/thatcube/AetherEngine", revision: "d97fad242c069711fb3065df449444cc31267251"),
         // NOTE: FFmpegBuild (FFmpeg n8.1.x decode-only) and LibDovi (Dolby Vision
         // RPU parser) are pulled in TRANSITIVELY by AetherEngine — its own manifest
         // declares and consumes them. Plozz used to declare them directly only for

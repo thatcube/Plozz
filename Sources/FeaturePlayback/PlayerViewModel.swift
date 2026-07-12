@@ -1632,13 +1632,15 @@ public final class PlayerViewModel {
     /// interrupt playback, so errors are swallowed (and never logged with data).
     /// The same lifecycle is forwarded to Trakt so watches sync to the user's
     /// Trakt history.
-    private func report(event: PlaybackEvent, isPaused: Bool, positionOverride: TimeInterval? = nil) async {
+    private func report(
+        event: PlaybackEvent,
+        isPaused: Bool,
+        positionOverride: TimeInterval? = nil,
+        durationOverride: TimeInterval? = nil
+    ) async {
         guard let request else { return }
         let position = positionOverride ?? engine.currentTime
-        let engineDuration = engine.duration
-        let knownDuration: TimeInterval? = (engineDuration.isFinite && engineDuration > 0)
-            ? engineDuration
-            : request.item.runtime
+        let knownDuration = durationOverride ?? knownPlaybackDuration()
         let progress = PlaybackProgress(
             itemID: itemID,
             playSessionID: request.playSessionID,
@@ -1657,6 +1659,15 @@ public final class PlayerViewModel {
         // (otherwise Trakt would see 0% and never mark the title watched).
         let scrobblePercent = positionOverride.map { watchedPercent(at: $0) } ?? watchedPercent()
         await scrobbler.scrobble(item: request.item, progress: scrobblePercent, event: event)
+    }
+
+    private func knownPlaybackDuration() -> TimeInterval? {
+        let candidates = [
+            engine.duration,
+            controls.duration,
+            request?.item.runtime ?? 0
+        ]
+        return candidates.first { $0.isFinite && $0 > 0 }
     }
 
     /// Watched percentage (0...100) from the engine's current position over the
@@ -2129,6 +2140,7 @@ public final class PlayerViewModel {
         // leaving the player never keeps playing audio while it completes. Grab
         // the resume position up front since the engine is torn down here.
         let finalPosition = max(engine.furthestObservedPosition, engine.currentTime)
+        let finalDuration = knownPlaybackDuration()
         let percent = watchedPercent(at: finalPosition)
         engine.stop(preserveDisplayMode: preserveDisplayMode)
         // Release any prefetched next-episode session that was never adopted, and
@@ -2155,7 +2167,12 @@ public final class PlayerViewModel {
                 group.cancelAll()
             }
         }
-        await report(event: .stop, isPaused: true, positionOverride: finalPosition)
+        await report(
+            event: .stop,
+            isPaused: true,
+            positionOverride: finalPosition,
+            durationOverride: finalDuration
+        )
         onPlaybackStopped(finalPosition, percent)
     }
 

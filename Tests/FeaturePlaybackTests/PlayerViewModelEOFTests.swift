@@ -37,6 +37,7 @@ final class PlayerViewModelEOFTests: XCTestCase {
         let reports = await provider.reports
         XCTAssertEqual(reports.map(\.event.rawValue), ["start", "stop"])
         XCTAssertEqual(reports.last?.progress.positionSeconds, 120)
+        XCTAssertEqual(reports.last?.progress.durationSeconds, 120)
         XCTAssertEqual(stopped.onlyCall?.position, 120)
         XCTAssertEqual(stopped.onlyCall?.percent, 100)
     }
@@ -118,7 +119,10 @@ private final class SpyVideoEngine: VideoEngine {
         currentTime = seconds
         furthestObservedPosition = max(furthestObservedPosition, seconds)
     }
-    func stop() { status = .idle }
+    func stop() {
+        status = .idle
+        duration = 0
+    }
     func selectAudioTrack(_ track: MediaTrack?) {}
     func selectSubtitleTrack(_ track: MediaTrack?) {}
 

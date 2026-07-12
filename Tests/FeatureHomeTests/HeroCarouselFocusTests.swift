@@ -95,19 +95,52 @@ final class HeroDirectionalPressGateTests: XCTestCase {
     func testIndirectTouchMovesRemainUnrestricted() {
         let gate = HeroDirectionalPressGate()
 
-        XCTAssertTrue(gate.shouldHandle(.right))
-        XCTAssertTrue(gate.shouldHandle(.right))
-        XCTAssertTrue(gate.shouldHandle(.left))
+        XCTAssertTrue(gate.shouldAllowFocusUpdate(.right, outcome: .advance(toItem: 1, keepButton: 2)))
+        XCTAssertTrue(gate.shouldAllowFocusUpdate(.right, outcome: .advance(toItem: 2, keepButton: 2)))
+        XCTAssertTrue(gate.shouldAllowFocusUpdate(.left, outcome: .advance(toItem: 1, keepButton: 0)))
     }
 
-    func testHeldPhysicalPressHandlesOnlyFirstMove() {
+    func testHeldPhysicalPressAllowsOnlyFirstPageBeforeDelay() {
         let gate = HeroDirectionalPressGate()
 
         gate.began(.right)
 
-        XCTAssertTrue(gate.shouldHandle(.right))
-        XCTAssertFalse(gate.shouldHandle(.right))
-        XCTAssertFalse(gate.shouldHandle(.right))
+        XCTAssertTrue(gate.shouldAllowFocusUpdate(.right, outcome: .advance(toItem: 1, keepButton: 2)))
+        gate.didCommitFocusUpdate(.right, outcome: .advance(toItem: 1, keepButton: 2))
+        XCTAssertFalse(gate.shouldAllowFocusUpdate(.right, outcome: .advance(toItem: 2, keepButton: 2)))
+        XCTAssertFalse(gate.shouldAllowFocusUpdate(.right, outcome: .advance(toItem: 0, keepButton: 2)))
+    }
+
+    func testRepeatedPreflightQueriesDoNotConsumeFirstPage() {
+        let gate = HeroDirectionalPressGate()
+
+        gate.began(.right)
+
+        XCTAssertTrue(gate.shouldAllowFocusUpdate(.right, outcome: .advance(toItem: 1, keepButton: 2)))
+        XCTAssertTrue(gate.shouldAllowFocusUpdate(.right, outcome: .advance(toItem: 1, keepButton: 2)))
+        gate.didCommitFocusUpdate(.right, outcome: .advance(toItem: 1, keepButton: 2))
+        XCTAssertFalse(gate.shouldAllowFocusUpdate(.right, outcome: .advance(toItem: 2, keepButton: 2)))
+    }
+
+    func testHeldPhysicalPressDoesNotThrottleInteriorButtons() {
+        let gate = HeroDirectionalPressGate()
+
+        gate.began(.right)
+
+        XCTAssertTrue(gate.shouldAllowFocusUpdate(.right, outcome: .moveButton(1)))
+        gate.didCommitFocusUpdate(.right, outcome: .moveButton(1))
+        XCTAssertTrue(gate.shouldAllowFocusUpdate(.right, outcome: .moveButton(2)))
+        gate.didCommitFocusUpdate(.right, outcome: .moveButton(2))
+        XCTAssertTrue(gate.shouldAllowFocusUpdate(.right, outcome: .advance(toItem: 1, keepButton: 2)))
+        gate.didCommitFocusUpdate(.right, outcome: .advance(toItem: 1, keepButton: 2))
+        XCTAssertFalse(gate.shouldAllowFocusUpdate(.right, outcome: .advance(toItem: 2, keepButton: 2)))
+    }
+
+    func testBlockedEdgeNeverMovesFocus() {
+        let gate = HeroDirectionalPressGate()
+
+        XCTAssertFalse(gate.shouldAllowFocusUpdate(.right, outcome: .blocked))
+        XCTAssertFalse(gate.shouldAllowFocusUpdate(.left, outcome: .blocked))
     }
 
     func testHeldPhysicalPressRepeatsAfterDeliberateDelay() {
@@ -115,30 +148,32 @@ final class HeroDirectionalPressGateTests: XCTestCase {
         let gate = HeroDirectionalPressGate(now: { now })
 
         gate.began(.right)
-        XCTAssertTrue(gate.shouldHandle(.right))
+        XCTAssertTrue(gate.shouldAllowFocusUpdate(.right, outcome: .advance(toItem: 1, keepButton: 2)))
+        gate.didCommitFocusUpdate(.right, outcome: .advance(toItem: 1, keepButton: 2))
 
         now += 4.99
-        XCTAssertFalse(gate.shouldHandle(.right))
+        XCTAssertFalse(gate.shouldAllowFocusUpdate(.right, outcome: .advance(toItem: 2, keepButton: 2)))
 
         now += 0.01
-        XCTAssertTrue(gate.shouldHandle(.right))
+        XCTAssertTrue(gate.shouldAllowFocusUpdate(.right, outcome: .advance(toItem: 0, keepButton: 2)))
 
         now += 0.1
-        XCTAssertTrue(gate.shouldHandle(.right))
+        XCTAssertTrue(gate.shouldAllowFocusUpdate(.right, outcome: .advance(toItem: 1, keepButton: 2)))
     }
 
     func testRepeatedBeginDoesNotRearmUntilRelease() {
         let gate = HeroDirectionalPressGate()
 
         gate.began(.right)
-        XCTAssertTrue(gate.shouldHandle(.right))
+        XCTAssertTrue(gate.shouldAllowFocusUpdate(.right, outcome: .advance(toItem: 1, keepButton: 2)))
+        gate.didCommitFocusUpdate(.right, outcome: .advance(toItem: 1, keepButton: 2))
 
         gate.began(.right)
-        XCTAssertFalse(gate.shouldHandle(.right))
+        XCTAssertFalse(gate.shouldAllowFocusUpdate(.right, outcome: .advance(toItem: 2, keepButton: 2)))
 
         gate.ended(.right)
         gate.began(.right)
-        XCTAssertTrue(gate.shouldHandle(.right))
+        XCTAssertTrue(gate.shouldAllowFocusUpdate(.right, outcome: .advance(toItem: 2, keepButton: 2)))
     }
 
     func testDirectionsAreTrackedIndependently() {
@@ -147,9 +182,11 @@ final class HeroDirectionalPressGateTests: XCTestCase {
         gate.began(.left)
         gate.began(.right)
 
-        XCTAssertTrue(gate.shouldHandle(.left))
-        XCTAssertTrue(gate.shouldHandle(.right))
-        XCTAssertFalse(gate.shouldHandle(.left))
-        XCTAssertFalse(gate.shouldHandle(.right))
+        XCTAssertTrue(gate.shouldAllowFocusUpdate(.left, outcome: .advance(toItem: 0, keepButton: 0)))
+        XCTAssertTrue(gate.shouldAllowFocusUpdate(.right, outcome: .advance(toItem: 2, keepButton: 2)))
+        gate.didCommitFocusUpdate(.left, outcome: .advance(toItem: 0, keepButton: 0))
+        gate.didCommitFocusUpdate(.right, outcome: .advance(toItem: 2, keepButton: 2))
+        XCTAssertFalse(gate.shouldAllowFocusUpdate(.left, outcome: .advance(toItem: 2, keepButton: 0)))
+        XCTAssertFalse(gate.shouldAllowFocusUpdate(.right, outcome: .advance(toItem: 0, keepButton: 2)))
     }
 }

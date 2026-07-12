@@ -721,11 +721,10 @@ struct HomeHeroView: View {
         // logo/metadata. The pills keep their own 24pt spacing in the inner HStack.
         HStack(spacing: 0) {
             // Invisible directional target, just left of the pills and inside the
-            // same focus section. Native focus movement preserves the familiar tvOS
-            // click sound. The UIKit surface tracks physical press phases so only
-            // the first move from one held press is handled; touch-surface swipes
-            // still pass through normally. It steps aside only at the one escape
-            // spot (first item, left-most button, sidebar nav).
+            // same focus section. Its UIKit focus hook can veto a suppressed held
+            // repeat before focus moves, which also prevents false navigation audio.
+            // Interior button moves remain native and unrestricted. It steps aside
+            // only at the one escape spot (first item, left-most button, sidebar nav).
             //
             // Crucially the inactivation is gated on `focus == .row`, NOT on
             // `allowsSidebarEscape` alone: `handleLeft()` moves `selectedButton`
@@ -736,9 +735,13 @@ struct HomeHeroView: View {
             // relocate to a Continue Watching card (scroll-down regression) or
             // strand focus. Requiring `focus == .row` means the guard can only lose
             // focusability once focus has already left it for the row — no race.
-            Color.clear
+            HeroDirectionalFocusGuard(
+                direction: .left,
+                isActive: leftGuardActive,
+                shouldAllowFocus: { shouldAllowGuardFocus(.left) },
+                onFocused: { guardReceivedFocus(.left) }
+            )
                 .frame(width: 1, height: 1)
-                .focusable(leftGuardActive)
                 .focused($focus, equals: .leftGuard)
                 .accessibilityHidden(true)
 
@@ -781,10 +784,9 @@ struct HomeHeroView: View {
             // reappear. There is NO per-button `@FocusState`.
             //
             // A passive UIKit recognizer attached to the window observes physical
-            // Left/Right begin/end phases without becoming the focus leaf or
-            // recognizing/cancelling the gesture. The guards below use that
-            // lifecycle to accept only the first move from one held click while
-            // native focus feedback and indirect-touch swipes remain unchanged.
+            // Left/Right begin/end phases without becoming the focus leaf. The edge
+            // guards use that lifecycle to veto only repeated paging moves; interior
+            // button navigation and indirect-touch swipes remain unrestricted.
             //
             // Select is `.onTapGesture` (the select-press fires the tap) — the SAME
             // pattern the Continue Watching cards use (`focusableCard`), NOT a
@@ -826,13 +828,17 @@ struct HomeHeroView: View {
             // id changes). Never key this on the item id — that would drop focus.
             .id(Self.actionRowFocusID)
 
-            // Invisible directional target just right of the pills. Physical clicks
-            // retain native focus feedback and are de-repeated by the press gate;
-            // touch-surface swipes route through the same `handleRight()` path.
+            // Invisible directional target just right of the pills. Suppressed held
+            // repeats are vetoed before a focus move, so they are silent; allowed
+            // edge pages and interior button moves retain native focus feedback.
             // Unlike the left guard it is always focusable: Right never escapes.
-            Color.clear
+            HeroDirectionalFocusGuard(
+                direction: .right,
+                isActive: true,
+                shouldAllowFocus: { shouldAllowGuardFocus(.right) },
+                onFocused: { guardReceivedFocus(.right) }
+            )
                 .frame(width: 1, height: 1)
-                .focusable(true)
                 .focused($focus, equals: .rightGuard)
                 .accessibilityHidden(true)
         }
@@ -858,22 +864,10 @@ struct HomeHeroView: View {
             let newName = new.map { "\($0)" } ?? "nil"
             HeroFocusDiagnostics.emit("focus \(oldName)->\(newName) | \(hfState())")
             switch new {
-            case .leftGuard:
-                if directionalPressGate.shouldHandle(.left) {
-                    handleLeft()
-                } else {
-                    HeroFocusDiagnostics.emit("suppressed repeated physical Left")
-                    noteInteraction()
-                    focus = .row
-                }
-            case .rightGuard:
-                if directionalPressGate.shouldHandle(.right) {
-                    handleRight()
-                } else {
-                    HeroFocusDiagnostics.emit("suppressed repeated physical Right")
-                    noteInteraction()
-                    focus = .row
-                }
+            case .leftGuard, .rightGuard:
+                // UIKit guard callbacks resolve these after the focus update. A
+                // denied held repeat never reaches this state.
+                break
             case .row:
                 // Focus arriving into the hero from *outside* (a row below / the
                 // tab bar): snap back to full-screen and scroll the page to the top.
@@ -937,6 +931,52 @@ struct HomeHeroView: View {
     /// left-most button.
     private var leftGuardActive: Bool {
         !(allowsSidebarEscape && focus == .row)
+    }
+
+    /// Runs from UIKit's pre-focus-update hook. Only an actual carousel page
+    /// consumes the held-press allowance; moving between interior action buttons
+    /// never starts or advances the repeat delay.
+    private func shouldAllowGuardFocus(_ direction: HeroFocusDirection) -> Bool {
+        directionalPressGate.shouldAllowFocusUpdate(
+            direction,
+            outcome: guardOutcome(direction)
+        )
+    }
+
+    private func guardOutcome(_ direction: HeroFocusDirection) -> HeroFocusOutcome {
+        guard let item = current else { return .blocked }
+        let buttonCount = buttons(for: item).count
+        return HeroCarouselFocus.resolve(
+            direction: direction,
+            itemIndex: index,
+            itemCount: items.count,
+            focusedButton: min(selectedButton, max(0, buttonCount - 1)),
+            buttonCount: buttonCount,
+            navigationStyle: navigationStyle
+        )
+    }
+
+    /// UIKit owns the invisible guard's focus lifecycle so it can veto repeats
+    /// before tvOS emits feedback. Mirror an allowed guard landing into the
+    /// SwiftUI focus state, then resolve it on the next turn and return to the row.
+    private func guardReceivedFocus(_ direction: HeroFocusDirection) {
+        directionalPressGate.didCommitFocusUpdate(
+            direction,
+            outcome: guardOutcome(direction)
+        )
+        let guardFocus: HeroFocus = direction == .left ? .leftGuard : .rightGuard
+        if focus != guardFocus {
+            focus = guardFocus
+        }
+        DispatchQueue.main.async {
+            guard focus == guardFocus else { return }
+            switch direction {
+            case .left:
+                handleLeft()
+            case .right:
+                handleRight()
+            }
+        }
     }
 
     /// The container-level move handler. Its ONLY job is to pause the auto-advance
@@ -1939,22 +1979,105 @@ final class HeroDirectionalPressGate {
         }
     }
 
-    func shouldHandle(_ direction: HeroFocusDirection) -> Bool {
+    func shouldAllowFocusUpdate(
+        _ direction: HeroFocusDirection,
+        outcome: HeroFocusOutcome
+    ) -> Bool {
+        switch outcome {
+        case .moveButton, .escape:
+            return true
+        case .blocked:
+            return false
+        case .advance:
+            return shouldAllowPage(direction)
+        }
+    }
+
+    func didCommitFocusUpdate(
+        _ direction: HeroFocusDirection,
+        outcome: HeroFocusOutcome
+    ) {
+        guard case .advance = outcome else { return }
+        switch direction {
+        case .left where leftHeld:
+            handledLeft = true
+        case .right where rightHeld:
+            handledRight = true
+        default:
+            break
+        }
+    }
+
+    private func shouldAllowPage(_ direction: HeroFocusDirection) -> Bool {
         switch direction {
         case .left:
             guard leftHeld else { return true }
-            if !handledLeft {
-                handledLeft = true
-                return true
-            }
+            guard handledLeft else { return true }
             return now() - leftBeganAt >= repeatDelay
         case .right:
             guard rightHeld else { return true }
-            if !handledRight {
-                handledRight = true
-                return true
-            }
+            guard handledRight else { return true }
             return now() - rightBeganAt >= repeatDelay
+        }
+    }
+}
+
+/// A native focus target for one horizontal edge of the Hero action row.
+/// `shouldUpdateFocus` runs before tvOS commits the move, allowing held paging
+/// repeats to be cancelled without producing a navigation sound.
+private struct HeroDirectionalFocusGuard: UIViewRepresentable {
+    let direction: HeroFocusDirection
+    let isActive: Bool
+    let shouldAllowFocus: () -> Bool
+    let onFocused: () -> Void
+
+    func makeUIView(context: Context) -> FocusGuardView {
+        let view = FocusGuardView()
+        view.backgroundColor = .clear
+        view.isOpaque = false
+        view.accessibilityElementsHidden = true
+        update(view)
+        return view
+    }
+
+    func updateUIView(_ uiView: FocusGuardView, context: Context) {
+        update(uiView)
+    }
+
+    private func update(_ view: FocusGuardView) {
+        view.direction = direction
+        view.isActive = isActive
+        view.shouldAllowFocus = shouldAllowFocus
+        view.onFocused = onFocused
+    }
+
+    final class FocusGuardView: UIView {
+        var direction: HeroFocusDirection = .right
+        var isActive = true
+        var shouldAllowFocus: () -> Bool = { true }
+        var onFocused: () -> Void = {}
+
+        override var canBecomeFocused: Bool { isActive }
+
+        override func shouldUpdateFocus(in context: UIFocusUpdateContext) -> Bool {
+            guard context.nextFocusedItem === self else {
+                return super.shouldUpdateFocus(in: context)
+            }
+            let expectedHeading: UIFocusHeading = direction == .left ? .left : .right
+            guard context.focusHeading.contains(expectedHeading) else {
+                return super.shouldUpdateFocus(in: context)
+            }
+            return shouldAllowFocus() && super.shouldUpdateFocus(in: context)
+        }
+
+        override func didUpdateFocus(
+            in context: UIFocusUpdateContext,
+            with coordinator: UIFocusAnimationCoordinator
+        ) {
+            super.didUpdateFocus(in: context, with: coordinator)
+            if context.nextFocusedItem === self {
+                onFocused()
+            }
         }
     }
 }

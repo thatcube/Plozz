@@ -37,6 +37,9 @@ struct DetailExtrasView: View {
                         leadingInset: leadingInset,
                         onFocusEntered: onCastFocusEntered
                     )
+                        // Detail pages use a fixed composition; profile display
+                        // density belongs to browse cards, not this cast rail.
+                        .environment(\.plozzMetrics, .standard)
                         .modifier(SeriesCastRevealModifier(
                             model: seriesRecedeModel,
                             revealsWithoutBrowser: revealsSeriesCastWithoutBrowser

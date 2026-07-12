@@ -36,12 +36,11 @@ public struct PlozzigenSMBStreamProber: SMBStreamProbing {
         } catch {
             return nil
         }
-        // We own the connection here so we can close it deterministically after the
-        // probe; the reader must NOT also try to close it (ownsSource: false).
-        defer { connection.close() }
-
+        let reader = TransportIOReader(
+            source: SMBTransportByteSource(connection: connection)
+        )
         let source = MediaSource.custom(
-            SMBIOReader(source: connection, ownsSource: false),
+            reader,
             formatHint: Self.formatHint(for: parsed.path)
         )
 
@@ -52,6 +51,8 @@ public struct PlozzigenSMBStreamProber: SMBStreamProbing {
                 continuation.resume(returning: try? AetherEngine.probe(source: source))
             }
         }
+        reader.close()
+        await reader.waitForFinalShutdown()
 
         guard let probe else { return nil }
         return Self.facts(from: probe)

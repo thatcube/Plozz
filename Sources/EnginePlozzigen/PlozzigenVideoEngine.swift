@@ -244,7 +244,7 @@ public final class PlozzigenVideoEngine: VideoEngine {
     /// Build an SMB `MediaSource` from an `smb://host[:port]/share/path/file.ext`
     /// URL. Parses it with the engine's `SMBURL`, opens an `SMBConnection`
     /// (NWConnection-backed SMB2, NTLMv2 / guest, read-only), and wraps it in an
-    /// `SMBIOReader` for the engine's custom-source path.
+    /// Plozz's lease-aware transport reader for the engine's custom-source path.
     private func makeSMBSource(from url: URL) async throws -> MediaSource {
         let parsed: SMBURL
         do {
@@ -259,7 +259,10 @@ public final class PlozzigenVideoEngine: VideoEngine {
             user: parsed.user,
             password: parsed.password
         )
-        return .custom(SMBIOReader(source: connection), formatHint: Self.smbFormatHint(for: parsed.path))
+        return .custom(
+            TransportIOReader(source: SMBTransportByteSource(connection: connection)),
+            formatHint: Self.smbFormatHint(for: parsed.path)
+        )
     }
 
     /// Optional container short-name hint for the demuxer probe, derived from the

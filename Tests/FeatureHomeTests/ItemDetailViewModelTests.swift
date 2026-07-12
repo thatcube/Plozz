@@ -176,6 +176,7 @@ final class ItemDetailViewModelTests: XCTestCase {
         let vm = ItemDetailViewModel(provider: provider, itemID: "m1", sourceAccountID: "plex")
         XCTAssertNil(vm.originSourceAccountID,
                      "Home/Search details carry no origin, so the picker defaults to the smart best version")
+        XCTAssertFalse(vm.isLibraryOriginPinned)
     }
 
     func testOriginSourceAccountIDIsThreadedForLibraryOpenedItems() {
@@ -185,6 +186,8 @@ final class ItemDetailViewModelTests: XCTestCase {
         let vm = ItemDetailViewModel(provider: provider, itemID: "m1",
                                      sourceAccountID: "jelly", originSourceAccountID: "jelly")
         XCTAssertEqual(vm.originSourceAccountID, "jelly")
+        XCTAssertTrue(vm.isLibraryOriginPinned,
+                      "Playback from a source-specific library must remain on that source")
     }
 
     // MARK: - Initial locality preference (series server picking)

@@ -134,6 +134,12 @@ public final class ItemDetailViewModel {
         return "\(activeSourceAccountID ?? activeProvider.kind.rawValue):\(activeItemID)"
     }
 
+    /// A source-specific library browse is an intentional source choice. Playback
+    /// must remain on that server unless the viewer changes the source picker.
+    public var isLibraryOriginPinned: Bool {
+        originSourceAccountID != nil
+    }
+
     /// Resolves theme audio as a best-effort decorative enhancement.
     public func resolveThemeMusic() async -> ThemeMusic? {
         guard themeMusicPlaybackID != nil else { return nil }

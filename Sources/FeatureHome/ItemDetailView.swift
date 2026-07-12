@@ -690,7 +690,9 @@ public struct ItemDetailView: View {
             sources: sources,
             activeAccountID: activeAccountID,
             versionID: versionID,
-            explicit: sourceOverride != nil || versionOverride != nil
+            explicit: viewModel.isLibraryOriginPinned
+                || sourceOverride != nil
+                || versionOverride != nil
         )
     }
 

@@ -1,5 +1,6 @@
 import Foundation
 import CoreModels
+import MediaTransportCore
 import CoreNetworking
 
 /// Lazy folder browser over an SMB share.
@@ -24,10 +25,10 @@ actor ShareLibraryStore {
     /// only happens when the row is actually opened.
     static let rootLibraryID = "share:root"
 
-    private let browser: SMBShareBrowser
+    private let browser: ShareTransportBrowser
     private let serverName: String
 
-    init(browser: SMBShareBrowser, serverName: String) {
+    init(browser: ShareTransportBrowser, serverName: String) {
         self.browser = browser
         self.serverName = serverName
     }
@@ -43,7 +44,7 @@ actor ShareLibraryStore {
     /// Raw directory listing (share-relative), for sidecar discovery at playback
     /// time. Unlike `entries(forContainerID:)` this returns every entry (incl.
     /// subtitle files), not just folders + videos.
-    func rawEntries(inDirectory relPath: String) async throws -> [SMBShareBrowser.Entry] {
+    func rawEntries(inDirectory relPath: String) async throws -> [RemoteFileEntry] {
         try await browser.listDirectory(relPath)
     }
 
@@ -75,7 +76,7 @@ actor ShareLibraryStore {
         var videos: [MediaItem] = []
         for entry in entries {
             let childPath = relPath.isEmpty ? entry.name : "\(relPath)/\(entry.name)"
-            if entry.isDirectory {
+            if entry.kind == .directory {
                 folders.append(folderItem(relPath: childPath, name: entry.name))
             } else if ShareMediaParser.isVideoFile(entry.name) {
                 videos.append(videoItem(relPath: childPath, name: entry.name))

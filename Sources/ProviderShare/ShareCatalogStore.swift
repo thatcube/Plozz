@@ -24,6 +24,7 @@ actor ShareCatalogStore {
     private let url: URL
     private var db: OpaquePointer?
     private var didOpen = false
+    private var activeScanGeneration: UUID?
 
     // SQLite wants a destructor sentinel for transient (copied) bound text; not
     // exported into Swift, so reconstruct it.
@@ -169,9 +170,30 @@ actor ShareCatalogStore {
     /// Insert or update a batch of discovered assets under one scan id. Preserves
     /// `first_seen_at` for rows already present (so "date added" = first discovery,
     /// never a re-scan), and refreshes size/mtime/parse/library. Idempotent.
-    func upsert(_ assets: [CatalogAsset], scanID: Int64, now: Date = Date()) async {
+    func activateScanGeneration(_ generation: UUID) {
+        activeScanGeneration = generation
+    }
+
+    func invalidateScanGeneration() {
+        activeScanGeneration = nil
+    }
+
+    func nextScanID(for generation: UUID) -> Int64? {
+        guard activeScanGeneration == generation else { return nil }
+        let current = Int64(meta("scan_counter") ?? "0") ?? 0
+        let next = current + 1
+        setMeta("scan_counter", String(next))
+        return next
+    }
+
+    func upsert(
+        _ assets: [CatalogAsset],
+        scanID: Int64,
+        now: Date = Date(),
+        scanGeneration: UUID? = nil
+    ) async {
         ensureOpen()
-        guard db != nil, !assets.isEmpty else { return }
+        guard admits(scanGeneration), db != nil, !assets.isEmpty else { return }
         let started = Date()
         var slowestChunkMs = 0
         let sql = """
@@ -202,6 +224,7 @@ actor ShareCatalogStore {
 
         var index = 0
         while index < assets.count {
+            guard admits(scanGeneration) else { return }
             let end = min(index + Self.writeChunkSize, assets.count)
             let chunkStarted = Date()
             exec("BEGIN IMMEDIATE;")
@@ -244,9 +267,9 @@ actor ShareCatalogStore {
     /// versions of one movie (metadata commonly differs by festival/theatrical
     /// year); distant remakes remain separate. Existing group ids win so adding a
     /// version later does not churn watch-state or deep-link ids.
-    func rebuildMovieGroups() async {
+    func rebuildMovieGroups(scanGeneration: UUID? = nil) async {
         ensureOpen()
-        guard db != nil else { return }
+        guard admits(scanGeneration), db != nil else { return }
         let started = Date()
 
         var rows: [MovieGroupingRow] = []
@@ -321,9 +344,11 @@ actor ShareCatalogStore {
             }
             return MovieGroupingPlan(assignments: assignments, aliases: aliases)
         }.value
+        guard admits(scanGeneration) else { return }
         let computeMs = Int(Date().timeIntervalSince(computeStarted) * 1_000)
 
-        await persistMovieAliases(plan.aliases)
+        await persistMovieAliases(plan.aliases, scanGeneration: scanGeneration)
+        guard admits(scanGeneration) else { return }
 
         guard !plan.assignments.isEmpty else {
             PlozzLog.boot(
@@ -340,6 +365,7 @@ actor ShareCatalogStore {
         var index = 0
         var slowestChunkMs = 0
         while index < plan.assignments.count {
+            guard admits(scanGeneration) else { return }
             let end = min(index + Self.writeChunkSize, plan.assignments.count)
             let chunkStarted = Date()
             exec("BEGIN IMMEDIATE;")
@@ -361,9 +387,9 @@ actor ShareCatalogStore {
 
     /// Capture aliases from the pre-prune catalog so a removed movie version's
     /// legacy file id still resolves to the surviving logical group.
-    func preserveMovieAliasesBeforePrune() {
+    func preserveMovieAliasesBeforePrune(scanGeneration: UUID? = nil) {
         ensureOpen()
-        guard db != nil else { return }
+        guard admits(scanGeneration), db != nil else { return }
         exec("BEGIN IMMEDIATE;")
         exec("""
         INSERT INTO movie_alias(alias_id, group_key)
@@ -382,8 +408,11 @@ actor ShareCatalogStore {
         exec("COMMIT;")
     }
 
-    private func persistMovieAliases(_ aliases: [MovieAlias]) async {
-        guard !aliases.isEmpty else { return }
+    private func persistMovieAliases(
+        _ aliases: [MovieAlias],
+        scanGeneration: UUID?
+    ) async {
+        guard admits(scanGeneration), !aliases.isEmpty else { return }
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, """
         INSERT INTO movie_alias(alias_id, group_key) VALUES(?,?)
@@ -393,6 +422,7 @@ actor ShareCatalogStore {
 
         var index = 0
         while index < aliases.count {
+            guard admits(scanGeneration) else { return }
             let end = min(index + Self.writeChunkSize, aliases.count)
             exec("BEGIN IMMEDIATE;")
             for alias in aliases[index..<end] {
@@ -410,9 +440,9 @@ actor ShareCatalogStore {
     /// Delete rows not seen by `scanID` — assets removed from the share since the
     /// last full walk. Only call after a scan that fully completed (no cancel), so
     /// a partial walk can't wipe still-present content.
-    func pruneNotSeen(inScan scanID: Int64) {
+    func pruneNotSeen(inScan scanID: Int64, scanGeneration: UUID? = nil) {
         ensureOpen()
-        guard db != nil else { return }
+        guard admits(scanGeneration), db != nil else { return }
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, "DELETE FROM assets WHERE last_scan <> ?;", -1, &stmt, nil) == SQLITE_OK else { return }
         defer { sqlite3_finalize(stmt) }
@@ -420,9 +450,9 @@ actor ShareCatalogStore {
         _ = sqlite3_step(stmt)
     }
 
-    func setMeta(_ key: String, _ value: String) {
+    func setMeta(_ key: String, _ value: String, scanGeneration: UUID? = nil) {
         ensureOpen()
-        guard db != nil else { return }
+        guard admits(scanGeneration), db != nil else { return }
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, "INSERT INTO meta(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value;", -1, &stmt, nil) == SQLITE_OK else { return }
         defer { sqlite3_finalize(stmt) }
@@ -440,6 +470,11 @@ actor ShareCatalogStore {
         bindText(stmt, 1, key)
         guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
         return columnText(stmt, 0)
+    }
+
+    private func admits(_ scanGeneration: UUID?) -> Bool {
+        guard let scanGeneration else { return true }
+        return activeScanGeneration == scanGeneration
     }
 
     // MARK: - Enrichment (scan-time metadata resolution, persisted)

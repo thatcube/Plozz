@@ -1,6 +1,7 @@
 import Foundation
 import CoreModels
 import CoreNetworking
+import MediaTransportCore
 
 /// Second-class local media-share provider (SMB). Conforms to `MediaProvider`
 /// so Home / browse / search / playback treat a share like any other backend —
@@ -22,6 +23,9 @@ public struct ShareProvider: MediaProvider {
     private let host: String
     private let port: Int?
     private let share: String
+    private let rootPathComponents: [String]
+    private let credentialRevision: CredentialRevision
+    private let sessionFactory: ShareTransportSessionFactory
     private let catalogOverride: ShareCatalogStore?
     /// Injected engine-side SMB header prober (nil in tests / when the engine layer
     /// isn't wired). Used to obtain real per-file stream facts for a share that has
@@ -32,12 +36,16 @@ public struct ShareProvider: MediaProvider {
     public init(
         session: UserSession,
         localMediaContext: LocalMediaContext,
+        credentialRevision: CredentialRevision,
+        sessionFactory: @escaping ShareTransportSessionFactory,
         streamProber: SMBStreamProbing? = nil
     ) {
         self.init(
             session: session,
             localMediaContext: localMediaContext,
             watchDirectory: nil,
+            credentialRevision: credentialRevision,
+            sessionFactory: sessionFactory,
             streamProber: streamProber
         )
     }
@@ -50,6 +58,12 @@ public struct ShareProvider: MediaProvider {
         session: UserSession,
         localMediaContext: LocalMediaContext? = nil,
         watchDirectory: URL?,
+        credentialRevision: CredentialRevision = CredentialRevision(
+            rawValue: UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+        ),
+        sessionFactory: @escaping ShareTransportSessionFactory = { _ in
+            throw MediaTransportError.unsupportedCapability("test transport")
+        },
         streamProber: SMBStreamProbing? = nil,
         catalogStore: ShareCatalogStore? = nil
     ) {
@@ -61,18 +75,24 @@ public struct ShareProvider: MediaProvider {
         )
         self.streamProber = streamProber
         self.catalogOverride = catalogStore
+        self.credentialRevision = credentialRevision
+        self.sessionFactory = sessionFactory
         let parsed = Self.parse(session.server.baseURL)
         self.host = parsed.host
         self.port = parsed.port
         self.share = parsed.share
-        let browser = SMBShareBrowser(
-            host: parsed.host, port: parsed.port, share: parsed.share,
-            user: session.userName, password: session.accessToken
+        self.rootPathComponents = parsed.rootPathComponents
+        let browser = ShareTransportBrowser(
+            role: .metadata,
+            sessionFactory: sessionFactory
         )
         self.store = ShareLibraryStore(browser: browser, serverName: session.server.name)
         // Watch state is device-local (a file share has no server), scoped by the
         // share's stable account id so two shares keep separate progress.
-        self.watchStore = ShareWatchStore(accountKey: session.server.id, directory: watchDirectory)
+        self.watchStore = ShareWatchStore(
+            localMediaContext: self.localMediaContext,
+            directory: watchDirectory
+        )
     }
 
     // MARK: Library browsing
@@ -85,10 +105,10 @@ public struct ShareProvider: MediaProvider {
         get async {
             if let catalogOverride { return catalogOverride }
             return await ShareCatalogRegistry.shared.store(
-                accountKey: session.server.id,
+                accountKey: localMediaContext.accountID,
                 displayName: session.server.name,
-                host: host, port: port, share: share,
-                user: session.userName, password: session.accessToken
+                credentialRevision: credentialRevision,
+                sessionFactory: sessionFactory
             )
         }
     }
@@ -98,7 +118,7 @@ public struct ShareProvider: MediaProvider {
     /// Home never queried this share yet, then forces a scan bypassing the throttle.
     public func rescan() async {
         _ = await catalog
-        await ShareCatalogRegistry.shared.rescan(accountKey: session.server.id)
+        await ShareCatalogRegistry.shared.rescan(accountKey: localMediaContext.accountID)
     }
 
     public func libraries() async throws -> [MediaLibrary] {
@@ -152,7 +172,7 @@ public struct ShareProvider: MediaProvider {
         }
         // Device-observable (in-app log ring) so a missing Continue Watching row
         // can be traced to "no resumable state on disk" vs "rebuild dropped it".
-        PlozzLog.playback.info("share.continueWatching account=\(session.server.id) resumable=\(resumable.count) folded=\(byCanonical.count) rebuilt=\(items.count)")
+        PlozzLog.playback.info("share.continueWatching account=\(localMediaContext.accountID) resumable=\(resumable.count) folded=\(byCanonical.count) rebuilt=\(items.count)")
         return items
     }
 
@@ -170,7 +190,10 @@ public struct ShareProvider: MediaProvider {
             // A user just opened this — fast-track its enrichment ahead of the
             // background backlog so its hero/poster/overview persist promptly. Fire-
             // and-forget (no added latency); a no-op once the item is enriched.
-            await ShareCatalogRegistry.shared.enrichItem(accountKey: session.server.id, itemID: id)
+            await ShareCatalogRegistry.shared.enrichItem(
+                accountKey: localMediaContext.accountID,
+                itemID: id
+            )
             measureStreamProbeIfEnabled(itemID: id)
             return await stampWatchState(indexed)
         }
@@ -357,7 +380,7 @@ public struct ShareProvider: MediaProvider {
         let subDirs = subFolderNames.map { sub in dir.isEmpty ? sub : "\(dir)/\(sub)" }
         for (listDir, dedicated) in [(ownDir, false)] + subDirs.map({ ($0, true) }) {
             guard let entries = try? await store.rawEntries(inDirectory: listDir) else { continue }
-            for entry in entries where !entry.isDirectory && ShareMediaParser.isSubtitleFile(entry.name) {
+            for entry in entries where entry.kind != .directory && ShareMediaParser.isSubtitleFile(entry.name) {
                 let key = "\(listDir.lowercased())/\(entry.name.lowercased())"
                 guard seenCandidateKeys.insert(key).inserted else { continue }
                 candidates.append((listDir, entry.name, dedicated))
@@ -439,7 +462,7 @@ public struct ShareProvider: MediaProvider {
         // persists the resume directly here. A later `setPlayed(true)` drained from
         // the outbox (newer `capturedAt`) still supersedes it and clears the resume,
         // so a fully-watched title doesn't linger in Continue Watching.
-        PlozzLog.playback.info("share.reportPlayback event=\(String(describing: event)) item=\(progress.itemID) pos=\(Int(progress.positionSeconds)) account=\(session.server.id)")
+        PlozzLog.playback.info("share.reportPlayback event=\(String(describing: event)) item=\(progress.itemID) pos=\(Int(progress.positionSeconds)) account=\(localMediaContext.accountID)")
         switch event {
         case .progress, .pause, .stop:
             let id = await catalog.canonicalItemID(progress.itemID)
@@ -553,7 +576,7 @@ public struct ShareProvider: MediaProvider {
 
     /// Build `smb://[user[:password]@]host[:port]/share/<relPath>` with each
     /// path segment percent-encoded, for the engine's custom SMB source.
-    private func smbURL(forRelativePath relPath: String) -> URL? {
+    func smbURL(forRelativePath relPath: String) -> URL? {
         var comps = URLComponents()
         comps.scheme = "smb"
         comps.host = Self.bracketedHostIfIPv6(host)
@@ -561,10 +584,15 @@ public struct ShareProvider: MediaProvider {
         if !session.userName.isEmpty {
             comps.user = session.userName
             if !session.accessToken.isEmpty { comps.password = session.accessToken }
+        } else if !session.accessToken.isEmpty {
+            comps.user = "guest"
+            comps.password = session.accessToken
         }
         // Share + each relative segment, joined so URLComponents percent-encodes
         // spaces and other reserved characters correctly.
-        let segments = [share] + relPath.split(separator: "/").map(String.init)
+        let segments = [share]
+            + rootPathComponents
+            + relPath.split(separator: "/").map(String.init)
         comps.path = "/" + segments.joined(separator: "/")
         return comps.url
     }
@@ -590,14 +618,21 @@ public struct ShareProvider: MediaProvider {
 
     // MARK: - Parse baseURL
 
-    private static func parse(_ baseURL: URL) -> (host: String, port: Int?, share: String) {
+    private static func parse(
+        _ baseURL: URL
+    ) -> (host: String, port: Int?, share: String, rootPathComponents: [String]) {
         let comps = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)
         let host = unbracketedHost(comps?.host ?? "")
         let port = comps?.port
-        let share = (comps?.path ?? "")
+        let pathComponents = (comps?.path ?? "")
             .split(separator: "/", omittingEmptySubsequences: true)
-            .first.map(String.init) ?? ""
-        return (host, port, share)
+            .map(String.init)
+        return (
+            host,
+            port,
+            pathComponents.first ?? "",
+            Array(pathComponents.dropFirst())
+        )
     }
 }
 
@@ -617,7 +652,9 @@ extension ShareProvider: CapabilityReporting {
 
 extension ShareProvider: InteractiveBrowseActivityReporting {
     public func noteInteractiveBrowseActivity() async {
-        await ShareCatalogRegistry.shared.noteInteractiveActivity(accountKey: session.server.id)
+        await ShareCatalogRegistry.shared.noteInteractiveActivity(
+            accountKey: localMediaContext.accountID
+        )
     }
 }
 

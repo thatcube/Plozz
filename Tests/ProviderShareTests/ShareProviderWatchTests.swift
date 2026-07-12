@@ -16,20 +16,124 @@ final class ShareProviderWatchTests: XCTestCase {
         return dir
     }
 
-    private func makeSession() -> UserSession {
+    private func makeSession(
+        baseURL: URL = URL(string: "smb://nas.local/Media")!,
+        username: String = "guest",
+        password: String = ""
+    ) -> UserSession {
         let server = MediaServer(
             id: "share:nas.local/Media",
             name: "NAS",
-            baseURL: URL(string: "smb://nas.local/Media")!,
+            baseURL: baseURL,
             provider: .mediaShare
         )
         return UserSession(
             server: server,
             userID: "guest",
-            userName: "guest",
+            userName: username,
             deviceID: "test-device",
-            accessToken: ""
+            accessToken: password
         )
+    }
+
+    func testPlaybackURLPreservesConfiguredSubfolderRoot() {
+        let provider = ShareProvider(
+            session: makeSession(baseURL: URL(string: "smb://nas.local/Media/Movies")!),
+            watchDirectory: makeTempDir()
+        )
+
+        XCTAssertEqual(
+            provider.smbURL(forRelativePath: "Drama/Arrival.mkv")?.absoluteString,
+            "smb://guest@nas.local/Media/Movies/Drama/Arrival.mkv"
+        )
+    }
+
+    func testPlaybackURLPreservesPasswordedGuestCredentials() {
+        let provider = ShareProvider(
+            session: makeSession(username: "", password: "guest-secret"),
+            watchDirectory: makeTempDir()
+        )
+
+        XCTAssertEqual(
+            provider.smbURL(forRelativePath: "Arrival.mkv")?.absoluteString,
+            "smb://guest:guest-secret@nas.local/Media/Arrival.mkv"
+        )
+    }
+
+    func testAccountsOnSameEndpointKeepIndependentWatchState() async throws {
+        let directory = makeTempDir()
+        let session = makeSession()
+        let first = ShareProvider(
+            session: session,
+            localMediaContext: LocalMediaContext(
+                accountID: "account-a",
+                profileID: "profile",
+                profileNamespace: nil
+            ),
+            watchDirectory: directory
+        )
+        let second = ShareProvider(
+            session: session,
+            localMediaContext: LocalMediaContext(
+                accountID: "account-b",
+                profileID: "profile",
+                profileNamespace: nil
+            ),
+            watchDirectory: directory
+        )
+
+        try await first.reportPlayback(
+            PlaybackProgress(
+                itemID: "f:Movie.mkv",
+                playSessionID: "play",
+                positionSeconds: 120,
+                isPaused: false
+            ),
+            event: .progress
+        )
+
+        let firstItems = try await first.continueWatching(limit: 10)
+        let secondItems = try await second.continueWatching(limit: 10)
+        XCTAssertEqual(firstItems.count, 1)
+        XCTAssertTrue(secondItems.isEmpty)
+    }
+
+    func testProfilesOnSameAccountKeepIndependentWatchState() async throws {
+        let directory = makeTempDir()
+        let session = makeSession()
+        let first = ShareProvider(
+            session: session,
+            localMediaContext: LocalMediaContext(
+                accountID: "account",
+                profileID: "profile-a",
+                profileNamespace: "household"
+            ),
+            watchDirectory: directory
+        )
+        let second = ShareProvider(
+            session: session,
+            localMediaContext: LocalMediaContext(
+                accountID: "account",
+                profileID: "profile-b",
+                profileNamespace: "household"
+            ),
+            watchDirectory: directory
+        )
+
+        try await first.reportPlayback(
+            PlaybackProgress(
+                itemID: "f:Movie.mkv",
+                playSessionID: "play",
+                positionSeconds: 120,
+                isPaused: false
+            ),
+            event: .progress
+        )
+
+        let firstItems = try await first.continueWatching(limit: 10)
+        let secondItems = try await second.continueWatching(limit: 10)
+        XCTAssertEqual(firstItems.count, 1)
+        XCTAssertTrue(secondItems.isEmpty)
     }
 
     func testProgressTickPersistsAcrossRelaunch() async throws {
@@ -114,7 +218,14 @@ final class ShareProviderWatchTests: XCTestCase {
 
         // Pre-upgrade state was persisted against the physical file id.
         let legacyID = ShareCatalogID.file(relPath)
-        let watch = ShareWatchStore(accountKey: session.server.id, directory: watchDir)
+        let watch = ShareWatchStore(
+            localMediaContext: LocalMediaContext(
+                accountID: session.server.id,
+                profileID: ProfileStore.defaultProfileID,
+                profileNamespace: nil
+            ),
+            directory: watchDir
+        )
         await watch.setResume(600, itemID: legacyID, capturedAt: Date(), duration: 6_000)
 
         let provider = ShareProvider(

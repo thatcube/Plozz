@@ -6,6 +6,18 @@ public protocol MediaTransportByteSource: AnyObject, Sendable {
     func shutdown() async
 }
 
+/// Optional specialization for transports that require a distinct underlying
+/// channel per logical cursor. A cancelled read may tear down that cursor's
+/// channel without disrupting cloned cursors that share the same lease.
+public protocol MediaTransportCursorIsolatedByteSource: MediaTransportByteSource {
+    func read(
+        cursorID: UUID,
+        at offset: Int64,
+        length: Int
+    ) async throws -> Data
+    func release(cursorID: UUID) async
+}
+
 /// Reference-counted ownership for a random-access source.
 ///
 /// Cursors are independent. Closing or cancelling one cursor never closes
@@ -96,8 +108,19 @@ public final class MediaTransportSourceLease: @unchecked Sendable {
         }
     }
 
-    fileprivate func read(at offset: Int64, length: Int) async throws -> Data {
-        try await source.read(at: offset, length: length)
+    fileprivate func read(
+        cursorID: UUID,
+        at offset: Int64,
+        length: Int
+    ) async throws -> Data {
+        if let isolatedSource = source as? any MediaTransportCursorIsolatedByteSource {
+            return try await isolatedSource.read(
+                cursorID: cursorID,
+                at: offset,
+                length: length
+            )
+        }
+        return try await source.read(at: offset, length: length)
     }
 
     fileprivate func endOperation() {
@@ -112,14 +135,22 @@ public final class MediaTransportSourceLease: @unchecked Sendable {
     }
 
     fileprivate func release(cursorID: UUID) {
-        let shouldShutdown = lock.withLock {
-            guard state.cursorIDs.remove(cursorID) != nil else { return false }
+        let outcome = lock.withLock { () -> (released: Bool, shouldShutdown: Bool) in
+            guard state.cursorIDs.remove(cursorID) != nil else {
+                return (false, false)
+            }
             if state.cursorIDs.isEmpty {
                 state.isDraining = true
             }
-            return markShutdownIfReady()
+            return (true, markShutdownIfReady())
         }
-        if shouldShutdown {
+        guard outcome.released else { return }
+        if let isolatedSource = source as? any MediaTransportCursorIsolatedByteSource {
+            Task.detached(priority: .utility) {
+                await isolatedSource.release(cursorID: cursorID)
+            }
+        }
+        if outcome.shouldShutdown {
             startShutdown()
         }
     }
@@ -183,10 +214,11 @@ public final class MediaTransportSourceCursor: @unchecked Sendable {
             throw MediaTransportError.cancelled
         }
         let operationID = UUID()
+        let cursorID = id
         let task = lock.withLock { () -> Task<Data, Error>? in
             guard !state.isClosed else { return nil }
             let task = Task.detached(priority: .userInitiated) { [lease] in
-                try await lease.read(at: offset, length: length)
+                try await lease.read(cursorID: cursorID, at: offset, length: length)
             }
             state.reads[operationID] = task
             return task

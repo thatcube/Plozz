@@ -330,6 +330,31 @@ final class AccountStoreTests: XCTestCase {
         )
     }
 
+    func testMediaShareCredentialResolutionRequiresExactActiveRevision() throws {
+        let setup = try makeShareStore()
+        let account = shareAccount()
+        try setup.store.add(account, token: "PASSWORD")
+
+        XCTAssertEqual(
+            try setup.store.mediaShareCredential(
+                for: account.id,
+                revision: account.credentialRevision
+            ).authentication,
+            .password(username: "alice", password: "PASSWORD")
+        )
+        XCTAssertThrowsError(
+            try setup.store.mediaShareCredential(
+                for: account.id,
+                revision: CredentialRevision()
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? AccountStoreError,
+                .mediaShareCredentialInvariantViolation
+            )
+        }
+    }
+
     func testReplacingSMBCredentialCommitsNewRevisionAndRetiresOld() throws {
         let setup = try makeShareStore()
         let account = shareAccount()

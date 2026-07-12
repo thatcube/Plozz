@@ -11,6 +11,10 @@ public protocol AccountPersisting: Sendable {
     func setActiveAccountIDs(_ ids: [String])
     func token(for accountID: String) -> String?
     func mediaShareCredential(for accountID: String) throws -> MediaShareCredentialEnvelope
+    func mediaShareCredential(
+        for accountID: String,
+        revision: CredentialRevision
+    ) throws -> MediaShareCredentialEnvelope
     func add(_ account: Account, token: String) throws
     func addMediaShare(
         _ account: Account,
@@ -146,6 +150,22 @@ public final class AccountStore: AccountPersisting, @unchecked Sendable {
         guard let account = persistedAccountsLocked().first(where: { $0.id == accountID }),
               account.server.provider == .mediaShare else {
             throw AccountStoreError.invalidMediaShareAccount
+        }
+        return try mediaShareCredentialLocked(for: account)
+    }
+
+    public func mediaShareCredential(
+        for accountID: String,
+        revision: CredentialRevision
+    ) throws -> MediaShareCredentialEnvelope {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let account = persistedAccountsLocked().first(where: { $0.id == accountID }),
+              account.server.provider == .mediaShare else {
+            throw AccountStoreError.invalidMediaShareAccount
+        }
+        guard account.credentialRevision == revision else {
+            throw AccountStoreError.mediaShareCredentialInvariantViolation
         }
         return try mediaShareCredentialLocked(for: account)
     }

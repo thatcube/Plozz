@@ -1,4 +1,5 @@
 import Foundation
+import CoreModels
 import CoreNetworking
 
 /// Local, on-device watch state for a media share.
@@ -22,9 +23,8 @@ import CoreNetworking
 /// never clobbers a newer one, so a stale resume can't resurrect an item a newer
 /// `setPlayed` marked finished.
 ///
-/// Scope: one file per share account. Watch state on a local share is inherently
-/// device-local; per-*profile* scoping is a future refinement (documented in the
-/// media-share plan).
+/// Scope: one file per share account and Plozz profile. Watch state on a local
+/// share is device-local, but profiles never read or overwrite each other's state.
 public actor ShareWatchStore {
     /// One item's persisted watch state.
     public struct Record: Codable, Sendable, Equatable {
@@ -55,13 +55,23 @@ public actor ShareWatchStore {
     private var records: [String: Record]?
 
     /// - Parameters:
-    ///   - accountKey: stable per-account id (the share's `server.id`), used to
-    ///     name the file so two shares/accounts keep separate state.
+    ///   - accountKey: stable per-account id, used to name the file so two
+    ///     shares/accounts keep separate state.
     ///   - directory: container dir (defaults to Application Support/Plozz).
     public init(accountKey: String, directory: URL? = nil) {
         let base = directory ?? Self.defaultDirectory()
         try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
         self.url = base.appendingPathComponent("share-watch-\(Self.sanitize(accountKey)).json")
+    }
+
+    public init(localMediaContext: LocalMediaContext, directory: URL? = nil) {
+        let namespace = localMediaContext.profileNamespace ?? ""
+        let key = [
+            "\(localMediaContext.accountID.utf8.count):\(localMediaContext.accountID)",
+            "\(namespace.utf8.count):\(namespace)",
+            "\(localMediaContext.profileID.utf8.count):\(localMediaContext.profileID)",
+        ].joined(separator: "|")
+        self.init(accountKey: key, directory: directory)
     }
 
     // MARK: - Reads

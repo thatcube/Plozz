@@ -45,6 +45,7 @@ let package = Package(
         .library(name: "CrashReporting", targets: ["CrashReporting"]),
         .library(name: "MediaTransportCore", targets: ["MediaTransportCore"]),
         .library(name: "MediaTransportHTTP", targets: ["MediaTransportHTTP"]),
+        .library(name: "MediaTransportSMB", targets: ["MediaTransportSMB"]),
         .library(name: "AppShell", targets: ["AppShell"])
     ],
     dependencies: [
@@ -92,9 +93,9 @@ let package = Package(
         .package(url: "https://github.com/getsentry/sentry-cocoa", from: "9.19.0"),
 
         // SMBClient — pure-Swift, MIT SMB client over NWConnection. Declared here
-        // for the **ProviderShare** target, which uses it to *browse/enumerate* a
-        // media share (listDirectory/listShares) and scan it into a library. This
-        // is an app concern distinct from playback: AetherEngine already pulls
+        // for the isolated **MediaTransportSMB** adapter and ProviderShare's
+        // pre-save discovery/share enumeration. Browsing and scanning consume the
+        // protocol-neutral MediaTransportCore contracts. AetherEngine already pulls
         // SMBClient transitively and owns the playback byte-reads (SMBConnection);
         // SwiftPM unifies both onto one version.
         //
@@ -146,14 +147,16 @@ let package = Package(
         ),
         // Second-class local media-share backend (SMB today). Scans a share into
         // a synthesised library and conforms to `MediaProvider` so the rest of the
-        // app treats it like Plex/Jellyfin. Depends on SMBClient for directory
-        // enumeration; playback still flows through EnginePlozzigen's engine
-        // SMBConnection (this target never plays). See docs/media-share-proposal.md.
+        // app treats it like Plex/Jellyfin. Runtime browsing/scanning use injected
+        // MediaTransportCore sessions; SMBClient remains here only for setup-time
+        // SMB discovery/share enumeration. Playback still flows through
+        // EnginePlozzigen's existing SMB path. See docs/media-share-proposal.md.
         .target(
             name: "ProviderShare",
             dependencies: [
                 "CoreModels",
                 "CoreNetworking",
+                "MediaTransportCore",
                 "MetadataKit",
                 .product(name: "SMBClient", package: "SMBClient"),
             ]
@@ -305,6 +308,17 @@ let package = Package(
             swiftSettings: [.unsafeFlags(["-strict-concurrency=complete"])]
         ),
 
+        // MARK: SMB transport
+        .target(
+            name: "MediaTransportSMB",
+            dependencies: [
+                "CoreModels",
+                "MediaTransportCore",
+                .product(name: "SMBClient", package: "SMBClient"),
+            ],
+            swiftSettings: [.unsafeFlags(["-strict-concurrency=complete"])]
+        ),
+
         // MARK: AetherEngine integration (native HLS-fMP4 remux engine)
         //
         // Wraps AetherEngine (the upstream media-player library) behind Plozz's
@@ -341,6 +355,8 @@ let package = Package(
                 "EnginePlozzigen",
                 "FeatureDiscovery",
                 "FeatureAuth",
+                "MediaTransportCore",
+                "MediaTransportSMB",
                 "MetadataKit",
                 "ProviderJellyfin",
                 "ProviderPlex",
@@ -439,7 +455,7 @@ let package = Package(
         ),
         .testTarget(
             name: "ProviderShareTests",
-            dependencies: ["ProviderShare", "CoreModels"]
+            dependencies: ["ProviderShare", "CoreModels", "MediaTransportCore"]
         ),
         .testTarget(
             name: "MediaTransportCoreTests",
@@ -449,6 +465,15 @@ let package = Package(
         .testTarget(
             name: "MediaTransportHTTPTests",
             dependencies: ["MediaTransportHTTP", "MediaTransportCore"],
+            swiftSettings: [.unsafeFlags(["-strict-concurrency=complete"])]
+        ),
+        .testTarget(
+            name: "MediaTransportSMBTests",
+            dependencies: [
+                "CoreModels",
+                "MediaTransportCore",
+                "MediaTransportSMB",
+            ],
             swiftSettings: [.unsafeFlags(["-strict-concurrency=complete"])]
         ),
         .testTarget(

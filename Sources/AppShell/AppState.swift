@@ -6,6 +6,8 @@ import FeatureAuth
 import FeatureDiscovery
 import FeatureMusic
 import FeatureProfiles
+import MediaTransportCore
+import MediaTransportSMB
 import ProviderJellyfin
 import ProviderPlex
 import ProviderShare
@@ -935,8 +937,9 @@ public final class AppState {
         malService: MALService? = nil,
         lastfmService: LastFmService? = nil
     ) {
-        self.accountStore = accountStore ?? Self.makeDefaultAccountStore()
-        self.registry = registry ?? Self.makeDefaultRegistry()
+        let resolvedAccountStore = accountStore ?? Self.makeDefaultAccountStore()
+        self.accountStore = resolvedAccountStore
+        self.registry = registry ?? Self.makeDefaultRegistry(accountStore: resolvedAccountStore)
         self.profilesModel = profilesModel ?? Self.makeDefaultProfilesModel()
         self.systemBridge = systemBridge ?? Self.makeDefaultSystemBridge()
         self.ratingsProvider = ratingsProvider ?? RatingsServiceFactory.make()
@@ -1091,8 +1094,29 @@ public final class AppState {
 
     /// Registers the providers this build links. Each backend is a single
     /// `register(kind, …)` line; nothing else in core changes.
-    private static func makeDefaultRegistry() -> ProviderRegistry {
+    private static func makeDefaultRegistry(
+        accountStore: any AccountPersisting
+    ) -> ProviderRegistry {
         let registry = ProviderRegistry()
+        let smbAdapter = SMBMediaTransportAdapter { accountID, revision in
+            let envelope = try accountStore.mediaShareCredential(
+                for: accountID,
+                revision: revision
+            )
+            guard envelope.transport == .smb else {
+                throw MediaTransportError.unsupportedCapability("non-SMB credential")
+            }
+            let credential: SMBMediaTransportCredential
+            switch envelope.authentication {
+            case .anonymous:
+                credential = .anonymous
+            case let .password(username, password):
+                credential = .password(username: username, password: password)
+            case .bearer, .generatedKey, .noCredentials:
+                throw MediaTransportError.unsupportedCapability("SMB authentication")
+            }
+            return SMBMediaTransportConfiguration(credential: credential)
+        }
         registry.register(.jellyfin) { context in
             JellyfinProvider(
                 session: context.session,
@@ -1112,9 +1136,36 @@ public final class AppState {
             guard let localMediaContext = context.localMediaContext else {
                 throw ProviderResolutionError.localMediaContextRequired(.mediaShare)
             }
+            let baseURL = context.session.server.baseURL
+            guard baseURL.scheme?.lowercased() == "smb",
+                  let host = baseURL.host else {
+                throw MediaTransportError.invalidInput(reason: "invalid SMB account endpoint")
+            }
+            let endpoint = try MediaTransportEndpointIdentity(
+                transportIdentifier: MediaShareTransportKind.smb.rawValue,
+                host: host,
+                port: baseURL.port,
+                rootPath: baseURL.path
+            )
+            let accountID = context.accountID
+            let credentialRevision = context.credentialRevision
+            let sessionFactory: ShareTransportSessionFactory = { role in
+                let key = MediaTransportSessionKey(
+                    accountID: accountID,
+                    credentialRevision: credentialRevision,
+                    endpoint: endpoint,
+                    trustRevision: UUID(
+                        uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+                    ),
+                    role: role
+                )
+                return try await smbAdapter.connect(for: key)
+            }
             return ShareProvider(
                 session: context.session,
                 localMediaContext: localMediaContext,
+                credentialRevision: credentialRevision,
+                sessionFactory: sessionFactory,
                 streamProber: PlozzigenSMBStreamProber()
             )
         }
@@ -1882,7 +1933,15 @@ public final class AppState {
 
     /// Removes one account; drops to onboarding if it was the last.
     public func removeAccount(id: String) {
+        let shareAccountKey = accounts.first {
+            $0.id == id && $0.server.provider == .mediaShare
+        }?.id
         try? accountStore.remove(id: id)
+        if let shareAccountKey {
+            Task {
+                await ShareLibraryControl.invalidate(accountKey: shareAccountKey)
+            }
+        }
         plexTokenOverrides[id] = nil
         plexResolvedHomeUser[id] = nil
         plexHomeUserTokenCache.removeAll(account: id)
@@ -1899,7 +1958,15 @@ public final class AppState {
 
     /// Removes every account (full reset).
     public func signOutAll() {
+        let shareAccountKeys = accounts
+            .filter { $0.server.provider == .mediaShare }
+            .map(\.id)
         try? accountStore.clearAll()
+        for accountKey in shareAccountKeys {
+            Task {
+                await ShareLibraryControl.invalidate(accountKey: accountKey)
+            }
+        }
         plexTokenOverrides.removeAll()
         plexResolvedHomeUser.removeAll()
         plexHomeUserTokenCache.removeAll()
@@ -1912,7 +1979,15 @@ public final class AppState {
     /// first-run flag, and the recent-servers list — so the next server add
     /// reproduces a genuine first run. Surfaced from a DEBUG-only Settings row.
     public func resetToFirstRunForDebugging() {
+        let shareAccountKeys = accounts
+            .filter { $0.server.provider == .mediaShare }
+            .map(\.id)
         try? accountStore.clearAll()
+        for accountKey in shareAccountKeys {
+            Task {
+                await ShareLibraryControl.invalidate(accountKey: accountKey)
+            }
+        }
         plexTokenOverrides.removeAll()
         plexResolvedHomeUser.removeAll()
         plexHomeUserTokenCache.removeAll()

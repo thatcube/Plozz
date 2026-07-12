@@ -1,17 +1,23 @@
 import XCTest
 @testable import ProviderShare
 import CoreModels
+import MediaTransportCore
 
 /// Within-share movie de-duplication: several files of the SAME film collapse to
 /// one logical movie (`movie:<key>`) with selectable versions — the share's local
 /// equivalent of the server-side version grouping Plex/Jellyfin do — while distinct
 /// films (and stacked multi-part movies) stay separate.
 final class ShareMovieGroupingTests: XCTestCase {
-    private func dir(_ name: String) -> SMBShareBrowser.Entry {
-        SMBShareBrowser.Entry(name: name, isDirectory: true, size: 0, modifiedAt: Date())
+    private func dir(_ name: String) -> RemoteFileEntry {
+        try! RemoteFileEntry(relativePath: name, kind: .directory, modifiedAt: Date())
     }
-    private func file(_ name: String, size: UInt64 = 1_000) -> SMBShareBrowser.Entry {
-        SMBShareBrowser.Entry(name: name, isDirectory: false, size: size, modifiedAt: Date())
+    private func file(_ name: String, size: UInt64 = 1_000) -> RemoteFileEntry {
+        try! RemoteFileEntry(
+            relativePath: name,
+            kind: .file,
+            size: Int64(clamping: size),
+            modifiedAt: Date()
+        )
     }
     private func tempDir() -> URL {
         let dir = FileManager.default.temporaryDirectory
@@ -20,11 +26,11 @@ final class ShareMovieGroupingTests: XCTestCase {
         return dir
     }
     private actor FakeShare {
-        private let tree: [String: [SMBShareBrowser.Entry]]
-        init(_ tree: [String: [SMBShareBrowser.Entry]]) { self.tree = tree }
-        func list(_ path: String) -> [SMBShareBrowser.Entry] { tree[path] ?? [] }
+        private let tree: [String: [RemoteFileEntry]]
+        init(_ tree: [String: [RemoteFileEntry]]) { self.tree = tree }
+        func list(_ path: String) -> [RemoteFileEntry] { tree[path] ?? [] }
     }
-    private func scan(_ tree: [String: [SMBShareBrowser.Entry]], into store: ShareCatalogStore) async {
+    private func scan(_ tree: [String: [RemoteFileEntry]], into store: ShareCatalogStore) async {
         let fake = FakeShare(tree)
         let scanner = ShareScanner(store: store, concurrency: 2, makeLister: {
             ShareScanner.ScanLister(list: { await fake.list($0) }, close: {})
@@ -35,7 +41,7 @@ final class ShareMovieGroupingTests: XCTestCase {
     /// Two quality files in one movie folder → ONE movie card, TWO versions.
     func testTwoFilesInMovieFolderGroupWithVersions() async {
         let store = ShareCatalogStore(accountKey: "a", directory: tempDir())
-        let tree: [String: [SMBShareBrowser.Entry]] = [
+        let tree: [String: [RemoteFileEntry]] = [
             "": [dir("Movies")],
             "Movies": [dir("Star Wars (1977)")],
             "Movies/Star Wars (1977)": [
@@ -70,7 +76,7 @@ final class ShareMovieGroupingTests: XCTestCase {
     /// Loose files (no shared folder) still group by parsed title+year.
     func testLooseFilesGroupByTitleYear() async {
         let store = ShareCatalogStore(accountKey: "a", directory: tempDir())
-        let tree: [String: [SMBShareBrowser.Entry]] = [
+        let tree: [String: [RemoteFileEntry]] = [
             "": [dir("Movies")],
             "Movies": [
                 file("Inception (2010) 2160p.mkv"),
@@ -89,7 +95,7 @@ final class ShareMovieGroupingTests: XCTestCase {
     /// Same title, DIFFERENT year → two distinct movies (a remake isn't a version).
     func testSameTitleDifferentYearStaysSeparate() async {
         let store = ShareCatalogStore(accountKey: "a", directory: tempDir())
-        let tree: [String: [SMBShareBrowser.Entry]] = [
+        let tree: [String: [RemoteFileEntry]] = [
             "": [dir("Movies")],
             "Movies": [
                 file("The Italian Job (1969).mkv"),
@@ -103,7 +109,7 @@ final class ShareMovieGroupingTests: XCTestCase {
 
     func testGenericFilenamesPersistDedicatedFolderTitleAndYear() async {
         let store = ShareCatalogStore(accountKey: "folder-meta", directory: tempDir())
-        let tree: [String: [SMBShareBrowser.Entry]] = [
+        let tree: [String: [RemoteFileEntry]] = [
             "": [dir("Movies")],
             "Movies": [dir("The Thing (1982)"), dir("The Thing (2011)")],
             "Movies/The Thing (1982)": [file("movie.mkv")],
@@ -119,7 +125,7 @@ final class ShareMovieGroupingTests: XCTestCase {
 
     func testYearBucketDoesNotCollapseUnrelatedMovies() async {
         let store = ShareCatalogStore(accountKey: "year-bucket", directory: tempDir())
-        let tree: [String: [SMBShareBrowser.Entry]] = [
+        let tree: [String: [RemoteFileEntry]] = [
             "": [dir("Movies")],
             "Movies": [dir("2024")],
             "Movies/2024": [
@@ -138,7 +144,7 @@ final class ShareMovieGroupingTests: XCTestCase {
     /// theatrical date) but both files are the same film and must become versions.
     func testSameTitleAdjacentYearsGroupWithDescriptiveVersions() async {
         let store = ShareCatalogStore(accountKey: "a", directory: tempDir())
-        let tree: [String: [SMBShareBrowser.Entry]] = [
+        let tree: [String: [RemoteFileEntry]] = [
             "": [dir("Movies")],
             "Movies": [
                 file("A.Quiet.Place.Part.II.2020.1080p.WEB.H264.AAC.5.1-CyEg.mkv", size: 4_000_000_000),
@@ -183,7 +189,7 @@ final class ShareMovieGroupingTests: XCTestCase {
     /// "versions" are each half a movie.
     func testStackedPartsAreNotVersions() async {
         let store = ShareCatalogStore(accountKey: "a", directory: tempDir())
-        let tree: [String: [SMBShareBrowser.Entry]] = [
+        let tree: [String: [RemoteFileEntry]] = [
             "": [dir("Movies")],
             "Movies": [dir("Gone with the Wind (1939)")],
             "Movies/Gone with the Wind (1939)": [
@@ -200,7 +206,7 @@ final class ShareMovieGroupingTests: XCTestCase {
     /// same-account merging, but still shows no picker (`hasMultipleVersions=false`).
     func testSingleFileMovieRetainsNamedVersionWithoutPicker() async {
         let store = ShareCatalogStore(accountKey: "a", directory: tempDir())
-        let tree: [String: [SMBShareBrowser.Entry]] = [
+        let tree: [String: [RemoteFileEntry]] = [
             "": [dir("Movies")],
             "Movies": [file("Dune (2021) 2160p.mkv")],
         ]
@@ -217,7 +223,7 @@ final class ShareMovieGroupingTests: XCTestCase {
     /// to `movie:<key>` so resume is shared across versions.
     func testCanonicalItemIDFoldsVersionToLogicalMovie() async {
         let store = ShareCatalogStore(accountKey: "a", directory: tempDir())
-        let tree: [String: [SMBShareBrowser.Entry]] = [
+        let tree: [String: [RemoteFileEntry]] = [
             "": [dir("Movies")],
             "Movies": [dir("Heat (1995)")],
             "Movies/Heat (1995)": [
@@ -236,7 +242,7 @@ final class ShareMovieGroupingTests: XCTestCase {
 
     func testWatchAliasLookupIsBoundedToRequestedMovie() async {
         let store = ShareCatalogStore(accountKey: "watch-alias-page", directory: tempDir())
-        let tree: [String: [SMBShareBrowser.Entry]] = [
+        let tree: [String: [RemoteFileEntry]] = [
             "": [dir("Movies")],
             "Movies": [dir("Heat (1995)"), dir("Dune (2021)")],
             "Movies/Heat (1995)": [
@@ -263,7 +269,7 @@ final class ShareMovieGroupingTests: XCTestCase {
     func testLegacyFileMovieLookupRetainsNamedVersion() async {
         let store = ShareCatalogStore(accountKey: "a", directory: tempDir())
         let path = "Movies/A Quiet Place Part II (2021) WEBDL-2160p DV.mkv"
-        let tree: [String: [SMBShareBrowser.Entry]] = [
+        let tree: [String: [RemoteFileEntry]] = [
             "": [dir("Movies")],
             "Movies": [file((path as NSString).lastPathComponent)],
         ]
@@ -281,7 +287,7 @@ final class ShareMovieGroupingTests: XCTestCase {
         let store = ShareCatalogStore(accountKey: "alias", directory: directory)
         let deletedPath = "Movies/Heat (1995)/Heat (1995) 1080p.mkv"
         let survivingPath = "Movies/Heat (1995)/Heat (1995) 2160p.mkv"
-        let originalTree: [String: [SMBShareBrowser.Entry]] = [
+        let originalTree: [String: [RemoteFileEntry]] = [
             "": [dir("Movies")],
             "Movies": [dir("Heat (1995)")],
             "Movies/Heat (1995)": [
@@ -293,7 +299,7 @@ final class ShareMovieGroupingTests: XCTestCase {
         let originalMovies = await store.movies(offset: 0, limit: 10)
         let originalMovie = try! XCTUnwrap(originalMovies.first)
 
-        let updatedTree: [String: [SMBShareBrowser.Entry]] = [
+        let updatedTree: [String: [RemoteFileEntry]] = [
             "": [dir("Movies")],
             "Movies": [dir("Heat (1995)")],
             "Movies/Heat (1995)": [file((survivingPath as NSString).lastPathComponent)],
@@ -318,7 +324,7 @@ final class ShareMovieGroupingTests: XCTestCase {
     /// An episode id is NOT folded (episodes keep their own watch id).
     func testEpisodeIDIsNotFolded() async {
         let store = ShareCatalogStore(accountKey: "a", directory: tempDir())
-        let tree: [String: [SMBShareBrowser.Entry]] = [
+        let tree: [String: [RemoteFileEntry]] = [
             "": [dir("TV")],
             "TV": [dir("Show")],
             "TV/Show": [file("Show - S01E01.mkv")],

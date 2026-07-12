@@ -1,6 +1,7 @@
 import XCTest
 @testable import ProviderShare
 import CoreModels
+import MediaTransportCore
 
 /// Coverage for the foreground share scanner: does walking a share's directory
 /// tree build the right indexed catalog (movies vs episodes vs anime), skip the
@@ -8,24 +9,91 @@ import CoreModels
 /// throttle repeat walks — all without a real SMB server (an in-memory tree is
 /// injected as the directory lister).
 final class ShareScannerTests: XCTestCase {
+    private final class AsyncCloseGate: @unchecked Sendable {
+        private let lock = NSLock()
+        private var started = false
+        private var opened = false
+        private var startWaiters: [CheckedContinuation<Void, Never>] = []
+        private var openWaiters: [CheckedContinuation<Void, Never>] = []
+
+        func close() async {
+            let startWaiters = lock.withLock {
+                started = true
+                let waiters = self.startWaiters
+                self.startWaiters.removeAll()
+                return waiters
+            }
+            startWaiters.forEach { $0.resume() }
+            await withCheckedContinuation { continuation in
+                let isOpen = lock.withLock {
+                    guard !opened else { return true }
+                    openWaiters.append(continuation)
+                    return false
+                }
+                if isOpen {
+                    continuation.resume()
+                }
+            }
+        }
+
+        func waitUntilStarted() async {
+            await withCheckedContinuation { continuation in
+                let hasStarted = lock.withLock {
+                    guard !started else { return true }
+                    startWaiters.append(continuation)
+                    return false
+                }
+                if hasStarted {
+                    continuation.resume()
+                }
+            }
+        }
+
+        func open() {
+            let waiters = lock.withLock {
+                opened = true
+                let waiters = openWaiters
+                openWaiters.removeAll()
+                return waiters
+            }
+            waiters.forEach { $0.resume() }
+        }
+    }
+
+    private final class CompletionFlag: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value = false
+
+        var isSet: Bool { lock.withLock { value } }
+
+        func set() {
+            lock.withLock { value = true }
+        }
+    }
+
     /// In-memory share: maps a directory rel-path ("" == root) to its entries, and
     /// records which directories were listed so throttling can be asserted.
     private actor FakeShare {
-        private let tree: [String: [SMBShareBrowser.Entry]]
+        private let tree: [String: [RemoteFileEntry]]
         private(set) var listedPaths: [String] = []
-        init(_ tree: [String: [SMBShareBrowser.Entry]]) { self.tree = tree }
-        func list(_ path: String) -> [SMBShareBrowser.Entry] {
+        init(_ tree: [String: [RemoteFileEntry]]) { self.tree = tree }
+        func list(_ path: String) -> [RemoteFileEntry] {
             listedPaths.append(path)
             return tree[path] ?? []
         }
         var listCount: Int { listedPaths.count }
     }
 
-    private func dir(_ name: String) -> SMBShareBrowser.Entry {
-        SMBShareBrowser.Entry(name: name, isDirectory: true, size: 0, modifiedAt: Date())
+    private func dir(_ name: String) -> RemoteFileEntry {
+        try! RemoteFileEntry(relativePath: name, kind: .directory, modifiedAt: Date())
     }
-    private func file(_ name: String) -> SMBShareBrowser.Entry {
-        SMBShareBrowser.Entry(name: name, isDirectory: false, size: 1_000, modifiedAt: Date())
+    private func file(_ name: String) -> RemoteFileEntry {
+        try! RemoteFileEntry(
+            relativePath: name,
+            kind: .file,
+            size: 1_000,
+            modifiedAt: Date()
+        )
     }
     private func tempDir() -> URL {
         let dir = FileManager.default.temporaryDirectory
@@ -36,7 +104,7 @@ final class ShareScannerTests: XCTestCase {
 
     /// A representative library: Movies (+ a sample), a TV show under Season 01,
     /// an Anime show, and an Extras folder that must be ignored wholesale.
-    private func standardTree() -> [String: [SMBShareBrowser.Entry]] {
+    private func standardTree() -> [String: [RemoteFileEntry]] {
         [
             "": [dir("Movies"), dir("TV Shows"), dir("Anime"), dir("Extras")],
             "Movies": [file("Inception (2010).mkv"), file("sample.mkv")],
@@ -63,6 +131,57 @@ final class ShareScannerTests: XCTestCase {
         ShareScanner(store: store, concurrency: concurrency, pacer: pacer, makeLister: {
             ShareScanner.ScanLister(list: { await fake.list($0) }, close: {})
         })
+    }
+
+    func testScanWaitsForEveryListerToClose() async {
+        let store = ShareCatalogStore(accountKey: "close-drain", directory: tempDir())
+        let closeGate = AsyncCloseGate()
+        let completed = CompletionFlag()
+        let scanner = ShareScanner(store: store, concurrency: 1, makeLister: {
+            ShareScanner.ScanLister(
+                list: { _ in [] },
+                close: { await closeGate.close() }
+            )
+        })
+        let scan = Task {
+            await scanner.scan()
+            completed.set()
+        }
+
+        await closeGate.waitUntilStarted()
+        XCTAssertFalse(completed.isSet)
+        closeGate.open()
+        await scan.value
+        XCTAssertTrue(completed.isSet)
+    }
+
+    func testConcurrentListerCloseWaitsForSameTeardown() async {
+        let closeGate = AsyncCloseGate()
+        let firstCompleted = CompletionFlag()
+        let secondCompleted = CompletionFlag()
+        let lister = ShareScanner.ScanLister(
+            list: { _ in [] },
+            close: { await closeGate.close() }
+        )
+        let first = Task {
+            await lister.close()
+            firstCompleted.set()
+        }
+
+        await closeGate.waitUntilStarted()
+        let second = Task {
+            await lister.close()
+            secondCompleted.set()
+        }
+        await Task.yield()
+        XCTAssertFalse(firstCompleted.isSet)
+        XCTAssertFalse(secondCompleted.isSet)
+
+        closeGate.open()
+        await first.value
+        await second.value
+        XCTAssertTrue(firstCompleted.isSet)
+        XCTAssertTrue(secondCompleted.isSet)
     }
 
     func testScanBuildsIndexedLibraries() async {
@@ -112,7 +231,7 @@ final class ShareScannerTests: XCTestCase {
     /// regression from the report (many "Sword Art Online 2 18" cards in Movies).
     func testBareNumberedAnimeGroupsAsSeriesNotMovies() async {
         let store = ShareCatalogStore(accountKey: "a", directory: tempDir())
-        let tree: [String: [SMBShareBrowser.Entry]] = [
+        let tree: [String: [RemoteFileEntry]] = [
             "": [dir("Anime")],
             "Anime": [dir("Sword Art Online II")],
             "Anime/Sword Art Online II": [
@@ -278,8 +397,8 @@ final class ShareScannerTests: XCTestCase {
 
     /// A wide/deep tree: many shows, each with seasons + episodes, plus many movies.
     /// Exercises the parallel BFS across multiple levels and pool reuse.
-    private func wideTree(shows: Int, seasonsPerShow: Int, episodesPerSeason: Int, movies: Int) -> [String: [SMBShareBrowser.Entry]] {
-        var tree: [String: [SMBShareBrowser.Entry]] = [:]
+    private func wideTree(shows: Int, seasonsPerShow: Int, episodesPerSeason: Int, movies: Int) -> [String: [RemoteFileEntry]] {
+        var tree: [String: [RemoteFileEntry]] = [:]
         tree[""] = [dir("Movies"), dir("TV Shows")]
         tree["Movies"] = (0..<movies).map { file("Movie \($0) (20\(String(format: "%02d", $0 % 100))).mkv") }
         tree["TV Shows"] = (0..<shows).map { dir("Show \($0)") }
@@ -345,6 +464,38 @@ final class ShareScannerTests: XCTestCase {
         XCTAssertEqual(counts.movies, 100)
         XCTAssertEqual(counts.tvSeries, 12,
                        "bounded pacing must slow admission, never wait for idle/starve")
+    }
+
+    func testSupersededScanGenerationCannotWriteOrPruneCatalog() async throws {
+        let store = ShareCatalogStore(accountKey: "generation", directory: tempDir())
+        let oldGeneration = UUID()
+        await store.activateScanGeneration(oldGeneration)
+        let generatedScanID = await store.nextScanID(for: oldGeneration)
+        let oldScanID = try XCTUnwrap(generatedScanID)
+        let retainedPath = "Movies/Arrival (2016).mkv"
+        await store.upsert(
+            [ShareScanner.asset(relPath: retainedPath, entry: file("Arrival (2016).mkv"))],
+            scanID: oldScanID,
+            scanGeneration: oldGeneration
+        )
+
+        let replacementGeneration = UUID()
+        await store.activateScanGeneration(replacementGeneration)
+        let stalePath = "Movies/Stale (2020).mkv"
+        await store.upsert(
+            [ShareScanner.asset(relPath: stalePath, entry: file("Stale (2020).mkv"))],
+            scanID: oldScanID + 1,
+            scanGeneration: oldGeneration
+        )
+        await store.pruneNotSeen(
+            inScan: oldScanID + 1,
+            scanGeneration: oldGeneration
+        )
+
+        let retained = await store.item(id: ShareCatalogID.file(retainedPath))
+        let stale = await store.item(id: ShareCatalogID.file(stalePath))
+        XCTAssertNotNil(retained)
+        XCTAssertNil(stale)
     }
 
     func testPacerEngagesOnlyForRecentActivityAndIsPerShare() async {

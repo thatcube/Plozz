@@ -1875,29 +1875,31 @@ final class HeroNavigationClickPlayer {
 
     private static func makeClickWAV() -> Data {
         let sampleRate = 48_000
-        let duration = 0.046
+        let duration = 0.038
         let frameCount = Int(Double(sampleRate) * duration)
         var samples = Data()
         samples.reserveCapacity(frameCount * MemoryLayout<Int16>.size)
 
         for frame in 0..<frameCount {
             let time = Double(frame) / Double(sampleRate)
-            let startFrequency = 440.0
-            let endFrequency = 320.0
+            let startFrequency = 620.0
+            let endFrequency = 460.0
             let sweep = (endFrequency - startFrequency) / duration
             let phase = 2 * Double.pi * (
                 startFrequency * time + 0.5 * sweep * time * time
             )
-            let tone = 0.85 * sin(phase) + 0.15 * sin(0.5 * phase)
-            let attackDuration = 0.004
+            let body = sin(phase) * exp(-time * 70)
+            let onset = 0.18 * sin(2 * phase) * exp(-time * 190)
+            let attackDuration = 0.0015
             let attackProgress = min(1, time / attackDuration)
             let attack = pow(sin(0.5 * Double.pi * attackProgress), 2)
+            let releaseStart = 0.026
             let releaseProgress = max(
                 0,
-                min(1, (time - attackDuration) / (duration - attackDuration))
+                min(1, (time - releaseStart) / (duration - releaseStart))
             )
             let release = pow(cos(0.5 * Double.pi * releaseProgress), 2)
-            let value = max(-1, min(1, tone * attack * release * 0.17))
+            let value = max(-1, min(1, (body + onset) * attack * release * 0.19))
             var sample = Int16((value * Double(Int16.max)).rounded()).littleEndian
             withUnsafeBytes(of: &sample) { samples.append(contentsOf: $0) }
         }

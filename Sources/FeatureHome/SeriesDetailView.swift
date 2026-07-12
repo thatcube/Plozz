@@ -1168,7 +1168,7 @@ enum SeriesRequestAccessoryPresentation {
     }
 
     static func systemImage(hasRequestable: Bool, isRequesting: Bool) -> String {
-        isRequesting || hasRequestable ? "plus" : "list.bullet.rectangle"
+        hasRequestable && !isRequesting ? "plus.circle" : "clock.arrow.circlepath"
     }
 }
 

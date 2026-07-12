@@ -300,6 +300,150 @@ final class ItemDetailViewModelTests: XCTestCase {
         XCTAssertEqual(provider.childrenCallCount["s1"], 1)
     }
 
+    func testConcurrentLoadEpisodesCoalescesAndAllCallersAwaitResult() async {
+        let provider = FakeMediaProvider(allItems: [series("show")])
+        provider.childrenByParent = [
+            "show": [season("s1", "Book One: Water")],
+            "s1": [episode("e1", number: 1)]
+        ]
+        let gate = AsyncGate()
+        provider.childrenGate = ["s1": { _ in await gate.wait() }]
+        let vm = ItemDetailViewModel(provider: provider, itemID: "show")
+        await vm.load()
+
+        let first = Task { @MainActor in
+            await vm.loadEpisodes(for: "s1")
+        }
+        await waitUntil { provider.childrenCallCount["s1"] == 1 }
+
+        let secondStarted = LockedFlag()
+        let secondReturned = LockedFlag()
+        let second = Task { @MainActor in
+            secondStarted.set()
+            await vm.loadEpisodes(for: "s1")
+            secondReturned.set()
+        }
+        await waitUntil { secondStarted.value }
+
+        XCTAssertFalse(secondReturned.value, "A foreground caller must await the prewarm already in flight")
+        XCTAssertEqual(provider.childrenCallCount["s1"], 1)
+
+        gate.open()
+        await first.value
+        await second.value
+
+        XCTAssertTrue(secondReturned.value)
+        XCTAssertEqual(vm.episodes(for: "s1")?.map(\.id), ["e1"])
+        XCTAssertEqual(provider.childrenCallCount["s1"], 1)
+    }
+
+    func testReloadRestartsInFlightSeasonAndItsWaitersReceiveReplacement() async {
+        let provider = FakeMediaProvider(allItems: [series("show")])
+        provider.childrenByParent = ["show": [season("s1", "Book One: Water")]]
+        provider.childrenResponsesByParent = [
+            "s1": [
+                [episode("stale", number: 1)],
+                [episode("fresh", number: 1)]
+            ]
+        ]
+        let staleRequestGate = AsyncGate()
+        let freshRequestGate = AsyncGate()
+        provider.childrenGate = ["s1": { callNumber in
+            switch callNumber {
+            case 1:
+                await staleRequestGate.wait()
+            case 2:
+                await freshRequestGate.wait()
+            default:
+                break
+            }
+        }]
+        let vm = ItemDetailViewModel(provider: provider, itemID: "show")
+        await vm.load()
+
+        let originalReturned = LockedFlag()
+        let originalLoad = Task { @MainActor in
+            await vm.loadEpisodes(for: "s1")
+            originalReturned.set()
+        }
+        await waitUntil { provider.childrenCallCount["s1"] == 1 }
+
+        let reload = Task { @MainActor in
+            await vm.reload()
+        }
+        await waitUntil { provider.childrenCallCount["s1"] == 2 }
+
+        XCTAssertFalse(originalReturned.value, "The invalidated caller must await the replacement")
+        XCTAssertNil(vm.episodes(for: "s1"))
+
+        freshRequestGate.open()
+        await waitUntil {
+            originalReturned.value
+                && vm.episodes(for: "s1")?.map(\.id) == ["fresh"]
+        }
+        XCTAssertEqual(vm.episodes(for: "s1")?.map(\.id), ["fresh"])
+
+        staleRequestGate.open()
+        await originalLoad.value
+        await reload.value
+        await Task.yield()
+
+        XCTAssertEqual(provider.childrenCallCount["s1"], 2)
+        XCTAssertEqual(vm.episodes(for: "s1")?.map(\.id), ["fresh"])
+    }
+
+    func testSuspendPreventsReloadInvalidatedWaiterFromRestartingLater() async {
+        let provider = FakeMediaProvider(allItems: [series("show")])
+        provider.childrenByParent = ["show": [season("s1", "Book One: Water")]]
+        provider.childrenResponsesByParent = [
+            "s1": [
+                [episode("stale", number: 1)],
+                [episode("replacement", number: 1)]
+            ]
+        ]
+        let staleRequestGate = AsyncGate()
+        let replacementRequestGate = AsyncGate()
+        provider.childrenGate = ["s1": { callNumber in
+            switch callNumber {
+            case 1:
+                await staleRequestGate.wait()
+            case 2:
+                await replacementRequestGate.wait()
+            default:
+                break
+            }
+        }]
+        let vm = ItemDetailViewModel(provider: provider, itemID: "show")
+        await vm.load()
+
+        let originalReturned = LockedFlag()
+        let originalLoad = Task { @MainActor in
+            await vm.loadEpisodes(for: "s1")
+            originalReturned.set()
+        }
+        await waitUntil { provider.childrenCallCount["s1"] == 1 }
+
+        let reload = Task { @MainActor in
+            await vm.reload()
+        }
+        await waitUntil { provider.childrenCallCount["s1"] == 2 }
+
+        vm.suspendEnrichment()
+        await waitUntil { originalReturned.value }
+        XCTAssertNil(vm.episodes(for: "s1"))
+
+        replacementRequestGate.open()
+        staleRequestGate.open()
+        await originalLoad.value
+        await reload.value
+        for _ in 0..<100 {
+            await Task.yield()
+        }
+
+        XCTAssertEqual(provider.childrenCallCount["s1"], 2)
+        XCTAssertNil(vm.episodes(for: "s1"))
+    }
+
     func testLoadEpisodesTagsChildrenWithSourceAccount() async {
         let provider = FakeMediaProvider(allItems: [series("show")])
         provider.childrenByParent = [
@@ -776,6 +920,32 @@ final class ItemDetailViewModelTests: XCTestCase {
         XCTAssertTrue(second?.technicalBadges.map(\.label).contains("Dolby Vision") ?? false)
     }
 
+    func testResolvedArtworkMergePreservesConcurrentBadgeEnrichment() async {
+        let sparse = MediaItem(id: "e1", title: "The End", kind: .episode, episodeNumber: 1)
+        let rich = MediaItem(
+            id: "e1", title: "The End", kind: .episode, episodeNumber: 1,
+            mediaInfo: MediaSourceMetadata(
+                container: "mkv",
+                video: .init(codec: "hevc", width: 3840, height: 2160, videoRangeType: "DOVIWithHDR10"),
+                audio: .init(codec: "eac3", profile: "Dolby Atmos", channels: 6)
+            )
+        )
+        let provider = FakeMediaProvider(allItems: [series("show"), rich])
+        provider.childrenByParent = ["show": [season("s1", "Season 1")], "s1": [sparse]]
+        let vm = ItemDetailViewModel(provider: provider, itemID: "show")
+        await vm.load()
+        await vm.loadEpisodes(for: "s1")
+        _ = await vm.enrichEpisodeBadgesIfNeeded(sparse)
+
+        let posterURL = URL(string: "https://example.com/e1.jpg")!
+        vm.mergeResolvedEpisodePosterURLs(["e1": posterURL], for: "s1")
+
+        let cached = vm.episodes(for: "s1")?.first
+        XCTAssertEqual(cached?.posterURL, posterURL)
+        XCTAssertTrue(cached?.technicalBadges.map(\.label).contains("Dolby Vision") ?? false)
+        XCTAssertTrue(cached?.technicalBadges.map(\.label).contains("Dolby Atmos") ?? false)
+    }
+
     // MARK: - In-place cross-server switch (Problem 4)
 
     /// Switching a series to another server's copy in place re-points the page to
@@ -811,8 +981,90 @@ final class ItemDetailViewModelTests: XCTestCase {
         XCTAssertEqual(vm.state.value?.item.sourceAccountID, "plex", "Hero tagged with the new active account")
         XCTAssertEqual(Set(vm.sources.map(\.accountID)), ["jelly", "plex"], "Cross-server picker stays intact")
 
+        await vm.loadEpisodes(for: "a-s1")
+        XCTAssertNil(provider.childrenCallCount["a-s1"], "An obsolete season id must not reach the replacement source")
+
         await vm.loadEpisodes(for: "b-s1")
         XCTAssertEqual(vm.episodes(for: "b-s1")?.map(\.id), ["b-e1"], "Episodes come from the new server")
+    }
+
+    func testInitialLoadCannotOverwriteAnExplicitSourceSwitch() async {
+        let primary = FakeMediaProvider(allItems: [series("showA")])
+        primary.childrenByParent = ["showA": [season("a-s1", "Season A")]]
+        let primaryChildrenGate = AsyncGate()
+        primary.childrenGate = ["showA": { _ in await primaryChildrenGate.wait() }]
+
+        let alternate = FakeMediaProvider(allItems: [series("showB")])
+        alternate.childrenByParent = ["showB": [season("b-s1", "Season B")]]
+        let vm = ItemDetailViewModel(
+            provider: primary,
+            itemID: "showA",
+            sourceAccountID: "jelly",
+            onlineTrailerResolver: { _ in [] },
+            playableVideoIDResolver: { _ in nil },
+            initialSources: [
+                MediaSourceRef(accountID: "jelly", itemID: "showA"),
+                MediaSourceRef(accountID: "plex", itemID: "showB")
+            ],
+            alternateProviderResolver: { accountID in
+                accountID == "plex" ? alternate : primary
+            }
+        )
+
+        let initialLoad = Task { @MainActor in
+            await vm.load()
+        }
+        await waitUntil { primary.childrenCallCount["showA"] == 1 }
+
+        await vm.switchToSource(accountID: "plex")
+        XCTAssertEqual(vm.state.value?.item.id, "showB")
+        XCTAssertEqual(vm.state.value?.children.map(\.id), ["b-s1"])
+
+        primaryChildrenGate.open()
+        await initialLoad.value
+
+        XCTAssertEqual(vm.state.value?.item.id, "showB")
+        XCTAssertEqual(vm.state.value?.item.sourceAccountID, "plex")
+        XCTAssertEqual(vm.state.value?.children.map(\.id), ["b-s1"])
+    }
+
+    func testResumeDuringSourceSwitchCannotLoadAnOldSeasonFromNewProvider() async {
+        let primary = FakeMediaProvider(allItems: [series("showA")])
+        primary.childrenByParent = ["showA": [season("a-s1", "Season A")]]
+        let alternate = FakeMediaProvider(allItems: [series("showB")])
+        alternate.childrenByParent = [
+            "showB": [season("b-s1", "Season B")],
+            "b-s1": [episode("b-e1", number: 1)]
+        ]
+        let alternateItemGate = AsyncGate()
+        alternate.itemGate = ["showB": { await alternateItemGate.wait() }]
+        let vm = ItemDetailViewModel(
+            provider: primary,
+            itemID: "showA",
+            sourceAccountID: "jelly",
+            originSourceAccountID: "jelly",
+            initialSources: [
+                MediaSourceRef(accountID: "jelly", itemID: "showA"),
+                MediaSourceRef(accountID: "plex", itemID: "showB")
+            ],
+            alternateProviderResolver: { accountID in
+                accountID == "plex" ? alternate : primary
+            }
+        )
+        await vm.load()
+
+        let sourceSwitch = Task { @MainActor in
+            await vm.switchToSource(accountID: "plex")
+        }
+        await waitUntil { alternate.itemCallCount(for: "showB") >= 2 }
+
+        vm.resumeEnrichmentIfNeeded()
+        await vm.loadEpisodes(for: "a-s1")
+        XCTAssertNil(alternate.childrenCallCount["a-s1"])
+
+        alternateItemGate.open()
+        await sourceSwitch.value
+        XCTAssertEqual(vm.state.value?.children.map(\.id), ["b-s1"])
     }
 
     /// Switching to the already-active server, an unknown account, or one with no
@@ -886,7 +1138,7 @@ final class ItemDetailViewModelTests: XCTestCase {
             "show": [season("s1", "Book One"), season("s2", "Book Two")]
         ]
         let gate = AsyncGate()
-        provider.childrenGate = ["show": { await gate.wait() }]
+        provider.childrenGate = ["show": { _ in await gate.wait() }]
 
         let vm = ItemDetailViewModel(
             provider: provider,
@@ -949,7 +1201,7 @@ final class ItemDetailViewModelTests: XCTestCase {
         let provider = FakeMediaProvider(allItems: [series("show")])
         provider.childrenByParent = ["show": [season("s1", "Book One")]]
         let gate = AsyncGate()
-        provider.childrenGate = ["show": { await gate.wait() }]
+        provider.childrenGate = ["show": { _ in await gate.wait() }]
 
         let vm = ItemDetailViewModel(
             provider: provider,

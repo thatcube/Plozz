@@ -31,7 +31,84 @@ public final class ItemDetailViewModel {
     /// season is shown/focused and cached so re-focusing a tab is instant. Keyed
     /// by season id. Observed by `SeriesDetailView` to populate its episode rail.
     public private(set) var seasonEpisodes: [String: [MediaItem]] = [:]
-    private var loadingSeasons: Set<String> = []
+    private final class SeasonLoad: @unchecked Sendable {
+        enum WaitResult: Sendable {
+            case completed
+            case invalidated(generation: UInt64)
+            case callerCancelled
+        }
+
+        let token: UUID
+        var task: Task<Void, Never>?
+        private var result: WaitResult?
+        private var waiters: [UUID: CheckedContinuation<WaitResult, Never>] = [:]
+
+        init(token: UUID) {
+            self.token = token
+        }
+
+        deinit {
+            task?.cancel()
+        }
+
+        @MainActor
+        func wait() async -> WaitResult {
+            if let result { return result }
+            if Task.isCancelled { return .callerCancelled }
+
+            let waiterID = UUID()
+            return await withTaskCancellationHandler {
+                await withCheckedContinuation { continuation in
+                    if let result {
+                        continuation.resume(returning: result)
+                    } else if Task.isCancelled {
+                        continuation.resume(returning: .callerCancelled)
+                    } else {
+                        waiters[waiterID] = continuation
+                    }
+                }
+            } onCancel: {
+                Task { @MainActor [weak self] in
+                    self?.cancelWaiter(waiterID)
+                }
+            }
+        }
+
+        @MainActor
+        func finish() {
+            resolve(.completed)
+        }
+
+        @MainActor
+        func invalidate(generation: UInt64) {
+            resolve(.invalidated(generation: generation))
+        }
+
+        @MainActor
+        private func cancelWaiter(_ waiterID: UUID) {
+            waiters.removeValue(forKey: waiterID)?.resume(returning: .callerCancelled)
+        }
+
+        @MainActor
+        private func resolve(_ result: WaitResult) {
+            guard self.result == nil else { return }
+            self.result = result
+            let pending = Array(waiters.values)
+            waiters.removeAll()
+            pending.forEach { $0.resume(returning: result) }
+        }
+    }
+    /// One authoritative request per season. Every foreground/background caller
+    /// awaits the same task so a prewarm can never make a user selection return
+    /// before its episodes are available.
+    private nonisolated(unsafe) var seasonLoads: [String: SeasonLoad] = [:]
+    /// Every invalidation advances the generation. A reload permits callers from
+    /// its generation to follow a replacement; suspend/source-switch invalidation
+    /// records a stop generation so older waiters can never retry after an ABA.
+    private var seasonLoadGeneration: UInt64 = 0
+    private var lastNonRetrySeasonLoadGeneration: UInt64 = 0
+    private var seasonLoadingSuspended = false
+    private var seasonLoadingResumeSourceGeneration: UInt64?
     /// Episode ids whose badges have already been enriched from a full per-item
     /// fetch (see ``enrichEpisodeBadgesIfNeeded(_:)``) so the focused-episode hero
     /// never re-fetches the same episode while the user browses a rail.
@@ -104,6 +181,9 @@ public final class ItemDetailViewModel {
     private var activeProvider: any MediaProvider
     private var activeItemID: String
     private var activeSourceAccountID: String?
+    /// Invalidates every publication owned by an older active source, including
+    /// the initial load and its snapshot restore.
+    private var sourceGeneration: UInt64 = 0
     /// Resolves a keyless online trailer (public YouTube front-ends), used only
     /// when the provider surfaces no local or server trailer. Injectable so tests
     /// can avoid the network.
@@ -332,6 +412,7 @@ public final class ItemDetailViewModel {
         alternateSourceEnrichmentTask?.cancel()
         snapshotRestoreTask?.cancel()
         pendingSnapshotWrite?.cancel()
+        seasonLoads.values.forEach { $0.task?.cancel() }
     }
 
     public func load() async {
@@ -357,9 +438,21 @@ public final class ItemDetailViewModel {
         // cross-server re-select at play time, so the initial server MUST be the
         // local one or every episode streams from a remote/Tailscale merge-primary.
         applyInitialLocalityPreferenceIfNeeded()
-        if let interactive = activeProvider as? any InteractiveBrowseActivityReporting {
+        let loadProvider = activeProvider
+        let loadItemID = activeItemID
+        let loadAccountID = activeSourceAccountID
+        let loadSourceGeneration = sourceGeneration
+        func isCurrent() -> Bool {
+            isCurrentSource(
+                generation: loadSourceGeneration,
+                itemID: loadItemID,
+                accountID: loadAccountID
+            )
+        }
+        if let interactive = loadProvider as? any InteractiveBrowseActivityReporting {
             await interactive.noteInteractiveBrowseActivity()
         }
+        guard !Task.isCancelled, isCurrent() else { return }
 
         // Stale-while-revalidate restore, RACED OFF THE CRITICAL PATH. The snapshot
         // read used to be the FIRST await in load() — so a disk-contended read (the
@@ -374,22 +467,29 @@ public final class ItemDetailViewModel {
         let restoreCache = snapshotCache
         snapshotRestoreTask = Task { [weak self] in
             guard let snapshot = await restoreCache.snapshot(for: restoreKey) else { return }
-            guard let self, !Task.isCancelled else { return }
+            guard let self,
+                  !Task.isCancelled,
+                  self.isCurrentSource(
+                      generation: loadSourceGeneration,
+                      itemID: loadItemID,
+                      accountID: loadAccountID
+                  ) else { return }
             self.applySnapshotIfNotStale(snapshot)
         }
 
         // Cold open (no seeded hero) shows a spinner immediately instead of blank.
         if state.value == nil { state = .loading }
         do {
-            var fetched = try await activeProvider.item(id: activeItemID)
-            try Task.checkCancellation()
-            fetched = await redirectingSeasonToSeries(fetched)
-            try Task.checkCancellation()
-            captureSeriesContext(from: fetched)
+            let fetched = try await loadProvider.item(id: loadItemID)
+            guard !Task.isCancelled, isCurrent() else { return }
+            let redirected = await redirectingSeasonToSeries(fetched, using: loadProvider)
+            guard !Task.isCancelled, isCurrent() else { return }
+            preselectedSeasonID = redirected.preselectedSeasonID
+            captureSeriesContext(from: redirected.item)
             // Immutable snapshot so the concurrent async-lets below capture a
             // Sendable value (Swift 6 strict-concurrency forbids capturing
             // mutated `var`s into concurrently-executing code).
-            let item = fetched
+            let item = redirected.item
             let taggedItem = tagged(item)
 
             // Container kinds (series/season/folder/collection) have children
@@ -428,14 +528,18 @@ public final class ItemDetailViewModel {
                 startSpeculativeEnrichment(for: item)
                 // Children fill in off the critical path of first paint; merge them
                 // in (same item identity ⇒ no hero flicker) when they arrive.
-                let fetchedChildren = (try? await activeProvider.children(of: item.id)) ?? []
-                try Task.checkCancellation()
+                let fetchedChildren = (try? await loadProvider.children(of: item.id)) ?? []
+                guard !Task.isCancelled, isCurrent() else { return }
                 state = .loaded(Detail(item: taggedItem, children: fetchedChildren.map(tagged), childrenLoaded: true))
                 persistSnapshot()
                 // Trailers + ratings ARE awaited: opening a detail deterministically
                 // populates its Trailer button and rating badges. Cancelled with
                 // load() on navigate-away; heavy trailer extraction is dwell-gated.
-                await runTrailersAndRatings(for: item)
+                await runTrailersAndRatings(
+                    for: item,
+                    provider: loadProvider,
+                    sourceGeneration: loadSourceGeneration
+                )
             } else {
                 // Leaf kinds (movie/episode/video): the hero IS the content, so
                 // publish it immediately, then load trailers/ratings off the
@@ -449,7 +553,11 @@ public final class ItemDetailViewModel {
                 // ARE awaited so the Trailer button / rating badges populate
                 // deterministically before load() returns.
                 startSpeculativeEnrichment(for: item)
-                await runTrailersAndRatings(for: item)
+                await runTrailersAndRatings(
+                    for: item,
+                    provider: loadProvider,
+                    sourceGeneration: loadSourceGeneration
+                )
             }
         } catch is CancellationError {
             // Back-button during load: leave whatever state we already published
@@ -459,9 +567,9 @@ public final class ItemDetailViewModel {
         } catch let error as AppError {
             // Don't bury an already-painted hero under a full-screen error just
             // because the detail re-fetch failed; the seeded hero stays usable.
-            if state.value == nil { state = .failed(error) }
+            if isCurrent(), state.value == nil { state = .failed(error) }
         } catch {
-            if state.value == nil { state = .failed(.unknown("")) }
+            if isCurrent(), state.value == nil { state = .failed(.unknown("")) }
         }
     }
 
@@ -494,15 +602,16 @@ public final class ItemDetailViewModel {
     /// parent series can't be resolved. This guarantees that tapping a season
     /// anywhere — Recently Added, Search, a deep link — lands on the rich series
     /// page, never a standalone season page.
-    private func redirectingSeasonToSeries(_ item: MediaItem) async -> MediaItem {
+    private func redirectingSeasonToSeries(
+        _ item: MediaItem,
+        using provider: any MediaProvider
+    ) async -> (item: MediaItem, preselectedSeasonID: String?) {
         guard item.kind == .season,
               let seriesID = item.seriesID,
-              let series = try? await activeProvider.item(id: seriesID) else {
-            preselectedSeasonID = nil
-            return item
+              let series = try? await provider.item(id: seriesID) else {
+            return (item, nil)
         }
-        preselectedSeasonID = item.id
-        return series
+        return (series, item.id)
     }
 
     /// Already-loaded episodes for `seasonID`, or `nil` if not yet fetched.
@@ -568,10 +677,24 @@ public final class ItemDetailViewModel {
     /// run to completion on the next page's back. The heavy trailer extraction is
     /// additionally gated behind a cancellable dwell (see ``loadTrailers(for:)``)
     /// so rapid tap-through never pays it.
-    private func runTrailersAndRatings(for item: MediaItem) async {
-        async let trailersDone: Void = loadTrailers(for: item)
-        async let ratingsDone: Void = enrichRatings(for: item)
-        async let overviewDone: Void = enrichOverview(for: item)
+    private func runTrailersAndRatings(
+        for item: MediaItem,
+        provider: any MediaProvider,
+        sourceGeneration: UInt64
+    ) async {
+        async let trailersDone: Void = loadTrailers(
+            for: item,
+            provider: provider,
+            sourceGeneration: sourceGeneration
+        )
+        async let ratingsDone: Void = enrichRatings(
+            for: item,
+            sourceGeneration: sourceGeneration
+        )
+        async let overviewDone: Void = enrichOverview(
+            for: item,
+            sourceGeneration: sourceGeneration
+        )
         _ = await trailersDone
         _ = await ratingsDone
         _ = await overviewDone
@@ -586,6 +709,8 @@ public final class ItemDetailViewModel {
         enrichmentTask?.cancel(); enrichmentTask = nil
         crossServerDiscoveryTask?.cancel(); crossServerDiscoveryTask = nil
         alternateSourceEnrichmentTask?.cancel(); alternateSourceEnrichmentTask = nil
+        seasonLoadingSuspended = true
+        cancelSeasonLoads()
     }
 
     /// Resumes enrichment for a page returned to (popped back onto) whose work was
@@ -593,6 +718,9 @@ public final class ItemDetailViewModel {
     /// drives), for a page still loading, or once enrichment finished — so it
     /// never double-starts or races `load()`.
     public func resumeEnrichmentIfNeeded() {
+        if seasonLoadingResumeSourceGeneration == nil {
+            seasonLoadingSuspended = false
+        }
         guard hasPaintedFreshDetail, !enrichmentComplete, enrichmentTask == nil,
               let item = enrichmentItem else { return }
         startSpeculativeEnrichment(for: item)
@@ -616,14 +744,18 @@ public final class ItemDetailViewModel {
     /// The verified outcome is cached so revisiting the page is instant, and the
     /// player's own primary→alternatives→error fallback means an optimistic button
     /// self-heals at tap time rather than ever being a dead end.
-    private func loadTrailers(for item: MediaItem) async {
-        guard !Task.isCancelled else { return }
-        let provided = (try? await activeProvider.trailers(for: item.id)) ?? []
-        guard !Task.isCancelled else { return }
+    private func loadTrailers(
+        for item: MediaItem,
+        provider: any MediaProvider,
+        sourceGeneration: UInt64
+    ) async {
+        guard !Task.isCancelled, self.sourceGeneration == sourceGeneration else { return }
+        let provided = (try? await provider.trailers(for: item.id)) ?? []
+        guard !Task.isCancelled, self.sourceGeneration == sourceGeneration else { return }
 
         // 1) A real local trailer file wins outright — no network verification.
         if let local = provided.first(where: { !$0.isYouTubeTrailer }) {
-            guard isStillLoaded(item) else { return }
+            guard isStillLoaded(item, sourceGeneration: sourceGeneration) else { return }
             trailers = [tagged(local)]
             return
         }
@@ -633,7 +765,7 @@ public final class ItemDetailViewModel {
         // 2) A cached decision applies instantly — the main reason a revisited page
         //    no longer re-pays the extraction/search cost.
         if let cached = trailerCache.outcome(for: item.id) {
-            guard isStillLoaded(item) else { return }
+            guard isStillLoaded(item, sourceGeneration: sourceGeneration) else { return }
             switch cached {
             case .working(let id): surfaceTrailer(videoID: id, for: item)
             case .none: trailers = []
@@ -644,6 +776,7 @@ public final class ItemDetailViewModel {
         // 3) Optimistically show the button from the server's first trailer id
         //    while verification runs, so it isn't gated on the network.
         if let optimistic = serverIDs.first {
+            guard isStillLoaded(item, sourceGeneration: sourceGeneration) else { return }
             surfaceTrailer(videoID: optimistic, for: item)
         }
 
@@ -659,7 +792,8 @@ public final class ItemDetailViewModel {
         // the (injected, instant) verify/search pass is deterministic.
         if Self.trailerExtractionDwellNanos > 0 {
             try? await Task.sleep(nanoseconds: Self.trailerExtractionDwellNanos)
-            guard !Task.isCancelled, isStillLoaded(item) else { return }
+            guard !Task.isCancelled,
+                  isStillLoaded(item, sourceGeneration: sourceGeneration) else { return }
         }
 
         // Verify (existence): confirm the server id exists+embeds via oEmbed, else
@@ -675,7 +809,7 @@ public final class ItemDetailViewModel {
             }
         }
 
-        guard isStillLoaded(item) else { return }
+        guard isStillLoaded(item, sourceGeneration: sourceGeneration) else { return }
         if let workingID {
             surfaceTrailer(videoID: workingID, for: item)
             trailerCache.record(.working(workingID), for: item.id)
@@ -689,8 +823,12 @@ public final class ItemDetailViewModel {
 
     /// Whether the loaded detail is still this `item` (guards against a stale
     /// trailer resolution landing after the user navigated away / reloaded).
-    private func isStillLoaded(_ item: MediaItem) -> Bool {
-        if case let .loaded(detail) = state, detail.item.id == item.id { return true }
+    private func isStillLoaded(_ item: MediaItem, sourceGeneration: UInt64) -> Bool {
+        if self.sourceGeneration == sourceGeneration,
+           case let .loaded(detail) = state,
+           detail.item.id == item.id {
+            return true
+        }
         return false
     }
 
@@ -763,12 +901,20 @@ public final class ItemDetailViewModel {
         let provider = activeProvider
         let itemID = activeItemID
         let account = activeSourceAccountID
+        let reloadSourceGeneration = sourceGeneration
         func isCurrent() -> Bool {
-            activeItemID == itemID && activeSourceAccountID == account
+            isCurrentSource(
+                generation: reloadSourceGeneration,
+                itemID: itemID,
+                accountID: account
+            )
         }
-        guard var item = try? await provider.item(id: itemID) else { return }
+        guard let fetched = try? await provider.item(id: itemID) else { return }
         guard !Task.isCancelled, isCurrent() else { return }
-        item = await redirectingSeasonToSeries(item)
+        let redirected = await redirectingSeasonToSeries(fetched, using: provider)
+        guard !Task.isCancelled, isCurrent() else { return }
+        preselectedSeasonID = redirected.preselectedSeasonID
+        let item = redirected.item
         captureSeriesContext(from: item)
         let children: [MediaItem]
         switch item.kind {
@@ -779,16 +925,23 @@ public final class ItemDetailViewModel {
         }
         guard !Task.isCancelled, isCurrent() else { return }
         state = .loaded(Detail(item: tagged(item), children: children.map(tagged), childrenLoaded: true))
+        if seasonLoadingResumeSourceGeneration == reloadSourceGeneration {
+            seasonLoadingSuspended = false
+            seasonLoadingResumeSourceGeneration = nil
+        }
         // Refresh the episode lists that were already loaded for visible seasons.
-        let loadedSeasonIDs = Array(seasonEpisodes.keys)
+        var loadedSeasonIDs = Array(seasonEpisodes.keys)
+        loadedSeasonIDs.append(contentsOf: seasonLoads.keys.filter { !loadedSeasonIDs.contains($0) })
+        cancelSeasonLoads(retryWaiters: true)
         seasonEpisodes = [:]
         for seasonID in loadedSeasonIDs {
-            if Task.isCancelled { return }
+            guard !Task.isCancelled, isCurrent() else { return }
             await loadEpisodes(for: seasonID)
+            guard !Task.isCancelled, isCurrent() else { return }
         }
         guard !Task.isCancelled else { return }
-        await enrichRatings(for: item)
-        await enrichOverview(for: item)
+        await enrichRatings(for: item, sourceGeneration: reloadSourceGeneration)
+        await enrichOverview(for: item, sourceGeneration: reloadSourceGeneration)
     }
 
     /// Whether the page can switch to `accountID`'s copy of this title in place —
@@ -852,6 +1005,7 @@ public final class ItemDetailViewModel {
               best.accountID != activeSourceAccountID,
               let provider = alternateProviderResolver(best.accountID) else { return }
 
+        invalidateSourceOperations()
         activeProvider = provider
         activeItemID = best.itemID
         activeSourceAccountID = best.accountID
@@ -909,12 +1063,15 @@ public final class ItemDetailViewModel {
         enrichmentTask?.cancel(); enrichmentTask = nil
         alternateSourceEnrichmentTask?.cancel(); alternateSourceEnrichmentTask = nil
 
+        invalidateSourceOperations()
         activeProvider = provider
         activeItemID = best.itemID
         activeSourceAccountID = best.accountID
 
+        seasonLoadingSuspended = true
+        seasonLoadingResumeSourceGeneration = sourceGeneration
+        cancelSeasonLoads()
         seasonEpisodes = [:]
-        loadingSeasons = []
         preselectedSeasonID = nil
 
         await reload()
@@ -951,14 +1108,15 @@ public final class ItemDetailViewModel {
         // server's source list after the switch.
         suspendEnrichment()
 
+        invalidateSourceOperations()
         activeProvider = provider
         activeItemID = source.itemID
         activeSourceAccountID = accountID
+        seasonLoadingResumeSourceGeneration = sourceGeneration
 
         // Drop the old server's per-season episode caches so the rail reloads from
         // the new server (its ids differ); the season list reloads via reload().
         seasonEpisodes = [:]
-        loadingSeasons = []
         preselectedSeasonID = nil
 
         // Reload the new server's detail + children in place over the existing
@@ -966,29 +1124,87 @@ public final class ItemDetailViewModel {
         await reload()
     }
 
-    /// Lazily fetches and caches the episodes of one season. Idempotent: a season
-    /// already loaded (or in flight) is a no-op, so callers may invoke it freely
-    /// whenever a season tab gains focus. Fetch failures cache an empty list so a
-    /// missing season renders as "no episodes" rather than retrying on every
-    /// focus change.
+    /// Lazily fetches and caches the episodes of one season. Concurrent callers
+    /// coalesce onto one request and all await its result. Fetch failures cache an
+    /// empty list so a missing season does not retry on every focus change.
     public func loadEpisodes(for seasonID: String) async {
-        if seasonEpisodes[seasonID] != nil || loadingSeasons.contains(seasonID) { return }
-        loadingSeasons.insert(seasonID)
-        defer { loadingSeasons.remove(seasonID) }
-        let episodes = (try? await activeProvider.children(of: seasonID)) ?? []
-        guard !Task.isCancelled else { return }
-        seasonEpisodes[seasonID] = stampSeriesTMDb(into: episodes.map(tagged))
-        persistSnapshot()
+        let sourceItemID = activeItemID
+        let sourceAccountID = activeSourceAccountID
+        let loadSourceGeneration = sourceGeneration
+        while !Task.isCancelled,
+              !seasonLoadingSuspended,
+              sourceGeneration == loadSourceGeneration,
+              activeItemID == sourceItemID,
+              activeSourceAccountID == sourceAccountID {
+            guard isCurrentSeasonID(seasonID) else { return }
+            if seasonEpisodes[seasonID] != nil { return }
+
+            let load: SeasonLoad
+            if let existing = seasonLoads[seasonID] {
+                load = existing
+            } else {
+                let provider = activeProvider
+                let token = UUID()
+                load = SeasonLoad(token: token)
+                load.task = Task { @MainActor [weak self, weak load, provider] in
+                    defer {
+                        if self?.seasonLoads[seasonID]?.token == token {
+                            self?.seasonLoads.removeValue(forKey: seasonID)
+                        }
+                        load?.finish()
+                    }
+                    let episodes = (try? await provider.children(of: seasonID)) ?? []
+                    guard !Task.isCancelled,
+                          let self,
+                          self.sourceGeneration == loadSourceGeneration,
+                          self.activeItemID == sourceItemID,
+                          self.activeSourceAccountID == sourceAccountID else { return }
+                    self.seasonEpisodes[seasonID] = self.stampSeriesTMDb(into: episodes.map(self.tagged))
+                    self.persistSnapshot()
+                }
+                seasonLoads[seasonID] = load
+            }
+
+            switch await load.wait() {
+            case .completed:
+                return
+            case let .invalidated(generation):
+                guard generation > lastNonRetrySeasonLoadGeneration else { return }
+            case .callerCancelled:
+                return
+            }
+        }
     }
 
-    /// Replaces the cached episodes for a season after the view has enriched them
-    /// — specifically, after injecting a resolved still URL into episodes the
-    /// server has no image for, so the rail re-renders seeding a synchronously
-    /// available thumbnail (no gray-placeholder flash). The ids and order are
-    /// unchanged, so SwiftUI updates artwork in place without disturbing focus.
-    public func setEpisodes(_ episodes: [MediaItem], for seasonID: String) {
-        guard seasonEpisodes[seasonID] != nil else { return }
-        seasonEpisodes[seasonID] = episodes
+    /// Patches resolved stills into the latest cache instead of replacing an old
+    /// array snapshot, preserving badge/watch-state enrichment that may have
+    /// completed while artwork resolution was suspended.
+    public func mergeResolvedEpisodePosterURLs(_ posterURLs: [String: URL], for seasonID: String) {
+        guard !posterURLs.isEmpty, var episodes = seasonEpisodes[seasonID] else { return }
+        var changed = false
+        for index in episodes.indices {
+            guard let posterURL = posterURLs[episodes[index].id],
+                  episodes[index].posterURL != posterURL else { continue }
+            episodes[index].posterURL = posterURL
+            changed = true
+        }
+        if changed {
+            seasonEpisodes[seasonID] = episodes
+        }
+    }
+
+    private func cancelSeasonLoads(retryWaiters: Bool = false) {
+        let permitsRetry = retryWaiters && !seasonLoadingSuspended
+        seasonLoadGeneration += 1
+        if !permitsRetry {
+            lastNonRetrySeasonLoadGeneration = seasonLoadGeneration
+        }
+        let invalidated = seasonLoads.values
+        seasonLoads.removeAll()
+        invalidated.forEach {
+            $0.invalidate(generation: seasonLoadGeneration)
+            $0.task?.cancel()
+        }
     }
 
     /// Refreshes a focused episode's capability badges from a full per-item fetch.
@@ -1051,6 +1267,29 @@ public final class ItemDetailViewModel {
     private func tagged(_ item: MediaItem) -> MediaItem {
         guard let activeSourceAccountID else { return item }
         return item.taggingSource(activeSourceAccountID)
+    }
+
+    private func isCurrentSource(
+        generation: UInt64,
+        itemID: String,
+        accountID: String?
+    ) -> Bool {
+        sourceGeneration == generation
+            && activeItemID == itemID
+            && activeSourceAccountID == accountID
+    }
+
+    private func isCurrentSeasonID(_ seasonID: String) -> Bool {
+        state.value?.children.contains(where: { $0.id == seasonID }) == true
+    }
+
+    private func invalidateSourceOperations() {
+        sourceGeneration += 1
+        seasonLoadingResumeSourceGeneration = nil
+        snapshotRestoreTask?.cancel()
+        snapshotRestoreTask = nil
+        pendingSnapshotWrite?.cancel()
+        pendingSnapshotWrite = nil
     }
 
     /// Captures the series-level context (TMDb id + anime ids/genre) used to stamp
@@ -1157,9 +1396,9 @@ public final class ItemDetailViewModel {
     /// Fetches external ratings off the critical path and merges them into the
     /// already-loaded detail. Failures are silent — the screen keeps whatever
     /// backend-native ratings it already has.
-    private func enrichRatings(for item: MediaItem) async {
+    private func enrichRatings(for item: MediaItem, sourceGeneration: UInt64) async {
         let external = await ratingsProvider.ratings(for: item)
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled, self.sourceGeneration == sourceGeneration else { return }
         guard !external.isEmpty else { return }
         guard case var .loaded(detail) = state, detail.item.id == item.id else { return }
         detail.item.ratings = detail.item.ratings.mergedWithAuthoritative(external)
@@ -1173,14 +1412,17 @@ public final class ItemDetailViewModel {
     /// (whose provider synthesises no text). Cached in the router, so revisiting a
     /// page or opening another episode of the same show issues no new request. A
     /// describable kind is required so folders/collections never trigger a lookup.
-    private func enrichOverview(for item: MediaItem) async {
+    private func enrichOverview(for item: MediaItem, sourceGeneration: UInt64) async {
         guard item.overview?.isEmpty ?? true else { return }
         switch item.kind {
         case .movie, .series, .season, .episode, .video: break
         case .folder, .collection, .unknown: return
         }
         let text = await OverviewRouter.shared.overview(for: item)
-        guard !Task.isCancelled, let text, !text.isEmpty else { return }
+        guard !Task.isCancelled,
+              self.sourceGeneration == sourceGeneration,
+              let text,
+              !text.isEmpty else { return }
         guard case var .loaded(detail) = state, detail.item.id == item.id else { return }
         guard detail.item.overview?.isEmpty ?? true else { return }
         detail.item.overview = text

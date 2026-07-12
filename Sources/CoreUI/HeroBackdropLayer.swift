@@ -23,17 +23,15 @@ public struct HeroBackdropLayer<Video: View>: View {
     private let urls: [URL]
     /// Last-resort async art lookup (e.g. TMDb fanart) when none of `urls` load.
     private let asyncFallbackURL: (@Sendable () async -> URL?)?
-    /// Poster used to synthesise a blurred cinematic wash when there is no real
-    /// landscape art at all. `nil` falls back to a neutral fill.
-    private let placeholderPosterURL: URL?
     /// The backdrop's rendered height (the caller scales this by any hero-height
     /// fraction / bottom extension before passing it in).
     private let height: CGFloat
     /// Legibility scrim tone — dark in dark mode (for light content), light in
     /// light mode (for dark content). Geometry is identical; only the tone flips.
     private let scrimTone: Color
-    /// Blurs the still image (used by spoiler-hiding). Never blurs the video slot.
-    private let blursImage: Bool
+    /// Layout-neutral vertical translation used by a receding hero. Applied before
+    /// overscan breakout so the full artwork layer moves as one screen-pinned image.
+    private let verticalOffset: CGFloat
     /// Fraction of the height at which the bottom dissolve *begins* (the image is
     /// fully opaque above it and fades to transparent by the bottom edge). The
     /// item **detail** hero melts into the page early (`0.33`) because content
@@ -54,20 +52,18 @@ public struct HeroBackdropLayer<Video: View>: View {
     public init(
         urls: [URL],
         asyncFallbackURL: (@Sendable () async -> URL?)? = nil,
-        placeholderPosterURL: URL? = nil,
         height: CGFloat,
         scrimTone: Color,
-        blursImage: Bool = false,
+        verticalOffset: CGFloat = 0,
         dissolveStart: CGFloat = 0.33,
         ignoresOverscan: Bool = true,
         @ViewBuilder backgroundVideo: @escaping () -> Video
     ) {
         self.urls = urls
         self.asyncFallbackURL = asyncFallbackURL
-        self.placeholderPosterURL = placeholderPosterURL
         self.height = height
         self.scrimTone = scrimTone
-        self.blursImage = blursImage
+        self.verticalOffset = verticalOffset
         self.dissolveStart = dissolveStart
         self.ignoresOverscan = ignoresOverscan
         self.backgroundVideo = backgroundVideo
@@ -85,17 +81,12 @@ public struct HeroBackdropLayer<Video: View>: View {
         .frame(height: height)
         .frame(maxWidth: .infinity)
         .clipped()
-        // Apply the blur ONLY when actually hiding a spoiler. `.blur(radius: 0)`
-        // still forces a full-screen offscreen render pass (a ~33MB 4K RGBA
-        // buffer on this panel) every time the modifier is present, even at
-        // radius 0 — so on the common non-spoiler path we omit the modifier
-        // entirely rather than paying for a no-op blur surface on every hero.
-        .modifier(ConditionalBlur(radius: blursImage ? 40 : nil))
         // Trailer slot: overlays the still (and so inherits the scrim + dissolve
         // below). Empty today — no layout or visual effect on the image-only path.
         .overlay { backgroundVideo() }
         .overlay(scrim)
         .mask(dissolveMask)
+        .offset(y: verticalOffset)
         // Break out of the tvOS overscan safe area so the backdrop spans the full
         // screen edge to edge — across the top too, otherwise the top overscan
         // inset shows through as a black bar above the artwork. Skipped when the
@@ -177,40 +168,23 @@ private struct OverscanBreakout: ViewModifier {
     }
 }
 
-/// Applies `.blur` only when a radius is supplied. A `nil` radius omits the
-/// modifier entirely so no offscreen blur buffer is allocated — unlike
-/// `.blur(radius: 0)`, which still forces a full-screen offscreen render pass.
-private struct ConditionalBlur: ViewModifier {
-    let radius: CGFloat?
-    func body(content: Content) -> some View {
-        if let radius {
-            content.blur(radius: radius)
-        } else {
-            content
-        }
-    }
-}
-
 public extension HeroBackdropLayer where Video == EmptyView {
-    /// Image-only backdrop (no trailer slot) — the default today. Byte-for-byte
-    /// the same treatment the detail hero has always rendered.
+    /// Image-only backdrop (no trailer slot) — the default today.
     init(
         urls: [URL],
         asyncFallbackURL: (@Sendable () async -> URL?)? = nil,
-        placeholderPosterURL: URL? = nil,
         height: CGFloat,
         scrimTone: Color,
-        blursImage: Bool = false,
+        verticalOffset: CGFloat = 0,
         dissolveStart: CGFloat = 0.33,
         ignoresOverscan: Bool = true
     ) {
         self.init(
             urls: urls,
             asyncFallbackURL: asyncFallbackURL,
-            placeholderPosterURL: placeholderPosterURL,
             height: height,
             scrimTone: scrimTone,
-            blursImage: blursImage,
+            verticalOffset: verticalOffset,
             dissolveStart: dissolveStart,
             ignoresOverscan: ignoresOverscan,
             backgroundVideo: { EmptyView() }

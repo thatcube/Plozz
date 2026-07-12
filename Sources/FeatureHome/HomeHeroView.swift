@@ -1,5 +1,6 @@
-#if canImport(SwiftUI)
+#if canImport(SwiftUI) && canImport(UIKit)
 import SwiftUI
+import UIKit
 import CoreModels
 import CoreUI
 import MetadataKit
@@ -132,6 +133,10 @@ struct HomeHeroView: View {
     /// guard never visibly holds focus. Pauses auto-advance and drives the button
     /// highlight whenever it is non-`nil` (either target counts as "hero focused").
     @FocusState private var focus: HeroFocus?
+    /// Tracks the physical Left/Right press lifecycle beneath SwiftUI's repeating
+    /// move commands. Early repeats are bounced so a normal click stays one-to-one;
+    /// after a deliberate hold delay, native rapid navigation resumes.
+    @State private var directionalPressGate = HeroDirectionalPressGate()
 
     /// The hero's focus targets. `leftGuard` is an invisible 1×1 sink used purely
     /// to capture a leftward move (see `focus`).
@@ -454,6 +459,13 @@ struct HomeHeroView: View {
         .task(id: artworkSetToken) {
             await warmHeroPreviews()
         }
+        // Provider logos are much smaller than backdrops, but still require a
+        // network fetch plus decode/analysis. Warm them in likely paging order so
+        // each slide arrives with its final identity instead of replacing a settled
+        // text title. The shared limiter keeps this behind foreground artwork.
+        .task(id: artworkSetToken) {
+            await warmHeroLogos()
+        }
         // Auto-advance: the fire is rescheduled whenever `autoAdvanceKey` changes
         // (slide change, manual page, pause/resume, or the item count settling).
         // It runs REGARDLESS of focus — focus lands on the hero action row by
@@ -570,7 +582,11 @@ struct HomeHeroView: View {
                     // below) so it never runs wider than the buttons beneath it —
                     // matching the title/overview. Falls back to the component's
                     // default until first measured.
-                    maxWidth: actionButtonsWidth > 0 ? actionButtonsWidth : 620
+                    maxWidth: actionButtonsWidth > 0 ? actionButtonsWidth : 620,
+                    // The parent keeps metadata hidden for 280ms during a wipe. A
+                    // cache-hot logo lands inside that window; a later result warms
+                    // the next visit but never pops into an already-settled slide.
+                    presentationPolicy: .onArrival(maximumWait: 0.2)
                 ) {
                     Text(hideText ? spoilerSettings.maskedTitle(for: item) : item.title)
                         .font(.system(size: 64, weight: .bold))
@@ -704,14 +720,12 @@ struct HomeHeroView: View {
         // pills — otherwise the guard + gap pushed the whole button row right of the
         // logo/metadata. The pills keep their own 24pt spacing in the inner HStack.
         HStack(spacing: 0) {
-            // Invisible focus guard, just left of the pills and inside the same
-            // focus section. It gives the focus engine an *internal* leftward
-            // target so a Left press is captured by the hero (routed through
-            // `.onChange(of: focus)` below) instead of escaping to the sidebar —
-            // which a lone focusable can't prevent. It steps aside (non-focusable)
-            // only at the one escape spot (first item, left-most button, sidebar
-            // nav) *while focus is resting on the row*, so Left there falls through
-            // and opens the side navigation, exactly as on the Apple TV app.
+            // Invisible directional target, just left of the pills and inside the
+            // same focus section. Native focus movement preserves the familiar tvOS
+            // click sound. The UIKit surface tracks physical press phases so only
+            // the first move from one held press is handled; touch-surface swipes
+            // still pass through normally. It steps aside only at the one escape
+            // spot (first item, left-most button, sidebar nav).
             //
             // Crucially the inactivation is gated on `focus == .row`, NOT on
             // `allowsSidebarEscape` alone: `handleLeft()` moves `selectedButton`
@@ -759,17 +773,18 @@ struct HomeHeroView: View {
             // delayed fade-IN still animates.
             .transaction { if !metadataVisible { $0.animation = nil } }
             .allowsHitTesting(false)
-            // ── The single hero focus target: an always-opaque, invisible focusable
+            // ── The single hero focus target: an always-opaque, invisible SwiftUI
             // leaf layered *over* the pills. Because `.overlay` is applied after the
             // pills' `.opacity`, it stays fully opaque and focusable even while the
             // pills fade to 0 — so focus (and therefore the scroll position) is
             // pinned throughout a page, while the buttons still disappear and
-            // reappear. There is NO per-button `@FocusState`: Left and Right are
-            // each captured by an invisible guard (see above / below) and resolved
-            // in `.onChange(of: focus)` against our own `selectedButton` (always the
-            // true pre-move value); Down is left to the enclosing section's
-            // `onMoveCommand`. The hero pages only on a real edge press, never
-            // because focus merely *landed* on an edge button.
+            // reappear. There is NO per-button `@FocusState`.
+            //
+            // A passive UIKit recognizer attached to the window observes physical
+            // Left/Right begin/end phases without becoming the focus leaf or
+            // recognizing/cancelling the gesture. The guards below use that
+            // lifecycle to accept only the first move from one held click while
+            // native focus feedback and indirect-touch swipes remain unchanged.
             //
             // Select is `.onTapGesture` (the select-press fires the tap) — the SAME
             // pattern the Continue Watching cards use (`focusableCard`), NOT a
@@ -782,6 +797,12 @@ struct HomeHeroView: View {
             // recommended placement) leaves this leaf a clean tap target. ──
             .overlay {
                 Color.clear
+                    .background {
+                        HeroDirectionalPressMonitor(
+                            capturesLeft: !allowsSidebarEscape,
+                            gate: directionalPressGate
+                        )
+                    }
                     .contentShape(Rectangle())
                     .focusable(true)
                     .focused($focus, equals: .row)
@@ -805,18 +826,10 @@ struct HomeHeroView: View {
             // id changes). Never key this on the item id — that would drop focus.
             .id(Self.actionRowFocusID)
 
-            // Invisible focus guard, just right of the pills and inside the same
-            // focus section — the mirror image of the left guard. A Right press
-            // has no focusable neighbour to relocate to (the pills are a single
-            // leaf, and everything else is below), so on tvOS a container-level
-            // `.onMoveCommand` never fires for it: Right silently died. Giving the
-            // engine an *internal* rightward target means a Right press is captured
-            // by the hero (routed through `.onChange(of: focus)` → `handleRight()`)
-            // exactly the way Left is captured by the left guard, with no reliance
-            // on `onMoveCommand`. Unlike the left guard it is ALWAYS focusable:
-            // Right never escapes the hero (there is nothing to the right to escape
-            // to) — it always pages or moves the selection — so there is no
-            // step-aside case and no `allowsSidebarEscape`-style race to guard.
+            // Invisible directional target just right of the pills. Physical clicks
+            // retain native focus feedback and are de-repeated by the press gate;
+            // touch-surface swipes route through the same `handleRight()` path.
+            // Unlike the left guard it is always focusable: Right never escapes.
             Color.clear
                 .frame(width: 1, height: 1)
                 .focusable(true)
@@ -846,13 +859,21 @@ struct HomeHeroView: View {
             HeroFocusDiagnostics.emit("focus \(oldName)->\(newName) | \(hfState())")
             switch new {
             case .leftGuard:
-                // The engine parked focus on the guard because Left was pressed.
-                // Resolve it and bounce straight back to the row.
-                handleLeft()
+                if directionalPressGate.shouldHandle(.left) {
+                    handleLeft()
+                } else {
+                    HeroFocusDiagnostics.emit("suppressed repeated physical Left")
+                    noteInteraction()
+                    focus = .row
+                }
             case .rightGuard:
-                // The engine parked focus on the guard because Right was pressed.
-                // Resolve it and bounce straight back to the row (mirror of Left).
-                handleRight()
+                if directionalPressGate.shouldHandle(.right) {
+                    handleRight()
+                } else {
+                    HeroFocusDiagnostics.emit("suppressed repeated physical Right")
+                    noteInteraction()
+                    focus = .row
+                }
             case .row:
                 // Focus arriving into the hero from *outside* (a row below / the
                 // tab bar): snap back to full-screen and scroll the page to the top.
@@ -901,9 +922,9 @@ struct HomeHeroView: View {
         ) == .escape
     }
 
-    /// Whether the invisible left guard should be focusable. It captures a Left
-    /// press so the hero handles it internally instead of the engine escaping to
-    /// the sidebar. It steps aside (non-focusable) *only* at the escape spot AND
+    /// Whether the invisible left swipe fallback should be focusable. It captures
+    /// a focus-engine move so the hero handles it internally instead of escaping
+    /// to the sidebar. It steps aside (non-focusable) *only* at the escape spot AND
     /// while focus is resting on the row — never while the guard itself holds
     /// focus. Gating on `focus == .row` is what makes the guard→row bounce
     /// race-free: `handleLeft()` moves `selectedButton`/`index` (flipping
@@ -920,11 +941,10 @@ struct HomeHeroView: View {
 
     /// The container-level move handler. Its ONLY job is to pause the auto-advance
     /// on any directional input so the carousel can't page out from under the user.
-    /// It does NOT resolve paging for any direction: **Left and Right are each
-    /// captured by their invisible focus guard** (→ `handleLeft()` / `handleRight()`),
-    /// Up is left to the system, and the Down-recede is driven by the page scroll in
-    /// `HomeView`. It only observes (never consumes) the move, so edge Left/Right
-    /// presses still page normally.
+    /// It does NOT resolve paging for any direction: Left/Right clicks use the
+    /// UIKit press surface, touch swipes use the invisible focus fallbacks, Up is
+    /// left to the system, and Down-recede is driven by the page scroll in
+    /// `HomeView`. It only observes (never consumes) the move.
     private func handleMove() {
         noteInteraction()
     }
@@ -940,11 +960,11 @@ struct HomeHeroView: View {
             + "sidebarEscape=\(allowsSidebarEscape) metaVisible=\(metadataVisible)"
     }
 
-    /// Resolves a Left press captured by the invisible left guard, then bounces
-    /// focus straight back to the pill row so the guard never visibly holds it.
+    /// Resolves one discrete Left click from the UIKit surface or a swipe captured
+    /// by the invisible left fallback, then ensures focus is on the pill row.
     /// Interior moves adjust `selectedButton`; `.advance` pages backward. The one
-    /// `.escape` case (first item, left-most button, sidebar) can't reach here —
-    /// the guard is non-focusable there, so Left falls through to the sidebar.
+    /// `.escape` case (first item, left-most button, sidebar) cannot arrive from a
+    /// swipe because the guard is non-focusable there; Left falls through instead.
     private func handleLeft() {
         noteInteraction()
         defer { focus = .row }
@@ -1002,14 +1022,10 @@ struct HomeHeroView: View {
         }
     }
 
-    /// Resolves a Right press captured by the invisible right guard, then bounces
-    /// focus straight back to the pill row so the guard never visibly holds it —
-    /// the exact mirror of `handleLeft()`. Interior moves adjust `selectedButton`;
-    /// `.advance` pages forward. Right never escapes (the reducer never returns
-    /// `.escape` for a rightward move), so there is no fall-through case. Routing
-    /// Right through the guard (rather than `onMoveCommand`) is what makes it fire
-    /// reliably even at the row's right edge, where there is no neighbour for a
-    /// container move handler to relocate to.
+    /// Resolves one discrete Right click from the UIKit surface or a swipe captured
+    /// by the invisible right fallback, then ensures focus is on the pill row.
+    /// Interior moves adjust `selectedButton`; `.advance` pages forward. Right
+    /// never escapes, so there is no fall-through case.
     private func handleRight() {
         noteInteraction()
         defer { focus = .row }
@@ -1710,6 +1726,39 @@ struct HomeHeroView: View {
         #endif
     }
 
+    /// Prepares provider-supplied logos in the same current/next/previous order as
+    /// backdrop previews. Two-at-a-time warming stays lightweight and avoids
+    /// launching external metadata searches for slides that have no provider logo;
+    /// those retain the immediate text title and resolve their optional fallback on
+    /// demand without ever becoming visually blank.
+    private func warmHeroLogos() async {
+        try? await Task.sleep(nanoseconds: 350_000_000)
+        guard !Task.isCancelled else { return }
+
+        var seen = Set<URL>()
+        let orderedURLs = HeroPreviewWarmOrder.indices(count: items.count, centeredAt: index)
+            .compactMap { items[$0].logoURL }
+            .filter { seen.insert($0).inserted }
+        let batchSize = 2
+        var batchStart = 0
+        while batchStart < orderedURLs.count {
+            guard !Task.isCancelled else { return }
+            let batchEnd = min(batchStart + batchSize, orderedURLs.count)
+            await withTaskGroup(of: Void.self) { group in
+                for url in orderedURLs[batchStart..<batchEnd] {
+                    group.addTask(priority: .utility) {
+                        guard !Task.isCancelled else { return }
+                        await ArtworkSession.warmLimiter.run {
+                            guard !Task.isCancelled else { return }
+                            await HeroLogoPreloader.warm(primaryURL: url)
+                        }
+                    }
+                }
+            }
+            batchStart = batchEnd
+        }
+    }
+
     /// Resolves the best hero backdrop URL for one item. Mirrors
     /// `DetailHeroView`: prefer the **server's** hero art
     /// (for an episode/season, the series backdrop carried on `fallbackArtworkURL`
@@ -1836,6 +1885,198 @@ enum HeroPreviewWarmOrder {
             distance += 1
         }
         return result
+    }
+}
+
+/// Distinguishes a physical arrow's first focus move from early key-repeat moves
+/// emitted while that same press is held. Repeats resume after the standard
+/// deliberate-hold delay; with no active physical press, every move is an
+/// indirect-touch swipe and remains unrestricted.
+@MainActor
+final class HeroDirectionalPressGate {
+    private let repeatDelay: TimeInterval
+    private let now: () -> TimeInterval
+    private var leftHeld = false
+    private var rightHeld = false
+    private var handledLeft = false
+    private var handledRight = false
+    private var leftBeganAt: TimeInterval = 0
+    private var rightBeganAt: TimeInterval = 0
+
+    init(
+        repeatDelay: TimeInterval = 0.45,
+        now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
+    ) {
+        self.repeatDelay = repeatDelay
+        self.now = now
+    }
+
+    func began(_ direction: HeroFocusDirection) {
+        switch direction {
+        case .left:
+            if !leftHeld {
+                leftHeld = true
+                handledLeft = false
+                leftBeganAt = now()
+            }
+        case .right:
+            if !rightHeld {
+                rightHeld = true
+                handledRight = false
+                rightBeganAt = now()
+            }
+        }
+    }
+
+    func ended(_ direction: HeroFocusDirection) {
+        switch direction {
+        case .left:
+            leftHeld = false
+            handledLeft = false
+        case .right:
+            rightHeld = false
+            handledRight = false
+        }
+    }
+
+    func shouldHandle(_ direction: HeroFocusDirection) -> Bool {
+        switch direction {
+        case .left:
+            guard leftHeld else { return true }
+            if !handledLeft {
+                handledLeft = true
+                return true
+            }
+            return now() - leftBeganAt >= repeatDelay
+        case .right:
+            guard rightHeld else { return true }
+            if !handledRight {
+                handledRight = true
+                return true
+            }
+            return now() - rightBeganAt >= repeatDelay
+        }
+    }
+}
+
+/// Installs a passive press-lifecycle observer on the window without replacing or
+/// wrapping the hero's proven SwiftUI focus leaf. The recognizer never succeeds,
+/// never cancels/delays delivery, and cannot compete with other recognizers; it
+/// only records arrow begin/end phases for ``HeroDirectionalPressGate``.
+private struct HeroDirectionalPressMonitor: UIViewRepresentable {
+    var capturesLeft: Bool
+    let gate: HeroDirectionalPressGate
+
+    func makeUIView(context: Context) -> InstallerView {
+        let view = InstallerView()
+        view.backgroundColor = .clear
+        view.isUserInteractionEnabled = false
+        view.monitor.gate = gate
+        view.monitor.capturesLeft = capturesLeft
+        return view
+    }
+
+    func updateUIView(_ uiView: InstallerView, context: Context) {
+        uiView.monitor.gate = gate
+        uiView.monitor.capturesLeft = capturesLeft
+    }
+
+    final class InstallerView: UIView {
+        let monitor = PressLifecycleRecognizer()
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            guard monitor.view !== window else { return }
+            monitor.view?.removeGestureRecognizer(monitor)
+            window?.addGestureRecognizer(monitor)
+        }
+
+        deinit {
+            monitor.view?.removeGestureRecognizer(monitor)
+        }
+    }
+
+    final class PressLifecycleRecognizer: UIGestureRecognizer {
+        var capturesLeft = true
+        weak var gate: HeroDirectionalPressGate?
+
+        override init(target: Any?, action: Selector?) {
+            super.init(target: target, action: action)
+            allowedPressTypes = [
+                NSNumber(value: UIPress.PressType.leftArrow.rawValue),
+                NSNumber(value: UIPress.PressType.rightArrow.rawValue)
+            ]
+            cancelsTouchesInView = false
+            delaysTouchesBegan = false
+            delaysTouchesEnded = false
+        }
+
+        convenience init() {
+            self.init(target: nil, action: nil)
+        }
+
+        override func pressesBegan(
+            _ presses: Set<UIPress>,
+            with event: UIPressesEvent
+        ) {
+            for press in presses {
+                switch press.type {
+                case .leftArrow where capturesLeft:
+                    HeroFocusDiagnostics.emit("began physical Left")
+                    gate?.began(.left)
+                case .rightArrow:
+                    HeroFocusDiagnostics.emit("began physical Right")
+                    gate?.began(.right)
+                default:
+                    break
+                }
+            }
+        }
+
+        override func pressesChanged(
+            _ presses: Set<UIPress>,
+            with event: UIPressesEvent
+        ) {
+        }
+
+        override func pressesEnded(
+            _ presses: Set<UIPress>,
+            with event: UIPressesEvent
+        ) {
+            finish(presses)
+            state = .failed
+        }
+
+        override func pressesCancelled(
+            _ presses: Set<UIPress>,
+            with event: UIPressesEvent
+        ) {
+            finish(presses)
+            state = .failed
+        }
+
+        override func canPrevent(_ preventedGestureRecognizer: UIGestureRecognizer) -> Bool {
+            false
+        }
+
+        override func canBePrevented(by preventingGestureRecognizer: UIGestureRecognizer) -> Bool {
+            false
+        }
+
+        private func finish(_ presses: Set<UIPress>) {
+            for press in presses {
+                switch press.type {
+                case .leftArrow:
+                    HeroFocusDiagnostics.emit("ended physical Left")
+                    gate?.ended(.left)
+                case .rightArrow:
+                    HeroFocusDiagnostics.emit("ended physical Right")
+                    gate?.ended(.right)
+                default:
+                    break
+                }
+            }
+        }
     }
 }
 

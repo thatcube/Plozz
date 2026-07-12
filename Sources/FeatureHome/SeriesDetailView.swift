@@ -41,6 +41,8 @@ struct SeriesDetailView: View {
     /// episode row to it, and parks focus on the hero Play button.
     let initialEpisode: MediaItem?
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     /// Which season's episodes the rail is currently showing. Driven by season
     /// tab focus; seeded to the "next up" season on first appearance.
     @State private var selectedSeasonID: String?
@@ -71,11 +73,26 @@ struct SeriesDetailView: View {
     /// have different ids), so `effectivePlayVersionID` re-defaults to recommended.
     @State private var versionOverride: String?
 
-    /// The measured width of the season tab bar's viewport, used to size a trailing
-    /// spacer so even the LAST season chip can be scrolled to the leading edge
-    /// (pinned under the Play button) rather than bottoming out right-aligned at the
-    /// end of the bar. `0` until first layout (spacer is then zero-width).
+    /// The measured width of the season tab bar's scroll viewport (its own width,
+    /// before the external leading inset), i.e. the right edge of the visible region
+    /// in `seasonBarSpace`. Used together with the per-chip frames below to decide
+    /// whether the active chip is already fully on-screen (skip the auto-scroll) and,
+    /// when it isn't, which edge it is clipped past. `0` until first layout.
     @State private var seasonBarViewportWidth: CGFloat = 0
+
+    /// Live frame of the pending reveal target in the bar's own coordinate space
+    /// (`seasonBarSpace`). Lets us tell whether the active chip is already fully
+    /// visible — so we DON'T shift an already-on-screen bar — and, when it isn't,
+    /// which edge it is clipped past so we reveal it minimally to that edge instead
+    /// of yanking it to the leading keyline. Measurement exists only while the
+    /// one-shot reveal is pending; normal horizontal scrolling publishes no frames.
+    @State private var seasonChipFrames: [String: CGRect] = [:]
+
+    /// One-shot arm for the active-season reveal. Set when the bar appears or the
+    /// selection changes externally; consumed once the chip frames are measured, so
+    /// the reveal only ever runs with real geometry (never a premature leading-align)
+    /// and never loops on its own animated scroll.
+    @State private var pendingSeasonReveal = false
 
     /// The season+episode NUMBER to re-front after an IN-PLACE cross-server switch,
     /// captured from the currently-fronted episode the instant the user picks a new
@@ -94,6 +111,9 @@ struct SeriesDetailView: View {
     /// each card and made scrolling the rail snap back; a stable target keeps it
     /// silky smooth while still re-pointing on open/season-change/switch.
     @State private var railTargetID: String?
+    /// Cosmetic-only series hero recede state. The parent writes it but never reads
+    /// it, so episode focus changes do not invalidate this page or its rail.
+    @State private var recedeModel = SeriesHeroRecedeModel()
 
     init(
         series: MediaItem,
@@ -130,6 +150,15 @@ struct SeriesDetailView: View {
     /// Scroll anchor for the hero, used to keep the page pinned to the top while
     /// initial focus lands on the bottom-anchored Play button.
     private static let topAnchorID = "series-hero-top"
+    /// The episode column's visual-center marker, used identically when focus first
+    /// enters either Seasons or Episodes.
+    private static let browserFocusAnchorID = "series-episode-browser-focus"
+
+    /// Named coordinate space anchored to the season bar's scroll viewport. In it the
+    /// visible region is exactly `0...seasonBarViewportWidth`, so each chip's frame
+    /// (published into `seasonChipFrames`) reflects the live scroll offset — letting
+    /// us decide true visibility and the clipped edge for a minimal reveal.
+    private static let seasonBarSpace = "seasonBarViewport"
 
     var body: some View {
         scrollContent
@@ -143,7 +172,7 @@ struct SeriesDetailView: View {
             // loaded yet); keying on the season ids re-runs this the moment they
             // arrive so a series/episode entry (selectedSeasonID still nil) picks
             // its first season and loads episodes instead of staying empty.
-            .task(id: seasons.map(\.id)) { await prepareInitialSeason() }
+            .task(id: seasonSetKey) { await prepareInitialSeason() }
             // Keep the series-level hero in sync with the active server: when an
             // in-place cross-server switch re-points `series` to the other server's
             // copy while the hero is showing the show itself (no episode fronted),
@@ -160,7 +189,7 @@ struct SeriesDetailView: View {
             // Background-warm *every* season's thumbnails the moment the page opens,
             // so switching seasons later is instant (no gray-placeholder flash)
             // rather than fetching that season's stills only once it is selected.
-            .task(id: seasons.map(\.id)) { await prewarmAllSeasons() }
+            .task(id: seasonSetKey) { await prewarmAllSeasons() }
             // The hero mirrors the focused episode via a local copy, so when a
             // watched/watchlist mutation broadcasts (e.g. from the hero's own
             // Watched button), flip the same flags on `heroItem` in place so the
@@ -183,12 +212,12 @@ struct SeriesDetailView: View {
     private var scroll: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                VStack(alignment: .leading, spacing: 32) {
+                VStack(alignment: .leading, spacing: 0) {
                     DetailHeroView(
                         item: displayHeroItem,
                         backdropItem: series,
-                        heroHeightFraction: 0.8,
-                        backdropBottomExtensionFraction: 0.1,
+                        titleFallbackOverride: series.title,
+                        seriesRecedeModel: recedeModel,
                         spoilerSettings: spoilerSettings,
                         subtitleOverride: heroSubtitleOverride,
                         playTitle: playTarget.map { viewModel.playButtonTitle(for: $0) },
@@ -210,8 +239,14 @@ struct SeriesDetailView: View {
                         // scroll drift the page down. Same animation as the
                         // Play-regains-focus case below.
                         onHeroActionFocused: {
-                            withAnimation(.easeInOut(duration: 0.4)) {
+                            rearmEpisodeRailOnHeroFocusIfNeeded()
+                            recedeModel.restore()
+                            if reduceMotion {
                                 proxy.scrollTo(Self.topAnchorID, anchor: .top)
+                            } else {
+                                withAnimation(.easeInOut(duration: 0.4)) {
+                                    proxy.scrollTo(Self.topAnchorID, anchor: .top)
+                                }
                             }
                         }
                     )
@@ -239,17 +274,32 @@ struct SeriesDetailView: View {
                         _ = await viewModel.enrichEpisodeBadgesIfNeeded(target)
                     }
 
-                    // Seasons and their episodes sit together as a tighter group,
-                    // with the show-level extras kept at the wider page spacing.
-                    VStack(alignment: .leading, spacing: 12) {
-                        if !seasons.isEmpty {
-                            seasonTabBar
+                    SeriesEpisodeBrowser(
+                        series: series,
+                        recedeModel: recedeModel,
+                        showsSeasons: !seasons.isEmpty,
+                        showsCast: !series.cast.isEmpty,
+                        focusAnchorID: Self.browserFocusAnchorID,
+                        seasonContent: {
+                            seasonTabBar {
+                                centerEpisodeBrowser(using: proxy)
+                            }
+                        },
+                        episodeContent: {
+                            episodeRail {
+                                centerEpisodeBrowser(using: proxy)
+                            }
                         }
+                    )
+                    .padding(.top, -SeriesEpisodeBrowserLayout.heroOverlap)
 
-                        episodeRail
-                    }
-
-                    DetailExtrasView(item: series, leadingInset: PlozzTheme.Metrics.heroLeadingPadding)
+                    DetailExtrasView(
+                        item: series,
+                        leadingInset: PlozzTheme.Metrics.heroLeadingPadding,
+                        seriesRecedeModel: recedeModel,
+                        revealsSeriesCastWithoutBrowser: revealsCastWithoutBrowser
+                    )
+                        .padding(.top, 32)
                 }
                 .padding(.bottom, PlozzTheme.Metrics.screenPadding)
                 // Cap the whole scroll column to the proposed (safe viewport)
@@ -271,8 +321,13 @@ struct SeriesDetailView: View {
             // rather than jumping instantly.
             .onChange(of: playFocused) { _, focused in
                 if focused {
-                    withAnimation(.easeInOut(duration: 0.4)) {
+                    recedeModel.restore()
+                    if reduceMotion {
                         proxy.scrollTo(Self.topAnchorID, anchor: .top)
+                    } else {
+                        withAnimation(.easeInOut(duration: 0.4)) {
+                            proxy.scrollTo(Self.topAnchorID, anchor: .top)
+                        }
                     }
                 }
             }
@@ -283,49 +338,76 @@ struct SeriesDetailView: View {
         }
     }
 
+    /// Moves the episode column to the one final browser position immediately as
+    /// focus enters either section. Both entry paths target the same fixed frame,
+    /// so Season → Episode has no second vertical movement and rapid DOWN-DOWN
+    /// cannot produce a different resting offset from a slow navigation.
+    private func centerEpisodeBrowser(using proxy: ScrollViewProxy) {
+        recedeModel.recede()
+        if reduceMotion {
+            proxy.scrollTo(Self.browserFocusAnchorID, anchor: .center)
+        } else {
+            withAnimation(.smooth(duration: 0.55)) {
+                proxy.scrollTo(Self.browserFocusAnchorID, anchor: .center)
+            }
+        }
+    }
+
     // MARK: Season tabs
 
-    private var seasonTabBar: some View {
+    private func seasonTabBar(onFocusEntered: @escaping () -> Void) -> some View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 12) {
                     ForEach(seasons) { season in
                         seasonChip(season)
                     }
-                    // Trailing spacer the width of the viewport so the LAST season
-                    // chip can be scrolled fully to the leading edge (pinned under
-                    // the Play button) like every other chip, instead of bottoming
-                    // out right-aligned at the end of the bar. It is empty space
-                    // *after* the final season — which is exactly what should sit to
-                    // the right of the last season anyway — and is non-focusable, so
-                    // it never participates in left/right season navigation.
-                    if seasonBarViewportWidth > 0 {
-                        Color.clear
-                            .frame(width: seasonBarViewportWidth)
-                    }
+                    // (No trailing spacer: we no longer leading-align chips, so the
+                    // last chip should sit at the natural right edge — the phantom
+                    // full-viewport spacer used to be what let an already-visible bar
+                    // be shifted at all.)
                 }
                 .padding(.trailing, PlozzTheme.Metrics.screenPadding)
                 // Headroom for the focused chip's lift so it is never clipped.
                 .padding(.vertical, 12)
             }
-            // Inset the whole scroll VIEWPORT to the hero keyline (rather than
-            // padding the content), so a chip scrolled to `.leading` aligns to the
-            // keyline — where "S·E"/Play start — instead of the column edge. Padding
-            // the content instead let `scrollTo(.leading)` pin the chip to the
-            // scrollview's own leading edge, clipping it left of the keyline.
-            .padding(.leading, PlozzTheme.Metrics.heroLeadingPadding)
-            // Measure the (inset) viewport width to size the trailing spacer above.
+            // Anchor a coordinate space to the scroll VIEWPORT so each season chip's
+            // frame reflects the live scroll offset — the visible region is exactly
+            // `0...seasonBarViewportWidth`. Attached to the raw ScrollView (before the
+            // leading inset below) so `minX == 0` at the keyline and the measured width
+            // is the true scroll viewport width.
+            .coordinateSpace(name: Self.seasonBarSpace)
+            // Measure the scroll viewport's own width (before the external leading
+            // inset) — the right edge of the visible region in `seasonBarSpace`.
             .background(
                 GeometryReader { geo in
                     Color.clear
-                        .onAppear { seasonBarViewportWidth = geo.size.width }
+                        .onAppear {
+                            if seasonBarViewportWidth != geo.size.width {
+                                seasonBarViewportWidth = geo.size.width
+                            }
+                        }
                         .onChange(of: geo.size.width) { _, width in
-                            seasonBarViewportWidth = width
+                            if seasonBarViewportWidth != width {
+                                seasonBarViewportWidth = width
+                            }
                         }
                 }
             )
+            // Collect the pending target's frame (published by `seasonChip`) so the
+            // reveal can tell whether it is already fully visible and, if not, which
+            // edge it is clipped past.
+            .onPreferenceChange(SeasonChipFramesKey.self) { frames in
+                guard pendingSeasonReveal, frames != seasonChipFrames else { return }
+                seasonChipFrames = frames
+            }
+            .frame(height: SeriesEpisodeBrowserLayout.seasonBarHeight)
             // Never clip a focused chip's lift, shadow or border.
             .scrollClipDisabled()
+            // Inset the whole scroll VIEWPORT to the hero keyline (rather than padding
+            // the content), so a chip revealed to `.leading` aligns to the keyline —
+            // where "S·E"/Play start — instead of the column edge.
+            .padding(.leading, PlozzTheme.Metrics.heroLeadingPadding)
             // Treat the whole tab bar as one focus section so pressing "up" from any
             // episode — even when the rail is scrolled far to the right and no tab
             // sits directly above — reliably enters the bar instead of being trapped.
@@ -337,9 +419,12 @@ struct SeriesDetailView: View {
                     seasonBarEngaged = false
                     return
                 }
+                let isEntering = !seasonBarEngaged
                 // We're now inside the bar — open every chip to focus so left/right
                 // navigation between seasons works.
                 seasonBarEngaged = true
+                recedeModel.recede()
+                if isEntering { onFocusEntered() }
                 // Focus has genuinely left the episode rail (it's now on the bar), so
                 // tell the rail to re-arm its entry gate for the next down-press.
                 episodeRailResetToken += 1
@@ -349,32 +434,64 @@ struct SeriesDetailView: View {
                 // keeps the page on the episode you were last viewing, so going up and
                 // back down stays anchored to that episode rather than the season.
             }
-            // Position the active season chip ONCE on arrival (and on an external
-            // re-selection such as a cross-server switch) so a high season parked
-            // off-screen right is brought into view, leading-aligned to the keyline,
-            // and is reachable by a down-press from Play. We deliberately do NOT
-            // re-anchor when focus merely leaves the bar (e.g. moving down into the
-            // episodes): once the user has scrolled the bar it stays where they left
-            // it rather than snapping back. Guarded by `seasonBarEngaged` so it never
-            // fights tvOS's own scrolling while focus is inside the bar.
-            .onAppear { scrollActiveSeasonIntoView(using: proxy) }
+            // Reveal the active season chip ONLY when it is actually off-screen, and
+            // then MINIMALLY — flush to whichever edge it was clipped past — rather
+            // than leading-aligning it under the Play button (see
+            // `fulfilSeasonRevealIfPending`). Armed on arrival and on an external
+            // re-selection (e.g. a cross-server switch); consumed once geometry is
+            // measured. We deliberately do NOT re-anchor when focus merely leaves the
+            // bar, and never while `seasonBarEngaged` (so it can't fight tvOS while the
+            // user is navigating the bar) — once the user has scrolled the bar it
+            // stays where they left it.
+            .onAppear {
+                seasonChipFrames = [:]
+                pendingSeasonReveal = true
+                fulfilSeasonRevealIfPending(using: proxy)
+            }
             .onChange(of: selectedSeasonID) { _, _ in
                 guard !seasonBarEngaged else { return }
-                scrollActiveSeasonIntoView(using: proxy)
+                seasonChipFrames = [:]
+                pendingSeasonReveal = true
+                fulfilSeasonRevealIfPending(using: proxy)
             }
+            // Frames and viewport width settle a layout pass after the bar appears, so
+            // run the (idempotent, one-shot) reveal as soon as real measurements exist.
+            .onChange(of: seasonChipFrames) { _, _ in fulfilSeasonRevealIfPending(using: proxy) }
+            .onChange(of: seasonBarViewportWidth) { _, _ in fulfilSeasonRevealIfPending(using: proxy) }
         }
     }
 
-    /// Scrolls the season bar so the active (`selectedSeasonID`, falling back to the
-    /// first) chip is leading-aligned — directly under the hero Play button — so it
-    /// is always on-screen and reachable by a down-press. Deferred a runloop tick so
-    /// the chip is laid out before we scroll, and animated so a far season glides in
-    /// rather than snapping.
-    private func scrollActiveSeasonIntoView(using proxy: ScrollViewProxy) {
+    /// Reveals the active season chip **only when it is actually off-screen**, and
+    /// then **minimally** — flush to whichever edge it was clipped past — rather than
+    /// leading-aligning it under the Play button. A no-op when the chip is already
+    /// fully visible (e.g. a 2–3 season bar that all fits). One-shot per arm via
+    /// `pendingSeasonReveal`, and only ever runs once real geometry is measured, so it
+    /// can neither prematurely leading-align nor loop on its own animated scroll.
+    ///
+    /// A genuinely off-screen active season (e.g. Season 12 on a long show) is still
+    /// brought into view; it stays reachable by a down-press from Play via the season
+    /// bar's disabled-others gate + `.focusSection()`, not by leading-alignment.
+    private func fulfilSeasonRevealIfPending(using proxy: ScrollViewProxy) {
+        guard pendingSeasonReveal, !seasonBarEngaged else { return }
         guard let id = selectedSeasonID ?? seasons.first?.id else { return }
+        // Wait until both the viewport and the target chip have been measured.
+        guard seasonBarViewportWidth > 0, let frame = seasonChipFrames[id] else { return }
+
+        // We have geometry — consume the arm (whether or not we end up scrolling).
+        pendingSeasonReveal = false
+
+        guard let edge = SeriesSeasonRevealEdge.clippedEdge(
+            frame: frame,
+            viewportWidth: seasonBarViewportWidth
+        ) else { return }
+        let anchor: UnitPoint = edge == .trailing ? .trailing : .leading
         DispatchQueue.main.async {
-            withAnimation(.easeInOut(duration: 0.25)) {
-                proxy.scrollTo(id, anchor: .leading)
+            if reduceMotion {
+                proxy.scrollTo(id, anchor: anchor)
+            } else {
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    proxy.scrollTo(id, anchor: anchor)
+                }
             }
         }
     }
@@ -402,8 +519,21 @@ struct SeriesDetailView: View {
         .focusEffectDisabled()
         .focused($focusedSeasonID, equals: season.id)
         // Stable scroll target so the season bar can programmatically scroll the
-        // active chip into view (see `scrollActiveSeasonIntoView`).
+        // active chip into view (see `fulfilSeasonRevealIfPending`).
         .id(season.id)
+        // Measure only the pending reveal target. Once the one-shot decision is
+        // consumed, no chip publishes live scroll frames, so horizontal movement
+        // cannot invalidate the full series page on every animation frame.
+        .background {
+            if pendingSeasonReveal, season.id == activeID {
+                GeometryReader { geo in
+                    Color.clear.preference(
+                        key: SeasonChipFramesKey.self,
+                        value: [season.id: geo.frame(in: .named(Self.seasonBarSpace))]
+                    )
+                }
+            }
+        }
         // Remove non-active seasons from the focus system until the bar is engaged,
         // so directional entry can only ever land on the active season (no snap).
         .disabled(!isFocusable)
@@ -437,7 +567,7 @@ struct SeriesDetailView: View {
 
     // MARK: Episode rail
 
-    private var episodeRail: some View {
+    private func episodeRail(onFocusEntered: @escaping () -> Void) -> some View {
         let episodes = currentEpisodes
         // The episode focus should land on when entering the rail / where it
         // pre-scrolls. We use the STABLE `railTargetID` (updated only on open,
@@ -452,7 +582,7 @@ struct SeriesDetailView: View {
         return MediaRowView(
             title: railTitle,
             items: episodes,
-            style: .landscape,
+            presentation: .episodeColumn,
             spoilerSettings: spoilerSettings,
             // Keep focus on the hero Play button initially; pre-scroll the rail to
             // the resume/target episode and make it the row's default focus so
@@ -463,6 +593,10 @@ struct SeriesDetailView: View {
             defaultFocusID: target,
             focusResetToken: episodeRailResetToken,
             leadingInset: PlozzTheme.Metrics.heroLeadingPadding,
+            onFocusEntered: {
+                recedeModel.recede()
+                onFocusEntered()
+            },
             onFocusChange: { focused in
                 if let focused, heroItem.id != focused.id { heroItem = focused }
             },
@@ -491,7 +625,12 @@ struct SeriesDetailView: View {
     /// it fires once the selected season's episodes arrive and again when the
     /// season changes — but not on every unrelated re-render.
     private var stillPrefetchKey: String {
-        "\(selectedSeasonID ?? "loose")#\(currentEpisodes.count)"
+        "\(series.sourceAccountID ?? "_")#\(series.id)#\(selectedSeasonID ?? "loose")#\(currentEpisodes.count)"
+    }
+
+    private var seasonSetKey: String {
+        let seasonIDs = seasons.map(\.id).joined(separator: ",")
+        return "\(series.sourceAccountID ?? "_")#\(series.id)#\(seasonIDs)"
     }
 
     /// Warms the **currently selected** season so its episode thumbnails are
@@ -565,14 +704,17 @@ struct SeriesDetailView: View {
     ///     to the view model so the rail re-renders seeding the now-decoded image.
     private func warmSeason(_ seasonID: String) async {
         guard let episodes = viewModel.episodes(for: seasonID) else { return }
-        var resolved = episodes
-        var changed = false
+        var resolvedPosterURLs: [String: URL] = [:]
         var heroResolved = false
         var heroURL: URL?
-        for index in resolved.indices {
+        for episode in episodes {
             if Task.isCancelled { return }
-            let episode = resolved[index]
-            if let url = episode.artworkCandidates(for: .landscape).first {
+            let candidates = MediaArtworkPrefetchPolicy.candidates(
+                for: episode,
+                style: .landscape,
+                spoilerSettings: spoilerSettings
+            )
+            if let url = candidates.first {
                 #if canImport(UIKit)
                 await ArtworkSession.warmLimiter.run {
                     _ = await ArtworkImageCache.shared.image(for: url, variant: .landscapeCard, background: true)
@@ -580,13 +722,17 @@ struct SeriesDetailView: View {
                 #endif
                 continue
             }
+            guard !(spoilerSettings.mode == .placeholder
+                    && spoilerSettings.shouldHideThumbnail(for: episode)) else { continue }
             guard episode.kind == .episode else { continue }
             // No server image: resolve a real still, falling back to the series
             // hero (resolved once and reused) so every episode is at least covered.
             var still = await ArtworkRouter.shared.artworkURL(.thumbnail, for: episode)
+            if Task.isCancelled { return }
             if still == nil {
                 if !heroResolved {
                     heroURL = await ArtworkRouter.shared.artworkURL(.hero, for: series)
+                    if Task.isCancelled { return }
                     heroResolved = true
                 }
                 still = heroURL ?? series.fallbackArtworkURL
@@ -597,12 +743,10 @@ struct SeriesDetailView: View {
                 _ = await ArtworkImageCache.shared.image(for: still, variant: .landscapeCard, background: true)
             }
             #endif
-            resolved[index].posterURL = still
-            changed = true
+            if Task.isCancelled { return }
+            resolvedPosterURLs[episode.id] = still
         }
-        if changed {
-            viewModel.setEpisodes(resolved, for: seasonID)
-        }
+        viewModel.mergeResolvedEpisodePosterURLs(resolvedPosterURLs, for: seasonID)
     }
 
     /// Decodes each episode's first displayed landscape candidate (its server
@@ -611,7 +755,11 @@ struct SeriesDetailView: View {
     private func warmPrimaryThumbnails(for episodes: [MediaItem]) {
         #if canImport(UIKit)
         for episode in episodes {
-            guard let url = episode.artworkCandidates(for: .landscape).first else { continue }
+            guard let url = MediaArtworkPrefetchPolicy.candidates(
+                for: episode,
+                style: .landscape,
+                spoilerSettings: spoilerSettings
+            ).first else { continue }
             ArtworkImageCache.shared.prefetch(url, variant: .landscapeCard)
         }
         #endif
@@ -624,6 +772,21 @@ struct SeriesDetailView: View {
             return episodes
         }
         return seasons.isEmpty ? stampedLooseEpisodes : []
+    }
+
+    private var revealsCastWithoutBrowser: Bool {
+        SeriesDetailBrowserPolicy.revealsCastWithoutBrowser(
+            childrenLoaded: viewModel.state.value?.childrenLoaded == true,
+            hasSeasons: !seasons.isEmpty,
+            hasEpisodes: !currentEpisodes.isEmpty
+        )
+    }
+
+    private func rearmEpisodeRailOnHeroFocusIfNeeded() {
+        guard SeriesDetailBrowserPolicy.rearmsEpisodeRailOnHeroFocus(
+            hasSeasons: !seasons.isEmpty
+        ) else { return }
+        episodeRailResetToken &+= 1
     }
 
     /// A representative tech-badge set (best resolution/HDR/audio) derived from
@@ -879,6 +1042,47 @@ struct SeriesDetailView: View {
         updateRailTarget()
     }
 
+}
+
+enum SeriesDetailBrowserPolicy {
+    static func rearmsEpisodeRailOnHeroFocus(hasSeasons: Bool) -> Bool {
+        !hasSeasons
+    }
+
+    static func revealsCastWithoutBrowser(
+        childrenLoaded: Bool,
+        hasSeasons: Bool,
+        hasEpisodes: Bool
+    ) -> Bool {
+        childrenLoaded && !hasSeasons && !hasEpisodes
+    }
+}
+
+enum SeriesSeasonRevealEdge: Equatable {
+    case leading
+    case trailing
+
+    static func clippedEdge(
+        frame: CGRect,
+        viewportWidth: CGFloat,
+        tolerance: CGFloat = 0.5
+    ) -> Self? {
+        guard viewportWidth > 0 else { return nil }
+        if frame.minX >= -tolerance, frame.maxX <= viewportWidth + tolerance {
+            return nil
+        }
+        return frame.maxX > viewportWidth ? .trailing : .leading
+    }
+}
+
+/// Collects the pending season chip's frame (in the season bar's viewport
+/// coordinate space) so `SeriesDetailView` can decide whether it is already
+/// fully visible — and, if not, which edge it is clipped past for a minimal reveal.
+private struct SeasonChipFramesKey: PreferenceKey {
+    static var defaultValue: [String: CGRect] = [:]
+    static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {
+        value.merge(nextValue()) { _, new in new }
+    }
 }
 
 #endif

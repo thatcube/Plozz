@@ -5,9 +5,15 @@ import CoreModels
 /// A horizontally-scrolling, focusable row of media cards with a title.
 /// Reused by Home (Continue Watching, Latest) and detail (episodes, related).
 public struct MediaRowView: View {
+    public enum Presentation: Equatable, Sendable {
+        case poster
+        case landscape
+        case episodeColumn
+    }
+
     private let title: String
     private let items: [MediaItem]
-    private let style: PosterCardView.Style
+    private let presentation: Presentation
     private let spoilerSettings: SpoilerSettings
     /// When set, the row scrolls to and moves focus onto the matching item the
     /// first time it appears (used by series/season detail to surface the
@@ -40,6 +46,10 @@ public struct MediaRowView: View {
     /// detail to mirror the focused episode into the page hero. When set, every
     /// card becomes individually focus-tracked.
     private let onFocusChange: ((MediaItem?) -> Void)?
+    /// Fires synchronously when focus reaches any card in the row. Unlike
+    /// `onFocusChange`, this is not settle-debounced and is intended for lightweight
+    /// cosmetic state such as the series hero recede.
+    private let onFocusEntered: (() -> Void)?
     /// Stable lookup tables so focus/prefetch hot paths avoid repeated linear scans.
     private let itemIDSet: Set<String>
     private let itemIndexByID: [String: Int]
@@ -83,18 +93,50 @@ public struct MediaRowView: View {
         defaultFocusID: String? = nil,
         focusResetToken: Int = 0,
         leadingInset: CGFloat = PlozzTheme.Metrics.screenPadding,
+        onFocusEntered: (() -> Void)? = nil,
+        onFocusChange: ((MediaItem?) -> Void)? = nil,
+        onSelect: @escaping (MediaItem) -> Void
+    ) {
+        self.init(
+            title: title,
+            items: items,
+            presentation: style == .poster ? .poster : .landscape,
+            spoilerSettings: spoilerSettings,
+            initialFocusID: initialFocusID,
+            initialScrollID: initialScrollID,
+            defaultFocusID: defaultFocusID,
+            focusResetToken: focusResetToken,
+            leadingInset: leadingInset,
+            onFocusEntered: onFocusEntered,
+            onFocusChange: onFocusChange,
+            onSelect: onSelect
+        )
+    }
+
+    public init(
+        title: String,
+        items: [MediaItem],
+        presentation: Presentation,
+        spoilerSettings: SpoilerSettings = .default,
+        initialFocusID: String? = nil,
+        initialScrollID: String? = nil,
+        defaultFocusID: String? = nil,
+        focusResetToken: Int = 0,
+        leadingInset: CGFloat = PlozzTheme.Metrics.screenPadding,
+        onFocusEntered: (() -> Void)? = nil,
         onFocusChange: ((MediaItem?) -> Void)? = nil,
         onSelect: @escaping (MediaItem) -> Void
     ) {
         self.title = title
         self.items = items
-        self.style = style
+        self.presentation = presentation
         self.spoilerSettings = spoilerSettings
         self.initialFocusID = initialFocusID
         self.initialScrollID = initialScrollID
         self.defaultFocusID = defaultFocusID
         self.focusResetToken = focusResetToken
         self.leadingInset = leadingInset
+        self.onFocusEntered = onFocusEntered
         self.onFocusChange = onFocusChange
         self.onSelect = onSelect
         self.itemIDSet = Set(items.map(\.id))
@@ -111,7 +153,19 @@ public struct MediaRowView: View {
     /// Whether each card needs an individual focus binding installed — required
     /// to drive initial/default focus and to report focus changes to the hero.
     private var tracksFocus: Bool {
-        initialFocusID != nil || onFocusChange != nil || defaultFocusID != nil
+        MediaRowFocusPolicy.observesFocus(
+            initialFocusID: initialFocusID,
+            defaultFocusID: defaultFocusID,
+            hasOnFocusEntered: onFocusEntered != nil,
+            hasOnFocusChange: onFocusChange != nil
+        )
+    }
+
+    /// Focus observation and directional entry gating are separate concerns.
+    /// A callback-only row needs per-card bindings, but must retain tvOS's normal
+    /// column-aligned navigation rather than becoming a remembered focus section.
+    private var usesFocusEntryGate: Bool {
+        MediaRowFocusPolicy.usesEntryGate(defaultFocusID: defaultFocusID)
     }
 
     /// The card the entry gate targets: the card focus last settled on in this row
@@ -121,6 +175,7 @@ public struct MediaRowView: View {
     /// arrived on. A stale `lastFocusedID` from another season is ignored because
     /// it won't be present in the current `items`.
     private var gateTarget: String? {
+        guard usesFocusEntryGate else { return nil }
         if let lastFocusedID, itemIDSet.contains(lastFocusedID) {
             return lastFocusedID
         }
@@ -149,16 +204,16 @@ public struct MediaRowView: View {
 
     public var body: some View {
         if !items.isEmpty {
-            VStack(alignment: .leading, spacing: metrics.sectionTitleSpacing) {
+            VStack(alignment: .leading, spacing: layoutMetrics.sectionTitleSpacing) {
                 if !title.isEmpty {
                     Text(title)
-                        .font(.system(size: metrics.sectionHeaderFontSize, weight: .bold))
+                        .font(.system(size: layoutMetrics.sectionHeaderFontSize, weight: .bold))
                         .padding(.leading, leadingInset)
                 }
 
                 ScrollViewReader { proxy in
                     ScrollView(.horizontal, showsIndicators: false) {
-                        LazyHStack(spacing: metrics.cardSpacing) {
+                        LazyHStack(spacing: layoutMetrics.cardSpacing) {
                             ForEach(items) { item in
                                 card(for: item)
                             }
@@ -173,22 +228,31 @@ public struct MediaRowView: View {
                         // the screen. The negative outer padding below cancels this
                         // clearance in layout, so the row's height and its gap to the
                         // neighbouring rows are unchanged; only the clip grows.
-                        .padding(.vertical, metrics.railShadowClearance)
-                        // Treat the rail as a single focus section ONLY when this
-                        // row runs the gated single-target flow (the episode rail):
-                        // there, pressing down must enter the section and land on the
-                        // gated target even when it's parked far right, which tvOS's
-                        // geometric downward search would otherwise miss. For ordinary
-                        // rows (Home, detail children — `tracksFocus == false`) a focus
-                        // section is HARMFUL: it makes the row remember its own last-
-                        // focused card, so navigating up/down between rows restores a
-                        // far-side card instead of tvOS's normal column-aligned
-                        // X-projection — the "focus jumps to the opposite side" bug.
-                        // Leaving it off lets vertical navigation keep the column.
-                        .focusSectionIf(tracksFocus)
+                        .padding(.vertical, layoutMetrics.railShadowClearance)
                     }
-                    .padding(.top, metrics.railTopClearanceOffset)
-                    .padding(.bottom, metrics.railBottomClearanceOffset)
+                    .padding(.top, layoutMetrics.railTopClearanceOffset)
+                    .padding(.bottom, layoutMetrics.railBottomClearanceOffset)
+                    // Section the whole rail VIEWPORT (the full-width horizontal
+                    // ScrollView) — NOT the scrolled inner LazyHStack — but ONLY for
+                    // the gated single-target flow (the episode rail). tvOS only enters
+                    // a focus section if part of its FRAME sits in the swipe's path, and
+                    // then forwards focus to the section's sole enabled focusable
+                    // regardless of where that card is scrolled. On the inner LazyHStack
+                    // the section only spanned the scrolled/visible cards, so pressing
+                    // DOWN from a horizontally-distant season chip found no rail geometry
+                    // in its corridor and either missed the target (landing on the cast
+                    // avatar below) or didn't move at all when the target was scrolled to
+                    // the opposite side. At the ScrollView level the section is the full,
+                    // static viewport width — directly below the season bar for every
+                    // chip position — so DOWN reliably reaches the gated target wherever
+                    // it sits (last far-right, first far-left, or middle), with no
+                    // repositioning. This mirrors the season bar's own ScrollView-level
+                    // `.focusSection()` (which makes UP work the same way) and the hero
+                    // action row (commit eddd937e). Ordinary rows (Home, detail children —
+                    // `gatesFocus == false`) stay UNsectioned so vertical navigation
+                    // keeps tvOS's column-aligned X-projection (the "focus jumps to the
+                    // opposite side" bug, commit f812fe64).
+                    .focusSectionIf(gatesFocus)
                     .onAppear { applyInitialFocus(using: proxy) }
                     .onChange(of: focusedID) { _, newValue in
                         handleFocusChange(to: newValue, using: proxy)
@@ -224,6 +288,39 @@ public struct MediaRowView: View {
 
     @ViewBuilder
     private func card(for item: MediaItem) -> some View {
+        switch presentation {
+        case .poster:
+            trackedCard(
+                PosterCardView(
+                    item: item,
+                    style: .poster,
+                    spoilerSettings: spoilerSettings
+                ) { onSelect(item) },
+                for: item
+            )
+        case .landscape:
+            trackedCard(
+                PosterCardView(
+                    item: item,
+                    style: .landscape,
+                    spoilerSettings: spoilerSettings
+                ) { onSelect(item) },
+                for: item
+            )
+        case .episodeColumn:
+            trackedCard(
+                EpisodeColumnCard(
+                    item: item,
+                    spoilerSettings: spoilerSettings
+                ) { onSelect(item) }
+                .environment(\.plozzMetrics, .standard),
+                for: item
+            )
+        }
+    }
+
+    @ViewBuilder
+    private func trackedCard<Card: View>(_ content: Card, for item: MediaItem) -> some View {
         // Pin every card to its true rendered width so a `LazyHStack` can compute
         // the offset of a far-off initial-focus target (e.g. episode 132 of a long
         // season) without first realising every card in between — which is what
@@ -236,7 +333,7 @@ public struct MediaRowView: View {
         // is fixed and sits inside a `cardInset` glass margin, so its glass
         // is `landscapeWidth + 2 * cardInset` — pin to that so `cardSpacing`
         // is a real gap and adjacent cards never overlap at rest.
-        let card = PosterCardView(item: item, style: style, spoilerSettings: spoilerSettings) { onSelect(item) }
+        let card = content
             .frame(width: cardSlotWidth)
             .id(item.id)
             .onAppear {
@@ -256,12 +353,22 @@ public struct MediaRowView: View {
     /// The layout width reserved for one card in the rail — its full glass-surface
     /// width, so `cardSpacing` lands as a true visible gap between cards.
     private var cardSlotWidth: CGFloat {
-        switch style {
+        switch presentation {
         case .poster:
             return metrics.posterWidth
         case .landscape:
             return metrics.landscapeCardSlotWidth
+        case .episodeColumn:
+            return EpisodeColumnCard.slotWidth
         }
+    }
+
+    private var layoutMetrics: PlozzMetrics {
+        presentation == .episodeColumn ? .standard : metrics
+    }
+
+    private var artworkStyle: PosterCardView.Style {
+        presentation == .poster ? .poster : .landscape
     }
 
     /// Warms the decoded-image cache for a forward window of cards starting at the
@@ -277,16 +384,20 @@ public struct MediaRowView: View {
         let upper = min(index + lookahead, items.count - 1)
         guard index <= upper else { return }
         let variant: ArtworkImageVariant = {
-            switch style {
+            switch presentation {
             case .poster: return .posterCard
-            case .landscape: return .landscapeCard
+            case .landscape, .episodeColumn: return .landscapeCard
             }
         }()
         for i in index...upper {
             let candidate = items[i]
             guard !prefetchedIDs.contains(candidate.id) else { continue }
             prefetchedIDs.insert(candidate.id)
-            for url in candidate.artworkCandidates(for: style).prefix(2) {
+            for url in MediaArtworkPrefetchPolicy.candidates(
+                for: candidate,
+                style: artworkStyle,
+                spoilerSettings: spoilerSettings
+            ).prefix(2) {
                 ArtworkImageCache.shared.prefetch(url, variant: variant)
             }
         }
@@ -333,6 +444,7 @@ public struct MediaRowView: View {
         // strand the focus indicator. The gate now re-arms only on `focusResetToken`
         // (focus actually left the row, up to the season bar).
         guard let newValue else { return }
+        if !focusEngaged { onFocusEntered?() }
         lastFocusedID = newValue
         if !focusEngaged,
            let target = gateTarget,
@@ -390,6 +502,38 @@ public struct MediaRowView: View {
         } else {
             proxy.scrollTo(target, anchor: anchor)
         }
+    }
+}
+
+enum MediaRowFocusPolicy {
+    static func observesFocus(
+        initialFocusID: String?,
+        defaultFocusID: String?,
+        hasOnFocusEntered: Bool,
+        hasOnFocusChange: Bool
+    ) -> Bool {
+        initialFocusID != nil
+            || defaultFocusID != nil
+            || hasOnFocusEntered
+            || hasOnFocusChange
+    }
+
+    static func usesEntryGate(defaultFocusID: String?) -> Bool {
+        defaultFocusID != nil
+    }
+}
+
+public enum MediaArtworkPrefetchPolicy {
+    public static func candidates(
+        for item: MediaItem,
+        style: PosterCardView.Style,
+        spoilerSettings: SpoilerSettings
+    ) -> [URL] {
+        if spoilerSettings.mode == .placeholder,
+           spoilerSettings.shouldHideThumbnail(for: item) {
+            return [item.fallbackArtworkURL].compactMap { $0 }
+        }
+        return item.artworkCandidates(for: style)
     }
 }
 

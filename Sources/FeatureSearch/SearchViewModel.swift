@@ -34,6 +34,10 @@ public final class SearchViewModel {
     /// can't break library search. `nil` disables the discovery section entirely
     /// (the zero-cost path when Seerr isn't connected).
     private let seerSearch: (@Sendable (String) async -> [MediaItem])?
+    /// Resolves season-level coverage only for a partial Seerr series that also
+    /// matched a playable library result. The cue is shown only when at least one
+    /// season is genuinely requestable, never from aggregate partial status alone.
+    private let seerRequestAvailability: (@Sendable (MediaItem) async -> MediaRequestAvailability?)?
 
     public init(
         accounts: [ResolvedAccount],
@@ -41,7 +45,8 @@ public final class SearchViewModel {
         debounceMilliseconds: Int = 350,
         identitySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef] = { _ in [] },
         disabledLibraryKeys: @escaping () -> Set<String> = { [] },
-        seerSearch: (@Sendable (String) async -> [MediaItem])? = nil
+        seerSearch: (@Sendable (String) async -> [MediaItem])? = nil,
+        seerRequestAvailability: (@Sendable (MediaItem) async -> MediaRequestAvailability?)? = nil
     ) {
         self.accounts = accounts
         self.limit = limit
@@ -49,6 +54,7 @@ public final class SearchViewModel {
         self.identitySources = identitySources
         self.disabledLibraryKeys = disabledLibraryKeys
         self.seerSearch = seerSearch
+        self.seerRequestAvailability = seerRequestAvailability
     }
 
     /// Runs a debounced search for the current `query`. Safe to call on every
@@ -104,10 +110,20 @@ public final class SearchViewModel {
             identitySources: identitySources,
             serverInfo: { serverInfo[$0] }
         )
-        var sections = SearchSection.sections(from: dedupedLibrary)
+        let requestableSeriesTmdbIDs = await requestablePartialSeriesTmdbIDs(
+            discoveryResults: discoveryItems,
+            libraryResults: dedupedLibrary
+        )
+        guard SearchPolicy.isCurrent(requestedQuery: requested, liveQuery: query) else { return }
+        let libraryWithAvailability = SearchSection.mergingDiscoveryAvailability(
+            into: dedupedLibrary,
+            discoveryResults: discoveryItems,
+            requestableSeriesTmdbIDs: requestableSeriesTmdbIDs
+        )
+        var sections = SearchSection.sections(from: libraryWithAvailability)
         if let notInLibrary = SearchSection.notInLibrarySection(
             discoveryResults: discoveryItems,
-            libraryResults: dedupedLibrary,
+            libraryResults: libraryWithAvailability,
             limit: limit
         ) {
             sections.append(notInLibrary)
@@ -134,6 +150,39 @@ public final class SearchViewModel {
                 mutation.applied(to: item)
             })
         })
+    }
+
+    private func requestablePartialSeriesTmdbIDs(
+        discoveryResults: [MediaItem],
+        libraryResults: [MediaItem]
+    ) async -> Set<String> {
+        guard let seerRequestAvailability else { return [] }
+        let libraryTmdbIDs = Set(libraryResults.compactMap { item in
+            item.kind == .series ? item.providerIDs["Tmdb"] : nil
+        })
+        let candidates = discoveryResults.filter { item in
+            guard item.kind == .series,
+                  item.availability == .partiallyAvailable,
+                  let tmdbID = item.providerIDs["Tmdb"]
+            else { return false }
+            return libraryTmdbIDs.contains(tmdbID)
+        }
+        return await withTaskGroup(of: String?.self) { group in
+            for item in candidates {
+                group.addTask {
+                    guard let tmdbID = item.providerIDs["Tmdb"],
+                          let availability = await seerRequestAvailability(item),
+                          !availability.requestableSeasonNumbers.isEmpty
+                    else { return nil }
+                    return tmdbID
+                }
+            }
+            var result: Set<String> = []
+            for await tmdbID in group {
+                if let tmdbID { result.insert(tmdbID) }
+            }
+            return result
+        }
     }
 
     /// Searches every active account concurrently and round-robin interleaves the

@@ -73,4 +73,42 @@ final class SeriesDetailBrowserPolicyTests: XCTestCase {
             hasEpisodes: false
         ))
     }
+
+    func testRequestAccessoryCannotStealInitialSeasonEntryFocus() {
+        XCTAssertFalse(SeriesRequestFocusPolicy.accessoryEnabled(
+            hasOwnedSeasons: true,
+            seasonBarEngaged: false,
+            hasRequestHandler: true
+        ))
+        XCTAssertTrue(SeriesRequestFocusPolicy.accessoryEnabled(
+            hasOwnedSeasons: true,
+            seasonBarEngaged: true,
+            hasRequestHandler: true
+        ))
+        XCTAssertFalse(SeriesRequestFocusPolicy.accessoryEnabled(
+            hasOwnedSeasons: true,
+            seasonBarEngaged: true,
+            hasRequestHandler: false
+        ))
+        XCTAssertTrue(SeriesRequestFocusPolicy.accessoryEnabled(
+            hasOwnedSeasons: false,
+            seasonBarEngaged: false,
+            hasRequestHandler: true
+        ))
+    }
+
+    func testSeasonBandStaysEngagedWhileEitherControlOwnsFocus() {
+        XCTAssertFalse(SeriesRequestFocusPolicy.shouldResetBand(
+            focusedSeasonID: "season-1",
+            requestAccessoryFocused: false
+        ))
+        XCTAssertFalse(SeriesRequestFocusPolicy.shouldResetBand(
+            focusedSeasonID: nil,
+            requestAccessoryFocused: true
+        ))
+        XCTAssertTrue(SeriesRequestFocusPolicy.shouldResetBand(
+            focusedSeasonID: nil,
+            requestAccessoryFocused: false
+        ))
+    }
 }

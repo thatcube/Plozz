@@ -19,6 +19,9 @@ public struct PosterCardView: View {
     private let style: Style
     private let spoilerSettings: SpoilerSettings
     private let enablesAsyncArtworkFallback: Bool
+    /// Optional caller-owned context cue. It occupies the artwork's top-leading
+    /// slot, leaving watch state (top-trailing) and progress (bottom) untouched.
+    private let statusCueText: String?
     private let action: () -> Void
 
     @FocusState private var isFocused: Bool
@@ -36,12 +39,14 @@ public struct PosterCardView: View {
         style: Style = .poster,
         spoilerSettings: SpoilerSettings = .default,
         enablesAsyncArtworkFallback: Bool = true,
+        statusCue: String? = nil,
         action: @escaping () -> Void
     ) {
         self.item = item
         self.style = style
         self.spoilerSettings = spoilerSettings
         self.enablesAsyncArtworkFallback = enablesAsyncArtworkFallback
+        self.statusCueText = statusCue
         self.action = action
     }
 
@@ -95,6 +100,7 @@ public struct PosterCardView: View {
                 .aspectRatio(2.0 / 3.0, contentMode: .fit)
                 .frame(maxWidth: .infinity)
                 .overlay { artwork }
+                .overlay(alignment: .topLeading) { statusCue(inset: 8) }
                 .overlay(alignment: .topTrailing) { statusIndicator(inset: 8) }
                 .overlay(alignment: .bottom) { progressBar(height: 12, hInset: 16, bottomInset: 16) }
                 .clipShape(RoundedRectangle(cornerRadius: PlozzTheme.Metrics.posterArtCornerRadius, style: .continuous))
@@ -135,6 +141,7 @@ public struct PosterCardView: View {
         VStack(alignment: .leading, spacing: metrics.landscapeCaptionTopSpacing) {
             artwork
                 .frame(width: size.width, height: size.height)
+                .overlay(alignment: .topLeading) { statusCue(inset: 8) }
                 .overlay(alignment: .topTrailing) { statusIndicator(inset: 8) }
                 .overlay(alignment: .bottom) { progressBar(height: 12, hInset: 16, bottomInset: 16) }
                 .clipShape(RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius, style: .continuous))
@@ -209,6 +216,7 @@ public struct PosterCardView: View {
             .aspectRatio(borderlessAspectRatio, contentMode: .fit)
             .frame(maxWidth: .infinity)
             .overlay { artwork }
+            .overlay(alignment: .topLeading) { statusCue(inset: borderlessBadgeInset) }
             .overlay(alignment: .topTrailing) { statusIndicator(inset: borderlessBadgeInset) }
             .overlay(alignment: .bottom) {
                 progressBar(
@@ -517,6 +525,21 @@ public struct PosterCardView: View {
     }
 
     // MARK: Progress
+
+    @ViewBuilder
+    private func statusCue(inset: CGFloat) -> some View {
+        if let statusCueText {
+            Text(statusCueText)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(.black.opacity(0.72), in: Capsule(style: .continuous))
+                .padding(inset)
+                .accessibilityLabel(statusCueText)
+        }
+    }
 
     /// The single source of truth for "this card is mid-playback": a partial
     /// `playedPercentage` strictly inside `(0.01, 0.99)`. When true the card shows

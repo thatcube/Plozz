@@ -112,6 +112,37 @@ final class SearchSectionTests: XCTestCase {
         XCTAssertNil(SearchSection.notInLibrarySection(discoveryResults: allOwned, libraryResults: []))
         XCTAssertNil(SearchSection.notInLibrarySection(discoveryResults: [], libraryResults: []))
     }
+
+    func testPartialDiscoveryStateMergesOntoPlayableSeriesWithoutDuplicate() {
+        let library = MediaItem(
+            id: "plex:1",
+            title: "The Bear",
+            kind: .series,
+            providerIDs: ["Tmdb": "136315"]
+        )
+        let discoveryResult = discovery(136315, .series, availability: .partiallyAvailable)
+
+        let merged = SearchSection.mergingDiscoveryAvailability(
+            into: [library],
+            discoveryResults: [discoveryResult],
+            requestableSeriesTmdbIDs: ["136315"]
+        )
+
+        XCTAssertEqual(merged.first?.id, "plex:1")
+        XCTAssertEqual(merged.first?.availability, .partiallyAvailable)
+        XCTAssertEqual(SearchSection.availabilityCue(for: merged[0]), "More Seasons")
+        XCTAssertNil(
+            SearchSection.notInLibrarySection(
+                discoveryResults: [discoveryResult],
+                libraryResults: merged
+            )
+        )
+    }
+
+    func testAvailabilityCueDoesNotApplyToMoviesOrOrdinaryLibrarySeries() {
+        XCTAssertNil(SearchSection.availabilityCue(for: discovery(1, .movie, availability: .partiallyAvailable)))
+        XCTAssertNil(SearchSection.availabilityCue(for: MediaItem(id: "s", title: "Show", kind: .series)))
+    }
 }
 
 @MainActor
@@ -127,12 +158,18 @@ final class SearchViewModelTests: XCTestCase {
     private func makeVM(
         providers: [SearchStubProvider],
         seerSearch: @escaping @Sendable (String) async -> [MediaItem],
+        seerRequestAvailability: @escaping @Sendable (MediaItem) async -> MediaRequestAvailability? = { _ in nil },
         debounceMilliseconds: Int = 0
     ) -> SearchViewModel {
         let accounts = providers.map { provider in
             ResolvedAccount(account: Account(id: provider.accountID, from: provider.session), provider: provider)
         }
-        return SearchViewModel(accounts: accounts, debounceMilliseconds: debounceMilliseconds, seerSearch: seerSearch)
+        return SearchViewModel(
+            accounts: accounts,
+            debounceMilliseconds: debounceMilliseconds,
+            seerSearch: seerSearch,
+            seerRequestAvailability: seerRequestAvailability
+        )
     }
 
     func testBlankQueryResetsToIdleWithoutSearching() async {
@@ -261,6 +298,73 @@ final class SearchViewModelTests: XCTestCase {
         }
         XCTAssertEqual(sections.last?.title, "Not in Your Library")
         XCTAssertEqual(sections.last?.items.map(\.id), ["seer:2"], "An already-available title isn't listed")
+    }
+
+    func testPartialDiscoveryTitleAnnotatesMatchingLibrarySeriesInPlace() async {
+        let library = MediaItem(
+            id: "library-show",
+            title: "The Bear",
+            kind: .series,
+            providerIDs: ["Tmdb": "136315"]
+        )
+        let provider = SearchStubProvider(results: [library])
+        let vm = makeVM(
+            providers: [provider],
+            seerSearch: { _ in
+                [discoveryItem(136315, "The Bear", .series, availability: .partiallyAvailable)]
+            },
+            seerRequestAvailability: { _ in
+                MediaRequestAvailability(
+                    status: .partiallyAvailable,
+                    seasons: [
+                        MediaSeasonRequestState(number: 1, title: "Season 1", status: .available),
+                        MediaSeasonRequestState(number: 2, title: "Season 2", status: .unknown)
+                    ]
+                )
+            }
+        )
+        vm.query = "bear"
+
+        await vm.search()
+
+        guard case let .loaded(sections) = vm.state else {
+            return XCTFail("Expected loaded, got \(vm.state)")
+        }
+        XCTAssertEqual(sections.map(\.title), ["TV Shows"])
+        XCTAssertEqual(sections[0].items[0].id, "library-show")
+        XCTAssertEqual(sections[0].items[0].availability, .partiallyAvailable)
+    }
+
+    func testPartialDiscoveryTitleDoesNotAnnotateWhenNoSeasonIsRequestable() async {
+        let library = MediaItem(
+            id: "library-show",
+            title: "The Bear",
+            kind: .series,
+            providerIDs: ["Tmdb": "136315"]
+        )
+        let provider = SearchStubProvider(results: [library])
+        let vm = makeVM(
+            providers: [provider],
+            seerSearch: { _ in
+                [discoveryItem(136315, "The Bear", .series, availability: .partiallyAvailable)]
+            },
+            seerRequestAvailability: { _ in
+                MediaRequestAvailability(
+                    status: .partiallyAvailable,
+                    seasons: [
+                        MediaSeasonRequestState(number: 1, title: "Season 1", status: .partiallyAvailable)
+                    ]
+                )
+            }
+        )
+        vm.query = "bear"
+
+        await vm.search()
+
+        guard case let .loaded(sections) = vm.state else {
+            return XCTFail("Expected loaded, got \(vm.state)")
+        }
+        XCTAssertNil(sections[0].items[0].availability)
     }
 
     func testLibraryDownButDiscoveryStillShows() async {

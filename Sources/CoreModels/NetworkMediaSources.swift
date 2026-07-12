@@ -18,7 +18,7 @@ public enum MediaSourceModelError: Error, Equatable, Sendable {
     case urlFragmentNotAllowed
 }
 
-public enum MediaShareTransportKind: String, CaseIterable, Hashable, Sendable {
+public enum MediaShareTransportKind: String, Codable, CaseIterable, Hashable, Sendable {
     case smb
     case webDAV
     case nfs

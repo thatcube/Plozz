@@ -13,6 +13,7 @@ import CoreModels
 /// `KeychainStore`) can back both `AccountStore` and `CoreModels.ProfileStore`.
 public protocol SecureStore: SecureStoring {
     func setString(_ value: String, for key: String) throws
+    func insertStringIfAbsent(_ value: String, for key: String) throws -> Bool
     func string(for key: String) -> String?
     func removeValue(for key: String) throws
 }
@@ -87,6 +88,28 @@ public struct KeychainStore: SecureStore {
         guard status == errSecSuccess else { throw KeychainError.unexpectedStatus(status) }
     }
 
+    public func insertStringIfAbsent(_ value: String, for key: String) throws -> Bool {
+        guard let data = value.data(using: .utf8) else { throw KeychainError.encodingFailed }
+
+        func add(useUserIndependent: Bool) -> OSStatus {
+            var query = baseQuery(for: key, userIndependent: useUserIndependent)
+            query[kSecValueData as String] = data
+            query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+            return SecItemAdd(query as CFDictionary, nil)
+        }
+
+        var status = add(useUserIndependent: userIndependent)
+        if shouldFallBack(status) { status = add(useUserIndependent: false) }
+        switch status {
+        case errSecSuccess:
+            return true
+        case errSecDuplicateItem:
+            return false
+        default:
+            throw KeychainError.unexpectedStatus(status)
+        }
+    }
+
     public func string(for key: String) -> String? {
         func copy(useUserIndependent: Bool) -> (OSStatus, AnyObject?) {
             var query = baseQuery(for: key, userIndependent: useUserIndependent)
@@ -142,6 +165,13 @@ public final class InMemorySecureStore: SecureStore, @unchecked Sendable {
     public func setString(_ value: String, for key: String) throws {
         lock.lock(); defer { lock.unlock() }
         storage[key] = value
+    }
+
+    public func insertStringIfAbsent(_ value: String, for key: String) throws -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard storage[key] == nil else { return false }
+        storage[key] = value
+        return true
     }
 
     public func string(for key: String) -> String? {

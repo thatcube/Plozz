@@ -806,7 +806,10 @@ public final class FileIdentityIndexStore: IdentityIndexStoring, @unchecked Send
     public init(directory: URL? = nil, namespace: String? = nil) {
         let base = directory ?? Self.defaultDirectory()
         let suffix = namespace.map { "-\($0)" } ?? ""
-        self.url = base.appendingPathComponent("identity-index\(suffix).json")
+        // v2 scopes episode identities by season/episode. Do not restore a v1
+        // snapshot that may have collapsed every episode sharing show-level IDs;
+        // this is a purgeable cache and is rebuilt from active providers.
+        self.url = base.appendingPathComponent("identity-index-v2\(suffix).json")
         try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
     }
 

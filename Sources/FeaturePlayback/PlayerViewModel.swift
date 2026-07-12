@@ -604,6 +604,7 @@ public final class PlayerViewModel {
     /// return to detail, a season finale returns to the series page.
     private func handlePlaybackEnded() {
         PlaybackTrace.note("handlePlaybackEnded curr=\(String(format: "%.2f", engine.currentTime)) furthest=\(String(format: "%.2f", engine.furthestObservedPosition)) dur=\(String(format: "%.2f", engine.duration)) hasNext=\(nextEpisode != nil) isSeeking=\(controls.isSeeking) isScrubbing=\(controls.isScrubbing) intendsPlayback=\(intendsPlayback)")
+        didReachNaturalEnd = true
         if let next = nextEpisode {
             pendingNextEpisode = next
         } else {
@@ -1720,8 +1721,8 @@ public final class PlayerViewModel {
     /// app background, from `checkpointNow()`.
     private func emitCheckpoint(includingPaused: Bool = false) {
         guard request != nil, includingPaused || !engine.isPaused else { return }
-        let position = max(engine.furthestObservedPosition, engine.currentTime)
-        guard position > 1, position - lastCheckpointPosition >= 1 else { return }
+        let position = currentResumePosition()
+        guard position > 1, abs(position - lastCheckpointPosition) >= 1 else { return }
         lastCheckpointPosition = position
         onPlaybackCheckpoint(position, watchedPercent(at: position))
     }
@@ -2100,6 +2101,18 @@ public final class PlayerViewModel {
     /// view's `onDisappear` fires a second `stop()` once it's torn down. Without
     /// this the server would get two `.stop` reports for one playback.
     private var didStop = false
+    /// Natural EOF can zero an engine's current time before dismissal. Only that
+    /// path falls back to the furthest observed point; manual exits save the actual
+    /// current position so rewinding intentionally moves the resume point backward.
+    private var didReachNaturalEnd = false
+
+    private func currentResumePosition() -> TimeInterval {
+        let current = engine.currentTime
+        if current.isFinite, current >= 0 {
+            return current
+        }
+        return max(0, engine.furthestObservedPosition)
+    }
 
     /// Call when leaving playback: report a final stop so the server records the
     /// resume point, then tear the engine down.
@@ -2139,7 +2152,9 @@ public final class PlayerViewModel {
         // network round-trip that can take a second or two; stopping first means
         // leaving the player never keeps playing audio while it completes. Grab
         // the resume position up front since the engine is torn down here.
-        let finalPosition = max(engine.furthestObservedPosition, engine.currentTime)
+        let finalPosition = didReachNaturalEnd
+            ? max(engine.furthestObservedPosition, engine.currentTime)
+            : currentResumePosition()
         let finalDuration = knownPlaybackDuration()
         let percent = watchedPercent(at: finalPosition)
         engine.stop(preserveDisplayMode: preserveDisplayMode)

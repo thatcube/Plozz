@@ -52,6 +52,66 @@ final class MediaItemIdentityTests: XCTestCase {
             .external(source: "tvdb", value: "x")
         ])
     }
+
+    func testEpisodeShowIDsAreScopedBySeasonAndEpisode() {
+        let s1e1 = MediaItem(
+            id: "s1e1",
+            title: "Episode 1",
+            kind: .episode,
+            seasonNumber: 1,
+            episodeNumber: 1,
+            providerIDs: ["Tmdb": "82452"]
+        )
+        let s2e5 = MediaItem(
+            id: "s2e5",
+            title: "Ten Thousand Things",
+            kind: .episode,
+            seasonNumber: 2,
+            episodeNumber: 5,
+            providerIDs: ["Tmdb": "82452"]
+        )
+
+        XCTAssertEqual(
+            MediaItemIdentity.identities(for: s1e1),
+            [.external(source: "tmdb:s1e1", value: "82452")]
+        )
+        XCTAssertEqual(
+            MediaItemIdentity.identities(for: s2e5),
+            [.external(source: "tmdb:s2e5", value: "82452")]
+        )
+        XCTAssertEqual(
+            MediaItemMerger.merge([
+                s1e1.taggingSource("smb"),
+                s2e5.taggingSource("plex")
+            ]).count,
+            2,
+            "Show-level IDs must not merge different episodes"
+        )
+    }
+
+    func testSameEpisodeStillMergesAcrossServers() {
+        let plex = MediaItem(
+            id: "plex-e5",
+            title: "Ten Thousand Things",
+            kind: .episode,
+            seasonNumber: 2,
+            episodeNumber: 5,
+            providerIDs: ["Tmdb": "82452"]
+        ).taggingSource("plex")
+        let smb = MediaItem(
+            id: "smb-e5",
+            title: "Ten Thousand Things",
+            kind: .episode,
+            seasonNumber: 2,
+            episodeNumber: 5,
+            providerIDs: ["Tmdb": "82452"]
+        ).taggingSource("smb")
+
+        let merged = MediaItemMerger.merge([plex, smb])
+
+        XCTAssertEqual(merged.count, 1)
+        XCTAssertEqual(Set(merged[0].sources.map(\.id)), ["plex:plex-e5", "smb:smb-e5"])
+    }
 }
 
 final class MediaItemMergerTests: XCTestCase {

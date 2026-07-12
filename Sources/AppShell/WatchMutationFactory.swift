@@ -61,8 +61,15 @@ enum WatchMutationFactory {
         // not a fan-out target), but we skip unioning the item's own peer sources
         // and the identity-index union so no other server is touched.
         guard crossServerSync else { return result }
-        item.sources.forEach { append(accountID: $0.accountID, itemID: $0.itemID, providerKind: $0.providerKind) }
-        additionalSources.forEach { append(accountID: $0.accountID, itemID: $0.itemID, providerKind: $0.providerKind) }
+        // Episodes deliberately ignore pre-merged peers here. Some providers expose
+        // show-level IDs on episodes, so a stale identity snapshot can contain a
+        // different episode from the same series. The episode expansion resolver
+        // below is the authoritative cross-server path: series identity followed by
+        // exact season+episode lookup. The origin above is always retained.
+        if item.kind != .episode {
+            item.sources.forEach { append(accountID: $0.accountID, itemID: $0.itemID, providerKind: $0.providerKind) }
+            additionalSources.forEach { append(accountID: $0.accountID, itemID: $0.itemID, providerKind: $0.providerKind) }
+        }
         return result
     }
 

@@ -104,6 +104,35 @@ final class WatchFanOutParityTests: XCTestCase {
         )
     }
 
+    func testEpisodeTargetsIgnoreUnsafePremergedPeers() {
+        var episode = MediaItem(
+            id: "s2e5",
+            title: "Ten Thousand Things",
+            kind: .episode,
+            parentTitle: "Avatar: The Last Airbender",
+            seasonNumber: 2,
+            episodeNumber: 5,
+            sourceAccountID: "smb"
+        )
+        episode.sources = [
+            MediaSourceRef(accountID: "smb", itemID: "s2e5", providerKind: .mediaShare),
+            // Regression: show-level IDs had attached S1E1 as a peer of S2E5.
+            MediaSourceRef(accountID: "smb", itemID: "s1e1", providerKind: .mediaShare)
+        ]
+
+        XCTAssertEqual(
+            WatchMutationFactory.targets(
+                for: episode,
+                primaryAccountID: "smb",
+                additionalSources: [
+                    MediaSourceRef(accountID: "plex", itemID: "wrong-episode", providerKind: .plex)
+                ]
+            ),
+            [WatchMutationTarget(accountID: "smb", itemID: "s2e5", providerKind: .mediaShare)],
+            "Episode peers must come only from exact season/episode expansion"
+        )
+    }
+
     /// playbackStop (the player's convergence path) is likewise origin-agnostic:
     /// a finish from the Plex copy and from the Jellyfin copy converge on the same
     /// complete set, sourced from the index snapshot.

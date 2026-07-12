@@ -70,6 +70,36 @@ final class PlayerViewModelEOFTests: XCTestCase {
         XCTAssertEqual(checkpoints.onlyCall?.position, 30)
         XCTAssertEqual(checkpoints.onlyCall?.percent, 25)
     }
+
+    func testStopAfterRewindUsesCurrentPositionInsteadOfFurthest() async {
+        let item = MediaItem(id: "movie", title: "Movie", kind: .movie, runtime: 600)
+        let request = PlaybackRequest(
+            item: item,
+            streamURL: URL(string: "https://example.test/movie.m3u8")!
+        )
+        let provider = RecordingPlaybackProvider(request: request)
+        let engine = SpyVideoEngine()
+        let stopped = PlaybackStoppedRecorder()
+        let viewModel = PlayerViewModel(
+            provider: provider,
+            itemID: item.id,
+            engineFactory: EngineFactory(makeNative: { _ in engine }),
+            onPlaybackStopped: { position, percent in
+                stopped.record(position: position, percent: percent)
+            }
+        )
+        await viewModel.load()
+        engine.duration = 600
+        engine.furthestObservedPosition = 427
+        engine.currentTime = 120
+
+        await viewModel.stop()
+
+        let reports = await provider.reports
+        XCTAssertEqual(stopped.onlyCall?.position, 120)
+        XCTAssertEqual(stopped.onlyCall?.percent, 20)
+        XCTAssertEqual(reports.last?.progress.positionSeconds, 120)
+    }
 }
 
 private actor RecordingPlaybackProvider: MediaProvider {

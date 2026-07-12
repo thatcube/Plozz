@@ -89,7 +89,11 @@ public enum MediaItemIdentity {
         // matches — the old plain-`.lowercased()` compare missed those.
         for entry in strongExternalNamespaces {
             if let value = item.providerIDs.providerID(entry.namespace) {
-                result.append(.external(source: entry.canonical, value: value.lowercased()))
+                guard let source = externalSource(
+                    entry.canonical,
+                    for: item
+                ) else { continue }
+                result.append(.external(source: source, value: value.lowercased()))
             }
         }
 
@@ -105,13 +109,30 @@ public enum MediaItemIdentity {
         // and the merge split-guard still ejects any genuinely contradictory pair.
         if let plexGuid = item.providerIDs["PlexGuid"]?.trimmingCharacters(in: .whitespacesAndNewlines),
            !plexGuid.isEmpty {
-            result.append(.external(source: "plexguid", value: plexGuid.lowercased()))
+            if let source = externalSource("plexguid", for: item) {
+                result.append(.external(source: source, value: plexGuid.lowercased()))
+            }
         }
 
         if result.isEmpty, let titleIdentity = titleIdentity(for: item) {
             result.append(titleIdentity)
         }
         return result
+    }
+
+    /// Episodes are scoped by `(season, episode)` even when an external ID exists.
+    /// Plex and metadata-enriched filesystem shares can expose the SHOW's IDs on
+    /// every episode; treating those raw IDs as episode identities collapses an
+    /// entire series into one cross-server source set. Scoping also remains safe
+    /// when the backend really supplied episode-level IDs.
+    private static func externalSource(
+        _ canonical: String,
+        for item: MediaItem
+    ) -> String? {
+        guard item.kind == .episode else { return canonical }
+        guard let season = item.seasonNumber,
+              let episode = item.episodeNumber else { return nil }
+        return "\(canonical):s\(season)e\(episode)"
     }
 
     private static func titleIdentity(for item: MediaItem) -> MediaIdentity? {

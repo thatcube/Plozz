@@ -1185,10 +1185,29 @@ final class PlayerInputViewController: UIViewController {
     private func scheduleAutoHide() {
         cancelAutoHide()
         autoHideTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 4_000_000_000)
-            guard let self, !Task.isCancelled else { return }
-            if !self.model.isScrubbing && !self.model.isPaused && self.focusContext == .surface {
-                self.model.controlsVisible = false
+            while !Task.isCancelled {
+                // A committed seek can spend longer than the normal idle timeout
+                // rebuilding its buffer. Keep the transport visible throughout,
+                // then grant a fresh full timeout once playback has recovered.
+                while self?.model.isScrubbing == true || self?.model.isSeekLoading == true {
+                    try? await Task.sleep(nanoseconds: 100_000_000)
+                    if Task.isCancelled { return }
+                }
+                guard self != nil else { return }
+
+                try? await Task.sleep(nanoseconds: 4_000_000_000)
+                if Task.isCancelled { return }
+
+                // Recovery may have restarted during the idle interval. Loop so
+                // the next completed recovery receives its own full timeout.
+                if self?.model.isScrubbing == true || self?.model.isSeekLoading == true {
+                    continue
+                }
+                guard let self else { return }
+                if !self.model.isPaused && self.focusContext == .surface {
+                    self.model.controlsVisible = false
+                }
+                return
             }
         }
     }

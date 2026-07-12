@@ -8,6 +8,26 @@ import UIKit
 
 @MainActor
 final class PlayerViewModelEOFTests: XCTestCase {
+    func testSeekLoadingSpansSeekLandingAndResumeRecovery() {
+        let controls = PlayerControlsModel()
+
+        XCTAssertFalse(controls.isSeekLoading)
+
+        controls.isSeeking = true
+        XCTAssertTrue(controls.isSeekLoading)
+
+        controls.isSeeking = false
+        controls.pendingSeekTarget = 42
+        XCTAssertTrue(controls.isSeekLoading)
+
+        controls.pendingSeekTarget = nil
+        controls.isResumeConfirming = true
+        XCTAssertTrue(controls.isSeekLoading)
+
+        controls.isResumeConfirming = false
+        XCTAssertFalse(controls.isSeekLoading)
+    }
+
     func testBackgroundReturnRestoresPipelineOnceAndRemainsPaused() async {
         let item = MediaItem(id: "movie", title: "Movie", kind: .movie, runtime: 120)
         let request = PlaybackRequest(

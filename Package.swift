@@ -56,9 +56,11 @@ let package = Package(
         // AetherEngine — production media player engine for Apple platforms.
         // FFmpeg demuxes, VideoToolbox decodes, AVPlayer handles Dolby Atmos.
         // Powers the native HLS-fMP4 remux path for MKV → DoVi + Atmos + seek.
-        // 4.8.0: unified `playbackPhase` status source-of-truth (#85), keyframe-
+        // 5.0.1: unified `playbackPhase` status source-of-truth (#85), keyframe-
         // gated VOD segment cutting so a seek landing on a segment boundary
-        // decodes cleanly (#92), software-path seek holds last frame (#90). See
+        // decodes cleanly (#92), software-path seek holds last frame (#90), and
+        // bounded backward-scrub detour reads so a cold source reconnects instead
+        // of stalling for 10–20 seconds (#93/#96). See
         // AGENTS.local.md › "Playback engine (AetherEngine / Plozzigen)".
         //
         // Pinned to a fork commit that carries the tvOS SMB transport fix on top
@@ -69,12 +71,13 @@ let package = Package(
         // over NWConnection), which completes a full handshake on-device where
         // libsmb2 does not. Same public surface, so `SMBConnection`/`SMBIOReader`/
         // `SMBURL` are unchanged. Upstreamed as superuser404notfound/AetherEngine
-        // PR #97; move this pin back to the upstream merge commit once it lands.
+        // PR #97 (now merged). The pinned fork commit carries Plozz's remaining
+        // display-settle patches on top of the upstream 5.0.1 release.
         // (Also includes PR #94: backward-seek muxer wedge fix — under +delay_moov
         // the fMP4 muxer needs a PARSED audio packet to build the AC-3/E-AC-3/TrueHD
         // sample entry, else a mid-file backward seek wedged the muxer.) See
         // docs/media-share-proposal.md § 5.1.
-        .package(url: "https://github.com/thatcube/AetherEngine", revision: "b62837d52e78af494746d616202426654a956dda"),
+        .package(url: "https://github.com/thatcube/AetherEngine", revision: "9fb4907156273270b67b2e457ad75462cabd46a1"),
         // NOTE: FFmpegBuild (FFmpeg n8.1.x decode-only) and LibDovi (Dolby Vision
         // RPU parser) are pulled in TRANSITIVELY by AetherEngine — its own manifest
         // declares and consumes them. Plozz used to declare them directly only for

@@ -101,6 +101,13 @@ public final class PlayerControlsModel {
     /// (within a small tolerance), then we release.
     public var pendingSeekTarget: TimeInterval?
 
+    /// True until a committed seek has landed, its optimistic timeline position
+    /// has reconciled, and playback has demonstrably resumed. Controls must not
+    /// auto-hide during any part of this window.
+    public var isSeekLoading: Bool {
+        isSeeking || isResumeConfirming || pendingSeekTarget != nil
+    }
+
     // MARK: Presentation
     public var title: String = ""
     public var subtitle: String = ""

@@ -136,6 +136,10 @@ public final class PlozzigenVideoEngine: VideoEngine {
     private let engine: AEEngine
     private var cancellables = Set<AnyCancellable>()
     private var progressTimer: Task<Void, Never>?
+    /// Tags every load/restore so deferred Combine state from a superseded
+    /// operation cannot fail or revive the replacement operation.
+    private var lifecycleGeneration = 0
+    private var reportedFailureGeneration: Int?
     #if canImport(UIKit)
     private let videoView: UIView
     #endif
@@ -177,6 +181,7 @@ public final class PlozzigenVideoEngine: VideoEngine {
     // MARK: - VideoEngine Lifecycle
 
     public func load(request: PlaybackRequest, startPosition: TimeInterval) async {
+        let generation = beginLifecycleOperation()
         status = .loading
         isPaused = false
         intendsPause = false
@@ -224,9 +229,10 @@ public final class PlozzigenVideoEngine: VideoEngine {
                     options: options
                 )
             }
-            // Guard against stop() having run during the await above.
-            guard status == .loading else { return }
+            guard generation == lifecycleGeneration, status != .idle else { return }
+            if case .failed = status { return }
             engine.play()
+            status = .ready
             syncTracks()
         } catch {
             // Surface the real reason: AppError / SMBConnection.SMBError don't
@@ -234,8 +240,7 @@ public final class PlozzigenVideoEngine: VideoEngine {
             // generic "error 0". `String(describing:)` keeps the actual message.
             let detail = String(describing: error)
             let err: AppError = .unknown(detail)
-            status = .failed(err)
-            onFailure?(err)
+            reportFailureIfNeeded(err, generation: generation)
         }
     }
 
@@ -290,11 +295,12 @@ public final class PlozzigenVideoEngine: VideoEngine {
 
     public func restoreAfterBackground() async {
         guard status != .idle else { return }
+        let generation = beginLifecycleOperation()
         status = .loading
         do {
             try await engine.reloadAtCurrentPosition()
-            // stop() may have torn the session down while reload was suspended.
-            guard status == .loading else { return }
+            guard generation == lifecycleGeneration, status != .idle else { return }
+            if case .failed = status { return }
             if intendsPause {
                 engine.pause()
                 isPaused = true
@@ -305,11 +311,8 @@ public final class PlozzigenVideoEngine: VideoEngine {
             status = .ready
             syncTracks()
         } catch {
-            // A stop or engine-published failure already owns the terminal state.
-            guard status == .loading else { return }
             let err: AppError = .unknown(String(describing: error))
-            status = .failed(err)
-            onFailure?(err)
+            reportFailureIfNeeded(err, generation: generation)
         }
     }
 
@@ -336,6 +339,8 @@ public final class PlozzigenVideoEngine: VideoEngine {
     }
 
     private func stopEngine(resetDisplayCriteria: Bool) {
+        lifecycleGeneration &+= 1
+        reportedFailureGeneration = nil
         progressTimer?.cancel()
         progressTimer = nil
         engine.stop(resetDisplayCriteria: resetDisplayCriteria)
@@ -387,12 +392,34 @@ public final class PlozzigenVideoEngine: VideoEngine {
 
     // MARK: - Engine Observation (Combine)
 
+    private func beginLifecycleOperation() -> Int {
+        lifecycleGeneration &+= 1
+        reportedFailureGeneration = nil
+        return lifecycleGeneration
+    }
+
+    private func reportFailureIfNeeded(_ error: AppError, generation: Int) {
+        guard generation == lifecycleGeneration,
+              reportedFailureGeneration != generation,
+              status != .idle else { return }
+        reportedFailureGeneration = generation
+        status = .failed(error)
+        onFailure?(error)
+    }
+
     private func observeEngine() {
         // State → status/isPaused/onEnded/onFailure
         engine.$state
+            // Capture the lifecycle generation synchronously with the published
+            // state. Delivery remains on the main queue, but an old `.error`
+            // can no longer arrive after a replacement load and poison it.
+            .map { [weak self] state in
+                (self?.lifecycleGeneration ?? -1, state)
+            }
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] state in
+            .sink { [weak self] generation, state in
                 guard let self else { return }
+                guard generation == self.lifecycleGeneration else { return }
                 PlaybackTrace.note("engine.state -> \(state) intendsPause=\(self.intendsPause) curr=\(String(format: "%.2f", self.currentTime)) dur=\(String(format: "%.2f", self.duration))")
                 switch state {
                 case .idle:
@@ -423,8 +450,7 @@ public final class PlozzigenVideoEngine: VideoEngine {
                     self.onEnded?()
                 case .error(let msg):
                     let err: AppError = .unknown(msg)
-                    self.status = .failed(err)
-                    self.onFailure?(err)
+                    self.reportFailureIfNeeded(err, generation: generation)
                 }
             }
             .store(in: &cancellables)

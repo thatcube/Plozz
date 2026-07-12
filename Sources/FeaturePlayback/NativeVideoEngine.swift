@@ -358,7 +358,10 @@ public final class NativeVideoEngine: VideoEngine {
 
     public func restoreAfterBackground() async {
         guard let request else { return }
-        let resumePosition = currentTime
+        // AVPlayer can briefly report an invalid/zero clock after tvOS has
+        // suspended its media services. Never rebuild behind the furthest
+        // position already observed from stable time callbacks.
+        let resumePosition = max(currentTime, furthestObservedPosition)
         await load(request: request, startPosition: resumePosition, startsPaused: true)
         guard status == .ready, let item = player?.currentItem else { return }
         if hasSelectedAudioTrackOverride {
@@ -841,15 +844,57 @@ public final class NativeVideoEngine: VideoEngine {
     }
 
     private func select(track: MediaTrack?, in group: AVMediaSelectionGroup, on item: AVPlayerItem) {
-        guard let track, let language = track.language else {
+        guard let track else {
             item.select(nil, in: group)
             return
         }
-        let match = group.options.first { option in
-            let tag = option.extendedLanguageTag ?? option.locale?.identifier
-            return tag?.caseInsensitiveCompare(language) == .orderedSame
+
+        let candidates: [AVMediaSelectionOption]
+        if let language = track.language, !language.isEmpty {
+            let ranked = AVMediaSelectionGroup.mediaSelectionOptions(
+                from: group.options,
+                filteredAndSortedAccordingToPreferredLanguages: [language]
+            )
+            candidates = ranked.isEmpty ? group.options : ranked
+        } else {
+            candidates = group.options
         }
+
+        let normalizedTitle = normalizedSelectionTitle(track.displayTitle)
+        if let exactTitleMatch = candidates.first(where: {
+            normalizedSelectionTitle($0.displayName) == normalizedTitle
+        }) {
+            item.select(exactTitleMatch, in: group)
+            return
+        }
+
+        // Multiple tracks often share one language (main mix, commentary, SDH).
+        // Provider stream order and AVFoundation option order both follow the
+        // container, so use the same-language ordinal before falling back to the
+        // first canonical language match.
+        let sourceTracks: [MediaTrack]
+        switch track.kind {
+        case .audio:
+            sourceTracks = request?.audioTracks ?? []
+        case .subtitle:
+            sourceTracks = request?.subtitleTracks ?? []
+        }
+        let languagePeers = sourceTracks.filter {
+            if track.language == nil { return $0.language == nil }
+            return LanguageMatch.matches($0.language, track.language)
+        }
+        let ordinal = languagePeers.firstIndex(where: { $0.id == track.id })
+        let match = ordinal.flatMap { $0 < candidates.count ? candidates[$0] : nil }
+            ?? candidates.first
         item.select(match, in: group)
+    }
+
+    private func normalizedSelectionTitle(_ title: String) -> String {
+        title
+            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
     }
 
     // MARK: - View

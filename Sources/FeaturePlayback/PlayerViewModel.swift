@@ -244,6 +244,38 @@ public final class PlayerViewModel {
     /// Guards the automatic transcode fallback so it only ever fires once — a
     /// second failure surfaces the error instead of looping.
     private var hasAttemptedTranscodeFallback = false
+    /// Every engine load/restore owns a generation. A newer lifecycle operation
+    /// invalidates all continuations from the older one before they can publish
+    /// ready state, reports, or track configuration.
+    private var engineOperationGeneration: UInt64 = 0
+    /// Setup still owed for the active engine load. A background restore can
+    /// supersede that load, adopt this payload, and finish the exact request's
+    /// capabilities/tracks/reporting instead of relying on a session-wide latch.
+    private struct PendingEngineSetup {
+        let engineID: ObjectIdentifier
+        let request: PlaybackRequest
+        let startPosition: TimeInterval
+    }
+    private var pendingEngineSetup: PendingEngineSetup?
+    private var didStartAutoSubtitleDownload = false
+
+    private struct EngineFailureKey: Hashable {
+        let engineID: ObjectIdentifier
+        let operationGeneration: UInt64
+    }
+
+    private struct PendingEngineFailure {
+        let key: EngineFailureKey
+        let error: AppError
+        let engine: any VideoEngine
+    }
+
+    /// Failure recovery is a serial state machine. A successor engine can fail
+    /// while the previous fallback is still awaiting its load; that event queues
+    /// behind the current recovery instead of racing it into the transcode stage.
+    private var pendingEngineFailures: [PendingEngineFailure] = []
+    private var knownEngineFailureKeys: Set<EngineFailureKey> = []
+    private var failureRecoveryTask: Task<Void, Never>?
     /// Tracks whether the first routed engine has been committed. We avoid
     /// bumping `engineToken` for this first selection to prevent an unnecessary
     /// host re-build during initial SwiftUI bring-up.
@@ -548,7 +580,8 @@ public final class PlayerViewModel {
     }
 
     private func configureEngineCallbacks() {
-        engine.onProgress = { [weak self] in
+        let configuredEngine = engine
+        configuredEngine.onProgress = { [weak self] in
             guard let self else { return }
             // Jellyfin (non-idempotent) next-episode prefetch fires once the
             // hand-off window opens; idempotent providers prefetch eagerly instead.
@@ -556,11 +589,8 @@ public final class PlayerViewModel {
             self.logUpNextStateIfNearEnd()
             Task { await self.report(event: .progress, isPaused: false) }
         }
-        engine.onFailure = { [weak self] error in
-            guard let self else { return }
-            Task { await self.handleEngineFailure(error) }
-        }
-        engine.onEnded = { [weak self] in
+        configureFailureCallback(for: configuredEngine, generation: engineOperationGeneration)
+        configuredEngine.onEnded = { [weak self] in
             self?.handlePlaybackEnded()
         }
         // Engines that discover tracks asynchronously (Plozzigen) tell us to
@@ -568,7 +598,7 @@ public final class PlayerViewModel {
         // built once at playResolved, stays empty for the whole session. This is
         // also the moment Plozzigen's tracks first become known, so it's where we
         // route its load-time default subtitle through the overlay.
-        engine.onTracksChanged = { [weak self] in
+        configuredEngine.onTracksChanged = { [weak self] in
             guard let self else { return }
             self.loadTrackOptions()
             self.applyImportedAudioIfPossible()
@@ -580,7 +610,7 @@ public final class PlayerViewModel {
         // cues here; the live overlay model draws them on the same SDR renderer as
         // native. Guarded by live-feed mode inside the model, so it's inert unless
         // a Plozzigen subtitle is actually selected.
-        engine.onSubtitleCues = { [weak self] cues in
+        configuredEngine.onSubtitleCues = { [weak self] cues in
             guard let self else { return }
             self.liveSubtitles.updateLiveCues(cues)
             #if DEBUG
@@ -594,13 +624,47 @@ public final class PlayerViewModel {
         // sidecar URL (e.g. Plex direct-play MKV): AetherEngine/Plozzigen decodes
         // the second track itself and pushes its cues here. Inert unless
         // `beginSecondaryLiveFeed()` has been called (guarded inside the model).
-        engine.onSecondarySubtitleCues = { [weak self] cues in
+        configuredEngine.onSecondarySubtitleCues = { [weak self] cues in
             guard let self else { return }
             self.liveSubtitles.updateSecondaryLiveCues(cues)
             if self.selectedSecondarySubtitleTrackID != nil {
                 self.controls.secondarySubtitleStatus = .loaded(cueCount: cues.count)
             }
         }
+    }
+
+    private func configureFailureCallback(
+        for configuredEngine: any VideoEngine,
+        generation: UInt64
+    ) {
+        configuredEngine.onFailure = { [weak self, weak configuredEngine] error in
+            guard let self, let configuredEngine else { return }
+            self.enqueueEngineFailure(
+                error,
+                from: configuredEngine,
+                generation: generation
+            )
+        }
+    }
+
+    @discardableResult
+    private func beginEngineOperation(on expectedEngine: any VideoEngine) -> UInt64 {
+        engineOperationGeneration &+= 1
+        configureFailureCallback(for: expectedEngine, generation: engineOperationGeneration)
+        return engineOperationGeneration
+    }
+
+    private func invalidateEngineOperations() {
+        engineOperationGeneration &+= 1
+    }
+
+    private func isCurrentEngineOperation(
+        _ generation: UInt64,
+        engine expectedEngine: any VideoEngine
+    ) -> Bool {
+        !didStop
+            && generation == engineOperationGeneration
+            && engine === expectedEngine
     }
 
     /// Called when the active engine reports a clean playthrough to the end of the
@@ -943,6 +1007,7 @@ public final class PlayerViewModel {
         guard kind != currentEngineKind else {
             return
         }
+        invalidateEngineOperations()
         engine.stop()
         engine = makeEngine(kind)
         currentEngineKind = kind
@@ -958,6 +1023,7 @@ public final class PlayerViewModel {
             guard kind != currentEngineKind else {
                 return
             }
+            invalidateEngineOperations()
             engine.stop()
             engine = makeEngine(kind)
             currentEngineKind = kind
@@ -1067,18 +1133,20 @@ public final class PlayerViewModel {
             }
 
             try Task.checkCancellation()
-            await playResolved(request, engineKind: resolved.engineKind, startPosition: startPosition)
-
-            // Best-effort, never blocking play(): (if enabled) fetch a missing
-            // subtitle in the preferred language.
-            startAutoSubtitleDownloadIfNeeded(request: request)
+            guard await playResolved(
+                request,
+                engineKind: resolved.engineKind,
+                startPosition: startPosition
+            ) else { return }
         } catch is CancellationError {
             // Leave `phase` as `.loading`; the view is dismissing.
             return
         } catch let error as AppError {
+            pendingEngineSetup = nil
             clearFirstFrameWait()
             phase = .failed(error)
         } catch {
+            pendingEngineSetup = nil
             clearFirstFrameWait()
             phase = .failed(.unknown(""))
         }
@@ -1379,8 +1447,15 @@ public final class PlayerViewModel {
         _ request: PlaybackRequest,
         engineKind: PlaybackEngineKind,
         startPosition: TimeInterval
-    ) async {
+    ) async -> Bool {
         commitEngineForPlayback(engineKind)
+        let loadingEngine = engine
+        let operationGeneration = beginEngineOperation(on: loadingEngine)
+        pendingEngineSetup = PendingEngineSetup(
+            engineID: ObjectIdentifier(loadingEngine),
+            request: request,
+            startPosition: startPosition
+        )
         // Publish the dynamic range the display is being driven to *before*
         // engine.load() requests the actual HDMI mode switch, so the view can
         // fade to black ahead of it. Only the native engine drives the panel's
@@ -1409,26 +1484,70 @@ public final class PlayerViewModel {
         // error still triggers the fallback chain instead of spinning forever.
         armPlaybackWatchdog(startPosition: startPosition)
         await Self.yieldToRunLoop()
+        guard isCurrentEngineOperation(operationGeneration, engine: loadingEngine) else {
+            return false
+        }
         let loadStart = Date()
-        await engine.load(request: request, startPosition: startPosition)
+        await loadingEngine.load(request: request, startPosition: startPosition)
         HandoffDiagnostics.emit("engine.load returned engine=\(engineKind.rawValue) took=\(HandoffDiagnostics.ms(loadStart))")
+        guard isCurrentEngineOperation(operationGeneration, engine: loadingEngine) else {
+            return false
+        }
+        if case .failed = loadingEngine.status {
+            return false
+        }
+        // Foreground restore may have deferred while this freshly-swapped engine
+        // was still idle. Now that it has a real session, let restore own setup;
+        // this load continuation will be invalidated by the restore generation.
+        if sceneIsActive, backgroundRestoreRequired {
+            await restoreAfterBackground()
+            return false
+        }
+        let finishesPaused = !intendsPlayback
+        if finishesPaused {
+            loadingEngine.pause()
+        }
+        return await completeEngineLoad(
+            request,
+            startPosition: startPosition,
+            startsPaused: finishesPaused,
+            engine: loadingEngine,
+            operationGeneration: operationGeneration
+        )
+    }
+
+    /// Publishes state that is valid only after a specific engine operation has
+    /// succeeded. All local setup is committed before the best-effort network
+    /// report yields the actor, so a concurrent restore cannot split setup in half.
+    private func completeEngineLoad(
+        _ request: PlaybackRequest,
+        startPosition: TimeInterval,
+        startsPaused: Bool,
+        engine loadedEngine: any VideoEngine,
+        operationGeneration: UInt64
+    ) async -> Bool {
+        guard isCurrentEngineOperation(operationGeneration, engine: loadedEngine) else {
+            return false
+        }
         phase = .ready
         // Hold the bring-up spinner until the engine actually presents its first
         // frame, so `.loading` → `.ready` is one continuous indicator rather than
         // a spinner that vanishes here (before the picture is up) and then a black
         // gap / second in-player spinner while frames arrive.
-        beginAwaitingFirstFrame()
+        if startsPaused {
+            clearFirstFrameWait()
+        } else {
+            beginAwaitingFirstFrame()
+        }
         // Publish diagnostics after the engine load attempt returns, so the
         // diagnostics sampler doesn't churn SwiftUI layout during Plozzigen init.
         diagnosticsToken = UUID()
-        // Report the *resolved* start position explicitly (not engine.currentTime,
-        // which can still read 0 before the seek settles). When best-source routing
-        // resumed a position learned from another server, this converges the chosen
-        // server to that unified furthest-progress point on entry.
-        await report(event: .start, isPaused: false, positionOverride: startPosition > 0 ? startPosition : nil)
-        // Register the live session (idempotent) now that the server has a real
-        // now-playing session, so convergence writes against this server defer
-        // until stop() ends it.
+        if pendingEngineSetup?.engineID == ObjectIdentifier(loadedEngine) {
+            pendingEngineSetup = nil
+        }
+        // Register the live session now that the engine has a real playback
+        // session. The server start report below is best-effort; local lifecycle
+        // ownership must not depend on that network round-trip.
         onPlaybackStarted()
         // Begin periodic mid-play convergence checkpoints from the resumed point so
         // progress fans out to other servers without waiting for Back. Seeded so the
@@ -1442,9 +1561,9 @@ public final class PlayerViewModel {
         // Reflect what the new engine supports + apply persisted/initial tunable
         // state through it, so the options menu opens with accurate rows and the
         // user's last playback speed is honoured from frame 1.
-        controls.engineCapabilities = engine.capabilities
-        if engine.capabilities.contains(.playbackSpeed) {
-            engine.setPlaybackSpeed(controls.playbackSpeed)
+        controls.engineCapabilities = loadedEngine.capabilities
+        if loadedEngine.capabilities.contains(.playbackSpeed) {
+            loadedEngine.setPlaybackSpeed(controls.playbackSpeed)
         } else {
             controls.playbackSpeed = 1.0
         }
@@ -1453,9 +1572,9 @@ public final class PlayerViewModel {
         controls.audioDelaySeconds = 0
         controls.subtitleDelaySeconds = 0
         controls.dialogEnhanceEnabled = false
-        engine.setAudioDelay(0)
-        engine.setSubtitleDelay(0)
-        engine.setDialogEnhanceEnabled(false)
+        loadedEngine.setAudioDelay(0)
+        loadedEngine.setSubtitleDelay(0)
+        loadedEngine.setDialogEnhanceEnabled(false)
         // Drop any overlay cues from a previous stream/engine and reset the sync
         // offset; a fresh selection re-seeds them. This is a full reset (new media
         // or engine), so the dual-subtitle selection is dropped too.
@@ -1491,6 +1610,22 @@ public final class PlayerViewModel {
 
         // Load skip markers once playback is live (opt-in, best-effort).
         loadSkipSegmentsIfEnabled()
+
+        if !didStartAutoSubtitleDownload {
+            didStartAutoSubtitleDownload = true
+            startAutoSubtitleDownloadIfNeeded(request: request)
+        }
+
+        // Report the *resolved* start position explicitly (not engine.currentTime,
+        // which can still read 0 before the seek settles). When best-source routing
+        // resumed a position learned from another server, this converges the chosen
+        // server to that unified furthest-progress point on entry.
+        await report(
+            event: .start,
+            isPaused: startsPaused,
+            positionOverride: startPosition > 0 ? startPosition : nil
+        )
+        return isCurrentEngineOperation(operationGeneration, engine: loadedEngine)
     }
 
     // MARK: - Skip intros/credits
@@ -1577,7 +1712,11 @@ public final class PlayerViewModel {
             // Still no progress after the deadline → treat as a stalled stream.
             if self.engine.currentTime <= threshold, !self.engine.isPaused {
                 PlozzLog.playback.info("Playback watchdog: no progress before deadline; triggering fallback")
-                await self.handleEngineFailure(.invalidResponse)
+                self.enqueueEngineFailure(
+                    .unknown("Playback stalled before making progress."),
+                    from: self.engine,
+                    generation: self.engineOperationGeneration
+                )
             }
         }
     }
@@ -1589,18 +1728,65 @@ public final class PlayerViewModel {
 
     // MARK: - Cross-engine fallback policy
 
-    /// Decides what to do when the active engine reports a playback failure,
-    /// following the fallback chain: the chosen engine's failure swaps to the
-    /// *other* engine (once) at the last known position; if that also fails, force
-    /// a server transcode (once); if even that fails, surface the error. Each step
-    /// fires at most once so the chain can never loop.
-    private func handleEngineFailure(_ error: AppError) async {
-        guard !didStop else { return }
+    /// Enqueues one failure for one engine operation. Duplicate callbacks from the
+    /// same operation collapse to one event, and failures from a fallback engine
+    /// wait for the current recovery stage to finish before advancing the chain.
+    private func enqueueEngineFailure(
+        _ error: AppError,
+        from failedEngine: any VideoEngine,
+        generation: UInt64
+    ) {
+        guard !didStop,
+              engine === failedEngine,
+              generation == engineOperationGeneration else { return }
+
+        let key = EngineFailureKey(
+            engineID: ObjectIdentifier(failedEngine),
+            operationGeneration: generation
+        )
+        guard knownEngineFailureKeys.insert(key).inserted else { return }
+
+        pendingEngineFailures.append(
+            PendingEngineFailure(key: key, error: error, engine: failedEngine)
+        )
+        guard failureRecoveryTask == nil else { return }
+        failureRecoveryTask = Task { @MainActor [weak self] in
+            await self?.drainEngineFailures()
+        }
+    }
+
+    private func drainEngineFailures() async {
+        while !Task.isCancelled, !pendingEngineFailures.isEmpty {
+            let failure = pendingEngineFailures.removeFirst()
+            if engine === failure.engine,
+               failure.key.operationGeneration == engineOperationGeneration,
+               !didStop {
+                await recoverFromEngineFailure(failure.error, failedEngine: failure.engine)
+            }
+            knownEngineFailureKeys.remove(failure.key)
+        }
+        failureRecoveryTask = nil
+    }
+
+    /// Advances the fallback chain for one claimed failure. Invalidating the
+    /// failed operation first fences its load/restore continuation while the
+    /// replacement engine or transcode is being resolved.
+    private func recoverFromEngineFailure(
+        _ error: AppError,
+        failedEngine: any VideoEngine
+    ) async {
+        guard !didStop, engine === failedEngine else { return }
+        invalidateEngineOperations()
+        cancelWatchdog()
+        cancelResumeConfirm()
+        clearFirstFrameWait()
+
         guard let request else {
+            pendingEngineSetup = nil
             phase = .failed(error)
             return
         }
-        let resumeFrom = max(engine.furthestObservedPosition, engine.currentTime)
+        let resumeFrom = max(failedEngine.furthestObservedPosition, failedEngine.currentTime)
         let resume = resumeFrom > 1 ? resumeFrom : (startPositionOverride ?? request.startPosition)
 
         // 1) Direct play failed on the chosen engine → try the other engine once,
@@ -1619,7 +1805,7 @@ public final class PlayerViewModel {
            !(alternate == .native && isSMBSource) {
             hasTriedAlternateEngine = true
             PlozzLog.playback.info("Engine failed; swapping to the alternate engine")
-            await playResolved(request, engineKind: alternate, startPosition: resume)
+            _ = await playResolved(request, engineKind: alternate, startPosition: resume)
             return
         }
 
@@ -1633,7 +1819,7 @@ public final class PlayerViewModel {
         }
 
         // 3) Already transcoding (or out of options): surface the error.
-        clearFirstFrameWait()
+        pendingEngineSetup = nil
         phase = .failed(error)
     }
 
@@ -1772,30 +1958,70 @@ public final class PlayerViewModel {
         // It re-arms `backgroundRestoreRequired`; drain that request only after a
         // later active event sets `sceneIsActive` again.
         while sceneIsActive, backgroundRestoreRequired, !didStop {
+            let restoringEngine = engine
+            let pendingSetup = pendingEngineSetup.flatMap {
+                $0.engineID == ObjectIdentifier(restoringEngine) ? $0 : nil
+            }
+
+            // A fallback can commit a fresh engine and yield one run-loop turn
+            // before its load starts. Restore is a no-op on that idle engine, so
+            // leave the request armed; playResolved re-enters restoration after
+            // the engine has established a real session.
+            if restoringEngine.status == .idle {
+                if pendingSetup != nil { return }
+                backgroundRestoreRequired = false
+                return
+            }
+
             backgroundRestoreRequired = false
             cancelSeekCommit()
             seekTask?.cancel()
             seekTask = nil
             latestSeekTarget = nil
             cancelResumeConfirm()
+            cancelWatchdog()
             controls.isSeeking = false
             controls.pendingSeekTarget = nil
             clearFirstFrameWait()
             phase = .loading
 
+            let operationGeneration = beginEngineOperation(on: restoringEngine)
             PlozzLog.playback.info("Restoring playback pipeline after background suspension")
-            await engine.restoreAfterBackground()
-            guard !didStop else { return }
-            if case .failed = engine.status { return }
+            await restoringEngine.restoreAfterBackground()
+            guard isCurrentEngineOperation(operationGeneration, engine: restoringEngine) else {
+                return
+            }
+            guard restoringEngine.status == .ready else {
+                if restoringEngine.status == .idle || restoringEngine.status == .loading {
+                    backgroundRestoreRequired = true
+                }
+                return
+            }
 
-            engine.pause()
+            restoringEngine.pause()
             intendsPlayback = false
             controls.intendsPause = true
             controls.isPaused = true
-            controls.currentSeconds = engine.currentTime
-            controls.bufferedSeconds = engine.bufferedPosition
-            phase = .ready
-            diagnosticsToken = UUID()
+            let restoredPosition = max(
+                restoringEngine.currentTime,
+                restoringEngine.furthestObservedPosition
+            )
+            controls.currentSeconds = restoredPosition
+            controls.bufferedSeconds = restoringEngine.bufferedPosition
+
+            if let pendingSetup {
+                guard await completeEngineLoad(
+                    pendingSetup.request,
+                    startPosition: max(restoredPosition, pendingSetup.startPosition),
+                    startsPaused: true,
+                    engine: restoringEngine,
+                    operationGeneration: operationGeneration
+                ) else { return }
+            } else {
+                phase = .ready
+                diagnosticsToken = UUID()
+            }
+
             confirmNextResumeAfterBackground = true
             loadTrackOptions()
             PlozzLog.playback.info("Playback pipeline restored after background suspension")
@@ -2083,7 +2309,11 @@ public final class PlayerViewModel {
             ScrubDiagnostics.note("background-resume-confirm: timed out without clock progress")
             self.controls.isResumeConfirming = false
             self.resumeConfirmTask = nil
-            await self.handleEngineFailure(.invalidResponse)
+            self.enqueueEngineFailure(
+                .unknown("Playback did not resume after returning to the app."),
+                from: self.engine,
+                generation: self.engineOperationGeneration
+            )
         }
     }
 
@@ -2216,6 +2446,12 @@ public final class PlayerViewModel {
         HandoffDiagnostics.emit("stop preserveDisplayMode=\(preserveDisplayMode) contentMode=\(contentDisplayMode) (false ⇒ panel should reset to SDR)")
         PlaybackTrace.note("stop() teardown curr=\(String(format: "%.2f", engine.currentTime)) shouldDismiss=\(shouldDismiss) pendingNext=\(pendingNextEpisode != nil) isSeeking=\(controls.isSeeking)")
         didStop = true
+        invalidateEngineOperations()
+        failureRecoveryTask?.cancel()
+        failureRecoveryTask = nil
+        pendingEngineFailures.removeAll()
+        knownEngineFailureKeys.removeAll()
+        pendingEngineSetup = nil
         backgroundRestoreRequired = false
         confirmNextResumeAfterBackground = false
         prefetchTask?.cancel()
@@ -3101,7 +3337,11 @@ public final class PlayerViewModel {
         guard let request else { return }
         let resume = max(engine.furthestObservedPosition, engine.currentTime)
         pendingImageSubtitleMatch = track
-        await playResolved(request, engineKind: .plozzigen, startPosition: resume > 1 ? resume : 0)
+        guard await playResolved(
+            request,
+            engineKind: .plozzigen,
+            startPosition: resume > 1 ? resume : 0
+        ) else { return }
         loadTrackOptions()
     }
 

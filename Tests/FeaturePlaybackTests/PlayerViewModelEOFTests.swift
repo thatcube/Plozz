@@ -47,7 +47,7 @@ final class PlayerViewModelEOFTests: XCTestCase {
         viewModel.setPaused(true)
     }
 
-    func testBackgroundDuringLoadingStillRestoresAfterLoadCompletes() async {
+    func testBackgroundRestoreSupersedesInFlightLoadWithoutStaleReadyTail() async {
         let item = MediaItem(id: "movie", title: "Movie", kind: .movie, runtime: 120)
         let request = PlaybackRequest(
             item: item,
@@ -69,12 +69,140 @@ final class PlayerViewModelEOFTests: XCTestCase {
         XCTAssertEqual(viewModel.phase, .loading)
 
         viewModel.suspendForBackground(requiresPipelineRestore: true)
+        let restoreTask = Task { @MainActor in
+            await viewModel.restoreAfterBackground()
+        }
+        await restoreTask.value
+        XCTAssertEqual(engine.restoreAfterBackgroundCallCount, 1)
+
         engine.finishLoad()
         await viewModel.load()
-        await viewModel.restoreAfterBackground()
 
         XCTAssertEqual(engine.restoreAfterBackgroundCallCount, 1)
         XCTAssertEqual(viewModel.phase, .ready)
+        XCTAssertTrue(viewModel.controls.isPaused)
+
+        let reports = await provider.reports
+        let startReports = reports.filter { $0.event == .start }
+        XCTAssertEqual(startReports.count, 1)
+        XCTAssertEqual(startReports.first?.progress.isPaused, true)
+    }
+
+    func testDuplicateFailureCallbackStartsOnlyOneFallbackStage() async {
+        let item = MediaItem(id: "movie", title: "Movie", kind: .movie, runtime: 120)
+        let request = PlaybackRequest(
+            item: item,
+            streamURL: URL(string: "https://example.test/movie.m3u8")!
+        )
+        let provider = RecordingPlaybackProvider(request: request)
+        let native = SpyVideoEngine()
+        let alternate = SpyVideoEngine()
+        let viewModel = PlayerViewModel(
+            provider: provider,
+            itemID: item.id,
+            engineFactory: EngineFactory(
+                makeNative: { _ in native },
+                makePlozzigen: { alternate }
+            )
+        )
+
+        await viewModel.load()
+        XCTAssertEqual(native.loadCallCount, 1)
+
+        native.onFailure?(.unknown("decoder failed"))
+        native.onFailure?(.unknown("decoder failed"))
+        await assertEventually { alternate.loadCallCount == 1 }
+
+        XCTAssertEqual(alternate.loadCallCount, 1)
+        let forceTranscodeRequestCount = await provider.forceTranscodeRequestCount
+        XCTAssertEqual(forceTranscodeRequestCount, 0)
+    }
+
+    func testSuccessorEngineFailureQueuesBehindCurrentFallback() async {
+        let item = MediaItem(id: "movie", title: "Movie", kind: .movie, runtime: 120)
+        let request = PlaybackRequest(
+            item: item,
+            streamURL: URL(string: "https://example.test/movie.m3u8")!
+        )
+        let provider = RecordingPlaybackProvider(request: request)
+        let native = SpyVideoEngine()
+        let alternate = SpyVideoEngine()
+        alternate.failureOnLoad = .unknown("alternate decoder failed")
+        let viewModel = PlayerViewModel(
+            provider: provider,
+            itemID: item.id,
+            engineFactory: EngineFactory(
+                makeNative: { _ in native },
+                makePlozzigen: { alternate }
+            )
+        )
+
+        await viewModel.load()
+        native.onFailure?(.unknown("native decoder failed"))
+
+        var forceTranscodeRequestCount = 0
+        for _ in 0..<200 {
+            forceTranscodeRequestCount = await provider.forceTranscodeRequestCount
+            if forceTranscodeRequestCount == 1 { break }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+
+        XCTAssertEqual(alternate.loadCallCount, 1)
+        XCTAssertEqual(native.loadCallCount, 2)
+        XCTAssertEqual(forceTranscodeRequestCount, 1)
+    }
+
+    func testForegroundRestoreDefersForFreshIdleFallbackEngine() async {
+        let item = MediaItem(id: "movie", title: "Movie", kind: .movie, runtime: 120)
+        let request = PlaybackRequest(
+            item: item,
+            streamURL: URL(string: "https://example.test/movie.m3u8")!
+        )
+        let provider = RecordingPlaybackProvider(request: request)
+        let native = SpyVideoEngine()
+        let alternate = SpyVideoEngine()
+        alternate.blocksLoad = true
+        alternate.marksLoadingOnLoad = false
+        alternate.capabilities = [.playbackSpeed]
+        let creationSignal = EngineCreationSignal()
+        let viewModel = PlayerViewModel(
+            provider: provider,
+            itemID: item.id,
+            engineFactory: EngineFactory(
+                makeNative: { _ in native },
+                makePlozzigen: {
+                    creationSignal.signal()
+                    return alternate
+                }
+            )
+        )
+
+        await viewModel.load()
+        viewModel.suspendForBackground(requiresPipelineRestore: true)
+        let restoreTask = Task { @MainActor in
+            guard await creationSignal.wait() else { return false }
+            await viewModel.restoreAfterBackground()
+            return true
+        }
+
+        native.onFailure?(.unknown("native decoder failed"))
+        let didCreateAlternate = await restoreTask.value
+        XCTAssertTrue(didCreateAlternate)
+
+        let reportsBeforeLoad = await provider.reports
+        XCTAssertEqual(reportsBeforeLoad.filter { $0.event == .start }.count, 1)
+
+        alternate.finishLoad()
+        await assertEventually {
+            alternate.restoreAfterBackgroundCallCount == 1
+                && viewModel.controls.engineCapabilities.contains(.playbackSpeed)
+        }
+
+        XCTAssertTrue(viewModel.controls.isPaused)
+        let reports = await provider.reports
+        let startReports = reports.filter { $0.event == .start }
+        XCTAssertEqual(startReports.count, 2)
+        XCTAssertEqual(startReports.last?.progress.isPaused, true)
     }
 
     func testStopAfterNaturalEndStillWritesFinalFurthestPosition() async {
@@ -109,6 +237,18 @@ final class PlayerViewModelEOFTests: XCTestCase {
         XCTAssertEqual(stopped.onlyCall?.position, 120)
         XCTAssertEqual(stopped.onlyCall?.percent, 100)
     }
+
+    private func assertEventually(
+        _ predicate: () -> Bool,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async {
+        for _ in 0..<200 {
+            if predicate() { return }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        XCTFail("Condition was not met before timeout", file: file, line: line)
+    }
 }
 
 private actor RecordingPlaybackProvider: MediaProvider {
@@ -133,6 +273,7 @@ private actor RecordingPlaybackProvider: MediaProvider {
 
     private let request: PlaybackRequest
     private(set) var reports: [Report] = []
+    private(set) var forceTranscodeRequestCount = 0
 
     init(request: PlaybackRequest) {
         self.request = request
@@ -149,7 +290,10 @@ private actor RecordingPlaybackProvider: MediaProvider {
     func search(query: String, limit: Int) async throws -> [MediaItem] { [] }
     func playbackInfo(for itemID: String) async throws -> PlaybackRequest { request }
     func playbackInfo(for itemID: String, mediaSourceID: String?, forceTranscode: Bool) async throws -> PlaybackRequest {
-        request
+        if forceTranscode {
+            forceTranscodeRequestCount += 1
+        }
+        return request
     }
     func reportPlayback(_ progress: PlaybackProgress, event: PlaybackEvent) async throws {
         reports.append(Report(event: event, progress: progress))
@@ -171,9 +315,14 @@ private final class SpyVideoEngine: VideoEngine {
     var restoreAfterBackgroundCallCount = 0
     var playCallCount = 0
     var pauseCallCount = 0
+    var loadCallCount = 0
+    var capabilities: PlayerEngineCapabilities = []
     var blocksLoad = false
+    var marksLoadingOnLoad = true
+    var failureOnLoad: AppError?
     private(set) var loadStarted = false
     private var loadContinuation: CheckedContinuation<Void, Never>?
+    private var lifecycleGeneration = 0
     var onProgress: (@MainActor () -> Void)?
     var onFailure: (@MainActor (AppError) -> Void)?
     var onEnded: (@MainActor () -> Void)?
@@ -182,11 +331,23 @@ private final class SpyVideoEngine: VideoEngine {
     var onSecondarySubtitleCues: (@MainActor ([SubtitleCue]) -> Void)?
 
     func load(request: PlaybackRequest, startPosition: TimeInterval) async {
+        lifecycleGeneration += 1
+        let generation = lifecycleGeneration
+        loadCallCount += 1
         loadStarted = true
+        if marksLoadingOnLoad {
+            status = .loading
+        }
         if blocksLoad {
             await withCheckedContinuation { continuation in
                 loadContinuation = continuation
             }
+        }
+        guard generation == lifecycleGeneration else { return }
+        if let failureOnLoad {
+            status = .failed(failureOnLoad)
+            onFailure?(failureOnLoad)
+            return
         }
         status = .ready
         currentTime = startPosition
@@ -208,6 +369,7 @@ private final class SpyVideoEngine: VideoEngine {
         isPaused = true
     }
     func restoreAfterBackground() async {
+        lifecycleGeneration += 1
         restoreAfterBackgroundCallCount += 1
         status = .ready
         isPaused = true
@@ -216,13 +378,33 @@ private final class SpyVideoEngine: VideoEngine {
         currentTime = seconds
         furthestObservedPosition = max(furthestObservedPosition, seconds)
     }
-    func stop() { status = .idle }
+    func stop() {
+        lifecycleGeneration += 1
+        status = .idle
+    }
     func selectAudioTrack(_ track: MediaTrack?) {}
     func selectSubtitleTrack(_ track: MediaTrack?) {}
 
     #if canImport(UIKit)
     func makeVideoOutputView() -> UIView { UIView() }
     #endif
+}
+
+@MainActor
+private final class EngineCreationSignal {
+    private var wasSignalled = false
+
+    func wait() async -> Bool {
+        for _ in 0..<200 {
+            if wasSignalled { return true }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        return false
+    }
+
+    func signal() {
+        wasSignalled = true
+    }
 }
 
 private final class PlaybackStoppedRecorder: @unchecked Sendable {

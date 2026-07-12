@@ -1,6 +1,7 @@
 import XCTest
 @testable import ProviderShare
 import CoreModels
+import MediaTransportCore
 
 /// End-to-end proof of the exact runtime path Brandon exercises on device:
 /// the player's `reportPlayback(.progress)` ticks write local watch state, and
@@ -14,6 +15,65 @@ final class ShareProviderWatchTests: XCTestCase {
             .appendingPathComponent("plozz-share-provider-tests-\(UUID().uuidString)", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
+    }
+
+    private final class LocatorFakeSession: MediaTransportSession, @unchecked Sendable {
+        let key: MediaTransportSessionKey
+        let fileSystem: any MediaTransportFileSystem = LocatorFakeFileSystem()
+
+        init(revision: CredentialRevision) throws {
+            key = MediaTransportSessionKey(
+                accountID: "share:nas.local/Media",
+                credentialRevision: revision,
+                endpoint: try MediaTransportEndpointIdentity(
+                    transportIdentifier: "smb",
+                    host: "nas.local",
+                    rootPath: "/Media"
+                ),
+                trustRevision: UUID(),
+                role: .metadata
+            )
+        }
+
+        func shutdown() async {}
+    }
+
+    private struct LocatorFakeFileSystem: MediaTransportFileSystem {
+        func validate() async throws {}
+
+        func probe() async throws -> MediaTransportProbe {
+            MediaTransportProbe(
+                capabilities: try MediaTransportCapabilities(
+                    supportsList: true,
+                    supportsStat: true,
+                    supportsBoundedWholeFileRead: true,
+                    byteRangeBehavior: .randomAccess,
+                    maximumBoundedWholeFileReadBytes: 1_024,
+                    consistency: .changeDetecting
+                )
+            )
+        }
+
+        func list(relativePath: String) async throws -> [RemoteFileEntry] {
+            []
+        }
+
+        func stat(relativePath: String) async throws -> RemoteFileEntry {
+            try RemoteFileEntry(
+                relativePath: relativePath,
+                kind: .file,
+                size: 42,
+                modifiedAt: Date(timeIntervalSince1970: 1_700_000_000)
+            )
+        }
+
+        func readSmallFile(relativePath: String, maximumBytes: Int) async throws -> Data {
+            Data()
+        }
+
+        func openSource(for locator: NetworkFileLocator) async throws -> MediaTransportSourceLease {
+            throw MediaTransportError.unsupportedCapability("test source")
+        }
     }
 
     private func makeSession(
@@ -36,27 +96,41 @@ final class ShareProviderWatchTests: XCTestCase {
         )
     }
 
-    func testPlaybackURLPreservesConfiguredSubfolderRoot() {
+    func testPlaybackLocatorIsRelativeToConfiguredSubfolderRoot() async throws {
+        let revision = CredentialRevision()
+        let session = try LocatorFakeSession(revision: revision)
         let provider = ShareProvider(
             session: makeSession(baseURL: URL(string: "smb://nas.local/Media/Movies")!),
-            watchDirectory: makeTempDir()
+            watchDirectory: makeTempDir(),
+            credentialRevision: revision,
+            sessionFactory: { _ in session }
         )
 
-        XCTAssertEqual(
-            provider.smbURL(forRelativePath: "Drama/Arrival.mkv")?.absoluteString,
-            "smb://guest@nas.local/Media/Movies/Drama/Arrival.mkv"
+        let locator = try await provider.networkFileLocator(
+            for: "Drama/Arrival.mkv"
         )
+
+        XCTAssertEqual(locator.relativePath, "Drama/Arrival.mkv")
+        XCTAssertEqual(locator.credentialRevision, revision)
+        XCTAssertEqual(locator.representation.size, 42)
+        XCTAssertEqual(locator.representation.consistency, .changeDetecting)
     }
 
-    func testPlaybackURLPreservesPasswordedGuestCredentials() {
+    func testPlaybackLocatorContainsNoPasswordedGuestCredentials() async throws {
+        let revision = CredentialRevision()
+        let session = try LocatorFakeSession(revision: revision)
         let provider = ShareProvider(
             session: makeSession(username: "", password: "guest-secret"),
-            watchDirectory: makeTempDir()
+            watchDirectory: makeTempDir(),
+            credentialRevision: revision,
+            sessionFactory: { _ in session }
         )
 
-        XCTAssertEqual(
-            provider.smbURL(forRelativePath: "Arrival.mkv")?.absoluteString,
-            "smb://guest:guest-secret@nas.local/Media/Arrival.mkv"
+        let locator = try await provider.networkFileLocator(for: "Arrival.mkv")
+
+        XCTAssertNil(PlaybackSource.networkFile(locator).publicURL)
+        XCTAssertFalse(
+            PlaybackSource.networkFile(locator).redactedLabel.contains("guest-secret")
         )
     }
 

@@ -1084,7 +1084,7 @@ final class PlexProviderMappingTests: XCTestCase {
         XCTAssertTrue(request.audioTracks.first?.isDefault == true)
         XCTAssertTrue(request.isTranscoding)
 
-        let url = request.streamURL.absoluteString
+        let url = try XCTUnwrap(request.streamURL).absoluteString
         XCTAssertTrue(url.hasPrefix("https://plex.host:32400/video/:/transcode/universal/start.m3u8"), url)
         XCTAssertTrue(url.contains("protocol=hls"), url)
         XCTAssertTrue(url.contains("path=/library/metadata/77"), url)
@@ -1116,7 +1116,7 @@ final class PlexProviderMappingTests: XCTestCase {
 
         let request = try await provider.playbackInfo(for: "88")
         XCTAssertFalse(request.isTranscoding)
-        let url = request.streamURL.absoluteString
+        let url = try XCTUnwrap(request.streamURL).absoluteString
         XCTAssertTrue(url.hasPrefix("https://plex.host:32400/library/parts/2/16000/file.mp4"), url)
         XCTAssertTrue(url.contains("X-Plex-Token=TOKEN"), url)
     }

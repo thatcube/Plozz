@@ -1102,6 +1102,10 @@ public final class PlayerViewModel {
     /// engine mutation or network. Extracted so the current-item load and the
     /// next-episode prefetch pick the engine the same way.
     private func routeEngine(for request: PlaybackRequest, forceTranscode: Bool) -> PlaybackEngineKind {
+        if case .some(.networkFile) = request.playbackSource {
+            return .plozzigen
+        }
+
         var kind: PlaybackEngineKind
         if !forceTranscode, engineFactory.plozzigenAvailable,
                   let descriptor = request.localRemuxSource,
@@ -1140,17 +1144,6 @@ public final class PlayerViewModel {
                mode: subtitleRule.mode,
                preferredLanguage: subtitleRule.preferredLanguage) {
             PlozzLog.playback.info("Default subtitle is image-based; routing to Plozzigen so it can be rendered on-device")
-            kind = .plozzigen
-        }
-
-        // A raw SMB share stream can ONLY be opened by the on-device engine —
-        // AVPlayer/AVFoundation cannot demux or even open an `smb://` URL. Force
-        // Plozzigen for any smb:// source regardless of container/codec facts
-        // (which a share provider doesn't report).
-        let resolvedURL = request.localRemuxSource?.originalURL ?? request.streamURL
-        if kind != .plozzigen, engineFactory.plozzigenAvailable,
-           resolvedURL.scheme?.lowercased() == "smb" {
-            PlozzLog.playback.info("SMB share source; routing to Plozzigen (AVPlayer can't open smb://)")
             kind = .plozzigen
         }
 
@@ -1597,15 +1590,17 @@ public final class PlayerViewModel {
         //    adaptive source (separate audio track): only the hybrid engine can
         //    mux it, so swapping to native would play silent video — go straight
         //    to the re-resolved safe (muxed) fallback below instead. Also skipped
-        //    when the only alternate is native AVPlayer and the source is an
-        //    `smb://` share: AVPlayer can't open an SMB URL at all, so a swap is a
-        //    guaranteed-fail wasted attempt — fall through to the (re-resolving)
-        //    transcode step, which re-routes back to Plozzigen for the share.
-        let resolvedURL = request.localRemuxSource?.originalURL ?? request.streamURL
-        let isSMBSource = resolvedURL.scheme?.lowercased() == "smb"
+        //    when the only alternate is native AVPlayer and the source is a typed
+        //    network file: native URL loaders must never reinterpret that source.
+        let isNetworkFile: Bool
+        if case .some(.networkFile) = request.playbackSource {
+            isNetworkFile = true
+        } else {
+            isNetworkFile = false
+        }
         if !request.isTranscoding, !hasTriedAlternateEngine, request.externalAudioURL == nil,
            let alternate = alternateEngineKind,
-           !(alternate == .native && isSMBSource) {
+           !(alternate == .native && isNetworkFile) {
             hasTriedAlternateEngine = true
             PlozzLog.playback.info("Engine failed; swapping to the alternate engine")
             await playResolved(request, engineKind: alternate, startPosition: resume)
@@ -1614,7 +1609,7 @@ public final class PlayerViewModel {
 
         // 2) Both engines exhausted (or none to swap to) → force a server
         //    transcode once, resuming where the failed attempt left off.
-        if !request.isTranscoding, !hasAttemptedTranscodeFallback {
+        if !isNetworkFile, !request.isTranscoding, !hasAttemptedTranscodeFallback {
             hasAttemptedTranscodeFallback = true
             PlozzLog.playback.info("Direct play failed; retrying with server transcode")
             await startPlayback(forceTranscode: true, resumeOverride: resume > 1 ? resume : nil)

@@ -1,6 +1,7 @@
 #if canImport(SwiftUI)
 import CoreModels
 import FeaturePlayback
+import MediaTransportCore
 #if canImport(UIKit)
 import EnginePlozzigen
 #endif
@@ -43,10 +44,16 @@ enum HybridPlayback {
     /// The engine factory injected into `PlayerViewModel`. Supplies the Plozzigen
     /// engine when linked; otherwise the native-only default.
     @MainActor
-    static func engineFactory() -> EngineFactory {
+    static func engineFactory(
+        networkFileResolver: any MediaTransportNetworkFileResolving
+    ) -> EngineFactory {
         #if canImport(UIKit)
         return EngineFactory(
-            makePlozzigen: { PlozzigenVideoEngineFactory.makeEngine() }
+            makePlozzigen: {
+                PlozzigenVideoEngineFactory.makeEngine(
+                    networkFileResolver: networkFileResolver
+                )
+            }
         )
         #else
         return .native

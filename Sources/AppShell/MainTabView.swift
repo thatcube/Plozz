@@ -5,6 +5,7 @@ import CoreUI
 import FeatureHome
 import FeatureMusic
 import FeaturePlayback
+import MediaTransportCore
 import MetadataKit
 import FeatureSearch
 import FeatureSettings
@@ -76,6 +77,7 @@ struct MainTabView: View {
     }
 
     let accounts: [ResolvedAccount]
+    let networkFileResolver: any MediaTransportNetworkFileResolving
     /// Subtitle behaviour (mode / language / auto-download) and appearance
     /// (`SubtitleStyle`) split out of the retired `CaptionSettings`. Behaviour
     /// feeds the policy resolver; style seeds the player + live overlay.
@@ -410,6 +412,7 @@ struct MainTabView: View {
             playRequest: $playRequest,
             resumePrompt: $resumePrompt,
             accounts: accounts,
+            networkFileResolver: networkFileResolver,
             behavior: subtitleBehaviorModel.settings,
             style: subtitleStyleModel.style,
             playbackSettings: playbackModel.settings,
@@ -1033,6 +1036,7 @@ private func failoverPlayItem(
 private func makePlayerViewModel(
     for request: PlayRequest,
     accounts: [ResolvedAccount],
+    networkFileResolver: any MediaTransportNetworkFileResolving,
     behavior: SubtitleBehavior,
     style: SubtitleStyle,
     playbackSettings: PlaybackSettings,
@@ -1049,7 +1053,9 @@ private func makePlayerViewModel(
     if let videoID = request.item.youTubeTrailerVideoID {
         let trailerItem = request.item
         let onlineTrailerResolver = ItemDetailViewModel.defaultOnlineTrailerResolver
-        let engineFactory = HybridPlayback.engineFactory()
+        let engineFactory = HybridPlayback.engineFactory(
+            networkFileResolver: networkFileResolver
+        )
         let trailerViewModel = PlayerViewModel(
             provider: YouTubeTrailerProvider(
                 item: trailerItem,
@@ -1139,7 +1145,9 @@ private func makePlayerViewModel(
         seriesAccountFallbackID: primaryAccountID,
         startPosition: request.startPosition,
         scrobbler: scrobbler,
-        engineFactory: HybridPlayback.engineFactory(),
+        engineFactory: HybridPlayback.engineFactory(
+            networkFileResolver: networkFileResolver
+        ),
         neighborResolver: neighborResolver,
         seriesIDResolver: seriesIDResolver,
         onPlaybackStopped: makePlaybackStoppedHandler(
@@ -1703,6 +1711,7 @@ private extension View {
         playRequest: Binding<PlayRequest?>,
         resumePrompt: Binding<MediaItem?>,
         accounts: [ResolvedAccount],
+        networkFileResolver: any MediaTransportNetworkFileResolving,
         behavior: SubtitleBehavior,
         style: SubtitleStyle,
         playbackSettings: PlaybackSettings,
@@ -1724,6 +1733,7 @@ private extension View {
                     makePlayerViewModel(
                         for: request,
                         accounts: accounts,
+                        networkFileResolver: networkFileResolver,
                         behavior: behavior,
                         style: style,
                         playbackSettings: playbackSettings,

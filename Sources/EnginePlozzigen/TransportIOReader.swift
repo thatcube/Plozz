@@ -2,7 +2,6 @@
 import Foundation
 import os
 import AetherEngine
-import AetherEngineSMB
 import MediaTransportCore
 
 public typealias TransportByteSource = MediaTransportByteSource
@@ -52,6 +51,7 @@ public final class TransportIOReader: IOReader, @unchecked Sendable {
 
     private let cursor: MediaTransportSourceCursor
     private let lease: MediaTransportSourceLease
+    private let resolvedSource: MediaTransportResolvedSource?
     private let readerState = OSAllocatedUnfairLock(initialState: ReaderState())
     private let inflight = OSAllocatedUnfairLock<TransportInflightRead?>(initialState: nil)
     private let avseekSize: Int32 = 65_536
@@ -59,12 +59,24 @@ public final class TransportIOReader: IOReader, @unchecked Sendable {
     public init(source: TransportByteSource) {
         let lease = MediaTransportSourceLease(source: source)
         self.lease = lease
+        self.resolvedSource = nil
         self.cursor = lease.makeCursor()!
     }
 
-    private init(cursor: MediaTransportSourceCursor, lease: MediaTransportSourceLease) {
+    public init(resolvedSource: MediaTransportResolvedSource) {
+        self.resolvedSource = resolvedSource
+        self.lease = resolvedSource.sourceLease
+        self.cursor = resolvedSource.sourceLease.makeCursor()!
+    }
+
+    private init(
+        cursor: MediaTransportSourceCursor,
+        lease: MediaTransportSourceLease,
+        resolvedSource: MediaTransportResolvedSource?
+    ) {
         self.cursor = cursor
         self.lease = lease
+        self.resolvedSource = resolvedSource
     }
 
     deinit {
@@ -140,9 +152,13 @@ public final class TransportIOReader: IOReader, @unchecked Sendable {
             case Int32(SEEK_SET):
                 candidate = offset
             case Int32(SEEK_CUR):
-                candidate = state.position + offset
+                let (value, overflow) = state.position.addingReportingOverflow(offset)
+                guard !overflow else { return -1 }
+                candidate = value
             case Int32(SEEK_END):
-                candidate = lease.byteSize + offset
+                let (value, overflow) = lease.byteSize.addingReportingOverflow(offset)
+                guard !overflow else { return -1 }
+                candidate = value
             case avseekSize:
                 return lease.byteSize
             default:
@@ -164,7 +180,11 @@ public final class TransportIOReader: IOReader, @unchecked Sendable {
         else {
             return nil
         }
-        return TransportIOReader(cursor: cursor, lease: lease)
+        return TransportIOReader(
+            cursor: cursor,
+            lease: lease,
+            resolvedSource: resolvedSource
+        )
     }
 
     public func close() {
@@ -179,27 +199,11 @@ public final class TransportIOReader: IOReader, @unchecked Sendable {
     }
 
     public func waitForFinalShutdown() async {
-        await lease.waitForFinalShutdown()
-    }
-}
-
-final class SMBTransportByteSource: TransportByteSource, @unchecked Sendable {
-    private let connection: SMBConnection
-
-    init(connection: SMBConnection) {
-        self.connection = connection
-    }
-
-    var byteSize: Int64 {
-        connection.byteSize
-    }
-
-    func read(at offset: Int64, length: Int) async throws -> Data {
-        try await connection.read(at: offset, length: length)
-    }
-
-    func shutdown() async {
-        connection.close()
+        if let resolvedSource {
+            await resolvedSource.waitForFinalShutdown()
+        } else {
+            await lease.waitForFinalShutdown()
+        }
     }
 }
 #endif

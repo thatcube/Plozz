@@ -252,11 +252,16 @@ public struct MediaSourceMetadata: Hashable, Sendable, Codable {
 /// Everything `FeaturePlayback` needs to start playing an item.
 ///
 /// Built by a provider's `playbackInfo(for:)`. The provider decides whether to
-/// direct-play or transcode and hands back a ready-to-play URL.
+/// direct-play or transcode and hands back either a legacy resolved URL or a
+/// credential-free typed source.
 public struct PlaybackRequest: Hashable, Sendable {
     public var item: MediaItem
-    /// The resolved media stream URL (HLS or direct file).
-    public var streamURL: URL
+    /// Credential-free source resolved at the engine boundary. Network files
+    /// use this path and never carry a diagnostic or placeholder URL.
+    public var playbackSource: PlaybackSource?
+    /// Legacy resolved media stream URL (HLS or direct file) while managed
+    /// providers migrate to typed authenticated-HTTP locators.
+    public var streamURL: URL?
     /// An optional *separate* audio track to be muxed with `streamURL` at playback
     /// time. Used for adaptive sources whose video and audio are delivered as two
     /// distinct streams (e.g. a high-resolution YouTube DASH trailer: `streamURL`
@@ -336,6 +341,7 @@ public struct PlaybackRequest: Hashable, Sendable {
         sourceFileName: String? = nil
     ) {
         self.item = item
+        self.playbackSource = nil
         self.streamURL = streamURL
         self.externalAudioURL = externalAudioURL
         self.playSessionID = playSessionID
@@ -348,6 +354,40 @@ public struct PlaybackRequest: Hashable, Sendable {
         self.localRemuxSource = localRemuxSource
         self.scrubPreview = scrubPreview
         self.isManifestStream = isTranscoding || streamURL.pathExtension.lowercased() == "m3u8"
+        self.sourceProvider = sourceProvider
+        self.serverName = serverName
+        self.sourceFileName = sourceFileName
+    }
+
+    public init(
+        item: MediaItem,
+        playbackSource: PlaybackSource,
+        externalAudioURL: URL? = nil,
+        playSessionID: String? = nil,
+        audioTracks: [MediaTrack] = [],
+        subtitleTracks: [MediaTrack] = [],
+        startPosition: TimeInterval = 0,
+        deliveryMode: PlaybackDiagnostics.PlaybackMode = .directPlay,
+        sourceMetadata: MediaSourceMetadata? = nil,
+        scrubPreview: ScrubPreviewSource? = nil,
+        sourceProvider: ProviderKind? = nil,
+        serverName: String? = nil,
+        sourceFileName: String? = nil
+    ) {
+        self.item = item
+        self.playbackSource = playbackSource
+        self.streamURL = nil
+        self.externalAudioURL = externalAudioURL
+        self.playSessionID = playSessionID
+        self.audioTracks = audioTracks
+        self.subtitleTracks = subtitleTracks
+        self.startPosition = startPosition
+        self.isTranscoding = false
+        self.deliveryMode = deliveryMode
+        self.sourceMetadata = sourceMetadata
+        self.localRemuxSource = nil
+        self.scrubPreview = scrubPreview
+        self.isManifestStream = playbackSource.isManifestStream
         self.sourceProvider = sourceProvider
         self.serverName = serverName
         self.sourceFileName = sourceFileName

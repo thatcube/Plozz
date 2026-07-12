@@ -164,8 +164,14 @@ public final class NativeVideoEngine: VideoEngine {
         teardownPlayer()
 
         self.request = request
+        guard let streamURL = request.streamURL else {
+            let error = AppError.unknown("Native playback requires a URL source")
+            status = .failed(error)
+            onFailure?(error)
+            return
+        }
 
-        let asset = makeAsset(for: request)
+        let asset = makeAsset(for: request, streamURL: streamURL)
         let item = AVPlayerItem(asset: asset)
         // Apply in-app subtitle styling overrides if the user set any.
         item.textStyleRules = style.textStyleRules()
@@ -294,10 +300,10 @@ public final class NativeVideoEngine: VideoEngine {
     /// otherwise never see, wrap the stream in a synthesized HLS playlist that
     /// adds those subtitles as selectable renditions. Otherwise play the stream
     /// URL directly (transcoded HLS already carries subtitles in its manifest).
-    private func makeAsset(for request: PlaybackRequest) -> AVURLAsset {
+    private func makeAsset(for request: PlaybackRequest, streamURL: URL) -> AVURLAsset {
         subtitleLoader = nil
         guard !request.isManifestStream else {
-            return AVURLAsset(url: request.streamURL)
+            return AVURLAsset(url: streamURL)
         }
         let injectables: [InjectableSubtitle] = request.subtitleTracks.compactMap { track in
             guard track.kind == .subtitle, let url = track.deliveryURL else { return nil }
@@ -311,10 +317,10 @@ public final class NativeVideoEngine: VideoEngine {
             )
         }
         guard !injectables.isEmpty, let duration = request.item.runtime, duration > 0 else {
-            return AVURLAsset(url: request.streamURL)
+            return AVURLAsset(url: streamURL)
         }
         let composer = SubtitleHLSComposer(
-            videoURL: request.streamURL,
+            videoURL: streamURL,
             durationSeconds: duration,
             subtitles: injectables
         )

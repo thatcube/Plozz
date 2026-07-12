@@ -182,6 +182,16 @@ final class TransportIOReaderTests: XCTestCase {
         XCTAssertEqual(read(reader, count: 2).data, Data([10, 11]))
     }
 
+    func testOverflowingRelativeSeekDoesNotMoveCursor() {
+        let reader = TransportIOReader(source: FakeTransportByteSource(payload))
+
+        XCTAssertEqual(reader.seek(offset: 10, whence: SEEK_SET), 10)
+        XCTAssertEqual(reader.seek(offset: Int64.max, whence: SEEK_CUR), -1)
+        XCTAssertEqual(read(reader, count: 2).data, Data([10, 11]))
+        XCTAssertEqual(reader.seek(offset: Int64.max, whence: SEEK_END), -1)
+        XCTAssertEqual(read(reader, count: 2).data, Data([12, 13]))
+    }
+
     func testReadFailureReturnsNegative() {
         let source = FakeTransportByteSource(payload)
         source.failReads()

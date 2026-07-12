@@ -8,11 +8,9 @@ import MediaTransportCore
 /// but everything a real server would compute (libraries, detail, search) is
 /// synthesised from a local scan (`ShareLibraryStore`) instead of network calls.
 ///
-/// The share connection is carried by the ordinary `UserSession`: the synthetic
-/// `MediaServer.baseURL` is `smb://host[:port]/share`, `session.userName` is the
-/// SMB account (or "guest"), and `session.accessToken` is the password (already
-/// Keychain-backed by `SessionStore`). Playback hands back an `smb://` URL that
-/// `EnginePlozzigen` turns into an engine `SMBConnection` custom source.
+/// Connection metadata remains in the ordinary `UserSession`; credentials are
+/// resolved only by the transport adapter. Playback returns a credential-free
+/// `NetworkFileLocator` that EnginePlozzigen opens through the shared resolver.
 public struct ShareProvider: MediaProvider {
     public let kind: ProviderKind = .mediaShare
     public let session: UserSession
@@ -20,25 +18,19 @@ public struct ShareProvider: MediaProvider {
 
     private let store: ShareLibraryStore
     private let watchStore: ShareWatchStore
-    private let host: String
-    private let port: Int?
-    private let share: String
-    private let rootPathComponents: [String]
     private let credentialRevision: CredentialRevision
     private let sessionFactory: ShareTransportSessionFactory
     private let catalogOverride: ShareCatalogStore?
-    /// Injected engine-side SMB header prober (nil in tests / when the engine layer
-    /// isn't wired). Used to obtain real per-file stream facts for a share that has
-    /// no server metadata. Currently drives an opt-in on-device timing measurement
-    /// (env `PLZXPROBE=1`); becomes the source for cached facts in Phase 1.
-    private let streamProber: SMBStreamProbing?
+    /// Injected engine-side network-file header prober. It uses the same typed
+    /// locator and transport resolver as playback.
+    private let streamProber: NetworkFileStreamProbing?
 
     public init(
         session: UserSession,
         localMediaContext: LocalMediaContext,
         credentialRevision: CredentialRevision,
         sessionFactory: @escaping ShareTransportSessionFactory,
-        streamProber: SMBStreamProbing? = nil
+        streamProber: NetworkFileStreamProbing? = nil
     ) {
         self.init(
             session: session,
@@ -64,7 +56,7 @@ public struct ShareProvider: MediaProvider {
         sessionFactory: @escaping ShareTransportSessionFactory = { _ in
             throw MediaTransportError.unsupportedCapability("test transport")
         },
-        streamProber: SMBStreamProbing? = nil,
+        streamProber: NetworkFileStreamProbing? = nil,
         catalogStore: ShareCatalogStore? = nil
     ) {
         self.session = session
@@ -77,11 +69,6 @@ public struct ShareProvider: MediaProvider {
         self.catalogOverride = catalogStore
         self.credentialRevision = credentialRevision
         self.sessionFactory = sessionFactory
-        let parsed = Self.parse(session.server.baseURL)
-        self.host = parsed.host
-        self.port = parsed.port
-        self.share = parsed.share
-        self.rootPathComponents = parsed.rootPathComponents
         let browser = ShareTransportBrowser(
             role: .metadata,
             sessionFactory: sessionFactory
@@ -222,10 +209,11 @@ public struct ShareProvider: MediaProvider {
             guard let relPath = await self.store.path(forItemID: itemID) else { return }
             let ext = (relPath as NSString).pathExtension.lowercased()
             let videoExts: Set<String> = ["mkv", "mp4", "m4v", "mov", "avi", "ts", "m2ts", "mts", "webm"]
-            guard videoExts.contains(ext), let url = self.smbURL(forRelativePath: relPath) else { return }
+            guard videoExts.contains(ext),
+                  let locator = try? await self.networkFileLocator(for: relPath) else { return }
             let name = (relPath as NSString).lastPathComponent
             let start = Date()
-            let facts = await prober.probe(smbURL: url)
+            let facts = await prober.probe(locator: locator)
             let ms = Int(Date().timeIntervalSince(start) * 1000)
             if let f = facts {
                 HandoffDiagnostics.emit("PROBE ok file=\(name) container=\(ext) elapsed=\(ms)ms range=\(f.videoRangeType ?? "-") res=\(f.videoWidth ?? 0)x\(f.videoHeight ?? 0) vcodec=\(f.videoCodec ?? "-") acodec=\(f.audioCodec ?? "-") ch=\(f.audioChannels ?? 0) atmos=\(f.audioIsAtmos) dur=\(Int(f.durationSeconds ?? 0))s")
@@ -332,9 +320,7 @@ public struct ShareProvider: MediaProvider {
         } else {
             throw AppError.unknown("Item is not directly playable: \(itemID)")
         }
-        guard let url = smbURL(forRelativePath: relPath) else {
-            throw AppError.unknown("Couldn't build a stream URL for \(relPath)")
-        }
+        let locator = try await networkFileLocator(for: relPath)
         let item = try await item(id: canonicalItemID)
         // Resume from the newest canonical/legacy member-file state so a movie
         // watched before version grouping still resumes after the upgrade.
@@ -348,12 +334,43 @@ public struct ShareProvider: MediaProvider {
         let subtitleTracks = (try? await discoverSidecarSubtitles(forVideoRelPath: relPath)) ?? []
         return PlaybackRequest(
             item: playItem,
-            streamURL: url,
+            playbackSource: .networkFile(locator),
             subtitleTracks: subtitleTracks,
             startPosition: startPosition,
             sourceProvider: .mediaShare,
             serverName: session.server.name,
             sourceFileName: (relPath as NSString).lastPathComponent
+        )
+    }
+
+    func networkFileLocator(for relativePath: String) async throws -> NetworkFileLocator {
+        let entry = try await store.stat(relativePath: relativePath)
+        guard entry.kind == .file,
+              let size = entry.size,
+              let modifiedAt = entry.modifiedAt else {
+            throw MediaTransportError.protocolViolation(
+                reason: "network file lacks a stable size or modification time"
+            )
+        }
+        let identity = try RemoteFileIdentity(
+            kind: .modificationTime,
+            modifiedAt: modifiedAt
+        )
+        let representation = try RemoteFileRepresentation(
+            size: size,
+            identity: identity,
+            consistency: .changeDetecting
+        )
+        return try NetworkFileLocator(
+            accountID: localMediaContext.accountID,
+            sourceID: localMediaContext.accountID,
+            credentialRevision: credentialRevision,
+            relativePath: relativePath,
+            representation: representation,
+            formatHint: MediaFormatHint(
+                container: (relativePath as NSString).pathExtension,
+                mimeType: entry.mimeType
+            )
         )
     }
 
@@ -572,31 +589,6 @@ public struct ShareProvider: MediaProvider {
         nil
     }
 
-    // MARK: - SMB URL
-
-    /// Build `smb://[user[:password]@]host[:port]/share/<relPath>` with each
-    /// path segment percent-encoded, for the engine's custom SMB source.
-    func smbURL(forRelativePath relPath: String) -> URL? {
-        var comps = URLComponents()
-        comps.scheme = "smb"
-        comps.host = Self.bracketedHostIfIPv6(host)
-        comps.port = port
-        if !session.userName.isEmpty {
-            comps.user = session.userName
-            if !session.accessToken.isEmpty { comps.password = session.accessToken }
-        } else if !session.accessToken.isEmpty {
-            comps.user = "guest"
-            comps.password = session.accessToken
-        }
-        // Share + each relative segment, joined so URLComponents percent-encodes
-        // spaces and other reserved characters correctly.
-        let segments = [share]
-            + rootPathComponents
-            + relPath.split(separator: "/").map(String.init)
-        comps.path = "/" + segments.joined(separator: "/")
-        return comps.url
-    }
-
     /// URLComponents produces `nil` for a bare IPv6 literal host (e.g. `fe80::1`)
     /// — it must be bracketed. IPv4 and hostnames never contain a colon, so this
     /// only wraps genuine IPv6 literals (and leaves already-bracketed ones alone).
@@ -608,9 +600,8 @@ public struct ShareProvider: MediaProvider {
     /// The inverse: `URLComponents.host` returns an IPv6 literal *bracketed*
     /// (`"[fe80::1]"`) on Apple Foundation, but the SMB layer (`NWEndpoint.Host`)
     /// needs the bare literal — a bracketed string is treated as an unresolvable
-    /// DNS name. Strip a matching surrounding `[...]` so the browser/engine get
-    /// `fe80::1`. `smbURL` re-brackets it for URL construction via
-    /// `bracketedHostIfIPv6`.
+    /// DNS name. Strip a matching surrounding `[...]` so the transport gets
+    /// `fe80::1`.
     public static func unbracketedHost(_ host: String) -> String {
         guard host.hasPrefix("["), host.hasSuffix("]"), host.count >= 2 else { return host }
         return String(host.dropFirst().dropLast())

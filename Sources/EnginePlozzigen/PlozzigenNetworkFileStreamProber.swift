@@ -1,47 +1,38 @@
 import Foundation
 import CoreModels
 import AetherEngine
-import AetherEngineSMB
+import MediaTransportCore
 
-/// Probes an SMB file's headers for real stream facts, via AetherEngine's demuxer
-/// over the SMB byte reader (AVPlayer can't open smb://). Runs entirely OFF the main
-/// actor. Injected into ShareProvider so ProviderShare stays engine-agnostic.
+/// Probes a network file's headers through the same transport resolver and
+/// representation-bound source used by playback.
 ///
 /// NOTE: this uses AetherEngine's standard `probe(source:)`, which currently opens
 /// with the engine's default demux budget (not the bounded browse budget) — the
 /// on-device timing measurement will tell us whether that resolves fast enough over
 /// SMB for the common (well-formed) case, or whether we need a bounded/header-only
 /// fast path (plan Phase 2).
-public struct PlozzigenSMBStreamProber: SMBStreamProbing {
+public struct PlozzigenNetworkFileStreamProber: NetworkFileStreamProbing {
     /// A dedicated serial queue for the BLOCKING find_stream_info call, so it never
     /// occupies a Swift concurrency (cooperative) thread — a blocked cooperative
     /// thread starves all other async work (image loading, enrichment, UI). Serial,
     /// so it also can't run two blocking probes at once.
-    private static let probeQueue = DispatchQueue(label: "com.thatcube.Plozz.smb-stream-probe", qos: .utility)
+    private static let probeQueue = DispatchQueue(
+        label: "com.thatcube.Plozz.network-file-stream-probe",
+        qos: .utility
+    )
 
-    public init() {}
+    private let resolver: any MediaTransportNetworkFileResolving
 
-    public func probe(smbURL: URL) async -> ProbedStreamFacts? {
-        guard let parsed = try? SMBURL.parse(smbURL.absoluteString) else { return nil }
+    public init(resolver: any MediaTransportNetworkFileResolving) {
+        self.resolver = resolver
+    }
 
-        let connection: SMBConnection
-        do {
-            connection = try await SMBConnection.connect(
-                server: parsed.server,
-                share: parsed.share,
-                path: parsed.path,
-                user: parsed.user,
-                password: parsed.password
-            )
-        } catch {
-            return nil
-        }
-        let reader = TransportIOReader(
-            source: SMBTransportByteSource(connection: connection)
-        )
+    public func probe(locator: NetworkFileLocator) async -> ProbedStreamFacts? {
+        guard let resolved = try? await resolver.resolve(locator) else { return nil }
+        let reader = TransportIOReader(resolvedSource: resolved)
         let source = MediaSource.custom(
             reader,
-            formatHint: Self.formatHint(for: parsed.path)
+            formatHint: Self.formatHint(for: locator.relativePath)
         )
 
         // find_stream_info is a BLOCKING call; run it on a dedicated serial thread so

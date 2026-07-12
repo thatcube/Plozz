@@ -134,6 +134,61 @@ private final class RacingAdapter: MediaTransportAdapter, @unchecked Sendable {
     }
 }
 
+private final class ResolvedSourceFileSystem: MediaTransportFileSystem, @unchecked Sendable {
+    let source: FakeByteSource
+
+    init(source: FakeByteSource) {
+        self.source = source
+    }
+
+    func validate() async throws {}
+
+    func probe() async throws -> MediaTransportProbe {
+        MediaTransportProbe(
+            capabilities: try MediaTransportCapabilities(
+                supportsList: true,
+                supportsStat: true,
+                supportsBoundedWholeFileRead: true,
+                byteRangeBehavior: .randomAccess,
+                maximumBoundedWholeFileReadBytes: 1_024,
+                consistency: .representationBound
+            )
+        )
+    }
+
+    func list(relativePath: String) async throws -> [RemoteFileEntry] { [] }
+
+    func stat(relativePath: String) async throws -> RemoteFileEntry {
+        try RemoteFileEntry(relativePath: relativePath, kind: .file, size: source.byteSize)
+    }
+
+    func readSmallFile(relativePath: String, maximumBytes: Int) async throws -> Data {
+        source.data.prefix(maximumBytes)
+    }
+
+    func openSource(for locator: NetworkFileLocator) async throws -> MediaTransportSourceLease {
+        MediaTransportSourceLease(source: source)
+    }
+}
+
+private final class ResolvedSourceSession: MediaTransportSession, @unchecked Sendable {
+    let key: MediaTransportSessionKey
+    let fileSystem: any MediaTransportFileSystem
+    private let lock = NSLock()
+    private var shutdownCountStorage = 0
+
+    init(key: MediaTransportSessionKey, fileSystem: any MediaTransportFileSystem) {
+        self.key = key
+        self.fileSystem = fileSystem
+    }
+
+    var shutdownCount: Int { lock.withLock { shutdownCountStorage } }
+
+    func shutdown() async {
+        lock.withLock { shutdownCountStorage += 1 }
+    }
+}
+
 final class ContractsAndResolverTests: XCTestCase {
     func testRemoteEntryNormalizesAndValidatesSecretSafeMetadata() throws {
         let diagnostic = try MediaTransportDiagnostic(code: "CACHE.HIT")
@@ -326,6 +381,85 @@ final class ContractsAndResolverTests: XCTestCase {
         second.release()
         let finalized = await waitUntil { session.shutdownCount == 1 }
         XCTAssertTrue(finalized)
+    }
+
+    func testNetworkFileResolutionPinsSessionUntilFinalCursorDrains() async throws {
+        let revision = CredentialRevision()
+        let key = try makeSessionKey(
+            credentialRevision: revision,
+            role: .playback
+        )
+        let source = FakeByteSource(data: Data([1, 2, 3]))
+        let fileSystem = ResolvedSourceFileSystem(source: source)
+        let session = ResolvedSourceSession(key: key, fileSystem: fileSystem)
+        let registry = MediaTransportResolverRegistry()
+        try await registry.register(session: session)
+        let resolver = MediaTransportNetworkFileResolver(registry: registry) { _ in key }
+        let identity = try RemoteFileIdentity(kind: .snapshot, value: "snapshot-1")
+        let representation = try RemoteFileRepresentation(
+            size: 3,
+            identity: identity,
+            consistency: .stronglyBound
+        )
+        let locator = try NetworkFileLocator(
+            accountID: key.accountID,
+            sourceID: key.accountID,
+            credentialRevision: revision,
+            relativePath: "movie.mkv",
+            representation: representation
+        )
+
+        let resolved = try await resolver.resolve(locator)
+        let cursor = try XCTUnwrap(resolved.sourceLease.makeCursor())
+        await registry.retire(
+            accountID: key.accountID,
+            credentialRevision: revision
+        )
+        let shutdown = Task { await resolved.waitForFinalShutdown() }
+        await Task.yield()
+
+        XCTAssertEqual(source.shutdownCount, 0)
+        XCTAssertEqual(session.shutdownCount, 0)
+
+        cursor.close()
+        await shutdown.value
+        XCTAssertEqual(source.shutdownCount, 1)
+        let sessionFinalized = await waitUntil { session.shutdownCount == 1 }
+        XCTAssertTrue(sessionFinalized)
+    }
+
+    func testNetworkFileResolverRejectsMismatchedSessionIdentity() async throws {
+        let revision = CredentialRevision()
+        let key = try makeSessionKey(
+            accountID: "other-account",
+            credentialRevision: revision,
+            role: .playback
+        )
+        let registry = MediaTransportResolverRegistry()
+        let resolver = MediaTransportNetworkFileResolver(registry: registry) { _ in key }
+        let identity = try RemoteFileIdentity(kind: .snapshot, value: "snapshot-1")
+        let representation = try RemoteFileRepresentation(
+            size: 1,
+            identity: identity,
+            consistency: .stronglyBound
+        )
+        let locator = try NetworkFileLocator(
+            accountID: "account",
+            sourceID: "account",
+            credentialRevision: revision,
+            relativePath: "movie.mkv",
+            representation: representation
+        )
+
+        do {
+            _ = try await resolver.resolve(locator)
+            XCTFail("mismatched account accepted")
+        } catch let error as MediaTransportError {
+            XCTAssertEqual(
+                error,
+                .invalidInput(reason: "network-file session identity mismatch")
+            )
+        }
     }
 
     func testRacedConnectionCannotResurrectRetiredSession() async throws {

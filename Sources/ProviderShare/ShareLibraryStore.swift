@@ -48,6 +48,10 @@ actor ShareLibraryStore {
         try await browser.listDirectory(relPath)
     }
 
+    func stat(relativePath: String) async throws -> RemoteFileEntry {
+        try await browser.stat(relativePath)
+    }
+
     /// Read a file's bytes off the share (share-relative path). Used to pull small
     /// sidecar subtitles into a local temp for the overlay.
     func readFile(_ relPath: String) async throws -> Data {

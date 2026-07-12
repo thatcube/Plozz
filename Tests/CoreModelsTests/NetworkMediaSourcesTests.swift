@@ -127,6 +127,13 @@ final class NetworkMediaSourcesTests: XCTestCase {
         XCTAssertEqual(locator.formatHint.container, "mkv")
         XCTAssertEqual(locator.formatHint.mimeType, "video/x-matroska")
         XCTAssertFalse(PlaybackSource.networkFile(locator).isManifestStream)
+        let request = PlaybackRequest(
+            item: MediaItem(id: "item", title: "Film", kind: .movie),
+            playbackSource: .networkFile(locator)
+        )
+        XCTAssertNil(request.streamURL)
+        XCTAssertEqual(request.playbackSource, .networkFile(locator))
+        XCTAssertFalse(request.isManifestStream)
 
         XCTAssertThrowsError(
             try NetworkFileLocator(

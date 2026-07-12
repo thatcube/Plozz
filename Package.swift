@@ -64,18 +64,12 @@ let package = Package(
         // decodes cleanly (#92), software-path seek holds last frame (#90). See
         // AGENTS.local.md › "Playback engine (AetherEngine / Plozzigen)".
         //
-        // Pinned to a fork commit that carries the tvOS SMB transport fix on top
-        // of the backward-seek muxer wedge fix. AetherEngine's stock SMB transport
-        // (`SMBConnection`, AMSMB2/libsmb2) fails POSIX EPERM on tvOS — a known,
-        // unfixed libsmb2-on-iOS/tvOS bug (AMSMB2 #32/#63/#64). The fork swaps that
-        // transport to kishikawakatsumi/SMBClient (pure-Swift, MIT, speaks SMB2
-        // over NWConnection), which completes a full handshake on-device where
-        // libsmb2 does not. Same public surface, so `SMBConnection`/`SMBIOReader`/
-        // `SMBURL` are unchanged. Upstreamed as superuser404notfound/AetherEngine
-        // PR #97; move this pin back to the upstream merge commit once it lands.
-        // (Also includes PR #94: backward-seek muxer wedge fix — under +delay_moov
+        // Pinned to the fork commit containing PR #94's backward-seek muxer wedge
+        // fix. SMB now enters AetherEngine only through Plozz's protocol-neutral
+        // custom-source bridge; the engine's legacy SMB URL product is not linked.
+        // Under +delay_moov,
         // the fMP4 muxer needs a PARSED audio packet to build the AC-3/E-AC-3/TrueHD
-        // sample entry, else a mid-file backward seek wedged the muxer.) See
+        // sample entry, else a mid-file backward seek wedged the muxer. See
         // docs/media-share-proposal.md § 5.1.
         .package(url: "https://github.com/thatcube/AetherEngine", revision: "b62837d52e78af494746d616202426654a956dda"),
         // NOTE: FFmpegBuild (FFmpeg n8.1.x decode-only) and LibDovi (Dolby Vision
@@ -335,13 +329,6 @@ let package = Package(
                 "MediaTransportCore",
                 "FeaturePlayback",
                 .product(name: "AetherEngine", package: "AetherEngine"),
-                // SMB2/3 byte-source product. Lets the engine wrapper play a
-                // media-share file over an `IOReader` custom source with no server.
-                // Second-class transport behind Plex/Jellyfin; see
-                // docs/media-share-proposal.md. The engine's `SMBConnection` speaks
-                // SMB2 over NWConnection (pinned fork / PR #97), so it works on
-                // tvOS where the stock AMSMB2/libsmb2 transport EPERMs.
-                .product(name: "AetherEngineSMB", package: "AetherEngine"),
             ]
         ),
 

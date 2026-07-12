@@ -596,7 +596,7 @@ final class JellyfinProviderMappingTests: XCTestCase {
         XCTAssertEqual(request.playSessionID, "ps1")
         XCTAssertEqual(request.audioTracks.count, 1)
         XCTAssertEqual(request.subtitleTracks.count, 1)
-        let url = request.streamURL.absoluteString
+        let url = try XCTUnwrap(request.streamURL).absoluteString
         XCTAssertTrue(url.contains("/Videos/i1/stream.mp4"))
         XCTAssertTrue(url.contains("api_key=TOKEN"))
         XCTAssertTrue(url.contains("mediaSourceId=src1"))
@@ -648,7 +648,7 @@ final class JellyfinProviderMappingTests: XCTestCase {
         let provider = JellyfinProvider(session: makeSession(), http: stub)
 
         let request = try await provider.playbackInfo(for: "i1")
-        let url = request.streamURL.absoluteString
+        let url = try XCTUnwrap(request.streamURL).absoluteString
         XCTAssertTrue(url.contains("/videos/i1/master.m3u8"), url)
         XCTAssertTrue(url.hasPrefix("http://host:8096"), url)
         XCTAssertFalse(url.contains("static=true"))

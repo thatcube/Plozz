@@ -61,6 +61,20 @@ public actor MediaTransportResolverRegistry: MediaTransportResolving {
 
     public init() {}
 
+    public init(adapter: any MediaTransportAdapter) {
+        adapters[adapter.transportIdentifier.lowercased()] = adapter
+    }
+
+    public init(adapters: [any MediaTransportAdapter]) throws {
+        for adapter in adapters {
+            let identifier = adapter.transportIdentifier.lowercased()
+            guard self.adapters[identifier] == nil else {
+                throw MediaTransportError.invalidInput(reason: "adapter already registered")
+            }
+            self.adapters[identifier] = adapter
+        }
+    }
+
     public func register(adapter: any MediaTransportAdapter) throws {
         let identifier = adapter.transportIdentifier.lowercased()
         guard adapters[identifier] == nil else {

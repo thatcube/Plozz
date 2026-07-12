@@ -846,6 +846,8 @@ public final class AppState {
     private var machine = SessionStateMachine()
     private let accountStore: AccountPersisting
     private let registry: ProviderRegistry
+    public let networkFileResolver: any MediaTransportNetworkFileResolving
+    private let networkFileResolverRegistry: MediaTransportResolverRegistry?
     /// Optional tvOS system-user seam (default app-owned no-op). See
     /// `SystemProfileBridging`.
     private let systemBridge: SystemProfileBridging
@@ -912,6 +914,7 @@ public final class AppState {
     public init(
         accountStore: AccountPersisting? = nil,
         registry: ProviderRegistry? = nil,
+        networkFileResolver: (any MediaTransportNetworkFileResolving)? = nil,
         profilesModel: ProfilesModel? = nil,
         systemBridge: SystemProfileBridging? = nil,
         subtitleBehaviorModel: SubtitleBehaviorModel? = nil,
@@ -939,7 +942,22 @@ public final class AppState {
     ) {
         let resolvedAccountStore = accountStore ?? Self.makeDefaultAccountStore()
         self.accountStore = resolvedAccountStore
-        self.registry = registry ?? Self.makeDefaultRegistry(accountStore: resolvedAccountStore)
+        let resolvedNetworkFileResolver: any MediaTransportNetworkFileResolving
+        if let networkFileResolver {
+            resolvedNetworkFileResolver = networkFileResolver
+            self.networkFileResolverRegistry = nil
+        } else {
+            let composition = Self.makeDefaultNetworkFileResolver(
+                accountStore: resolvedAccountStore
+            )
+            resolvedNetworkFileResolver = composition.resolver
+            self.networkFileResolverRegistry = composition.registry
+        }
+        self.networkFileResolver = resolvedNetworkFileResolver
+        self.registry = registry ?? Self.makeDefaultRegistry(
+            accountStore: resolvedAccountStore,
+            networkFileResolver: resolvedNetworkFileResolver
+        )
         self.profilesModel = profilesModel ?? Self.makeDefaultProfilesModel()
         self.systemBridge = systemBridge ?? Self.makeDefaultSystemBridge()
         self.ratingsProvider = ratingsProvider ?? RatingsServiceFactory.make()
@@ -1095,28 +1113,11 @@ public final class AppState {
     /// Registers the providers this build links. Each backend is a single
     /// `register(kind, …)` line; nothing else in core changes.
     private static func makeDefaultRegistry(
-        accountStore: any AccountPersisting
+        accountStore: any AccountPersisting,
+        networkFileResolver: any MediaTransportNetworkFileResolving
     ) -> ProviderRegistry {
         let registry = ProviderRegistry()
-        let smbAdapter = SMBMediaTransportAdapter { accountID, revision in
-            let envelope = try accountStore.mediaShareCredential(
-                for: accountID,
-                revision: revision
-            )
-            guard envelope.transport == .smb else {
-                throw MediaTransportError.unsupportedCapability("non-SMB credential")
-            }
-            let credential: SMBMediaTransportCredential
-            switch envelope.authentication {
-            case .anonymous:
-                credential = .anonymous
-            case let .password(username, password):
-                credential = .password(username: username, password: password)
-            case .bearer, .generatedKey, .noCredentials:
-                throw MediaTransportError.unsupportedCapability("SMB authentication")
-            }
-            return SMBMediaTransportConfiguration(credential: credential)
-        }
+        let smbAdapter = makeSMBAdapter(accountStore: accountStore)
         registry.register(.jellyfin) { context in
             JellyfinProvider(
                 session: context.session,
@@ -1166,10 +1167,85 @@ public final class AppState {
                 localMediaContext: localMediaContext,
                 credentialRevision: credentialRevision,
                 sessionFactory: sessionFactory,
-                streamProber: PlozzigenSMBStreamProber()
+                streamProber: PlozzigenNetworkFileStreamProber(
+                    resolver: networkFileResolver
+                )
             )
         }
         return registry
+    }
+
+    private struct NetworkFileResolverComposition {
+        let resolver: any MediaTransportNetworkFileResolving
+        let registry: MediaTransportResolverRegistry
+    }
+
+    private static func makeDefaultNetworkFileResolver(
+        accountStore: any AccountPersisting
+    ) -> NetworkFileResolverComposition {
+        let transportRegistry = MediaTransportResolverRegistry(
+            adapter: makeSMBAdapter(accountStore: accountStore)
+        )
+        let resolver = MediaTransportNetworkFileResolver(
+            registry: transportRegistry
+        ) { locator in
+            guard locator.sourceID == locator.accountID,
+                  let account = accountStore.loadAccounts().first(where: {
+                      $0.id == locator.accountID
+                  }),
+                  account.server.provider == .mediaShare,
+                  account.credentialRevision == locator.credentialRevision else {
+                throw MediaTransportError.authentication(reason: "inactive network-file identity")
+            }
+            let baseURL = account.server.baseURL
+            guard baseURL.scheme?.lowercased() == "smb",
+                  let host = baseURL.host else {
+                throw MediaTransportError.invalidInput(reason: "invalid SMB account endpoint")
+            }
+            let endpoint = try MediaTransportEndpointIdentity(
+                transportIdentifier: MediaShareTransportKind.smb.rawValue,
+                host: host,
+                port: baseURL.port,
+                rootPath: baseURL.path
+            )
+            return MediaTransportSessionKey(
+                accountID: account.id,
+                credentialRevision: account.credentialRevision,
+                endpoint: endpoint,
+                trustRevision: UUID(
+                    uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+                ),
+                role: .playback
+            )
+        }
+        return NetworkFileResolverComposition(
+            resolver: resolver,
+            registry: transportRegistry
+        )
+    }
+
+    private static func makeSMBAdapter(
+        accountStore: any AccountPersisting
+    ) -> SMBMediaTransportAdapter {
+        SMBMediaTransportAdapter { accountID, revision in
+            let envelope = try accountStore.mediaShareCredential(
+                for: accountID,
+                revision: revision
+            )
+            guard envelope.transport == .smb else {
+                throw MediaTransportError.unsupportedCapability("non-SMB credential")
+            }
+            let credential: SMBMediaTransportCredential
+            switch envelope.authentication {
+            case .anonymous:
+                credential = .anonymous
+            case let .password(username, password):
+                credential = .password(username: username, password: password)
+            case .bearer, .generatedKey, .noCredentials:
+                throw MediaTransportError.unsupportedCapability("SMB authentication")
+            }
+            return SMBMediaTransportConfiguration(credential: credential)
+        }
     }
 
     /// Restores stored accounts on launch (relaunch without re-login). Shows the
@@ -1628,11 +1704,16 @@ public final class AppState {
     public func didAuthenticate(_ session: UserSession) {
         let isFirstRun = accounts.isEmpty && !profilesModel.firstRunProfileSetupComplete
         let account = Account(from: session)
+        let previousAccount = accounts.first { $0.id == account.id }
         do {
             try accountStore.add(account, token: session.accessToken)
         } catch {
             apply(.authenticationFailed(.unknown("")))
             return
+        }
+        if let previousAccount,
+           previousAccount.credentialRevision != account.credentialRevision {
+            retireNetworkFileRevision(for: previousAccount)
         }
         reloadAccounts()
         // Flow finished — next add-account starts at the chooser.
@@ -1656,8 +1737,13 @@ public final class AppState {
         var addedIDs: [String] = []
         for session in sessions {
             let account = Account(from: session)
+            let previousAccount = accounts.first { $0.id == account.id }
             do {
                 try accountStore.add(account, token: session.accessToken)
+                if let previousAccount,
+                   previousAccount.credentialRevision != account.credentialRevision {
+                    retireNetworkFileRevision(for: previousAccount)
+                }
                 addedIDs.append(account.id)
             } catch {
                 continue // Skip a failed add; keep the rest of the batch.
@@ -1933,10 +2019,14 @@ public final class AppState {
 
     /// Removes one account; drops to onboarding if it was the last.
     public func removeAccount(id: String) {
-        let shareAccountKey = accounts.first {
-            $0.id == id && $0.server.provider == .mediaShare
-        }?.id
+        let removedAccount = accounts.first { $0.id == id }
+        let shareAccountKey = removedAccount?.server.provider == .mediaShare
+            ? removedAccount?.id
+            : nil
         try? accountStore.remove(id: id)
+        if let removedAccount {
+            retireNetworkFileRevision(for: removedAccount)
+        }
         if let shareAccountKey {
             Task {
                 await ShareLibraryControl.invalidate(accountKey: shareAccountKey)
@@ -1958,10 +2048,12 @@ public final class AppState {
 
     /// Removes every account (full reset).
     public func signOutAll() {
-        let shareAccountKeys = accounts
+        let removedAccounts = accounts
+        let shareAccountKeys = removedAccounts
             .filter { $0.server.provider == .mediaShare }
             .map(\.id)
         try? accountStore.clearAll()
+        removedAccounts.forEach(retireNetworkFileRevision)
         for accountKey in shareAccountKeys {
             Task {
                 await ShareLibraryControl.invalidate(accountKey: accountKey)
@@ -1979,10 +2071,12 @@ public final class AppState {
     /// first-run flag, and the recent-servers list — so the next server add
     /// reproduces a genuine first run. Surfaced from a DEBUG-only Settings row.
     public func resetToFirstRunForDebugging() {
-        let shareAccountKeys = accounts
+        let removedAccounts = accounts
+        let shareAccountKeys = removedAccounts
             .filter { $0.server.provider == .mediaShare }
             .map(\.id)
         try? accountStore.clearAll()
+        removedAccounts.forEach(retireNetworkFileRevision)
         for accountKey in shareAccountKeys {
             Task {
                 await ShareLibraryControl.invalidate(accountKey: accountKey)
@@ -2190,6 +2284,17 @@ public final class AppState {
     }
 
     // MARK: Internals
+
+    private func retireNetworkFileRevision(for account: Account) {
+        guard account.server.provider == .mediaShare,
+              let networkFileResolverRegistry else { return }
+        Task {
+            await networkFileResolverRegistry.retire(
+                accountID: account.id,
+                credentialRevision: account.credentialRevision
+            )
+        }
+    }
 
     private func reloadAccounts() {
         registry.invalidateCache()

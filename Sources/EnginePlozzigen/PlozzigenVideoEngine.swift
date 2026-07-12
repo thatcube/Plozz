@@ -8,7 +8,7 @@ import FeaturePlayback
 import UIKit
 #endif
 @preconcurrency import AetherEngine
-@preconcurrency import AetherEngineSMB
+import MediaTransportCore
 
 // The module and main class are both named "AetherEngine", so we typealias
 // the class to avoid ambiguity. All other public types (LoadOptions,
@@ -134,6 +134,7 @@ public final class PlozzigenVideoEngine: VideoEngine {
     // MARK: - Private
 
     private let engine: AEEngine
+    private let networkFileResolver: (any MediaTransportNetworkFileResolving)?
     private var cancellables = Set<AnyCancellable>()
     private var progressTimer: Task<Void, Never>?
     #if canImport(UIKit)
@@ -142,8 +143,11 @@ public final class PlozzigenVideoEngine: VideoEngine {
 
     // MARK: - Init
 
-    public init() throws {
+    public init(
+        networkFileResolver: (any MediaTransportNetworkFileResolving)? = nil
+    ) throws {
         self.engine = try AEEngine()
+        self.networkFileResolver = networkFileResolver
         #if canImport(UIKit)
         let surface = AetherPlayerView()
         engine.bind(view: surface)
@@ -182,12 +186,6 @@ public final class PlozzigenVideoEngine: VideoEngine {
         intendsPause = false
         furthestObservedPosition = startPosition
 
-        // Prefer the original range-readable URL (MKV bytes with embedded auth)
-        // for sources that have a localRemuxSource descriptor; AetherEngine
-        // handles the remux pipeline internally. Fall back to streamURL for
-        // standard HLS / direct-play URLs.
-        let url = request.localRemuxSource?.originalURL ?? request.streamURL
-
         // For >6-channel sources (7.1), prefer the lossless FLAC bridge so the
         // full 7.1 layout survives — the default `.surroundCompat` EAC3 bridge caps
         // at 5.1. Multichannel-LPCM AVRs get true 7.1; stereo-only routes downmix
@@ -205,19 +203,26 @@ public final class PlozzigenVideoEngine: VideoEngine {
         options.preferredSubtitleLanguages = request.preferredSubtitleLanguages
 
         do {
-            if url.scheme?.lowercased() == "smb" {
-                // Media-share transport (second-class, behind Plex/Jellyfin). The
-                // provider mints a per-play `smb://user:password@host/share/path`
-                // URL with in-memory credentials; nothing is persisted here. We
-                // wrap it in an `IOReader` custom source so AetherEngine demuxes
-                // the raw file over SMB with no server-side transcode.
-                let source = try await makeSMBSource(from: url)
+            if case .some(.networkFile(let locator)) = request.playbackSource {
+                guard let networkFileResolver else {
+                    throw MediaTransportError.unsupportedCapability(
+                        "network-file playback resolver"
+                    )
+                }
+                let resolvedSource = try await networkFileResolver.resolve(locator)
+                let source = MediaSource.custom(
+                    TransportIOReader(resolvedSource: resolvedSource),
+                    formatHint: Self.networkFileFormatHint(for: locator)
+                )
                 try await engine.load(
                     source: source,
                     startPosition: startPosition > 0 ? startPosition : nil,
                     options: options
                 )
             } else {
+                guard let url = request.localRemuxSource?.originalURL ?? request.streamURL else {
+                    throw MediaTransportError.invalidInput(reason: "missing playback source")
+                }
                 try await engine.load(
                     url: url,
                     startPosition: startPosition > 0 ? startPosition : nil,
@@ -229,9 +234,8 @@ public final class PlozzigenVideoEngine: VideoEngine {
             engine.play()
             syncTracks()
         } catch {
-            // Surface the real reason: AppError / SMBConnection.SMBError don't
-            // conform to LocalizedError, so `localizedDescription` collapses to a
-            // generic "error 0". `String(describing:)` keeps the actual message.
+            // Preserve typed error detail rather than collapsing it to a generic
+            // localized error code.
             let detail = String(describing: error)
             let err: AppError = .unknown(detail)
             status = .failed(err)
@@ -239,37 +243,11 @@ public final class PlozzigenVideoEngine: VideoEngine {
         }
     }
 
-    // MARK: - SMB custom source
-
-    /// Build an SMB `MediaSource` from an `smb://host[:port]/share/path/file.ext`
-    /// URL. Parses it with the engine's `SMBURL`, opens an `SMBConnection`
-    /// (NWConnection-backed SMB2, NTLMv2 / guest, read-only), and wraps it in an
-    /// Plozz's lease-aware transport reader for the engine's custom-source path.
-    private func makeSMBSource(from url: URL) async throws -> MediaSource {
-        let parsed: SMBURL
-        do {
-            parsed = try SMBURL.parse(url.absoluteString)
-        } catch {
-            throw AppError.unknown("Malformed SMB URL: \(String(describing: error))")
-        }
-        let connection = try await SMBConnection.connect(
-            server: parsed.server,
-            share: parsed.share,
-            path: parsed.path,
-            user: parsed.user,
-            password: parsed.password
-        )
-        return .custom(
-            TransportIOReader(source: SMBTransportByteSource(connection: connection)),
-            formatHint: Self.smbFormatHint(for: parsed.path)
-        )
-    }
-
     /// Optional container short-name hint for the demuxer probe, derived from the
-    /// file extension (there is no server MIME type for a raw share file). nil
-    /// lets AetherEngine probe from content.
-    private static func smbFormatHint(for path: String) -> String? {
-        switch (path as NSString).pathExtension.lowercased() {
+    /// typed locator. nil lets AetherEngine probe from content.
+    private static func networkFileFormatHint(for locator: NetworkFileLocator) -> String? {
+        switch locator.formatHint.container
+            ?? (locator.relativePath as NSString).pathExtension.lowercased() {
         case "mkv":                 return "matroska"
         case "webm":                return "webm"
         case "mp4", "m4v", "mov":   return "mp4"
@@ -565,8 +543,10 @@ public final class PlozzigenVideoEngine: VideoEngine {
 
 public enum PlozzigenVideoEngineFactory {
     @MainActor
-    public static func makeEngine() -> (any VideoEngine)? {
-        try? PlozzigenVideoEngine()
+    public static func makeEngine(
+        networkFileResolver: any MediaTransportNetworkFileResolving
+    ) -> (any VideoEngine)? {
+        try? PlozzigenVideoEngine(networkFileResolver: networkFileResolver)
     }
 }
 #endif

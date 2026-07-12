@@ -707,8 +707,8 @@ struct HomeHeroView: View {
             }
         }
         // The visible pills remain one stable focus target even when their count
-        // changes across slides. UIKit consumes horizontal presses at the focused
-        // responder before the focus engine can create duplicate moves or sounds,
+        // changes across slides. UIKit claims horizontal presses with press-typed
+        // recognizers before the focus engine can create duplicate moves or sounds,
         // while Up/Down and the one Sidebar escape path still fall through natively.
         HStack(spacing: 24) {
             ForEach(Array(itemButtons.enumerated()), id: \.element) { offset, button in
@@ -731,7 +731,7 @@ struct HomeHeroView: View {
                     case .right: handleRight()
                     }
                 },
-                canHandleSwipe: { resolveMove($0) != .escape },
+                canHandleDirection: { resolveMove($0) != .escape },
                 onHorizontalHoldChanged: { setDirectionalHoldActive($0) },
                 onSelect: { activateSelected() },
                 onPlayPause: {
@@ -1737,8 +1737,8 @@ enum HeroPreviewWarmOrder {
     }
 }
 
-/// Owns deterministic Left/Right hold timing after the focused UIKit responder
-/// consumes the physical press. Interior actions repeat normally; the first page
+/// Owns deterministic Left/Right hold timing after UIKit claims the physical
+/// press. Interior actions repeat normally; the first page
 /// starts a deliberate pause, then rapid paging continues until release.
 @MainActor
 final class HeroDirectionalRepeatController {
@@ -1814,12 +1814,12 @@ final class HeroDirectionalRepeatController {
     }
 }
 
-/// The Hero's single focus target and directional-input owner. Horizontal arrow
-/// presses are handled at the focused responder and intentionally not forwarded,
-/// so the focus engine cannot emit duplicate moves or false navigation feedback.
+/// The Hero's single focus target and directional-input owner. Zero-duration,
+/// press-typed recognizers claim Left/Right at press-down, before the focus engine
+/// can emit duplicate moves or false navigation feedback.
 private struct HeroActionPressSurface: UIViewRepresentable {
     let onMove: (HeroFocusDirection) -> HeroFocusOutcome
-    let canHandleSwipe: (HeroFocusDirection) -> Bool
+    let canHandleDirection: (HeroFocusDirection) -> Bool
     let onHorizontalHoldChanged: (Bool) -> Void
     let onSelect: () -> Void
     let onPlayPause: () -> Void
@@ -1840,7 +1840,7 @@ private struct HeroActionPressSurface: UIViewRepresentable {
 
     private func update(_ view: PressView) {
         view.onMove = onMove
-        view.canHandleSwipe = canHandleSwipe
+        view.canHandleDirection = canHandleDirection
         view.onHorizontalHoldChanged = onHorizontalHoldChanged
         view.onSelect = onSelect
         view.onPlayPause = onPlayPause
@@ -1848,7 +1848,7 @@ private struct HeroActionPressSurface: UIViewRepresentable {
 
     final class PressView: UIView, UIGestureRecognizerDelegate {
         var onMove: (HeroFocusDirection) -> HeroFocusOutcome = { _ in .blocked }
-        var canHandleSwipe: (HeroFocusDirection) -> Bool = { _ in true }
+        var canHandleDirection: (HeroFocusDirection) -> Bool = { _ in true }
         var onHorizontalHoldChanged: (Bool) -> Void = { _ in }
         var onSelect: () -> Void = {}
         var onPlayPause: () -> Void = {}
@@ -1870,6 +1870,8 @@ private struct HeroActionPressSurface: UIViewRepresentable {
 
             addPressRecognizer(.select, action: #selector(selected))
             addPressRecognizer(.playPause, action: #selector(playPaused))
+            addDirectionalPressRecognizer(.leftArrow, direction: .left)
+            addDirectionalPressRecognizer(.rightArrow, direction: .right)
             addSwipeRecognizer(.left)
             addSwipeRecognizer(.right)
 
@@ -1901,58 +1903,15 @@ private struct HeroActionPressSurface: UIViewRepresentable {
             }
         }
 
-        override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
-            var unhandled: Set<UIPress> = []
-            let wasHolding = consumesLeft || consumesRight
-            for press in presses {
-                switch press.type {
-                case .leftArrow:
-                    let outcome = onMove(.left)
-                    if outcome == .escape {
-                        unhandled.insert(press)
-                    } else {
-                        consumesLeft = true
-                        repeatController.began(.left, initialOutcome: outcome)
-                    }
-                case .rightArrow:
-                    let outcome = onMove(.right)
-                    if outcome == .escape {
-                        unhandled.insert(press)
-                    } else {
-                        consumesRight = true
-                        repeatController.began(.right, initialOutcome: outcome)
-                    }
-                default:
-                    unhandled.insert(press)
-                }
-            }
-            if !wasHolding, consumesLeft || consumesRight {
-                onHorizontalHoldChanged(true)
-            }
-            if !unhandled.isEmpty {
-                super.pressesBegan(unhandled, with: event)
-            }
-        }
-
-        override func pressesChanged(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
-            let unhandled = Set(presses.filter { !consumes($0.type) })
-            if !unhandled.isEmpty {
-                super.pressesChanged(unhandled, with: event)
-            }
-        }
-
-        override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
-            finish(presses, event: event, cancelled: false)
-        }
-
-        override func pressesCancelled(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
-            finish(presses, event: event, cancelled: true)
-        }
-
         override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-            guard let swipe = gestureRecognizer as? UISwipeGestureRecognizer,
-                  let direction = heroDirection(for: swipe.direction) else { return true }
-            return canHandleSwipe(direction)
+            if let directional = gestureRecognizer as? DirectionalLongPressRecognizer {
+                return canHandleDirection(directional.heroDirection)
+            }
+            if let swipe = gestureRecognizer as? UISwipeGestureRecognizer,
+               let direction = heroDirection(for: swipe.direction) {
+                return canHandleDirection(direction)
+            }
+            return true
         }
 
         func cancelInput() {
@@ -1985,9 +1944,47 @@ private struct HeroActionPressSurface: UIViewRepresentable {
             _ = onMove(direction)
         }
 
+        @objc private func directionPressed(_ recognizer: DirectionalLongPressRecognizer) {
+            let direction = recognizer.heroDirection
+            switch recognizer.state {
+            case .began:
+                let wasHolding = consumesLeft || consumesRight
+                let outcome = onMove(direction)
+                switch direction {
+                case .left: consumesLeft = true
+                case .right: consumesRight = true
+                }
+                if !wasHolding {
+                    onHorizontalHoldChanged(true)
+                }
+                repeatController.began(direction, initialOutcome: outcome)
+            case .ended, .cancelled, .failed:
+                endHold(direction)
+            default:
+                break
+            }
+        }
+
         private func addPressRecognizer(_ type: UIPress.PressType, action: Selector) {
             let recognizer = UITapGestureRecognizer(target: self, action: action)
             recognizer.allowedPressTypes = [NSNumber(value: type.rawValue)]
+            recognizer.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
+            addGestureRecognizer(recognizer)
+        }
+
+        private func addDirectionalPressRecognizer(
+            _ type: UIPress.PressType,
+            direction: HeroFocusDirection
+        ) {
+            let recognizer = DirectionalLongPressRecognizer(
+                direction: direction,
+                target: self,
+                action: #selector(directionPressed(_:))
+            )
+            recognizer.minimumPressDuration = 0
+            recognizer.allowedPressTypes = [NSNumber(value: type.rawValue)]
+            recognizer.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
+            recognizer.delegate = self
             addGestureRecognizer(recognizer)
         }
 
@@ -1999,41 +1996,15 @@ private struct HeroActionPressSurface: UIViewRepresentable {
             addGestureRecognizer(recognizer)
         }
 
-        private func consumes(_ type: UIPress.PressType) -> Bool {
-            switch type {
-            case .leftArrow: consumesLeft
-            case .rightArrow: consumesRight
-            default: false
-            }
-        }
-
-        private func finish(
-            _ presses: Set<UIPress>,
-            event: UIPressesEvent?,
-            cancelled: Bool
-        ) {
-            var unhandled: Set<UIPress> = []
+        private func endHold(_ direction: HeroFocusDirection) {
             let wasHolding = consumesLeft || consumesRight
-            for press in presses {
-                switch press.type {
-                case .leftArrow where consumesLeft:
-                    repeatController.ended(.left)
-                    consumesLeft = false
-                case .rightArrow where consumesRight:
-                    repeatController.ended(.right)
-                    consumesRight = false
-                default:
-                    unhandled.insert(press)
-                }
+            repeatController.ended(direction)
+            switch direction {
+            case .left: consumesLeft = false
+            case .right: consumesRight = false
             }
             if wasHolding, !consumesLeft, !consumesRight {
                 onHorizontalHoldChanged(false)
-            }
-            guard !unhandled.isEmpty else { return }
-            if cancelled {
-                super.pressesCancelled(unhandled, with: event)
-            } else {
-                super.pressesEnded(unhandled, with: event)
             }
         }
 
@@ -2043,6 +2014,19 @@ private struct HeroActionPressSurface: UIViewRepresentable {
             if direction.contains(.left) { return .left }
             if direction.contains(.right) { return .right }
             return nil
+        }
+
+        final class DirectionalLongPressRecognizer: UILongPressGestureRecognizer {
+            let heroDirection: HeroFocusDirection
+
+            init(direction: HeroFocusDirection, target: Any?, action: Selector?) {
+                heroDirection = direction
+                super.init(target: target, action: action)
+            }
+
+            required init?(coder: NSCoder) {
+                fatalError("init(coder:) has not been implemented")
+            }
         }
     }
 }

@@ -31,7 +31,7 @@ struct SettingsAboutSection: View {
                         .scaledToFit()
                         .frame(width: 72, height: 72)
 
-                    Text("Version \(version) · Build \(build)")
+                    Text("Version \(version) (Build \(build))")
                         .font(.headline)
 
                     Text("Bring all of your media together into one unified experience. Free forever and open source.")

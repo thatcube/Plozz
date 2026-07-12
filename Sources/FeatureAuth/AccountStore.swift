@@ -115,10 +115,16 @@ public final class AccountStore: AccountPersisting, @unchecked Sendable {
     public func add(_ account: Account, token: String) throws {
         lock.lock(); defer { lock.unlock() }
         var accounts = loadAccountsLocked()
+        var persistedAccount = account
         if let idx = accounts.firstIndex(where: { $0.id == account.id }) {
-            accounts[idx] = account
+            let existing = accounts[idx]
+            let existingToken = secureStore.string(for: tokenKey(account.id))
+            persistedAccount.credentialRevision = existingToken == token
+                ? existing.credentialRevision
+                : CredentialRevision()
+            accounts[idx] = persistedAccount
         } else {
-            accounts.append(account)
+            accounts.append(persistedAccount)
         }
         // Token only ever lives in the Keychain.
         try secureStore.setString(token, for: tokenKey(account.id))
@@ -235,7 +241,20 @@ public final class AccountStore: AccountPersisting, @unchecked Sendable {
               let accounts = try? JSONDecoder().decode([Account].self, from: data) else {
             return []
         }
-        return accounts.sorted { $0.addedAt < $1.addedAt }
+        let ordered = accounts.sorted { $0.addedAt < $1.addedAt }
+        let revisionPresence = try? JSONDecoder().decode(
+            [CredentialRevisionPresence].self,
+            from: data
+        )
+        if revisionPresence?.contains(where: { $0.credentialRevision == nil }) == true {
+            do {
+               try saveAccountsLocked(ordered)
+               PlozzLog.auth.info("Migrated account credential revisions")
+            } catch {
+               PlozzLog.auth.error("Account credential revision migration failed")
+            }
+        }
+        return ordered
     }
 
     private func saveAccountsLocked(_ accounts: [Account]) throws {
@@ -273,6 +292,10 @@ public final class AccountStore: AccountPersisting, @unchecked Sendable {
 /// exists where `Security` is importable).
 private enum AccountStoreError: Error {
     case encodingFailed
+}
+
+private struct CredentialRevisionPresence: Decodable {
+    let credentialRevision: CredentialRevision?
 }
 
 /// Mirror of the legacy `SessionStore.Metadata` shape, decoded only to migrate.

@@ -1028,7 +1028,9 @@ public final class AppState {
         guard let account = accounts.first(where: { $0.id == accountID }),
               account.server.provider == .mediaShare else { return }
         let token = resolvedToken(for: account.id) ?? ""
-        guard let shareProvider = try? registry.provider(for: account.session(token: token)) as? ShareProvider else { return }
+        guard let shareProvider = try? registry.provider(
+            for: providerResolutionContext(for: account, token: token)
+        ) as? ShareProvider else { return }
         Task { await shareProvider.rescan() }
     }
 
@@ -1080,23 +1082,30 @@ public final class AppState {
     /// `register(kind, …)` line; nothing else in core changes.
     private static func makeDefaultRegistry() -> ProviderRegistry {
         let registry = ProviderRegistry()
-        registry.register(.jellyfin) { session in
+        registry.register(.jellyfin) { context in
             JellyfinProvider(
-                session: session,
+                session: context.session,
                 interactiveHTTP: URLSessionHTTPClient(session: .plozzInteractive),
                 hybridEngineEnabled: HybridPlayback.enabled
             )
         }
-        registry.register(.plex) { session in
+        registry.register(.plex) { context in
             PlexProvider(
-                session: session,
+                session: context.session,
                 interactiveHTTP: URLSessionHTTPClient(session: .plozzInteractive),
                 hybridEngineEnabled: HybridPlayback.enabled,
-                connectionRefresh: PlexProvider.connectionRefresh(for: session)
+                connectionRefresh: PlexProvider.connectionRefresh(for: context.session)
             )
         }
-        registry.register(.mediaShare) { session in
-            ShareProvider(session: session, streamProber: PlozzigenSMBStreamProber())
+        registry.register(.mediaShare) { context in
+            guard let localMediaContext = context.localMediaContext else {
+                throw ProviderResolutionError.localMediaContextRequired(.mediaShare)
+            }
+            return ShareProvider(
+                session: context.session,
+                localMediaContext: localMediaContext,
+                streamProber: PlozzigenSMBStreamProber()
+            )
         }
         return registry
     }
@@ -1162,7 +1171,7 @@ public final class AppState {
     public var primaryProvider: (any MediaProvider)? {
         guard let account = primaryActiveAccount,
               let token = resolvedToken(for: account.id) else { return nil }
-        return try? registry.provider(for: account.session(token: token))
+        return try? registry.provider(for: providerResolutionContext(for: account, token: token))
     }
 
     /// The active account that drives the current single-provider UI.
@@ -1178,7 +1187,9 @@ public final class AppState {
         accounts.compactMap { account in
             guard activeAccountIDs.contains(account.id),
                   let token = resolvedToken(for: account.id),
-                  let provider = try? registry.provider(for: account.session(token: token))
+                  let provider = try? registry.provider(
+                      for: providerResolutionContext(for: account, token: token)
+                  )
             else { return nil }
             return ResolvedAccount(account: account, provider: provider)
         }
@@ -1191,7 +1202,9 @@ public final class AppState {
         ids.compactMap { id in
             guard let account = accounts.first(where: { $0.id == id }),
                   let token = resolvedToken(for: id),
-                  let provider = try? registry.provider(for: account.session(token: token))
+                  let provider = try? registry.provider(
+                      for: providerResolutionContext(for: account, token: token)
+                  )
             else { return nil }
             return ResolvedAccount(account: account, provider: provider)
         }
@@ -1205,7 +1218,9 @@ public final class AppState {
         if !active.isEmpty { return active }
         guard let account = primaryActiveAccount,
               let token = resolvedToken(for: account.id),
-              let provider = try? registry.provider(for: account.session(token: token))
+              let provider = try? registry.provider(
+                  for: providerResolutionContext(for: account, token: token)
+              )
         else { return [] }
         return [ResolvedAccount(account: account, provider: provider)]
     }
@@ -1217,7 +1232,26 @@ public final class AppState {
         guard let account = accounts.first(where: { $0.id == id }),
               let token = resolvedToken(for: account.id)
         else { return nil }
-        return try? registry.provider(for: account.session(token: token))
+        return try? registry.provider(for: providerResolutionContext(for: account, token: token))
+    }
+
+    private func providerResolutionContext(
+        for account: Account,
+        token: String
+    ) -> ProviderResolutionContext {
+        let localMediaContext = account.server.provider == .mediaShare
+            ? LocalMediaContext(
+                accountID: account.id,
+                profileID: profilesModel.activeProfileID,
+                profileNamespace: profilesModel.activeNamespace
+            )
+            : nil
+        return ProviderResolutionContext(
+            session: account.session(token: token),
+            accountID: account.id,
+            credentialRevision: account.credentialRevision,
+            localMediaContext: localMediaContext
+        )
     }
 
     // MARK: Plex Home users ("Who's watching?")
@@ -1334,6 +1368,7 @@ public final class AppState {
                     if plexTokenOverrides[account.id] != nil {
                         plexTokenOverrides[account.id] = nil
                         plexResolvedHomeUser[account.id] = nil
+                        registry.invalidate(accountID: account.id)
                         plexIdentityGeneration += 1
                         PlozzLog.boot("genBump=\(self.plexIdentityGeneration) site=ensure.staleOverride acct=\(account.id)")
                     }
@@ -1359,6 +1394,7 @@ public final class AppState {
                     if let cached = plexHomeUserTokenCache.token(account: account.id, homeUser: binding.homeUserID) {
                         plexTokenOverrides[account.id] = cached
                         plexResolvedHomeUser[account.id] = binding.homeUserID
+                        registry.invalidate(accountID: account.id)
                         PlozzLog.boot("ensure.cachedOverride acct=\(account.id) home=\(binding.homeUserID) — instant paint")
                     } else {
                         PlozzLog.boot("ensure.unprotectedSwitch acct=\(account.id) home=\(binding.homeUserID) — cache miss, async")
@@ -1373,6 +1409,7 @@ public final class AppState {
                 if plexTokenOverrides[account.id] != nil {
                     plexTokenOverrides[account.id] = nil
                     plexResolvedHomeUser[account.id] = nil
+                    registry.invalidate(accountID: account.id)
                     plexIdentityGeneration += 1
                     PlozzLog.boot("genBump=\(self.plexIdentityGeneration) site=ensure.dropOverride acct=\(account.id)")
                 }
@@ -1399,8 +1436,12 @@ public final class AppState {
         pendingPlexPINRequest = nil
         plexPINError = nil
         if !plexTokenOverrides.isEmpty {
+            let accountIDs = Array(plexTokenOverrides.keys)
             plexTokenOverrides.removeAll()
             plexResolvedHomeUser.removeAll()
+            for accountID in accountIDs {
+                registry.invalidate(accountID: accountID)
+            }
             plexIdentityGeneration += 1
             PlozzLog.boot("genBump=\(self.plexIdentityGeneration) site=clearPlexOverrides")
         }
@@ -1460,6 +1501,7 @@ public final class AppState {
             // refresh that returns the same token (the common case on a cache hit)
             // must NOT rebuild, or it reintroduces the startup double-load.
             if previousToken != resolvedToken {
+                registry.invalidate(accountID: accountID)
                 plexIdentityGeneration += 1
                 PlozzLog.boot("genBump=\(self.plexIdentityGeneration) site=performPlexSwitch acct=\(accountID) home=\(homeUserID)")
             } else {

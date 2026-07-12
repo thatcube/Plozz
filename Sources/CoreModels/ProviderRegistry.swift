@@ -1,14 +1,66 @@
 import Foundation
 
-/// Resolves an authenticated `UserSession` into a concrete `MediaProvider`.
+/// Immutable identity required by providers that own Plozz-local media state.
+///
+/// The account and profile are both explicit so delayed work never consults
+/// whichever profile happens to be active when it eventually executes.
+public struct LocalMediaContext: Hashable, Sendable {
+    public let accountID: String
+    public let profileID: String
+    public let profileNamespace: String?
+
+    public init(accountID: String, profileID: String, profileNamespace: String?) {
+        self.accountID = accountID
+        self.profileID = profileID
+        self.profileNamespace = profileNamespace
+    }
+}
+
+/// Complete, immutable input used to construct one provider instance.
+///
+/// `session` carries runtime-only credential material. Cache identity comes only
+/// from the stable account id, random credential revision, and relevant local
+/// profile id; secrets are never interpolated into a key or description.
+public struct ProviderResolutionContext: Equatable, Sendable {
+    public let session: UserSession
+    public let accountID: String
+    public let credentialRevision: CredentialRevision
+    public let localMediaContext: LocalMediaContext?
+
+    public init(
+        session: UserSession,
+        accountID: String,
+        credentialRevision: CredentialRevision,
+        localMediaContext: LocalMediaContext? = nil
+    ) {
+        self.session = session
+        self.accountID = accountID
+        self.credentialRevision = credentialRevision
+        self.localMediaContext = localMediaContext
+    }
+}
+
+extension ProviderResolutionContext: CustomStringConvertible {
+    public var description: String {
+        let profile = localMediaContext?.profileID ?? "<none>"
+        return "ProviderResolutionContext(account: \(accountID), revision: \(credentialRevision.rawValue), profile: \(profile), session: <redacted>)"
+    }
+}
+
+public enum ProviderResolutionError: Error, Equatable, Sendable {
+    case unregisteredProvider(ProviderKind)
+    case contextChangedWithoutRevision(accountID: String)
+    case localContextAccountMismatch(accountID: String, localAccountID: String)
+    case localMediaContextRequired(ProviderKind)
+}
+
+/// Resolves immutable account/profile context into a concrete `MediaProvider`.
 ///
 /// This is the indirection that lets the composition root stay
 /// provider-agnostic: feature code and `AppShell` ask a resolver for "the
-/// provider for this session" without importing any specific provider module.
+/// provider for this context" without importing any specific provider module.
 public protocol ProviderResolving: Sendable {
-    /// Vends the provider for `session.server.provider`.
-    /// - Throws: `AppError.unknown` if no factory is registered for that kind.
-    func provider(for session: UserSession) throws -> any MediaProvider
+    func provider(for context: ProviderResolutionContext) throws -> any MediaProvider
 }
 
 /// Optional capability a provider adopts to release long-lived connection state
@@ -28,60 +80,103 @@ public protocol ProviderTeardown: Sendable {
 /// `register(.someKind, …)` at the composition root — **no change** to this
 /// type, `AppState`, or any feature module.
 public final class ProviderRegistry: ProviderResolving, @unchecked Sendable {
-    public typealias Factory = @Sendable (UserSession) -> any MediaProvider
+    public typealias Factory = @Sendable (ProviderResolutionContext) throws -> any MediaProvider
+
+    private struct CacheKey: Hashable {
+        let accountID: String
+        let credentialRevision: CredentialRevision
+        let localProfileID: String?
+    }
+
+    private struct CacheEntry {
+        let context: ProviderResolutionContext
+        let provider: any MediaProvider
+    }
 
     private var factories: [ProviderKind: Factory] = [:]
-    /// Memoized providers keyed by `server.id|userID|token`. Vending the *same*
-    /// provider instance for a session is essential, not just an optimization:
+    /// Vending the *same* provider instance for a context is essential, not just
+    /// an optimization:
     /// a provider owns long-lived connection state (e.g. Plex's resolved/cached
     /// base URL). Rebuilding it on every `provider(for:)` call — which happens
     /// constantly as SwiftUI reads `AppState`'s computed provider properties —
     /// would re-run connection discovery (a burst of reachability probes) on
     /// every screen open, accumulating sockets until the connection pool chokes.
-    private var cache: [String: any MediaProvider] = [:]
+    private var cache: [CacheKey: CacheEntry] = [:]
     private let lock = NSLock()
 
     public init() {}
 
-    /// Registers (or replaces) the factory for `kind`. Clears any cached
-    /// providers of that kind so the new factory takes effect.
+    /// Registers (or replaces) the factory for `kind`, evicting only providers
+    /// built by that kind.
     public func register(_ kind: ProviderKind, factory: @escaping Factory) {
         lock.lock()
         factories[kind] = factory
-        let evicted = Array(cache.values)
-        cache.removeAll()
+        let staleKeys = cache.compactMap { key, entry in
+            entry.context.session.server.provider == kind ? key : nil
+        }
+        let evicted = staleKeys.compactMap { cache.removeValue(forKey: $0)?.provider }
         lock.unlock()
         Self.teardown(evicted)
     }
 
-    public func provider(for session: UserSession) throws -> any MediaProvider {
-        let kind = session.server.provider
-        let identity = "\(session.server.id)|\(session.userID)"
-        let key = "\(identity)|\(session.accessToken)"
+    public func provider(for context: ProviderResolutionContext) throws -> any MediaProvider {
+        if let local = context.localMediaContext, local.accountID != context.accountID {
+            throw ProviderResolutionError.localContextAccountMismatch(
+                accountID: context.accountID,
+                localAccountID: local.accountID
+            )
+        }
+
+        let kind = context.session.server.provider
+        let key = CacheKey(
+            accountID: context.accountID,
+            credentialRevision: context.credentialRevision,
+            localProfileID: context.localMediaContext?.profileID
+        )
         lock.lock()
         if let cached = cache[key] {
             lock.unlock()
-            return cached
+            guard cached.context == context else {
+                throw ProviderResolutionError.contextChangedWithoutRevision(
+                    accountID: context.accountID
+                )
+            }
+            return cached.provider
         }
         let factory = factories[kind]
         lock.unlock()
         guard let factory else {
-            throw AppError.unknown("No provider registered for \(kind.displayName)")
+            throw ProviderResolutionError.unregisteredProvider(kind)
         }
-        let provider = factory(session)
+        let provider = try factory(context)
+
         lock.lock()
         // Another thread may have built it while we were unlocked.
         if let existing = cache[key] {
             lock.unlock()
-            return existing
+            guard existing.context == context else {
+                Self.teardown([provider])
+                throw ProviderResolutionError.contextChangedWithoutRevision(
+                    accountID: context.accountID
+                )
+            }
+            Self.teardown([provider])
+            return existing.provider
         }
-        // Evict any prior entry for the same server+user (e.g. a refreshed token)
-        // so the cache holds exactly one live provider per account.
+        // A credential revision supersedes every older profile-scoped provider
+        // for the account. Same-revision providers for distinct local profiles
+        // remain isolated and may coexist.
         var evicted: [any MediaProvider] = []
-        for staleKey in cache.keys where staleKey.hasPrefix("\(identity)|") {
-            if let stale = cache.removeValue(forKey: staleKey) { evicted.append(stale) }
+        let staleKeys = cache.keys.filter {
+            $0.accountID == context.accountID
+                && $0.credentialRevision != context.credentialRevision
         }
-        cache[key] = provider
+        for staleKey in staleKeys {
+            if let stale = cache.removeValue(forKey: staleKey) {
+                evicted.append(stale.provider)
+            }
+        }
+        cache[key] = CacheEntry(context: context, provider: provider)
         lock.unlock()
         Self.teardown(evicted)
         return provider
@@ -91,8 +186,19 @@ public final class ProviderRegistry: ProviderResolving, @unchecked Sendable {
     /// so removed accounts don't retain provider/connection state.
     public func invalidateCache() {
         lock.lock()
-        let evicted = Array(cache.values)
+        let evicted = cache.values.map(\.provider)
         cache.removeAll()
+        lock.unlock()
+        Self.teardown(evicted)
+    }
+
+    /// Drops memoized providers for one account without disturbing unrelated
+    /// servers. Used when a runtime-derived identity such as a Plex Home user
+    /// changes without replacing the account's persisted credential.
+    public func invalidate(accountID: String) {
+        lock.lock()
+        let staleKeys = cache.keys.filter { $0.accountID == accountID }
+        let evicted = staleKeys.compactMap { cache.removeValue(forKey: $0)?.provider }
         lock.unlock()
         Self.teardown(evicted)
     }

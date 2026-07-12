@@ -172,6 +172,32 @@ final class AccountStoreTests: XCTestCase {
         XCTAssertEqual(store.token(for: "a1"), "TOK1")
     }
 
+    func testReplacingTokenRotatesCredentialRevision() throws {
+        let store = AccountStore(secureStore: InMemorySecureStore(), defaults: makeDefaults())
+        let acc = account("a1")
+        try store.add(acc, token: "OLD")
+
+        try store.add(acc, token: "NEW")
+
+        let replaced = try XCTUnwrap(store.loadAccounts().first)
+        XCTAssertNotEqual(replaced.credentialRevision, acc.credentialRevision)
+        XCTAssertEqual(store.token(for: "a1"), "NEW")
+    }
+
+    func testMetadataUpdateWithSameTokenPreservesCredentialRevision() throws {
+        let store = AccountStore(secureStore: InMemorySecureStore(), defaults: makeDefaults())
+        var acc = account("a1")
+        try store.add(acc, token: "TOKEN")
+        let originalRevision = acc.credentialRevision
+        acc.userName = "Renamed"
+
+        try store.add(acc, token: "TOKEN")
+
+        let updated = try XCTUnwrap(store.loadAccounts().first)
+        XCTAssertEqual(updated.credentialRevision, originalRevision)
+        XCTAssertEqual(updated.userName, "Renamed")
+    }
+
     func testMultipleAccountsPersistInAddedOrder() throws {
         let store = AccountStore(secureStore: InMemorySecureStore(), defaults: makeDefaults())
         try store.add(account("a2", added: 200), token: "T2")
@@ -307,6 +333,44 @@ final class AccountStoreTests: XCTestCase {
         XCTAssertNotNil(secure.string(for: "com.plozz.accounts.v1"))
         XCTAssertNil(defaults.data(forKey: "com.plozz.accounts.v1"))
         XCTAssertNil(defaults.string(forKey: "com.plozz.session.deviceID"))
+    }
+
+    func testLegacyAccountMetadataGainsOneStableCredentialRevision() throws {
+        struct LegacyAccount: Codable {
+            let id: String
+            let server: MediaServer
+            let userID: String
+            let userName: String
+            let avatarURL: URL?
+            let deviceID: String
+            let addedAt: Date
+        }
+
+        let secure = InMemorySecureStore()
+        let legacy = LegacyAccount(
+            id: "legacy",
+            server: server,
+            userID: "u",
+            userName: "Legacy",
+            avatarURL: nil,
+            deviceID: "device",
+            addedAt: Date(timeIntervalSince1970: 1)
+        )
+        let encoded = try JSONEncoder().encode([legacy])
+        try secure.setString(
+            try XCTUnwrap(String(data: encoded, encoding: .utf8)),
+            for: "com.plozz.accounts.v1"
+        )
+
+        let firstStore = AccountStore(secureStore: secure, defaults: makeDefaults())
+        let firstRevision = try XCTUnwrap(firstStore.loadAccounts().first).credentialRevision
+        let secondStore = AccountStore(secureStore: secure, defaults: makeDefaults())
+        let secondRevision = try XCTUnwrap(secondStore.loadAccounts().first).credentialRevision
+
+        XCTAssertEqual(firstRevision, secondRevision)
+        XCTAssertTrue(
+            secure.string(for: "com.plozz.accounts.v1")?.contains("credentialRevision") == true
+        )
     }
 }
 

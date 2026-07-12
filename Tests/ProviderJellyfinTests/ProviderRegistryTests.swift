@@ -12,38 +12,52 @@ final class ProviderRegistryTests: XCTestCase {
         )
     }
 
+    private func context(provider: ProviderKind) -> ProviderResolutionContext {
+        ProviderResolutionContext(
+            session: session(provider: provider),
+            accountID: "account",
+            credentialRevision: CredentialRevision()
+        )
+    }
+
     func testResolvesJellyfinProvider() throws {
         let registry = ProviderRegistry()
-        registry.register(.jellyfin) { JellyfinProvider(session: $0) }
+        registry.register(.jellyfin) { JellyfinProvider(session: $0.session) }
 
-        let provider = try registry.provider(for: session(provider: .jellyfin))
+        let provider = try registry.provider(for: context(provider: .jellyfin))
         XCTAssertEqual(provider.kind, .jellyfin)
         XCTAssertTrue(provider is JellyfinProvider)
     }
 
     func testResolvedProviderIsBoundToSession() throws {
         let registry = ProviderRegistry()
-        registry.register(.jellyfin) { JellyfinProvider(session: $0) }
+        registry.register(.jellyfin) { JellyfinProvider(session: $0.session) }
 
         let s = session(provider: .jellyfin)
-        let provider = try registry.provider(for: s)
+        let context = ProviderResolutionContext(
+            session: s,
+            accountID: "account",
+            credentialRevision: CredentialRevision()
+        )
+        let provider = try registry.provider(for: context)
         XCTAssertEqual(provider.session, s)
     }
 
     func testUnregisteredKindThrows() {
         let registry = ProviderRegistry()
         // Only Jellyfin registered; resolving Plex must throw.
-        registry.register(.jellyfin) { JellyfinProvider(session: $0) }
+        registry.register(.jellyfin) { JellyfinProvider(session: $0.session) }
 
-        XCTAssertThrowsError(try registry.provider(for: session(provider: .plex))) { error in
-            guard case AppError.unknown = error else {
-                return XCTFail("Expected AppError.unknown, got \(error)")
-            }
+        XCTAssertThrowsError(try registry.provider(for: context(provider: .plex))) { error in
+            XCTAssertEqual(
+                error as? ProviderResolutionError,
+                .unregisteredProvider(.plex)
+            )
         }
     }
 
     func testEmptyRegistryThrows() {
         let registry = ProviderRegistry()
-        XCTAssertThrowsError(try registry.provider(for: session(provider: .jellyfin)))
+        XCTAssertThrowsError(try registry.provider(for: context(provider: .jellyfin)))
     }
 }

@@ -15,6 +15,7 @@ import CoreNetworking
 public struct ShareProvider: MediaProvider {
     public let kind: ProviderKind = .mediaShare
     public let session: UserSession
+    public let localMediaContext: LocalMediaContext
 
     private let store: ShareLibraryStore
     private let watchStore: ShareWatchStore
@@ -28,8 +29,17 @@ public struct ShareProvider: MediaProvider {
     /// (env `PLZXPROBE=1`); becomes the source for cached facts in Phase 1.
     private let streamProber: SMBStreamProbing?
 
-    public init(session: UserSession, streamProber: SMBStreamProbing? = nil) {
-        self.init(session: session, watchDirectory: nil, streamProber: streamProber)
+    public init(
+        session: UserSession,
+        localMediaContext: LocalMediaContext,
+        streamProber: SMBStreamProbing? = nil
+    ) {
+        self.init(
+            session: session,
+            localMediaContext: localMediaContext,
+            watchDirectory: nil,
+            streamProber: streamProber
+        )
     }
 
     /// Test seam: build a provider whose device-local watch state lives in
@@ -38,11 +48,17 @@ public struct ShareProvider: MediaProvider {
     /// simulated relaunch) without touching the real app container.
     init(
         session: UserSession,
+        localMediaContext: LocalMediaContext? = nil,
         watchDirectory: URL?,
         streamProber: SMBStreamProbing? = nil,
         catalogStore: ShareCatalogStore? = nil
     ) {
         self.session = session
+        self.localMediaContext = localMediaContext ?? LocalMediaContext(
+            accountID: session.server.id,
+            profileID: ProfileStore.defaultProfileID,
+            profileNamespace: nil
+        )
         self.streamProber = streamProber
         self.catalogOverride = catalogStore
         let parsed = Self.parse(session.server.baseURL)

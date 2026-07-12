@@ -17,7 +17,7 @@ private struct ShimmerModifier: ViewModifier {
     /// on a light background, so a white plusLighter sheen needs more punch to be
     /// visible at all.
     var lightIntensity: Double = 0.45
-    /// Highlight strength in dark/OLED mode — on near-black the same sheen reads
+    /// Highlight strength in dark and Pure Black mode — on near-black the same sheen reads
     /// strongly, so it's kept very low to stay barely-there.
     var darkIntensity: Double = 0.035
 

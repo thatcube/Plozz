@@ -41,7 +41,7 @@ public struct PlexLogoMark: View {
 /// A scan-to-sign-in QR code rendered plainly — theme-tinted modules on a
 /// transparent background, with no surrounding card and no center logo. The
 /// module colour defaults to the active theme's primary text colour, so the
-/// code shows as white-on-black in dark/OLED and black-on-white in light mode
+/// code shows as white-on-black in dark and Pure Black and black-on-white in light mode
 /// (an unset explicit colour would otherwise vanish against a light background).
 public struct BrandQRCodeView: View {
     @Environment(\.themePalette) private var palette

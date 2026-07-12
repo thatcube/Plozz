@@ -89,3 +89,70 @@ final class HeroCarouselFocusTests: XCTestCase {
         XCTAssertEqual(resolve(.right, itemIndex: 0, itemCount: 0, focusedButton: 0), .blocked)
     }
 }
+
+@MainActor
+final class HeroDirectionalPressGateTests: XCTestCase {
+    func testIndirectTouchMovesRemainUnrestricted() {
+        let gate = HeroDirectionalPressGate()
+
+        XCTAssertTrue(gate.shouldHandle(.right))
+        XCTAssertTrue(gate.shouldHandle(.right))
+        XCTAssertTrue(gate.shouldHandle(.left))
+    }
+
+    func testHeldPhysicalPressHandlesOnlyFirstMove() {
+        let gate = HeroDirectionalPressGate()
+
+        gate.began(.right)
+
+        XCTAssertTrue(gate.shouldHandle(.right))
+        XCTAssertFalse(gate.shouldHandle(.right))
+        XCTAssertFalse(gate.shouldHandle(.right))
+    }
+
+    func testHeldPhysicalPressRepeatsAfterDeliberateDelay() {
+        var now: TimeInterval = 100
+        let gate = HeroDirectionalPressGate(
+            repeatDelay: 0.45,
+            now: { now }
+        )
+
+        gate.began(.right)
+        XCTAssertTrue(gate.shouldHandle(.right))
+
+        now += 0.2
+        XCTAssertFalse(gate.shouldHandle(.right))
+
+        now += 0.25
+        XCTAssertTrue(gate.shouldHandle(.right))
+
+        now += 0.1
+        XCTAssertTrue(gate.shouldHandle(.right))
+    }
+
+    func testRepeatedBeginDoesNotRearmUntilRelease() {
+        let gate = HeroDirectionalPressGate()
+
+        gate.began(.right)
+        XCTAssertTrue(gate.shouldHandle(.right))
+
+        gate.began(.right)
+        XCTAssertFalse(gate.shouldHandle(.right))
+
+        gate.ended(.right)
+        gate.began(.right)
+        XCTAssertTrue(gate.shouldHandle(.right))
+    }
+
+    func testDirectionsAreTrackedIndependently() {
+        let gate = HeroDirectionalPressGate()
+
+        gate.began(.left)
+        gate.began(.right)
+
+        XCTAssertTrue(gate.shouldHandle(.left))
+        XCTAssertTrue(gate.shouldHandle(.right))
+        XCTAssertFalse(gate.shouldHandle(.left))
+        XCTAssertFalse(gate.shouldHandle(.right))
+    }
+}

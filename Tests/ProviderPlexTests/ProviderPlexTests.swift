@@ -1374,6 +1374,27 @@ final class PlexAuthClientTests: XCTestCase {
         PlexAuthClient(deviceProfile: PlexDeviceProfile(clientIdentifier: "dev1"), http: stub, probeHTTP: UnreachableProbe())
     }
 
+    func testAuthorizationURLCarriesPinAndDeviceIdentity() {
+        let profile = PlexDeviceProfile(product: "Plozz Player", clientIdentifier: "device/id")
+        let client = PlexAuthClient(deviceProfile: profile)
+        let url = client.authorizationURL(for: PlexPinChallenge(id: 42, code: "A&B"))
+
+        XCTAssertEqual(url.scheme, "https")
+        XCTAssertEqual(url.host, "app.plex.tv")
+        XCTAssertEqual(url.path, "/auth")
+
+        let encodedFragment = URLComponents(url: url, resolvingAgainstBaseURL: false)?.percentEncodedFragment
+        let query = encodedFragment.map { String($0.dropFirst()) }
+        let queryItems = query.flatMap { URLComponents(string: "https://example.com/?\($0)")?.queryItems }
+        let values = Dictionary(uniqueKeysWithValues: (queryItems ?? []).compactMap { item in
+            item.value.map { (item.name, $0) }
+        })
+
+        XCTAssertEqual(values["clientID"], "device/id")
+        XCTAssertEqual(values["code"], "A&B")
+        XCTAssertEqual(values["context[device][product]"], "Plozz Player")
+    }
+
     func testCreatePinParsesChallenge() async throws {
         let stub = StubHTTPClient()
         stub.stub(pathSuffix: "/api/v2/pins", json: #"{"id":424242,"code":"WXYZ","authToken":null}"#)
@@ -1387,6 +1408,17 @@ final class PlexAuthClientTests: XCTestCase {
         XCTAssertNil(query?.first(where: { $0.name == "strong" }))
     }
 
+    func testCreateStrongPinRequestsHostedAuthChallenge() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/api/v2/pins", json: #"{"id":424242,"code":"long-code","authToken":null}"#)
+
+        let pin = try await client(stub).createPin(strong: true)
+
+        XCTAssertEqual(pin.code, "long-code")
+        let query = stub.queryItems(forPathSuffix: "/api/v2/pins")
+        XCTAssertEqual(query?.first(where: { $0.name == "strong" })?.value, "true")
+    }
+
     func testPollPinPendingThenClaimed() async throws {
         let stub = StubHTTPClient()
         stub.stubSequence(pathSuffix: "/api/v2/pins/1", jsons: [
@@ -1398,6 +1430,25 @@ final class PlexAuthClientTests: XCTestCase {
         XCTAssertEqual(first, .pending)
         let second = try await c.pollPin(id: 1)
         XCTAssertEqual(second, .claimed(authToken: "ACCOUNT_TOKEN"))
+    }
+
+    func testPollPinSurfacesRateLimitAndRetryDelay() async {
+        let stub = StubHTTPClient()
+        stub.stub(
+            pathSuffix: "/api/v2/pins/1",
+            json: "",
+            status: 429,
+            headers: ["Retry-After": "12"]
+        )
+
+        do {
+            _ = try await client(stub).pollPin(id: 1)
+            XCTFail("Expected rate limit")
+        } catch let error as PlexPinError {
+            XCTAssertEqual(error, .rateLimited(retryAfter: 12))
+        } catch {
+            XCTFail("Unexpected \(error)")
+        }
     }
 
     func testServersFilterToServerProvidesAndPickConnection() async throws {

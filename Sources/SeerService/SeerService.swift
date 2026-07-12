@@ -208,14 +208,20 @@ public final class SeerService {
     /// TMDB id, or when the lookup fails — the caller then just keeps the seeded
     /// state. An untracked (never-requested) title decodes as `.unknown`.
     public func availability(for item: MediaItem) async -> (MediaAvailabilityStatus, Double?)? {
+        guard let availability = await requestAvailability(for: item) else { return nil }
+        return (availability.status, availability.downloadProgress)
+    }
+
+    /// Current title and season-level request coverage. For TV this combines
+    /// Seerr's tracked seasons with the complete TMDB season list so Plozz can
+    /// offer only seasons that are truly absent or already in flight.
+    public func requestAvailability(for item: MediaItem) async -> MediaRequestAvailability? {
         guard config.isConfigured,
               let mediaType = SeerMapper.requestMediaType(for: item),
               let tmdbID = SeerMapper.tmdbID(for: item),
               let details = try? await client.mediaDetails(mediaType: mediaType, tmdbID: tmdbID)
         else { return nil }
-        let status = details.mediaInfo?.status.flatMap(MediaAvailabilityStatus.init(rawValue:)) ?? .unknown
-        let progress = SeerMapper.downloadProgress(from: details.mediaInfo?.downloadStatus)
-        return (status, progress)
+        return SeerMapper.requestAvailability(from: details)
     }
 
     // MARK: - Users
@@ -263,13 +269,21 @@ public final class SeerService {
     /// availability (`.pending` = created, awaiting approval), failure a specific
     /// user-facing reason. Never throws; transport errors map to `.unreachable`.
     @discardableResult
-    public func request(_ item: MediaItem, actingUserID: Int? = nil) async -> SeerRequestOutcome {
+    public func request(
+        _ item: MediaItem,
+        seasons: [Int]? = nil,
+        actingUserID: Int? = nil
+    ) async -> SeerRequestOutcome {
         guard config.isConfigured else { return .failure(.unknown("Seerr isn’t connected.")) }
         guard let mediaType = SeerMapper.requestMediaType(for: item),
               let tmdbID = SeerMapper.tmdbID(for: item)
         else { return .failure(.unknown("This title can’t be requested.")) }
 
         let isTV = mediaType == "tv"
+        let requestedSeasons = seasons.map { Array(Set($0.filter { $0 > 0 })).sorted() }
+        if isTV, let requestedSeasons, requestedSeasons.isEmpty {
+            return .failure(.unknown("Choose at least one season to request."))
+        }
         // Snapshot the connection at call start so this request is internally
         // consistent: a reconnect/disconnect that reentrantly changes `config`
         // across the default-lookup await can't make us fetch defaults from one
@@ -288,7 +302,7 @@ public final class SeerService {
         let body = SeerRequestBody(
             mediaType: mediaType,
             mediaId: tmdbID,
-            seasons: isTV ? .all : nil,
+            seasons: isTV ? requestedSeasons.map(SeerSeasons.list) ?? .all : nil,
             is4k: false,
             serverId: server?.id,
             profileId: server?.activeProfileId,

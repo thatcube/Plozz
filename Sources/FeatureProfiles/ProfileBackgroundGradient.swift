@@ -160,12 +160,12 @@ struct ProfileBackgroundGradient: View {
             LiquidArtworkBackground(
                 palette: resolvedColors,
                 animate: !reduceMotion && motionStarted,
-                // Use the OLED treatment for every theme — the most restrained
+                // Use the Pure Black treatment for every theme — the most restrained
                 // intensity — so the profile color is a gentle bloom rather than
                 // a bright wash. Each theme's own background colour still shows
                 // through underneath (this renders only the masked color mesh,
                 // showsBackdrop: false).
-                style: .oled,
+                style: .pureBlack,
                 paletteCrossfade: 1.8,
                 showsBackdrop: false
             )
@@ -195,7 +195,7 @@ struct ProfileBackgroundGradient: View {
 
     /// A gentle center-weighting that never cuts off: the color is stronger
     /// around the focused icon and eases down toward the edges, but stays faintly
-    /// present all the way out (no hard ring). Paired with the OLED treatment so
+    /// present all the way out (no hard ring). Paired with the Pure Black treatment so
     /// the profile color reads as a subtle bloom over the app's existing
     /// background in every theme.
     private func glowMask(in size: CGSize) -> some View {
@@ -216,9 +216,9 @@ struct ProfileBackgroundGradient: View {
 
     /// Slightly damps the bloom in the standard Dark theme, whose dark
     /// background makes the same color read more vividly than it does over the
-    /// Light or OLED fields. Light and OLED stay at full strength.
+    /// Light or Pure Black fields. Light and Pure Black stay at full strength.
     private var dimFactor: Double {
-        if palette == .oled { return 1.0 }
+        if palette == .pureBlack { return 1.0 }
         if colorScheme == .light { return 1.0 }
         return 0.55
     }

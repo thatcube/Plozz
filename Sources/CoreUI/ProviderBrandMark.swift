@@ -4,9 +4,9 @@ import CoreModels
 
 /// Shared brand mark for a media provider (Jellyfin / Plex): the real bundled
 /// `JellyfinLogo` / `PlexLogo` assets — the SAME logos Settings uses — instead
-/// of an SF Symbol stand-in. Template-rendered and tinted with the provider's
-/// brand color so it reads on any background, and it flips to the focus
-/// foreground when it sits on a focused Settings-style row.
+/// of an SF Symbol stand-in. Template-rendered with a focus-aware provider color:
+/// darker on a white focus card and lighter on a black one, preserving brand
+/// identity while maintaining contrast.
 ///
 /// Lives in CoreUI so every surface (Settings, onboarding chooser, the server
 /// picker) draws provider logos one identical way instead of each re-deriving
@@ -15,12 +15,8 @@ public struct ProviderBrandMark: View {
     private let provider: ProviderKind
     private let size: CGFloat
     private let showsBackground: Bool
-
-    // Reads the unified Settings-row focus state so the mark flips to the focus
-    // foreground on the inverted card (avoids a tinted glyph on a same-color
-    // background). No-ops outside a Settings-style focus row (defaults unfocused).
     @Environment(\.settingsRowIsFocused) private var rowFocused
-    @Environment(\.settingsRowFocusForeground) private var rowFocusForeground
+    @Environment(\.colorScheme) private var colorScheme
 
     public init(provider: ProviderKind, size: CGFloat = 14, showsBackground: Bool = true) {
         self.provider = provider
@@ -29,7 +25,8 @@ public struct ProviderBrandMark: View {
     }
 
     private var tint: Color {
-        rowFocused ? rowFocusForeground : Self.brandTint(provider)
+        guard rowFocused else { return Self.brandTint(provider) }
+        return Self.focusedBrandTint(provider, colorScheme: colorScheme)
     }
 
     private var assetName: String {
@@ -56,7 +53,7 @@ public struct ProviderBrandMark: View {
     public var body: some View {
         ZStack {
             if showsBackground {
-                Circle().fill(Self.brandTint(provider).opacity(rowFocused ? 0 : 0.18))
+                Circle().fill(tint.opacity(0.18))
             }
             if let systemSymbolName {
                 Image(systemName: systemSymbolName)
@@ -87,6 +84,32 @@ public struct ProviderBrandMark: View {
             // Neutral teal — reads as "storage/network", clearly not a Plex/
             // Jellyfin brand color, matching its second-class standing.
             return Color(red: 0x2A / 255, green: 0xA8 / 255, blue: 0x9E / 255)
+        }
+    }
+
+    private static func focusedBrandTint(_ provider: ProviderKind, colorScheme: ColorScheme) -> Color {
+        if colorScheme == .dark {
+            // Dark appearance uses a white focus card, so each brand needs a
+            // deeper shade rather than collapsing to generic black.
+            switch provider {
+            case .jellyfin:
+                return Color(red: 0.38, green: 0.25, blue: 0.78)
+            case .plex:
+                return Color(red: 0.60, green: 0.39, blue: 0.00)
+            case .mediaShare:
+                return Color(red: 0.08, green: 0.46, blue: 0.43)
+            }
+        }
+
+        // Light appearance uses a black focus card; brighter variants preserve
+        // the same identities against the darker surface.
+        switch provider {
+        case .jellyfin:
+            return Color(red: 0.65, green: 0.52, blue: 0.98)
+        case .plex:
+            return Color(red: 0.96, green: 0.73, blue: 0.18)
+        case .mediaShare:
+            return Color(red: 0.36, green: 0.82, blue: 0.77)
         }
     }
 }

@@ -16,6 +16,13 @@ struct DetailExtrasView: View {
     /// Leading inset so the cast row and chip strips align with the hero text
     /// above. Defaults to the standard screen padding.
     var leadingInset: CGFloat = PlozzTheme.Metrics.screenPadding
+    /// Series pages supply their cosmetic recede model so only Cast participates
+    /// in the browser transition. Movie detail leaves this nil and stays visible.
+    var seriesRecedeModel: SeriesHeroRecedeModel? = nil
+    /// A series with a definitively empty season/episode browser has no lower
+    /// focus target that could trigger recede, so Cast must be available directly.
+    var revealsSeriesCastWithoutBrowser = false
+    var onCastFocusEntered: (() -> Void)? = nil
 
     private var hasContent: Bool {
         !item.cast.isEmpty || !item.studios.isEmpty || !item.tags.isEmpty
@@ -25,7 +32,18 @@ struct DetailExtrasView: View {
         if hasContent {
             VStack(alignment: .leading, spacing: 28) {
                 if !item.cast.isEmpty {
-                    CastRowView(people: item.cast, leadingInset: leadingInset)
+                    CastRowView(
+                        people: item.cast,
+                        leadingInset: leadingInset,
+                        onFocusEntered: onCastFocusEntered
+                    )
+                        // Detail pages use a fixed composition; profile display
+                        // density belongs to browse cards, not this cast rail.
+                        .environment(\.plozzMetrics, .standard)
+                        .modifier(SeriesCastRevealModifier(
+                            model: seriesRecedeModel,
+                            revealsWithoutBrowser: revealsSeriesCastWithoutBrowser
+                        ))
                 }
                 if !item.studios.isEmpty {
                     StudiosRow(studios: item.studios)
@@ -35,6 +53,30 @@ struct DetailExtrasView: View {
                 }
             }
         }
+    }
+}
+
+private struct SeriesCastRevealModifier: ViewModifier {
+    let model: SeriesHeroRecedeModel?
+    let revealsWithoutBrowser: Bool
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        let revealed = (model?.isReceded ?? true) || revealsWithoutBrowser
+        content
+            .opacity(revealed ? 1 : 0)
+            .offset(y: revealed ? 0 : 96)
+            .disabled(!revealed)
+            .accessibilityHidden(!revealed)
+            .animation(
+                reduceMotion
+                    ? nil
+                    : (revealed
+                        ? SeriesHeroRevealTransition.entrance
+                        : .easeOut(duration: 0.14)),
+                value: revealed
+            )
     }
 }
 

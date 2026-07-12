@@ -32,15 +32,15 @@ struct EnableProfilesView: View {
         [
             Highlight(
                 icon: "star.fill",
-                text: "Separate favorites, watch history, and Home layout for each person."
+                text: "Each profile has its own settings and Home layout."
             ),
             Highlight(
                 icon: "appletv.fill",
-                text: "Tied to your Apple TV user — switching users switches your Plozz profile too."
+                text: "Plozz remembers the last profile used by each Apple TV user."
             ),
             Highlight(
                 icon: "externaldrive.fill",
-                text: "Servers are still available to all profiles on the Apple TV."
+                text: "Choose which servers each profile can use."
             ),
         ]
     }
@@ -56,7 +56,7 @@ struct EnableProfilesView: View {
                     .frame(width: 140, height: 140)
                     .background(Circle().fill(palette.accent.opacity(0.16)))
 
-                Text("Set up profiles for this Apple TV?")
+                Text("Use profiles on this Apple TV?")
                     .font(.largeTitle.weight(.bold))
                     .multilineTextAlignment(.center)
             }
@@ -92,7 +92,7 @@ struct EnableProfilesView: View {
             }
             .padding(.top, 8)
 
-            Text("You can turn this on later in Settings.")
+            Text("You can enable Profiles later in Settings.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
 

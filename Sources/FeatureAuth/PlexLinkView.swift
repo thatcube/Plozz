@@ -11,6 +11,7 @@ public struct PlexLinkView: View {
     @State private var viewModel: PlexAuthViewModel
     private let onCancel: () -> Void
 
+    @Environment(\.themePalette) private var palette
     @FocusState private var focused: Control?
     private enum Control: Hashable { case cancel, retry, continueServers }
 
@@ -63,7 +64,7 @@ public struct PlexLinkView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .defaultFocus($focused, defaultControl)
         .onExitCommand { requestCancel() }
-        .onAppear { viewModel.start() }
+        .onAppear { viewModel.startIfNeeded() }
         .onDisappear { viewModel.cancel() }
         .onChange(of: viewModel.phase) { _, newPhase in
             // When the server picker appears, land focus on Continue (not Cancel).
@@ -94,58 +95,58 @@ public struct PlexLinkView: View {
             ProgressView("Requesting a code…")
                 .font(.title2)
 
-        case let .awaitingLink(code, expiresAt):
-            HStack(alignment: .top, spacing: 80) {
+        case let .awaitingLink(code, authorizationURL, expiresAt):
+            HStack(alignment: .top, spacing: 64) {
                 VStack(spacing: 28) {
                     Text("Scan with your phone")
                         .font(.title3).bold()
                         .fixedSize(horizontal: true, vertical: false)
                     BrandQRCodeView(
-                        payload: Self.linkURL(for: code),
+                        payload: authorizationURL.absoluteString,
                         size: 460
                     )
                 }
-
-                orDivider
+                .frame(maxWidth: .infinity)
 
                 VStack(spacing: 0) {
-                    Text("Or enter a code")
+                    Text("Or enter a code at")
                         .font(.title3).bold()
 
-                    // Center the link + code + timer in the space below the
-                    // heading so it lines up with the QR on the left.
                     Spacer(minLength: 0)
 
                     VStack(spacing: 24) {
-                        VStack(spacing: 4) {
-                            Text("Go to")
-                                .font(.body)
-                                .foregroundStyle(.secondary)
-                            Text("plex.tv/link")
-                                .font(.system(size: 72, weight: .heavy, design: .rounded))
-                                .foregroundStyle(PlexBrand.gold)
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.5)
-                        }
-
-                        Text(code)
-                            .font(.plozzCode(size: 96))
-                            .tracking(12)
+                        Text("plex.tv/link")
+                            .font(.system(size: 64, weight: .bold))
+                            .foregroundStyle(PlexBrand.gold)
                             .lineLimit(1)
-                            .minimumScaleFactor(0.6)
-                            .padding(.horizontal, 48)
-                            .padding(.vertical, 24)
-                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: PlozzTheme.Metrics.Radius.panel))
+                            .minimumScaleFactor(0.5)
 
-                        PlexExpiryCountdown(expiresAt: expiresAt, lifetime: viewModel.codeLifetime)
+                        HStack(spacing: 32) {
+                            Text(code)
+                                .font(.plozzCode(size: 96))
+                                .tracking(12)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.6)
+                                .padding(.horizontal, 48)
+                                .padding(.vertical, 24)
+                                .background { codePanel }
+
+                            PlexExpiryCountdown(
+                                expiresAt: expiresAt,
+                                lifetime: viewModel.codeLifetime
+                            )
+                        }
                     }
 
                     Spacer(minLength: 0)
                 }
-                .frame(maxWidth: 700, maxHeight: .infinity)
+                .padding(.horizontal, 48)
+                .padding(.vertical, 36)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background { manualLinkPanel }
             }
-            // Bound the row to the QR column's height so the divider and the
-            // right column fill exactly that (not the whole centered area).
+            // Bound the row to the QR column's height so both choices remain
+            // balanced instead of stretching into the footer.
             .fixedSize(horizontal: false, vertical: true)
 
         case .loadingServers:
@@ -155,11 +156,6 @@ public struct PlexLinkView: View {
         case let .selectingServer(servers):
             ServerList(servers: servers, selected: $selectedServerIDs)
                 .onAppear { seedSelectionIfNeeded(servers) }
-
-        case .success:
-            Label("Signed in!", systemImage: "checkmark.circle.fill")
-                .font(.title)
-                .foregroundStyle(.green)
 
         case let .error(message):
             VStack(spacing: 12) {
@@ -174,27 +170,28 @@ public struct PlexLinkView: View {
         }
     }
 
-    private var orDivider: some View {
-        VStack(spacing: 16) {
-            Rectangle()
-                .fill(Color.primary.opacity(0.15))
-                .frame(width: 2)
-                .frame(maxHeight: .infinity)
-            Text("OR")
-                .font(.title3).bold()
-                .foregroundStyle(.secondary)
-            Rectangle()
-                .fill(Color.primary.opacity(0.15))
-                .frame(width: 2)
-                .frame(maxHeight: .infinity)
-        }
-        .frame(maxHeight: .infinity)
+    private var manualLinkPanel: some View {
+        let shape = RoundedRectangle(
+            cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius,
+            style: .continuous
+        )
+        return shape
+            .fill(palette.cardSurface)
+            .overlay {
+                shape.strokeBorder(palette.cardBorder.opacity(0.45), lineWidth: 1)
+            }
     }
 
-    /// The activation URL the QR encodes: scanning it on a phone opens
-    /// plex.tv/link with the code pre-filled.
-    static func linkURL(for code: String) -> String {
-        "https://plex.tv/link?code=\(code)"
+    private var codePanel: some View {
+        let shape = RoundedRectangle(
+            cornerRadius: PlozzTheme.Metrics.Radius.panel,
+            style: .continuous
+        )
+        return shape
+            .fill(palette.cardSurface)
+            .overlay {
+                shape.fill(Color.black.opacity(palette.isLight ? 0.06 : 0.26))
+            }
     }
 
     @ViewBuilder

@@ -14,8 +14,9 @@ public enum AppTheme: String, CaseIterable, Identifiable, Codable, Sendable {
     case light
     /// A soft, dark gray theme.
     case dark
-    /// A pure-black theme tuned for OLED panels.
-    case oled
+    /// A pure-black theme. The persisted raw value stays unchanged so existing
+    /// installs retain their selection after the user-facing rename.
+    case pureBlack = "oled"
 
     public var id: String { rawValue }
 
@@ -24,7 +25,7 @@ public enum AppTheme: String, CaseIterable, Identifiable, Codable, Sendable {
         case .system: return "System"
         case .light: return "Light"
         case .dark: return "Dark"
-        case .oled: return "OLED"
+        case .pureBlack: return "Pure Black"
         }
     }
 
@@ -34,30 +35,18 @@ public enum AppTheme: String, CaseIterable, Identifiable, Codable, Sendable {
         case .system: return "circle.lefthalf.filled"
         case .light: return "sun.max.fill"
         case .dark: return "moon.fill"
-        case .oled: return "moon.stars.fill"
-        }
-    }
-
-    /// One-line explanation of each look, shown under the option in the
-    /// onboarding theme picker (and available to Settings). Kept factual — a
-    /// description of the look, never a claim about what's "best".
-    public var detail: String {
-        switch self {
-        case .system: return "Follows your Apple TV's theme settings."
-        case .light: return "Dark text on light backgrounds."
-        case .dark: return "Light text on dark gray backgrounds."
-        case .oled: return "Light text on pure black, tuned for OLED screens."
+        case .pureBlack: return "moon.stars.fill"
         }
     }
 
     /// Fresh installs default to Dark, regardless of the device appearance —
-    /// dark/OLED read best for a lean-back media app. Users can still pick any
+    /// dark and Pure Black read best for a lean-back media app. Users can still pick any
     /// look during onboarding or later in Settings.
     public static let `default`: AppTheme = .dark
 
     /// The order the theme pickers (onboarding + Settings) present options in:
-    /// Dark first (the default), then OLED, Light, and System last.
-    public static let pickerOrder: [AppTheme] = [.dark, .oled, .light, .system]
+    /// Dark first (the default), then Pure Black, Light, and System last.
+    public static let pickerOrder: [AppTheme] = [.dark, .pureBlack, .light, .system]
 }
 
 /// How the full-screen music player paints its background and text. Independent
@@ -72,8 +61,9 @@ public enum MusicPlayerAppearance: String, CaseIterable, Identifiable, Codable, 
     case light
     /// Always the vibrant, artwork-tinted dark look.
     case dark
-    /// Always true black, with the artwork colors as subtle accents (OLED).
-    case oled
+    /// Always true black, with the artwork colors as subtle accents. The
+    /// persisted raw value stays unchanged for existing installs.
+    case pureBlack = "oled"
 
     public var id: String { rawValue }
 
@@ -82,7 +72,7 @@ public enum MusicPlayerAppearance: String, CaseIterable, Identifiable, Codable, 
         case .matchTheme: return "Match Theme"
         case .light: return "Light"
         case .dark: return "Dark"
-        case .oled: return "OLED"
+        case .pureBlack: return "Pure Black"
         }
     }
 
@@ -92,16 +82,16 @@ public enum MusicPlayerAppearance: String, CaseIterable, Identifiable, Codable, 
         case .matchTheme: return "circle.lefthalf.filled"
         case .light: return "sun.max.fill"
         case .dark: return "moon.fill"
-        case .oled: return "moon.stars.fill"
+        case .pureBlack: return "moon.stars.fill"
         }
     }
 
     public static let `default`: MusicPlayerAppearance = .matchTheme
 
-    /// The order the music-player style picker presents options in: Dark, OLED,
+    /// The order the music-player style picker presents options in: Dark, Pure Black,
     /// Light, then Match Theme last (mirroring the theme picker, where the
     /// "follows something else" option sits at the end).
-    public static let pickerOrder: [MusicPlayerAppearance] = [.dark, .oled, .light, .matchTheme]
+    public static let pickerOrder: [MusicPlayerAppearance] = [.dark, .pureBlack, .light, .matchTheme]
 
     /// AppStorage key shared by the player (reads it) and Settings (writes it).
     public static let storageKey = "musicPlayerAppearance"

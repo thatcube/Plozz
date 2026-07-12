@@ -92,16 +92,27 @@ struct SeerMediaInfo: Decodable {
     var tmdbId: Int?
     var status: Int?
     var downloadStatus: [SeerDownloadingItem]?
+    var seasons: [SeerMediaSeason]?
+    var requests: [SeerMediaRequest]?
 
-    init(id: Int? = nil, tmdbId: Int? = nil, status: Int? = nil, downloadStatus: [SeerDownloadingItem]? = nil) {
+    init(
+        id: Int? = nil,
+        tmdbId: Int? = nil,
+        status: Int? = nil,
+        downloadStatus: [SeerDownloadingItem]? = nil,
+        seasons: [SeerMediaSeason]? = nil,
+        requests: [SeerMediaRequest]? = nil
+    ) {
         self.id = id
         self.tmdbId = tmdbId
         self.status = status
         self.downloadStatus = downloadStatus
+        self.seasons = seasons
+        self.requests = requests
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, tmdbId, status, downloadStatus
+        case id, tmdbId, status, downloadStatus, seasons, requests
     }
 
     init(from decoder: Decoder) throws {
@@ -110,6 +121,53 @@ struct SeerMediaInfo: Decodable {
         tmdbId = try c.decodeIfPresent(Int.self, forKey: .tmdbId)
         status = try c.decodeIfPresent(Int.self, forKey: .status)
         downloadStatus = try c.decodeIfPresent([SeerDownloadingItem].self, forKey: .downloadStatus)
+        seasons = try c.decodeIfPresent([SeerMediaSeason].self, forKey: .seasons)
+        requests = try c.decodeIfPresent([SeerMediaRequest].self, forKey: .requests)
+    }
+}
+
+/// One season tracked by Seerr for a series. Seasons absent from this array are
+/// untracked and therefore requestable when they exist in the TMDB season list.
+struct SeerMediaSeason: Decodable {
+    var seasonNumber: Int
+    var status: Int?
+
+    init(seasonNumber: Int, status: Int? = nil) {
+        self.seasonNumber = seasonNumber
+        self.status = status
+    }
+}
+
+/// A TV request attached to `mediaInfo`. Active requests must be reconciled
+/// separately from availability-scanner seasons or pending seasons look missing.
+struct SeerMediaRequest: Decodable {
+    var status: Int?
+    var is4k: Bool?
+    var seasons: [SeerRequestedSeason]
+
+    init(status: Int? = nil, is4k: Bool? = nil, seasons: [SeerRequestedSeason] = []) {
+        self.status = status
+        self.is4k = is4k
+        self.seasons = seasons
+    }
+
+    enum CodingKeys: String, CodingKey { case status, is4k, seasons }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        status = try c.decodeIfPresent(Int.self, forKey: .status)
+        is4k = try c.decodeIfPresent(Bool.self, forKey: .is4k)
+        seasons = try c.decodeIfPresent([SeerRequestedSeason].self, forKey: .seasons) ?? []
+    }
+}
+
+struct SeerRequestedSeason: Decodable {
+    var seasonNumber: Int
+    var status: Int?
+
+    init(seasonNumber: Int, status: Int? = nil) {
+        self.seasonNumber = seasonNumber
+        self.status = status
     }
 }
 
@@ -149,21 +207,34 @@ struct SeerStatus: Decodable {
     var commitTag: String?
 }
 
-/// Minimal decode of `GET /api/v1/movie/{id}` and `/api/v1/tv/{id}`: only the
-/// `mediaInfo` (request status + live download queue) needed to refresh a
-/// discovery title's request/availability state when its detail page is
-/// (re)opened — so a title requested earlier reads "Requested"/"Downloading"
-/// instead of a stale "Request".
+/// Minimal decode of `GET /api/v1/movie/{id}` and `/api/v1/tv/{id}`. TV details
+/// include the complete TMDB season list while `mediaInfo.seasons` carries the
+/// subset Seerr currently tracks.
 struct SeerMediaDetails: Decodable {
     var mediaInfo: SeerMediaInfo?
+    var seasons: [SeerSeasonSummary]
 
-    init(mediaInfo: SeerMediaInfo? = nil) { self.mediaInfo = mediaInfo }
+    init(mediaInfo: SeerMediaInfo? = nil, seasons: [SeerSeasonSummary] = []) {
+        self.mediaInfo = mediaInfo
+        self.seasons = seasons
+    }
 
-    enum CodingKeys: String, CodingKey { case mediaInfo }
+    enum CodingKeys: String, CodingKey { case mediaInfo, seasons }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         mediaInfo = try c.decodeIfPresent(SeerMediaInfo.self, forKey: .mediaInfo)
+        seasons = try c.decodeIfPresent([SeerSeasonSummary].self, forKey: .seasons) ?? []
+    }
+}
+
+struct SeerSeasonSummary: Decodable {
+    var name: String?
+    var seasonNumber: Int
+
+    init(name: String? = nil, seasonNumber: Int) {
+        self.name = name
+        self.seasonNumber = seasonNumber
     }
 }
 

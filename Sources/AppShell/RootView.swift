@@ -94,57 +94,13 @@ public struct RootView: View {
             case .launching:
                 LaunchView()
 
-            case let .onboarding(.selectingServer, canReturnToApp):
-                AddAccountView(
-                    deviceID: appState.deviceID,
+            case let .onboarding(step, canReturnToApp):
+                OnboardingFlowView(
+                    appState: appState,
+                    step: step,
                     canReturnToApp: canReturnToApp,
-                    initialProvider: appState.pendingOnboardingProvider,
-                    signedInServers: appState.signedInServers,
-                    onJellyfinServerSelected: { server in appState.selectServer(server) },
-                    onPlexAuthenticated: { session in appState.didAuthenticatePlex(session) },
-                    onPlexAuthenticatedMany: { sessions in appState.didAuthenticatePlexMany(sessions) },
-                    onShareConfigured: { draft in
-                        appState.didConfigureShare(
-                            host: draft.host,
-                            port: draft.port,
-                            share: draft.share,
-                            username: draft.username,
-                            password: draft.password,
-                            displayName: draft.displayName
-                        )
-                    },
-                    onCancel: { appState.cancelAuthentication() }
+                    deviceColorScheme: systemColorScheme
                 )
-
-            case let .onboarding(.authenticating(server), _):
-                AuthView(
-                    server: server,
-                    deviceID: appState.deviceID,
-                    onAuthenticated: { session in appState.didAuthenticate(session) },
-                    onCancel: { appState.cancelAuthentication() }
-                )
-
-            case .onboarding(.selectPlexUser, _):
-                if let selection = appState.pendingPlexUserSelection {
-                    PlexUserSelectionView(
-                        selection: selection,
-                        onSelect: { user in appState.selectPlexUserDuringOnboarding(user) }
-                    )
-                } else {
-                    LaunchView()
-                }
-
-            case .onboarding(.selectLibraries, _):
-                SelectLibrariesView(appState: appState)
-
-            case .onboarding(.enableProfilesPrompt, _):
-                EnableProfilesView(appState: appState)
-
-            case .onboarding(.confirmProfile, _):
-                FirstRunProfileView(appState: appState)
-
-            case .onboarding(.selectTheme, _):
-                SelectThemeView(appState: appState, onContinue: { appState.finishThemeSelection() }, deviceColorScheme: systemColorScheme)
 
             case .ready:
                 ZStack {
@@ -340,6 +296,245 @@ public struct RootView: View {
         // model is rebuilt on profile switch by AppState, so each profile gets its
         // own tint without re-architecting this call site.
         .installNightShiftOverlay(appState.nightShiftModel)
+    }
+}
+
+private enum OnboardingPage: Equatable {
+    case selectingServer(canReturnToApp: Bool)
+    case authenticating(MediaServer)
+    case selectPlexUser(AppState.PendingPlexUserSelection?)
+    case selectLibraries
+    case enableProfilesPrompt
+    case confirmProfile
+    case selectTheme
+
+    init(
+        step: OnboardingStep,
+        canReturnToApp: Bool,
+        plexUserSelection: AppState.PendingPlexUserSelection?
+    ) {
+        switch step {
+        case .selectingServer:
+            self = .selectingServer(canReturnToApp: canReturnToApp)
+        case let .authenticating(server):
+            self = .authenticating(server)
+        case .selectPlexUser:
+            self = .selectPlexUser(plexUserSelection)
+        case .selectLibraries:
+            self = .selectLibraries
+        case .enableProfilesPrompt:
+            self = .enableProfilesPrompt
+        case .confirmProfile:
+            self = .confirmProfile
+        case .selectTheme:
+            self = .selectTheme
+        }
+    }
+
+    var order: Int {
+        switch self {
+        case .selectingServer: 0
+        case .authenticating: 1
+        case .selectPlexUser: 2
+        case .selectLibraries: 3
+        case .enableProfilesPrompt: 4
+        case .confirmProfile: 5
+        case .selectTheme: 6
+        }
+    }
+
+    var transitionID: String {
+        switch self {
+        case let .selectingServer(canReturnToApp):
+            "selectingServer-\(canReturnToApp)"
+        case let .authenticating(server):
+            "authenticating-\(server.id)"
+        case let .selectPlexUser(selection):
+            "selectPlexUser-\(selection?.accountID ?? "pending")"
+        case .selectLibraries:
+            "selectLibraries"
+        case .enableProfilesPrompt:
+            "enableProfilesPrompt"
+        case .confirmProfile:
+            "confirmProfile"
+        case .selectTheme:
+            "selectTheme"
+        }
+    }
+}
+
+private struct OnboardingFlowView: View {
+    let appState: AppState
+    let step: OnboardingStep
+    let canReturnToApp: Bool
+    let deviceColorScheme: ColorScheme
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var displayedPage: OnboardingPage
+    @State private var pendingPage: OnboardingPage?
+    @State private var navigationDirection: OnboardingNavigationDirection = .forward
+    @State private var isTransitioning = false
+
+    init(
+        appState: AppState,
+        step: OnboardingStep,
+        canReturnToApp: Bool,
+        deviceColorScheme: ColorScheme
+    ) {
+        self.appState = appState
+        self.step = step
+        self.canReturnToApp = canReturnToApp
+        self.deviceColorScheme = deviceColorScheme
+        _displayedPage = State(initialValue: OnboardingPage(
+            step: step,
+            canReturnToApp: canReturnToApp,
+            plexUserSelection: appState.pendingPlexUserSelection
+        ))
+    }
+
+    var body: some View {
+        ZStack {
+            OnboardingPageContent(
+                page: displayedPage,
+                appState: appState,
+                deviceColorScheme: deviceColorScheme
+            )
+            .id(displayedPage.transitionID)
+            .geometryGroup()
+            .transition(pageTransition)
+            .allowsHitTesting(!isTransitioning)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onChange(of: currentPage) { _, newPage in
+            enqueue(newPage)
+        }
+    }
+
+    private var currentPage: OnboardingPage {
+        OnboardingPage(
+            step: step,
+            canReturnToApp: canReturnToApp,
+            plexUserSelection: appState.pendingPlexUserSelection
+        )
+    }
+
+    private var pageTransition: AnyTransition {
+        OnboardingPageMotion.transition(
+            direction: navigationDirection,
+            reduceMotion: reduceMotion
+        )
+    }
+
+    private func enqueue(_ page: OnboardingPage) {
+        guard page != displayedPage || isTransitioning else { return }
+        pendingPage = page
+        guard !isTransitioning else { return }
+        transitionToPendingPage()
+    }
+
+    private func transitionToPendingPage() {
+        guard let nextPage = pendingPage else { return }
+        pendingPage = nil
+        guard nextPage != displayedPage else { return }
+
+        let outgoingPage = displayedPage
+        navigationDirection = direction(from: outgoingPage, to: nextPage)
+        isTransitioning = true
+
+        withAnimation(
+            OnboardingPageMotion.animation(reduceMotion: reduceMotion),
+            completionCriteria: .logicallyComplete
+        ) {
+            displayedPage = nextPage
+        } completion: {
+            isTransitioning = false
+            if pendingPage == displayedPage {
+                pendingPage = nil
+            }
+            if pendingPage != nil {
+                transitionToPendingPage()
+            }
+        }
+    }
+
+    private func direction(
+        from oldPage: OnboardingPage,
+        to newPage: OnboardingPage
+    ) -> OnboardingNavigationDirection {
+        newPage.order < oldPage.order ? .backward : .forward
+    }
+}
+
+private struct OnboardingPageContent: View {
+    let page: OnboardingPage
+    let appState: AppState
+    let deviceColorScheme: ColorScheme
+
+    @ViewBuilder
+    var body: some View {
+        switch page {
+        case let .selectingServer(canReturnToApp):
+            AddAccountView(
+                deviceID: appState.deviceID,
+                canReturnToApp: canReturnToApp,
+                initialProvider: appState.pendingOnboardingProvider,
+                signedInServers: appState.signedInServers,
+                onJellyfinServerSelected: { server in appState.selectServer(server) },
+                onPlexAuthenticated: { session in appState.didAuthenticatePlex(session) },
+                onPlexAuthenticatedMany: { sessions in appState.didAuthenticatePlexMany(sessions) },
+                onShareConfigured: { draft in
+                    appState.didConfigureShare(
+                        host: draft.host,
+                        port: draft.port,
+                        share: draft.share,
+                        username: draft.username,
+                        password: draft.password,
+                        displayName: draft.displayName
+                    )
+                },
+                onCancel: { appState.cancelAuthentication() }
+            )
+
+        case let .authenticating(server):
+            if server.provider == .plex {
+                ProgressView("Finishing Plex sign-in…")
+                    .font(.title2)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                AuthView(
+                    server: server,
+                    deviceID: appState.deviceID,
+                    onAuthenticated: { session in appState.didAuthenticate(session) },
+                    onCancel: { appState.cancelAuthentication() }
+                )
+            }
+
+        case let .selectPlexUser(selection):
+            if let selection {
+                PlexUserSelectionView(
+                    selection: selection,
+                    onSelect: { user in appState.selectPlexUserDuringOnboarding(user) }
+                )
+            } else {
+                LaunchView()
+            }
+
+        case .selectLibraries:
+            SelectLibrariesView(appState: appState)
+
+        case .enableProfilesPrompt:
+            EnableProfilesView(appState: appState)
+
+        case .confirmProfile:
+            FirstRunProfileView(appState: appState)
+
+        case .selectTheme:
+            SelectThemeView(
+                appState: appState,
+                onContinue: { appState.finishThemeSelection() },
+                deviceColorScheme: deviceColorScheme
+            )
+        }
     }
 }
 

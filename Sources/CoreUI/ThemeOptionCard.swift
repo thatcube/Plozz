@@ -37,7 +37,7 @@ struct ThemePreviewColors {
         textSecondary: Color.white.opacity(0.45),
         accent: accentBlue
     )
-    static let oled = ThemePreviewColors(
+    static let pureBlack = ThemePreviewColors(
         bgTop: .black,
         bgBottom: .black,
         card: Color(white: 0.11),
@@ -103,7 +103,7 @@ private struct MiniPreview: View {
     }
 }
 
-/// The per-theme preview graphic. Light/Dark/OLED show their own fixed look;
+/// The per-theme preview graphic. Light, Dark, and Pure Black show their own fixed look;
 /// System is one UI split light | dark down the middle (so the centre poster
 /// card straddles the seam) to signal "follows your device." Fills whatever
 /// frame the caller gives it, so it scales for both the full onboarding card
@@ -141,8 +141,8 @@ public struct ThemeSwatch: View {
                 MiniPreview(colors: .light)
             case .dark:
                 MiniPreview(colors: .dark)
-            case .oled:
-                MiniPreview(colors: .oled)
+            case .pureBlack:
+                MiniPreview(colors: .pureBlack)
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
@@ -220,9 +220,9 @@ private struct ThemeCardButtonBody: View {
     }
 }
 
-/// A selectable theme card: a preview swatch above the theme name (plus a short
-/// description in the full variant). Used both by the onboarding theme picker
-/// (`compact: false`, a fixed-width card) and Settings ▸ Appearance
+/// A selectable theme card: a preview swatch above the theme name. Used both by
+/// the onboarding theme picker (`compact: false`, a fixed-width card) and
+/// Settings ▸ Appearance
 /// (`compact: true`, a smaller, flexible-width card that shares available space).
 ///
 /// The caller owns focus (apply `.focused(...)`) and selection state; tapping
@@ -251,7 +251,6 @@ public struct ThemeOptionCard: View {
     public var body: some View {
         PreviewCard(
             title: theme.displayName,
-            detail: theme.detail,
             isSelected: isSelected,
             accent: accent,
             compact: compact,

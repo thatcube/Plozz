@@ -19,6 +19,9 @@ public struct PosterCardView: View {
     private let style: Style
     private let spoilerSettings: SpoilerSettings
     private let enablesAsyncArtworkFallback: Bool
+    /// Optional caller-owned context cue. It occupies the artwork's top-leading
+    /// slot, leaving watch state (top-trailing) and progress (bottom) untouched.
+    private let statusCueText: String?
     private let action: () -> Void
 
     @FocusState private var isFocused: Bool
@@ -36,12 +39,14 @@ public struct PosterCardView: View {
         style: Style = .poster,
         spoilerSettings: SpoilerSettings = .default,
         enablesAsyncArtworkFallback: Bool = true,
+        statusCue: String? = nil,
         action: @escaping () -> Void
     ) {
         self.item = item
         self.style = style
         self.spoilerSettings = spoilerSettings
         self.enablesAsyncArtworkFallback = enablesAsyncArtworkFallback
+        self.statusCueText = statusCue
         self.action = action
     }
 
@@ -95,6 +100,7 @@ public struct PosterCardView: View {
                 .aspectRatio(2.0 / 3.0, contentMode: .fit)
                 .frame(maxWidth: .infinity)
                 .overlay { artwork }
+                .overlay(alignment: .topLeading) { statusCue(inset: 8) }
                 .overlay(alignment: .topTrailing) { statusIndicator(inset: 8) }
                 .overlay(alignment: .bottom) { progressBar(height: 12, hInset: 16, bottomInset: 16) }
                 .clipShape(RoundedRectangle(cornerRadius: PlozzTheme.Metrics.posterArtCornerRadius, style: .continuous))
@@ -135,6 +141,7 @@ public struct PosterCardView: View {
         VStack(alignment: .leading, spacing: metrics.landscapeCaptionTopSpacing) {
             artwork
                 .frame(width: size.width, height: size.height)
+                .overlay(alignment: .topLeading) { statusCue(inset: 8) }
                 .overlay(alignment: .topTrailing) { statusIndicator(inset: 8) }
                 .overlay(alignment: .bottom) { progressBar(height: 12, hInset: 16, bottomInset: 16) }
                 .clipShape(RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius, style: .continuous))
@@ -209,6 +216,7 @@ public struct PosterCardView: View {
             .aspectRatio(borderlessAspectRatio, contentMode: .fit)
             .frame(maxWidth: .infinity)
             .overlay { artwork }
+            .overlay(alignment: .topLeading) { statusCue(inset: borderlessBadgeInset) }
             .overlay(alignment: .topTrailing) { statusIndicator(inset: borderlessBadgeInset) }
             .overlay(alignment: .bottom) {
                 progressBar(
@@ -518,6 +526,21 @@ public struct PosterCardView: View {
 
     // MARK: Progress
 
+    @ViewBuilder
+    private func statusCue(inset: CGFloat) -> some View {
+        if let statusCueText {
+            Text(statusCueText)
+                .font(.system(size: metrics.cardStatusCueFontSize, weight: .semibold))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+                .padding(.horizontal, metrics.cardStatusCueHorizontalPadding)
+                .padding(.vertical, metrics.cardStatusCueVerticalPadding)
+                .background(.black.opacity(0.72), in: Capsule(style: .continuous))
+                .padding(inset)
+                .accessibilityLabel(statusCueText)
+        }
+    }
+
     /// The single source of truth for "this card is mid-playback": a partial
     /// `playedPercentage` strictly inside `(0.01, 0.99)`. When true the card shows
     /// the in-progress bar (see `progressBar`), and — crucially — the "watched"
@@ -625,7 +648,7 @@ public struct PosterCardView: View {
     /// Glass rim for the watched badge. Unlike the card's `mediaEdgeColor` (which
     /// blends with the surrounding card surface), the badge floats on artwork, so
     /// it wants a translucent glass edge that reads against the poster: a bright
-    /// white highlight on dark / OLED, a soft dark edge on Light.
+    /// white highlight on dark and Pure Black, a soft dark edge on Light.
     private var watchedBadgeRim: Color {
         palette.isLight ? .black.opacity(0.15) : .white.opacity(0.4)
     }
@@ -732,7 +755,7 @@ public extension View {
     /// `Button`. On tvOS a `Button` (even `.buttonStyle(.plain)`) paints the
     /// system focus *platter* — a stark white plate behind the focused card that
     /// `.focusEffectDisabled()` can't fully remove and that buries our own glass
-    /// focus treatment (most visible on dark / OLED themes). Following Twozz's
+    /// focus treatment (most visible on dark and Pure Black themes). Following Twozz's
     /// card pattern, we instead drive focus with `.focusable` + `.onTapGesture`
     /// (the select-press fires the tap) and disable the system focus effect, so
     /// the only focus visuals are the ones we draw via `plozzGlassCard`.

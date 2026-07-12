@@ -33,6 +33,9 @@ final class FakeMediaProvider: MediaProvider, InteractiveBrowseActivityReporting
     /// Optional per-parent children for `children(of:)`. When `nil`, the legacy
     /// behaviour (return `allItems`) is preserved for existing tests.
     var childrenByParent: [String: [MediaItem]]?
+    /// Optional per-call responses for a parent. The first request gets the first
+    /// array, the second gets the second, and later requests reuse the last.
+    var childrenResponsesByParent: [String: [[MediaItem]]]?
     /// How many times `children(of:)` was called for each parent id.
     private var _childrenCallCount: [String: Int] = [:]
     var childrenCallCount: [String: Int] { withLock { _childrenCallCount } }
@@ -99,12 +102,21 @@ final class FakeMediaProvider: MediaProvider, InteractiveBrowseActivityReporting
     /// Optional gate that, when present for a given parent id, suspends the
     /// `children(of:)` call until released. Lets tests observe state published
     /// between an item arriving and its children arriving.
-    var childrenGate: [String: @Sendable () async -> Void]?
+    var childrenGate: [String: @Sendable (Int) async -> Void]?
 
     func children(of itemID: String) async throws -> [MediaItem] {
-        withLock { _childrenCallCount[itemID, default: 0] += 1 }
+        let callNumber = withLock {
+            _childrenCallCount[itemID, default: 0] += 1
+            return _childrenCallCount[itemID, default: 0]
+        }
+        let sequencedResponse = childrenResponsesByParent?[itemID].flatMap { responses in
+            responses.isEmpty ? nil : responses[min(callNumber - 1, responses.count - 1)]
+        }
         if let gate = childrenGate?[itemID] {
-            await gate()
+            await gate(callNumber)
+        }
+        if let sequencedResponse {
+            return sequencedResponse
         }
         if let childrenByParent {
             return childrenByParent[itemID] ?? []

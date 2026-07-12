@@ -87,7 +87,7 @@ private struct OptionalMediaEdge: ViewModifier {
 
 /// A focusable square card used across the music grids/rows. Mirrors CoreUI's
 /// `PosterCardView` 1:1: the shared liquid-glass lift (theme-aware across
-/// dark/OLED/light via `plozzGlassCard`), a focused drop shadow + scale, and
+/// dark, Pure Black, and light via `plozzGlassCard`), a focused drop shadow + scale, and
 /// title/subtitle that flip to dark ink on the opaque white focus lift (Reduce
 /// Transparency on, or pre-tvOS 26) so text never vanishes into the plate.
 struct MusicCard: View {

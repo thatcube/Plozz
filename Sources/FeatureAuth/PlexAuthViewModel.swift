@@ -14,10 +14,9 @@ public final class PlexAuthViewModel {
     public enum Phase: Equatable {
         case idle
         case requesting
-        case awaitingLink(code: String, expiresAt: Date)
+        case awaitingLink(code: String, authorizationURL: URL, expiresAt: Date)
         case loadingServers
         case selectingServer([PlexServerCandidate])
-        case success
         case error(String)
     }
 
@@ -55,12 +54,22 @@ public final class PlexAuthViewModel {
             do {
                 while true {
                     try Task.checkCancellation()
-                    let pin = try await service.begin()
+                    async let manualPinRequest = service.begin()
+                    async let hostedPinRequest = service.begin(strong: true)
+                    let (manualPin, hostedPin) = try await (manualPinRequest, hostedPinRequest)
                     try Task.checkCancellation()
                     let expiresAt = Date().addingTimeInterval(service.timeout)
-                    self.phase = .awaitingLink(code: pin.code, expiresAt: expiresAt)
+                    self.phase = .awaitingLink(
+                        code: manualPin.code,
+                        authorizationURL: service.authorizationURL(for: hostedPin),
+                        expiresAt: expiresAt
+                    )
 
-                    switch try await Self.awaitLinkOrExpiry(service: service, pin: pin, expiresAt: expiresAt) {
+                    switch try await Self.awaitLinkOrExpiry(
+                        service: service,
+                        pins: [manualPin, hostedPin],
+                        expiresAt: expiresAt
+                    ) {
                     case let .linked(token):
                         try Task.checkCancellation()
                         self.authToken = token
@@ -81,8 +90,11 @@ public final class PlexAuthViewModel {
                         continue // Transparently issue a fresh code + QR.
                     }
                 }
+
             } catch is CancellationError {
                 // Cancelled by the user; leave phase as-is (view is dismissing).
+            } catch let error as PlexPinError {
+                self.phase = .error(error.userMessage)
             } catch let error as AppError {
                 if error == .cancelled { return }
                 self.phase = .error(error.userMessage)
@@ -92,7 +104,13 @@ public final class PlexAuthViewModel {
         }
     }
 
-    private enum LinkOutcome {
+    /// Starts the flow when a host has not already begun preloading it.
+    public func startIfNeeded() {
+        guard flow == nil else { return }
+        start()
+    }
+
+    enum LinkOutcome: Equatable, Sendable {
         case linked(String)
         case expired
     }
@@ -100,17 +118,23 @@ public final class PlexAuthViewModel {
     /// Races the link poll against a wall-clock expiry watchdog. The watchdog
     /// guarantees we regenerate at the deadline even if a poll request stalls,
     /// so the screen can never get stranded on an expired code.
-    private static func awaitLinkOrExpiry(
+    nonisolated static func awaitLinkOrExpiry(
         service: PlexAuthService,
-        pin: PlexPinChallenge,
+        pins: [PlexPinChallenge],
         expiresAt: Date
     ) async throws -> LinkOutcome {
         try await withThrowingTaskGroup(of: LinkOutcome.self) { group in
-            group.addTask {
-                do {
-                    return .linked(try await service.awaitLink(for: pin))
-                } catch let error as AppError where error == .quickConnectExpired {
-                    return .expired
+            for (index, pin) in pins.enumerated() {
+                group.addTask {
+                    do {
+                        let initialDelay = index == 0 ? 0 : service.pollInterval / 2
+                        return .linked(try await service.awaitLink(
+                            for: pin,
+                            initialDelay: initialDelay
+                        ))
+                    } catch let error as AppError where error == .quickConnectExpired {
+                        return .expired
+                    }
                 }
             }
             group.addTask {
@@ -147,7 +171,6 @@ public final class PlexAuthViewModel {
                     sessions.append(try await self.service.makeSession(for: candidate, authToken: token))
                 }
                 try Task.checkCancellation()
-                self.phase = .success
                 if sessions.count == 1 {
                     self.onAuthenticated(sessions[0])
                 } else {
@@ -166,7 +189,6 @@ public final class PlexAuthViewModel {
     private func finish(with candidate: PlexServerCandidate, token: String) async throws {
         let session = try await service.makeSession(for: candidate, authToken: token)
         try Task.checkCancellation()
-        phase = .success
         onAuthenticated(session)
     }
 

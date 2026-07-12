@@ -3,7 +3,7 @@ import SwiftUI
 
 /// A shared inline error line: a warning triangle followed by a short message,
 /// tinted with the active theme's `errorText` colour so it reads as a clear
-/// error in every theme (brighter on dark/OLED, deeper on light). Use anywhere
+/// error in every theme (brighter on dark and Pure Black, deeper on light). Use anywhere
 /// the UI needs to surface a recoverable failure (wrong credentials, server
 /// unreachable, etc.) rather than hand-rolling a red `Label` each time.
 public struct InlineErrorMessage: View {

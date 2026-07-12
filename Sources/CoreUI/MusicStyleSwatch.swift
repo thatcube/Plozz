@@ -13,7 +13,7 @@ private struct MusicStylePreviewColors {
     /// `LiquidArtworkBackground.gradientOpacity`).
     let blobOpacity: Double
     /// Legibility veil painted over the blobs (a white frost for Light, black
-    /// veils for Dark/OLED — OLED heaviest so colors read as faint accents).
+    /// veils for Dark and Pure Black — Pure Black heaviest so colors read as faint accents).
     let scrim: Color
     /// Progress-track colour (the unfilled scrubber behind the played portion).
     let track: Color
@@ -45,7 +45,7 @@ private struct MusicStylePreviewColors {
         track: Color.white.opacity(0.3),
         seek: Color.white
     )
-    static let oled = MusicStylePreviewColors(
+    static let pureBlack = MusicStylePreviewColors(
         base: .black,
         blobOpacity: 1.0,
         scrim: Color.black.opacity(0.42),
@@ -132,7 +132,7 @@ private struct MusicMini: View {
 }
 
 /// The per-appearance preview graphic for the music player style picker.
-/// Light/Dark/OLED show their own fixed chrome; Match Theme is one screen split
+/// Light, Dark, and Pure Black show their own fixed chrome; Match Theme is one screen split
 /// light | dark down the middle (mirroring the System theme swatch) to signal
 /// "follows your theme." Fills the caller's frame, so it scales for the full and
 /// compact card sizes.
@@ -165,8 +165,8 @@ public struct MusicStyleSwatch: View {
                 MusicMini(colors: .light)
             case .dark:
                 MusicMini(colors: .dark)
-            case .oled:
-                MusicMini(colors: .oled)
+            case .pureBlack:
+                MusicMini(colors: .pureBlack)
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))

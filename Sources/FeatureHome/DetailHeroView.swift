@@ -30,12 +30,12 @@ struct DetailHeroView: View {
     /// the season tabs and episode row peek above the fold, signalling there's
     /// more to scroll to.
     var heroHeightFraction: CGFloat = 1.0
-    /// Extends *only the backdrop image* (and its dissolve-to-background) below
-    /// the hero content by this fraction of the screen height, without moving the
-    /// title/Play (which stay pinned within `heroHeightFraction`). Used by the
-    /// series page so the seamless fade lands closer to the top of the episode
-    /// rail instead of completing high up the page.
-    var backdropBottomExtensionFraction: CGFloat = 0
+    /// Stable title used when no logo resolves. A series page supplies the series
+    /// title so the fallback remains the same identity while episodes are browsed.
+    var titleFallbackOverride: String? = nil
+    /// Optional series-only cosmetic recede state. The model is consumed by leaf
+    /// modifiers so changing it never invalidates the parent page or episode rail.
+    var seriesRecedeModel: SeriesHeroRecedeModel? = nil
     let spoilerSettings: SpoilerSettings
     /// Replaces the hero's own subtitle when set. Used by a TV-show hero that is
     /// presenting the *series* (not a focused episode) to still surface the
@@ -113,6 +113,14 @@ struct DetailHeroView: View {
     /// One-tap request action, invoked when the user activates the "Request" pill.
     /// `nil` disables requesting (e.g. Seerr disconnected), leaving the pill inert.
     var onRequest: (() -> Void)? = nil
+    /// Season-level request state for a discovery series. When present, the hero
+    /// replaces its one-tap title request with the shared season request menu.
+    var seasonRequestAvailability: MediaRequestAvailability? = nil
+    var seasonRequestAvailabilityResolved: Bool = false
+    var seasonRequestAvailabilityFailed: Bool = false
+    var isRequestingSeasons: Bool = false
+    var onRequestSeasons: (([Int]) -> Void)? = nil
+    var onRetrySeasonRequestAvailability: (() -> Void)? = nil
 
     /// Local focus state of the Play button, so the inline resume progress bar
     /// can flip its colours to stay visible against the button's focused (white)
@@ -180,6 +188,7 @@ struct DetailHeroView: View {
     /// the value-keyed `.animation` on `item.id`/`backdrop.id`.
     @State private var heroVisible = false
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// The app-installed action handler (the SAME one the press-and-hold context
     /// menu reads). Drives the visible Watchlist / Watched / Refresh hero buttons
     /// so they are byte-for-byte consistent with the long-press menu — optimistic
@@ -225,6 +234,8 @@ struct DetailHeroView: View {
     /// content does). The scrim geometry is identical across modes — only this
     /// tone flips — so legibility stays consistent between appearances.
     private var scrimTone: Color { colorScheme == .dark ? .black : .white }
+
+    private var heroLogoHeight: CGFloat { 200 }
 
     // MARK: - Visible item actions (discoverability)
 
@@ -337,7 +348,6 @@ struct DetailHeroView: View {
 
     var body: some View {
         let hideText = spoilerSettings.shouldHideText(for: item)
-        let hideThumbnail = spoilerSettings.shouldHideThumbnail(for: item)
         let heroHeight = Self.screenHeight * heroHeightFraction
         // When the hero fills the screen (a movie, with no children rail below to
         // provide separation) its content is pinned to the very bottom edge, which
@@ -349,9 +359,11 @@ struct DetailHeroView: View {
         // left. A non-full-height hero (a show) has rows beneath it and keeps the
         // plain inter-section `screenPadding`.
         let isFullScreenHero = heroHeightFraction >= 1.0
-        let bottomInset = isFullScreenHero
+        let baseBottomInset = isFullScreenHero
             ? Self.horizontalSafeAreaInset + PlozzTheme.Metrics.heroLeadingPadding
             : PlozzTheme.Metrics.screenPadding
+        let bottomInset = baseBottomInset
+            + (seriesRecedeModel == nil ? 0 : SeriesEpisodeBrowserLayout.heroContentBottomLift)
         // The leading-aligned content column. It is the ONLY thing that sizes the
         // hero, so the hero always reports the safe viewport width — never the
         // full panel — keeping its title/logo/Play on-screen and focusable.
@@ -365,29 +377,34 @@ struct DetailHeroView: View {
             HeroLogoArtwork(
                 primaryURL: backdrop.logoURL,
                 asyncFallbackURL: tmdbLogoFallback,
-                backgroundSample: heroBackgroundSample
+                backgroundSample: heroBackgroundSample,
+                maxHeight: heroLogoHeight
             ) {
                 titleText(hideText: hideText)
             }
-            if let subtitle = subtitleOverride ?? item.subtitle, !isYearOnlySubtitle(subtitle) {
-                Text(subtitle)
-                    .font(.system(size: 26, weight: .medium))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .contentTransition(.opacity)
+            ZStack(alignment: .leading) {
+                if let subtitle = subtitleOverride ?? item.subtitle, !isYearOnlySubtitle(subtitle) {
+                    Text(subtitle)
+                        .font(.system(size: 26, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .contentTransition(.opacity)
+                }
             }
             let metadata = item.metadataComponents()
-            if heroRatingBadge != nil || !metadata.isEmpty {
-                HStack(alignment: .center, spacing: 16) {
-                    if let badge = heroRatingBadge {
-                        MediaBadgeChip(badge: badge)
-                    }
-                    if !metadata.isEmpty {
-                        Text(metadata.joined(separator: "  ·  "))
-                            .font(.system(size: 23, weight: .medium))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .contentTransition(.opacity)
+            ZStack(alignment: .leading) {
+                if heroRatingBadge != nil || !metadata.isEmpty {
+                    HStack(alignment: .center, spacing: 16) {
+                        if let badge = heroRatingBadge {
+                            MediaBadgeChip(badge: badge)
+                        }
+                        if !metadata.isEmpty {
+                            Text(metadata.joined(separator: "  ·  "))
+                                .font(.system(size: 23, weight: .medium))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .contentTransition(.opacity)
+                        }
                     }
                 }
             }
@@ -400,29 +417,23 @@ struct DetailHeroView: View {
                     .frame(maxWidth: 960, alignment: .topLeading)
                     .contentTransition(.opacity)
             }
-            if !featureBadges.isEmpty {
-                MediaBadgeRow(badges: featureBadges)
+            ZStack(alignment: .leading) {
+                if !featureBadges.isEmpty {
+                    MediaBadgeRow(badges: featureBadges)
+                }
             }
-            if !heroRatings.isEmpty && !spoilerSettings.shouldHideRatings(for: item) {
-                RatingsBadgeRow(ratings: heroRatings)
+            ZStack(alignment: .leading) {
+                if !heroRatings.isEmpty && !spoilerSettings.shouldHideRatings(for: item) {
+                    RatingsBadgeRow(ratings: heroRatings)
+                }
             }
-            if hideText {
-                Label("Overview hidden to avoid spoilers", systemImage: "eye.slash.fill")
-                    .font(.system(size: 22))
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: 960, alignment: .topLeading)
-            } else if let overview = item.overview {
-                Text(overview)
-                    .font(.system(size: 22))
-                    .foregroundStyle(.secondary)
-                    .lineSpacing(2)
-                    // Reserve three lines of height even when the text is
-                    // shorter, so swapping the focused item never makes the
-                    // controls below jump up and down.
-                    .lineLimit(3, reservesSpace: true)
-                    .frame(maxWidth: 960, alignment: .topLeading)
-                    .contentTransition(.opacity)
-            }
+            SpoilerSafeOverviewText(
+                overview: item.overview,
+                hidesSpoilers: hideText,
+                mode: spoilerSettings.mode,
+                lineCount: 3,
+                maxWidth: 960
+            )
             if isDiscoveryItem ? showsRequestPill : ((playTitle != nil && onPlay != nil) || onPlayTrailer != nil || showsMoreMenu || hasHeroActionButtons) {
                 HStack(spacing: 24) {
                     if isDiscoveryItem {
@@ -474,6 +485,10 @@ struct DetailHeroView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .focusScope(heroActionsScope)
                 .focusSection()
+                // The receded row is visually hidden, so remove only its controls
+                // from focus. Disabling the entire hero would also disable the
+                // sibling return proxy that restores Play on an UP press.
+                .disabled(seriesRecedeModel?.isReceded == true)
                 // Keep the whole action row pinned to the hero top: this row is
                 // bottom-anchored in a hero that is full-screen-height for a
                 // childless movie, so when focus lands on any button tvOS
@@ -495,6 +510,11 @@ struct DetailHeroView: View {
         // but measured at the *safe* viewport width (`.infinity` reports the
         // proposed width), never the full 1920pt panel.
         .frame(maxWidth: .infinity, minHeight: heroHeight, alignment: .bottomLeading)
+        .frame(
+            height: seriesRecedeModel == nil ? nil : heroHeight,
+            alignment: .bottomLeading
+        )
+        .modifier(SeriesHeroContentRecedeModifier(model: seriesRecedeModel))
         // The full-bleed backdrop lives in a `.background`, which by definition is
         // sized to the host and does NOT contribute to the host's measured size.
         // That is the fix: previously the backdrop was a ZStack *sibling* whose
@@ -504,8 +524,8 @@ struct DetailHeroView: View {
         // leading-aligned title/Play off the left edge while the centred image
         // still looked correct. As a background, the image bleeds edge-to-edge
         // purely visually and the content column stays at the safe width.
-        .background(alignment: backdropBottomExtensionFraction > 0 ? .top : .bottom) {
-            heroBackdrop(hideThumbnail: hideThumbnail)
+        .background(alignment: .bottom) {
+            heroBackdrop()
                 // Re-key on the backdrop identity so a server switch (the only
                 // thing that changes the backdrop — episode focus deliberately
                 // keeps the show-level backdrop) cross-fades the old artwork out
@@ -513,12 +533,26 @@ struct DetailHeroView: View {
                 .id(backdrop.id)
                 .transition(.opacity)
         }
+        .overlay(alignment: .bottomLeading) {
+            if let seriesRecedeModel {
+                SeriesHeroFocusProxy(
+                    model: seriesRecedeModel,
+                    playButtonFocus: playButtonFocus,
+                    bottomInset: bottomInset,
+                    onRestore: { onHeroActionFocused?() }
+                )
+            }
+        }
         // Fade the whole hero (backdrop + text) in on first appearance rather
         // than hard-cutting, for a more polished open.
         .opacity(heroVisible ? 1 : 0)
         .onAppear {
             guard !heroVisible else { return }
-            withAnimation(.easeInOut(duration: 0.35)) { heroVisible = true }
+            if reduceMotion {
+                heroVisible = true
+            } else {
+                withAnimation(.easeInOut(duration: 0.35)) { heroVisible = true }
+            }
         }
         // Cross-fade the hero text as the focused context changes, while the
         // backdrop swaps underneath it.
@@ -543,18 +577,17 @@ struct DetailHeroView: View {
     /// ignore the horizontal/top overscan safe area and span the screen edge to
     /// edge *without* inflating the hero's (and the scroll column's) layout width.
     @ViewBuilder
-    private func heroBackdrop(hideThumbnail: Bool) -> some View {
+    private func heroBackdrop() -> some View {
         // The shared `HeroBackdropLayer` (CoreUI) owns the exact scrim + dissolve
         // + full-bleed treatment, so the detail hero and the Home hero carousel
-        // render an identical backdrop. The blurred-poster placeholder lives in
-        // the layer too, driven by `backdrop.posterURL`.
-        HeroBackdropLayer(
+        // render an identical backdrop. Hero artwork is never spoiler-blurred;
+        // episode spoiler masking remains limited to episode text and cards.
+        SeriesDetailHeroBackdrop(
             urls: [backdrop.heroBackdropURL, backdrop.backdropURL].compactMap { $0 },
             asyncFallbackURL: tmdbBackdropFallback,
-            placeholderPosterURL: backdrop.posterURL,
-            height: Self.screenHeight * (heroHeightFraction + backdropBottomExtensionFraction),
+            height: Self.screenHeight * heroHeightFraction,
             scrimTone: scrimTone,
-            blursImage: hideThumbnail && spoilerSettings.mode == .blur
+            recedeModel: seriesRecedeModel
         )
     }
 
@@ -616,6 +649,59 @@ struct DetailHeroView: View {
     /// preferred default focus so entering the row lands on it.
     @ViewBuilder
     private func requestPill() -> some View {
+        if item.kind == .series {
+            seriesRequestPill()
+        } else {
+            titleRequestPill()
+        }
+    }
+
+    @ViewBuilder
+    private func seriesRequestPill() -> some View {
+        if let seasonRequestAvailability, seasonRequestAvailability.hasSeasonRequestContent {
+            let hasRequestable = !seasonRequestAvailability.requestableSeasonNumbers.isEmpty
+            let label = isRequestingSeasons
+                ? "Requesting…"
+                : (hasRequestable ? "Request Seasons" : "Season Requests")
+            SeasonRequestMenu(
+                availability: seasonRequestAvailability,
+                requestAllTitle: "Request All Seasons",
+                onRequest: { onRequestSeasons?($0) }
+            ) {
+                Label(label, systemImage: "plus.circle")
+            }
+            .menuStyle(.button)
+            .modifier(HeroActionButtonStyle(prominent: hasRequestable))
+            .prefersDefaultFocus(true, in: heroActionsScope)
+            .focused($heroActionRowFocus, equals: .request)
+            .disabled(onRequestSeasons == nil || isRequestingSeasons)
+            .accessibilityLabel(requestActingName.map { "\(label) as \($0)" } ?? label)
+        } else if seasonRequestAvailabilityFailed {
+            Button { onRetrySeasonRequestAvailability?() } label: {
+                Label("Retry Seasons", systemImage: "arrow.clockwise")
+            }
+            .modifier(HeroActionButtonStyle(prominent: true))
+            .prefersDefaultFocus(true, in: heroActionsScope)
+            .focused($heroActionRowFocus, equals: .request)
+            .disabled(onRetrySeasonRequestAvailability == nil)
+            .accessibilityLabel("Retry loading seasons")
+        } else {
+            let label = SeasonRequestHeroPresentation.inactiveTitle(
+                availabilityLoaded: seasonRequestAvailability != nil,
+                resolved: seasonRequestAvailabilityResolved
+            )
+            Button {} label: {
+                Label(label, systemImage: seasonRequestAvailabilityResolved ? "exclamationmark.circle" : "clock")
+            }
+            .modifier(HeroActionButtonStyle(prominent: false))
+            .prefersDefaultFocus(true, in: heroActionsScope)
+            .focused($heroActionRowFocus, equals: .request)
+            .accessibilityLabel(label)
+        }
+    }
+
+    @ViewBuilder
+    private func titleRequestPill() -> some View {
         switch requestCTA {
         case .request:
             let label = requestActingName.map { "Request as \($0)" } ?? "Request"
@@ -864,7 +950,9 @@ struct DetailHeroView: View {
     /// which would blow the hero's content past the viewport and shove the whole
     /// page (title + focusable buttons) off the left edge.
     private func titleText(hideText: Bool) -> some View {
-        Text(hideText ? spoilerSettings.maskedTitle(for: item) : item.title)
+        let title = titleFallbackOverride
+            ?? (hideText ? spoilerSettings.maskedTitle(for: item) : item.title)
+        return Text(title)
             .font(.system(size: 64, weight: .bold))
             .lineLimit(2)
             .minimumScaleFactor(0.5)
@@ -1079,6 +1167,88 @@ private struct HeroMoreMenu: View, Equatable {
                 .font(.system(size: glyphSize))
                 .foregroundStyle(Color.primary)
                 .frame(width: iconSize, height: iconSize)
+        }
+    }
+}
+
+private struct SeriesHeroContentRecedeModifier: ViewModifier {
+    let model: SeriesHeroRecedeModel?
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        let receded = model?.isReceded == true
+        content
+            .opacity(receded ? 0 : 1)
+            .offset(y: reduceMotion ? 0 : (receded ? -120 : 0))
+            .accessibilityHidden(receded)
+            .animation(
+                reduceMotion ? nil : .smooth(duration: 0.45),
+                value: receded
+            )
+    }
+}
+
+private struct SeriesDetailHeroBackdrop: View {
+    let urls: [URL]
+    let asyncFallbackURL: (@Sendable () async -> URL?)?
+    let height: CGFloat
+    let scrimTone: Color
+    let recedeModel: SeriesHeroRecedeModel?
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        let receded = recedeModel?.isReceded == true
+        HeroBackdropLayer(
+            urls: urls,
+            asyncFallbackURL: asyncFallbackURL,
+            height: height,
+            scrimTone: scrimTone,
+            verticalOffset: reduceMotion ? 0 : (receded ? -260 : 0)
+        )
+        .animation(reduceMotion ? nil : .smooth(duration: 0.9), value: receded)
+    }
+}
+
+private struct SeriesHeroFocusProxy: View {
+    let model: SeriesHeroRecedeModel
+    let playButtonFocus: FocusState<Bool>.Binding?
+    let bottomInset: CGFloat
+    let onRestore: () -> Void
+
+    @FocusState private var focused: Bool
+
+    @ViewBuilder
+    var body: some View {
+        if model.isReceded {
+            Color.clear
+                .frame(maxWidth: .infinity)
+                .frame(height: 96)
+                .contentShape(Rectangle())
+                .focusable(true)
+                .focused($focused)
+                .focusEffectDisabled()
+                .padding(.leading, PlozzTheme.Metrics.heroLeadingPadding)
+                .padding(.trailing, PlozzTheme.Metrics.screenPadding)
+                // Stand in for the receded action row as the same full-width focus
+                // section, so UP from any Season chip has a section to enter.
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .focusSection()
+                // Match the real action row's bottom band. This keeps the proxy
+                // strictly above Seasons/Episodes instead of inserting an invisible
+                // focusable between them.
+                .padding(.bottom, bottomInset)
+                .onChange(of: focused) { _, isFocused in
+                    guard isFocused else { return }
+                    model.restore()
+                    onRestore()
+                    // The action row becomes focusable after the recede-state update
+                    // commits. Hand focus to Play on the following run-loop turn.
+                    DispatchQueue.main.async {
+                        playButtonFocus?.wrappedValue = true
+                    }
+                }
         }
     }
 }

@@ -59,4 +59,53 @@ final class HeroCTATests: XCTestCase {
         XCTAssertTrue(item(.processing).isNotInLibraryDiscovery)
         XCTAssertTrue(item(.deleted).isNotInLibraryDiscovery)
     }
+
+    func testSeasonRequestAvailabilityKeepsOnlyMissingAndInFlightSeasons() {
+        let availability = MediaRequestAvailability(
+            status: .partiallyAvailable,
+            seasons: [
+                MediaSeasonRequestState(number: 1, title: "Season 1", status: .available),
+                MediaSeasonRequestState(number: 2, title: "Season 2", status: .unknown),
+                MediaSeasonRequestState(number: 3, title: "Season 3", status: .pending),
+                MediaSeasonRequestState(number: 4, title: "Season 4", status: .processing),
+                MediaSeasonRequestState(number: 5, title: "Season 5", status: .partiallyAvailable),
+                MediaSeasonRequestState(number: 6, title: "Season 6", status: .pending, requestFailed: true)
+            ]
+        )
+
+        XCTAssertEqual(availability.requestableSeasonNumbers, [2])
+        XCTAssertEqual(availability.requestPickerSeasons.map(\.number), [2, 3, 4, 6])
+        XCTAssertTrue(availability.hasSeasonRequestContent)
+    }
+
+    func testMarkingSeasonsRequestedOnlyChangesRequestableSelections() {
+        let availability = MediaRequestAvailability(
+            status: .partiallyAvailable,
+            seasons: [
+                MediaSeasonRequestState(number: 1, title: "Season 1", status: .available),
+                MediaSeasonRequestState(number: 2, title: "Season 2", status: .unknown),
+                MediaSeasonRequestState(number: 3, title: "Season 3", status: .pending)
+            ]
+        )
+
+        let updated = availability.markingRequested([1, 2, 3])
+
+        XCTAssertEqual(updated.seasons.map(\.status), [.available, .pending, .pending])
+    }
+
+    func testMarkingOwnedSeasonsAvailableRemovesThemFromRequestPicker() {
+        let availability = MediaRequestAvailability(
+            status: .partiallyAvailable,
+            seasons: [
+                MediaSeasonRequestState(number: 1, title: "Season 1", status: .unknown),
+                MediaSeasonRequestState(number: 2, title: "Season 2", status: .pending),
+                MediaSeasonRequestState(number: 3, title: "Season 3", status: .unknown)
+            ]
+        )
+
+        let updated = availability.markingAvailable([1, 2])
+
+        XCTAssertEqual(updated.seasons.map(\.status), [.available, .available, .unknown])
+        XCTAssertEqual(updated.requestPickerSeasons.map(\.number), [3])
+    }
 }

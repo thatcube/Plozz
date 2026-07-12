@@ -86,6 +86,7 @@ public struct CircularFocusTile<Avatar: View, Caption: View>: View {
     private let avatar: () -> Avatar
     private let caption: (Bool) -> Caption
     private let action: () -> Void
+    private let onFocusChange: ((Bool) -> Void)?
 
     @FocusState private var isFocused: Bool
     @Environment(\.plozzMetrics) private var metrics
@@ -96,6 +97,7 @@ public struct CircularFocusTile<Avatar: View, Caption: View>: View {
         focusScale: CGFloat = PlozzTheme.Metrics.mediumFocusedCardScale,
         captionSpacing: CGFloat = 12,
         action: @escaping () -> Void,
+        onFocusChange: ((Bool) -> Void)? = nil,
         @ViewBuilder avatar: @escaping () -> Avatar,
         @ViewBuilder caption: @escaping (Bool) -> Caption
     ) {
@@ -104,6 +106,7 @@ public struct CircularFocusTile<Avatar: View, Caption: View>: View {
         self.focusScale = focusScale
         self.captionSpacing = captionSpacing
         self.action = action
+        self.onFocusChange = onFocusChange
         self.avatar = avatar
         self.caption = caption
     }
@@ -132,6 +135,7 @@ public struct CircularFocusTile<Avatar: View, Caption: View>: View {
         }
         .focusable(true)
         .focused($isFocused)
+        .onChange(of: isFocused) { _, focused in onFocusChange?(focused) }
         .focusEffectDisabled()
         .onTapGesture(perform: action)
         .accessibilityAddTraits(.isButton)

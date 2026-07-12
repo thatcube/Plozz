@@ -30,18 +30,18 @@ public struct ThemePalette: Equatable, Sendable {
     public let accent: Color
     /// Text colour for inline error / failure messaging (wrong credentials,
     /// unreachable server, etc). Theme-aware so it reads as a clear "danger" red
-    /// against each background — brighter on dark/OLED, deeper on light.
+    /// against each background — brighter on dark and Pure Black, deeper on light.
     public let errorText: Color
     /// Optional accent glow bloomed from the top-centre of the background.
-    /// `nil` keeps a theme flat (e.g. OLED stays pure black).
+    /// `nil` keeps a theme flat (e.g. Pure Black stays pure black).
     public let topGlow: Color?
 
     // MARK: Focused-card glass treatment (ported 1:1 from Twozz)
 
     /// Tint blended into a focused card's Liquid Glass so focus reads as a clear
-    /// lightness shift — not just the scale bump. Dark/OLED brighten toward
+    /// lightness shift — not just the scale bump. Dark and Pure Black brighten toward
     /// white; Light darkens toward black, so the focused tile always separates
-    /// from the page behind it. OLED uses a lighter wash than Dark because its
+    /// from the page behind it. Pure Black uses a lighter wash than Dark because its
     /// pure-black backdrop makes the same white tint read stronger. Only affects
     /// the translucent-glass path; the Reduce Transparency path uses `liftSurface`.
     public let focusedCardGlassTint: Color
@@ -58,7 +58,7 @@ public struct ThemePalette: Equatable, Sendable {
     /// opaque backing that stops the drop shadow bleeding through the glass.
     public let isLight: Bool
 
-    /// Only the module's own `dark`/`oled`/`light` literals construct palettes;
+    /// Only the module's own `dark`/`pureBlack`/`light` literals construct palettes;
     /// external callers use the static factories (`palette(for:)`) or the ready
     /// palettes. Kept `internal` (not `public`) so adding tokens here is never a
     /// source-breaking change for consumers of the package.
@@ -151,9 +151,9 @@ public extension ThemePalette {
         isLight: false
     )
 
-    /// Pure-black OLED theme. Matches Twozz's `ThemePalette.oled`: both stops
-    /// sit at pure black with no glow, so the panel can switch pixels fully off.
-    static let oled = ThemePalette(
+    /// Pure-black theme. Matches Twozz's `ThemePalette.pureBlack`: both stops
+    /// sit at pure black with no glow.
+    static let pureBlack = ThemePalette(
         backgroundBase: .black,
         backgroundSecondary: .black,
         cardSurface: Color(red: 0.10, green: 0.10, blue: 0.12),
@@ -196,7 +196,7 @@ public extension ThemePalette {
         switch theme {
         case .system: return systemColorScheme == .dark ? .dark : .light
         case .dark: return .dark
-        case .oled: return .oled
+        case .pureBlack: return .pureBlack
         case .light: return .light
         }
     }
@@ -206,12 +206,12 @@ public extension ThemePalette {
 
 public extension AppTheme {
     /// The colour scheme to force on the SwiftUI view tree. `nil` (System)
-    /// follows the device; OLED rides the dark scheme.
+    /// follows the device; Pure Black rides the dark scheme.
     var preferredColorScheme: ColorScheme? {
         switch self {
         case .system: return nil
         case .light: return .light
-        case .dark, .oled: return .dark
+        case .dark, .pureBlack: return .dark
         }
     }
 }
@@ -222,7 +222,7 @@ public extension AppTheme {
 /// low-contrast tones, with an optional accent glow bloomed from the top-centre.
 /// Ported 1:1 from my Twozz `AppBackground` (same `LinearGradient` + top-glow
 /// `RadialGradient` with `endRadius: 820`), recoloured to Plozz's brand blue.
-/// Theme-aware — colours come entirely from the palette, so OLED renders pure
+/// Theme-aware — colours come entirely from the palette, so Pure Black renders pure
 /// black and Light renders a soft white wash.
 public struct AppBackground: View {
     private let palette: ThemePalette

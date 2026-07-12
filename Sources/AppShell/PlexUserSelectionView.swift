@@ -58,7 +58,7 @@ struct PlexUserSelectionView: View {
                 }
             }
 
-            Text("You can change this anytime in Settings.")
+            Text("You can change this any time in Settings.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .padding(.top, 20)

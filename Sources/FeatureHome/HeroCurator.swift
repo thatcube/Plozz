@@ -29,8 +29,9 @@ public struct HeroCurator: Sendable {
     /// - `continueWatching` / `watchlist`: already-aggregated Home content
     ///   (both providers, cross-server merged) — passed in, not fetched.
     /// - `featuredProvider`: the Seerr seam — returns `[]` until Seerr exists.
-    /// - `randomProvider`: random-from-library fetch (both providers), scoped to
-    ///   `settings.randomLibraryKeys` (empty = all visible libraries).
+    /// - `randomLibraries`: the already-loaded, settings-filtered library containers
+    ///   available to the Random source.
+    /// - `randomProvider`: random-from-library fetch across both providers.
     ///
     /// The featured and random sources are fetched **concurrently** (and only
     /// when their source is enabled) so an offline Seerr or a slow random query
@@ -39,6 +40,7 @@ public struct HeroCurator: Sendable {
         settings: HeroSettings,
         continueWatching: [MediaItem],
         watchlist: [MediaItem],
+        randomLibraries: [HeroRandomLibrary] = [],
         featuredProvider: FeaturedContentProviding = HeroFeaturedProvider.none,
         randomProvider: RandomLibraryContentProviding = HeroRandomProvider.none,
         artworkProvider: @escaping HeroArtworkProviding = HeroArtworkProvider.none
@@ -51,7 +53,7 @@ public struct HeroCurator: Sendable {
         async let featuredItems: [MediaItem] = settings.isEnabled(.featured)
             ? featuredProvider(limit) : []
         async let randomItems: [MediaItem] = settings.isEnabled(.randomFromLibrary)
-            ? randomProvider(settings.randomLibraryKeys, limit) : []
+            ? randomProvider(randomLibraries, limit) : []
 
         let featured = await featuredItems
         let random = await randomItems

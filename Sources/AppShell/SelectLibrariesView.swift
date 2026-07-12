@@ -55,7 +55,7 @@ struct SelectLibrariesView: View {
         VStack(spacing: 0) {
             OnboardingHeader(
                 "Choose your libraries",
-                subtitle: "Pick which libraries appear on your Home. You can turn any of these on or off anytime in Settings."
+                subtitle: "You can change this any time in Settings."
             )
             .padding(.bottom, 28)
 
@@ -121,12 +121,12 @@ struct SelectLibrariesView: View {
                     VStack(alignment: .leading, spacing: 28) {
                         ForEach(groups(from: all)) { group in
                             VStack(alignment: .leading, spacing: 10) {
-                                HStack(spacing: 12) {
-                                    ProviderBrandMark(provider: group.providerKind, size: 30, showsBackground: false).frame(width: 34)
+                                HStack(spacing: 16) {
+                                    ProviderBrandMark(provider: group.providerKind, size: 48)
+                                        .frame(width: 48)
                                     Text(group.serverName)
                                         .font(.headline.weight(.semibold))
                                 }
-                                .padding(.horizontal, 20)
 
                                 ForEach(group.libraries) { library in
                                     Toggle(isOn: Binding(

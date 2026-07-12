@@ -76,6 +76,26 @@ final class SessionStateMachineTests: XCTestCase {
         XCTAssertEqual(m.state, .onboarding(.enableProfilesPrompt, canReturnToApp: true))
     }
 
+    func testPlexUserSelectionCanResolveDirectlyFromProviderPicker() {
+        var m = SessionStateMachine(
+            state: .onboarding(.selectingServer, canReturnToApp: false)
+        )
+
+        m.apply(.plexUserSelectionRequired)
+
+        XCTAssertEqual(m.state, .onboarding(.selectPlexUser, canReturnToApp: true))
+    }
+
+    func testPlexLibrarySelectionCanResolveDirectlyFromProviderPicker() {
+        var m = SessionStateMachine(
+            state: .onboarding(.selectingServer, canReturnToApp: false)
+        )
+
+        m.apply(.librarySelectionRequired)
+
+        XCTAssertEqual(m.state, .onboarding(.selectLibraries, canReturnToApp: true))
+    }
+
     func testPlexUserSelectionOnLaterAddReturnsToApp() {
         // Plex with 2+ Home users added later (not first run): pick the user,
         // then straight back to the app — no profile-setup detour.

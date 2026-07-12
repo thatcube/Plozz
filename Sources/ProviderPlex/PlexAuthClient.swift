@@ -16,6 +16,17 @@ public struct PlexPinChallenge: Hashable, Sendable {
     }
 }
 
+public enum PlexPinError: Error, Equatable, Sendable {
+    case rateLimited(retryAfter: TimeInterval?)
+
+    public var userMessage: String {
+        switch self {
+        case .rateLimited:
+            "Plex is temporarily limiting sign-in attempts. Wait a minute and try again."
+        }
+    }
+}
+
 /// Low-level client for the **plex.tv** account API (`plex.tv/api/v2`).
 ///
 /// Handles the parts of sign-in that happen *before* a server is known: issuing
@@ -42,30 +53,71 @@ public struct PlexAuthClient: Sendable {
         self.baseURL = baseURL
     }
 
+    /// Plex's hosted authorization page for a PIN challenge. Unlike
+    /// `plex.tv/link`, this URL carries the challenge and client identity, so a
+    /// phone scanning it can sign in and approve the TV without retyping the
+    /// four-character code.
+    public func authorizationURL(for pin: PlexPinChallenge) -> URL {
+        var fragmentQuery = URLComponents()
+        fragmentQuery.queryItems = [
+            URLQueryItem(name: "clientID", value: deviceProfile.clientIdentifier),
+            URLQueryItem(name: "code", value: pin.code),
+            URLQueryItem(name: "context[device][product]", value: deviceProfile.product)
+        ]
+
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = "app.plex.tv"
+        components.path = "/auth"
+        components.percentEncodedFragment = "?\(fragmentQuery.percentEncodedQuery!)"
+        return components.url!
+    }
+
     // MARK: PIN flow
 
-    /// `POST /api/v2/pins` — issues a new PIN/code pair.
-    ///
-    /// We intentionally do NOT request `strong=true`. A strong PIN returns a
-    /// long, random code meant for app-to-app / deep-link auth — not something
-    /// a person can read off a TV screen and type. The default (non-strong)
-    /// PIN returns the short 4-character code that the plex.tv/link manual-entry
-    /// flow expects.
-    public func createPin() async throws -> PlexPinChallenge {
+    /// `POST /api/v2/pins` — issues a new PIN/code pair. Weak challenges return
+    /// the short code used at plex.tv/link; strong challenges are required by
+    /// Plex's hosted authorization page.
+    public func createPin(strong: Bool = false) async throws -> PlexPinChallenge {
         let endpoint = Endpoint(
             method: .post,
             path: "/api/v2/pins",
+            queryItems: strong ? [URLQueryItem(name: "strong", value: "true")] : [],
             headers: deviceProfile.headers()
         )
-        let dto = try await http.decode(PlexPinDTO.self, from: endpoint, baseURL: baseURL)
+        let dto = try await pinDTO(from: endpoint)
         return PlexPinChallenge(id: dto.id, code: dto.code)
     }
 
     /// `GET /api/v2/pins/{id}` — one poll of a PIN's link state.
     public func pollPin(id: Int) async throws -> PlexPinFlow.Outcome {
         let endpoint = Endpoint(path: "/api/v2/pins/\(id)", headers: deviceProfile.headers())
-        let dto = try await http.decode(PlexPinDTO.self, from: endpoint, baseURL: baseURL)
+        let dto = try await pinDTO(from: endpoint)
         return PlexPinFlow.evaluate(pin: dto)
+    }
+
+    private func pinDTO(from endpoint: Endpoint) async throws -> PlexPinDTO {
+        let (data, response) = try await http.sendRaw(endpoint, baseURL: baseURL)
+        switch response.statusCode {
+        case 200...299:
+            do {
+                return try JSONDecoder.plozz.decode(PlexPinDTO.self, from: data)
+            } catch {
+                throw AppError.decoding
+            }
+        case 401, 403:
+            throw AppError.unauthorized
+        case 404:
+            throw AppError.notFound
+        case 409:
+            throw AppError.conflict
+        case 429:
+            let retryAfter = response.value(forHTTPHeaderField: "Retry-After")
+                .flatMap(TimeInterval.init)
+            throw PlexPinError.rateLimited(retryAfter: retryAfter)
+        default:
+            throw AppError.invalidResponse
+        }
     }
 
     // MARK: Account + servers

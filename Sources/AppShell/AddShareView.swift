@@ -22,38 +22,70 @@ struct ShareDraft: Equatable {
 /// second-class backend, so this stays lightweight — no reachability probes,
 /// recents, or credential management, just enough to point Plozz at a folder.
 struct AddShareView: View {
+    let isPageReady: Bool
     let onBack: () -> Void
     let onConfigured: (ShareDraft) -> Void
 
     @State private var viewModel = AddShareViewModel()
     @State private var displayName = ""
     @FocusState private var focusedField: Field?
-    private enum Field { case host, port, username, password, share, name }
+    private enum Field: Hashable {
+        case back
+        case rescan
+        case server(String)
+        case host
+        case port
+        case connect
+        case username
+        case password
+        case share
+        case shareOption(String)
+        case name
+    }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 28) {
-                switch viewModel.step {
-                case .chooseServer: serverStep
-                case .chooseShare: shareStep
+        GeometryReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 28) {
+                    switch viewModel.step {
+                    case .chooseServer: serverStep
+                    case .chooseShare: shareStep
+                    }
                 }
+                .frame(maxWidth: PlozzTheme.Metrics.settingsContentMaxWidth, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
+                .padding(.vertical, 32)
+                .padding(.top, proxy.safeAreaInsets.top)
+                .padding(.bottom, proxy.safeAreaInsets.bottom)
             }
-            .frame(maxWidth: PlozzTheme.Metrics.settingsContentMaxWidth, alignment: .leading)
-            .frame(maxWidth: .infinity, alignment: .center)
-            .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
-            .padding(.vertical, 32)
+            .scrollClipDisabled()
+            .ignoresSafeArea(.container, edges: .vertical)
         }
-        .scrollClipDisabled()
+        .defaultFocus($focusedField, .back)
         .onExitCommand {
             if viewModel.step == .chooseShare { viewModel.backToServers() } else { onBack() }
         }
-        .onAppear { viewModel.startScan() }
+        .onAppear {
+            focusedField = .back
+            if isPageReady { viewModel.startScan() }
+        }
+        .onChange(of: viewModel.step) { _, _ in focusedField = .back }
+        .onChange(of: isPageReady) { _, ready in
+            if ready {
+                viewModel.startScan()
+            } else {
+                viewModel.stopScan()
+            }
+        }
         .onDisappear { viewModel.stopScan() }
     }
 
     // MARK: - Step 1: choose a server
 
     private var serverStep: some View {
+        // Discovery starts after the parent transition; keep later result
+        // insertions instant so the list never introduces competing motion.
         Group {
             headerRow(
                 title: "Add a Media Share",
@@ -64,29 +96,34 @@ struct AddShareView: View {
                         Label("Rescan", systemImage: "arrow.clockwise")
                     }
                     .buttonStyle(.bordered)
+                    .focused($focusedField, equals: .rescan)
                 }
             )
 
             SharePanel(title: "On your network", titleAccessory: {
                 if viewModel.scanning { ProgressView() }
             }) {
-                if viewModel.discovered.isEmpty {
-                    placeholder(
-                        viewModel.scanning
-                            ? "Searching for servers…"
-                            : "No servers found yet. Make sure the server is on and that Plozz is allowed Local Network access, then rescan — or enter an address below.",
-                        systemImage: viewModel.scanning ? "antenna.radiowaves.left.and.right" : "magnifyingglass"
-                    )
-                } else {
-                    VStack(spacing: 16) {
-                        ForEach(viewModel.discovered) { server in
-                            Button { viewModel.selectDiscovered(server) } label: {
-                                serverRowLabel(name: server.name, host: server.host)
+                Group {
+                    if viewModel.discovered.isEmpty {
+                        placeholder(
+                            viewModel.scanning
+                                ? "Searching for servers…"
+                                : "No servers found yet. Make sure the server is on and that Plozz is allowed Local Network access, then rescan — or enter an address below.",
+                            systemImage: viewModel.scanning ? "antenna.radiowaves.left.and.right" : "magnifyingglass"
+                        )
+                    } else {
+                        VStack(spacing: 16) {
+                            ForEach(viewModel.discovered) { server in
+                                Button { viewModel.selectDiscovered(server) } label: {
+                                    serverRowLabel(name: server.name, host: server.host)
+                                }
+                                .buttonStyle(SettingsFocusButtonStyle(size: .prominent))
+                                .focused($focusedField, equals: .server(server.id))
                             }
-                            .buttonStyle(SettingsFocusButtonStyle(size: .prominent))
                         }
                     }
                 }
+                .transaction { $0.animation = nil }
             }
 
             SharePanel(
@@ -106,6 +143,7 @@ struct AddShareView: View {
                         .onSubmit { viewModel.connectManualHost() }
                     Button("Connect") { viewModel.connectManualHost() }
                         .disabled(!viewModel.canConnectManualHost)
+                        .focused($focusedField, equals: .connect)
                 }
             }
         }
@@ -191,6 +229,7 @@ struct AddShareView: View {
                                 serverRowLabel(name: share, host: nil, icon: "folder")
                             }
                             .buttonStyle(SettingsFocusButtonStyle(size: .prominent))
+                            .focused($focusedField, equals: .shareOption(share))
                         }
                     }
                 }
@@ -298,12 +337,14 @@ struct AddShareView: View {
                     Label("Back", systemImage: "chevron.backward")
                 }
                 .buttonStyle(.bordered)
+                .focused($focusedField, equals: .back)
                 Spacer(minLength: 24)
                 trailing()
             }
             OnboardingHeader(title, subtitle: subtitle)
                 .frame(maxWidth: .infinity)
         }
+        .padding(.top, PlozzTheme.Spacing.large)
     }
 
     private func serverRowLabel(name: String, host: String?, icon: String = "externaldrive.connected.to.line.below.fill") -> some View {

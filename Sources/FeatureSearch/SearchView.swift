@@ -71,7 +71,12 @@ public struct SearchView: View {
 
                         LazyVGrid(columns: columns, alignment: .leading, spacing: metrics.gridSpacing) {
                             ForEach(section.items) { item in
-                                PosterCardView(item: item, style: .poster, spoilerSettings: spoilerSettings) {
+                                PosterCardView(
+                                    item: item,
+                                    style: .poster,
+                                    spoilerSettings: spoilerSettings,
+                                    statusCue: SearchSection.availabilityCue(for: item)
+                                ) {
                                     onSelect(item)
                                 }
                             }

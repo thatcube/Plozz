@@ -9,7 +9,8 @@ import CoreUI
 /// engine and Siri Remote work without custom handling.
 public struct ServerPickerView: View {
     @State private var viewModel: ServerPickerViewModel
-    @FocusState private var manualFieldFocused: Bool
+    @FocusState private var focusedControl: FocusTarget?
+    private let isPageReady: Bool
     private let onSelect: (MediaServer) -> Void
     /// Invoked when the user backs out — the in-bounds Back button or the Siri
     /// Remote's Menu button. `nil` hides the Back button and lets Menu fall
@@ -17,9 +18,18 @@ public struct ServerPickerView: View {
     /// chooser, so Menu no longer quits the app from this screen.
     private let onBack: (() -> Void)?
 
+    private enum FocusTarget: Hashable {
+        case back
+        case rescan
+        case server(String)
+        case manualField
+        case connect
+    }
+
     @MainActor
     public init(
         viewModel: ServerPickerViewModel? = nil,
+        isPageReady: Bool = true,
         signedInServers: [SignedInServer] = [],
         onBack: (() -> Void)? = nil,
         onSelect: @escaping (MediaServer) -> Void
@@ -27,6 +37,7 @@ public struct ServerPickerView: View {
         let vm = viewModel ?? ServerPickerViewModel()
         vm.setSignedInServers(signedInServers)
         _viewModel = State(initialValue: vm)
+        self.isPageReady = isPageReady
         self.onBack = onBack
         self.onSelect = onSelect
     }
@@ -44,31 +55,36 @@ public struct ServerPickerView: View {
                     let signedIn = viewModel.signedInServers
                     let recents = viewModel.recentServers
                     let discovered = viewModel.discoveredServers
-                    if signedIn.isEmpty && recents.isEmpty && discovered.isEmpty {
-                        emptyServersPlaceholder
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.vertical, 8)
-                            .padding(.horizontal, 12)
-                    } else {
-                        // No flush dividers between rows: the focus highlight
-                        // bleeds a few points outward, so a divider sitting
-                        // directly against a row gets painted over on focus. A
-                        // gap lets each row's focus lift breathe and act as its
-                        // own separator (matches the Settings pages' row lists).
-                        VStack(spacing: 16) {
-                            // Servers you already have accounts on come first —
-                            // tap to add another user to them.
-                            ForEach(signedIn, id: \.server) { entry in
-                                serverRow(entry.server, role: .signedIn(entry.userNames))
-                            }
-                            ForEach(recents, id: \.self) { server in
-                                serverRow(server, role: .recent)
-                            }
-                            ForEach(discovered, id: \.self) { server in
-                                serverRow(server, role: .discovered)
+                    // Discovery starts after the parent transition; keep later
+                    // result insertions instant so only navigation animates.
+                    Group {
+                        if signedIn.isEmpty && recents.isEmpty && discovered.isEmpty {
+                            emptyServersPlaceholder
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.vertical, 8)
+                                .padding(.horizontal, 12)
+                        } else {
+                            // No flush dividers between rows: the focus highlight
+                            // bleeds a few points outward, so a divider sitting
+                            // directly against a row gets painted over on focus. A
+                            // gap lets each row's focus lift breathe and act as its
+                            // own separator (matches the Settings pages' row lists).
+                            VStack(spacing: 16) {
+                                // Servers you already have accounts on come first —
+                                // tap to add another user to them.
+                                ForEach(signedIn, id: \.server) { entry in
+                                    serverRow(entry.server, role: .signedIn(entry.userNames))
+                                }
+                                ForEach(recents, id: \.self) { server in
+                                    serverRow(server, role: .recent)
+                                }
+                                ForEach(discovered, id: \.self) { server in
+                                    serverRow(server, role: .discovered)
+                                }
                             }
                         }
                     }
+                    .transaction { $0.animation = nil }
                 }
 
                 if viewModel.isOnTailscale {
@@ -85,11 +101,12 @@ public struct ServerPickerView: View {
                 ) {
                     VStack(alignment: .leading, spacing: 18) {
                         TextField("Server address", text: $viewModel.manualURLText)
-                            .focused($manualFieldFocused)
+                            .focused($focusedControl, equals: .manualField)
                             .textContentType(.URL)
                             .autocorrectionDisabled()
                         Button("Connect") { Task { await connectManually() } }
                             .disabled(viewModel.manualURLText.isEmpty)
+                            .focused($focusedControl, equals: .connect)
                     }
                 }
 
@@ -111,10 +128,22 @@ public struct ServerPickerView: View {
         // Never clip the outward-growing focus highlight/shadow at the
         // width-capped column edges (same reason the Settings pages disable it).
         .scrollClipDisabled()
+        .defaultFocus($focusedControl, preferredInitialFocus)
         // The Siri Remote's Menu/back button steps back to the provider chooser
         // instead of quitting the app.
         .onExitCommand { onBack?() }
-        .onAppear { viewModel.startScan() }
+        .onAppear {
+            let initialFocus = preferredInitialFocus
+            focusedControl = initialFocus
+            if isPageReady { viewModel.startScan() }
+        }
+        .onChange(of: isPageReady) { _, ready in
+            if ready {
+                viewModel.startScan()
+            } else {
+                viewModel.stopScan()
+            }
+        }
         .onDisappear { viewModel.stopScan() }
     }
 
@@ -127,13 +156,23 @@ public struct ServerPickerView: View {
                     Label("Back", systemImage: "chevron.backward")
                 }
                 .buttonStyle(.bordered)
+                .focused($focusedControl, equals: .back)
             }
             Spacer(minLength: 24)
             Button { viewModel.startScan() } label: {
                 Label("Rescan", systemImage: "arrow.clockwise")
             }
             .buttonStyle(.bordered)
+            .focused($focusedControl, equals: .rescan)
         }
+        .padding(.top, PlozzTheme.Spacing.large)
+    }
+
+    private var preferredInitialFocus: FocusTarget {
+        if let server = viewModel.signedInServers.first?.server ?? viewModel.recentServers.first {
+            return .server(ServerIdentity.key(for: server))
+        }
+        return onBack == nil ? .rescan : .back
     }
 
     /// Small trailing spinner shown beside the "Servers" card header while a
@@ -203,6 +242,7 @@ public struct ServerPickerView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(SettingsFocusButtonStyle(size: .prominent))
+        .focused($focusedControl, equals: .server(ServerIdentity.key(for: server)))
     }
 
     /// Distinguishes the three kinds of rows in the "Servers" card: an account

@@ -14,27 +14,16 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
-    name: Unit tests (SwiftPM)
-    runs-on: ubuntu-latest
-    container: swift:6.0
-    steps:
-      - uses: actions/checkout@v4
-      # On Linux, SwiftUI/AVKit/UIKit are unavailable, so the UI modules compile
-      # out behind `#if canImport(...)` guards and only the pure logic modules
-      # (models, networking, provider, discovery, auth) are tested. This keeps
-      # the high-value logic under test on every push without a simulator.
-      - name: Run unit tests
-        run: swift test
-
-  build:
-    name: Build tvOS app
+  build-and-test:
+    name: Build and test tvOS app
     runs-on: macos-15
+    env:
+      GIT_CONFIG_PARAMETERS: "'safe.bareRepository=all'"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Select Xcode
-        run: sudo xcode-select -s /Applications/Xcode_16.app
+        run: sudo xcode-select -s /Applications/Xcode_26.2.app
 
       - name: Install XcodeGen
         run: brew install xcodegen
@@ -43,7 +32,7 @@ jobs:
         run: tools/run-tests.sh
 
       - name: Generate Xcode project
-        run: xcodegen generate
+        run: tools/generate-project.sh
 
       - name: Build (tvOS Simulator)
         run: |
@@ -52,4 +41,9 @@ jobs:
             -project Plozz.xcodeproj \
             -scheme Plozz \
             -destination 'generic/platform=tvOS Simulator' \
+            ARCHS=arm64 \
+            ONLY_ACTIVE_ARCH=YES \
             CODE_SIGNING_ALLOWED=NO
+
+      - name: Run unit tests (tvOS Simulator)
+        run: tools/run-tests.sh

@@ -22,6 +22,10 @@ public struct ItemDetailView: View {
     /// pill flips to Requested/Downloading), or a user-facing failure the page
     /// surfaces as an alert. Only used on the discovery page.
     private let onRequest: ((MediaItem) async -> MediaRequestActionResult)?
+    /// Season-level Seerr coverage for a normal playable library series.
+    private let requestAvailabilityRefresh: (@Sendable (MediaItem) async -> MediaRequestAvailability?)?
+    /// Requests explicit season numbers for a playable library series.
+    private let onRequestSeasons: ((MediaItem, [Int]) async -> MediaRequestActionResult)?
     /// Display name of the Seerr user the active profile requests as, when mapped.
     /// Drives the "Request as <name>" pill so a shared-TV request's identity is
     /// visible **before** the press. `nil` = requests run as admin.
@@ -69,6 +73,12 @@ public struct ItemDetailView: View {
     @State private var requestFailure: RequestFailureAlert?
     /// Drives the "Request as Admin?" confirmation dialog for the unmapped case.
     @State private var showingAdminConfirm = false
+    @State private var pendingAdminRequest: PendingRequestIntent?
+    @State private var seasonRequestAvailability: MediaRequestAvailability?
+    @State private var seasonRequestAvailabilityResolved = false
+    @State private var seasonRequestAvailabilityFailed = false
+    @State private var seasonRequestRetryToken = 0
+    @State private var isSeasonRequestInFlight = false
     /// One-time acknowledgement of the "requests as unrestricted admin" explainer.
     /// Device-wide (shared with any other request surface via this key): once the
     /// user has confirmed an admin request once, we don't nag on every subsequent
@@ -83,6 +93,11 @@ public struct ItemDetailView: View {
         let message: String?
     }
 
+    private struct PendingRequestIntent {
+        let item: MediaItem
+        let seasons: [Int]?
+    }
+
     public init(
         viewModel: ItemDetailViewModel,
         spoilerSettings: SpoilerSettings = .default,
@@ -93,6 +108,8 @@ public struct ItemDetailView: View {
         isDiscoveryItem: Bool = false,
         seerConnected: Bool = false,
         onRequest: ((MediaItem) async -> MediaRequestActionResult)? = nil,
+        requestAvailabilityRefresh: (@Sendable (MediaItem) async -> MediaRequestAvailability?)? = nil,
+        onRequestSeasons: ((MediaItem, [Int]) async -> MediaRequestActionResult)? = nil,
         requestActingName: String? = nil,
         confirmAdminRequest: Bool = false,
         capabilities: MediaCapabilities = .detected(),
@@ -107,6 +124,8 @@ public struct ItemDetailView: View {
         self.isDiscoveryItem = isDiscoveryItem
         self.seerConnected = seerConnected
         self.onRequest = onRequest
+        self.requestAvailabilityRefresh = requestAvailabilityRefresh
+        self.onRequestSeasons = onRequestSeasons
         self.requestActingName = requestActingName
         self.confirmAdminRequest = confirmAdminRequest
         self.capabilities = capabilities
@@ -136,6 +155,15 @@ public struct ItemDetailView: View {
                     viewModel: viewModel,
                     spoilerSettings: spoilerSettings,
                     onPlay: onPlay,
+                    requestAvailability: seasonRequestAvailability?.markingAvailable(
+                        detail.children.compactMap { child in
+                            child.kind == .season || child.kind == .episode ? child.seasonNumber : nil
+                        }
+                    ),
+                    isRequestingSeasons: isSeasonRequestInFlight,
+                    onRequestSeasons: onRequestSeasons == nil ? nil : { seasons in
+                        requestTapped(detail.item, seasons: seasons)
+                    },
                     onSelectServer: { source in
                         // Switch to the chosen server's copy of this show IN PLACE
                         // (reload its seasons/episodes) rather than pushing a new
@@ -178,6 +206,34 @@ public struct ItemDetailView: View {
                 Task { await viewModel.reload() }
             }
         }
+        .task(id: seasonRequestRefreshKey) {
+            await refreshSeasonRequestAvailability()
+        }
+        .confirmationDialog(
+            "Request as Admin?",
+            isPresented: $showingAdminConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Request as Admin") {
+                adminRequestAcknowledged = true
+                if let pendingAdminRequest {
+                    performRequest(pendingAdminRequest)
+                }
+                pendingAdminRequest = nil
+            }
+            Button("Cancel", role: .cancel) {
+                pendingAdminRequest = nil
+            }
+        } message: {
+            Text("This profile isn’t linked to a Seerr user, so the request is made as the unrestricted admin. Link a user in Settings to track requests per person.")
+        }
+        .alert(item: $requestFailure) { failure in
+            Alert(
+                title: Text(failure.title),
+                message: failure.message.map(Text.init),
+                dismissButton: .default(Text("OK"))
+            )
+        }
         #if canImport(AVFoundation)
         .themeMusicPlayback(
             playbackID: viewModel.themeMusicPlaybackID,
@@ -214,35 +270,24 @@ public struct ItemDetailView: View {
                 // Show "Request as <name>" before the press so a shared-TV
                 // request's identity is visible up front.
                 requestActingName: requestActingName,
-                onRequest: (onRequest != nil && cta == .request) ? { requestTapped(detail.item) } : nil
+                onRequest: (detail.item.kind == .movie && onRequest != nil && cta == .request)
+                    ? { requestTapped(detail.item) }
+                    : nil,
+                seasonRequestAvailability: detail.item.kind == .series ? seasonRequestAvailability : nil,
+                seasonRequestAvailabilityResolved: seasonRequestAvailabilityResolved,
+                seasonRequestAvailabilityFailed: seasonRequestAvailabilityFailed,
+                isRequestingSeasons: isSeasonRequestInFlight,
+                onRequestSeasons: onRequestSeasons == nil ? nil : { seasons in
+                    requestTapped(detail.item, seasons: seasons)
+                },
+                onRetrySeasonRequestAvailability: {
+                    seasonRequestRetryToken &+= 1
+                }
             )
             .id(Self.topAnchorID)
         }
         // Never clip the focused request pill's lift/shadow.
         .scrollClipDisabled()
-        // Unmapped (admin) requests in a multi-profile household confirm first so a
-        // member on an unmapped profile can't silently request as the unrestricted
-        // admin. Mapped requests fire directly.
-        .confirmationDialog(
-            "Request as Admin?",
-            isPresented: $showingAdminConfirm,
-            titleVisibility: .visible
-        ) {
-            Button("Request as Admin") {
-                adminRequestAcknowledged = true
-                performRequest(detail.item)
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This profile isn’t linked to a Seerr user, so the request is made as the unrestricted admin. Link a user in Settings to track requests per person.")
-        }
-        .alert(item: $requestFailure) { failure in
-            Alert(
-                title: Text(failure.title),
-                message: failure.message.map(Text.init),
-                dismissButton: .default(Text("OK"))
-            )
-        }
     }
 
     /// Handles a Request tap: confirm ONCE for the unmapped admin case in a
@@ -251,11 +296,13 @@ public struct ItemDetailView: View {
     /// acknowledged it once (intentional admin use shouldn't nag every time).
     /// Mapped requests, and everything after the one-time acknowledgement, fire
     /// directly.
-    private func requestTapped(_ item: MediaItem) {
+    private func requestTapped(_ item: MediaItem, seasons: [Int]? = nil) {
+        let intent = PendingRequestIntent(item: item, seasons: seasons)
         if confirmAdminRequest && requestActingName == nil && !adminRequestAcknowledged {
+            pendingAdminRequest = intent
             showingAdminConfirm = true
         } else {
-            performRequest(item)
+            performRequest(intent)
         }
     }
 
@@ -263,11 +310,15 @@ public struct ItemDetailView: View {
     /// the pill to Requested/Downloading immediately, then reconciling with the
     /// returned result: a success keeps the new status; a failure clears the
     /// optimistic override (so Request returns for a retry) and surfaces an alert.
-    private func performRequest(_ item: MediaItem) {
+    private func performRequest(_ intent: PendingRequestIntent) {
+        if let seasons = intent.seasons {
+            performSeasonRequest(intent.item, seasons: seasons)
+            return
+        }
         guard let onRequest else { return }
         requestOverride = .pending
         Task {
-            let result = await onRequest(item)
+            let result = await onRequest(intent.item)
             if let status = result.status {
                 requestOverride = status
             } else {
@@ -277,6 +328,61 @@ public struct ItemDetailView: View {
                 }
             }
         }
+    }
+
+    private func performSeasonRequest(_ item: MediaItem, seasons: [Int]) {
+        guard let onRequestSeasons, !seasons.isEmpty, !isSeasonRequestInFlight else { return }
+        let previous = seasonRequestAvailability
+        seasonRequestAvailability = previous?.markingRequested(seasons)
+        isSeasonRequestInFlight = true
+        Task {
+            let result = await onRequestSeasons(item, seasons)
+            if !result.isSuccess {
+                seasonRequestAvailability = previous
+            }
+            isSeasonRequestInFlight = false
+            if let title = result.failureTitle {
+                requestFailure = RequestFailureAlert(title: title, message: result.failureMessage)
+            }
+        }
+    }
+
+    private var seasonRequestRefreshKey: String {
+        guard seerConnected,
+              let item = viewModel.state.value?.item,
+              item.kind == .series,
+              item.providerIDs["Tmdb"] != nil
+        else { return "disabled" }
+        let sources = viewModel.sources.map(\.id).sorted().joined(separator: ",")
+        return "\(item.sourceAccountID ?? "_")|\(item.id)|\(item.providerIDs["Tmdb"] ?? "")|\(sources)|\(seasonRequestRetryToken)"
+    }
+
+    private func refreshSeasonRequestAvailability() async {
+        guard seasonRequestRefreshKey != "disabled",
+              let item = viewModel.state.value?.item,
+              let requestAvailabilityRefresh
+        else {
+            seasonRequestAvailability = nil
+            seasonRequestAvailabilityResolved = true
+            seasonRequestAvailabilityFailed = false
+            return
+        }
+        seasonRequestAvailability = nil
+        seasonRequestAvailabilityResolved = false
+        seasonRequestAvailabilityFailed = false
+        guard let availability = await requestAvailabilityRefresh(item) else {
+            guard !Task.isCancelled else { return }
+            seasonRequestAvailabilityResolved = true
+            seasonRequestAvailabilityFailed = true
+            return
+        }
+        let ownedSeasonNumbers = isDiscoveryItem
+            ? Set<Int>()
+            : await viewModel.ownedSeasonNumbersAcrossSources()
+        guard !Task.isCancelled else { return }
+        seasonRequestAvailability = availability.markingAvailable(Array(ownedSeasonNumbers))
+        seasonRequestAvailabilityResolved = true
+        seasonRequestAvailabilityFailed = false
     }
 
     private func container(_ detail: ItemDetailViewModel.Detail) -> some View {

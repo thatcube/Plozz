@@ -1238,6 +1238,43 @@ final class PlexProviderMappingTests: XCTestCase {
         XCTAssertTrue(bifURL.contains("X-Plex-Token=TOKEN"), bifURL)
     }
 
+    func testAudioPlaybackInfoReturnsCredentialFreeSource() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/library/metadata/song1", json: """
+        {"MediaContainer":{"Metadata":[
+          {"ratingKey":"song1","type":"track","title":"Song",
+           "Media":[{"id":7,"container":"m4a","audioCodec":"aac",
+             "Part":[{"id":8,"key":"/library/parts/8/song name.m4a","container":"m4a"}]}]}
+        ]}}
+        """)
+        let provider = PlexProvider(
+            session: makeSession(),
+            accountID: "account",
+            http: stub
+        )
+
+        let request = try await provider.audioPlaybackInfo(
+            for: "song1",
+            queueContext: nil
+        )
+        guard case .authenticatedHTTP(let locator) = request.playbackSource else {
+            return XCTFail("expected authenticated HTTP audio locator")
+        }
+        XCTAssertEqual(locator.accountID, "account")
+        XCTAssertEqual(locator.purpose, .audioStream)
+        XCTAssertEqual(locator.deliveryMode, .directFile)
+        XCTAssertEqual(
+            locator.resource.path,
+            "/library/parts/8/song%20name.m4a"
+        )
+        XCTAssertFalse(
+            locator.resource.queryItems.contains {
+                $0.name.localizedCaseInsensitiveContains("token")
+            }
+        )
+        XCTAssertNil(request.streamURL)
+    }
+
     func testPlaybackInfoPrefersHDBIFWhenAvailable() async throws {
         let stub = StubHTTPClient()
         stub.stub(pathSuffix: "/library/metadata/101", json: """

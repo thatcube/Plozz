@@ -175,3 +175,90 @@ final class LyricsNegativeAuthorityTests: XCTestCase {
         ))
     }
 }
+
+@MainActor
+final class MusicStreamResolutionTests: XCTestCase {
+    func testResolverMaterializesAuthenticatedSourceAtPlaybackBoundary() async throws {
+        let credentialRevision = CredentialRevision(rawValue: UUID())
+        let locator = try AuthenticatedHTTPPlaybackLocator(
+            provider: .jellyfin,
+            accountID: "account",
+            credentialRevision: credentialRevision,
+            itemID: "track",
+            deliveryMode: .directFile,
+            formatHint: MediaFormatHint(container: "flac"),
+            purpose: .audioStream,
+            resource: try AuthenticatedHTTPResource(
+                pathBase: .serverRoot,
+                path: "/Audio/track/universal"
+            )
+        )
+        let provider = ResolverMusicProvider(
+            request: AudioPlaybackRequest(
+                track: MusicTrack(id: "track", title: "Track"),
+                playbackSource: .authenticatedHTTP(locator)
+            )
+        )
+        let expectedURL = URL(
+            string: "https://media.example/Audio/track/universal?api_key=secret"
+        )!
+        let resolver = RecordingAuthenticatedResolver(url: expectedURL)
+
+        let resolved = await streamURLResolver(
+            for: provider,
+            authenticatedHTTPResolver: resolver
+        )(MusicTrack(id: "track", title: "Track"))
+
+        XCTAssertEqual(resolved?.url, expectedURL)
+        let captured = await resolver.capturedLocator()
+        XCTAssertEqual(captured, locator)
+    }
+}
+
+private final class ResolverMusicProvider: MusicProvider, @unchecked Sendable {
+    let accountID = "account"
+    let providerKind = ProviderKind.jellyfin
+    private let request: AudioPlaybackRequest
+
+    init(request: AudioPlaybackRequest) {
+        self.request = request
+    }
+
+    func musicLibraries() async throws -> [MediaLibrary] { [] }
+
+    func musicItems(
+        in containerID: String,
+        kind: MusicItemKind,
+        page: PageRequest
+    ) async throws -> MusicPage {
+        MusicPage()
+    }
+
+    func audioPlaybackInfo(
+        for trackID: String,
+        queueContext: [String]?
+    ) async throws -> AudioPlaybackRequest {
+        request
+    }
+}
+
+@MainActor
+private final class RecordingAuthenticatedResolver:
+    AuthenticatedHTTPResourceResolving
+{
+    private let url: URL
+    private var locator: AuthenticatedHTTPPlaybackLocator?
+
+    init(url: URL) {
+        self.url = url
+    }
+
+    func resolve(_ locator: AuthenticatedHTTPPlaybackLocator) async throws -> URL {
+        self.locator = locator
+        return url
+    }
+
+    func capturedLocator() -> AuthenticatedHTTPPlaybackLocator? {
+        locator
+    }
+}

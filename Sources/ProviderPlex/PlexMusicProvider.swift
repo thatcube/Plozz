@@ -256,9 +256,20 @@ extension PlexProvider: MusicProvider {
         }
         let track = mapTrack(detail)
         let quality = Self.playbackQuality(media: media, part: part, isTranscoding: resolved.isTranscoding)
+        let locator = try authenticatedPlaybackLocator(
+            itemID: trackID,
+            mediaSourceID: media.id.map(String.init),
+            url: resolved.url,
+            deliveryMode: resolved.isTranscoding ? .serverTranscode : .directFile,
+            purpose: .audioStream,
+            playSessionID: resolved.isTranscoding ? sessionID : nil,
+            formatHint: resolved.isTranscoding
+                ? "mp3"
+                : (media.container ?? part.container)
+        )
         return AudioPlaybackRequest(
             track: track,
-            streamURL: resolved.url,
+            playbackSource: .authenticatedHTTP(locator),
             playSessionID: trackID,
             queue: [track],
             queueIndex: 0,

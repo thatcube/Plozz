@@ -745,7 +745,7 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
         )
     }
 
-    private func authenticatedPlaybackLocator(
+    func authenticatedPlaybackLocator(
         itemID: String,
         mediaSourceID: String?,
         url: URL,

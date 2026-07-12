@@ -326,6 +326,7 @@ struct MainTabView: View {
                     accounts: musicAvailability.detectedAccounts,
                     visibleLibraryIDs: musicAvailability.visibleLibraryIDs,
                     controller: audioController,
+                    authenticatedHTTPResolver: authenticatedHTTPResolver,
                     appTheme: themeModel.theme,
                     musicPlayer: musicPlayerModel,
                     showNowPlaying: $showNowPlaying

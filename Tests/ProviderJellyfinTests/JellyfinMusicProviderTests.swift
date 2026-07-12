@@ -105,11 +105,19 @@ final class JellyfinMusicProviderTests: XCTestCase {
         let provider = JellyfinProvider(session: makeSession(), http: stub)
 
         let request = try await provider.audioPlaybackInfo(for: "t1", queueContext: nil)
-        let url = request.streamURL
-        XCTAssertEqual(url.path, "/Audio/t1/universal")
-        let query = url.query ?? ""
-        XCTAssertTrue(query.contains("api_key=TOKEN"), "stream URL must carry the auth token")
-        XCTAssertTrue(query.contains("PlaySessionId="), "stream URL must carry the play session id")
+        guard case .authenticatedHTTP(let locator) = request.playbackSource else {
+            return XCTFail("expected authenticated HTTP audio locator")
+        }
+        XCTAssertEqual(locator.resource.path, "/Audio/t1/universal")
+        XCTAssertEqual(locator.purpose, .audioStream)
+        XCTAssertEqual(locator.playSessionID, request.playSessionID)
+        XCTAssertFalse(
+            locator.resource.queryItems.contains {
+                $0.name.localizedCaseInsensitiveContains("token")
+                    || $0.name.localizedCaseInsensitiveContains("session")
+            }
+        )
+        XCTAssertNil(request.streamURL)
         XCTAssertNotNil(request.playSessionID)
         XCTAssertEqual(request.track.title, "Opening")
         XCTAssertEqual(request.queue.count, 1)

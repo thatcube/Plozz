@@ -955,7 +955,7 @@ public struct JellyfinProvider: MediaProvider {
         )
     }
 
-    private func credentialFreeResource(
+    func credentialFreeResource(
         fromServerPath value: String
     ) throws -> AuthenticatedHTTPResource {
         guard let components = URLComponents(string: value),

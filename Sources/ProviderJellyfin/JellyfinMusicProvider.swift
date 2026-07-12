@@ -378,9 +378,28 @@ extension JellyfinProvider: MusicProvider {
         } else {
             track = MusicTrack(id: trackID, title: "")
         }
+        let locator = try AuthenticatedHTTPPlaybackLocator(
+            provider: .jellyfin,
+            accountID: accountID,
+            credentialRevision: credentialRevision,
+            itemID: trackID,
+            deliveryMode: quality?.isDirectPlay == false
+                ? .serverTranscode
+                : .directFile,
+            formatHint: MediaFormatHint(
+                container: quality?.isDirectPlay == false
+                    ? "ts"
+                    : quality?.container
+            ),
+            purpose: .audioStream,
+            resource: try credentialFreeResource(
+                fromServerPath: streamURL.absoluteString
+            ),
+            playSessionID: playSessionID
+        )
         return AudioPlaybackRequest(
             track: track,
-            streamURL: streamURL,
+            playbackSource: .authenticatedHTTP(locator),
             playSessionID: playSessionID,
             queue: [track],
             queueIndex: 0,

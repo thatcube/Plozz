@@ -497,6 +497,7 @@ struct ArtistDetailView: View {
 struct AlbumDetailView: View {
     @State var viewModel: AlbumDetailViewModel
     let controller: AudioPlaybackController
+    let authenticatedHTTPResolver: any AuthenticatedHTTPResourceResolving
 
     /// Lands initial focus on the Play button rather than the top of the track
     /// list. Set once tracks load (Play is disabled until then).
@@ -569,7 +570,10 @@ struct AlbumDetailView: View {
         controller.play(
             tracks: viewModel.tracks,
             startIndex: start,
-            resolveStreamURL: streamURLResolver(for: provider),
+            resolveStreamURL: streamURLResolver(
+                for: provider,
+                authenticatedHTTPResolver: authenticatedHTTPResolver
+            ),
             resolveLyrics: lyricsResolver(for: provider),
             refreshLyrics: lyricsRefresher(for: provider),
             reportPlayback: playbackReporter(for: provider)
@@ -580,7 +584,10 @@ struct AlbumDetailView: View {
         guard let provider = viewModel.provider, !viewModel.tracks.isEmpty else { return }
         controller.playShuffled(
             tracks: viewModel.tracks,
-            resolveStreamURL: streamURLResolver(for: provider),
+            resolveStreamURL: streamURLResolver(
+                for: provider,
+                authenticatedHTTPResolver: authenticatedHTTPResolver
+            ),
             resolveLyrics: lyricsResolver(for: provider),
             refreshLyrics: lyricsRefresher(for: provider),
             reportPlayback: playbackReporter(for: provider)
@@ -593,6 +600,7 @@ struct AlbumDetailView: View {
 struct PlaylistDetailView: View {
     @State var viewModel: PlaylistDetailViewModel
     let controller: AudioPlaybackController
+    let authenticatedHTTPResolver: any AuthenticatedHTTPResourceResolving
 
     /// Lands initial focus on the Play button rather than the top of the track
     /// list. Set once tracks load (Play is disabled until then).
@@ -655,7 +663,10 @@ struct PlaylistDetailView: View {
         controller.play(
             tracks: viewModel.tracks,
             startIndex: start,
-            resolveStreamURL: streamURLResolver(for: provider),
+            resolveStreamURL: streamURLResolver(
+                for: provider,
+                authenticatedHTTPResolver: authenticatedHTTPResolver
+            ),
             resolveLyrics: lyricsResolver(for: provider),
             refreshLyrics: lyricsRefresher(for: provider),
             reportPlayback: playbackReporter(for: provider)
@@ -666,7 +677,10 @@ struct PlaylistDetailView: View {
         guard let provider = viewModel.provider, !viewModel.tracks.isEmpty else { return }
         controller.playShuffled(
             tracks: viewModel.tracks,
-            resolveStreamURL: streamURLResolver(for: provider),
+            resolveStreamURL: streamURLResolver(
+                for: provider,
+                authenticatedHTTPResolver: authenticatedHTTPResolver
+            ),
             resolveLyrics: lyricsResolver(for: provider),
             refreshLyrics: lyricsRefresher(for: provider),
             reportPlayback: playbackReporter(for: provider)

@@ -112,18 +112,15 @@ final class HeroDirectionalPressGateTests: XCTestCase {
 
     func testHeldPhysicalPressRepeatsAfterDeliberateDelay() {
         var now: TimeInterval = 100
-        let gate = HeroDirectionalPressGate(
-            repeatDelay: 0.45,
-            now: { now }
-        )
+        let gate = HeroDirectionalPressGate(now: { now })
 
         gate.began(.right)
         XCTAssertTrue(gate.shouldHandle(.right))
 
-        now += 0.2
+        now += 0.45
         XCTAssertFalse(gate.shouldHandle(.right))
 
-        now += 0.25
+        now += 0.30
         XCTAssertTrue(gate.shouldHandle(.right))
 
         now += 0.1

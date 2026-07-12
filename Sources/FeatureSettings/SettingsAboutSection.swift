@@ -32,7 +32,6 @@ struct SettingsAboutSection: View {
                         .frame(width: 72, height: 72)
 
                     VStack(alignment: .leading, spacing: 10) {
-                        infoRow("Name", "Plozz")
                         infoRow("Version", version)
                         infoRow("Build", build)
                     }
@@ -40,11 +39,6 @@ struct SettingsAboutSection: View {
                     Text("Bring your media together and enjoy it in one unified experience. Free forever and open source.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    Text("Plozz is an independent project and is not affiliated with the services it connects to.")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -60,7 +54,7 @@ struct SettingsAboutSection: View {
                 }
             }
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel("About Plozz. Version \(version), build \(build). Bring your media together and enjoy it in one unified experience. Free forever and open source. Plozz is an independent project and is not affiliated with the services it connects to. Scan the on-screen code to view the GitHub repository.")
+            .accessibilityLabel("About Plozz. Version \(version), build \(build). Bring your media together and enjoy it in one unified experience. Free forever and open source. Scan the on-screen code to view the GitHub repository.")
         }
     }
 

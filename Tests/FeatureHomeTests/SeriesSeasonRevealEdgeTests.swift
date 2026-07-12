@@ -43,6 +43,44 @@ final class SeriesSeasonRevealEdgeTests: XCTestCase {
             viewportWidth: 0
         ))
     }
+
+    func testFocusClearanceRequiresAComfortablyVisibleChip() {
+        XCTAssertNil(SeriesSeasonRevealEdge.clippedEdge(
+            frame: CGRect(x: 32, y: 0, width: 160, height: 60),
+            viewportWidth: 600,
+            clearance: 32
+        ))
+        XCTAssertEqual(
+            SeriesSeasonRevealEdge.clippedEdge(
+                frame: CGRect(x: 420, y: 0, width: 160, height: 60),
+                viewportWidth: 600,
+                clearance: 32
+            ),
+            .trailing
+        )
+    }
+
+    func testRevealAnchorPlacesChipInsideFocusComfortMargin() {
+        let viewportWidth: CGFloat = 600
+        let targetWidth: CGFloat = 160
+        let clearance: CGFloat = 32
+
+        let trailing = SeriesSeasonRevealEdge.trailing.revealAnchor(
+            targetWidth: targetWidth,
+            viewportWidth: viewportWidth,
+            clearance: clearance
+        )
+        let trailingMaxX = trailing.x * (viewportWidth - targetWidth) + targetWidth
+        XCTAssertEqual(trailingMaxX, viewportWidth - clearance, accuracy: 0.001)
+
+        let leading = SeriesSeasonRevealEdge.leading.revealAnchor(
+            targetWidth: targetWidth,
+            viewportWidth: viewportWidth,
+            clearance: clearance
+        )
+        let leadingMinX = leading.x * (viewportWidth - targetWidth)
+        XCTAssertEqual(leadingMinX, clearance, accuracy: 0.001)
+    }
 }
 
 final class SeriesDetailBrowserPolicyTests: XCTestCase {

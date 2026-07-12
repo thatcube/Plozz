@@ -568,9 +568,14 @@ struct SeriesDetailView: View {
 
         guard let edge = SeriesSeasonRevealEdge.clippedEdge(
             frame: frame,
-            viewportWidth: seasonBarViewportWidth
+            viewportWidth: seasonBarViewportWidth,
+            clearance: PlozzTheme.Metrics.screenPadding
         ) else { return }
-        let anchor: UnitPoint = edge == .trailing ? .trailing : .leading
+        let anchor = edge.revealAnchor(
+            targetWidth: frame.width,
+            viewportWidth: seasonBarViewportWidth,
+            clearance: PlozzTheme.Metrics.screenPadding
+        )
         DispatchQueue.main.async {
             if reduceMotion {
                 proxy.scrollTo(id, anchor: anchor)
@@ -1264,13 +1269,33 @@ enum SeriesSeasonRevealEdge: Equatable {
     static func clippedEdge(
         frame: CGRect,
         viewportWidth: CGFloat,
+        clearance: CGFloat = 0,
         tolerance: CGFloat = 0.5
     ) -> Self? {
         guard viewportWidth > 0 else { return nil }
-        if frame.minX >= -tolerance, frame.maxX <= viewportWidth + tolerance {
+        if frame.minX >= clearance - tolerance,
+           frame.maxX <= viewportWidth - clearance + tolerance {
             return nil
         }
-        return frame.maxX > viewportWidth ? .trailing : .leading
+        return frame.maxX > viewportWidth - clearance ? .trailing : .leading
+    }
+
+    /// Unit-point anchor that leaves `clearance` between the revealed chip and
+    /// the viewport edge. tvOS applies the same comfort margin when focus lands;
+    /// pre-positioning with it prevents a second focus-driven scroll.
+    func revealAnchor(
+        targetWidth: CGFloat,
+        viewportWidth: CGFloat,
+        clearance: CGFloat
+    ) -> UnitPoint {
+        let travel = max(viewportWidth - targetWidth, 1)
+        let normalizedClearance = min(max(clearance / travel, 0), 1)
+        switch self {
+        case .leading:
+            return UnitPoint(x: normalizedClearance, y: 0.5)
+        case .trailing:
+            return UnitPoint(x: 1 - normalizedClearance, y: 0.5)
+        }
     }
 }
 

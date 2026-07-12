@@ -119,6 +119,11 @@ public struct PlozzMetrics: Equatable, Sendable {
     public let cardTitleFontSize: CGFloat
     /// Point size for a media card's subtitle/metadata line, scaled with density.
     public let cardSubtitleFontSize: CGFloat
+    /// Artwork status-cue typography and insets. These scale with card density but
+    /// retain explicit floors so compact poster walls never make the cue illegible.
+    public let cardStatusCueFontSize: CGFloat
+    public let cardStatusCueHorizontalPadding: CGFloat
+    public let cardStatusCueVerticalPadding: CGFloat
     /// Point size for a section/row header, scaled with density but *dampened*
     /// (see `PlozzTheme.Metrics.headerScaleDamping`) so headers stay anchored.
     public let sectionHeaderFontSize: CGFloat
@@ -255,6 +260,18 @@ public struct PlozzMetrics: Equatable, Sendable {
         #endif
         self.cardTitleFontSize = (baseTitleFontSize * s).rounded()
         self.cardSubtitleFontSize = step(PlozzTheme.Metrics.cardSubtitleFontSize)
+        self.cardStatusCueFontSize = max(
+            step(PlozzTheme.Metrics.cardStatusCueFontSize),
+            PlozzTheme.Metrics.cardStatusCueMinFontSize
+        )
+        self.cardStatusCueHorizontalPadding = max(
+            step(PlozzTheme.Metrics.cardStatusCueHorizontalPadding),
+            PlozzTheme.Metrics.cardStatusCueMinHorizontalPadding
+        )
+        self.cardStatusCueVerticalPadding = max(
+            step(PlozzTheme.Metrics.cardStatusCueVerticalPadding),
+            PlozzTheme.Metrics.cardStatusCueMinVerticalPadding
+        )
         // Section headers scale with density but dampened, so they anchor the page
         // hierarchy instead of ballooning/shrinking 1:1 with the cards.
         self.sectionHeaderFontSize = damped(PlozzTheme.Metrics.sectionHeaderFontSize, PlozzTheme.Metrics.headerScaleDamping)

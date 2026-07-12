@@ -530,11 +530,11 @@ public struct PosterCardView: View {
     private func statusCue(inset: CGFloat) -> some View {
         if let statusCueText {
             Text(statusCueText)
-                .font(.caption2.weight(.semibold))
+                .font(.system(size: metrics.cardStatusCueFontSize, weight: .semibold))
                 .foregroundStyle(.white)
                 .lineLimit(1)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
+                .padding(.horizontal, metrics.cardStatusCueHorizontalPadding)
+                .padding(.vertical, metrics.cardStatusCueVerticalPadding)
                 .background(.black.opacity(0.72), in: Capsule(style: .continuous))
                 .padding(inset)
                 .accessibilityLabel(statusCueText)

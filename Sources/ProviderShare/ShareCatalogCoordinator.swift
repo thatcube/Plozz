@@ -178,7 +178,10 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
                 await invalidationTask.value
                 continue
             }
-            guard let store = stores[accountKey] else { return }
+            guard let store = stores[accountKey] else {
+                reporter.shareRemoved(accountKey)
+                return
+            }
             await invalidateScanner(
                 accountKey: accountKey,
                 store: store,
@@ -356,6 +359,7 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
             stores[accountKey] = nil
             enrichers[accountKey] = nil
             pacers[accountKey] = nil
+            reporter.shareRemoved(accountKey)
         }
         restartingScans.remove(accountKey)
         invalidationTasks[accountKey] = nil

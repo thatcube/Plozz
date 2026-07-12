@@ -2199,11 +2199,21 @@ public final class AppState {
         let shareAccountKey = removedAccount?.server.provider == .mediaShare
             ? removedAccount?.id
             : nil
-        try? accountStore.remove(id: id)
+        do {
+            try accountStore.remove(id: id)
+        } catch {
+            PlozzLog.auth.error("Account removal failed; account remains signed in")
+        }
+        reloadAccounts()
+        guard !accounts.contains(where: { $0.id == id }) else {
+            apply(.accountsChanged(accounts))
+            return
+        }
         if let removedAccount {
             retireNetworkFileRevision(for: removedAccount)
         }
         if let shareAccountKey {
+            shareScanStatusModel.removeShare(shareID: shareAccountKey)
             Task {
                 await self.shareCatalogCoordinator.invalidate(accountKey: shareAccountKey)
             }
@@ -2211,7 +2221,6 @@ public final class AppState {
         setPlexTokenOverride(nil, for: id)
         plexResolvedHomeUser[id] = nil
         plexHomeUserTokenCache.removeAll(account: id)
-        reloadAccounts()
         apply(.accountsChanged(accounts))
     }
 
@@ -2228,18 +2237,33 @@ public final class AppState {
         let shareAccountKeys = removedAccounts
             .filter { $0.server.provider == .mediaShare }
             .map(\.id)
-        try? accountStore.clearAll()
-        removedAccounts.forEach(retireNetworkFileRevision)
-        for accountKey in shareAccountKeys {
+        do {
+            try accountStore.clearAll()
+        } catch {
+            PlozzLog.auth.error("Sign out all was incomplete; retained accounts remain signed in")
+        }
+        reloadAccounts()
+        let retainedAccountIDs = Set(accounts.map(\.id))
+        let confirmedRemovedAccounts = removedAccounts.filter {
+            !retainedAccountIDs.contains($0.id)
+        }
+        let confirmedShareAccountKeys = shareAccountKeys.filter {
+            !retainedAccountIDs.contains($0)
+        }
+        confirmedRemovedAccounts.forEach(retireNetworkFileRevision)
+        confirmedShareAccountKeys.forEach {
+            shareScanStatusModel.removeShare(shareID: $0)
+        }
+        for accountKey in confirmedShareAccountKeys {
             Task {
                 await self.shareCatalogCoordinator.invalidate(accountKey: accountKey)
             }
         }
-        plexTokenOverrides.removeAll()
-        plexOverrideCredentialRevisions.removeAll()
-        plexResolvedHomeUser.removeAll()
-        plexHomeUserTokenCache.removeAll()
-        reloadAccounts()
+        for account in confirmedRemovedAccounts {
+            setPlexTokenOverride(nil, for: account.id)
+            plexResolvedHomeUser[account.id] = nil
+            plexHomeUserTokenCache.removeAll(account: account.id)
+        }
         apply(.accountsChanged(accounts))
     }
 
@@ -2252,12 +2276,31 @@ public final class AppState {
         let shareAccountKeys = removedAccounts
             .filter { $0.server.provider == .mediaShare }
             .map(\.id)
-        try? accountStore.clearAll()
-        removedAccounts.forEach(retireNetworkFileRevision)
-        for accountKey in shareAccountKeys {
+        do {
+            try accountStore.clearAll()
+        } catch {
+            PlozzLog.auth.error("First-run reset could not remove every account")
+        }
+        reloadAccounts()
+        let retainedAccountIDs = Set(accounts.map(\.id))
+        let confirmedRemovedAccounts = removedAccounts.filter {
+            !retainedAccountIDs.contains($0.id)
+        }
+        let confirmedShareAccountKeys = shareAccountKeys.filter {
+            !retainedAccountIDs.contains($0)
+        }
+        confirmedRemovedAccounts.forEach(retireNetworkFileRevision)
+        confirmedShareAccountKeys.forEach {
+            shareScanStatusModel.removeShare(shareID: $0)
+        }
+        for accountKey in confirmedShareAccountKeys {
             Task {
                 await self.shareCatalogCoordinator.invalidate(accountKey: accountKey)
             }
+        }
+        guard accounts.isEmpty else {
+            apply(.accountsChanged(accounts))
+            return
         }
         plexTokenOverrides.removeAll()
         plexOverrideCredentialRevisions.removeAll()
@@ -2271,7 +2314,6 @@ public final class AppState {
         pendingOnboardingContinuation = nil
         pendingPlexUserApplyToAccountIDs = []
         isChoosingProfile = false
-        reloadAccounts()
         rebuildSettingsModels()
         apply(.accountsChanged(accounts))
     }

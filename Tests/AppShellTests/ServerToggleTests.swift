@@ -465,4 +465,87 @@ final class ServerToggleTests: XCTestCase {
             )
         }
     }
+
+    func testFailedShareRemovalKeepsLiveScanStatus() {
+        let account = Account(
+            id: "retained-share",
+            server: MediaServer(
+                id: "share:retained",
+                name: "Retained NAS",
+                baseURL: URL(string: "smb://nas.local/media")!,
+                provider: .mediaShare
+            ),
+            userID: "guest",
+            userName: "",
+            deviceID: "device"
+        )
+        let store = FailingRemovalAccountStore(account: account)
+        let state = AppState(
+            accountStore: store,
+            profilesModel: ProfilesModel(
+                store: ProfileStore(defaults: makeDefaults())
+            )
+        )
+        state.bootstrap()
+        state.shareScanStatusModel.scanStarted(
+            shareID: account.id,
+            name: account.server.name
+        )
+
+        state.removeAccount(id: account.id)
+
+        XCTAssertTrue(state.accounts.contains { $0.id == account.id })
+        XCTAssertTrue(
+            state.shareScanStatusModel.state(forShareID: account.id)?.isScanning
+                == true
+        )
+    }
+}
+
+private final class FailingRemovalAccountStore:
+    AccountPersisting,
+    @unchecked Sendable
+{
+    private let account: Account
+
+    init(account: Account) {
+        self.account = account
+    }
+
+    func deviceID() -> String { account.deviceID }
+    func loadAccounts() -> [Account] { [account] }
+    func activeAccountIDs() -> [String] { [account.id] }
+    func setActiveAccountIDs(_ ids: [String]) {}
+    func token(for accountID: String) -> String? { nil }
+
+    func mediaShareCredential(
+        for accountID: String
+    ) throws -> MediaShareCredentialEnvelope {
+        throw AccountStoreError.mediaShareCredentialInfrastructureUnavailable
+    }
+
+    func mediaShareCredential(
+        for accountID: String,
+        revision: CredentialRevision
+    ) throws -> MediaShareCredentialEnvelope {
+        throw AccountStoreError.mediaShareCredentialInfrastructureUnavailable
+    }
+
+    func add(_ account: Account, token: String) throws {}
+
+    func addMediaShare(
+        _ account: Account,
+        credential: MediaShareCredentialEnvelope,
+        generatedPrivateKey: String?
+    ) throws {}
+
+    func remove(id: String) throws {
+        throw AccountStoreError.mediaShareCredentialInfrastructureUnavailable
+    }
+
+    func clearAll() throws {
+        throw AccountStoreError.mediaShareCredentialInfrastructureUnavailable
+    }
+
+    func recoverCredentialMutations() throws {}
 }

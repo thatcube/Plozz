@@ -132,6 +132,40 @@ final class ShareScanStatusModelTests: XCTestCase {
         XCTAssertFalse(model.isAnyBusy, "enrich finish applied — indicator cleared")
     }
 
+    func testReporterRemovesDeletedShareAfterQueuedProgress() async {
+        let model = ShareScanStatusModel()
+        let reporter = model.reporter()
+        reporter.scanStarted("s1", "NAS")
+        for _ in 0..<200 where !model.isAnyBusy {
+            await Task.yield()
+        }
+        XCTAssertTrue(model.isAnyBusy)
+
+        reporter.scanDetailedProgress("s1", 4, 10)
+        reporter.shareRemoved("s1")
+
+        for _ in 0..<200 where model.state(forShareID: "s1") != nil {
+            await Task.yield()
+        }
+
+        XCTAssertNil(model.state(forShareID: "s1"))
+        XCTAssertFalse(model.isAnyBusy)
+        XCTAssertTrue(model.busyStates.isEmpty)
+    }
+
+    func testRemovedShareRejectsLateScannerAndEnricherEvents() {
+        let model = ShareScanStatusModel()
+        model.scanStarted(shareID: "s1", name: "NAS")
+        XCTAssertTrue(model.isAnyBusy)
+
+        model.removeShare(shareID: "s1")
+        model.scanStarted(shareID: "s1", name: "NAS")
+        model.enrichStarted(shareID: "s1", total: 10)
+
+        XCTAssertNil(model.state(forShareID: "s1"))
+        XCTAssertFalse(model.isAnyBusy)
+    }
+
     func testLegacyReporterReceivesDetailedScannerProgress() {
         final class Capture: @unchecked Sendable {
             private let lock = NSLock()

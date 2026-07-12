@@ -82,7 +82,7 @@ conformer — adding another backend means one new conformer, no feature rewrite
 
 ### Requirements
 
-- macOS with **Xcode 16+** (tvOS 17.0 deployment target)
+- macOS with **Xcode 16+** (tvOS 18.0 deployment target)
 - [XcodeGen](https://github.com/yonaskolb/XcodeGen): `brew install xcodegen`
 
 ### Generate the project and run

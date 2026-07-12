@@ -1588,7 +1588,7 @@ public final class AudioPlaybackController {
         // 2 device fires *during* a normal track transition; re-activating the
         // session mid-reconfiguration races the system's own route management and
         // tears the speaker down. A genuine route loss instead arrives as an
-        // AVAudioSession INTERRUPTION (tvOS 17+), which `handleInterruption`
+        // AVAudioSession INTERRUPTION (tvOS 18+), which `handleInterruption`
         // recovers from at the documented-safe moment. So: log only, act never.
     }
 
@@ -1598,7 +1598,7 @@ public final class AudioPlaybackController {
               let type = AVAudioSession.InterruptionType(rawValue: typeValue) else { return }
         switch type {
         case .began:
-            // System interrupted us. On tvOS 17+ a route disconnect (the HomePod
+            // System interrupted us. On tvOS 18+ a route disconnect (the HomePod
             // dropping) arrives here as reason `.routeDisconnected` — the exact
             // fingerprint of the AirPlay skip bug, so log the reason.
             diag("interrupt", "BEGAN reason=\(interruptionReasonName(info)) route=\(routeSummary()) isPlaying=\(isPlaying) state=[\(playerStateSummary())]")
@@ -1634,7 +1634,7 @@ public final class AudioPlaybackController {
         }
     }
 
-    /// Human-readable name for an interruption's reason (tvOS 17+). A HomePod
+    /// Human-readable name for an interruption's reason (tvOS 18+). A HomePod
     /// route drop reports `.routeDisconnected`; anything else is a different
     /// interruption (phone call analog, mic mute, etc.).
     private func interruptionReasonName(_ info: [AnyHashable: Any]) -> String {

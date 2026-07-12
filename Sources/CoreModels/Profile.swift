@@ -215,9 +215,9 @@ public struct AvatarEmojiCategory: Hashable, Sendable, Identifiable {
 extension Profile {
     /// Curated, tvOS-friendly SF Symbols offered as profile avatars, grouped so
     /// the picker can present browsable sections. **Every symbol here is verified
-    /// available on tvOS 17.0 (SF Symbols 5.0)** against the SDK's
+    /// available at Plozz's tvOS 18.0 baseline (SF Symbols 6.0)** against the SDK's
     /// `name_availability.plist` — a blank tile means a bad name, so don't add a
-    /// symbol without confirming its tvOS 17.0 availability. The very first symbol
+    /// symbol without confirming its tvOS 18.0 availability. The very first symbol
     /// of the first category is the app-wide default avatar
     /// (`defaultAvatarSymbols[0]`), so keep `person.crop.circle.fill` leading —
     /// several call sites rely on it. Each category holds exactly 8 symbols so it

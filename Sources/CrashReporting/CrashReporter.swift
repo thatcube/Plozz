@@ -13,7 +13,7 @@ public struct CrashReportContext: Sendable {
     public var build: String
     /// `debug` | `testflight` | `production`.
     public var environment: String
-    /// e.g. `tvOS 17.5`.
+    /// e.g. `tvOS 18.5`.
     public var systemVersion: String
     /// Hardware identifier, e.g. `AppleTV14,1`.
     public var deviceModel: String

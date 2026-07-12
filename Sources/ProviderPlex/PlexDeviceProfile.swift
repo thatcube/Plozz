@@ -25,7 +25,7 @@ public struct PlexDeviceProfile: Sendable, Hashable {
         version: String = "1.0",
         device: String = "Apple TV",
         platform: String = "tvOS",
-        platformVersion: String = "17.0",
+        platformVersion: String = "18.0",
         deviceName: String = "Plozz",
         clientIdentifier: String
     ) {

@@ -188,7 +188,7 @@ private struct MeshLiquidLayer: View {
     }
 }
 
-// MARK: - tvOS 17 fallback
+// MARK: - Pre-tvOS 18 fallback
 
 private struct BlobLiquidLayer: View {
     var colors: [Color]

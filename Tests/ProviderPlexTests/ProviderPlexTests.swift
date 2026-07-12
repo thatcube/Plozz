@@ -1242,6 +1242,11 @@ final class PlexAuthClientTests: XCTestCase {
         PlexAuthClient(deviceProfile: PlexDeviceProfile(clientIdentifier: "dev1"), http: stub, probeHTTP: UnreachableProbe())
     }
 
+    func testDefaultDeviceProfileReportsMinimumSupportedTVOS() {
+        let profile = PlexDeviceProfile(clientIdentifier: "device")
+        XCTAssertEqual(profile.headers()["X-Plex-Platform-Version"], "18.0")
+    }
+
     func testAuthorizationURLCarriesPinAndDeviceIdentity() {
         let profile = PlexDeviceProfile(product: "Plozz Player", clientIdentifier: "device/id")
         let client = PlexAuthClient(deviceProfile: profile)

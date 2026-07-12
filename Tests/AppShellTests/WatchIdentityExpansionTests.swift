@@ -17,9 +17,11 @@ final class WatchIdentityExpansionTests: XCTestCase {
         allAccounts: @escaping @Sendable () async -> [String],
         indexedSources: @escaping @Sendable ([MediaIdentity], MediaItemKind?, String?, Int?) -> [IndexedSource],
         indexedAccountIDs: @escaping @Sendable () -> Set<String>,
-        maxAttempts: Int = 6
+        maxAttempts: Int = 6,
+        isActive: @escaping @Sendable () async -> Bool = { true }
     ) -> AppShellWatchMutationApplier {
         AppShellWatchMutationApplier(
+            isActive: isActive,
             resolveProvider: { _ in nil },
             traktScrobbler: { DisabledTraktScrobbler() },
             simklScrobbler: { DisabledSimklScrobbler() },
@@ -31,6 +33,22 @@ final class WatchIdentityExpansionTests: XCTestCase {
             indexedAccountIDs: indexedAccountIDs,
             maxIdentityExpansionAttempts: maxAttempts
         )
+    }
+
+    func testInactiveProfileKeepsExpansionInconclusive() async {
+        let applier = applier(
+            allAccounts: { ["a"] },
+            indexedSources: { _, _, _, _ in [] },
+            indexedAccountIDs: { [] },
+            isActive: { false }
+        )
+
+        let expansion = await applier.expandTargets(
+            for: movieMutation()
+        )
+
+        XCTAssertFalse(expansion.isConclusive)
+        XCTAssertTrue(expansion.targets.isEmpty)
     }
 
     private func movieMutation(attempts: Int = 0) -> WatchMutation {

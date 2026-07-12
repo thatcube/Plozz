@@ -50,16 +50,215 @@ private func playedMutation(canonical: String = "imdb:tt1", played: Bool = true,
     )
 }
 
+private final class WatchOutboxMemoryStore:
+    SecureStoring,
+    @unchecked Sendable
+{
+    private let lock = NSLock()
+    private var storage: [String: String] = [:]
+
+    func setString(_ value: String, for key: String) throws {
+        lock.lock()
+        storage[key] = value
+        lock.unlock()
+    }
+
+    func string(for key: String) -> String? {
+        lock.lock()
+        defer { lock.unlock() }
+        return storage[key]
+    }
+
+    func readString(for key: String) throws -> String? {
+        string(for: key)
+    }
+
+    func removeValue(for key: String) throws {
+        lock.lock()
+        storage[key] = nil
+        lock.unlock()
+    }
+
+    var count: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return storage.count
+    }
+}
+
+private final class PersistenceFailureCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage = 0
+
+    func increment() {
+        lock.lock()
+        storage += 1
+        lock.unlock()
+    }
+
+    var value: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return storage
+    }
+}
+
+private struct FailingWatchMutationStore: WatchMutationStoring {
+    func load() -> WatchOutboxState { .empty }
+    func save(_ state: WatchOutboxState) throws {
+        throw DurableLocalStateError.malformedPayload
+    }
+}
+
 // MARK: - Cold start
 
 final class WatchOutboxColdStartTests: XCTestCase {
+    func testDurableStoreSurvivesRecreationAndIsolatesProfiles() throws {
+        let backing = WatchOutboxMemoryStore()
+        let durable = try DurableLocalStateStore(secureStore: backing)
+        let first = try DurableWatchMutationStore(
+            store: durable,
+            profileID: "profile-a"
+        )
+        let expected = WatchOutboxState(
+            clock: ["movie": Date(timeIntervalSince1970: 123)]
+        )
+        try first.save(expected)
+
+        let afterRestart = try DurableWatchMutationStore(
+            store: durable,
+            profileID: "profile-a"
+        )
+        let otherProfile = try DurableWatchMutationStore(
+            store: durable,
+            profileID: "profile-b"
+        )
+
+        XCTAssertEqual(afterRestart.load(), expected)
+        XCTAssertEqual(otherProfile.load(), .empty)
+    }
+
+    func testDurableStoreChunksStateBeyondSingleRecordLimit() throws {
+        let durable = try DurableLocalStateStore(
+            secureStore: WatchOutboxMemoryStore(),
+            maximumPayloadBytes: 4_096
+        )
+        let store = try DurableWatchMutationStore(
+            store: durable,
+            profileID: "profile"
+        )
+        let clock = Dictionary(
+            uniqueKeysWithValues: (0..<500).map {
+                (
+                    "movie-\($0)-" + String(repeating: "x", count: 40),
+                    Date(timeIntervalSince1970: TimeInterval($0))
+                )
+            }
+
+        )
+        let expected = WatchOutboxState(clock: clock)
+
+        try store.save(expected)
+
+        XCTAssertEqual(
+            try DurableWatchMutationStore(
+                store: durable,
+                profileID: "profile"
+            ).load(),
+            expected
+        )
+    }
+
+    func testRepeatedChunkedSavesUseBoundedAlternatingSlots() throws {
+        let backing = WatchOutboxMemoryStore()
+        let durable = try DurableLocalStateStore(
+            secureStore: backing,
+            maximumPayloadBytes: 4_096
+        )
+        let store = try DurableWatchMutationStore(
+            store: durable,
+            profileID: "profile"
+        )
+        for generation in 0..<50 {
+            let clock = Dictionary(
+                uniqueKeysWithValues: (0..<(100 + generation)).map {
+                    (
+                        "movie-\($0)-" + String(repeating: "x", count: 40),
+                        Date(timeIntervalSince1970: TimeInterval($0))
+                    )
+                }
+            )
+            try store.save(WatchOutboxState(clock: clock))
+        }
+
+        XCTAssertLessThanOrEqual(
+            backing.count,
+            1 + 2 * 32,
+            "manifest plus two bounded chunk slots"
+        )
+    }
+
+    func testStaleStoreCannotOverwriteNewerCommittedRevision() throws {
+        let durable = try DurableLocalStateStore(
+            secureStore: WatchOutboxMemoryStore(),
+            maximumPayloadBytes: 4_096
+        )
+        let first = try DurableWatchMutationStore(
+            store: durable,
+            profileID: "profile"
+        )
+        let stale = try DurableWatchMutationStore(
+            store: durable,
+            profileID: "profile"
+        )
+        XCTAssertEqual(first.load(), .empty)
+        XCTAssertEqual(stale.load(), .empty)
+        let committed = WatchOutboxState(
+            clock: ["new": Date(timeIntervalSince1970: 2)]
+        )
+        try first.save(committed)
+
+        XCTAssertThrowsError(
+            try stale.save(
+                WatchOutboxState(
+                    clock: ["old": Date(timeIntervalSince1970: 1)]
+                )
+            )
+        ) {
+            XCTAssertEqual(
+                $0 as? DurableLocalStateError,
+                .writeConflict
+            )
+        }
+        XCTAssertEqual(
+            try DurableWatchMutationStore(
+                store: durable,
+                profileID: "profile"
+            ).load(),
+            committed
+        )
+    }
+
+    func testMalformedPresentFieldFailsStrictDecode() {
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                WatchOutboxState.self,
+                from: Data(#"{"pending":"corrupt"}"#.utf8)
+            )
+        )
+    }
+
     /// A brand-new install: an empty file store must load `.empty` without throwing
     /// or force-unwrapping, the reconciler must start at zero pending, and a drain on
     /// an empty queue must be a safe no-op.
     func testFreshStoreIsEmptyAndDrainIsNoOp() async throws {
-        let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("plozz-coldstart-\(UUID().uuidString)", isDirectory: true)
-        let store = FileWatchMutationStore(directory: dir, namespace: "newuser")
+        let durable = try DurableLocalStateStore(
+            secureStore: WatchOutboxMemoryStore()
+        )
+        let store = try DurableWatchMutationStore(
+            store: durable,
+            profileID: "newuser"
+        )
 
         XCTAssertEqual(store.load(), .empty, "A never-written store reads as empty")
 
@@ -72,6 +271,26 @@ final class WatchOutboxColdStartTests: XCTestCase {
         let afterPending = await reconciler.pendingCount
         XCTAssertEqual(afterPending, 0)
         XCTAssertTrue(applier.playedWrites.isEmpty)
+    }
+
+    func testPersistenceFailureIsSurfacedAndMutationRemainsInMemory() async {
+        let failures = PersistenceFailureCounter()
+        let reconciler = WatchStateReconciler(
+            store: FailingWatchMutationStore(),
+            applier: FakeWatchApplier(),
+            onPersistenceFailure: { failures.increment() }
+        )
+
+        await reconciler.enqueue(
+            playedMutation(
+                capturedAt: Date(),
+                targets: [target("plex", "p1")]
+            )
+        )
+
+        XCTAssertEqual(failures.value, 1)
+        let pending = await reconciler.pendingCount
+        XCTAssertEqual(pending, 1)
     }
 
     /// A new user's very first watch must enqueue and converge end-to-end.
@@ -92,23 +311,22 @@ final class WatchOutboxColdStartTests: XCTestCase {
 // MARK: - Durability across relaunch (offline write survives, no rewind)
 
 final class WatchOutboxDurabilityTests: XCTestCase {
-    private func makeStoreDir() -> URL {
-        FileManager.default.temporaryDirectory
-            .appendingPathComponent("plozz-outbox-\(UUID().uuidString)", isDirectory: true)
-    }
-
     /// An offline write must survive an app relaunch: the intent is persisted before
     /// the (failing) network call, reloaded from disk by a fresh reconciler, and then
     /// applied once the server is reachable — never silently dropped.
     func testOfflineWriteSurvivesRelaunchThenConverges() async throws {
-        let dir = makeStoreDir()
-        let ns = "prof"
+        let durable = try DurableLocalStateStore(
+            secureStore: WatchOutboxMemoryStore()
+        )
 
         // Session 1: enqueue while the server is unreachable; drain fails to apply.
         let applier1 = FakeWatchApplier()
         applier1.failingAccounts = ["plex"]
         do {
-            let store1 = FileWatchMutationStore(directory: dir, namespace: ns)
+            let store1 = try DurableWatchMutationStore(
+                store: durable,
+                profileID: "prof"
+            )
             let reconciler1 = WatchStateReconciler(store: store1, applier: applier1)
             await reconciler1.enqueue(playedMutation(capturedAt: Date(), targets: [target("plex", "p1")]))
             await reconciler1.drain()
@@ -119,7 +337,10 @@ final class WatchOutboxDurabilityTests: XCTestCase {
 
         // Session 2 ("relaunch"): a brand-new reconciler reads the persisted intent.
         let applier2 = FakeWatchApplier() // server now reachable
-        let store2 = FileWatchMutationStore(directory: dir, namespace: ns)
+        let store2 = try DurableWatchMutationStore(
+            store: durable,
+            profileID: "prof"
+        )
         let reconciler2 = WatchStateReconciler(store: store2, applier: applier2)
         let reloaded = await reconciler2.pendingCount
         XCTAssertEqual(reloaded, 1, "Intent reloaded from disk")

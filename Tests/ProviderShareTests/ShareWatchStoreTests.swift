@@ -8,25 +8,34 @@ import CoreModels
 /// an app relaunch (a fresh `ShareWatchStore` reading the same file), and does it
 /// surface in the Continue Watching feed (`resumable`)?
 final class ShareWatchStoreTests: XCTestCase {
-    private func makeTempDir() -> URL {
-        let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("plozz-share-watch-tests-\(UUID().uuidString)", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir
+    private func makeDurableStore(
+        maximumPayloadBytes: Int =
+            DurableLocalStateStore.defaultMaximumPayloadBytes
+    ) throws -> DurableLocalStateStore {
+        try DurableLocalStateStore(
+            secureStore: ShareWatchMemoryStore(),
+            maximumPayloadBytes: maximumPayloadBytes
+        )
     }
 
     /// The core "gone after restart" reproduction: write a resume, then read it
     /// back through a BRAND-NEW store instance pointed at the same directory
     /// (exactly what a relaunch does — a fresh provider builds a fresh store).
     func testResumeSurvivesRestart() async throws {
-        let dir = makeTempDir()
+        let durableStore = try makeDurableStore()
         let itemID = "f:TV Shows/The Show/Season 01/S01E03.mkv"
 
-        let live = ShareWatchStore(accountKey: "acct-1", directory: dir)
+        let live = ShareWatchStore(
+            accountKey: "acct-1",
+            durableStore: durableStore
+        )
         await live.setResume(842, itemID: itemID, capturedAt: Date())
 
         // Simulate a relaunch: nothing shared in memory, only the file on disk.
-        let afterRestart = ShareWatchStore(accountKey: "acct-1", directory: dir)
+        let afterRestart = ShareWatchStore(
+            accountKey: "acct-1",
+            durableStore: durableStore
+        )
         let record = await afterRestart.record(for: itemID)
         XCTAssertEqual(record?.position, 842, "resume position must persist to disk across a fresh store")
         XCTAssertEqual(record?.played, false)
@@ -35,23 +44,32 @@ final class ShareWatchStoreTests: XCTestCase {
     /// The Continue Watching feed is backed by `resumable`; an in-progress item
     /// must appear there after a relaunch.
     func testResumableSurfacesAfterRestart() async throws {
-        let dir = makeTempDir()
+        let durableStore = try makeDurableStore()
         let itemID = "f:Movies/Some Movie (2021).mkv"
 
-        let live = ShareWatchStore(accountKey: "acct-2", directory: dir)
+        let live = ShareWatchStore(
+            accountKey: "acct-2",
+            durableStore: durableStore
+        )
         await live.setResume(300, itemID: itemID, capturedAt: Date())
 
-        let afterRestart = ShareWatchStore(accountKey: "acct-2", directory: dir)
+        let afterRestart = ShareWatchStore(
+            accountKey: "acct-2",
+            durableStore: durableStore
+        )
         let resumable = await afterRestart.resumable(limit: 10)
         XCTAssertEqual(resumable.map(\.itemID), [itemID], "an in-progress item must be resumable after restart")
     }
 
     /// A finished item clears its resume and drops out of the resumable feed.
     func testPlayedClearsResume() async throws {
-        let dir = makeTempDir()
+        let durableStore = try makeDurableStore()
         let itemID = "f:Movies/Done (2020).mkv"
 
-        let store = ShareWatchStore(accountKey: "acct-3", directory: dir)
+        let store = ShareWatchStore(
+            accountKey: "acct-3",
+            durableStore: durableStore
+        )
         await store.setResume(500, itemID: itemID, capturedAt: Date())
         await store.setPlayed(true, itemID: itemID, capturedAt: Date().addingTimeInterval(1))
 
@@ -64,9 +82,15 @@ final class ShareWatchStoreTests: XCTestCase {
     /// Two shares/accounts keep separate files, so one account's watch state never
     /// bleeds into another's feed.
     func testAccountsAreIsolated() async throws {
-        let dir = makeTempDir()
-        let a = ShareWatchStore(accountKey: "acct-A", directory: dir)
-        let b = ShareWatchStore(accountKey: "acct-B", directory: dir)
+        let durableStore = try makeDurableStore()
+        let a = ShareWatchStore(
+            accountKey: "acct-A",
+            durableStore: durableStore
+        )
+        let b = ShareWatchStore(
+            accountKey: "acct-B",
+            durableStore: durableStore
+        )
         await a.setResume(120, itemID: "f:x.mkv", capturedAt: Date())
 
         let aResumable = await a.resumable(limit: 10)
@@ -79,9 +103,12 @@ final class ShareWatchStoreTests: XCTestCase {
     /// clobber a newer one — the mechanism that stops a late-draining queued write
     /// from resurrecting old state.
     func testStaleWriteIsRejected() async throws {
-        let dir = makeTempDir()
+        let durableStore = try makeDurableStore()
         let itemID = "f:Movies/Ordering (2019).mkv"
-        let store = ShareWatchStore(accountKey: "acct-4", directory: dir)
+        let store = ShareWatchStore(
+            accountKey: "acct-4",
+            durableStore: durableStore
+        )
 
         let newer = Date()
         let older = newer.addingTimeInterval(-60)
@@ -96,13 +123,19 @@ final class ShareWatchStoreTests: XCTestCase {
     /// relaunch, so the Continue Watching progress bar (position / duration) can be
     /// rendered without re-playing the item.
     func testDurationPersistsAcrossRestart() async throws {
-        let dir = makeTempDir()
+        let durableStore = try makeDurableStore()
         let itemID = "f:Movies/Timed (2022).mkv"
 
-        let live = ShareWatchStore(accountKey: "acct-5", directory: dir)
+        let live = ShareWatchStore(
+            accountKey: "acct-5",
+            durableStore: durableStore
+        )
         await live.setResume(600, itemID: itemID, capturedAt: Date(), duration: 6000)
 
-        let afterRestart = ShareWatchStore(accountKey: "acct-5", directory: dir)
+        let afterRestart = ShareWatchStore(
+            accountKey: "acct-5",
+            durableStore: durableStore
+        )
         let record = await afterRestart.record(for: itemID)
         XCTAssertEqual(record?.position, 600)
         XCTAssertEqual(record?.duration, 6000, "duration must persist so the progress bar survives a relaunch")
@@ -111,9 +144,12 @@ final class ShareWatchStoreTests: XCTestCase {
     /// A subsequent resume tick that lacks duration (e.g. an outbox-drained write
     /// with no live player) must not wipe a previously-learned duration.
     func testResumeWithoutDurationPreservesLearnedDuration() async throws {
-        let dir = makeTempDir()
+        let durableStore = try makeDurableStore()
         let itemID = "f:Movies/Kept (2023).mkv"
-        let store = ShareWatchStore(accountKey: "acct-6", directory: dir)
+        let store = ShareWatchStore(
+            accountKey: "acct-6",
+            durableStore: durableStore
+        )
 
         await store.setResume(100, itemID: itemID, capturedAt: Date(), duration: 5000)
         await store.setResume(200, itemID: itemID, capturedAt: Date().addingTimeInterval(1)) // no duration
@@ -121,5 +157,74 @@ final class ShareWatchStoreTests: XCTestCase {
         let record = await store.record(for: itemID)
         XCTAssertEqual(record?.position, 200)
         XCTAssertEqual(record?.duration, 5000, "a duration-less resume must keep the previously-learned duration")
+    }
+
+    func testLongPathsPruneOldestRecordsToDurableByteBudget() async throws {
+        let durableStore = try makeDurableStore(
+            maximumPayloadBytes: 4_096
+        )
+        let store = ShareWatchStore(
+            accountKey: "bounded",
+            durableStore: durableStore
+        )
+        let start = Date(timeIntervalSince1970: 1_000)
+        for index in 0..<100 {
+            await store.setResume(
+                TimeInterval(index + 1),
+                itemID: "f:" + String(repeating: "directory/", count: 8)
+                    + "episode-\(index).mkv",
+                capturedAt: start.addingTimeInterval(TimeInterval(index))
+            )
+        }
+
+        let afterRestart = ShareWatchStore(
+            accountKey: "bounded",
+            durableStore: durableStore
+        )
+        let records = await afterRestart.recordsSnapshot()
+
+        XCTAssertLessThan(records.count, 100)
+        XCTAssertNotNil(
+            records[
+                "f:" + String(repeating: "directory/", count: 8)
+                    + "episode-99.mkv"
+            ]
+        )
+        XCTAssertNil(
+            records[
+                "f:" + String(repeating: "directory/", count: 8)
+                    + "episode-0.mkv"
+            ]
+        )
+    }
+
+    private final class ShareWatchMemoryStore:
+        SecureStoring,
+        @unchecked Sendable
+    {
+        private let lock = NSLock()
+        private var storage: [String: String] = [:]
+
+        func setString(_ value: String, for key: String) throws {
+            lock.lock()
+            storage[key] = value
+            lock.unlock()
+        }
+
+        func string(for key: String) -> String? {
+            lock.lock()
+            defer { lock.unlock() }
+            return storage[key]
+        }
+
+        func readString(for key: String) throws -> String? {
+            string(for: key)
+        }
+
+        func removeValue(for key: String) throws {
+            lock.lock()
+            storage[key] = nil
+            lock.unlock()
+        }
     }
 }

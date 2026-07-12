@@ -16,6 +16,10 @@ import MALService
 ///    state) → return success, since retrying could never succeed (no silent loss —
 ///    there is genuinely nothing to write).
 struct AppShellWatchMutationApplier: WatchMutationApplying {
+    /// Fences a reconciler to the profile it was created for. A superseded
+    /// profile's in-flight drain must keep its mutations queued, never write
+    /// through services/providers now scoped to another profile.
+    var isActive: @Sendable () async -> Bool = { true }
     /// Main-actor provider resolution (account id → live provider).
     let resolveProvider: @Sendable (String) async -> (any MediaProvider)?
     /// The active Trakt scrobbler (durable, throwing variant used).
@@ -78,10 +82,12 @@ struct AppShellWatchMutationApplier: WatchMutationApplying {
     }
 
     func setPlayed(_ played: Bool, on target: WatchMutationTarget, capturedAt: Date) async throws {
+        guard await isActive() else { throw AppError.serverUnreachable }
         guard let provider = await resolveProvider(target.accountID) else {
             FanoutDiagnostics.emit("write.setPlayed acct=\(target.accountID) item=\(target.itemID) -> provider=nil (unreachable/unresolved, will retry)")
             throw AppError.serverUnreachable
         }
+        guard await isActive() else { throw AppError.serverUnreachable }
         // A locally-stored played state (the SMB share) is ordered last-writer-wins
         // by the play's real time, so prefer the timestamped write — otherwise a
         // late-draining stale played write, stamped at drain time, would clobber a
@@ -99,10 +105,12 @@ struct AppShellWatchMutationApplier: WatchMutationApplying {
     }
 
     func setResumePosition(_ seconds: TimeInterval, on target: WatchMutationTarget, capturedAt: Date) async throws {
+        guard await isActive() else { throw AppError.serverUnreachable }
         guard let provider = await resolveProvider(target.accountID) else {
             FanoutDiagnostics.emit("write.setResume acct=\(target.accountID) item=\(target.itemID) -> provider=nil (unreachable/unresolved, will retry)")
             throw AppError.serverUnreachable
         }
+        guard await isActive() else { throw AppError.serverUnreachable }
         guard let resumeWriter = provider as? ResumeStateWriting else {
             FanoutDiagnostics.emit("write.setResume acct=\(target.accountID) item=\(target.itemID) -> provider=\(provider.kind.rawValue) NOT ResumeStateWriting (no write, treated success)")
             return
@@ -111,7 +119,9 @@ struct AppShellWatchMutationApplier: WatchMutationApplying {
     }
 
     func scrobbleTrakt(_ intent: TraktScrobbleIntent) async throws {
+        guard await isActive() else { throw AppError.serverUnreachable }
         let scrobbler = await traktScrobbler()
+        guard await isActive() else { throw AppError.serverUnreachable }
         try await scrobbler.scrobbleResult(
             item: intent.makeScrobbleItem(),
             progress: intent.progress,
@@ -120,7 +130,9 @@ struct AppShellWatchMutationApplier: WatchMutationApplying {
     }
 
     func scrobbleSimkl(_ intent: TraktScrobbleIntent) async throws {
+        guard await isActive() else { throw AppError.serverUnreachable }
         let scrobbler = await simklScrobbler()
+        guard await isActive() else { throw AppError.serverUnreachable }
         try await scrobbler.scrobbleResult(
             item: intent.makeScrobbleItem(),
             progress: intent.progress,
@@ -129,7 +141,9 @@ struct AppShellWatchMutationApplier: WatchMutationApplying {
     }
 
     func scrobbleAniList(_ intent: TraktScrobbleIntent) async throws {
+        guard await isActive() else { throw AppError.serverUnreachable }
         let scrobbler = await anilistScrobbler()
+        guard await isActive() else { throw AppError.serverUnreachable }
         try await scrobbler.scrobbleResult(
             item: intent.makeScrobbleItem(),
             progress: intent.progress,
@@ -138,7 +152,9 @@ struct AppShellWatchMutationApplier: WatchMutationApplying {
     }
 
     func scrobbleMAL(_ intent: TraktScrobbleIntent) async throws {
+        guard await isActive() else { throw AppError.serverUnreachable }
         let scrobbler = await malScrobbler()
+        guard await isActive() else { throw AppError.serverUnreachable }
         try await scrobbler.scrobbleResult(
             item: intent.makeScrobbleItem(),
             progress: intent.progress,
@@ -154,10 +170,25 @@ struct AppShellWatchMutationApplier: WatchMutationApplying {
     /// warmth-gated via ``WatchTargetExpansion/inconclusiveAccountIDs`` so the
     /// reconciler retries rather than dropping or guessing.
     func expandTargets(for mutation: WatchMutation) async -> WatchTargetExpansion {
-        if mutation.episodeOrigin != nil {
-            return await expandEpisodeTargets(for: mutation)
+        guard await isActive() else {
+            return WatchTargetExpansion(
+                targets: [],
+                inconclusiveAccountIDs: ["inactive-profile"]
+            )
         }
-        return await expandIdentityTargets(for: mutation)
+        let expansion: WatchTargetExpansion
+        if mutation.episodeOrigin != nil {
+            expansion = await expandEpisodeTargets(for: mutation)
+        } else {
+            expansion = await expandIdentityTargets(for: mutation)
+        }
+        guard await isActive() else {
+            return WatchTargetExpansion(
+                targets: [],
+                inconclusiveAccountIDs: ["inactive-profile"]
+            )
+        }
+        return expansion
     }
 
     /// Fans a **movie / series** watch out to every server the eager identity index

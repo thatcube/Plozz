@@ -32,12 +32,13 @@ public struct ShareProvider: MediaProvider {
         credentialRevision: CredentialRevision,
         sessionFactory: @escaping ShareTransportSessionFactory,
         catalogCoordinator: ShareCatalogCoordinator,
+        durableLocalStateStore: DurableLocalStateStore? = nil,
         streamProber: NetworkFileStreamProbing? = nil
     ) {
         self.init(
             session: session,
             localMediaContext: localMediaContext,
-            watchDirectory: nil,
+            durableLocalStateStore: durableLocalStateStore,
             credentialRevision: credentialRevision,
             sessionFactory: sessionFactory,
             catalogCoordinator: catalogCoordinator,
@@ -45,14 +46,11 @@ public struct ShareProvider: MediaProvider {
         )
     }
 
-    /// Test seam: build a provider whose device-local watch state lives in
-    /// `watchDirectory` instead of Application Support, so the reportPlayback →
-    /// persist → continueWatching path can be exercised end-to-end (including a
-    /// simulated relaunch) without touching the real app container.
+    /// Test seam with an injectable durable store.
     init(
         session: UserSession,
         localMediaContext: LocalMediaContext? = nil,
-        watchDirectory: URL?,
+        durableLocalStateStore: DurableLocalStateStore? = nil,
         credentialRevision: CredentialRevision = CredentialRevision(
             rawValue: UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
         ),
@@ -83,7 +81,7 @@ public struct ShareProvider: MediaProvider {
         // share's stable account id so two shares keep separate progress.
         self.watchStore = ShareWatchStore(
             localMediaContext: self.localMediaContext,
-            directory: watchDirectory
+            durableStore: durableLocalStateStore
         )
     }
 

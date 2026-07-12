@@ -58,6 +58,7 @@ public enum DurableLocalStateError: Error, Equatable, Sendable {
     case payloadTooLarge
     case schemaMismatch
     case unsupportedVersion
+    case writeConflict
 }
 
 public struct DurableLocalStateKey: Hashable, Sendable {
@@ -127,7 +128,7 @@ public final class DurableLocalStateStore: @unchecked Sendable {
     public static let defaultMaximumPayloadBytes = 256 * 1024
 
     private let secureStore: SecureStoring
-    private let maximumPayloadBytes: Int
+    public let maximumPayloadBytes: Int
     private let lock = NSLock()
 
     public init(

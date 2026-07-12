@@ -83,19 +83,46 @@ public struct WatchOutboxState: Codable, Sendable, Equatable {
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        pending = (try? container.decodeIfPresent([WatchMutation].self, forKey: .pending)) ?? []
-        clock = (try? container.decodeIfPresent([String: Date].self, forKey: .clock)) ?? [:]
-        appliedTrakt = (try? container.decodeIfPresent([String: Date].self, forKey: .appliedTrakt)) ?? [:]
-        appliedSimkl = (try? container.decodeIfPresent([String: Date].self, forKey: .appliedSimkl)) ?? [:]
-        appliedAniList = (try? container.decodeIfPresent([String: Date].self, forKey: .appliedAniList)) ?? [:]
-        appliedMAL = (try? container.decodeIfPresent([String: Date].self, forKey: .appliedMAL)) ?? [:]
-        appliedRecency = (try? container.decodeIfPresent([String: AppliedResumeRecord].self, forKey: .appliedRecency)) ?? [:]
+        pending = try container.decodeIfPresent(
+            [WatchMutation].self,
+            forKey: .pending
+        ) ?? []
+        clock = try container.decodeIfPresent(
+            [String: Date].self,
+            forKey: .clock
+        ) ?? [:]
+        appliedTrakt = try container.decodeIfPresent(
+            [String: Date].self,
+            forKey: .appliedTrakt
+        ) ?? [:]
+        appliedSimkl = try container.decodeIfPresent(
+            [String: Date].self,
+            forKey: .appliedSimkl
+        ) ?? [:]
+        appliedAniList = try container.decodeIfPresent(
+            [String: Date].self,
+            forKey: .appliedAniList
+        ) ?? [:]
+        appliedMAL = try container.decodeIfPresent(
+            [String: Date].self,
+            forKey: .appliedMAL
+        ) ?? [:]
+        appliedRecency = try container.decodeIfPresent(
+            [String: AppliedResumeRecord].self,
+            forKey: .appliedRecency
+        ) ?? [:]
     }
 }
 
-/// Persistence seam for the outbox. Implementations must be cold-start safe:
-/// ``load()`` returns ``WatchOutboxState/empty`` (never throws / crashes) when no
-/// state exists yet or the file is unreadable.
+extension WatchOutboxState: DurableLocalStateValue {
+    public static let durableLocalStateSchemaID =
+        "com.plozz.watch-outbox.v1"
+}
+
+/// Persistence seam for the outbox. Implementations are cold-start safe:
+/// ``load()`` returns ``WatchOutboxState/empty`` when no state exists. A durable
+/// implementation that cannot decode existing state must block later writes so
+/// corruption is never overwritten with an empty queue.
 public protocol WatchMutationStoring: Sendable {
     func load() -> WatchOutboxState
     func save(_ state: WatchOutboxState) throws
@@ -122,44 +149,184 @@ public final class InMemoryWatchMutationStore: WatchMutationStoring, @unchecked 
     }
 }
 
-/// JSON-file-backed store. Atomic writes; a missing or corrupt file reads as
-/// ``WatchOutboxState/empty`` so the very first launch (and a torn write) recover
-/// cleanly. The file is profile-scoped by the caller via `namespace`, so each
-/// household profile keeps its own queue.
-public final class FileWatchMutationStore: WatchMutationStoring, @unchecked Sendable {
-    private let url: URL
-    private let lock = NSLock()
+/// User-independent Keychain-backed watch outbox. There is intentionally no
+/// file-store migration: tester builds start with a fresh durable queue.
+public final class DurableWatchMutationStore:
+    WatchMutationStoring,
+    @unchecked Sendable
+{
+    private struct Manifest: DurableLocalStateValue {
+        static let durableLocalStateSchemaID =
+            "com.plozz.watch-outbox-manifest.v1"
 
-    /// - Parameters:
-    ///   - directory: container dir (defaults to Application Support/Plozz).
-    ///   - namespace: profile namespace; `nil` is the default profile.
-    public init(directory: URL? = nil, namespace: String? = nil) {
-        let base = directory ?? Self.defaultDirectory()
-        let suffix = namespace.map { "-\($0)" } ?? ""
-        self.url = base.appendingPathComponent("watch-outbox\(suffix).json")
-        try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        let generation: String
+        let chunkCount: Int
+        let revision: UInt64
     }
 
-    private static func defaultDirectory() -> URL {
-        // tvOS does not persist `Application Support` (the directory doesn't survive
-        // a relaunch on device), so an outbox written there silently vanished on
-        // every restart — pending watch mutations that hadn't drained in-session
-        // were lost. `Library/Caches` persists across normal tvOS launches (matching
-        // every other durable store in the app), so use it here.
-        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
-            ?? FileManager.default.temporaryDirectory
-        return caches.appendingPathComponent("Plozz", isDirectory: true)
+    private struct Chunk: DurableLocalStateValue {
+        static let durableLocalStateSchemaID =
+            "com.plozz.watch-outbox-chunk.v1"
+
+        let data: Data
+    }
+
+    private static let maximumChunkCount = 32
+    private let store: DurableLocalStateStore
+    private let scope: DurableLocalStateScope
+    private let manifestKey: DurableLocalStateKey
+    private let onLoadFailure: @Sendable () -> Void
+    private let operationLock: NSLock
+    private var loadFailed = false
+    private var loadedRevision: UInt64?
+
+    public init(
+        store: DurableLocalStateStore,
+        profileID: String,
+        onLoadFailure: @escaping @Sendable () -> Void = {}
+    ) throws {
+        self.store = store
+        self.onLoadFailure = onLoadFailure
+        self.scope = .profile(profileID: profileID)
+        self.operationLock = DurableWatchOutboxCoordination.shared.lock(
+            for: profileID
+        )
+        self.manifestKey = try DurableLocalStateKey(
+            collection: .watchOutbox,
+            scope: self.scope,
+            recordID: "manifest"
+        )
     }
 
     public func load() -> WatchOutboxState {
-        lock.lock(); defer { lock.unlock() }
-        guard let data = try? Data(contentsOf: url) else { return .empty }
-        return (try? JSONDecoder().decode(WatchOutboxState.self, from: data)) ?? .empty
+        operationLock.lock()
+        do {
+            guard let manifest = try store.load(
+                Manifest.self,
+                for: manifestKey
+            ) else {
+                loadedRevision = nil
+                operationLock.unlock()
+                return .empty
+            }
+            guard (1...Self.maximumChunkCount).contains(
+                manifest.chunkCount
+            ), manifest.generation == "slot0"
+                || manifest.generation == "slot1" else {
+                throw DurableLocalStateError.malformedPayload
+            }
+            var encoded = Data()
+            for index in 0..<manifest.chunkCount {
+                guard let chunk = try store.load(
+                    Chunk.self,
+                    for: try chunkKey(
+                        generation: manifest.generation,
+                        index: index
+                    )
+                ) else {
+                    throw DurableLocalStateError.malformedPayload
+                }
+                encoded.append(chunk.data)
+            }
+            do {
+                let state = try JSONDecoder().decode(
+                    WatchOutboxState.self,
+                    from: encoded
+                )
+                loadedRevision = manifest.revision
+                operationLock.unlock()
+                return state
+            } catch {
+                throw DurableLocalStateError.malformedPayload
+            }
+        } catch {
+            loadFailed = true
+            operationLock.unlock()
+            onLoadFailure()
+            return .empty
+        }
     }
 
     public func save(_ state: WatchOutboxState) throws {
-        lock.lock(); defer { lock.unlock() }
-        let data = try JSONEncoder().encode(state)
-        try data.write(to: url, options: .atomic)
+        operationLock.lock()
+        defer { operationLock.unlock() }
+        guard !loadFailed else {
+            throw DurableLocalStateError.malformedPayload
+        }
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let encoded = try encoder.encode(state)
+        let chunkByteCount = max(
+            1,
+            min(128 * 1_024, store.maximumPayloadBytes * 45 / 100)
+        )
+        let chunks = stride(
+            from: 0,
+            to: max(1, encoded.count),
+            by: chunkByteCount
+        ).map { offset -> Data in
+            guard !encoded.isEmpty else { return Data() }
+            return encoded.subdata(
+                in: offset..<min(offset + chunkByteCount, encoded.count)
+            )
+        }
+        guard chunks.count <= Self.maximumChunkCount else {
+            throw DurableLocalStateError.payloadTooLarge
+        }
+
+        let previous = try store.load(Manifest.self, for: manifestKey)
+        guard previous?.revision == loadedRevision else {
+            throw DurableLocalStateError.writeConflict
+        }
+        let generation = previous?.generation == "slot0"
+            ? "slot1"
+            : "slot0"
+        let revision = (previous?.revision ?? 0) &+ 1
+        for (index, data) in chunks.enumerated() {
+            let key = try chunkKey(
+                generation: generation,
+                index: index
+            )
+            try store.save(Chunk(data: data), for: key)
+        }
+        try store.save(
+            Manifest(
+                generation: generation,
+                chunkCount: chunks.count,
+                revision: revision
+            ),
+            for: manifestKey
+        )
+        loadedRevision = revision
+    }
+
+    private func chunkKey(
+        generation: String,
+        index: Int
+    ) throws -> DurableLocalStateKey {
+        try DurableLocalStateKey(
+            collection: .watchOutbox,
+            scope: scope,
+            recordID: "chunk.\(generation).\(index)"
+        )
+    }
+}
+
+private final class DurableWatchOutboxCoordination: @unchecked Sendable {
+    static let shared = DurableWatchOutboxCoordination()
+
+    private let lock = NSLock()
+    private var profileLocks: [String: NSLock] = [:]
+
+    func lock(for profileID: String) -> NSLock {
+        lock.lock()
+        defer { lock.unlock() }
+        if let existing = profileLocks[profileID] {
+            return existing
+        }
+        let created = NSLock()
+        profileLocks[profileID] = created
+        return created
     }
 }

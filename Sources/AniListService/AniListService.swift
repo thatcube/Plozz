@@ -30,6 +30,7 @@ public final class AniListService {
     @ObservationIgnored private let tokenStore: AniListTokenStoring
     @ObservationIgnored private let http: HTTPClient
     @ObservationIgnored private var pendingSession: String?
+    @ObservationIgnored private var profileGeneration: UInt64 = 0
 
     public init(config: AniListConfig, http: HTTPClient = URLSessionHTTPClient(), tokenStore: AniListTokenStoring) {
         self.config = config
@@ -47,19 +48,27 @@ public final class AniListService {
     public var isConfigured: Bool { config.isConfigured }
 
     public func setActiveProfile(namespace: String?) async {
+        profileGeneration &+= 1
+        let generation = profileGeneration
         tokenStore.setNamespace(namespace)
         phase = config.isConfigured ? .unknown : .unavailable
-        await refreshStatus()
+        await refreshStatus(generation: generation)
     }
 
     public func refreshStatus() async {
+        await refreshStatus(generation: profileGeneration)
+    }
+
+    private func refreshStatus(generation: UInt64) async {
         guard config.isConfigured else { phase = .unavailable; return }
         guard let tokens = tokenStore.load() else { phase = .disconnected; return }
         let client = AniListClient(config: config, http: http)
         do {
             let user = try await client.viewer(accessToken: tokens.accessToken)
+            guard generation == profileGeneration else { return }
             phase = .connected(username: user.name)
         } catch {
+            guard generation == profileGeneration else { return }
             try? tokenStore.clear()
             phase = .disconnected
         }
@@ -69,6 +78,7 @@ public final class AniListService {
     public func connect() {
         guard config.isConfigured else { phase = .unavailable; return }
         guard let url = config.authorizationURL else { phase = .unavailable; return }
+        profileGeneration &+= 1
         // Mint a 32-char TV session so the short redeem code is bound to this TV.
         let session = Self.randomSession()
         pendingSession = session
@@ -77,6 +87,8 @@ public final class AniListService {
 
     /// Completes the connection by redeeming a short code from the auth relay.
     public func submitToken(_ input: String) async {
+        profileGeneration &+= 1
+        let generation = profileGeneration
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             phase = .error("Code cannot be empty")
@@ -90,16 +102,19 @@ public final class AniListService {
             }
             let redeemURL = URL(string: redeemString)!
             let (data, _) = try await URLSession.shared.data(from: redeemURL)
+            guard generation == profileGeneration else { return }
             let result = try JSONDecoder().decode(RelayRedeemResponse.self, from: data)
 
             let accessToken = result.accessToken
             let client = AniListClient(config: config, http: http)
             let user = try await client.viewer(accessToken: accessToken)
+            guard generation == profileGeneration else { return }
             let tokens = AniListTokens(accessToken: accessToken)
             try? tokenStore.save(tokens)
             pendingSession = nil
             phase = .connected(username: user.name)
         } catch {
+            guard generation == profileGeneration else { return }
             phase = .error("Invalid or expired code — please try again")
         }
     }
@@ -112,11 +127,15 @@ public final class AniListService {
 
     /// Cancels an in-flight connection attempt.
     public func cancelConnect() {
+        profileGeneration &+= 1
+        pendingSession = nil
         phase = config.isConfigured ? .disconnected : .unavailable
     }
 
     /// Disconnects: clears the stored token.
     public func disconnect() async {
+        profileGeneration &+= 1
+        pendingSession = nil
         try? tokenStore.clear()
         phase = config.isConfigured ? .disconnected : .unavailable
     }

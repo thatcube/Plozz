@@ -17,6 +17,12 @@ final class ShareProviderWatchTests: XCTestCase {
         return dir
     }
 
+    private func makeDurableStore() throws -> DurableLocalStateStore {
+        try DurableLocalStateStore(
+            secureStore: ShareProviderWatchMemoryStore()
+        )
+    }
+
     private final class LocatorFakeSession: MediaTransportSession, @unchecked Sendable {
         let key: MediaTransportSessionKey
         let fileSystem: any MediaTransportFileSystem = LocatorFakeFileSystem()
@@ -101,7 +107,7 @@ final class ShareProviderWatchTests: XCTestCase {
         let session = try LocatorFakeSession(revision: revision)
         let provider = ShareProvider(
             session: makeSession(baseURL: URL(string: "smb://nas.local/Media/Movies")!),
-            watchDirectory: makeTempDir(),
+            durableLocalStateStore: nil,
             credentialRevision: revision,
             sessionFactory: { _ in session }
         )
@@ -121,7 +127,7 @@ final class ShareProviderWatchTests: XCTestCase {
         let session = try LocatorFakeSession(revision: revision)
         let provider = ShareProvider(
             session: makeSession(username: "", password: "guest-secret"),
-            watchDirectory: makeTempDir(),
+            durableLocalStateStore: nil,
             credentialRevision: revision,
             sessionFactory: { _ in session }
         )
@@ -135,7 +141,7 @@ final class ShareProviderWatchTests: XCTestCase {
     }
 
     func testAccountsOnSameEndpointKeepIndependentWatchState() async throws {
-        let directory = makeTempDir()
+        let durableStore = try makeDurableStore()
         let session = makeSession()
         let first = ShareProvider(
             session: session,
@@ -144,7 +150,7 @@ final class ShareProviderWatchTests: XCTestCase {
                 profileID: "profile",
                 profileNamespace: nil
             ),
-            watchDirectory: directory
+            durableLocalStateStore: durableStore
         )
         let second = ShareProvider(
             session: session,
@@ -153,7 +159,7 @@ final class ShareProviderWatchTests: XCTestCase {
                 profileID: "profile",
                 profileNamespace: nil
             ),
-            watchDirectory: directory
+            durableLocalStateStore: durableStore
         )
 
         try await first.reportPlayback(
@@ -173,7 +179,7 @@ final class ShareProviderWatchTests: XCTestCase {
     }
 
     func testProfilesOnSameAccountKeepIndependentWatchState() async throws {
-        let directory = makeTempDir()
+        let durableStore = try makeDurableStore()
         let session = makeSession()
         let first = ShareProvider(
             session: session,
@@ -182,7 +188,7 @@ final class ShareProviderWatchTests: XCTestCase {
                 profileID: "profile-a",
                 profileNamespace: "household"
             ),
-            watchDirectory: directory
+            durableLocalStateStore: durableStore
         )
         let second = ShareProvider(
             session: session,
@@ -191,7 +197,7 @@ final class ShareProviderWatchTests: XCTestCase {
                 profileID: "profile-b",
                 profileNamespace: "household"
             ),
-            watchDirectory: directory
+            durableLocalStateStore: durableStore
         )
 
         try await first.reportPlayback(
@@ -211,19 +217,25 @@ final class ShareProviderWatchTests: XCTestCase {
     }
 
     func testProgressTickPersistsAcrossRelaunch() async throws {
-        let dir = makeTempDir()
+        let durableStore = try makeDurableStore()
         let session = makeSession()
         let itemID = "f:TV Shows/The Show/Season 01/S01E02.mkv"
 
         // Live playback: the engine progress timer fires ~every 10s.
-        let live = ShareProvider(session: session, watchDirectory: dir)
+        let live = ShareProvider(
+            session: session,
+            durableLocalStateStore: durableStore
+        )
         try await live.reportPlayback(
             PlaybackProgress(itemID: itemID, playSessionID: "s1", positionSeconds: 636, isPaused: false),
             event: .progress
         )
 
         // Relaunch: a fresh provider is built for the same account, memory empty.
-        let afterRestart = ShareProvider(session: session, watchDirectory: dir)
+        let afterRestart = ShareProvider(
+            session: session,
+            durableLocalStateStore: durableStore
+        )
 
         // 1) Detail page shows a Resume point.
         let detail = try await afterRestart.item(id: itemID)
@@ -236,17 +248,23 @@ final class ShareProviderWatchTests: XCTestCase {
     }
 
     func testPauseAlsoPersists() async throws {
-        let dir = makeTempDir()
+        let durableStore = try makeDurableStore()
         let session = makeSession()
         let itemID = "f:Movies/A Film (2022).mkv"
 
-        let live = ShareProvider(session: session, watchDirectory: dir)
+        let live = ShareProvider(
+            session: session,
+            durableLocalStateStore: durableStore
+        )
         try await live.reportPlayback(
             PlaybackProgress(itemID: itemID, playSessionID: "s2", positionSeconds: 120, isPaused: true),
             event: .pause
         )
 
-        let afterRestart = ShareProvider(session: session, watchDirectory: dir)
+        let afterRestart = ShareProvider(
+            session: session,
+            durableLocalStateStore: durableStore
+        )
         let cw = try await afterRestart.continueWatching(limit: 20)
         XCTAssertEqual(cw.map(\.id), [itemID], "a paused item must be resumable after relaunch")
     }
@@ -255,17 +273,23 @@ final class ShareProviderWatchTests: XCTestCase {
     /// `playedPercentage` on the Continue Watching card (which drives the progress
     /// bar) — and it must survive a relaunch.
     func testProgressWithDurationSurfacesPlayedPercentage() async throws {
-        let dir = makeTempDir()
+        let durableStore = try makeDurableStore()
         let session = makeSession()
         let itemID = "f:Movies/Timed Film (2021).mkv"
 
-        let live = ShareProvider(session: session, watchDirectory: dir)
+        let live = ShareProvider(
+            session: session,
+            durableLocalStateStore: durableStore
+        )
         try await live.reportPlayback(
             PlaybackProgress(itemID: itemID, playSessionID: "s3", positionSeconds: 600, isPaused: false, durationSeconds: 6000),
             event: .progress
         )
 
-        let afterRestart = ShareProvider(session: session, watchDirectory: dir)
+        let afterRestart = ShareProvider(
+            session: session,
+            durableLocalStateStore: durableStore
+        )
         let cw = try await afterRestart.continueWatching(limit: 20)
         XCTAssertEqual(cw.map(\.id), [itemID])
         let pct = try XCTUnwrap(cw.first?.playedPercentage)
@@ -273,7 +297,7 @@ final class ShareProviderWatchTests: XCTestCase {
     }
 
     func testGroupedMovieRestoresLegacyFileWatchStateOnGridAndDetail() async throws {
-        let watchDir = makeTempDir()
+        let durableStore = try makeDurableStore()
         let catalog = ShareCatalogStore(accountKey: "legacy-watch", directory: makeTempDir())
         let session = makeSession()
         let relPath = "Movies/Legacy Film (2020) 1080p.mkv"
@@ -298,13 +322,13 @@ final class ShareProviderWatchTests: XCTestCase {
                 profileID: ProfileStore.defaultProfileID,
                 profileNamespace: nil
             ),
-            directory: watchDir
+            durableStore: durableStore
         )
         await watch.setResume(600, itemID: legacyID, capturedAt: Date(), duration: 6_000)
 
         let provider = ShareProvider(
             session: session,
-            watchDirectory: watchDir,
+            durableLocalStateStore: durableStore,
             catalogStore: catalog
         )
         let logicalID = ShareCatalogID.movie(movieKey)
@@ -320,5 +344,35 @@ final class ShareProviderWatchTests: XCTestCase {
         )
         XCTAssertEqual(page.items.map(\.id), [logicalID])
         XCTAssertEqual(page.items.first?.resumePosition, 600)
+    }
+
+    private final class ShareProviderWatchMemoryStore:
+        SecureStoring,
+        @unchecked Sendable
+    {
+        private let lock = NSLock()
+        private var storage: [String: String] = [:]
+
+        func setString(_ value: String, for key: String) throws {
+            lock.lock()
+            storage[key] = value
+            lock.unlock()
+        }
+
+        func string(for key: String) -> String? {
+            lock.lock()
+            defer { lock.unlock() }
+            return storage[key]
+        }
+
+        func readString(for key: String) throws -> String? {
+            string(for: key)
+        }
+
+        func removeValue(for key: String) throws {
+            lock.lock()
+            storage[key] = nil
+            lock.unlock()
+        }
     }
 }

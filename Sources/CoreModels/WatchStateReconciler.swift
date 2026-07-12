@@ -72,6 +72,7 @@ public actor WatchStateReconciler {
     /// reload (both around app-foreground), and a short window guarantees a stale
     /// record can never override a genuine later play made on another client.
     private let resumeRecencyTTL: TimeInterval
+    private let onPersistenceFailure: @Sendable () -> Void
 
     private var state: WatchOutboxState
     private var isDraining = false
@@ -94,7 +95,8 @@ public actor WatchStateReconciler {
         now: @escaping @Sendable () -> Date = Date.init,
         traktTTL: TimeInterval = 48 * 3600,
         clockTTL: TimeInterval = 30 * 24 * 3600,
-        resumeRecencyTTL: TimeInterval = 30 * 60
+        resumeRecencyTTL: TimeInterval = 30 * 60,
+        onPersistenceFailure: @escaping @Sendable () -> Void = {}
     ) {
         self.store = store
         self.applier = applier
@@ -102,6 +104,7 @@ public actor WatchStateReconciler {
         self.traktTTL = traktTTL
         self.clockTTL = clockTTL
         self.resumeRecencyTTL = resumeRecencyTTL
+        self.onPersistenceFailure = onPersistenceFailure
         self.state = store.load()
     }
 
@@ -462,6 +465,10 @@ public actor WatchStateReconciler {
     }
 
     private func persist() {
-        try? store.save(state)
+        do {
+            try store.save(state)
+        } catch {
+            onPersistenceFailure()
+        }
     }
 }

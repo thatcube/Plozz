@@ -26,6 +26,7 @@ public final class MALService {
     @ObservationIgnored private let tokenStore: MALTokenStoring
     @ObservationIgnored private var connectTask: Task<Void, Never>?
     @ObservationIgnored private var pendingSession: String?
+    @ObservationIgnored private var profileGeneration: UInt64 = 0
 
     public init(config: MALConfig, http: HTTPClient = URLSessionHTTPClient(), tokenStore: MALTokenStoring) {
         self.config = config
@@ -43,21 +44,32 @@ public final class MALService {
     public var isConfigured: Bool { config.isConfigured }
 
     public func setActiveProfile(namespace: String?) async {
+        profileGeneration &+= 1
+        let generation = profileGeneration
         connectTask?.cancel()
         connectTask = nil
         tokenStore.setNamespace(namespace)
         phase = config.isConfigured ? .unknown : .unavailable
-        await refreshStatus()
+        await refreshStatus(generation: generation)
     }
 
     public func refreshStatus() async {
+        await refreshStatus(generation: profileGeneration)
+    }
+
+    private func refreshStatus(generation: UInt64) async {
         guard config.isConfigured else { phase = .unavailable; return }
         guard let tokens = tokenStore.load() else { phase = .disconnected; return }
         do {
-            let access = try await validAccessToken(tokens)
+            let access = try await validAccessToken(
+                tokens,
+                generation: generation
+            )
             let user = try await auth.userInfo(accessToken: access)
+            guard generation == profileGeneration else { return }
             phase = .connected(username: user.name)
         } catch {
+            guard generation == profileGeneration else { return }
             try? tokenStore.clear()
             phase = .disconnected
         }
@@ -65,6 +77,7 @@ public final class MALService {
 
     public func connect() {
         guard config.isConfigured else { phase = .unavailable; return }
+        profileGeneration &+= 1
         connectTask?.cancel()
         connectTask = nil
         // Mint a 32-char TV session so the short redeem code is bound to this TV.
@@ -85,6 +98,8 @@ public final class MALService {
         }
 
         connectTask?.cancel()
+        profileGeneration &+= 1
+        let generation = profileGeneration
         connectTask = Task { [weak self] in
             guard let self else { return }
             do {
@@ -94,6 +109,7 @@ public final class MALService {
                 }
                 let redeemURL = URL(string: redeemString)!
                 let (data, _) = try await URLSession.shared.data(from: redeemURL)
+                guard generation == self.profileGeneration else { return }
                 let result = try JSONDecoder().decode(RelayRedeemResponse.self, from: data)
 
                 let tokens = MALTokens(
@@ -102,14 +118,18 @@ public final class MALService {
                     expiresAt: Date().addingTimeInterval(Double(result.expiresIn ?? 3600))
                 )
                 try Task.checkCancellation()
+                guard generation == self.profileGeneration else { return }
                 try? self.tokenStore.save(tokens)
                 let user = try? await self.auth.userInfo(accessToken: tokens.accessToken)
+                guard generation == self.profileGeneration else { return }
                 self.connectTask = nil
                 self.pendingSession = nil
                 self.phase = .connected(username: user?.name ?? "MyAnimeList")
             } catch is CancellationError {
+                guard generation == self.profileGeneration else { return }
                 self.connectTask = nil
             } catch {
+                guard generation == self.profileGeneration else { return }
                 self.connectTask = nil
                 self.phase = .error("Invalid or expired code — please try again")
             }
@@ -117,21 +137,29 @@ public final class MALService {
     }
 
     public func cancelConnect() {
+        profileGeneration &+= 1
         connectTask?.cancel()
         connectTask = nil
         phase = config.isConfigured ? .disconnected : .unavailable
     }
 
     public func disconnect() async {
+        profileGeneration &+= 1
         connectTask?.cancel()
         connectTask = nil
         try? tokenStore.clear()
         phase = config.isConfigured ? .disconnected : .unavailable
     }
 
-    private func validAccessToken(_ tokens: MALTokens) async throws -> String {
+    private func validAccessToken(
+        _ tokens: MALTokens,
+        generation: UInt64
+    ) async throws -> String {
         guard tokens.isExpired else { return tokens.accessToken }
         let refreshed = try await auth.refresh(tokens.refreshToken)
+        guard generation == profileGeneration else {
+            throw CancellationError()
+        }
         try? tokenStore.save(refreshed)
         return refreshed.accessToken
     }

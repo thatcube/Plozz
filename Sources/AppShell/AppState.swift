@@ -351,36 +351,87 @@ public final class AppState {
     /// Durable cross-server watch-state outbox + reconciler. Persists each watch
     /// mutation's intent to disk before the network call and drains it on launch /
     /// foreground / reachability so a watch made while a server was asleep (or the
-    /// app offline) still converges every server + Trakt. Profile-scoped store, so
-    /// it is rebuilt (and the old one flushed) when the active profile changes.
+    /// app offline) still converges every server + Trakt. One reconciler is retained
+    /// per profile so a returning profile never creates a competing writer.
     @ObservationIgnored
-    private var _watchReconciler: WatchStateReconciler?
+    private var watchReconcilers: [String: WatchStateReconciler] = [:]
+    @ObservationIgnored
+    private var trackerProfileGeneration: UInt64 = 0
     public var watchReconciler: WatchStateReconciler {
-        if let existing = _watchReconciler { return existing }
-        let created = makeWatchReconciler()
-        _watchReconciler = created
+        let profileID = profilesModel.activeProfileID
+        if let existing = watchReconcilers[profileID] { return existing }
+        let created = makeWatchReconciler(profileID: profileID)
+        watchReconcilers[profileID] = created
         return created
     }
 
-    /// Builds the reconciler with a profile-scoped file store and an applier that
-    /// resolves providers / the Trakt scrobbler live on the main actor.
-    private func makeWatchReconciler() -> WatchStateReconciler {
-        let store = FileWatchMutationStore(namespace: profilesModel.activeNamespace)
+    /// Builds the reconciler with profile-scoped durable state and an applier that
+    /// resolves providers / tracker scrobblers live on the main actor.
+    private func makeWatchReconciler(
+        profileID: String
+    ) -> WatchStateReconciler {
+        let profile = profilesModel.profiles.first { $0.id == profileID }
+            ?? profilesModel.activeProfile
+        let trackerNamespace = profile.settingsNamespace(
+            isDefault: profilesModel.isDefault(profile)
+        )
+        let boundTraktScrobbler = TraktServiceFactory.make(
+            namespace: trackerNamespace
+        ).scrobbler
+        let boundSimklScrobbler = SimklServiceFactory.make(
+            namespace: trackerNamespace
+        ).scrobbler
+        let boundAniListScrobbler = AniListServiceFactory.make(
+            namespace: trackerNamespace
+        ).scrobbler
+        let boundMALScrobbler = MALServiceFactory.make(
+            namespace: trackerNamespace
+        ).scrobbler
+        let store: any WatchMutationStoring
+        if let durableLocalStateStore {
+            do {
+                store = try DurableWatchMutationStore(
+                    store: durableLocalStateStore,
+                    profileID: profileID,
+                    onLoadFailure: {
+                        PlozzLog.app.error(
+                            "Durable watch outbox unavailable; preserving corrupt state"
+                        )
+                    }
+                )
+            } catch {
+                PlozzLog.app.error(
+                    "Durable watch outbox address invalid; using memory only"
+                )
+                store = InMemoryWatchMutationStore()
+            }
+        } else {
+            store = InMemoryWatchMutationStore()
+        }
         let applier = AppShellWatchMutationApplier(
+            isActive: { [weak self] in
+                await MainActor.run {
+                    self?.profilesModel.activeProfileID == profileID
+                }
+            },
             resolveProvider: { [weak self] accountID in
-                await MainActor.run { self?.provider(forAccountID: accountID) }
+                await MainActor.run {
+                    guard self?.profilesModel.activeProfileID == profileID
+                    else { return nil }
+                    return self?.provider(forAccountID: accountID)
+                }
             },
-            traktScrobbler: { [weak self] in
-                await MainActor.run { self?.traktService.scrobbler ?? DisabledTraktScrobbler() }
+            traktScrobbler: {
+                boundTraktScrobbler
             },
-            simklScrobbler: { [weak self] in
-                await MainActor.run { self?.simklService.scrobbler ?? DisabledSimklScrobbler() }
+            simklScrobbler: {
+                boundSimklScrobbler
             },
-            anilistScrobbler: { [weak self] in
-                await MainActor.run { self?.anilistService.scrobbler ?? DisabledAniListScrobbler() }
+            anilistScrobbler: {
+                boundAniListScrobbler
             },
-            malScrobbler: { [weak self] in
-                await MainActor.run { self?.malService.scrobbler ?? DisabledMALScrobbler() }
+            malScrobbler: {
+                boundMALScrobbler
             },
             allAccountIDs: { [weak self] in
                 // The set the identity index actually warms and that Home/Search
@@ -407,15 +458,13 @@ public final class AppState {
                 identitySnapshotStore.current.indexedAccountIDs
             }
         )
-        return WatchStateReconciler(store: store, applier: applier)
-    }
-
-    /// Flushes and drops the current reconciler so the next access rebuilds it for
-    /// the now-active profile's namespace.
-    private func resetWatchReconciler() {
-        guard let old = _watchReconciler else { return }
-        _watchReconciler = nil
-        Task { await old.drain() }
+        return WatchStateReconciler(
+            store: store,
+            applier: applier,
+            onPersistenceFailure: {
+                PlozzLog.app.error("Durable watch outbox write failed")
+            }
+        )
     }
 
     /// Drains the watch-state outbox. Safe to call repeatedly (no-op when empty);
@@ -937,6 +986,7 @@ public final class AppState {
     public let authenticatedHTTPResolver: any AuthenticatedHTTPResourceResolving
     private let networkFileResolverRegistry: MediaTransportResolverRegistry?
     private let shareCatalogCoordinator: ShareCatalogCoordinator
+    private let durableLocalStateStore: DurableLocalStateStore?
     /// Optional tvOS system-user seam (default app-owned no-op). See
     /// `SystemProfileBridging`.
     private let systemBridge: SystemProfileBridging
@@ -1009,6 +1059,7 @@ public final class AppState {
         networkFileResolver: (any MediaTransportNetworkFileResolving)? = nil,
         authenticatedHTTPResolver: (any AuthenticatedHTTPResourceResolving)? = nil,
         shareCatalogCoordinator: ShareCatalogCoordinator? = nil,
+        durableLocalStateStore: DurableLocalStateStore? = nil,
         profilesModel: ProfilesModel? = nil,
         systemBridge: SystemProfileBridging? = nil,
         subtitleBehaviorModel: SubtitleBehaviorModel? = nil,
@@ -1036,6 +1087,23 @@ public final class AppState {
     ) {
         let resolvedAccountStore = accountStore ?? Self.makeDefaultAccountStore()
         self.accountStore = resolvedAccountStore
+        let resolvedDurableLocalStateStore: DurableLocalStateStore?
+        if let durableLocalStateStore {
+            resolvedDurableLocalStateStore = durableLocalStateStore
+        } else if accountStore == nil {
+            do {
+                resolvedDurableLocalStateStore =
+                    try DurableLocalStateStoreFactory.userIndependent()
+            } catch {
+                PlozzLog.app.error(
+                    "Durable local media state unavailable for this launch"
+                )
+                resolvedDurableLocalStateStore = nil
+            }
+        } else {
+            resolvedDurableLocalStateStore = nil
+        }
+        self.durableLocalStateStore = resolvedDurableLocalStateStore
         let resolvedShareCatalogCoordinator = shareCatalogCoordinator
             ?? ShareCatalogCoordinator()
         self.shareCatalogCoordinator = resolvedShareCatalogCoordinator
@@ -1064,7 +1132,8 @@ public final class AppState {
         self.registry = registry ?? Self.makeDefaultRegistry(
             accountStore: resolvedAccountStore,
             networkFileResolver: resolvedNetworkFileResolver,
-            shareCatalogCoordinator: resolvedShareCatalogCoordinator
+            shareCatalogCoordinator: resolvedShareCatalogCoordinator,
+            durableLocalStateStore: resolvedDurableLocalStateStore
         )
         self.profilesModel = profilesModel ?? Self.makeDefaultProfilesModel()
         self.systemBridge = systemBridge ?? Self.makeDefaultSystemBridge()
@@ -1261,7 +1330,8 @@ public final class AppState {
     private static func makeDefaultRegistry(
         accountStore: any AccountPersisting,
         networkFileResolver: any MediaTransportNetworkFileResolving,
-        shareCatalogCoordinator: ShareCatalogCoordinator
+        shareCatalogCoordinator: ShareCatalogCoordinator,
+        durableLocalStateStore: DurableLocalStateStore?
     ) -> ProviderRegistry {
         let registry = ProviderRegistry()
         let smbAdapter = makeSMBAdapter(accountStore: accountStore)
@@ -1319,6 +1389,7 @@ public final class AppState {
                 credentialRevision: credentialRevision,
                 sessionFactory: sessionFactory,
                 catalogCoordinator: shareCatalogCoordinator,
+                durableLocalStateStore: durableLocalStateStore,
                 streamProber: PlozzigenNetworkFileStreamProber(
                     resolver: networkFileResolver
                 )
@@ -2446,6 +2517,7 @@ public final class AppState {
     /// active, selection falls back to the first profile and re-scopes.
     public func removeProfile(id: String) {
         let wasActive = id == profilesModel.activeProfileID
+        watchReconcilers[id] = nil
         profilesModel.remove(id)
         if wasActive {
             rebuildSettingsModels()
@@ -2576,14 +2648,21 @@ public final class AppState {
     /// is async and best-effort.
     private func updateTraktForActiveProfile() {
         let ns = profilesModel.activeNamespace
-        resetWatchReconciler()
+        trackerProfileGeneration &+= 1
+        let generation = trackerProfileGeneration
         resetIdentityIndex()
         Task {
+            guard generation == trackerProfileGeneration else { return }
             await traktService.setActiveProfile(namespace: ns)
+            guard generation == trackerProfileGeneration else { return }
             await simklService.setActiveProfile(namespace: ns)
+            guard generation == trackerProfileGeneration else { return }
             await seerService.setActiveProfile(namespace: ns)
+            guard generation == trackerProfileGeneration else { return }
             await anilistService.setActiveProfile(namespace: ns)
+            guard generation == trackerProfileGeneration else { return }
             await malService.setActiveProfile(namespace: ns)
+            guard generation == trackerProfileGeneration else { return }
             await lastfmService.setActiveProfile(namespace: ns)
         }
     }

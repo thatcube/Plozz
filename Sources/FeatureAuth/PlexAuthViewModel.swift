@@ -110,7 +110,7 @@ public final class PlexAuthViewModel {
         start()
     }
 
-    private enum LinkOutcome {
+    enum LinkOutcome: Equatable, Sendable {
         case linked(String)
         case expired
     }
@@ -118,7 +118,7 @@ public final class PlexAuthViewModel {
     /// Races the link poll against a wall-clock expiry watchdog. The watchdog
     /// guarantees we regenerate at the deadline even if a poll request stalls,
     /// so the screen can never get stranded on an expired code.
-    private static func awaitLinkOrExpiry(
+    nonisolated static func awaitLinkOrExpiry(
         service: PlexAuthService,
         pins: [PlexPinChallenge],
         expiresAt: Date

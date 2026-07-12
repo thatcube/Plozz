@@ -86,7 +86,11 @@ public struct PlexAuthService: Sendable {
             } catch let error as PlexPinError {
                 switch error {
                 case let .rateLimited(retryAfter):
-                    nextDelay = min(max(retryAfter ?? nextDelay * 2, config.pollInterval), 30)
+                    if let retryAfter {
+                        nextDelay = max(retryAfter, config.pollInterval)
+                    } else {
+                        nextDelay = min(max(nextDelay * 2, config.pollInterval), 30)
+                    }
                 }
             } catch let error as AppError
                 where error == .invalidResponse
@@ -96,7 +100,9 @@ public struct PlexAuthService: Sendable {
                 guard consecutiveTransientFailures < 3 else { throw error }
                 nextDelay = min(max(nextDelay * 2, config.pollInterval), 30)
             }
-            try await sleep(nextDelay)
+            let remaining = deadline.timeIntervalSince(now())
+            guard remaining > 0 else { break }
+            try await sleep(min(nextDelay, remaining))
         }
         throw AppError.quickConnectExpired
     }

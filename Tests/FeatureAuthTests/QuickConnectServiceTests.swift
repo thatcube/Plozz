@@ -34,6 +34,14 @@ final class QuickConnectServiceTests: XCTestCase {
     }
 
     final class PlexAuthServiceTests: XCTestCase {
+        private actor DelayRecorder {
+            private(set) var delays: [TimeInterval] = []
+
+            func record(_ delay: TimeInterval) {
+                delays.append(delay)
+            }
+        }
+
         func testAwaitLinkBacksOffAfterRateLimitAndRecovers() async throws {
             let stub = StubHTTPClient()
             stub.stubFixed(
@@ -59,6 +67,36 @@ final class QuickConnectServiceTests: XCTestCase {
 
             XCTAssertEqual(token, "ACCOUNT_TOKEN")
             XCTAssertEqual(stub.callCount, 3)
+        }
+
+        func testAwaitLinkHonorsLongRetryAfter() async throws {
+            let stub = StubHTTPClient()
+            stub.stubFixed(
+                pathSuffix: "/api/v2/pins",
+                json: #"{"id":1,"code":"WXYZ","authToken":null}"#
+            )
+            stub.stubSequence(pathSuffix: "/api/v2/pins/1", responses: [
+                .init(status: 429, json: "", headers: ["Retry-After": "90"]),
+                .init(
+                    status: 200,
+                    json: #"{"id":1,"code":"WXYZ","authToken":"ACCOUNT_TOKEN"}"#
+                )
+            ])
+            let recorder = DelayRecorder()
+            let service = PlexAuthService(
+                deviceID: "dev1",
+                http: stub,
+                config: .init(pollInterval: 5, timeout: 120),
+                now: { Date(timeIntervalSince1970: 0) },
+                sleep: { delay in await recorder.record(delay) }
+            )
+
+            let challenge = try await service.begin()
+            let token = try await service.awaitLink(for: challenge)
+
+            XCTAssertEqual(token, "ACCOUNT_TOKEN")
+            let delays = await recorder.delays
+            XCTAssertEqual(delays, [90])
         }
 
         func testAwaitLinkRecoversFromTransientServerResponse() async throws {

@@ -41,5 +41,22 @@ final class PlozzMetricsTests: XCTestCase {
         let m = PlozzMetrics(density: .standard)
         XCTAssertEqual(m.landscapeCardSlotWidth, m.landscapeWidth + m.cardInset * 2)
     }
+
+    func testCardStatusCueScalesWithoutBecomingTooSmall() {
+        let micro = PlozzMetrics(density: .micro)
+        let standard = PlozzMetrics(density: .standard)
+        let extraLarge = PlozzMetrics(density: .extraLarge)
+
+        XCTAssertEqual(micro.cardStatusCueFontSize, PlozzTheme.Metrics.cardStatusCueMinFontSize)
+        XCTAssertGreaterThan(extraLarge.cardStatusCueFontSize, standard.cardStatusCueFontSize)
+        XCTAssertGreaterThanOrEqual(
+            micro.cardStatusCueHorizontalPadding,
+            PlozzTheme.Metrics.cardStatusCueMinHorizontalPadding
+        )
+        XCTAssertGreaterThanOrEqual(
+            micro.cardStatusCueVerticalPadding,
+            PlozzTheme.Metrics.cardStatusCueMinVerticalPadding
+        )
+    }
 }
 #endif

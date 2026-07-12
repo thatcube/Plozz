@@ -209,6 +209,14 @@ public enum PlozzTheme {
         /// Base (standard-density) point size for a card's subtitle/metadata line.
         /// Density-scaled in `PlozzMetrics` so caption text grows with the card.
         public static let cardSubtitleFontSize: CGFloat = 20
+        /// Search-only status cue painted on media artwork. It scales with the card
+        /// but is floored in `PlozzMetrics` so micro density remains TV-readable.
+        public static let cardStatusCueFontSize: CGFloat = 18
+        public static let cardStatusCueMinFontSize: CGFloat = 16
+        public static let cardStatusCueHorizontalPadding: CGFloat = 10
+        public static let cardStatusCueMinHorizontalPadding: CGFloat = 8
+        public static let cardStatusCueVerticalPadding: CGFloat = 6
+        public static let cardStatusCueMinVerticalPadding: CGFloat = 5
         /// Fallback base point size for a card's title when the platform's live
         /// `.subheadline` metric is unavailable (non-UIKit builds). On tvOS the
         /// real `.subheadline` size is used so standard density is unchanged.

@@ -327,6 +327,13 @@ final class SearchViewModelTests: XCTestCase {
 
         await vm.search()
 
+        guard case let .loaded(initialSections) = vm.state else {
+            return XCTFail("Expected immediate loaded results, got \(vm.state)")
+        }
+        XCTAssertNil(initialSections[0].items[0].availability, "Cue enrichment must not block initial search publication")
+
+        await vm.waitForAvailabilityCueEnrichment()
+
         guard case let .loaded(sections) = vm.state else {
             return XCTFail("Expected loaded, got \(vm.state)")
         }
@@ -360,11 +367,99 @@ final class SearchViewModelTests: XCTestCase {
         vm.query = "bear"
 
         await vm.search()
+        await vm.waitForAvailabilityCueEnrichment()
 
         guard case let .loaded(sections) = vm.state else {
             return XCTFail("Expected loaded, got \(vm.state)")
         }
         XCTAssertNil(sections[0].items[0].availability)
+    }
+
+    func testSlowSeasonCueEnrichmentDoesNotDelayLibraryResults() async {
+        let library = MediaItem(
+            id: "library-show",
+            title: "The Bear",
+            kind: .series,
+            providerIDs: ["Tmdb": "136315"]
+        )
+        let provider = SearchStubProvider(results: [library])
+        let vm = makeVM(
+            providers: [provider],
+            seerSearch: { _ in
+                [discoveryItem(136315, "The Bear", .series, availability: .partiallyAvailable)]
+            },
+            seerRequestAvailability: { _ in
+                try? await Task.sleep(for: .seconds(10))
+                return MediaRequestAvailability(status: .partiallyAvailable)
+            }
+        )
+        vm.query = "bear"
+
+        await vm.search()
+
+        guard case let .loaded(sections) = vm.state else {
+            return XCTFail("Library results must publish before cue enrichment, got \(vm.state)")
+        }
+        XCTAssertEqual(sections[0].items.map(\.id), ["library-show"])
+
+        vm.query = ""
+        await vm.search()
+    }
+
+    func testPartialCueReconcilesOwnedSeasonsAcrossMergedServers() async {
+        let plexItem = MediaItem(
+            id: "plex-show",
+            title: "The Bear",
+            kind: .series,
+            providerIDs: ["Tmdb": "136315"]
+        )
+        let jellyfinItem = MediaItem(
+            id: "jelly-show",
+            title: "The Bear",
+            kind: .series,
+            providerIDs: ["Tmdb": "136315"]
+        )
+        let plex = SearchStubProvider(
+            results: [plexItem],
+            providerKind: .plex,
+            accountID: "plex",
+            childrenByID: [
+                "plex-show": [MediaItem(id: "p-s1", title: "Season 1", kind: .season, seasonNumber: 1)]
+            ]
+        )
+        let jellyfin = SearchStubProvider(
+            results: [jellyfinItem],
+            providerKind: .jellyfin,
+            accountID: "jellyfin",
+            childrenByID: [
+                "jelly-show": [MediaItem(id: "j-s2", title: "Season 2", kind: .season, seasonNumber: 2)]
+            ]
+        )
+        let vm = makeVM(
+            providers: [plex, jellyfin],
+            seerSearch: { _ in
+                [discoveryItem(136315, "The Bear", .series, availability: .partiallyAvailable)]
+            },
+            seerRequestAvailability: { _ in
+                MediaRequestAvailability(
+                    status: .partiallyAvailable,
+                    seasons: [
+                        MediaSeasonRequestState(number: 1, title: "Season 1", status: .available),
+                        MediaSeasonRequestState(number: 2, title: "Season 2", status: .unknown)
+                    ]
+                )
+            }
+        )
+        vm.query = "bear"
+
+        await vm.search()
+        await vm.waitForAvailabilityCueEnrichment()
+
+        guard case let .loaded(sections) = vm.state else {
+            return XCTFail("Expected loaded, got \(vm.state)")
+        }
+        XCTAssertEqual(sections[0].items.count, 1, "Cross-server copies remain merged")
+        XCTAssertNil(sections[0].items[0].availability, "Season 2 is owned on Jellyfin, so no More Seasons cue")
     }
 
     func testLibraryDownButDiscoveryStillShows() async {
@@ -406,6 +501,7 @@ private final class SearchStubProvider: MediaProvider, @unchecked Sendable {
     let accountID: String
     private let results: [MediaItem]
     private let error: AppError?
+    private let childrenByID: [String: [MediaItem]]
     private(set) var callCount = 0
     private(set) var lastQuery: String?
 
@@ -413,12 +509,14 @@ private final class SearchStubProvider: MediaProvider, @unchecked Sendable {
         results: [MediaItem],
         error: AppError? = nil,
         providerKind: ProviderKind = .jellyfin,
-        accountID: String = "acct-1"
+        accountID: String = "acct-1",
+        childrenByID: [String: [MediaItem]] = [:]
     ) {
         self.kind = providerKind
         self.accountID = accountID
         self.results = results
         self.error = error
+        self.childrenByID = childrenByID
         self.session = UserSession(
             server: MediaServer(id: "s-\(accountID)", name: "Home", baseURL: URL(string: "http://host:8096")!, provider: providerKind),
             userID: "u-\(accountID)", userName: "Alice", deviceID: "d-\(accountID)", accessToken: "TOKEN"
@@ -436,7 +534,7 @@ private final class SearchStubProvider: MediaProvider, @unchecked Sendable {
     func continueWatching(limit: Int) async throws -> [MediaItem] { [] }
     func latest(limit: Int) async throws -> [MediaItem] { [] }
     func item(id: String) async throws -> MediaItem { throw AppError.notFound }
-    func children(of itemID: String) async throws -> [MediaItem] { [] }
+    func children(of itemID: String) async throws -> [MediaItem] { childrenByID[itemID] ?? [] }
     func items(in containerID: String, kind: MediaItemKind, page: PageRequest) async throws -> MediaPage {
         MediaPage(items: [], startIndex: 0, totalCount: 0)
     }

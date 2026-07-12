@@ -38,6 +38,9 @@ public final class SearchViewModel {
     /// matched a playable library result. The cue is shown only when at least one
     /// season is genuinely requestable, never from aggregate partial status alone.
     private let seerRequestAvailability: (@Sendable (MediaItem) async -> MediaRequestAvailability?)?
+    /// Best-effort cue enrichment runs after the playable search results publish.
+    /// A new query cancels it so stale availability can never mutate fresh results.
+    private nonisolated(unsafe) var availabilityCueEnrichmentTask: Task<Void, Never>?
 
     public init(
         accounts: [ResolvedAccount],
@@ -57,10 +60,16 @@ public final class SearchViewModel {
         self.seerRequestAvailability = seerRequestAvailability
     }
 
+    deinit {
+        availabilityCueEnrichmentTask?.cancel()
+    }
+
     /// Runs a debounced search for the current `query`. Safe to call on every
     /// keystroke via `.task(id: query)`: an empty query resets to idle, and a
     /// query that changes mid-flight discards the obsolete result.
     public func search() async {
+        availabilityCueEnrichmentTask?.cancel()
+        availabilityCueEnrichmentTask = nil
         let requested = SearchPolicy.normalized(query)
 
         guard SearchPolicy.shouldSearch(requested) else {
@@ -110,20 +119,10 @@ public final class SearchViewModel {
             identitySources: identitySources,
             serverInfo: { serverInfo[$0] }
         )
-        let requestableSeriesTmdbIDs = await requestablePartialSeriesTmdbIDs(
-            discoveryResults: discoveryItems,
-            libraryResults: dedupedLibrary
-        )
-        guard SearchPolicy.isCurrent(requestedQuery: requested, liveQuery: query) else { return }
-        let libraryWithAvailability = SearchSection.mergingDiscoveryAvailability(
-            into: dedupedLibrary,
-            discoveryResults: discoveryItems,
-            requestableSeriesTmdbIDs: requestableSeriesTmdbIDs
-        )
-        var sections = SearchSection.sections(from: libraryWithAvailability)
+        var sections = SearchSection.sections(from: dedupedLibrary)
         if let notInLibrary = SearchSection.notInLibrarySection(
             discoveryResults: discoveryItems,
-            libraryResults: libraryWithAvailability,
+            libraryResults: dedupedLibrary,
             limit: limit
         ) {
             sections.append(notInLibrary)
@@ -131,6 +130,11 @@ public final class SearchViewModel {
 
         if !sections.isEmpty {
             state = .loaded(sections)
+            scheduleAvailabilityCueEnrichment(
+                requestedQuery: requested,
+                discoveryResults: discoveryItems,
+                libraryResults: dedupedLibrary
+            )
         } else if let libraryError {
             // Nothing to show and the library search failed outright — surface the
             // error (matches prior behaviour). A Seerr-only failure just reads empty.
@@ -152,29 +156,81 @@ public final class SearchViewModel {
         })
     }
 
-    private func requestablePartialSeriesTmdbIDs(
+    /// Synchronization seam for deterministic tests of the off-critical-path cue.
+    /// Production UI never waits for this work.
+    func waitForAvailabilityCueEnrichment() async {
+        await availabilityCueEnrichmentTask?.value
+    }
+
+    private func scheduleAvailabilityCueEnrichment(
+        requestedQuery: String,
         discoveryResults: [MediaItem],
         libraryResults: [MediaItem]
+    ) {
+        guard let seerRequestAvailability else { return }
+        let accounts = accounts
+        availabilityCueEnrichmentTask = Task { [weak self] in
+            let requestableSeriesTmdbIDs = await Self.requestablePartialSeriesTmdbIDs(
+                discoveryResults: discoveryResults,
+                libraryResults: libraryResults,
+                accounts: accounts,
+                availabilityResolver: seerRequestAvailability
+            )
+            guard !Task.isCancelled, !requestableSeriesTmdbIDs.isEmpty, let self else { return }
+            guard SearchPolicy.isCurrent(requestedQuery: requestedQuery, liveQuery: self.query),
+                  case let .loaded(currentSections) = self.state
+            else { return }
+            self.state = .loaded(currentSections.map { section in
+                SearchSection(
+                    title: section.title,
+                    items: SearchSection.mergingDiscoveryAvailability(
+                        into: section.items,
+                        discoveryResults: discoveryResults,
+                        requestableSeriesTmdbIDs: requestableSeriesTmdbIDs
+                    )
+                )
+            })
+        }
+    }
+
+    private nonisolated static func requestablePartialSeriesTmdbIDs(
+        discoveryResults: [MediaItem],
+        libraryResults: [MediaItem],
+        accounts: [ResolvedAccount],
+        availabilityResolver: @escaping @Sendable (MediaItem) async -> MediaRequestAvailability?
     ) async -> Set<String> {
-        guard let seerRequestAvailability else { return [] }
         let libraryTmdbIDs = Set(libraryResults.compactMap { item in
             item.kind == .series ? item.providerIDs["Tmdb"] : nil
         })
-        let candidates = discoveryResults.filter { item in
-            guard item.kind == .series,
-                  item.availability == .partiallyAvailable,
-                  let tmdbID = item.providerIDs["Tmdb"]
-            else { return false }
-            return libraryTmdbIDs.contains(tmdbID)
+        let partialDiscoveryByTmdbID = Dictionary(
+            discoveryResults.compactMap { item -> (String, MediaItem)? in
+                guard item.kind == .series,
+                      item.availability == .partiallyAvailable,
+                      let tmdbID = item.providerIDs["Tmdb"],
+                      libraryTmdbIDs.contains(tmdbID)
+                else { return nil }
+                return (tmdbID, item)
+            },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let candidates = libraryResults.compactMap { libraryItem -> (String, MediaItem, MediaItem)? in
+            guard libraryItem.kind == .series,
+                  let tmdbID = libraryItem.providerIDs["Tmdb"],
+                  let discoveryItem = partialDiscoveryByTmdbID[tmdbID]
+            else { return nil }
+            return (tmdbID, libraryItem, discoveryItem)
         }
         return await withTaskGroup(of: String?.self) { group in
-            for item in candidates {
+            for (tmdbID, libraryItem, discoveryItem) in candidates {
                 group.addTask {
-                    guard let tmdbID = item.providerIDs["Tmdb"],
-                          let availability = await seerRequestAvailability(item),
-                          !availability.requestableSeasonNumbers.isEmpty
+                    guard let availability = await availabilityResolver(discoveryItem),
+                          let ownedSeasonNumbers = await ownedSeasonNumbers(
+                            for: libraryItem,
+                            accounts: accounts
+                          )
                     else { return nil }
-                    return tmdbID
+                    let reconciled = availability.markingAvailable(Array(ownedSeasonNumbers))
+                    return reconciled.requestableSeasonNumbers.isEmpty ? nil : tmdbID
                 }
             }
             var result: Set<String> = []
@@ -182,6 +238,52 @@ public final class SearchViewModel {
                 if let tmdbID { result.insert(tmdbID) }
             }
             return result
+        }
+    }
+
+    /// Returns `nil` unless ownership could be checked on every known source.
+    /// Search cues are optional, so incomplete cross-server data fails closed
+    /// rather than advertising seasons that detail may discover are already owned.
+    private nonisolated static func ownedSeasonNumbers(
+        for item: MediaItem,
+        accounts: [ResolvedAccount]
+    ) async -> Set<Int>? {
+        var sources = item.sources
+        if let sourceAccountID = item.sourceAccountID,
+           !sources.contains(where: { $0.accountID == sourceAccountID && $0.itemID == item.id }) {
+            sources.append(MediaSourceRef(accountID: sourceAccountID, itemID: item.id))
+        }
+        var seen = Set<String>()
+        sources = sources.filter { seen.insert($0.id).inserted }
+        guard !sources.isEmpty else { return nil }
+
+        let providers = Dictionary(
+            accounts.map { ($0.account.id, $0.provider) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        return await withTaskGroup(of: Set<Int>?.self) { group in
+            for source in sources {
+                guard let provider = providers[source.accountID] else { return nil }
+                group.addTask {
+                    do {
+                        let children = try await provider.children(of: source.itemID)
+                        return Set(children.compactMap { child in
+                            child.kind == .season || child.kind == .episode ? child.seasonNumber : nil
+                        })
+                    } catch {
+                        return nil
+                    }
+                }
+            }
+            var owned: Set<Int> = []
+            for await sourceSeasons in group {
+                guard let sourceSeasons else {
+                    group.cancelAll()
+                    return nil
+                }
+                owned.formUnion(sourceSeasons)
+            }
+            return owned
         }
     }
 

@@ -37,9 +37,14 @@ struct SettingsAboutSection: View {
                         infoRow("Build", build)
                     }
 
-                    Text("Plozz is free and open source — an unofficial tvOS client for Jellyfin and Plex, not affiliated with or endorsed by Jellyfin or Plex.")
+                    Text("Bring your media together and enjoy it in one unified experience. Free forever and open source.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Text("Plozz is an independent project and is not affiliated with the services it connects to.")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -55,7 +60,7 @@ struct SettingsAboutSection: View {
                 }
             }
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel("About Plozz. Version \(version), build \(build). Free and open source, an unofficial tvOS client for Jellyfin and Plex. Scan the on-screen code to view the GitHub repository.")
+            .accessibilityLabel("About Plozz. Version \(version), build \(build). Bring your media together and enjoy it in one unified experience. Free forever and open source. Plozz is an independent project and is not affiliated with the services it connects to. Scan the on-screen code to view the GitHub repository.")
         }
     }
 

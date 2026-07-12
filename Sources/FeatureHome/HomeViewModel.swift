@@ -371,10 +371,10 @@ public final class HomeViewModel {
     }
 
     /// Applies a watched-state or watchlist mutation to the loaded rows **in
-    /// place** so the affected cards just flip their badge. Items are kept in
-    /// their rows (rather than refetched/removed) so the user's focus is
-    /// preserved exactly where it was when they invoked the menu. A watchlist
-    /// add/remove also inserts/removes the title from the Watchlist row.
+    /// place** so affected cards immediately reflect their new state. A title marked
+    /// watched leaves Continue Watching immediately; other rows retain the card and
+    /// flip its badge without a refetch. A watchlist add/remove also inserts/removes
+    /// the title from the Watchlist row.
     public func applyWatchedState(_ mutation: MediaItemMutation) {
         guard case var .loaded(content) = state else { return }
         // A resume/progress change — or a *completed* play — means the user
@@ -404,7 +404,9 @@ public final class HomeViewModel {
         if isInProgressResume && !alreadyOnHome {
             scheduleNewResumeReload()
         }
-        if reflectsPlayback {
+        if mutation.played == true {
+            content.continueWatching.removeAll { mutation.targets($0) }
+        } else if reflectsPlayback {
             let now = Date()
             let stamped = content.continueWatching.map { item -> MediaItem in
                 var updated = apply(mutation, to: item)

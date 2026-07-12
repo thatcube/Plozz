@@ -89,7 +89,13 @@ final class MediaItemActionCoordinator: MediaItemActionHandling {
         // would false-match an unrelated title that happens to share a Plex
         // ratingKey on another server, flipping the wrong card's watched badge.
         let scoped = Set(mutation.targets.map(\.id))
-        MediaItemMutation(itemIDs: ids, scopedItemIDs: scoped, played: played).post()
+        MediaItemMutation(
+            itemIDs: ids,
+            scopedItemIDs: scoped,
+            played: played,
+            resumePosition: played ? 0 : nil,
+            playedPercentage: played ? 1 : nil
+        ).post()
 
         appState.enqueueWatchMutation(mutation)
     }
@@ -110,7 +116,13 @@ final class MediaItemActionCoordinator: MediaItemActionHandling {
         let scoped: Set<String> = item.sourceAccountID.map { account in
             Set(ids.map { "\(account):\($0)" })
         } ?? []
-        MediaItemMutation(itemIDs: ids, scopedItemIDs: scoped, played: true).post()
+        MediaItemMutation(
+            itemIDs: ids,
+            scopedItemIDs: scoped,
+            played: true,
+            resumePosition: 0,
+            playedPercentage: 1
+        ).post()
         Task {
             for id in ids {
                 try? await watch.setPlayed(true, itemID: id)

@@ -251,6 +251,43 @@ final class ItemDetailViewModelTests: XCTestCase {
                        "A library-tile open keeps its own server, locality notwithstanding")
     }
 
+    func testLibraryOriginRetargetsMergedPrimaryToLibraryCopy() async {
+        let jellyfinMovie = MediaItem(
+            id: "jellyfin-movie",
+            title: "Movie",
+            kind: .movie,
+            sourceAccountID: "jellyfin"
+        )
+        let plexMovie = MediaItem(
+            id: "plex-movie",
+            title: "Movie",
+            kind: .movie,
+            sourceAccountID: "plex"
+        )
+        let jellyfin = FakeMediaProvider(allItems: [jellyfinMovie])
+        let plex = FakeMediaProvider(allItems: [plexMovie])
+        let vm = ItemDetailViewModel(
+            provider: jellyfin,
+            itemID: jellyfinMovie.id,
+            initialItem: jellyfinMovie,
+            sourceAccountID: "jellyfin",
+            originSourceAccountID: "plex",
+            initialSources: [
+                MediaSourceRef(accountID: "jellyfin", itemID: jellyfinMovie.id),
+                MediaSourceRef(accountID: "plex", itemID: plexMovie.id)
+            ],
+            alternateProviderResolver: { accountID in
+                accountID == "plex" ? plex : jellyfin
+            }
+        )
+
+        await vm.load()
+
+        XCTAssertEqual(vm.state.value?.item.id, plexMovie.id)
+        XCTAssertEqual(vm.state.value?.item.sourceAccountID, "plex")
+        XCTAssertTrue(vm.isLibraryOriginPinned)
+    }
+
     func testSeriesWatchMutationCascadesToLoadedEpisodes() async {
         let series = MediaItem(id: "series", title: "Series", kind: .series)
         let season = MediaItem(id: "season", title: "Season 1", kind: .season)

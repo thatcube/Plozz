@@ -1530,7 +1530,12 @@ private struct HomeTab: View {
                     ),
                     title: library.title,
                     spoilerSettings: spoilerSettings,
-                    onSelect: { navigate($0, libraryOrigin: browse.sourceAccountID) }
+                    onSelect: {
+                        navigate(
+                            $0,
+                            libraryOrigin: browse.sourceAccountID ?? library.sourceAccountID
+                        )
+                    }
                 )
             }
             .navigationDestination(for: MediaItem.self) { item in
@@ -1555,6 +1560,7 @@ private struct HomeTab: View {
                         initialItem: route.episode,
                         ratingsProvider: ratingsProvider,
                         sourceAccountID: route.sourceAccountID,
+                        originSourceAccountID: route.originAccountID,
                         // The fronted page IS the series, so it gets the same
                         // cross-server "…" picker a directly-opened series does —
                         // discovery matches the series by provider IDs and fills
@@ -1565,7 +1571,7 @@ private struct HomeTab: View {
                     ),
                     spoilerSettings: spoilerSettings,
                     onPlay: { requestPlay($0) },
-                    onSelectChild: { navigate($0) },
+                    onSelectChild: { navigate($0, libraryOrigin: route.originAccountID) },
                     initialEpisode: route.episode,
                     seerConnected: seer.isConfigured,
                     requestAvailabilityRefresh: { await seer.requestAvailability(for: $0) },
@@ -1588,6 +1594,7 @@ private struct HomeTab: View {
                         initialItem: route.season,
                         ratingsProvider: ratingsProvider,
                         sourceAccountID: route.sourceAccountID,
+                        originSourceAccountID: route.originAccountID,
                         // The fronted page IS the series, so it gets the same
                         // cross-server "…" picker a directly-opened series does.
                         alternateProviderResolver: { resolveOptionalProvider($0, in: accounts) },
@@ -1596,7 +1603,7 @@ private struct HomeTab: View {
                     ),
                     spoilerSettings: spoilerSettings,
                     onPlay: { requestPlay($0) },
-                    onSelectChild: { navigate($0) },
+                    onSelectChild: { navigate($0, libraryOrigin: route.originAccountID) },
                     initialSeasonID: route.season.id,
                     seerConnected: seer.isConfigured,
                     requestAvailabilityRefresh: { await seer.requestAvailability(for: $0) },
@@ -1638,13 +1645,19 @@ private struct HomeTab: View {
     /// from a single-server library tile, so the pushed detail (and any movie/
     /// collection children it spawns) defaults its cross-server picker to that
     /// server. `nil` for Home/Search rows, which keep the smart best-version
-    /// default. Episode/season routes do no cross-server discovery (no picker), so
-    /// they need not carry the origin — they already play from their own provider.
+    /// default. Episode/season routes carry the same origin because their series
+    /// page can discover alternate servers after opening.
     private func navigate(_ item: MediaItem, libraryOrigin: String? = nil) {
         if item.kind == .episode, item.seriesID != nil {
-            path.append(EpisodeContextRoute(episode: item))
+            path.append(EpisodeContextRoute(
+                episode: item,
+                originAccountID: libraryOrigin
+            ))
         } else if item.kind == .season, item.seriesID != nil {
-            path.append(SeasonContextRoute(season: item))
+            path.append(SeasonContextRoute(
+                season: item,
+                originAccountID: libraryOrigin
+            ))
         } else if let libraryOrigin {
             path.append(LibraryDetailRoute(item: item, originAccountID: libraryOrigin))
         } else {
@@ -1857,6 +1870,7 @@ private struct LibraryDetailRoute: Hashable {
 /// top — rather than a dead-end single-episode page.
 private struct EpisodeContextRoute: Hashable {
     let episode: MediaItem
+    let originAccountID: String?
     /// The owning series' id (falls back to the episode id only if unset, which
     /// shouldn't happen for an episode that carries a `seriesID`).
     var seriesID: String { episode.seriesID ?? episode.id }
@@ -1870,6 +1884,7 @@ private struct EpisodeContextRoute: Hashable {
 /// fronted in the hero.
 private struct SeasonContextRoute: Hashable {
     let season: MediaItem
+    let originAccountID: String?
     /// The owning series' id.
     var seriesID: String { season.seriesID ?? season.id }
     var sourceAccountID: String? { season.sourceAccountID }
@@ -2067,9 +2082,15 @@ private struct SearchTab: View {
         }
         .mediaItemNavigator { item in
             if item.kind == .episode, item.seriesID != nil {
-                path.append(EpisodeContextRoute(episode: item))
+                path.append(EpisodeContextRoute(
+                    episode: item,
+                    originAccountID: nil
+                ))
             } else if item.kind == .season, item.seriesID != nil {
-                path.append(SeasonContextRoute(season: item))
+                path.append(SeasonContextRoute(
+                    season: item,
+                    originAccountID: nil
+                ))
             } else {
                 path.append(item)
             }
@@ -2082,9 +2103,15 @@ private struct SearchTab: View {
     private func open(_ item: MediaItem) {
         switch item.kind {
         case .episode where item.seriesID != nil:
-            path.append(EpisodeContextRoute(episode: item))
+            path.append(EpisodeContextRoute(
+                episode: item,
+                originAccountID: nil
+            ))
         case .season where item.seriesID != nil:
-            path.append(SeasonContextRoute(season: item))
+            path.append(SeasonContextRoute(
+                season: item,
+                originAccountID: nil
+            ))
         default:
             path.append(item)
         }

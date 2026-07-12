@@ -460,6 +460,9 @@ public final class ItemDetailViewModel {
         crossServerDiscoveryTask = nil
         hasPaintedFreshDetail = false
 
+        // A source-specific library is authoritative even when an aggregated or
+        // cached grid item happens to carry another server as its merge primary.
+        applyLibraryOriginPreferenceIfAvailable(in: initialSources)
         // Before the very first fetch, retarget a cross-server-merged Home/Search
         // open onto its most-local copy (see doc on the method): a SERIES loads
         // its whole tree from ONE server and its per-server episodes can't
@@ -1055,6 +1058,29 @@ public final class ItemDetailViewModel {
         activeSourceAccountID = best.accountID
     }
 
+    /// Retargets a merged grid item to the source-specific library that opened it.
+    /// The grid's merge primary is an implementation detail and may be a different
+    /// server; the library origin is the user's explicit navigation choice.
+    @discardableResult
+    private func applyLibraryOriginPreferenceIfAvailable(
+        in candidates: [MediaSourceRef]
+    ) -> Bool {
+        guard !userDidSwitchSource,
+              let originSourceAccountID,
+              activeSourceAccountID != originSourceAccountID,
+              let source = candidates.first(where: {
+                  $0.accountID == originSourceAccountID
+              }),
+              let provider = alternateProviderResolver(originSourceAccountID)
+        else { return false }
+
+        invalidateSourceOperations()
+        activeProvider = provider
+        activeItemID = source.itemID
+        activeSourceAccountID = originSourceAccountID
+        return true
+    }
+
     /// Deferred twin of ``applyInitialLocalityPreferenceIfNeeded`` for the common
     /// case where a series cold-loads with a SINGLE source and its local copy is
     /// only discovered later (async cross-server discovery).
@@ -1626,6 +1652,13 @@ public final class ItemDetailViewModel {
         sources = result
         applyUnifiedWatchState()
         persistSnapshot()
+        // A library-origin copy that was not present at first paint can arrive from
+        // async discovery. Prefer it before any Home/Search locality routing.
+        if applyLibraryOriginPreferenceIfAvailable(in: result) {
+            await reload()
+            startAlternateSourceEnrichment(primaryID: activeItemID)
+            return
+        }
         // If discovery surfaced a more-local copy of a SERIES, route there now so
         // its episode tree loads from the local (same-LAN) server — the initial
         // pass couldn't pick it because the twin wasn't known at first paint. The

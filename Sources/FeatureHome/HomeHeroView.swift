@@ -1,9 +1,7 @@
 #if canImport(SwiftUI) && canImport(UIKit)
-import AudioToolbox
 import SwiftUI
 import UIKit
 import CoreModels
-import CoreNetworking
 import CoreUI
 import MetadataKit
 
@@ -125,14 +123,24 @@ struct HomeHeroView: View {
     /// for the next trending refresh. Keyed by `MediaItem.id`; reconciled with the
     /// server's returned status when the request completes.
     @State private var requestOverrides: [String: MediaAvailabilityStatus] = [:]
-    /// Whether the Hero's single UIKit action surface holds focus.
+    /// Which of the hero's two focus targets holds focus: the pill `row`, or the
+    /// invisible `leftGuard` that sits just left of it. The guard exists so a Left
+    /// press has an *internal* target and is captured by the hero instead of
+    /// escaping to the sidebar (a lone `.focusable()` under `.focusSection()` can't
+    /// trap Left when the sidebar TabView is its left neighbor — the engine jumps
+    /// straight to it and `onMoveCommand` never runs). We resolve the Left against
+    /// our own `selectedButton` and bounce focus straight back to the row, so the
+    /// guard never visibly holds focus. Pauses auto-advance and drives the button
+    /// highlight whenever it is non-`nil` (either target counts as "hero focused").
     @FocusState private var focus: HeroFocus?
-    /// True while the focused UIKit surface owns a physical Left/Right press.
-    /// Keeps auto-advance paused across the full hold, including the five-second
-    /// paging delay, rather than letting the shorter idle timer resume underneath.
-    @State private var directionalHoldActive = false
+    /// Tracks the physical Left/Right press lifecycle beneath SwiftUI's repeating
+    /// move commands. Early repeats are bounced so a normal click stays one-to-one;
+    /// after a deliberate hold delay, native rapid navigation resumes.
+    @State private var directionalPressGate = HeroDirectionalPressGate()
 
-    private enum HeroFocus: Hashable { case row }
+    /// The hero's focus targets. `leftGuard` is an invisible 1×1 sink used purely
+    /// to capture a leftward move (see `focus`).
+    private enum HeroFocus: Hashable { case row, leftGuard, rightGuard }
     /// Bumped on every manual page so the auto-advance `.task` restarts its dwell
     /// from the fresh slide instead of firing early.
     @State private var advanceToken = 0
@@ -398,9 +406,9 @@ struct HomeHeroView: View {
             // backdrop wipes to it (with whatever direction was last recorded).
             slideToken &+= 1
             metadataVisible = true
-            // The set swap re-seats the fronted slide. Preserve only a live physical
-            // hold so a background refresh cannot interrupt its five-second pause.
-            restartDwell(preservingPause: directionalHoldActive && pausedAt != nil)
+            // The set swap re-seats the fronted slide, so start a fresh dwell for
+            // it (gauge from empty, no lingering pause).
+            restartDwell()
             // ...but if the hero is currently RECEDED (focus is down on Continue
             // Watching), re-assert the pause that `restartDwell()` just cleared.
             // Otherwise a background hero recompute (e.g. a Random re-roll or a
@@ -708,59 +716,164 @@ struct HomeHeroView: View {
             case .next: return ("Next", { advanceForward() })
             }
         }
-        // The visible pills remain one stable focus target even when their count
-        // changes across slides. UIKit claims horizontal presses with press-typed
-        // recognizers before the focus engine can create duplicate moves or sounds,
-        // while Up/Down and the one Sidebar escape path still fall through natively.
-        HStack(spacing: 24) {
-            ForEach(Array(itemButtons.enumerated()), id: \.element) { offset, button in
-                heroButtonVisual(button, for: item, selected: focus != nil && selectedButton == offset)
-            }
-        }
-        .background {
-            GeometryReader { geo in
-                Color.clear.preference(key: HeroButtonsWidthKey.self, value: geo.size.width)
-            }
-        }
-        .opacity(metadataVisible ? 1 : 0)
-        .transaction { if !metadataVisible { $0.animation = nil } }
-        .allowsHitTesting(false)
-        .overlay {
-            HeroActionPressSurface(
-                onMove: { direction in
-                    switch direction {
-                    case .left: handleLeft()
-                    case .right: handleRight()
-                    }
-                },
-                canHandleDirection: { resolveMove($0) != .escape },
-                onHorizontalHoldChanged: { setDirectionalHoldActive($0) },
-                onSelect: { activateSelected() },
-                onPlayPause: {
-                    noteInteraction()
-                    if let item = current { onPlay(item) }
+        // spacing: 0 so the 1pt invisible focus guard below adds no gap ahead of the
+        // pills — otherwise the guard + gap pushed the whole button row right of the
+        // logo/metadata. The pills keep their own 24pt spacing in the inner HStack.
+        HStack(spacing: 0) {
+            // Invisible directional target, just left of the pills and inside the
+            // same focus section. Native focus movement preserves the familiar tvOS
+            // click sound. The UIKit surface tracks physical press phases so only
+            // the first move from one held press is handled; touch-surface swipes
+            // still pass through normally. It steps aside only at the one escape
+            // spot (first item, left-most button, sidebar nav).
+            //
+            // Crucially the inactivation is gated on `focus == .row`, NOT on
+            // `allowsSidebarEscape` alone: `handleLeft()` moves `selectedButton`
+            // to 0 (or pages back to item 0) which flips `allowsSidebarEscape` to
+            // true in the very transaction that is bouncing focus guard→row. If the
+            // guard's focusability keyed on that flip alone, it would go
+            // non-focusable *while still holding focus*, and the focus engine could
+            // relocate to a Continue Watching card (scroll-down regression) or
+            // strand focus. Requiring `focus == .row` means the guard can only lose
+            // focusability once focus has already left it for the row — no race.
+            Color.clear
+                .frame(width: 1, height: 1)
+                .focusable(leftGuardActive)
+                .focused($focus, equals: .leftGuard)
+                .accessibilityHidden(true)
+
+            // The VISIBLE pills. Non-focusable and free to fade with the rest of
+            // the metadata on a page — exactly like the Apple TV hero, where the
+            // buttons vanish on press and reappear on landing. Focus is NOT here
+            // (it lives on the overlay below), so fading these to opacity 0 can't
+            // drop focus or shift the scroll.
+            //
+            // The button COUNT can differ per slide (e.g. a Continue Watching slide
+            // has no Watchlist action), which once caused an intermittent focus
+            // drop when paging between different-count slides. That is fixed by
+            // `restoreFocusAfterPage()` (a next-tick focus reassert), NOT by
+            // stabilising this row — and the pills are hidden (opacity 0, snapped)
+            // during the ~280ms page window anyway, so a one-tick focus/highlight
+            // blip here is invisible. So this stays the simple, direct row.
+            HStack(spacing: 24) {
+                ForEach(Array(itemButtons.enumerated()), id: \.element) { offset, button in
+                    heroButtonVisual(button, for: item, selected: focus != nil && selectedButton == offset)
                 }
-            )
-            .focused($focus, equals: .row)
-            .prefersDefaultFocus(true, in: focusScope)
-            .focusEffectDisabled()
-            .accessibilityElement(children: .ignore)
-            .accessibilityAddTraits(.isButton)
-            .accessibilityLabel(accessibilityLabel(for: item))
-            .accessibilityAction { activateSelected() }
-            .modifier(HeroActionAccessibility(actions: a11yActions))
+            }
+            // Report the pills' natural width up so the overview above can cap itself
+            // to the button row (see `actionButtonsWidth`). Measured on the pills
+            // themselves — NOT the enclosing action row, which is `maxWidth: .infinity`.
+            .background {
+                GeometryReader { geo in
+                    Color.clear.preference(key: HeroButtonsWidthKey.self, value: geo.size.width)
+                }
+            }
+            .opacity(metadataVisible ? 1 : 0)
+            // Snap the pills' hide instantly (matches the metadata above); the
+            // delayed fade-IN still animates.
+            .transaction { if !metadataVisible { $0.animation = nil } }
+            .allowsHitTesting(false)
+            // ── The single hero focus target: an always-opaque, invisible SwiftUI
+            // leaf layered *over* the pills. Because `.overlay` is applied after the
+            // pills' `.opacity`, it stays fully opaque and focusable even while the
+            // pills fade to 0 — so focus (and therefore the scroll position) is
+            // pinned throughout a page, while the buttons still disappear and
+            // reappear. There is NO per-button `@FocusState`.
+            //
+            // A passive UIKit recognizer attached to the window observes physical
+            // Left/Right begin/end phases without becoming the focus leaf or
+            // recognizing/cancelling the gesture. The guards below use that
+            // lifecycle to accept only the first move from one held click while
+            // native focus feedback and indirect-touch swipes remain unchanged.
+            //
+            // Select is `.onTapGesture` (the select-press fires the tap) — the SAME
+            // pattern the Continue Watching cards use (`focusableCard`), NOT a
+            // `Button` (a `Button` paints tvOS's white focus platter over the
+            // backdrop, which `.focusEffectDisabled()` can't fully remove). Crucially
+            // `.onMoveCommand` is NOT attached here: on tvOS a move-command handler on
+            // the same view as `.onTapGesture` intercepts the select press, so the
+            // tap only landed intermittently (Select "needed five presses"). Moving
+            // the move handling up to the `.focusSection()` container (Apple's
+            // recommended placement) leaves this leaf a clean tap target. ──
+            .overlay {
+                Color.clear
+                    .background {
+                        HeroDirectionalPressMonitor(
+                            capturesLeft: !allowsSidebarEscape,
+                            gate: directionalPressGate
+                        )
+                    }
+                    .contentShape(Rectangle())
+                    .focusable(true)
+                    .focused($focus, equals: .row)
+                    // Initial Home focus lands on the hero (not a CW card).
+                    .prefersDefaultFocus(true, in: focusScope)
+                    // No system focus platter on the clear overlay — we draw our own
+                    // selection styling via `selectedButton`.
+                    .focusEffectDisabled()
+                    // Remote **Select** activates the selected pill. Stands alone
+                    // (no `.onMoveCommand` here) so the tap can't be intercepted.
+                    .onTapGesture { activateSelected() }
+                    // Play/Pause is a shortcut straight to playback.
+                    .onPlayPauseCommand { noteInteraction(); if let item = current { onPlay(item) } }
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityLabel(accessibilityLabel(for: item))
+                    .accessibilityAction { activateSelected() }
+                    .modifier(HeroActionAccessibility(actions: a11yActions))
+            }
+            // Pin a *constant* identity so focus is retained across a page (item
+            // id changes). Never key this on the item id — that would drop focus.
+            .id(Self.actionRowFocusID)
+
+            // Invisible directional target just right of the pills. Physical clicks
+            // retain native focus feedback and are de-repeated by the press gate;
+            // touch-surface swipes route through the same `handleRight()` path.
+            // Unlike the left guard it is always focusable: Right never escapes.
+            Color.clear
+                .frame(width: 1, height: 1)
+                .focusable(true)
+                .focused($focus, equals: .rightGuard)
+                .accessibilityHidden(true)
         }
-        // Pin a constant identity so slide changes never recreate the responder.
-        .id(Self.actionRowFocusID)
         .padding(.top, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
+        // Always-on (never toggled): a lone focusable under a *conditional* focus
+        // section churned structure on every interior move on the first slide,
+        // which jostled the scroll position. Constant confinement keeps Down going
+        // to Continue Watching and Right paging cleanly.
         .focusSection()
+        // Move handling lives HERE, on the section container, not on the focus
+        // target leaf. Apple's guidance is to put `.onMoveCommand` on a container
+        // rather than the focused element, and doing so is what lets the leaf's
+        // `.onTapGesture` (Select) fire reliably — a move handler on the same view
+        // was intercepting the select press. Its ONLY job now is to pause the
+        // auto-advance on any directional input (see `handleMove`): all
+        // paging/interior behaviour is driven by the invisible Left/Right guards,
+        // Up is left to the system, and the Down-recede is driven by the page
+        // scroll in `HomeView` — not by this handler.
         .onMoveCommand { _ in handleMove() }
         .onChange(of: focus) { old, new in
             let oldName = old.map { "\($0)" } ?? "nil"
             let newName = new.map { "\($0)" } ?? "nil"
             HeroFocusDiagnostics.emit("focus \(oldName)->\(newName) | \(hfState())")
             switch new {
+            case .leftGuard:
+                if directionalPressGate.shouldHandle(.left) {
+                    handleLeft()
+                } else {
+                    HeroFocusDiagnostics.emit("suppressed repeated physical Left")
+                    noteInteraction()
+                    focus = .row
+                }
+            case .rightGuard:
+                if directionalPressGate.shouldHandle(.right) {
+                    handleRight()
+                } else {
+                    HeroFocusDiagnostics.emit("suppressed repeated physical Right")
+                    noteInteraction()
+                    focus = .row
+                }
             case .row:
                 // Focus arriving into the hero from *outside* (a row below / the
                 // tab bar): snap back to full-screen and scroll the page to the top.
@@ -794,9 +907,44 @@ struct HomeHeroView: View {
         }
     }
 
+    /// Whether Left on the left-most button of the *current* slide should open
+    /// the side navigation instead of paging — the one case the reducer resolves
+    /// to `.escape`. Mirrors `HeroCarouselFocus`, and controls whether the left
+    /// focus guard steps aside so Left can reach the sidebar.
+    private var allowsSidebarEscape: Bool {
+        HeroCarouselFocus.resolve(
+            direction: .left,
+            itemIndex: index,
+            itemCount: items.count,
+            focusedButton: selectedButton,
+            buttonCount: max(1, current.map { buttons(for: $0).count } ?? 1),
+            navigationStyle: navigationStyle
+        ) == .escape
+    }
+
+    /// Whether the invisible left swipe fallback should be focusable. It captures
+    /// a focus-engine move so the hero handles it internally instead of escaping
+    /// to the sidebar. It steps aside (non-focusable) *only* at the escape spot AND
+    /// while focus is resting on the row — never while the guard itself holds
+    /// focus. Gating on `focus == .row` is what makes the guard→row bounce
+    /// race-free: `handleLeft()` moves `selectedButton`/`index` (flipping
+    /// `allowsSidebarEscape` to true) in the same transaction that re-pins focus to
+    /// `.row`; if focusability keyed on `allowsSidebarEscape` alone, the guard would
+    /// go non-focusable *while focused*, and the engine could relocate focus to a
+    /// Continue Watching card (scroll-down) or strand it. Requiring `focus == .row`
+    /// means the guard can only lose focusability once focus has already moved off
+    /// it, so the escape only fires from a genuine at-rest Left on item 0's
+    /// left-most button.
+    private var leftGuardActive: Bool {
+        !(allowsSidebarEscape && focus == .row)
+    }
+
     /// The container-level move handler. Its ONLY job is to pause the auto-advance
-    /// on focus-engine moves (Up/Down or Sidebar escape) so the carousel can't page
-    /// out from under the user. Horizontal moves are consumed by the UIKit surface.
+    /// on any directional input so the carousel can't page out from under the user.
+    /// It does NOT resolve paging for any direction: Left/Right clicks use the
+    /// UIKit press surface, touch swipes use the invisible focus fallbacks, Up is
+    /// left to the system, and Down-recede is driven by the page scroll in
+    /// `HomeView`. It only observes (never consumes) the move.
     private func handleMove() {
         noteInteraction()
     }
@@ -808,32 +956,29 @@ struct HomeHeroView: View {
         let btnCount = current.map { buttons(for: $0).count } ?? 0
         let focusName = focus.map { "\($0)" } ?? "nil"
         return "idx=\(index)/\(items.count) selBtn=\(selectedButton)/\(btnCount) "
-            + "focus=\(focusName) metaVisible=\(metadataVisible)"
+            + "focus=\(focusName) leftGuardActive=\(leftGuardActive) "
+            + "sidebarEscape=\(allowsSidebarEscape) metaVisible=\(metadataVisible)"
     }
 
-    private func resolveMove(_ direction: HeroFocusDirection) -> HeroFocusOutcome {
-        guard let item = current else { return .blocked }
+    /// Resolves one discrete Left click from the UIKit surface or a swipe captured
+    /// by the invisible left fallback, then ensures focus is on the pill row.
+    /// Interior moves adjust `selectedButton`; `.advance` pages backward. The one
+    /// `.escape` case (first item, left-most button, sidebar) cannot arrive from a
+    /// swipe because the guard is non-focusable there; Left falls through instead.
+    private func handleLeft() {
+        noteInteraction()
+        defer { focus = .row }
+        guard let item = current else { return }
         let buttonCount = buttons(for: item).count
-        return HeroCarouselFocus.resolve(
-            direction: direction,
+        selectedButton = min(selectedButton, max(0, buttonCount - 1))
+        let outcome = HeroCarouselFocus.resolve(
+            direction: .left,
             itemIndex: index,
             itemCount: items.count,
-            focusedButton: min(selectedButton, max(0, buttonCount - 1)),
+            focusedButton: selectedButton,
             buttonCount: buttonCount,
             navigationStyle: navigationStyle
         )
-    }
-
-    /// Resolves one Left input from the UIKit surface. Returning `.escape` lets the
-    /// surface forward that press to the focus engine for Sidebar navigation.
-    @discardableResult
-    private func handleLeft() -> HeroFocusOutcome {
-        noteInteraction()
-        defer { focus = .row }
-        guard let item = current else { return .blocked }
-        let buttonCount = buttons(for: item).count
-        selectedButton = min(selectedButton, max(0, buttonCount - 1))
-        let outcome = resolveMove(.left)
         HeroFocusDiagnostics.emit("handleLeft outcome=\(outcome) | \(hfState())")
         switch outcome {
         case let .moveButton(newIndex):
@@ -844,12 +989,30 @@ struct HomeHeroView: View {
         case .escape, .blocked:
             break
         }
-        playNavigationFeedback(for: outcome)
-        return outcome
     }
 
-    /// Backstop for any transient focus drop while a slide with a different action
-    /// count commits. The stable UIKit responder normally keeps focus throughout.
+    /// Backstop for the intermittent focus drop on a page that changes the hero's
+    /// action-button count. `handleLeft()`/`handleRight()` re-pin focus with the
+    /// synchronous `defer { focus = .row }` above — but that runs from INSIDE
+    /// `focus`'s own `onChange` (we're handling the guard bounce) and in the SAME
+    /// transaction that `page()` swaps `index` (new pill content). Device tracing
+    /// (`PLZHFOCUS`) proved that on a page where the button count changes the extra
+    /// layout work makes the tvOS focus engine DROP that reassignment: focus lands
+    /// on `nil` and is stranded ~1–2s until the next press, then returns on the
+    /// wrong control (the reported bug). Reasserting `.row` on the NEXT runloop
+    /// tick — after SwiftUI has committed the paged layout — lands reliably because
+    /// it no longer races the content change. It only fires if focus was actually
+    /// dropped (`== nil`) AND no newer page has happened since (`advanceToken`
+    /// unchanged), and is a no-op on the ~80% of pages where the synchronous re-pin
+    /// already worked (so it adds no flicker there). Note the `advanceToken` guard
+    /// rules out a *newer page* superseding this reassert; it does NOT by itself
+    /// distinguish an engine-dropped re-pin from a deliberate non-paging exit (Down
+    /// to a row / Up to the tab bar / Left to the sidebar all also leave
+    /// `focus == nil`). We rely on timing instead: this block drains on the very
+    /// next main-runloop turn — well before a second physical remote press can
+    /// arrive (~100ms+) — so a deliberate exit that happens *after* the restore
+    /// still wins normally. (A multi-frame main-thread stall could theoretically
+    /// let a second press land first; not observed on device.)
     private func restoreFocusAfterPage() {
         let token = advanceToken
         DispatchQueue.main.async {
@@ -859,15 +1022,24 @@ struct HomeHeroView: View {
         }
     }
 
-    /// Resolves one Right input from the UIKit surface.
-    @discardableResult
-    private func handleRight() -> HeroFocusOutcome {
+    /// Resolves one discrete Right click from the UIKit surface or a swipe captured
+    /// by the invisible right fallback, then ensures focus is on the pill row.
+    /// Interior moves adjust `selectedButton`; `.advance` pages forward. Right
+    /// never escapes, so there is no fall-through case.
+    private func handleRight() {
         noteInteraction()
         defer { focus = .row }
-        guard let item = current else { return .blocked }
+        guard let item = current else { return }
         let buttonCount = buttons(for: item).count
         selectedButton = min(selectedButton, max(0, buttonCount - 1))
-        let outcome = resolveMove(.right)
+        let outcome = HeroCarouselFocus.resolve(
+            direction: .right,
+            itemIndex: index,
+            itemCount: items.count,
+            focusedButton: selectedButton,
+            buttonCount: buttonCount,
+            navigationStyle: navigationStyle
+        )
         HeroFocusDiagnostics.emit("handleRight outcome=\(outcome) | \(hfState())")
         switch outcome {
         case let .moveButton(newIndex):
@@ -875,17 +1047,6 @@ struct HomeHeroView: View {
         case let .advance(toItem, keepButton):
             page(to: toItem, keepButton: keepButton, forward: true)
             restoreFocusAfterPage()
-        case .escape, .blocked:
-            break
-        }
-        playNavigationFeedback(for: outcome)
-        return outcome
-    }
-
-    private func playNavigationFeedback(for outcome: HeroFocusOutcome) {
-        switch outcome {
-        case .moveButton, .advance:
-            HeroNavigationClickPlayer.shared.play()
         case .escape, .blocked:
             break
         }
@@ -1119,24 +1280,22 @@ struct HomeHeroView: View {
 
         index = toItem
         advanceToken &+= 1
-        // A page is a fresh dwell. Preserve an active interaction pause so auto-
-        // advance cannot interrupt a held directional press.
-        restartDwell(preservingPause: pausedAt != nil)
+        // A page is a fresh dwell: reset the progress gauge (so the newly-active
+        // dot opens from empty instead of flashing the outgoing dot's progress)
+        // and clear any pause so the new slide counts down normally.
+        restartDwell()
         metadataVisible = false
         selectedButton = min(keepButton, max(0, buttons(for: items[toItem]).count - 1))
     }
 
-    /// Begins a fresh auto-advance dwell from now. A manual page can preserve the
-    /// active interaction pause while resetting the new slide's gauge to empty.
-    private func restartDwell(preservingPause: Bool = false) {
+    /// Begins a fresh auto-advance dwell from now: the progress gauge fills from
+    /// empty and any interaction pause is cleared. Called on a page, on first
+    /// appearance, and when the curated set re-seats the fronted slide.
+    private func restartDwell() {
         dwellStart = .now
-        if preservingPause {
-            pausedAt = .now
-        } else {
-            pausedAt = nil
-            resumeWork?.cancel()
-            resumeWork = nil
-        }
+        pausedAt = nil
+        resumeWork?.cancel()
+        resumeWork = nil
     }
 
     /// Records a remote interaction: freezes the auto-advance so it can't page out
@@ -1150,28 +1309,7 @@ struct HomeHeroView: View {
             pausedAt = Date()
             runEpoch &+= 1
         }
-        if directionalHoldActive {
-            resumeWork?.cancel()
-            resumeWork = nil
-        } else {
-            scheduleResume()
-        }
-    }
-
-    private func setDirectionalHoldActive(_ active: Bool) {
-        guard directionalHoldActive != active else { return }
-        directionalHoldActive = active
-        guard settings.autoAdvance, items.count > 1 else { return }
-        if active {
-            resumeWork?.cancel()
-            resumeWork = nil
-            if pausedAt == nil {
-                pausedAt = .now
-                runEpoch &+= 1
-            }
-        } else if pausedAt != nil, !receded {
-            scheduleResume()
-        }
+        scheduleResume()
     }
 
     /// Pauses the auto-advance because the hero has RECEDED — focus moved DOWN to
@@ -1750,399 +1888,193 @@ enum HeroPreviewWarmOrder {
     }
 }
 
-/// Owns deterministic Left/Right hold timing after UIKit claims the physical
-/// press. Interior actions repeat normally; the first page
-/// starts a deliberate pause, then rapid paging continues until release.
+/// Distinguishes a physical arrow's first focus move from early key-repeat moves
+/// emitted while that same press is held. Repeats resume after the standard
+/// deliberate-hold delay; with no active physical press, every move is an
+/// indirect-touch swipe and remains unrestricted.
 @MainActor
-final class HeroDirectionalRepeatController {
-    private let interiorInitialDelay: TimeInterval
-    private let pageDelay: TimeInterval
-    private let repeatInterval: TimeInterval
-    private let sleep: (TimeInterval) async throws -> Void
-    private var activeDirection: HeroFocusDirection?
-    private var repeatTask: Task<Void, Never>?
-    var onRepeat: ((HeroFocusDirection) -> HeroFocusOutcome)?
+final class HeroDirectionalPressGate {
+    private let repeatDelay: TimeInterval
+    private let now: () -> TimeInterval
+    private var leftHeld = false
+    private var rightHeld = false
+    private var handledLeft = false
+    private var handledRight = false
+    private var leftBeganAt: TimeInterval = 0
+    private var rightBeganAt: TimeInterval = 0
 
     init(
-        interiorInitialDelay: TimeInterval = 0.35,
-        pageDelay: TimeInterval = 5.0,
-        repeatInterval: TimeInterval = 0.12,
-        sleep: @escaping (TimeInterval) async throws -> Void = { duration in
-            try await Task.sleep(for: .seconds(duration))
-        }
+        repeatDelay: TimeInterval = 0.45,
+        now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
     ) {
-        self.interiorInitialDelay = interiorInitialDelay
-        self.pageDelay = pageDelay
-        self.repeatInterval = repeatInterval
-        self.sleep = sleep
+        self.repeatDelay = repeatDelay
+        self.now = now
     }
 
-    func began(_ direction: HeroFocusDirection, initialOutcome: HeroFocusOutcome) {
-        cancel()
-        guard initialOutcome != .escape, initialOutcome != .blocked else { return }
-        activeDirection = direction
-
-        let interiorInitialDelay = interiorInitialDelay
-        let pageDelay = pageDelay
-        let repeatInterval = repeatInterval
-        let sleep = sleep
-        repeatTask = Task { [weak self] in
-            var rapidPaging = {
-                if case .advance = initialOutcome { return true }
-                return false
-            }()
-            var delay = rapidPaging ? pageDelay : interiorInitialDelay
-
-            do {
-                while !Task.isCancelled, self?.activeDirection == direction {
-                    try await sleep(delay)
-                    guard !Task.isCancelled,
-                          self?.activeDirection == direction,
-                          let outcome = self?.onRepeat?(direction) else { return }
-                    switch outcome {
-                    case .moveButton:
-                        delay = repeatInterval
-                    case .advance:
-                        delay = rapidPaging ? repeatInterval : pageDelay
-                        rapidPaging = true
-                    case .escape, .blocked:
-                        return
-                    }
-                }
-            } catch {
-                return
+    func began(_ direction: HeroFocusDirection) {
+        switch direction {
+        case .left:
+            if !leftHeld {
+                leftHeld = true
+                handledLeft = false
+                leftBeganAt = now()
+            }
+        case .right:
+            if !rightHeld {
+                rightHeld = true
+                handledRight = false
+                rightBeganAt = now()
             }
         }
     }
 
     func ended(_ direction: HeroFocusDirection) {
-        guard activeDirection == direction else { return }
-        cancel()
+        switch direction {
+        case .left:
+            leftHeld = false
+            handledLeft = false
+        case .right:
+            rightHeld = false
+            handledRight = false
+        }
     }
 
-    func cancel() {
-        activeDirection = nil
-        repeatTask?.cancel()
-        repeatTask = nil
-    }
-}
-
-/// A short original UI tone for app-driven Hero moves. tvOS exposes no public API
-/// for replaying its native focus click, so this stays in memory and never changes
-/// the shared audio-session category.
-@MainActor
-final class HeroNavigationClickPlayer {
-    static let shared = HeroNavigationClickPlayer()
-
-    private var soundID: SystemSoundID = 0
-    private var soundURL: URL?
-
-    private init() {
-        let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("plozz-hero-navigation-click.wav")
-        do {
-            try Self.makeClickWAV().write(to: url, options: .atomic)
-            var createdSoundID: SystemSoundID = 0
-            let status = AudioServicesCreateSystemSoundID(url as CFURL, &createdSoundID)
-            guard status == kAudioServicesNoError else {
-                PlozzLog.app.error(
-                    "Hero navigation click registration failed status=\(status)"
-                )
-                return
+    func shouldHandle(_ direction: HeroFocusDirection) -> Bool {
+        switch direction {
+        case .left:
+            guard leftHeld else { return true }
+            if !handledLeft {
+                handledLeft = true
+                return true
             }
-            soundID = createdSoundID
-            soundURL = url
-        } catch {
-            PlozzLog.app.error(
-                "Hero navigation click initialization failed error=\(String(describing: error))"
-            )
+            return now() - leftBeganAt >= repeatDelay
+        case .right:
+            guard rightHeld else { return true }
+            if !handledRight {
+                handledRight = true
+                return true
+            }
+            return now() - rightBeganAt >= repeatDelay
         }
-    }
-
-    func play() {
-        guard soundID != 0 else { return }
-        AudioServicesPlaySystemSound(soundID)
-    }
-
-    deinit {
-        if soundID != 0 {
-            AudioServicesDisposeSystemSoundID(soundID)
-        }
-        if let soundURL {
-            try? FileManager.default.removeItem(at: soundURL)
-        }
-    }
-
-    private static func makeClickWAV() -> Data {
-        let sampleRate = 48_000
-        let duration = 0.038
-        let frameCount = Int(Double(sampleRate) * duration)
-        var samples = Data()
-        samples.reserveCapacity(frameCount * MemoryLayout<Int16>.size)
-
-        for frame in 0..<frameCount {
-            let time = Double(frame) / Double(sampleRate)
-            let startFrequency = 500.0
-            let endFrequency = 380.0
-            let sweep = (endFrequency - startFrequency) / duration
-            let phase = 2 * Double.pi * (
-                startFrequency * time + 0.5 * sweep * time * time
-            )
-            let body = sin(phase) * exp(-time * 70)
-            let onset = 0.08 * sin(2 * phase) * exp(-time * 190)
-            let attackDuration = 0.0015
-            let attackProgress = min(1, time / attackDuration)
-            let attack = pow(sin(0.5 * Double.pi * attackProgress), 2)
-            let releaseStart = 0.026
-            let releaseProgress = max(
-                0,
-                min(1, (time - releaseStart) / (duration - releaseStart))
-            )
-            let release = pow(cos(0.5 * Double.pi * releaseProgress), 2)
-            let value = max(-1, min(1, (body + onset) * attack * release * 0.19))
-            var sample = Int16((value * Double(Int16.max)).rounded()).littleEndian
-            withUnsafeBytes(of: &sample) { samples.append(contentsOf: $0) }
-        }
-
-        var wav = Data()
-        wav.append(contentsOf: "RIFF".utf8)
-        appendLittleEndian(UInt32(36 + samples.count), to: &wav)
-        wav.append(contentsOf: "WAVEfmt ".utf8)
-        appendLittleEndian(UInt32(16), to: &wav)
-        appendLittleEndian(UInt16(1), to: &wav)
-        appendLittleEndian(UInt16(1), to: &wav)
-        appendLittleEndian(UInt32(sampleRate), to: &wav)
-        appendLittleEndian(UInt32(sampleRate * MemoryLayout<Int16>.size), to: &wav)
-        appendLittleEndian(UInt16(MemoryLayout<Int16>.size), to: &wav)
-        appendLittleEndian(UInt16(16), to: &wav)
-        wav.append(contentsOf: "data".utf8)
-        appendLittleEndian(UInt32(samples.count), to: &wav)
-        wav.append(samples)
-        return wav
-    }
-
-    private static func appendLittleEndian<T: FixedWidthInteger>(
-        _ value: T,
-        to data: inout Data
-    ) {
-        var value = value.littleEndian
-        withUnsafeBytes(of: &value) { data.append(contentsOf: $0) }
     }
 }
 
-/// The Hero's single focus target and directional-input owner. Zero-duration,
-/// press-typed recognizers claim Left/Right at press-down, before the focus engine
-/// can emit duplicate moves or false navigation feedback.
-private struct HeroActionPressSurface: UIViewRepresentable {
-    let onMove: (HeroFocusDirection) -> HeroFocusOutcome
-    let canHandleDirection: (HeroFocusDirection) -> Bool
-    let onHorizontalHoldChanged: (Bool) -> Void
-    let onSelect: () -> Void
-    let onPlayPause: () -> Void
+/// Installs a passive press-lifecycle observer on the window without replacing or
+/// wrapping the hero's proven SwiftUI focus leaf. The recognizer never succeeds,
+/// never cancels/delays delivery, and cannot compete with other recognizers; it
+/// only records arrow begin/end phases for ``HeroDirectionalPressGate``.
+private struct HeroDirectionalPressMonitor: UIViewRepresentable {
+    var capturesLeft: Bool
+    let gate: HeroDirectionalPressGate
 
-    func makeUIView(context: Context) -> PressView {
-        let view = PressView()
-        update(view)
+    func makeUIView(context: Context) -> InstallerView {
+        let view = InstallerView()
+        view.backgroundColor = .clear
+        view.isUserInteractionEnabled = false
+        view.monitor.gate = gate
+        view.monitor.capturesLeft = capturesLeft
         return view
     }
 
-    func updateUIView(_ uiView: PressView, context: Context) {
-        update(uiView)
+    func updateUIView(_ uiView: InstallerView, context: Context) {
+        uiView.monitor.gate = gate
+        uiView.monitor.capturesLeft = capturesLeft
     }
 
-    static func dismantleUIView(_ uiView: PressView, coordinator: ()) {
-        uiView.cancelInput()
-    }
-
-    private func update(_ view: PressView) {
-        view.onMove = onMove
-        view.canHandleDirection = canHandleDirection
-        view.onHorizontalHoldChanged = onHorizontalHoldChanged
-        view.onSelect = onSelect
-        view.onPlayPause = onPlayPause
-    }
-
-    final class PressView: UIView, UIGestureRecognizerDelegate {
-        var onMove: (HeroFocusDirection) -> HeroFocusOutcome = { _ in .blocked }
-        var canHandleDirection: (HeroFocusDirection) -> Bool = { _ in true }
-        var onHorizontalHoldChanged: (Bool) -> Void = { _ in }
-        var onSelect: () -> Void = {}
-        var onPlayPause: () -> Void = {}
-
-        private let repeatController = HeroDirectionalRepeatController()
-        private var consumesLeft = false
-        private var consumesRight = false
-        private var resignActiveObserver: NSObjectProtocol?
-
-        override var canBecomeFocused: Bool { true }
-
-        override init(frame: CGRect) {
-            super.init(frame: frame)
-            backgroundColor = .clear
-            isOpaque = false
-            _ = HeroNavigationClickPlayer.shared
-            repeatController.onRepeat = { [weak self] direction in
-                self?.onMove(direction) ?? .blocked
-            }
-
-            addPressRecognizer(.select, action: #selector(selected))
-            addPressRecognizer(.playPause, action: #selector(playPaused))
-            addDirectionalPressRecognizer(.leftArrow, direction: .left)
-            addDirectionalPressRecognizer(.rightArrow, direction: .right)
-            addSwipeRecognizer(.left)
-            addSwipeRecognizer(.right)
-
-            resignActiveObserver = NotificationCenter.default.addObserver(
-                forName: UIApplication.willResignActiveNotification,
-                object: nil,
-                queue: .main
-            ) { [weak self] _ in
-                self?.cancelInput()
-            }
-        }
-
-        required init?(coder: NSCoder) {
-            fatalError("init(coder:) has not been implemented")
-        }
+    final class InstallerView: UIView {
+        let monitor = PressLifecycleRecognizer()
 
         override func didMoveToWindow() {
             super.didMoveToWindow()
-            if window == nil { cancelInput() }
-        }
-
-        override func didUpdateFocus(
-            in context: UIFocusUpdateContext,
-            with coordinator: UIFocusAnimationCoordinator
-        ) {
-            super.didUpdateFocus(in: context, with: coordinator)
-            if context.previouslyFocusedItem === self, context.nextFocusedItem !== self {
-                cancelInput()
-            }
-        }
-
-        override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-            if let directional = gestureRecognizer as? DirectionalLongPressRecognizer {
-                return canHandleDirection(directional.heroDirection)
-            }
-            if let swipe = gestureRecognizer as? UISwipeGestureRecognizer,
-               let direction = heroDirection(for: swipe.direction) {
-                return canHandleDirection(direction)
-            }
-            return true
-        }
-
-        func cancelInput() {
-            let wasHolding = consumesLeft || consumesRight
-            repeatController.cancel()
-            consumesLeft = false
-            consumesRight = false
-            if wasHolding {
-                onHorizontalHoldChanged(false)
-            }
+            guard monitor.view !== window else { return }
+            monitor.view?.removeGestureRecognizer(monitor)
+            window?.addGestureRecognizer(monitor)
         }
 
         deinit {
-            if let resignActiveObserver {
-                NotificationCenter.default.removeObserver(resignActiveObserver)
-            }
-            cancelInput()
+            monitor.view?.removeGestureRecognizer(monitor)
+        }
+    }
+
+    final class PressLifecycleRecognizer: UIGestureRecognizer {
+        var capturesLeft = true
+        weak var gate: HeroDirectionalPressGate?
+
+        override init(target: Any?, action: Selector?) {
+            super.init(target: target, action: action)
+            allowedPressTypes = [
+                NSNumber(value: UIPress.PressType.leftArrow.rawValue),
+                NSNumber(value: UIPress.PressType.rightArrow.rawValue)
+            ]
+            cancelsTouchesInView = false
+            delaysTouchesBegan = false
+            delaysTouchesEnded = false
         }
 
-        @objc private func selected() {
-            onSelect()
+        convenience init() {
+            self.init(target: nil, action: nil)
         }
 
-        @objc private func playPaused() {
-            onPlayPause()
-        }
-
-        @objc private func swiped(_ recognizer: UISwipeGestureRecognizer) {
-            guard let direction = heroDirection(for: recognizer.direction) else { return }
-            _ = onMove(direction)
-        }
-
-        @objc private func directionPressed(_ recognizer: DirectionalLongPressRecognizer) {
-            let direction = recognizer.heroDirection
-            switch recognizer.state {
-            case .began:
-                let wasHolding = consumesLeft || consumesRight
-                let outcome = onMove(direction)
-                switch direction {
-                case .left: consumesLeft = true
-                case .right: consumesRight = true
-                }
-                if !wasHolding {
-                    onHorizontalHoldChanged(true)
-                }
-                repeatController.began(direction, initialOutcome: outcome)
-            case .ended, .cancelled, .failed:
-                endHold(direction)
-            default:
-                break
-            }
-        }
-
-        private func addPressRecognizer(_ type: UIPress.PressType, action: Selector) {
-            let recognizer = UITapGestureRecognizer(target: self, action: action)
-            recognizer.allowedPressTypes = [NSNumber(value: type.rawValue)]
-            recognizer.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
-            addGestureRecognizer(recognizer)
-        }
-
-        private func addDirectionalPressRecognizer(
-            _ type: UIPress.PressType,
-            direction: HeroFocusDirection
+        override func pressesBegan(
+            _ presses: Set<UIPress>,
+            with event: UIPressesEvent
         ) {
-            let recognizer = DirectionalLongPressRecognizer(
-                direction: direction,
-                target: self,
-                action: #selector(directionPressed(_:))
-            )
-            recognizer.minimumPressDuration = 0
-            recognizer.allowedPressTypes = [NSNumber(value: type.rawValue)]
-            recognizer.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
-            recognizer.delegate = self
-            addGestureRecognizer(recognizer)
-        }
-
-        private func addSwipeRecognizer(_ direction: UISwipeGestureRecognizer.Direction) {
-            let recognizer = UISwipeGestureRecognizer(target: self, action: #selector(swiped(_:)))
-            recognizer.direction = direction
-            recognizer.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.indirect.rawValue)]
-            recognizer.delegate = self
-            addGestureRecognizer(recognizer)
-        }
-
-        private func endHold(_ direction: HeroFocusDirection) {
-            let wasHolding = consumesLeft || consumesRight
-            repeatController.ended(direction)
-            switch direction {
-            case .left: consumesLeft = false
-            case .right: consumesRight = false
-            }
-            if wasHolding, !consumesLeft, !consumesRight {
-                onHorizontalHoldChanged(false)
+            for press in presses {
+                switch press.type {
+                case .leftArrow where capturesLeft:
+                    HeroFocusDiagnostics.emit("began physical Left")
+                    gate?.began(.left)
+                case .rightArrow:
+                    HeroFocusDiagnostics.emit("began physical Right")
+                    gate?.began(.right)
+                default:
+                    break
+                }
             }
         }
 
-        private func heroDirection(
-            for direction: UISwipeGestureRecognizer.Direction
-        ) -> HeroFocusDirection? {
-            if direction.contains(.left) { return .left }
-            if direction.contains(.right) { return .right }
-            return nil
+        override func pressesChanged(
+            _ presses: Set<UIPress>,
+            with event: UIPressesEvent
+        ) {
         }
 
-        final class DirectionalLongPressRecognizer: UILongPressGestureRecognizer {
-            let heroDirection: HeroFocusDirection
+        override func pressesEnded(
+            _ presses: Set<UIPress>,
+            with event: UIPressesEvent
+        ) {
+            finish(presses)
+            state = .failed
+        }
 
-            init(direction: HeroFocusDirection, target: Any?, action: Selector?) {
-                heroDirection = direction
-                super.init(target: target, action: action)
-            }
+        override func pressesCancelled(
+            _ presses: Set<UIPress>,
+            with event: UIPressesEvent
+        ) {
+            finish(presses)
+            state = .failed
+        }
 
-            required init?(coder: NSCoder) {
-                fatalError("init(coder:) has not been implemented")
+        override func canPrevent(_ preventedGestureRecognizer: UIGestureRecognizer) -> Bool {
+            false
+        }
+
+        override func canBePrevented(by preventingGestureRecognizer: UIGestureRecognizer) -> Bool {
+            false
+        }
+
+        private func finish(_ presses: Set<UIPress>) {
+            for press in presses {
+                switch press.type {
+                case .leftArrow:
+                    HeroFocusDiagnostics.emit("ended physical Left")
+                    gate?.ended(.left)
+                case .rightArrow:
+                    HeroFocusDiagnostics.emit("ended physical Right")
+                    gate?.ended(.right)
+                default:
+                    break
+                }
             }
         }
     }

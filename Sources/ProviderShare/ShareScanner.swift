@@ -81,6 +81,7 @@ actor ShareScanner {
     private var reporter: ShareScanReporter
     private var isRunning = false
     private var isInvalidated = false
+    private var activeListers: [ScanLister] = []
 
     /// Folder names whose subtree is skipped wholesale (extras/junk, not library
     /// content). Matched case-insensitively against a directory's own name.
@@ -133,6 +134,17 @@ actor ShareScanner {
         isInvalidated = true
     }
 
+    func forceCloseActiveListers() async {
+        let listers = activeListers
+        await withTaskGroup(of: Void.self) { group in
+            for lister in listers {
+                group.addTask {
+                    await lister.close()
+                }
+            }
+        }
+    }
+
     /// Run a scan unless one already ran within `minInterval` (or is running).
     /// Called fire-and-forget from the Home hot path, so it must be cheap to no-op.
     func scanIfStale(minInterval: TimeInterval = 600) async {
@@ -156,18 +168,24 @@ actor ShareScanner {
     /// Full breadth-first walk from the share root, using a pool of independent
     /// connections to list `concurrency` directories at once. Idempotent.
     func scan() async {
-        if isRunning || isInvalidated { return }
+        if isRunning || isInvalidated || Task.isCancelled { return }
         isRunning = true
         let scanGeneration = UUID()
         await store.activateScanGeneration(scanGeneration)
         let started = Date()
         reporter.scanStarted(shareID, name)
 
+        guard !Task.isCancelled, !isInvalidated else {
+            await finishScan(listers: [])
+            return
+        }
+
         // Pre-build the pool of independent listers (each its own SMB connection).
         // `pool` tracks EVERY lister we create (including ones swapped in to replace
         // a wedged connection) so all are torn down when the scan ends. Each close
         // runs in its own task so one hung teardown can't block the others.
         var pool = (0..<concurrency).map { _ in makeLister() }
+        activeListers = pool
         // The live free-list of healthy connections, carried ACROSS BFS levels. Every
         // dispatched lister returns here exactly once per level (healthy back as-is; a
         // failed one replaced by a fresh connection), so at each level boundary it
@@ -234,6 +252,7 @@ actor ShareScanner {
                         Task { await dead.close() }
                         let fresh = makeLister()
                         pool.append(fresh)
+                        activeListers.append(fresh)
                         free.append(fresh)
                     }
                     dirsWalked += 1
@@ -325,6 +344,7 @@ actor ShareScanner {
                 }
             }
         }
+        activeListers = []
         isRunning = false
         reporter.scanFinished(shareID)
     }

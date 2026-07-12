@@ -1,15 +1,25 @@
 import Foundation
 import CoreModels
+import MediaTransportCore
 import MetadataKit
 
-/// Process-wide cache of one `ShareCatalogStore` + `ShareScanner` per share
-/// account. `ShareProvider` is a value type SwiftUI rebuilds constantly, so the
-/// catalog and the in-flight scan must live *outside* it — otherwise every
-/// re-render would spin up a new SQLite handle and restart scanning. Keyed by the
-/// the configured account id (the same key `ShareWatchStore` uses), so separate
-/// principals on one endpoint never share catalog or scanner state.
-actor ShareCatalogRegistry {
-    static let shared = ShareCatalogRegistry()
+protocol ShareCatalogCoordinating: Sendable {
+    func store(
+        accountKey: String,
+        displayName: String,
+        credentialRevision: CredentialRevision,
+        sessionFactory: @escaping ShareTransportSessionFactory
+    ) async -> ShareCatalogStore
+    func rescan(accountKey: String) async
+    func enrichItem(accountKey: String, itemID: String) async
+    func noteInteractiveActivity(accountKey: String) async
+}
+
+/// App-owned cache and I/O coordinator for share catalogs, scanners, and
+/// playback admission. `ShareProvider` is a value type SwiftUI rebuilds
+/// constantly, so this state is injected from the composition root.
+public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
+    public typealias ArbiterFactory = @Sendable (String) -> MediaIOArbiter
 
     private var stores: [String: ShareCatalogStore] = [:]
     private var scanners: [String: ShareScanner] = [:]
@@ -22,18 +32,24 @@ actor ShareCatalogRegistry {
     private var invalidationTasks: [String: Task<Void, Never>] = [:]
     private var invalidationTaskIDs: [String: UUID] = [:]
     private var restartingScans: Set<String> = []
+    private var arbiters: [String: MediaIOArbiter] = [:]
+    private let arbiterFactory: ArbiterFactory
     /// Where scan/enrich progress is reported for the Home banner + Settings.
     /// Wired once by the app (`AppState`); `.noop` until then (tests/previews).
     private var reporter: ShareScanReporter = .noop
 
-    private init() {}
+    public init(
+        arbiterFactory: @escaping ArbiterFactory = { MediaIOArbiter(accountID: $0) }
+    ) {
+        self.arbiterFactory = arbiterFactory
+    }
 
     /// Inject the app's scan-status reporter (call once at startup). Applies to
     /// future scanners/enrichers AND back-fills any already created before this
     /// ran (a startup race: the app configures the reporter from an async Task in
     /// its init, which can land after Home's first share query created a scanner
     /// with the `.noop` default — that left the banner + last-scanned line dead).
-    func configure(reporter: ShareScanReporter) async {
+    public func configure(reporter: ShareScanReporter) async {
         self.reporter = reporter
         for scanner in scanners.values { await scanner.setReporter(reporter) }
         for enricher in enrichers.values { await enricher.setReporter(reporter) }
@@ -110,7 +126,7 @@ actor ShareCatalogRegistry {
                 }
                 enrichers[accountKey] = ShareEnricher(store: store, resolver: resolver, shareID: accountKey, reporter: reporter)
             }
-            ensureScanning(accountKey)
+            await ensureScanning(accountKey)
             return store
         }
     }
@@ -153,10 +169,10 @@ actor ShareCatalogRegistry {
             return
         }
         restartingScans.remove(accountKey)
-        startScan(accountKey: accountKey, scanner: scanner, force: true)
+        await startScan(accountKey: accountKey, scanner: scanner, force: true)
     }
 
-    func invalidate(accountKey: String) async {
+    public func invalidate(accountKey: String) async {
         while true {
             if let invalidationTask = invalidationTasks[accountKey] {
                 await invalidationTask.value
@@ -170,6 +186,19 @@ actor ShareCatalogRegistry {
             )
             return
         }
+    }
+
+    public func acquirePlayback(accountKey: String) async throws -> MediaIOPlaybackLease {
+        try await arbiter(for: accountKey).acquirePlayback()
+    }
+
+    private func arbiter(for accountKey: String) -> MediaIOArbiter {
+        if let arbiter = arbiters[accountKey] {
+            return arbiter
+        }
+        let arbiter = arbiterFactory(accountKey)
+        arbiters[accountKey] = arbiter
+        return arbiter
     }
 
     /// Fast-track enrichment of ONE item the user just opened, ahead of the
@@ -195,21 +224,37 @@ actor ShareCatalogRegistry {
     /// Spawn a throttled scan attempt (then an enrichment pass) unless one is
     /// already in flight for this share. `ShareScanner.scanIfStale` time-throttles
     /// the real walk, so a rapid burst of Home reloads collapses to one run.
-    private func ensureScanning(_ accountKey: String) {
+    private func ensureScanning(_ accountKey: String) async {
         guard scanTasks[accountKey]?.isEmpty != false,
               !restartingScans.contains(accountKey),
               let scanner = scanners[accountKey] else { return }
-        startScan(accountKey: accountKey, scanner: scanner, force: false)
+        await startScan(accountKey: accountKey, scanner: scanner, force: false)
     }
 
     private func startScan(
         accountKey: String,
         scanner: ShareScanner,
         force: Bool
-    ) {
-        guard let enricher = enrichers[accountKey] else { return }
+    ) async {
+        guard let enricher = enrichers[accountKey],
+              let store = stores[accountKey] else { return }
+        let resource = ShareScannerResource(scanner: scanner, store: store)
+        let scannerLease: MediaIOScannerLease
+        do {
+            scannerLease = try await arbiter(for: accountKey).acquireScanner(resource: resource)
+        } catch {
+            return
+        }
         let taskID = UUID()
+        let startGate = ShareScanStartGate()
         let task = Task(priority: .utility) { [weak self] in
+            await startGate.wait()
+            guard !Task.isCancelled else {
+                resource.markDrained()
+                await scannerLease.finishAndWait()
+                await self?.clearScanTask(accountKey, taskID: taskID)
+                return
+            }
             ShareBackgroundActivity.scanStarted()
             if force {
                 await scanner.scan()
@@ -217,6 +262,8 @@ actor ShareCatalogRegistry {
                 await scanner.scanIfStale()
             }
             ShareBackgroundActivity.scanFinished()
+            resource.markDrained()
+            await scannerLease.finishAndWait()
             // Enrich whatever the scan (and prior scans) indexed. Cheap no-op when
             // nothing is pending.
             if !Task.isCancelled {
@@ -226,7 +273,9 @@ actor ShareCatalogRegistry {
             }
             await self?.clearScanTask(accountKey, taskID: taskID)
         }
+        resource.attach(task)
         scanTasks[accountKey, default: [:]][taskID] = task
+        await startGate.open()
     }
 
     private func clearScanTask(_ accountKey: String, taskID: UUID) {
@@ -314,18 +363,73 @@ actor ShareCatalogRegistry {
     }
 }
 
-/// Public control surface over the (internal) `ShareCatalogRegistry`, so the app
-/// layer can wire the scan-status reporter without seeing the registry's internal
-/// types. (Rescan is driven through `ShareProvider.rescan()` instead, so it can
-/// register the share's catalog on demand.)
-public enum ShareLibraryControl {
-    /// Wire the app's scan-status reporter into the registry (call once at startup).
-    /// Back-fills any scanners already created before this ran.
-    public static func configure(reporter: ShareScanReporter) async {
-        await ShareCatalogRegistry.shared.configure(reporter: reporter)
+private actor ShareScanStartGate {
+    private var isOpen = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        guard !isOpen else { return }
+        await withCheckedContinuation { continuation in
+            waiters.append(continuation)
+        }
     }
 
-    public static func invalidate(accountKey: String) async {
-        await ShareCatalogRegistry.shared.invalidate(accountKey: accountKey)
+    func open() {
+        isOpen = true
+        let pending = waiters
+        waiters.removeAll()
+        pending.forEach { $0.resume() }
+    }
+}
+
+private final class ShareScannerResource: MediaIOScannerResource, @unchecked Sendable {
+    private let scanner: ShareScanner
+    private let store: ShareCatalogStore
+    private let lock = NSLock()
+    private var task: Task<Void, Never>?
+    private var cancelled = false
+    private var drained = false
+
+    init(scanner: ShareScanner, store: ShareCatalogStore) {
+        self.scanner = scanner
+        self.store = store
+    }
+
+    var isDrained: Bool {
+        lock.withLock { drained }
+    }
+
+    func attach(_ task: Task<Void, Never>) {
+        let shouldCancel = lock.withLock {
+            self.task = task
+            return cancelled
+        }
+        if shouldCancel {
+            task.cancel()
+        }
+    }
+
+    func markDrained() {
+        lock.withLock {
+            drained = true
+            task = nil
+        }
+    }
+
+    func cancel() async {
+        let task = lock.withLock {
+            cancelled = true
+            return self.task
+        }
+        task?.cancel()
+        await store.invalidateScanGeneration()
+    }
+
+    func forceClose() async throws {
+        await cancel()
+        await scanner.forceCloseActiveListers()
+        lock.withLock {
+            drained = true
+        }
     }
 }

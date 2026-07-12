@@ -20,6 +20,7 @@ public struct ShareProvider: MediaProvider {
     private let watchStore: ShareWatchStore
     private let credentialRevision: CredentialRevision
     private let sessionFactory: ShareTransportSessionFactory
+    private let catalogCoordinator: any ShareCatalogCoordinating
     private let catalogOverride: ShareCatalogStore?
     /// Injected engine-side network-file header prober. It uses the same typed
     /// locator and transport resolver as playback.
@@ -30,6 +31,7 @@ public struct ShareProvider: MediaProvider {
         localMediaContext: LocalMediaContext,
         credentialRevision: CredentialRevision,
         sessionFactory: @escaping ShareTransportSessionFactory,
+        catalogCoordinator: ShareCatalogCoordinator,
         streamProber: NetworkFileStreamProbing? = nil
     ) {
         self.init(
@@ -38,6 +40,7 @@ public struct ShareProvider: MediaProvider {
             watchDirectory: nil,
             credentialRevision: credentialRevision,
             sessionFactory: sessionFactory,
+            catalogCoordinator: catalogCoordinator,
             streamProber: streamProber
         )
     }
@@ -56,6 +59,7 @@ public struct ShareProvider: MediaProvider {
         sessionFactory: @escaping ShareTransportSessionFactory = { _ in
             throw MediaTransportError.unsupportedCapability("test transport")
         },
+        catalogCoordinator: any ShareCatalogCoordinating = ShareCatalogCoordinator(),
         streamProber: NetworkFileStreamProbing? = nil,
         catalogStore: ShareCatalogStore? = nil
     ) {
@@ -69,6 +73,7 @@ public struct ShareProvider: MediaProvider {
         self.catalogOverride = catalogStore
         self.credentialRevision = credentialRevision
         self.sessionFactory = sessionFactory
+        self.catalogCoordinator = catalogCoordinator
         let browser = ShareTransportBrowser(
             role: .metadata,
             sessionFactory: sessionFactory
@@ -84,14 +89,12 @@ public struct ShareProvider: MediaProvider {
 
     // MARK: Library browsing
 
-    /// Shared, process-wide catalog for this share (SQLite index built by a
-    /// background `ShareScanner`). Fetched from the registry rather than stored on
-    /// the provider, which SwiftUI rebuilds constantly. Accessing it also kicks a
-    /// throttled background scan.
+    /// App-owned catalog for this share (SQLite index built by a background
+    /// `ShareScanner`). The injected coordinator outlives transient provider values.
     private var catalog: ShareCatalogStore {
         get async {
             if let catalogOverride { return catalogOverride }
-            return await ShareCatalogRegistry.shared.store(
+            return await catalogCoordinator.store(
                 accountKey: localMediaContext.accountID,
                 displayName: session.server.name,
                 credentialRevision: credentialRevision,
@@ -105,7 +108,7 @@ public struct ShareProvider: MediaProvider {
     /// Home never queried this share yet, then forces a scan bypassing the throttle.
     public func rescan() async {
         _ = await catalog
-        await ShareCatalogRegistry.shared.rescan(accountKey: localMediaContext.accountID)
+        await catalogCoordinator.rescan(accountKey: localMediaContext.accountID)
     }
 
     public func libraries() async throws -> [MediaLibrary] {
@@ -177,7 +180,7 @@ public struct ShareProvider: MediaProvider {
             // A user just opened this — fast-track its enrichment ahead of the
             // background backlog so its hero/poster/overview persist promptly. Fire-
             // and-forget (no added latency); a no-op once the item is enriched.
-            await ShareCatalogRegistry.shared.enrichItem(
+            await catalogCoordinator.enrichItem(
                 accountKey: localMediaContext.accountID,
                 itemID: id
             )
@@ -643,7 +646,7 @@ extension ShareProvider: CapabilityReporting {
 
 extension ShareProvider: InteractiveBrowseActivityReporting {
     public func noteInteractiveBrowseActivity() async {
-        await ShareCatalogRegistry.shared.noteInteractiveActivity(
+        await catalogCoordinator.noteInteractiveActivity(
             accountKey: localMediaContext.accountID
         )
     }

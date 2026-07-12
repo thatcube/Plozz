@@ -12,15 +12,18 @@ public final class MediaTransportResolvedSource: @unchecked Sendable {
     public let sourceLease: MediaTransportSourceLease
 
     private let sessionLease: MediaTransportResolverLease
+    private let playbackLease: MediaIOPlaybackLease?
     private let lock = NSLock()
     private var releaseTask: Task<Void, Never>?
 
     init(
         sourceLease: MediaTransportSourceLease,
-        sessionLease: MediaTransportResolverLease
+        sessionLease: MediaTransportResolverLease,
+        playbackLease: MediaIOPlaybackLease?
     ) {
         self.sourceLease = sourceLease
         self.sessionLease = sessionLease
+        self.playbackLease = playbackLease
     }
 
     deinit {
@@ -41,10 +44,12 @@ public final class MediaTransportResolvedSource: @unchecked Sendable {
 
         let sourceLease = sourceLease
         let sessionLease = sessionLease
+        let playbackLease = playbackLease
         let task = Task.detached {
             sourceLease.close()
             await sourceLease.waitForFinalShutdown()
             sessionLease.release()
+            await playbackLease?.releaseAndWait()
         }
         releaseTask = task
         return task
@@ -55,15 +60,21 @@ public struct MediaTransportNetworkFileResolver: MediaTransportNetworkFileResolv
     public typealias SessionKeyProvider = @Sendable (
         _ locator: NetworkFileLocator
     ) async throws -> MediaTransportSessionKey
+    public typealias PlaybackLeaseProvider = @Sendable (
+        _ locator: NetworkFileLocator
+    ) async throws -> MediaIOPlaybackLease?
 
     private let registry: MediaTransportResolverRegistry
     private let sessionKeyProvider: SessionKeyProvider
+    private let playbackLeaseProvider: PlaybackLeaseProvider
 
     public init(
         registry: MediaTransportResolverRegistry,
+        playbackLeaseProvider: @escaping PlaybackLeaseProvider = { _ in nil },
         sessionKeyProvider: @escaping SessionKeyProvider
     ) {
         self.registry = registry
+        self.playbackLeaseProvider = playbackLeaseProvider
         self.sessionKeyProvider = sessionKeyProvider
     }
 
@@ -75,15 +86,24 @@ public struct MediaTransportNetworkFileResolver: MediaTransportNetworkFileResolv
             throw MediaTransportError.invalidInput(reason: "network-file session identity mismatch")
         }
 
-        let sessionLease = try await registry.lease(for: key)
+        let playbackLease = try await playbackLeaseProvider(locator)
+        let sessionLease: MediaTransportResolverLease
+        do {
+            sessionLease = try await registry.lease(for: key)
+        } catch {
+            await playbackLease?.releaseAndWait()
+            throw error
+        }
         do {
             let sourceLease = try await sessionLease.session.fileSystem.openSource(for: locator)
             return MediaTransportResolvedSource(
                 sourceLease: sourceLease,
-                sessionLease: sessionLease
+                sessionLease: sessionLease,
+                playbackLease: playbackLease
             )
         } catch {
             sessionLease.release()
+            await playbackLease?.releaseAndWait()
             throw error
         }
     }

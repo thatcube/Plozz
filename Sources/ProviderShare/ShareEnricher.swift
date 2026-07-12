@@ -10,7 +10,7 @@ import CoreNetworking
 /// Foreground, incremental, cancellation-safe, and bounded: it processes a few
 /// items concurrently, persists each result (marking it done at the current
 /// enrichment version so it isn't re-fetched), and stops cleanly on cancel or when
-/// nothing is pending. Kicked by `ShareCatalogRegistry` after each scan.
+/// nothing is pending. Kicked by `ShareCatalogCoordinator` after each scan.
 actor ShareEnricher {
     /// Bump when the resolver's output materially changes, to re-enrich everything.
     static let version = 1

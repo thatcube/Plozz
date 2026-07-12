@@ -848,6 +848,7 @@ public final class AppState {
     private let registry: ProviderRegistry
     public let networkFileResolver: any MediaTransportNetworkFileResolving
     private let networkFileResolverRegistry: MediaTransportResolverRegistry?
+    private let shareCatalogCoordinator: ShareCatalogCoordinator
     /// Optional tvOS system-user seam (default app-owned no-op). See
     /// `SystemProfileBridging`.
     private let systemBridge: SystemProfileBridging
@@ -915,6 +916,7 @@ public final class AppState {
         accountStore: AccountPersisting? = nil,
         registry: ProviderRegistry? = nil,
         networkFileResolver: (any MediaTransportNetworkFileResolving)? = nil,
+        shareCatalogCoordinator: ShareCatalogCoordinator? = nil,
         profilesModel: ProfilesModel? = nil,
         systemBridge: SystemProfileBridging? = nil,
         subtitleBehaviorModel: SubtitleBehaviorModel? = nil,
@@ -942,13 +944,17 @@ public final class AppState {
     ) {
         let resolvedAccountStore = accountStore ?? Self.makeDefaultAccountStore()
         self.accountStore = resolvedAccountStore
+        let resolvedShareCatalogCoordinator = shareCatalogCoordinator
+            ?? ShareCatalogCoordinator()
+        self.shareCatalogCoordinator = resolvedShareCatalogCoordinator
         let resolvedNetworkFileResolver: any MediaTransportNetworkFileResolving
         if let networkFileResolver {
             resolvedNetworkFileResolver = networkFileResolver
             self.networkFileResolverRegistry = nil
         } else {
             let composition = Self.makeDefaultNetworkFileResolver(
-                accountStore: resolvedAccountStore
+                accountStore: resolvedAccountStore,
+                shareCatalogCoordinator: resolvedShareCatalogCoordinator
             )
             resolvedNetworkFileResolver = composition.resolver
             self.networkFileResolverRegistry = composition.registry
@@ -956,7 +962,8 @@ public final class AppState {
         self.networkFileResolver = resolvedNetworkFileResolver
         self.registry = registry ?? Self.makeDefaultRegistry(
             accountStore: resolvedAccountStore,
-            networkFileResolver: resolvedNetworkFileResolver
+            networkFileResolver: resolvedNetworkFileResolver,
+            shareCatalogCoordinator: resolvedShareCatalogCoordinator
         )
         self.profilesModel = profilesModel ?? Self.makeDefaultProfilesModel()
         self.systemBridge = systemBridge ?? Self.makeDefaultSystemBridge()
@@ -1032,12 +1039,14 @@ public final class AppState {
             )
         }
 
-        // Wire the media-share scan/enrich progress reporter into the (process-wide)
-        // share catalog registry, so the first share query (from Home) reports into
+        // Wire the media-share scan/enrich progress reporter into the app-owned
+        // catalog coordinator, so the first share query (from Home) reports into
         // this model and the "Updating library…" banner + Settings last-scanned line
         // light up. The reporter is a Sendable value; capture it before the Task.
         let scanReporter = self.shareScanStatusModel.reporter()
-        Task { await ShareLibraryControl.configure(reporter: scanReporter) }
+        Task {
+            await resolvedShareCatalogCoordinator.configure(reporter: scanReporter)
+        }
     }
 
     /// Force a fresh scan + enrichment of a media share now (Settings "Scan now").
@@ -1114,7 +1123,8 @@ public final class AppState {
     /// `register(kind, …)` line; nothing else in core changes.
     private static func makeDefaultRegistry(
         accountStore: any AccountPersisting,
-        networkFileResolver: any MediaTransportNetworkFileResolving
+        networkFileResolver: any MediaTransportNetworkFileResolving,
+        shareCatalogCoordinator: ShareCatalogCoordinator
     ) -> ProviderRegistry {
         let registry = ProviderRegistry()
         let smbAdapter = makeSMBAdapter(accountStore: accountStore)
@@ -1167,6 +1177,7 @@ public final class AppState {
                 localMediaContext: localMediaContext,
                 credentialRevision: credentialRevision,
                 sessionFactory: sessionFactory,
+                catalogCoordinator: shareCatalogCoordinator,
                 streamProber: PlozzigenNetworkFileStreamProber(
                     resolver: networkFileResolver
                 )
@@ -1181,13 +1192,19 @@ public final class AppState {
     }
 
     private static func makeDefaultNetworkFileResolver(
-        accountStore: any AccountPersisting
+        accountStore: any AccountPersisting,
+        shareCatalogCoordinator: ShareCatalogCoordinator
     ) -> NetworkFileResolverComposition {
         let transportRegistry = MediaTransportResolverRegistry(
             adapter: makeSMBAdapter(accountStore: accountStore)
         )
         let resolver = MediaTransportNetworkFileResolver(
-            registry: transportRegistry
+            registry: transportRegistry,
+            playbackLeaseProvider: { locator in
+                try await shareCatalogCoordinator.acquirePlayback(
+                    accountKey: locator.accountID
+                )
+            }
         ) { locator in
             guard locator.sourceID == locator.accountID,
                   let account = accountStore.loadAccounts().first(where: {
@@ -2029,7 +2046,7 @@ public final class AppState {
         }
         if let shareAccountKey {
             Task {
-                await ShareLibraryControl.invalidate(accountKey: shareAccountKey)
+                await self.shareCatalogCoordinator.invalidate(accountKey: shareAccountKey)
             }
         }
         plexTokenOverrides[id] = nil
@@ -2056,7 +2073,7 @@ public final class AppState {
         removedAccounts.forEach(retireNetworkFileRevision)
         for accountKey in shareAccountKeys {
             Task {
-                await ShareLibraryControl.invalidate(accountKey: accountKey)
+                await self.shareCatalogCoordinator.invalidate(accountKey: accountKey)
             }
         }
         plexTokenOverrides.removeAll()
@@ -2079,7 +2096,7 @@ public final class AppState {
         removedAccounts.forEach(retireNetworkFileRevision)
         for accountKey in shareAccountKeys {
             Task {
-                await ShareLibraryControl.invalidate(accountKey: accountKey)
+                await self.shareCatalogCoordinator.invalidate(accountKey: accountKey)
             }
         }
         plexTokenOverrides.removeAll()

@@ -85,7 +85,7 @@ public final class MediaIOPlaybackLease: @unchecked Sendable {
     private let id: UUID
     private let arbiter: MediaIOArbiter
     private let lock = NSLock()
-    private var isReleased = false
+    private var releaseTask: Task<Void, Never>?
 
     fileprivate init(id: UUID, arbiter: MediaIOArbiter) {
         self.id = id
@@ -97,17 +97,25 @@ public final class MediaIOPlaybackLease: @unchecked Sendable {
     }
 
     public func release() {
-        let shouldRelease = lock.withLock {
-            guard !isReleased else { return false }
-            isReleased = true
-            return true
-        }
-        if shouldRelease {
+        _ = taskForRelease()
+    }
+
+    public func releaseAndWait() async {
+        await taskForRelease().value
+    }
+
+    private func taskForRelease() -> Task<Void, Never> {
+        lock.withLock {
+            if let releaseTask {
+                return releaseTask
+            }
             let arbiter = self.arbiter
             let id = self.id
-            Task { [arbiter, id] in
+            let task = Task { [arbiter, id] in
                 await arbiter.releasePlayback(id: id)
             }
+            releaseTask = task
+            return task
         }
     }
 }
@@ -124,7 +132,7 @@ public actor MediaIOArbiter {
     private let drainTimeout: Duration
     private var nextGeneration: UInt64 = 0
     private var activeScanner: ScannerAdmission?
-    private var playbackID: UUID?
+    private var playbackIDs: Set<UUID> = []
     private var playbackPending = false
     private var scannerTransitionPending = false
 
@@ -141,7 +149,7 @@ public actor MediaIOArbiter {
     public func acquireScanner(
         resource: any MediaIOScannerResource
     ) async throws -> MediaIOScannerLease {
-        guard playbackID == nil, !playbackPending, !scannerTransitionPending else {
+        guard playbackIDs.isEmpty, !playbackPending, !scannerTransitionPending else {
             throw MediaTransportError.resourceBusy
         }
         nextGeneration &+= 1
@@ -159,7 +167,7 @@ public actor MediaIOArbiter {
             }
         }
         try Task.checkCancellation()
-        guard playbackID == nil, !playbackPending, activeScanner == nil else {
+        guard playbackIDs.isEmpty, !playbackPending, activeScanner == nil else {
             throw MediaTransportError.resourceBusy
         }
         activeScanner = ScannerAdmission(
@@ -170,8 +178,13 @@ public actor MediaIOArbiter {
     }
 
     public func acquirePlayback() async throws -> MediaIOPlaybackLease {
-        guard playbackID == nil, !playbackPending, !scannerTransitionPending else {
+        guard !playbackPending, !scannerTransitionPending else {
             throw MediaTransportError.resourceBusy
+        }
+        if activeScanner == nil {
+            let id = UUID()
+            playbackIDs.insert(id)
+            return MediaIOPlaybackLease(id: id, arbiter: self)
         }
         playbackPending = true
         defer { playbackPending = false }
@@ -186,11 +199,11 @@ public actor MediaIOArbiter {
             }
         }
         try Task.checkCancellation()
-        guard playbackID == nil, activeScanner == nil, !scannerTransitionPending else {
+        guard activeScanner == nil, !scannerTransitionPending else {
             throw MediaTransportError.resourceBusy
         }
         let id = UUID()
-        playbackID = id
+        playbackIDs.insert(id)
         return MediaIOPlaybackLease(id: id, arbiter: self)
     }
 
@@ -211,7 +224,6 @@ public actor MediaIOArbiter {
     }
 
     fileprivate func releasePlayback(id: UUID) {
-        guard playbackID == id else { return }
-        playbackID = nil
+        playbackIDs.remove(id)
     }
 }

@@ -231,16 +231,26 @@ final class SourceLeaseAndArbiterTests: XCTestCase {
         scannerLease.finish()
     }
 
-    func testPlaybackIsExclusive() async throws {
+    func testOverlappingPlaybackLeasesBlockScannerUntilAllRelease() async throws {
         let arbiter = MediaIOArbiter(accountID: "account")
-        let playback = try await arbiter.acquirePlayback()
+        let firstPlayback = try await arbiter.acquirePlayback()
+        let secondPlayback = try await arbiter.acquirePlayback()
         do {
-            _ = try await arbiter.acquirePlayback()
-            XCTFail("second playback admitted")
+            _ = try await arbiter.acquireScanner(resource: FakeScannerResource())
+            XCTFail("scanner admitted during overlapping playback")
         } catch let error as MediaTransportError {
             XCTAssertEqual(error, .resourceBusy)
         }
-        playback.release()
+        await firstPlayback.releaseAndWait()
+        do {
+            _ = try await arbiter.acquireScanner(resource: FakeScannerResource())
+            XCTFail("scanner admitted before final playback released")
+        } catch let error as MediaTransportError {
+            XCTAssertEqual(error, .resourceBusy)
+        }
+        await secondPlayback.releaseAndWait()
+        let scanner = try await arbiter.acquireScanner(resource: FakeScannerResource())
+        await scanner.finishAndWait()
     }
 
     func testReplacingScannerCreatesDisposableGeneration() async throws {

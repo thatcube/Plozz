@@ -428,6 +428,64 @@ final class ContractsAndResolverTests: XCTestCase {
         XCTAssertTrue(sessionFinalized)
     }
 
+    func testNetworkFileResolutionPinsExclusivePlaybackUntilSourceDrains() async throws {
+        let revision = CredentialRevision()
+        let key = try makeSessionKey(
+            credentialRevision: revision,
+            role: .playback
+        )
+        let session = FakeSession(key: key)
+        let registry = MediaTransportResolverRegistry()
+        try await registry.register(session: session)
+        let arbiter = MediaIOArbiter(
+            accountID: key.accountID,
+            deadline: FakeDrainDeadline(drains: true)
+        )
+        let scannerResource = FakeScannerResource()
+        let scannerLease = try await arbiter.acquireScanner(resource: scannerResource)
+        let resolver = MediaTransportNetworkFileResolver(
+            registry: registry,
+            playbackLeaseProvider: { _ in
+                try await arbiter.acquirePlayback()
+            },
+            sessionKeyProvider: { _ in key }
+        )
+        let representation = try RemoteFileRepresentation(
+            size: 0,
+            identity: RemoteFileIdentity(kind: .snapshot, value: "snapshot-1"),
+            consistency: .stronglyBound
+        )
+        let locator = try NetworkFileLocator(
+            accountID: key.accountID,
+            sourceID: key.accountID,
+            credentialRevision: revision,
+            relativePath: "movie.mkv",
+            representation: representation
+        )
+
+        let resolved = try await resolver.resolve(locator)
+        let handoff = try await resolver.resolve(locator)
+        XCTAssertEqual(scannerResource.cancelCount, 1)
+        do {
+            _ = try await arbiter.acquireScanner(resource: FakeScannerResource())
+            XCTFail("scanner admitted while the resolved source held playback")
+        } catch let error as MediaTransportError {
+            XCTAssertEqual(error, .resourceBusy)
+        }
+
+        await resolved.waitForFinalShutdown()
+        do {
+            _ = try await arbiter.acquireScanner(resource: FakeScannerResource())
+            XCTFail("scanner admitted before the handoff source drained")
+        } catch let error as MediaTransportError {
+            XCTAssertEqual(error, .resourceBusy)
+        }
+        await handoff.waitForFinalShutdown()
+        let nextScanner = try await arbiter.acquireScanner(resource: FakeScannerResource())
+        await nextScanner.finishAndWait()
+        await scannerLease.finishAndWait()
+    }
+
     func testNetworkFileResolverRejectsMismatchedSessionIdentity() async throws {
         let revision = CredentialRevision()
         let key = try makeSessionKey(

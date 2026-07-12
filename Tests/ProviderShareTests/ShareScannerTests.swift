@@ -71,6 +71,140 @@ final class ShareScannerTests: XCTestCase {
         }
     }
 
+    private final class BlockingListGate: @unchecked Sendable {
+        private let lock = NSLock()
+        private var started = false
+        private var opened = false
+        private var startWaiters: [CheckedContinuation<Void, Never>] = []
+        private var openWaiters: [CheckedContinuation<Void, Never>] = []
+
+        func wait() async {
+            let starts = lock.withLock {
+                started = true
+                let waiters = startWaiters
+                startWaiters.removeAll()
+                return waiters
+            }
+            starts.forEach { $0.resume() }
+            await withCheckedContinuation { continuation in
+                let shouldResume = lock.withLock {
+                    guard !opened else { return true }
+                    openWaiters.append(continuation)
+                    return false
+                }
+                if shouldResume {
+                    continuation.resume()
+                }
+            }
+        }
+
+        func waitUntilStarted() async {
+            await withCheckedContinuation { continuation in
+                let shouldResume = lock.withLock {
+                    guard !started else { return true }
+                    startWaiters.append(continuation)
+                    return false
+                }
+                if shouldResume {
+                    continuation.resume()
+                }
+            }
+        }
+
+        func open() {
+            let waiters = lock.withLock {
+                opened = true
+                let waiters = openWaiters
+                openWaiters.removeAll()
+                return waiters
+            }
+            waiters.forEach { $0.resume() }
+        }
+    }
+
+    private final class ShutdownCounter: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value = 0
+
+        var count: Int { lock.withLock { value } }
+
+        func increment() {
+            lock.withLock { value += 1 }
+        }
+    }
+
+    private final class BlockingListFileSystem: MediaTransportFileSystem, @unchecked Sendable {
+        private let gate: BlockingListGate
+
+        init(gate: BlockingListGate) {
+            self.gate = gate
+        }
+
+        func validate() async throws {}
+
+        func probe() async throws -> MediaTransportProbe {
+            MediaTransportProbe(
+                capabilities: try MediaTransportCapabilities(
+                    supportsList: true,
+                    supportsStat: true,
+                    supportsBoundedWholeFileRead: false,
+                    byteRangeBehavior: .unsupported,
+                    maximumBoundedWholeFileReadBytes: nil,
+                    consistency: .changeDetecting
+                )
+            )
+        }
+
+        func list(relativePath: String) async throws -> [RemoteFileEntry] {
+            await gate.wait()
+            return []
+        }
+
+        func stat(relativePath: String) async throws -> RemoteFileEntry {
+            throw MediaTransportError.unsupportedCapability("stat")
+        }
+
+        func readSmallFile(relativePath: String, maximumBytes: Int) async throws -> Data {
+            throw MediaTransportError.unsupportedCapability("bounded read")
+        }
+
+        func openSource(for locator: NetworkFileLocator) async throws -> MediaTransportSourceLease {
+            throw MediaTransportError.unsupportedCapability("source")
+        }
+    }
+
+    private final class BlockingListSession: MediaTransportSession, @unchecked Sendable {
+        let key: MediaTransportSessionKey
+        let fileSystem: any MediaTransportFileSystem
+        private let gate: BlockingListGate
+        private let shutdownCounter: ShutdownCounter
+
+        init(
+            key: MediaTransportSessionKey,
+            gate: BlockingListGate,
+            shutdownCounter: ShutdownCounter
+        ) {
+            self.key = key
+            self.gate = gate
+            self.shutdownCounter = shutdownCounter
+            fileSystem = BlockingListFileSystem(gate: gate)
+        }
+
+        func shutdown() async {
+            shutdownCounter.increment()
+            gate.open()
+        }
+    }
+
+    private struct ImmediateTimeoutDeadline: MediaIODrainDeadline {
+        func waitForDrain(
+            of resource: any MediaIOScannerResource,
+            timeout: Duration
+        ) async -> Bool {
+            false
+        }
+    }
+
     /// In-memory share: maps a directory rel-path ("" == root) to its entries, and
     /// records which directories were listed so throttling can be asserted.
     private actor FakeShare {
@@ -520,5 +654,52 @@ final class ShareScannerTests: XCTestCase {
         try? await Task.sleep(for: .milliseconds(20))
         let expired = await firstShare.paceIfBrowsing()
         XCTAssertFalse(expired, "full throughput resumes after the activity window")
+    }
+
+    func testCoordinatorForceClosesBlockedScanBeforePlaybackAdmission() async throws {
+        let accountID = "coordinator-\(UUID().uuidString)"
+        let revision = CredentialRevision()
+        let endpoint = try MediaTransportEndpointIdentity(
+            transportIdentifier: "smb",
+            host: "nas.local",
+            rootPath: "/Media"
+        )
+        let gate = BlockingListGate()
+        let shutdownCounter = ShutdownCounter()
+        let coordinator = ShareCatalogCoordinator { accountID in
+            MediaIOArbiter(
+                accountID: accountID,
+                deadline: ImmediateTimeoutDeadline(),
+                drainTimeout: .zero
+            )
+        }
+        let sessionFactory: ShareTransportSessionFactory = { role in
+            BlockingListSession(
+                key: MediaTransportSessionKey(
+                    accountID: accountID,
+                    credentialRevision: revision,
+                    endpoint: endpoint,
+                    trustRevision: UUID(
+                        uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+                    ),
+                    role: role
+                ),
+                gate: gate,
+                shutdownCounter: shutdownCounter
+            )
+        }
+
+        _ = await coordinator.store(
+            accountKey: accountID,
+            displayName: "NAS",
+            credentialRevision: revision,
+            sessionFactory: sessionFactory
+        )
+        await gate.waitUntilStarted()
+
+        let playback = try await coordinator.acquirePlayback(accountKey: accountID)
+        XCTAssertGreaterThanOrEqual(shutdownCounter.count, 1)
+        await playback.releaseAndWait()
+        await coordinator.invalidate(accountKey: accountID)
     }
 }

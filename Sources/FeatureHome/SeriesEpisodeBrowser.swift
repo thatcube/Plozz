@@ -39,6 +39,8 @@ enum SeriesEpisodeBrowserLayout {
     /// ScrollView itself removes its excess vertical proposal while keeping its
     /// rendered frame and tvOS focus-section geometry identical.
     static let seasonBarHeight: CGFloat = 88
+    /// Softens the clipped boundary before the fixed season-request accessory.
+    static let seasonRequestFadeWidth: CGFloat = 72
     /// Prevents the episode rail from absorbing the full-screen stage's surplus
     /// height while preserving normal size proposals for every card.
     static let episodeRailHeight: CGFloat = 520

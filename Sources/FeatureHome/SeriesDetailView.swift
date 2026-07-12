@@ -250,6 +250,7 @@ struct SeriesDetailView: View {
                         // Play-regains-focus case below.
                         onHeroActionFocused: {
                             rearmEpisodeRailOnHeroFocusIfNeeded()
+                            seasonBarEngaged = false
                             recedeModel.restore()
                             if reduceMotion {
                                 proxy.scrollTo(Self.topAnchorID, anchor: .top)
@@ -307,7 +308,8 @@ struct SeriesDetailView: View {
                         item: series,
                         leadingInset: PlozzTheme.Metrics.heroLeadingPadding,
                         seriesRecedeModel: recedeModel,
-                        revealsSeriesCastWithoutBrowser: revealsCastWithoutBrowser
+                        revealsSeriesCastWithoutBrowser: revealsCastWithoutBrowser,
+                        onCastFocusEntered: { seasonBarEngaged = false }
                     )
                         .padding(.top, 32)
                 }
@@ -401,7 +403,12 @@ struct SeriesDetailView: View {
                     // full-viewport spacer used to be what let an already-visible bar
                     // be shifted at all.)
                 }
-                .padding(.trailing, PlozzTheme.Metrics.screenPadding)
+                .padding(
+                    .trailing,
+                    requestAvailability?.hasSeasonRequestContent == true
+                        ? PlozzTheme.Metrics.screenPadding + SeriesEpisodeBrowserLayout.seasonRequestFadeWidth
+                        : PlozzTheme.Metrics.screenPadding
+                )
                 // Headroom for the focused chip's lift so it is never clipped.
                 .padding(.vertical, 12)
             }
@@ -439,15 +446,29 @@ struct SeriesDetailView: View {
             // they never render underneath the fixed "+ Seasons" accessory. The
             // content already carries 12pt of vertical headroom for focus lift.
             .scrollClipDisabled(false)
+            .mask {
+                if requestAvailability?.hasSeasonRequestContent == true {
+                    HStack(spacing: 0) {
+                        Rectangle()
+                            .fill(.white)
+                        LinearGradient(
+                            colors: [.white, .clear],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                        .frame(width: SeriesEpisodeBrowserLayout.seasonRequestFadeWidth)
+                    }
+                } else {
+                    Rectangle()
+                        .fill(.white)
+                }
+            }
             // Inset the whole scroll VIEWPORT to the hero keyline (rather than padding
             // the content), so a chip revealed to `.leading` aligns to the keyline —
             // where "S·E"/Play start — instead of the column edge.
             .padding(.leading, PlozzTheme.Metrics.heroLeadingPadding)
             .onChange(of: focusedSeasonID) { _, newValue in
-                guard let id = newValue else {
-                    scheduleSeasonBandResetIfNeeded()
-                    return
-                }
+                guard let id = newValue else { return }
                 let isEntering = !seasonBarEngaged
                 // We're now inside the bar — open every chip to focus so left/right
                 // navigation between seasons works.
@@ -490,38 +511,11 @@ struct SeriesDetailView: View {
     }
 
     private func seasonRequestMenu(onFocusEntered: @escaping () -> Void) -> some View {
-        let pickerSeasons = requestAvailability?.requestPickerSeasons ?? []
-        let requestable = pickerSeasons.filter(\.isRequestable)
-        return Menu {
-            if requestable.count > 1 {
-                Button("Request All Missing (\(requestable.count))") {
-                    onRequestSeasons?(requestable.map(\.number))
-                }
-                Divider()
-            }
-            ForEach(pickerSeasons) { season in
-                if season.requestFailed {
-                    Button {
-                    } label: {
-                        Label("\(season.title) — Failed", systemImage: "exclamationmark.circle")
-                    }
-                    .disabled(true)
-                } else if season.isRequestable {
-                    Button("Request \(season.title)") {
-                        onRequestSeasons?([season.number])
-                    }
-                } else {
-                    Button {
-                    } label: {
-                        Label(
-                            "\(season.title) — \(season.status == .processing ? "Processing" : "Requested")",
-                            systemImage: season.status == .processing ? "arrow.down.circle" : "clock"
-                        )
-                    }
-                    .disabled(true)
-                }
-            }
-        } label: {
+        SeasonRequestMenu(
+            availability: requestAvailability ?? MediaRequestAvailability(status: .unknown),
+            requestAllTitle: "Request All Missing Seasons",
+            onRequest: { onRequestSeasons?($0) }
+        ) {
             Label(isRequestingSeasons ? "Requesting…" : "Seasons", systemImage: "plus")
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)
@@ -544,19 +538,7 @@ struct SeriesDetailView: View {
                 recedeModel.recede()
                 if isEntering { onFocusEntered() }
                 episodeRailResetToken += 1
-            } else {
-                scheduleSeasonBandResetIfNeeded()
             }
-        }
-    }
-
-    private func scheduleSeasonBandResetIfNeeded() {
-        DispatchQueue.main.async {
-            guard SeriesRequestFocusPolicy.shouldResetBand(
-                focusedSeasonID: focusedSeasonID,
-                requestAccessoryFocused: requestSeasonsFocused
-            ) else { return }
-            seasonBarEngaged = false
         }
     }
 
@@ -693,6 +675,7 @@ struct SeriesDetailView: View {
             focusResetToken: episodeRailResetToken,
             leadingInset: PlozzTheme.Metrics.heroLeadingPadding,
             onFocusEntered: {
+                seasonBarEngaged = false
                 recedeModel.recede()
                 onFocusEntered()
             },
@@ -1166,8 +1149,57 @@ enum SeriesRequestFocusPolicy {
         hasRequestHandler && (!hasOwnedSeasons || seasonBarEngaged)
     }
 
-    static func shouldResetBand(focusedSeasonID: String?, requestAccessoryFocused: Bool) -> Bool {
-        focusedSeasonID == nil && !requestAccessoryFocused
+}
+
+/// The one season-request menu used by both a playable series' fixed "+ Seasons"
+/// accessory and a wholly absent discovery series' hero action.
+struct SeasonRequestMenu<MenuLabel: View>: View {
+    let availability: MediaRequestAvailability
+    let requestAllTitle: String
+    let onRequest: ([Int]) -> Void
+    @ViewBuilder let label: () -> MenuLabel
+
+    private var pickerSeasons: [MediaSeasonRequestState] {
+        availability.requestPickerSeasons
+    }
+
+    private var requestableSeasons: [MediaSeasonRequestState] {
+        pickerSeasons.filter(\.isRequestable)
+    }
+
+    var body: some View {
+        Menu {
+            if requestableSeasons.count > 1 {
+                Button(requestAllTitle) {
+                    onRequest(requestableSeasons.map(\.number))
+                }
+                Divider()
+            }
+            ForEach(pickerSeasons) { season in
+                if season.requestFailed {
+                    Button {
+                    } label: {
+                        Label("\(season.title) — Failed", systemImage: "exclamationmark.circle")
+                    }
+                    .disabled(true)
+                } else if season.isRequestable {
+                    Button("Request \(season.title)") {
+                        onRequest([season.number])
+                    }
+                } else {
+                    Button {
+                    } label: {
+                        Label(
+                            "\(season.title) — \(season.status == .processing ? "Processing" : "Requested")",
+                            systemImage: season.status == .processing ? "arrow.down.circle" : "clock"
+                        )
+                    }
+                    .disabled(true)
+                }
+            }
+        } label: {
+            label()
+        }
     }
 }
 

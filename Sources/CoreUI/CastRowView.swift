@@ -12,17 +12,20 @@ public struct CastRowView: View {
     /// Leading inset for the title and first headshot. Detail pages pass the
     /// hero leading padding so the cast row aligns with the hero text above.
     private let leadingInset: CGFloat
+    private let onFocusEntered: (() -> Void)?
 
     @Environment(\.plozzMetrics) private var metrics
 
     public init(
         title: String = "Cast",
         people: [MediaPerson],
-        leadingInset: CGFloat = PlozzTheme.Metrics.screenPadding
+        leadingInset: CGFloat = PlozzTheme.Metrics.screenPadding,
+        onFocusEntered: (() -> Void)? = nil
     ) {
         self.title = title
         self.people = people
         self.leadingInset = leadingInset
+        self.onFocusEntered = onFocusEntered
     }
 
     public var body: some View {
@@ -37,7 +40,7 @@ public struct CastRowView: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     LazyHStack(spacing: metrics.cardSpacing) {
                         ForEach(people) { person in
-                            CastMemberCard(person: person)
+                            CastMemberCard(person: person, onFocusEntered: onFocusEntered)
                         }
                     }
                     .padding(.leading, leadingInset)
@@ -61,6 +64,7 @@ public struct CastRowView: View {
 /// smaller, density-aware variant of the artist/profile circular style.
 private struct CastMemberCard: View {
     let person: MediaPerson
+    let onFocusEntered: (() -> Void)?
 
     @Environment(\.plozzMetrics) private var metrics
 
@@ -71,6 +75,9 @@ private struct CastMemberCard: View {
             diameter: diameter,
             focusPadding: metrics.circleFocusPadding,
             action: {},
+            onFocusChange: { focused in
+                if focused { onFocusEntered?() }
+            },
             avatar: { avatar },
             caption: { _ in
                 VStack(spacing: 2) {

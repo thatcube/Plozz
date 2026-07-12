@@ -511,12 +511,22 @@ struct SeriesDetailView: View {
     }
 
     private func seasonRequestMenu(onFocusEntered: @escaping () -> Void) -> some View {
-        SeasonRequestMenu(
+        let hasRequestable = !(requestAvailability?.requestableSeasonNumbers.isEmpty ?? true)
+        return SeasonRequestMenu(
             availability: requestAvailability ?? MediaRequestAvailability(status: .unknown),
             requestAllTitle: "Request All Missing Seasons",
             onRequest: { onRequestSeasons?($0) }
         ) {
-            Label(isRequestingSeasons ? "Requesting…" : "Seasons", systemImage: "plus")
+            Label(
+                SeriesRequestAccessoryPresentation.title(
+                    hasRequestable: hasRequestable,
+                    isRequesting: isRequestingSeasons
+                ),
+                systemImage: SeriesRequestAccessoryPresentation.systemImage(
+                    hasRequestable: hasRequestable,
+                    isRequesting: isRequestingSeasons
+                )
+            )
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)
         }
@@ -1149,6 +1159,17 @@ enum SeriesRequestFocusPolicy {
         hasRequestHandler && (!hasOwnedSeasons || seasonBarEngaged)
     }
 
+}
+
+enum SeriesRequestAccessoryPresentation {
+    static func title(hasRequestable: Bool, isRequesting: Bool) -> String {
+        if isRequesting { return "Requesting…" }
+        return hasRequestable ? "Request More" : "Season Requests"
+    }
+
+    static func systemImage(hasRequestable: Bool, isRequesting: Bool) -> String {
+        isRequesting || hasRequestable ? "plus" : "list.bullet.rectangle"
+    }
 }
 
 /// The one season-request menu used by both a playable series' fixed "+ Seasons"

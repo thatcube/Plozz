@@ -97,4 +97,19 @@ final class SeriesDetailBrowserPolicyTests: XCTestCase {
         ))
     }
 
+    func testRequestAccessoryCopyReflectsAvailableActions() {
+        XCTAssertEqual(
+            SeriesRequestAccessoryPresentation.title(hasRequestable: true, isRequesting: false),
+            "Request More"
+        )
+        XCTAssertEqual(
+            SeriesRequestAccessoryPresentation.title(hasRequestable: false, isRequesting: false),
+            "Season Requests"
+        )
+        XCTAssertEqual(
+            SeriesRequestAccessoryPresentation.title(hasRequestable: true, isRequesting: true),
+            "Requesting…"
+        )
+    }
+
 }

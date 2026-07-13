@@ -50,7 +50,10 @@ actor ShareEnricher {
     /// of merging, so stale artwork from a previous wrong match is dropped (a "TP"
     /// folder that once cached TAP Portugal's logo no longer keeps it under the
     /// corrected "The Punisher").
-    static let version = 13
+    /// v14: prefer the English title too (not just non-Latin overviews) when the
+    /// resolved name doesn't resemble the searched title — TheTVDB serves a foreign
+    /// primary name in Latin script for some shows ("The Eternaut" → "El eternauta").
+    static let version = 14
 
     private let store: ShareCatalogStore
     private let resolver: ShareMetadataResolving

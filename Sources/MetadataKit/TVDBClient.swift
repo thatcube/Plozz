@@ -274,7 +274,38 @@ public actor TVDBClient {
         // Prefer the English name/overview when the base record is another language
         // (TheTVDB serves the primary-language text for many anime — Japanese for
         // Death Note / One Piece / "…Slime").
-        return await preferEnglish(chosen.asMetadata(), isMovie: isMovie, token: token)
+        return await preferEnglish(chosen.asMetadata(), query: query, isMovie: isMovie, token: token)
+    }
+
+    /// Overlay the official English name/overview onto a metadata whose base text is
+    /// another language. Fetches the `/translations/eng` record when the base text is
+    /// non-Latin script (Japanese/…) OR the resolved title doesn't RESEMBLE what we
+    /// searched for — the sign TheTVDB served a foreign primary name in a Latin
+    /// script too ("The Eternaut" folder → primary "El eternauta"). English shows,
+    /// whose resolved title matches the query, cost no extra request.
+    private func preferEnglish(_ meta: TVDBMetadata, query: String, isMovie: Bool, token: String) async -> TVDBMetadata {
+        guard let id = meta.tvdbID, !id.isEmpty else { return meta }
+        let titleForeign = Self.isNonLatinText(meta.title) || !Self.titleResembles(meta.title, query)
+        let overviewForeign = Self.isNonLatinText(meta.overview)
+        guard titleForeign || overviewForeign else { return meta }
+        let type = isMovie ? "movies" : "series"
+        guard let t = await translation(type: type, id: id, language: "eng", token: token) else { return meta }
+        var m = meta
+        if overviewForeign || titleForeign, let o = t.overview?.nonEmpty { m.overview = o }
+        if titleForeign, let n = t.name?.nonEmpty { m.title = n }
+        return m
+    }
+
+    /// Whether a resolved title plausibly refers to the same show we searched for:
+    /// normalized-equal, or one a word-prefix of the other ("Avatar" ⊂ "Avatar The
+    /// Last Airbender"). A resolved title that resembles the query is trusted as-is;
+    /// one that doesn't is likely a foreign primary name to be replaced with English.
+    static func titleResembles(_ title: String?, _ query: String) -> Bool {
+        guard let title else { return false }
+        let a = normalizedTitleKey(title)
+        let b = normalizedTitleKey(query)
+        guard !a.isEmpty, !b.isEmpty else { return false }
+        return a == b || a.hasPrefix(b + " ") || b.hasPrefix(a + " ")
     }
 
     /// Non-canonical "variant" markers — a result adding one of these words the
@@ -291,23 +322,6 @@ public actor TVDBClient {
         let nameTokens = Set(normalizedTitleKey(name).split(separator: " ").map(String.init))
         let queryTokens = Set(normalizedTitleKey(query).split(separator: " ").map(String.init))
         return !nameTokens.subtracting(queryTokens).isDisjoint(with: variantTokens)
-    }
-
-    /// Overlay the official English name/overview onto a metadata whose base text is
-    /// another language. Only fetches the `/translations/eng` record when the base
-    /// name or overview actually contains non-Latin script, so English shows cost no
-    /// extra request.
-    private func preferEnglish(_ meta: TVDBMetadata, isMovie: Bool, token: String) async -> TVDBMetadata {
-        guard let id = meta.tvdbID, !id.isEmpty else { return meta }
-        let overviewNeedsEnglish = Self.isNonLatinText(meta.overview)
-        let titleNeedsEnglish = Self.isNonLatinText(meta.title)
-        guard overviewNeedsEnglish || titleNeedsEnglish else { return meta }
-        let type = isMovie ? "movies" : "series"
-        guard let t = await translation(type: type, id: id, language: "eng", token: token) else { return meta }
-        var m = meta
-        if overviewNeedsEnglish, let o = t.overview?.nonEmpty { m.overview = o }
-        if titleNeedsEnglish, let n = t.name?.nonEmpty { m.title = n }
-        return m
     }
 
     /// Whether `s` contains characters from a non-Latin script (CJK, kana, hangul,

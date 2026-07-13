@@ -79,4 +79,17 @@ final class TVDBTitleMatchTests: XCTestCase {
         XCTAssertFalse(TVDBClient.isNonLatinText(nil))
         XCTAssertFalse(TVDBClient.isNonLatinText(""))
     }
+
+    // MARK: - Foreign Latin-script title detection (drives English overlay)
+
+    func testTitleResembles() {
+        // Same / prefix-related titles resemble the query and are trusted as-is.
+        XCTAssertTrue(TVDBClient.titleResembles("The Eternaut", "The Eternaut"))
+        XCTAssertTrue(TVDBClient.titleResembles("Avatar The Last Airbender", "Avatar"))
+        XCTAssertTrue(TVDBClient.titleResembles("Halo", "halo"))
+        // A foreign primary name does NOT resemble the English folder → triggers the
+        // English-translation fetch.
+        XCTAssertFalse(TVDBClient.titleResembles("El eternauta", "The Eternaut"))
+        XCTAssertFalse(TVDBClient.titleResembles(nil, "Whatever"))
+    }
 }

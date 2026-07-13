@@ -64,6 +64,13 @@ public enum HandoffDiagnostics {
         String(format: "%.0fms", to.timeIntervalSince(from) * 1000)
     }
 
+    /// Returns the bounded persistent playback journal after pending writes
+    /// finish. This lets the in-app sender collect it without copying the app
+    /// container, which terminates the tvOS process.
+    public static func persistentPlaybackLogText() -> String {
+        recorder.snapshot()
+    }
+
     public static func errorCode(_ error: AppError) -> String {
         switch error {
         case .serverUnreachable: return "serverUnreachable"
@@ -80,10 +87,33 @@ public enum HandoffDiagnostics {
         }
     }
 
+    /// Bounded, secret-safe detail for diagnostics that originate below Plozz's
+    /// typed error boundary. URLs and common credential assignments are removed.
+    public static func redactedDetail(_ raw: String) -> String {
+        var result = raw.replacingOccurrences(
+            of: #"https?://\S+"#,
+            with: "<url>",
+            options: .regularExpression
+        )
+        result = result.replacingOccurrences(
+            of: #"(?i)(authorization|x-plex-token|token|secret|api[_-]?key)\s*[:=]\s*([^\s&]+)"#,
+            with: "$1=<redacted>",
+            options: .regularExpression
+        )
+        result = result
+            .replacingOccurrences(
+                of: #"\s+"#,
+                with: " ",
+                options: .regularExpression
+            )
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return String(result.prefix(500))
+    }
+
     private final class Gate: @unchecked Sendable {
         private let lock = NSLock()
         private var enabled: Bool = {
-            #if DEBUG
+            #if PLOZZ_DIAGNOSTICS
             true
             #else
             ProcessInfo.processInfo.environment["PLZXHAND_STDOUT"] == "1"
@@ -103,11 +133,15 @@ public enum HandoffDiagnostics {
         private let maximumBytes = 64 * 1024
 
         func append(_ line: String) {
-            #if DEBUG
+            #if PLOZZ_DIAGNOSTICS
             queue.async {
                 guard let url = Self.traceURL() else { return }
                 var data = (try? Data(contentsOf: url)) ?? Data()
-                data.append(Data(("PLZXHAND \(line)\n").utf8))
+                let timestamp = String(
+                    format: "%.3f",
+                    Date().timeIntervalSince1970
+                )
+                data.append(Data(("\(timestamp) PLZXHAND \(line)\n").utf8))
                 if data.count > self.maximumBytes {
                     data = Data(data.suffix(self.maximumBytes))
                 }
@@ -117,6 +151,20 @@ public enum HandoffDiagnostics {
                 )
                 try? data.write(to: url, options: .atomic)
             }
+            #endif
+        }
+
+        func snapshot() -> String {
+            #if PLOZZ_DIAGNOSTICS
+            return queue.sync {
+                guard let url = Self.traceURL(),
+                      let data = try? Data(contentsOf: url) else {
+                    return ""
+                }
+                return String(decoding: data, as: UTF8.self)
+            }
+            #else
+            return ""
             #endif
         }
 

@@ -1372,7 +1372,17 @@ private struct PlayerPresentation: View {
         }
         .task {
             if viewModel == nil {
+                HandoffDiagnostics.emit(
+                    "presentation READY trace=\(activeRequest.traceID.uuidString.prefix(8)) "
+                        + "item=\(activeRequest.item.id) "
+                        + "tapToPresentation=\(HandoffDiagnostics.ms(activeRequest.requestedAt))"
+                )
                 viewModel = make(activeRequest, nil)
+                HandoffDiagnostics.emit(
+                    "viewModel CREATED trace=\(activeRequest.traceID.uuidString.prefix(8)) "
+                        + "item=\(activeRequest.item.id) "
+                        + "tapToModel=\(HandoffDiagnostics.ms(activeRequest.requestedAt))"
+                )
             }
         }
         .onChange(of: viewModel?.pendingNextEpisode?.id) { _, nextID in
@@ -1739,9 +1749,17 @@ private struct HomeTab: View {
     /// (movie or episode), prompting Resume vs Start Over when it has progress.
     private func presentPlay(_ target: MediaItem) {
         if let resume = target.resumePosition, resume > 1 {
+            HandoffDiagnostics.emit(
+                "tap RESUME_PROMPT item=\(target.id) provider=\(target.sourceAccountID ?? "nil")"
+            )
             resumePrompt = target
         } else {
-            playRequest = PlayRequest(item: target, startPosition: 0)
+            let request = PlayRequest(item: target, startPosition: 0)
+            HandoffDiagnostics.emit(
+                "tap PLAY trace=\(request.traceID.uuidString.prefix(8)) item=\(target.id) "
+                    + "provider=\(target.sourceAccountID ?? "nil")"
+            )
+            playRequest = request
         }
     }
 
@@ -1782,6 +1800,21 @@ private struct HomeTab: View {
 private struct PlayRequest: Identifiable, Equatable {
     let item: MediaItem
     let startPosition: TimeInterval
+    let traceID: UUID
+    let requestedAt: Date
+
+    init(
+        item: MediaItem,
+        startPosition: TimeInterval,
+        traceID: UUID = UUID(),
+        requestedAt: Date = Date()
+    ) {
+        self.item = item
+        self.startPosition = startPosition
+        self.traceID = traceID
+        self.requestedAt = requestedAt
+    }
+
     var id: String { item.id }
 }
 
@@ -1845,7 +1878,15 @@ private extension View {
             )
         }
         .resumePrompt(item: resumePrompt) { item, startPosition in
-            playRequest.wrappedValue = PlayRequest(item: item, startPosition: startPosition)
+            let request = PlayRequest(
+                item: item,
+                startPosition: startPosition
+            )
+            HandoffDiagnostics.emit(
+                "tap RESUME_CHOICE trace=\(request.traceID.uuidString.prefix(8)) "
+                    + "item=\(item.id) start=\(Int(startPosition))"
+            )
+            playRequest.wrappedValue = request
         }
     }
 }

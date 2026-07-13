@@ -175,8 +175,17 @@ public final class PlozzigenVideoEngine: VideoEngine {
             // apply/reset lines to the hand-off telemetry stdout channel, so
             // time-to-first-frame and the panel HDR/DV enter/exit are visible on
             // device (e.g. confirm the panel resets to SDR when a title ends).
-            if handoff, line.contains("[TTFF]") || line.contains("[DisplayCriteria]") {
-                HandoffDiagnostics.emit("aether " + line)
+            let lowered = line.lowercased()
+            let isFailureDetail = [
+                "failed", "failure", "error", "starved", "stalled", "watchdog"
+            ].contains { lowered.contains($0) }
+            if handoff,
+               line.contains("[TTFF]")
+                || line.contains("[DisplayCriteria]")
+                || isFailureDetail {
+                HandoffDiagnostics.emit(
+                    "aether " + HandoffDiagnostics.redactedDetail(line)
+                )
             }
         }
     }
@@ -395,6 +404,10 @@ public final class PlozzigenVideoEngine: VideoEngine {
                 case .ended:
                     self.onEnded?()
                 case .error(let msg):
+                    HandoffDiagnostics.emit(
+                        "aether STATE_ERROR detail="
+                            + HandoffDiagnostics.redactedDetail(msg)
+                    )
                     let err: AppError = .unknown(msg)
                     self.status = .failed(err)
                     self.onFailure?(err)

@@ -233,6 +233,10 @@ public final class PlayerViewModel {
     /// Guards the cross-engine swap so it only ever fires once: a chosen engine's
     /// failure swaps to the *other* engine exactly once before escalating.
     private var hasTriedAlternateEngine = false
+    /// A typed network file has no native/server-transcode fallback. One fresh
+    /// Plozzigen instance retry recovers the observed intermittent AVPlayer/HLS
+    /// post-start stall without requiring the viewer to Back out and press Play.
+    private var hasRetriedNetworkFileEngine = false
     /// Guards the automatic transcode fallback so it only ever fires once — a
     /// second failure surfaces the error instead of looping.
     private var hasAttemptedTranscodeFallback = false
@@ -528,6 +532,9 @@ public final class PlayerViewModel {
         // Kick off bring-up now so playbackInfo + engine warm-up run *during* the
         // navigation transition. `load()` (from the view's `.task`) adopts this
         // task; `stop()` cancels it on an early Back.
+        HandoffDiagnostics.emit(
+            "viewModel INIT item=\(itemID) provider=\(provider.kind.rawValue)"
+        )
         prefetchTask = Task { @MainActor [weak self] in
             await self?.startPlayback(forceTranscode: false, resumeOverride: nil)
         }
@@ -543,8 +550,9 @@ public final class PlayerViewModel {
     }
 
     private func configureEngineCallbacks() {
+        let callbackEngineToken = engineToken
         engine.onProgress = { [weak self] in
-            guard let self else { return }
+            guard let self, self.engineToken == callbackEngineToken else { return }
             // Jellyfin (non-idempotent) next-episode prefetch fires once the
             // hand-off window opens; idempotent providers prefetch eagerly instead.
             self.maybeStartWindowedNextPrefetch()
@@ -552,11 +560,17 @@ public final class PlayerViewModel {
             Task { await self.report(event: .progress, isPaused: false) }
         }
         engine.onFailure = { [weak self] error in
-            guard let self else { return }
-            Task { await self.handleEngineFailure(error) }
+            guard let self, self.engineToken == callbackEngineToken else { return }
+            Task {
+                await self.handleEngineFailure(
+                    error,
+                    sourceEngineToken: callbackEngineToken
+                )
+            }
         }
         engine.onEnded = { [weak self] in
-            self?.handlePlaybackEnded()
+            guard let self, self.engineToken == callbackEngineToken else { return }
+            self.handlePlaybackEnded()
         }
         // Engines that discover tracks asynchronously (Plozzigen) tell us to
         // rebuild the options menu once their lists arrive — otherwise the menu,
@@ -564,7 +578,7 @@ public final class PlayerViewModel {
         // also the moment Plozzigen's tracks first become known, so it's where we
         // route its load-time default subtitle through the overlay.
         engine.onTracksChanged = { [weak self] in
-            guard let self else { return }
+            guard let self, self.engineToken == callbackEngineToken else { return }
             self.loadTrackOptions()
             self.applyImportedAudioIfPossible()
             if let request = self.request {
@@ -576,7 +590,7 @@ public final class PlayerViewModel {
         // native. Guarded by live-feed mode inside the model, so it's inert unless
         // a Plozzigen subtitle is actually selected.
         engine.onSubtitleCues = { [weak self] cues in
-            guard let self else { return }
+            guard let self, self.engineToken == callbackEngineToken else { return }
             self.liveSubtitles.updateLiveCues(cues)
             #if DEBUG
             if self.selectedSubtitleTrackID != nil {
@@ -590,7 +604,7 @@ public final class PlayerViewModel {
         // the second track itself and pushes its cues here. Inert unless
         // `beginSecondaryLiveFeed()` has been called (guarded inside the model).
         engine.onSecondarySubtitleCues = { [weak self] cues in
-            guard let self else { return }
+            guard let self, self.engineToken == callbackEngineToken else { return }
             self.liveSubtitles.updateSecondaryLiveCues(cues)
             if self.selectedSecondarySubtitleTrackID != nil {
                 self.controls.secondarySubtitleStatus = .loaded(cueCount: cues.count)
@@ -939,11 +953,33 @@ public final class PlayerViewModel {
         guard kind != currentEngineKind else {
             return
         }
+        clearEngineCallbacks()
         engine.stop()
         engine = makeEngine(kind)
         currentEngineKind = kind
-        configureEngineCallbacks()
         engineToken = UUID()
+        configureEngineCallbacks()
+    }
+
+    private func clearEngineCallbacks() {
+        engine.onProgress = nil
+        engine.onFailure = nil
+        engine.onEnded = nil
+        engine.onTracksChanged = nil
+        engine.onSubtitleCues = nil
+        engine.onSecondarySubtitleCues = nil
+    }
+
+    private func replaceEngineForRetry(
+        _ kind: PlaybackEngineKind,
+        preserveDisplayMode: Bool
+    ) {
+        clearEngineCallbacks()
+        engine.stop(preserveDisplayMode: preserveDisplayMode)
+        engine = makeEngine(kind)
+        currentEngineKind = kind
+        engineToken = UUID()
+        configureEngineCallbacks()
     }
 
     /// Commits the first routed engine without forcing a host `.id` rebuild.
@@ -954,6 +990,7 @@ public final class PlayerViewModel {
             guard kind != currentEngineKind else {
                 return
             }
+            clearEngineCallbacks()
             engine.stop()
             engine = makeEngine(kind)
             currentEngineKind = kind
@@ -1010,6 +1047,10 @@ public final class PlayerViewModel {
         phase = .loading
         let bringUpStart = Date()
         bringUpStartedAt = bringUpStart
+        HandoffDiagnostics.emit(
+            "bringup START item=\(itemID) provider=\(provider.kind.rawValue) "
+                + "transcode=\(forceTranscode)"
+        )
         do {
             let resolved: PrefetchedPlayback
             if !forceTranscode, let adopted = adoptedResolved, adopted.itemID == itemID {
@@ -1555,6 +1596,7 @@ public final class PlayerViewModel {
         watchdogTask?.cancel()
         let timeout = watchdogTimeout
         let threshold = startPosition + 0.5
+        let watchedEngineToken = engineToken
         watchdogTask = Task { [weak self] in
             let pollNanos: UInt64 = 2_000_000_000
             var waited: TimeInterval = 0
@@ -1574,7 +1616,10 @@ public final class PlayerViewModel {
             // Still no progress after the deadline → treat as a stalled stream.
             if self.engine.currentTime <= threshold, !self.engine.isPaused {
                 PlozzLog.playback.info("Playback watchdog: no progress before deadline; triggering fallback")
-                await self.handleEngineFailure(.invalidResponse)
+                await self.handleEngineFailure(
+                    .invalidResponse,
+                    sourceEngineToken: watchedEngineToken
+                )
             }
         }
     }
@@ -1591,7 +1636,16 @@ public final class PlayerViewModel {
     /// *other* engine (once) at the last known position; if that also fails, force
     /// a server transcode (once); if even that fails, surface the error. Each step
     /// fires at most once so the chain can never loop.
-    private func handleEngineFailure(_ error: AppError) async {
+    private func handleEngineFailure(
+        _ error: AppError,
+        sourceEngineToken: UUID
+    ) async {
+        guard sourceEngineToken == engineToken else {
+            HandoffDiagnostics.emit(
+                "engine FAILURE_IGNORED stale-callback item=\(itemID)"
+            )
+            return
+        }
         guard let request else {
             HandoffDiagnostics.emit(
                 "engine FAILED item=\(itemID) request=nil "
@@ -1615,6 +1669,26 @@ public final class PlayerViewModel {
             isNetworkFile = true
         } else {
             isNetworkFile = false
+        }
+        if isNetworkFile,
+           currentEngineKind == .plozzigen,
+           !hasRetriedNetworkFileEngine {
+            hasRetriedNetworkFileEngine = true
+            HandoffDiagnostics.emit(
+                "engine RETRY_FRESH item=\(itemID) engine=plozzigen "
+                    + "error=\(HandoffDiagnostics.errorCode(error))"
+            )
+            phase = .loading
+            replaceEngineForRetry(
+                .plozzigen,
+                preserveDisplayMode: contentDisplayMode.isHDR
+            )
+            await playResolved(
+                request,
+                engineKind: .plozzigen,
+                startPosition: resume
+            )
+            return
         }
         if !request.isTranscoding, !hasTriedAlternateEngine, request.externalAudioURL == nil,
            let alternate = alternateEngineKind,

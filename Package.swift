@@ -64,13 +64,23 @@ let package = Package(
         // decodes cleanly (#92), software-path seek holds last frame (#90). See
         // AGENTS.local.md › "Playback engine (AetherEngine / Plozzigen)".
         //
-        // Experimental 5.0.1 validation pin: carries Plozz's local patches,
-        // including PR #94's backward-seek muxer fix, plus the bounded stalled-seek
-        // and sparse-cache recovery fix from 2026-07-12. SMB enters AetherEngine
-        // only through Plozz's protocol-neutral custom-source bridge.
-        // Under +delay_moov,
-        // the fMP4 muxer needs a PARSED audio packet to build the AC-3/E-AC-3/TrueHD
-        // sample entry, else a mid-file backward seek wedged the muxer. See
+        // Pinned to AetherEngine 5.0.1 + Plozz's re-applied local patches + the
+        // bounded stalled-seek / sparse-cache fix. Lineage (verified in the fork
+        // history): upstream 5.0.1 (carries the merged Dolby Vision startup fix,
+        // PR #118) → `9fb4907` "Carry Plozz's local patches on top of 5.0.1"
+        // (public `stop(resetDisplayCriteria:)` + the SDR pre-play settle gate that
+        // skips the ~1000ms waitForSwitch for SDR/non-switching loads; DV/HDR
+        // behavior byte-for-byte identical to 5.0.1) → this commit adds the
+        // bounded seek/sparse-cache recovery. This is `d97fad24` and is a strict
+        // superset of the old pre-5.0.1 pin (`b62837d5`, 177 commits behind): the
+        // five "extra" commits on that old line are just older copies of the same
+        // Plozz patches, already re-applied here on top of 5.0.1.
+        //
+        // SMB enters AetherEngine only through Plozz's protocol-neutral custom-source
+        // bridge; the engine's legacy SMB URL product is not linked. PR #94's
+        // backward-seek muxer wedge fix is included: under +delay_moov the fMP4
+        // muxer needs a PARSED audio packet to build the AC-3/E-AC-3/TrueHD sample
+        // entry, else a mid-file backward seek wedged the muxer. See
         // docs/media-share-proposal.md § 5.1.
         .package(url: "https://github.com/thatcube/AetherEngine", revision: "d97fad242c069711fb3065df449444cc31267251"),
         // NOTE: FFmpegBuild (FFmpeg n8.1.x decode-only) and LibDovi (Dolby Vision
@@ -106,7 +116,12 @@ let package = Package(
     ],
     targets: [
         // MARK: Core
-        .target(name: "CoreModels"),
+        .target(
+            name: "CoreModels",
+            swiftSettings: [
+                .define("PLOZZ_DIAGNOSTICS", .when(configuration: .debug))
+            ]
+        ),
         .target(
             name: "CoreNetworking",
             dependencies: ["CoreModels"]

@@ -100,6 +100,74 @@ final class PlayerViewModelEOFTests: XCTestCase {
         XCTAssertEqual(stopped.onlyCall?.percent, 20)
         XCTAssertEqual(reports.last?.progress.positionSeconds, 120)
     }
+
+    func testNetworkFileFailureReplacesPlozzigenOnceAndIgnoresOldCallback() async throws {
+        let item = MediaItem(id: "movie", title: "Movie", kind: .movie, runtime: 120)
+        let identity = try RemoteFileIdentity(
+            kind: .strongETag,
+            value: "\"movie-v1\""
+        )
+        let representation = try RemoteFileRepresentation(
+            size: 1_024,
+            identity: identity,
+            consistency: .stronglyBound
+        )
+        let locator = try NetworkFileLocator(
+            accountID: "account",
+            sourceID: "source",
+            credentialRevision: CredentialRevision(),
+            relativePath: "Movies/Movie.mkv",
+            representation: representation,
+            formatHint: MediaFormatHint(
+                container: "mkv",
+                mimeType: "video/x-matroska"
+            )
+        )
+        let request = PlaybackRequest(
+            item: item,
+            playbackSource: .networkFile(locator)
+        )
+        let provider = RecordingPlaybackProvider(request: request)
+        let native = SpyVideoEngine()
+        var plozzigenEngines: [SpyVideoEngine] = []
+        let factory = EngineFactory(
+            makeNative: { _ in native },
+            makePlozzigen: {
+                let engine = SpyVideoEngine()
+                plozzigenEngines.append(engine)
+                return engine
+            }
+        )
+        let viewModel = PlayerViewModel(
+            provider: provider,
+            itemID: item.id,
+            engineFactory: factory
+        )
+
+        await viewModel.load()
+        XCTAssertEqual(plozzigenEngines.count, 1)
+        let staleFailure = try XCTUnwrap(plozzigenEngines[0].onFailure)
+
+        staleFailure(.invalidResponse)
+        for _ in 0..<50
+        where plozzigenEngines.count < 2 || plozzigenEngines[1].loadCount < 1 {
+            await Task.yield()
+        }
+
+        XCTAssertEqual(plozzigenEngines.count, 2)
+        XCTAssertEqual(plozzigenEngines[0].stopCount, 1)
+        XCTAssertEqual(plozzigenEngines[1].loadCount, 1)
+
+        staleFailure(.unknown("late old-engine failure"))
+        await Task.yield()
+        XCTAssertEqual(plozzigenEngines.count, 2)
+
+        plozzigenEngines[1].onFailure?(.invalidResponse)
+        for _ in 0..<10 { await Task.yield() }
+        XCTAssertEqual(plozzigenEngines.count, 2)
+
+        await viewModel.stop()
+    }
 }
 
 private actor RecordingPlaybackProvider: MediaProvider {
@@ -165,8 +233,11 @@ private final class SpyVideoEngine: VideoEngine {
     var onTracksChanged: (@MainActor () -> Void)?
     var onSubtitleCues: (@MainActor ([SubtitleCue]) -> Void)?
     var onSecondarySubtitleCues: (@MainActor ([SubtitleCue]) -> Void)?
+    var loadCount = 0
+    var stopCount = 0
 
     func load(request: PlaybackRequest, startPosition: TimeInterval) async {
+        loadCount += 1
         status = .ready
         currentTime = startPosition
         furthestObservedPosition = max(furthestObservedPosition, startPosition)
@@ -179,6 +250,7 @@ private final class SpyVideoEngine: VideoEngine {
         furthestObservedPosition = max(furthestObservedPosition, seconds)
     }
     func stop() {
+        stopCount += 1
         status = .idle
         duration = 0
     }

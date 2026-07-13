@@ -101,7 +101,7 @@ public struct ProviderBrandMark: View {
             // Fraction of the icon height chopped off the bottom. Constant, so the
             // cutoff line sits in the same place for SMB, WebDAV, NFS, … — the
             // label never shifts it.
-            let chop = size * 0.44
+            let chop = size * 0.40
             ZStack(alignment: .bottom) {
                 base
                     // Slice the lower band cleanly off the glyph (a straight

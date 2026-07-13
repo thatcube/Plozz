@@ -9,6 +9,9 @@ struct ShareEnrichRequest: Sendable, Equatable {
     var year: Int?
     var isMovie: Bool
     var isAnime: Bool
+    /// On-disk episode fingerprints (season/episode/title), used to disambiguate a
+    /// same-name series collision by content. Empty for movies or when unknown.
+    var episodeHints: [SeriesEpisodeHint] = []
 }
 
 /// Resolves metadata (external ids + overview + artwork) for a bare share item.
@@ -76,7 +79,8 @@ struct TVDBShareResolver: ShareMetadataResolving {
         async let keylessIDsTask = KeylessIDResolver().externalIDs(
             title: request.title, year: request.year, isAnime: request.isAnime, isTV: !request.isMovie
         )
-        async let tvdbTask = tvdb.resolve(title: request.title, year: request.year, isMovie: request.isMovie)
+        async let tvdbTask = tvdb.resolve(title: request.title, year: request.year,
+                                          isMovie: request.isMovie, episodeHints: request.episodeHints)
         var ids = await keylessIDsTask
         let meta = await tvdbTask
         if let meta {

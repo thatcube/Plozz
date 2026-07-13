@@ -1,6 +1,7 @@
 import Foundation
 import CoreModels
 import CoreNetworking
+import MetadataKit
 
 /// Second pass after a scan: resolves + persists metadata (external ids, overview,
 /// artwork) for indexed movies/series that lack it, so a share's cards and detail
@@ -13,7 +14,9 @@ import CoreNetworking
 /// nothing is pending. Kicked by `ShareCatalogCoordinator` after each scan.
 actor ShareEnricher {
     /// Bump when the resolver's output materially changes, to re-enrich everything.
-    static let version = 1
+    /// v2: TVDB same-name collisions now disambiguate by on-disk episode titles
+    /// (fixes e.g. animated "Archer" matching the 1975 detective drama).
+    static let version = 2
 
     private let store: ShareCatalogStore
     private let resolver: ShareMetadataResolving
@@ -96,11 +99,10 @@ actor ShareEnricher {
             let resolver = self.resolver
             func addNext() -> Bool {
                 guard !Task.isCancelled, let pending = iterator.next() else { return false }
-                let request = ShareEnrichRequest(
-                    itemID: pending.itemID, title: pending.title, year: pending.year,
-                    isMovie: pending.isMovie, isAnime: pending.isAnime
-                )
-                group.addTask { (pending.itemID, await resolver.resolve(request)) }
+                group.addTask { [self] in
+                    let request = await self.request(for: pending)
+                    return (pending.itemID, await resolver.resolve(request))
+                }
                 return true
             }
             for _ in 0..<concurrency { _ = addNext() }
@@ -130,12 +132,25 @@ actor ShareEnricher {
     /// guard) so opening an item during a full drain still fast-tracks it.
     func enrichOne(itemID: String) async {
         guard let pending = await store.pendingEnrichment(forItemID: itemID, version: Self.version) else { return }
-        let request = ShareEnrichRequest(
-            itemID: pending.itemID, title: pending.title, year: pending.year,
-            isMovie: pending.isMovie, isAnime: pending.isAnime
-        )
+        let request = await request(for: pending)
         let record = await resolver.resolve(request)
         guard !Task.isCancelled else { return }
         await store.saveEnrichment(itemID: pending.itemID, record, version: Self.version)
+    }
+
+    /// Builds the resolve request for a pending item, attaching on-disk episode
+    /// title hints for a series so a same-name metadata collision can be resolved
+    /// by content (see ``TVDBClient`` disambiguation). No hints for movies.
+    private func request(for pending: ShareCatalogStore.PendingEnrichment) async -> ShareEnrichRequest {
+        var hints: [SeriesEpisodeHint] = []
+        if !pending.isMovie, let key = ShareCatalogID.seriesKey(forSeriesID: pending.itemID) {
+            hints = await store.episodeTitleHints(seriesKey: key).map {
+                SeriesEpisodeHint(season: $0.season, episode: $0.episode, title: $0.title)
+            }
+        }
+        return ShareEnrichRequest(
+            itemID: pending.itemID, title: pending.title, year: pending.year,
+            isMovie: pending.isMovie, isAnime: pending.isAnime, episodeHints: hints
+        )
     }
 }

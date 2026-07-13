@@ -1110,9 +1110,34 @@ actor ShareCatalogStore {
         }.map(withEnrichment)
     }
 
-    /// Episode items for one season of a series, in episode order.
-    func episodes(seriesKey: String, season: Int) -> [MediaItem] {
+    /// Up to `limit` on-disk episode fingerprints (season, episode, title) for a
+    /// series — the earliest seasons/episodes with a real title — used to
+    /// disambiguate a same-name metadata collision by content. Skips episodes with
+    /// no parsed title (nothing to match on).
+    func episodeTitleHints(seriesKey: String, limit: Int = 12) -> [(season: Int, episode: Int, title: String)] {
         ensureOpen()
+        guard db != nil, limit > 0 else { return [] }
+        var out: [(season: Int, episode: Int, title: String)] = []
+        query("""
+        SELECT COALESCE(season,1) AS s, episode, title FROM assets
+        WHERE series_key=? AND kind='episode' AND episode IS NOT NULL
+          AND title IS NOT NULL AND title <> ''
+        ORDER BY s, episode
+        LIMIT ?;
+        """, bind: {
+            self.bindText($0, 1, seriesKey)
+            sqlite3_bind_int64($0, 2, Int64(limit))
+        }) { stmt in
+            let s = Int(sqlite3_column_int64(stmt, 0))
+            let e = Int(sqlite3_column_int64(stmt, 1))
+            guard let t = self.columnText(stmt, 2) else { return }
+            out.append((season: s, episode: e, title: t))
+        }
+        return out
+    }
+
+    /// Episode items for one season of a series, in episode order.
+    func episodes(seriesKey: String, season: Int) -> [MediaItem] {        ensureOpen()
         guard db != nil else { return [] }
         var out: [MediaItem] = []
         query("""

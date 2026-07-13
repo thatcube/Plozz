@@ -23,6 +23,22 @@ public struct TVDBMetadata: Sendable, Equatable {
     }
 }
 
+/// A per-episode fingerprint from the LOCAL library, used to disambiguate a
+/// title collision (e.g. the animated "Archer" vs the 1975 detective drama of the
+/// same name) by matching on-disk episode titles against a candidate's episodes.
+/// Robust even when only one season was downloaded (season count alone can't tell
+/// a 1-season namesake from S1 of a long-running show).
+public struct SeriesEpisodeHint: Sendable, Equatable {
+    public let season: Int
+    public let episode: Int
+    public let title: String
+    public init(season: Int, episode: Int, title: String) {
+        self.season = season
+        self.episode = episode
+        self.title = title
+    }
+}
+
 /// Minimal client for **TheTVDB v4** — the bundled keyed metadata/artwork tier.
 ///
 /// Flow: `POST /login` with the project api key → a JWT bearer (~1 month), cached
@@ -43,12 +59,20 @@ public actor TVDBClient {
     public var isConfigured: Bool { config.isConfigured }
 
     /// Resolve metadata for a title. `year` (when known) disambiguates same-name
-    /// results. Returns `nil` when unconfigured or unmatched.
-    public func resolve(title: String, year: Int?, isMovie: Bool) async -> TVDBMetadata? {
+    /// results; `episodeHints` (on-disk episode titles) disambiguate a same-name
+    /// collision by content when the year is unknown. Returns `nil` when
+    /// unconfigured or unmatched.
+    public func resolve(
+        title: String,
+        year: Int?,
+        isMovie: Bool,
+        episodeHints: [SeriesEpisodeHint] = []
+    ) async -> TVDBMetadata? {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard config.isConfigured, !trimmed.isEmpty else { return nil }
 
-        if let result = await search(query: trimmed, year: year, isMovie: isMovie, allowRelogin: true) {
+        if let result = await search(query: trimmed, year: year, isMovie: isMovie,
+                                     episodeHints: episodeHints, allowRelogin: true) {
             return result
         }
         return nil
@@ -113,7 +137,9 @@ public actor TVDBClient {
 
     // MARK: - Search
 
-    private func search(query: String, year: Int?, isMovie: Bool, allowRelogin: Bool) async -> TVDBMetadata? {
+    private func search(query: String, year: Int?, isMovie: Bool,
+                        episodeHints: [SeriesEpisodeHint] = [],
+                        allowRelogin: Bool) async -> TVDBMetadata? {
         guard let token = await ensureToken(),
               let escaped = query.addingPercentEncoding(withAllowedCharacters: .urlQueryValueAllowed) else { return nil }
         let type = isMovie ? "movie" : "series"
@@ -126,22 +152,115 @@ public actor TVDBClient {
             // A likely-expired token (unreachable non-404) → drop it and retry once.
             if allowRelogin, !reachable {
                 self.token = nil
-                return await search(query: query, year: year, isMovie: isMovie, allowRelogin: false)
+                return await search(query: query, year: year, isMovie: isMovie,
+                                    episodeHints: episodeHints, allowRelogin: false)
             }
             return nil
         }
         let results = response.data ?? []
-        guard let best = Self.bestMatch(results, year: year) else { return nil }
-        return best.asMetadata()
+        guard !results.isEmpty else { return nil }
+
+        // An exact year match is the strongest disambiguator when a year is known.
+        if let year, let exact = results.first(where: { Int($0.year ?? "") == year }) {
+            return exact.asMetadata()
+        }
+        // Otherwise, when there's a same-name collision (>1 result) and we have
+        // on-disk episode titles, pick the candidate whose episodes match ours —
+        // robust even when only one season was downloaded (season count alone
+        // can't tell a 1-season namesake from S1 of a long-running show).
+        if !isMovie, results.count > 1, !episodeHints.isEmpty,
+           let matched = await disambiguateByEpisodes(results, hints: episodeHints, token: token) {
+            return matched.asMetadata()
+        }
+        // Fallback: TheTVDB's own relevance order.
+        return results.first?.asMetadata()
     }
 
-    /// Prefer an exact year match when a year is known; otherwise the first result.
-    private static func bestMatch(_ results: [SearchResult], year: Int?) -> SearchResult? {
-        guard !results.isEmpty else { return nil }
-        if let year {
-            if let exact = results.first(where: { Int($0.year ?? "") == year }) { return exact }
+    // MARK: - Episode-title disambiguation
+
+    /// Picks the search candidate whose episode titles best match the on-disk
+    /// library. Fetches each candidate's episode list (bounded to the first few
+    /// candidates) and scores exact per-`SxxEyy` title matches. Returns the best
+    /// candidate only when the match is confident, else `nil` (caller falls back
+    /// to relevance order). Never throws.
+    private func disambiguateByEpisodes(
+        _ results: [SearchResult],
+        hints: [SeriesEpisodeHint],
+        token: String
+    ) async -> SearchResult? {
+        var best: (result: SearchResult, score: Int)?
+        var secondBestScore = 0
+        // Distinctive-enough acceptance: a clear majority of hints, or (for a
+        // tiny hint set) at least two matches. A single generic title ("Pilot")
+        // must not decide a collision.
+        let strongThreshold = max(2, (hints.count + 1) / 2)
+
+        for candidate in results.prefix(5) {
+            guard let id = candidate.tvdb_id else { continue }
+            let names = await episodeNames(seriesID: id, token: token)
+            guard !names.isEmpty else { continue }
+            var score = 0
+            for hint in hints {
+                let key = "\(hint.season)x\(hint.episode)"
+                if let name = names[key], Self.titlesMatch(name, hint.title) { score += 1 }
+            }
+            if score > (best?.score ?? 0) {
+                secondBestScore = best?.score ?? 0
+                best = (candidate, score)
+            } else if score > secondBestScore {
+                secondBestScore = score
+            }
         }
-        return results.first
+
+        guard let best else { return nil }
+        // Confident when the winner clears the threshold AND beats the runner-up
+        // (so a title both namesakes happen to share can't decide it alone).
+        if best.score >= strongThreshold, best.score > secondBestScore {
+            return best.result
+        }
+        return nil
+    }
+
+    /// `"<season>x<episode>" -> episode name` for a series' first page of episodes
+    /// (the default order leads with season 1 — enough to match the seasons a
+    /// viewer is most likely to have). Empty on any failure.
+    private func episodeNames(seriesID: String, token: String) async -> [String: String] {
+        guard let url = URL(string: "\(config.apiBaseURL.absoluteString)/series/\(seriesID)/episodes/default?page=0") else { return [:] }
+        let (response, _) = await MetadataHTTP.getWithStatus(
+            EpisodesResponse.self, url: url, headers: ["Authorization": "Bearer \(token)"]
+        )
+        guard let episodes = response?.data?.episodes else { return [:] }
+        var map: [String: String] = [:]
+        for ep in episodes {
+            guard let s = ep.seasonNumber, let n = ep.number,
+                  let name = ep.name?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty
+            else { continue }
+            map["\(s)x\(n)"] = name
+        }
+        return map
+    }
+
+    /// Two episode titles match when their alphanumeric token sets are equal or
+    /// one contains the other — tolerant of scene/quality remnants the local
+    /// parser may leave and of minor punctuation/casing differences. A bare
+    /// numeric-only overlap never matches.
+    static func titlesMatch(_ a: String, _ b: String) -> Bool {
+        let ta = tokens(a), tb = tokens(b)
+        guard !ta.isEmpty, !tb.isEmpty else { return false }
+        if ta == tb { return true }
+        return ta.isSubset(of: tb) || tb.isSubset(of: ta)
+    }
+
+    private static func tokens(_ s: String) -> Set<String> {
+        Set(
+            s.lowercased()
+                .unicodeScalars
+                .map { CharacterSet.alphanumerics.contains($0) ? Character($0) : " " }
+                .reduce(into: "") { $0.append($1) }
+                .split(separator: " ")
+                .map(String.init)
+                .filter { $0.count >= 2 && Int($0) == nil }
+        )
     }
 
     // MARK: - DTOs
@@ -165,6 +284,17 @@ public actor TVDBClient {
 
     private struct SearchResponse: Decodable {
         let data: [SearchResult]?
+    }
+
+    /// TheTVDB v4 `/series/{id}/episodes/{seasonType}` payload (first page).
+    private struct EpisodesResponse: Decodable {
+        let data: DataField?
+        struct DataField: Decodable { let episodes: [Episode]? }
+        struct Episode: Decodable {
+            let number: Int?
+            let seasonNumber: Int?
+            let name: String?
+        }
     }
 
     private struct SearchResult: Decodable {

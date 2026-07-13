@@ -29,7 +29,10 @@ actor ShareEnricher {
     /// v7: re-enrich after the nested-spinoff regroup so a parent show whose hints
     /// were previously polluted (The Witcher, absorbing Blood Origin) resolves to its
     /// own id; also fetch the English overview for id-resolved shows (One Piece).
-    static let version = 7
+    /// v8: id-corroborated series reconciliation — fold a typo'd folder ("Peaky
+    /// Blinder") into its twin ("Peaky Blinders") when both resolve to the same
+    /// strong external id. Re-enrich so the merge runs on existing catalogs.
+    static let version = 8
 
     private let store: ShareCatalogStore
     private let resolver: ShareMetadataResolving

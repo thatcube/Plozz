@@ -313,4 +313,35 @@ final class ShareCatalogStoreTests: XCTestCase {
                        ShareCatalogID.seriesKey(fromTitle: "breaking.bad"))
         XCTAssertEqual(ShareCatalogID.seriesKey(fromTitle: "Mr. Robot"), "mr-robot")
     }
+
+    // MARK: - Reconciliation primitives
+
+    func testLevenshtein() {
+        XCTAssertEqual(ShareCatalogStore.levenshtein("peaky blinder", "peaky blinders"), 1)
+        XCTAssertEqual(ShareCatalogStore.levenshtein("kitten", "sitting"), 3)
+        XCTAssertEqual(ShareCatalogStore.levenshtein("same", "same"), 0)
+        XCTAssertEqual(ShareCatalogStore.levenshtein("", "abc"), 3)
+    }
+
+    func testTitlesNearlyIdentical() {
+        // Typo / plural of one show.
+        XCTAssertTrue(ShareCatalogStore.titlesNearlyIdentical("Peaky Blinder", "Peaky Blinders"))
+        XCTAssertTrue(ShareCatalogStore.titlesNearlyIdentical("The Handmaids Tale", "The Handmaid's Tale"))
+        // A digit difference is a deliberate distinction — never "nearly identical".
+        XCTAssertFalse(ShareCatalogStore.titlesNearlyIdentical("1883", "1923"))
+        // Too short / too different.
+        XCTAssertFalse(ShareCatalogStore.titlesNearlyIdentical("Fargo", "Cargo"))
+        XCTAssertFalse(ShareCatalogStore.titlesNearlyIdentical("Lost", "Loki"))
+        XCTAssertFalse(ShareCatalogStore.titlesNearlyIdentical("The Office", "The Wire"))
+    }
+
+    func testResolveAliasFollowsChains() {
+        let map = ["a": "b", "b": "c", "x": "y"]
+        XCTAssertEqual(ShareCatalogStore.resolveAlias("a", in: map), "c")
+        XCTAssertEqual(ShareCatalogStore.resolveAlias("b", in: map), "c")
+        XCTAssertEqual(ShareCatalogStore.resolveAlias("x", in: map), "y")
+        XCTAssertEqual(ShareCatalogStore.resolveAlias("z", in: map), "z")
+        // A cycle terminates (rather than looping forever) at a cycle member.
+        XCTAssertTrue(["a", "b"].contains(ShareCatalogStore.resolveAlias("a", in: ["a": "b", "b": "a"])))
+    }
 }

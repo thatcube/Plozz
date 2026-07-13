@@ -162,6 +162,17 @@ actor ShareCatalogStore {
         );
         """)
         exec("CREATE INDEX IF NOT EXISTS idx_movie_alias_group ON movie_alias(group_key);")
+        // Durable series reconciliation: maps a redundant series key (e.g. a typo'd
+        // folder "peaky-blinder") to a canonical one ("peaky-blinders") once BOTH
+        // were proven the same show by a shared authoritative external id. Applied at
+        // upsert so a re-scan can't undo the merge.
+        exec("""
+        CREATE TABLE IF NOT EXISTS series_merge(
+            alias_key     TEXT PRIMARY KEY,
+            canonical_key TEXT NOT NULL
+        );
+        """)
+        exec("CREATE INDEX IF NOT EXISTS idx_series_merge_canonical ON series_merge(canonical_key);")
         exec("""
         CREATE INDEX IF NOT EXISTS idx_assets_movie_logical_sort
         ON assets(
@@ -229,6 +240,10 @@ actor ShareCatalogStore {
         }
         defer { sqlite3_finalize(stmt) }
 
+        // Preload the series-merge alias map once so a reconciled typo key stays
+        // folded across re-scans without a per-row lookup in the hot write loop.
+        let seriesAliases = seriesMergeMap()
+
         var index = 0
         while index < assets.count {
             guard admits(scanGeneration) else { return }
@@ -250,7 +265,7 @@ actor ShareCatalogStore {
                 bindText(stmt, 10, ShareCatalogID.sortTitle(from: libraryTitle))
                 bindOptInt(stmt, 11, a.year)
                 bindOptText(stmt, 12, a.seriesTitle)
-                bindOptText(stmt, 13, a.seriesKey)
+                bindOptText(stmt, 13, a.seriesKey.map { Self.resolveAlias($0, in: seriesAliases) })
                 bindOptInt(stmt, 14, a.season)
                 bindOptInt(stmt, 15, a.episode)
                 bindOptText(stmt, 16, a.movieKey)
@@ -751,6 +766,13 @@ actor ShareCatalogStore {
            merged.providerIDs.keys.contains(where: { ["anilist", "mal", "myanimelist"].contains($0.lowercased()) }) {
             reclassifySeriesToAnime(seriesKey: key)
         }
+        // Id-corroborated reconciliation: if this series shares an authoritative
+        // external id with another near-identically-titled series (a typo'd folder
+        // like "Peaky Blinder" vs "Peaky Blinders"), fold them into one card.
+        if ok, ShareCatalogID.isSeries(itemID),
+           let key = ShareCatalogID.seriesKey(forSeriesID: itemID) {
+            reconcileSeriesByStrongID(key: key, ids: merged.providerIDs, resolvedTitle: merged.title)
+        }
         return ok
     }
 
@@ -793,6 +815,162 @@ actor ShareCatalogStore {
         defer { sqlite3_finalize(stmt) }
         bindText(stmt, 1, seriesKey)
         _ = sqlite3_step(stmt)
+    }
+
+    // MARK: - Id-corroborated series reconciliation
+
+    /// The strong (authoritative) external-id namespaces, in preference order, that
+    /// are trustworthy enough to prove two series are the SAME show.
+    private static let strongIDNamespaces = ["Tvdb", "Imdb", "Tmdb"]
+
+    /// Fold `key` together with any OTHER already-enriched series that shares one of
+    /// its strong external ids AND is near-identically titled (a typo/plural folder
+    /// like "Peaky Blinder" vs "Peaky Blinders"). The shared id is the authoritative
+    /// signal; the title check is a conservative guard so a provider mis-id can never
+    /// collapse two genuinely different shows.
+    private func reconcileSeriesByStrongID(key: String, ids: [String: String], resolvedTitle: String?) {
+        guard db != nil else { return }
+        let myStrong = Self.strongIDNamespaces.compactMap { ns -> (String, String)? in
+            guard let v = ids[ns], !v.isEmpty else { return nil }
+            return (ns.lowercased(), v.lowercased())
+        }
+        guard !myStrong.isEmpty else { return }
+        let mySet = Set(myStrong.map { "\($0.0):\($0.1)" })
+
+        // Candidate other series carrying at least one of the same strong ids.
+        var candidates: [String] = []
+        query("SELECT item_id, provider_ids_json FROM enrichment WHERE item_id LIKE 'series:%';") { stmt in
+            guard let itemID = self.columnText(stmt, 0),
+                  let k = ShareCatalogID.seriesKey(forSeriesID: itemID), k != key,
+                  let json = self.columnText(stmt, 1),
+                  let other = self.decodeJSON([String: String].self, json) else { return }
+            let otherSet = Set(Self.strongIDNamespaces.compactMap { ns -> String? in
+                guard let v = other[ns], !v.isEmpty else { return nil }
+                return "\(ns.lowercased()):\(v.lowercased())"
+            })
+            if !mySet.isDisjoint(with: otherSet) { candidates.append(k) }
+        }
+        guard !candidates.isEmpty else { return }
+
+        let myTitle = seriesDisplayTitle(forKey: key)
+        for other in candidates {
+            let otherTitle = seriesDisplayTitle(forKey: other)
+            guard Self.titlesNearlyIdentical(myTitle, otherTitle) else { continue }
+            let (canonical, loser) = chooseCanonicalSeries(key, other, resolvedTitle: resolvedTitle)
+            mergeSeries(loser: loser, into: canonical)
+        }
+    }
+
+    /// A representative display title for a series key (any episode's `series_title`).
+    private func seriesDisplayTitle(forKey key: String) -> String {
+        var title = key
+        query("""
+        SELECT series_title FROM assets
+        WHERE series_key=? AND kind='episode' AND series_title IS NOT NULL AND series_title <> ''
+        LIMIT 1;
+        """, bind: { self.bindText($0, 1, key) }) { stmt in title = self.columnText(stmt, 0) ?? key }
+        return title
+    }
+
+    /// Which of two same-id series is canonical: prefer the one whose title matches
+    /// the resolved canonical name; else more episodes; else the lexicographically
+    /// smaller key (stable). Returns `(canonical, loser)`.
+    private func chooseCanonicalSeries(_ a: String, _ b: String, resolvedTitle: String?) -> (String, String) {
+        if let resolved = resolvedTitle.map({ MediaItemIdentity.normalizedTitle($0) }), !resolved.isEmpty {
+            let na = MediaItemIdentity.normalizedTitle(seriesDisplayTitle(forKey: a))
+            let nb = MediaItemIdentity.normalizedTitle(seriesDisplayTitle(forKey: b))
+            if na == resolved, nb != resolved { return (a, b) }
+            if nb == resolved, na != resolved { return (b, a) }
+        }
+        let ea = seriesEpisodeCount(a), eb = seriesEpisodeCount(b)
+        if ea != eb { return ea > eb ? (a, b) : (b, a) }
+        return a <= b ? (a, b) : (b, a)
+    }
+
+    private func seriesEpisodeCount(_ key: String) -> Int {
+        var n = 0
+        query("SELECT COUNT(*) FROM assets WHERE series_key=? AND kind='episode';",
+              bind: { self.bindText($0, 1, key) }) { stmt in n = Int(sqlite3_column_int64(stmt, 0)) }
+        return n
+    }
+
+    /// Physically fold `loser` into `canonical`: re-key its assets, record the alias
+    /// (so a re-scan re-applies it), retarget any aliases that pointed at `loser`,
+    /// and drop the loser's now-redundant enrichment row.
+    private func mergeSeries(loser: String, into canonical: String) {
+        guard loser != canonical else { return }
+        exec("BEGIN IMMEDIATE;")
+        runUpdate("UPDATE assets SET series_key=? WHERE series_key=?;") { self.bindText($0, 1, canonical); self.bindText($0, 2, loser) }
+        runUpdate("INSERT OR REPLACE INTO series_merge(alias_key, canonical_key) VALUES (?,?);") { self.bindText($0, 1, loser); self.bindText($0, 2, canonical) }
+        runUpdate("UPDATE series_merge SET canonical_key=? WHERE canonical_key=?;") { self.bindText($0, 1, canonical); self.bindText($0, 2, loser) }
+        runUpdate("DELETE FROM enrichment WHERE item_id=?;") { self.bindText($0, 1, ShareCatalogID.series(loser)) }
+        exec("COMMIT;")
+    }
+
+    /// Run a parameterized write statement with a binder; finalizes cleanly.
+    private func runUpdate(_ sql: String, bind: (OpaquePointer) -> Void) {
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else { return }
+        defer { sqlite3_finalize(stmt) }
+        bind(stmt)
+        _ = sqlite3_step(stmt)
+    }
+
+    /// All alias→canonical series-merge rows as a map, for in-memory resolution.
+    private func seriesMergeMap() -> [String: String] {
+        var map: [String: String] = [:]
+        query("SELECT alias_key, canonical_key FROM series_merge;") { stmt in
+            guard let a = self.columnText(stmt, 0), let c = self.columnText(stmt, 1) else { return }
+            map[a] = c
+        }
+        return map
+    }
+
+    /// Resolve a series key through the alias map, following chains (bounded) so a
+    /// transitively-merged key still lands on the final canonical.
+    static func resolveAlias(_ key: String, in map: [String: String]) -> String {
+        var current = key
+        var seen = Set<String>()
+        while let next = map[current], next != current, seen.insert(current).inserted {
+            current = next
+        }
+        return current
+    }
+
+    /// Whether two series titles are near-identical enough to be a typo/plural of
+    /// one show (Levenshtein ≤ 2 on the normalized forms, no DIGIT difference, and
+    /// long enough that a couple of edits isn't most of the title). Combined with a
+    /// shared strong id this is a very tight merge gate.
+    static func titlesNearlyIdentical(_ a: String, _ b: String) -> Bool {
+        let na = MediaItemIdentity.normalizedTitle(a)
+        let nb = MediaItemIdentity.normalizedTitle(b)
+        guard !na.isEmpty, !nb.isEmpty, na != nb else { return na == nb && !na.isEmpty }
+        // A digit difference marks a deliberate distinction (1883 vs 1923, sequels).
+        let digitsA = na.filter { $0.isNumber }, digitsB = nb.filter { $0.isNumber }
+        guard digitsA == digitsB else { return false }
+        let dist = levenshtein(na, nb)
+        let shorter = min(na.count, nb.count)
+        // Long enough that a couple of edits isn't a big fraction of the title — a
+        // 5-letter word like "Fargo"/"Cargo" is one edit apart yet distinct.
+        return dist <= 2 && shorter >= 8 && dist * 6 <= shorter
+    }
+
+    /// Classic Levenshtein edit distance (two-row DP).
+    static func levenshtein(_ a: String, _ b: String) -> Int {
+        let s = Array(a), t = Array(b)
+        if s.isEmpty { return t.count }
+        if t.isEmpty { return s.count }
+        var prev = Array(0...t.count)
+        var curr = [Int](repeating: 0, count: t.count + 1)
+        for i in 1...s.count {
+            curr[0] = i
+            for j in 1...t.count {
+                let cost = s[i - 1] == t[j - 1] ? 0 : 1
+                curr[j] = min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost)
+            }
+            swap(&prev, &curr)
+        }
+        return prev[t.count]
     }
 
     /// Persisted enrichment for a catalog id (movie file id or `series:<key>`).
@@ -888,16 +1066,18 @@ actor ShareCatalogStore {
         if copy.heroBackdropURL == nil { copy.heroBackdropURL = rec.backdropURL }
         if copy.logoURL == nil { copy.logoURL = rec.logoURL }
         // Display-title upgrade (series/movies only, never episodes): overlay the
-        // resolved canonical name when it's IDENTICAL or MORE SPECIFIC than the
-        // folder-derived title (current is a word-prefix of resolved) — so a generic
-        // "Avatar" becomes "Avatar: The Last Airbender", but a spinoff that wrongly
-        // matched its parent is never renamed DOWN. Applied at READ time so it's
-        // durable across re-scans (which reset assets.series_title).
+        // resolved canonical name when it's IDENTICAL, MORE SPECIFIC (current is a
+        // word-prefix of resolved), or a NEAR-IDENTICAL typo/plural of the current
+        // ("Peaky Blinder" → "Peaky Blinders") — so a generic or misspelled folder
+        // shows the real name, but a spinoff that wrongly matched its parent is never
+        // renamed DOWN. Applied at READ time so it's durable across re-scans.
         if item.kind == .series || item.kind == .movie,
            let resolved = rec.title, !resolved.isEmpty, resolved != copy.title {
             let a = MediaItemIdentity.normalizedTitle(copy.title)
             let b = MediaItemIdentity.normalizedTitle(resolved)
-            if b == a || b.hasPrefix(a + " ") { copy.title = resolved }
+            if b == a || b.hasPrefix(a + " ") || Self.titlesNearlyIdentical(copy.title, resolved) {
+                copy.title = resolved
+            }
         }
         // Episodes get the series art as a fallback, not as their own poster.
         if item.kind == .episode {

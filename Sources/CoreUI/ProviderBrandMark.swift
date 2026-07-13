@@ -72,6 +72,10 @@ public struct ProviderBrandMark: View {
             }
             if let systemSymbolName {
                 glyph(systemSymbolName)
+                    // The band chop pulls the drive's visual weight downward;
+                    // lift the badged mark a touch so it sits optically centered
+                    // in its container. Visual only — layout footprint unchanged.
+                    .offset(y: badgeLabel != nil ? -size * 0.08 : 0)
             } else {
                 Image(assetName)
                     .renderingMode(.template)

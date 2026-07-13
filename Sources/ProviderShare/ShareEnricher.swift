@@ -26,7 +26,10 @@ actor ShareEnricher {
     /// v6: resolve directly by an explicit [tvdb-####] folder tag, upgrade a generic
     /// folder title to the resolved canonical name, and feed that name+year into
     /// artwork so the logo matches the right same-named show.
-    static let version = 6
+    /// v7: re-enrich after the nested-spinoff regroup so a parent show whose hints
+    /// were previously polluted (The Witcher, absorbing Blood Origin) resolves to its
+    /// own id; also fetch the English overview for id-resolved shows (One Piece).
+    static let version = 7
 
     private let store: ShareCatalogStore
     private let resolver: ShareMetadataResolving

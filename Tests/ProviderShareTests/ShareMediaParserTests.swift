@@ -476,4 +476,30 @@ final class ShareMediaParserTests: XCTestCase {
         )
         XCTAssertEqual(ep?.series, "Arrested Development")
     }
+
+    func testDateEpisodeInYearSubfolderFoldsIntoShow() {
+        // Regression: "American Pickers/2022/American Pickers 2022/…S2022E01…" is
+        // date-organised, NOT a spinoff. The broken S2022E marker mis-parses, but the
+        // year/date suffix is not a real sub-show name, so it must fold into the show.
+        let ep = episode(
+            "TV Shows/American Pickers/2022/American Pickers 2022/American Pickers - S2022E01 - Skateboards.mkv"
+        )
+        XCTAssertEqual(
+            ShareCatalogID.seriesKey(fromTitle: ep?.series ?? "x"),
+            "american-pickers"
+        )
+    }
+
+    func testNestedShortInitialsSuffixFoldsIntoShow() {
+        // Regression: US S3 content nested under the AU show, filename "…U.S.S03E01…".
+        // The added tokens are 1-letter initials ("u","s"), not a real sub-show name,
+        // so it folds into the parent rather than orphaning a "…U S" card.
+        let ep = episode(
+            "TV Shows/Love on the Spectrum/Season 3/Love.on.the.Spectrum.U.S.S03E01.1080p/Love.on.the.Spectrum.U.S.S03E01.1080p.mkv"
+        )
+        XCTAssertEqual(
+            ShareCatalogID.seriesKey(fromTitle: ep?.series ?? "x"),
+            "love-on-the-spectrum"
+        )
+    }
 }

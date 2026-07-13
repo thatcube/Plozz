@@ -19,7 +19,7 @@ enum ShareMediaParser {
     /// v10: normalize series titles (strip year/season/edition/quality junk),
     /// prefer the clean filename title over a junky folder, and capture the series
     /// year — collapses split/variant folders and fixes same-name matches.
-    static let classifierVersion = 12
+    static let classifierVersion = 13
 
     /// File extensions we treat as playable video.
     static let videoExtensions: Set<String> = [
@@ -309,14 +309,25 @@ enum ShareMediaParser {
         return ep
     }
 
-    /// Whether `title` is a STRICT word-extension of `base` (base is a proper
-    /// word-prefix): "The Witcher Blood Origin" extends "The Witcher", but neither an
-    /// identical title nor an unrelated one qualifies. Case/punctuation-insensitive.
+    /// Whether `title` is a STRICT word-extension of `base` by a GENUINE sub-show
+    /// name — `base` is a proper word-prefix AND the added words include a real name
+    /// word (alphabetic, not a year / season marker / release tag). "The Witcher
+    /// Blood Origin" extends "The Witcher" (adds "Blood Origin"), but "American
+    /// Pickers 2022" or a broken "American Pickers S2022E" does NOT (the extra is a
+    /// year / date-episode token) — those are date organisation of the SAME show and
+    /// must fold into the parent. Case/punctuation-insensitive.
     static func titleStrictlyExtends(_ title: String, base: String) -> Bool {
         let a = seriesMatchKey(title)
         let b = seriesMatchKey(base)
-        guard !b.isEmpty, a != b else { return false }
-        return a.hasPrefix(b + " ")
+        guard !b.isEmpty, a != b, a.hasPrefix(b + " ") else { return false }
+        let suffix = String(a.dropFirst(b.count + 1))
+        return suffix.split(separator: " ").map(String.init).contains { token in
+            token.count >= 2
+                && token.allSatisfy { $0.isLetter }
+                && !isYearToken(token)
+                && !isSeasonToken(token)
+                && !seriesTitleStopTokens.contains(token)
+        }
     }
 
     /// Lowercased, alphanumerics-only, single-space title key for prefix comparison.

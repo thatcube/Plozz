@@ -346,17 +346,25 @@ public struct ShareProvider: MediaProvider {
 
     func networkFileLocator(for relativePath: String) async throws -> NetworkFileLocator {
         let entry = try await store.stat(relativePath: relativePath)
-        guard entry.kind == .file,
-              let size = entry.size,
-              let modifiedAt = entry.modifiedAt else {
+        guard entry.kind == .file, let size = entry.size else {
             throw MediaTransportError.protocolViolation(
-                reason: "network file lacks a stable size or modification time"
+                reason: "network file lacks a stable size"
             )
         }
-        let identity = try RemoteFileIdentity(
-            kind: .modificationTime,
-            modifiedAt: modifiedAt
-        )
+        // Prefer a strong ETag as the representation identity when the transport
+        // provides one (WebDAV): it lets the byte source revalidate every read
+        // with If-Match. Fall back to modification time (SMB, which has no
+        // ETag). A file with neither has no way to detect mid-playback change.
+        let identity: RemoteFileIdentity
+        if let strongETag = entry.strongETag {
+            identity = try RemoteFileIdentity(kind: .strongETag, value: strongETag)
+        } else if let modifiedAt = entry.modifiedAt {
+            identity = try RemoteFileIdentity(kind: .modificationTime, modifiedAt: modifiedAt)
+        } else {
+            throw MediaTransportError.protocolViolation(
+                reason: "network file lacks a stable identity (no strong ETag or modification time)"
+            )
+        }
         let representation = try RemoteFileRepresentation(
             size: size,
             identity: identity,

@@ -2081,8 +2081,26 @@ public final class AppState {
             apply(.authenticationFailed(.unknown("")))
             return
         }
+        finalizeAddedAccount(
+            session: session,
+            account: account,
+            previousAccount: previousAccount,
+            isFirstRun: isFirstRun
+        )
+    }
+
+    /// Shared onboarding tail once an account has been persisted: retire the old
+    /// credential revision if it actually rotated, refresh state, and hand off to
+    /// the library-selection / first-run continuation. Kept separate so the SMB
+    /// (token) and WebDAV (credential-envelope) persistence paths converge here.
+    private func finalizeAddedAccount(
+        session: UserSession,
+        account: Account,
+        previousAccount: Account?,
+        isFirstRun: Bool
+    ) {
         // Tear down the OLD credential revision's transport sessions only when the
-        // store actually moved to a new revision (a real password change). An
+        // store actually moved to a new revision (a real credential change). An
         // identical re-add is a no-op that keeps the existing revision, so read the
         // persisted revision back rather than trusting the freshly-minted one.
         if let previousAccount,
@@ -2386,6 +2404,162 @@ public final class AppState {
         let normalizedUser = username.trimmingCharacters(in: .whitespaces).lowercased()
         let user = normalizedUser.isEmpty ? "guest" : normalizedUser
         return "share:\(host.lowercased())\(portKey)/\(share.lowercased())#\(user)"
+    }
+
+    /// The credential a WebDAV share is being added with. Mirrors the vault's
+    /// `MediaShareAuthentication` cases WebDAV permits, kept as a small onboarding
+    /// input type so the UI (Phase 3) doesn't depend on FeatureAuth internals.
+    public enum WebDAVShareAuth: Equatable, Sendable {
+        case anonymous
+        case password(username: String, password: String)
+        case bearer(token: String)
+
+        /// Stable principal component of the account identity. Different users on
+        /// one URL get separate accounts; anonymous and bearer each fold to a
+        /// single principal (re-adding replaces in place — the "my token/password
+        /// changed" flow), which is the common one-principal-per-server case.
+        fileprivate var principal: String {
+            switch self {
+            case .anonymous: return "anon"
+            case .password(let username, _):
+                let trimmed = username.trimmingCharacters(in: .whitespaces)
+                return trimmed.isEmpty ? "anon" : trimmed
+            case .bearer: return "bearer"
+            }
+        }
+
+        fileprivate var accountUserName: String {
+            switch self {
+            case .anonymous, .bearer: return ""
+            case .password(let username, _): return username.trimmingCharacters(in: .whitespaces)
+            }
+        }
+    }
+
+    /// Stable identity for a WebDAV share. Unlike SMB, WebDAV paths are
+    /// case-sensitive and http vs https are genuinely different origins, so both
+    /// the scheme and the exact-case path are part of the identity; the host is
+    /// folded (DNS is case-insensitive) and the port is explicit. The principal
+    /// distinguishes different users on the same URL.
+    static func webDAVShareID(
+        scheme: String,
+        host: String,
+        port: Int?,
+        path: String,
+        principal: String
+    ) -> String {
+        let portKey = port.map { ":\($0)" } ?? ""
+        let normalizedPath = path.isEmpty ? "/" : path
+        return "share:\(scheme.lowercased())://\(host.lowercased())\(portKey)\(normalizedPath)#\(principal)"
+    }
+
+    /// Adds (or updates in place) a WebDAV media share. Persists through the
+    /// credential-envelope path — NOT the SMB token path — because a single
+    /// access-token string can't carry a bearer token plus a TLS leaf pin, and
+    /// `AccountStore`'s legacy token path is SMB-only. The credential bytes live
+    /// only in the vault; the account record stays secret-free.
+    public func didConfigureWebDAVShare(
+        baseURL: URL,
+        auth: WebDAVShareAuth,
+        trustPin: SHA256Fingerprint? = nil,
+        displayName: String
+    ) {
+        guard let components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false),
+              let scheme = components.scheme?.lowercased(),
+              scheme == "http" || scheme == "https",
+              let host = components.host, !host.isEmpty,
+              // A base URL must never carry credentials-in-URL, a query, or a
+              // fragment — those aren't part of a share root and are a smuggling
+              // vector. Reject rather than silently strip.
+              components.user == nil, components.password == nil,
+              components.query == nil, components.fragment == nil else {
+            apply(.authenticationFailed(.unknown("Invalid WebDAV address")))
+            return
+        }
+        // A TLS leaf pin is only meaningful over HTTPS; refuse it on plaintext.
+        if trustPin != nil, scheme != "https" {
+            apply(.authenticationFailed(.unknown("A certificate pin requires HTTPS")))
+            return
+        }
+        // Anonymous/bearer over plain HTTP is allowed only for anonymous; a
+        // reusable secret (password/bearer) over cleartext is refused here to
+        // match the transport-layer CredentialPreflight (fail closed early).
+        if scheme != "https" {
+            switch auth {
+            case .anonymous: break
+            case .password, .bearer:
+                apply(.authenticationFailed(.unknown("A username, password, or token requires HTTPS")))
+                return
+            }
+        }
+
+        let path = components.percentEncodedPath
+        let normalizedPath = path.isEmpty ? "/" : path
+        let envelope: MediaShareCredentialEnvelope
+        do {
+            let authentication: MediaShareAuthentication
+            switch auth {
+            case .anonymous:
+                authentication = .anonymous
+            case let .password(username, password):
+                authentication = .password(
+                    username: username.trimmingCharacters(in: .whitespaces),
+                    password: password
+                )
+            case let .bearer(token):
+                authentication = .bearer(token: token)
+            }
+            let trust = MediaShareTrustMaterial(tlsLeafCertificateSHA256: trustPin)
+            envelope = try MediaShareCredentialEnvelope(
+                transport: .webDAV,
+                authentication: authentication,
+                trust: trust
+            )
+        } catch {
+            apply(.authenticationFailed(.unknown("Invalid WebDAV credentials")))
+            return
+        }
+
+        let serverID = Self.webDAVShareID(
+            scheme: scheme,
+            host: host,
+            port: components.port,
+            path: normalizedPath,
+            principal: auth.principal
+        )
+        let trimmedName = displayName.trimmingCharacters(in: .whitespaces)
+        let name = trimmedName.isEmpty ? "\(host)\(normalizedPath)" : trimmedName
+        let server = MediaServer(
+            id: serverID,
+            name: name,
+            baseURL: baseURL,
+            provider: .mediaShare
+        )
+        let isFirstRun = accounts.isEmpty && !profilesModel.firstRunProfileSetupComplete
+        let userName = auth.accountUserName
+        let session = UserSession(
+            server: server,
+            userID: auth.principal,
+            userName: userName,
+            deviceID: accountStore.deviceID(),
+            // Credential bytes live in the vault envelope, not the token slot.
+            accessToken: ""
+        )
+        let account = Account(id: server.id, from: session)
+        let previousAccount = accounts.first { $0.id == account.id }
+        apply(.serverSelected(server))
+        do {
+            try accountStore.addMediaShare(account, credential: envelope, generatedPrivateKey: nil)
+        } catch {
+            apply(.authenticationFailed(.unknown("Couldn’t save this WebDAV share")))
+            return
+        }
+        finalizeAddedAccount(
+            session: session,
+            account: account,
+            previousAccount: previousAccount,
+            isFirstRun: isFirstRun
+        )
     }
 
     /// Begins adding another account from inside the signed-in app.

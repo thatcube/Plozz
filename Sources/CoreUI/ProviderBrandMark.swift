@@ -75,7 +75,7 @@ public struct ProviderBrandMark: View {
                     // The band chop pulls the drive's visual weight downward;
                     // lift the badged mark a touch so it sits optically centered
                     // in its container. Visual only — layout footprint unchanged.
-                    .offset(y: badgeLabel != nil ? -size * 0.08 : 0)
+                    .offset(y: badgeLabel != nil ? -size * 0.11 : 0)
             } else {
                 Image(assetName)
                     .renderingMode(.template)
@@ -98,14 +98,14 @@ public struct ProviderBrandMark: View {
         let base = Image(systemName: symbol)
             .resizable()
             .scaledToFit()
-            .padding(size * (showsBackground ? 0.28 : 0.18))
+            .padding(size * (showsBackground ? 0.33 : 0.23))
             .foregroundStyle(tint)
 
         if let badgeLabel {
             // Fraction of the icon height chopped off the bottom. Constant, so the
             // cutoff line sits in the same place for SMB, WebDAV, NFS, … — the
             // label never shifts it.
-            let chop = size * 0.41
+            let chop = size * 0.43
             ZStack(alignment: .bottom) {
                 base
                     // Slice the lower band cleanly off the glyph (a straight
@@ -117,10 +117,12 @@ public struct ProviderBrandMark: View {
                             .blendMode(.destinationOut)
                     }
                     .compositingGroup()
-                // The label sits in the cleared band, same color as the glyph.
+                // The label sits in the cleared band, same color as the glyph,
+                // nudged up so it reads more centered under the smaller drive.
                 badgeText(badgeLabel)
                     .foregroundStyle(tint)
                     .frame(height: chop, alignment: .center)
+                    .offset(y: -size * 0.05)
             }
         } else {
             base
@@ -137,7 +139,7 @@ public struct ProviderBrandMark: View {
             .lineLimit(1)
             .minimumScaleFactor(0.3)
             .multilineTextAlignment(.center)
-            .frame(width: size * 0.7)
+            .frame(width: size * 0.82)
     }
 
     /// Brand accent color used to tint each provider's logo + chip.

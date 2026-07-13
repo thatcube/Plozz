@@ -111,6 +111,16 @@ public protocol VideoEngine: AnyObject {
     /// protocol extension so existing engines need no change.
     func stop(preserveDisplayMode: Bool)
 
+    /// Deterministically tears down any external transport this engine opened
+    /// (e.g. a leased SMB session + source cursor) and **awaits** its full
+    /// shutdown before returning. `stop()` only halts decode; the transport it
+    /// held is otherwise released asynchronously on deinit, which lets a fresh
+    /// engine's re-open race the draining cursor. The stall-recovery retry awaits
+    /// this first so the new session opens against a clean slate. Defaulted to a
+    /// no-op (see the protocol extension) — only engines that lease their own
+    /// transport (Plozzigen's network-file path) do real work here.
+    func drainTransport() async
+
     // MARK: Live tunables
 
     /// What this engine supports beyond baseline transport. The options menu
@@ -306,6 +316,10 @@ public extension VideoEngine {
     /// the `preserveDisplayMode` hint is only meaningful to the on-device engine,
     /// which drives `AVDisplayManager` for HDR/Dolby Vision.
     func stop(preserveDisplayMode: Bool) { stop() }
+
+    /// Default no-op: engines that don't lease an external transport have nothing
+    /// to drain — `stop()` already released everything they own.
+    func drainTransport() async {}
 
     /// Default no-op: only engines advertising
     /// ``PlayerEngineCapabilities/dualSubtitleDecode`` decode a second subtitle

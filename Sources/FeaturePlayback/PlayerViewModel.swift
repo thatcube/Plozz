@@ -973,9 +973,15 @@ public final class PlayerViewModel {
     private func replaceEngineForRetry(
         _ kind: PlaybackEngineKind,
         preserveDisplayMode: Bool
-    ) {
+    ) async {
+        let oldEngine = engine
         clearEngineCallbacks()
-        engine.stop(preserveDisplayMode: preserveDisplayMode)
+        oldEngine.stop(preserveDisplayMode: preserveDisplayMode)
+        // Deterministically drain the old engine's leased transport (SMB session +
+        // source cursor) before opening a fresh one, so the retry's re-resolve
+        // doesn't race the old cursor's asynchronous deinit release — the race
+        // that made the previous fresh-engine retry re-fail in ~3ms.
+        await oldEngine.drainTransport()
         engine = makeEngine(kind)
         currentEngineKind = kind
         engineToken = UUID()
@@ -1631,6 +1637,17 @@ public final class PlayerViewModel {
 
     // MARK: - Cross-engine fallback policy
 
+    /// Formats the typed `.unknown` payload as a redacted ` detail=…` suffix for a
+    /// failure log line (empty string for classified errors or an empty payload),
+    /// so a stall/retry line names the underlying throw without leaking URLs or
+    /// credentials.
+    private static func redactedFailureDetail(_ error: AppError) -> String {
+        guard case .unknown(let message) = error, !message.isEmpty else {
+            return ""
+        }
+        return " detail=\(HandoffDiagnostics.redactedDetail(message))"
+    }
+
     /// Decides what to do when the active engine reports a playback failure,
     /// following the fallback chain: the chosen engine's failure swaps to the
     /// *other* engine (once) at the last known position; if that also fails, force
@@ -1640,16 +1657,22 @@ public final class PlayerViewModel {
         _ error: AppError,
         sourceEngineToken: UUID
     ) async {
+        // The engine's best failure classification collapses to a short code
+        // (`unknown`), which for the network-file stall discarded the ACTUAL throw
+        // reason. Surface the typed `.unknown` payload (redacted) on every branch
+        // so the journal names why a stall/retry failed instead of a bare code.
+        let detail = Self.redactedFailureDetail(error)
         guard sourceEngineToken == engineToken else {
             HandoffDiagnostics.emit(
-                "engine FAILURE_IGNORED stale-callback item=\(itemID)"
+                "engine FAILURE_IGNORED stale-callback item=\(itemID) "
+                    + "error=\(HandoffDiagnostics.errorCode(error))\(detail)"
             )
             return
         }
         guard let request else {
             HandoffDiagnostics.emit(
                 "engine FAILED item=\(itemID) request=nil "
-                    + "error=\(HandoffDiagnostics.errorCode(error))"
+                    + "error=\(HandoffDiagnostics.errorCode(error))\(detail)"
             )
             phase = .failed(error)
             return
@@ -1676,10 +1699,10 @@ public final class PlayerViewModel {
             hasRetriedNetworkFileEngine = true
             HandoffDiagnostics.emit(
                 "engine RETRY_FRESH item=\(itemID) engine=plozzigen "
-                    + "error=\(HandoffDiagnostics.errorCode(error))"
+                    + "error=\(HandoffDiagnostics.errorCode(error))\(detail)"
             )
             phase = .loading
-            replaceEngineForRetry(
+            await replaceEngineForRetry(
                 .plozzigen,
                 preserveDisplayMode: contentDisplayMode.isHDR
             )
@@ -1711,7 +1734,7 @@ public final class PlayerViewModel {
         // 3) Already transcoding (or out of options): surface the error.
         HandoffDiagnostics.emit(
             "engine FAILED item=\(itemID) engine=\(currentEngineKind.rawValue) "
-                + "error=\(HandoffDiagnostics.errorCode(error)) exhausted=true"
+                + "error=\(HandoffDiagnostics.errorCode(error))\(detail) exhausted=true"
         )
         clearFirstFrameWait()
         phase = .failed(error)

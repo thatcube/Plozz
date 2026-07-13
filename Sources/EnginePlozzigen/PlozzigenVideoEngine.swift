@@ -138,6 +138,11 @@ public final class PlozzigenVideoEngine: VideoEngine {
     private let authenticatedHTTPResolver: (any AuthenticatedHTTPResourceResolving)?
     private var cancellables = Set<AnyCancellable>()
     private var progressTimer: Task<Void, Never>?
+    /// The leased network source backing the current load (SMB/network-file path
+    /// only). Retained so ``drainTransport()`` can await its full shutdown before a
+    /// stall-recovery retry re-opens, instead of letting deinit release it
+    /// asynchronously and racing the fresh open. `nil` for URL-backed loads.
+    private var activeResolvedSource: MediaTransportResolvedSource?
     #if canImport(UIKit)
     private let videoView: UIView
     #endif
@@ -214,6 +219,7 @@ public final class PlozzigenVideoEngine: VideoEngine {
         options.preferredAudioLanguages = request.preferredAudioLanguages
         options.preferredSubtitleLanguages = request.preferredSubtitleLanguages
 
+        var stage = "resolve"
         do {
             if case .some(.networkFile(let locator)) = request.playbackSource {
                 guard let networkFileResolver else {
@@ -222,6 +228,8 @@ public final class PlozzigenVideoEngine: VideoEngine {
                     )
                 }
                 let resolvedSource = try await networkFileResolver.resolve(locator)
+                activeResolvedSource = resolvedSource
+                stage = "engine.load"
                 let source = MediaSource.custom(
                     TransportIOReader(resolvedSource: resolvedSource),
                     formatHint: Self.networkFileFormatHint(for: locator)
@@ -249,6 +257,7 @@ public final class PlozzigenVideoEngine: VideoEngine {
                 guard let url = resolvedURL else {
                     throw MediaTransportError.invalidInput(reason: "missing playback source")
                 }
+                stage = "engine.load"
                 try await engine.load(
                     url: url,
                     startPosition: startPosition > 0 ? startPosition : nil,
@@ -261,8 +270,14 @@ public final class PlozzigenVideoEngine: VideoEngine {
             syncTracks()
         } catch {
             // Preserve typed error detail rather than collapsing it to a generic
-            // localized error code.
+            // localized error code, and journal WHICH stage threw so a fast
+            // re-fail on retry is attributable (SMB/registry resolve vs the
+            // AetherEngine/localhost load) instead of a bare "unknown".
             let detail = String(describing: error)
+            HandoffDiagnostics.emit(
+                "aether LOAD_FAILED stage=\(stage) "
+                    + "detail=\(HandoffDiagnostics.redactedDetail(detail))"
+            )
             let err: AppError = .unknown(detail)
             status = .failed(err)
             onFailure?(err)
@@ -324,6 +339,16 @@ public final class PlozzigenVideoEngine: VideoEngine {
         status = .idle
         intendsPause = true
         isPaused = true
+    }
+
+    /// Awaits the full shutdown of the leased network source (if any) before
+    /// returning, so a stall-recovery retry re-opens against a fully drained
+    /// session/cursor rather than racing the old one's asynchronous deinit
+    /// release. No-op for URL-backed loads (nothing leased). Call after `stop()`.
+    public func drainTransport() async {
+        let source = activeResolvedSource
+        activeResolvedSource = nil
+        await source?.waitForFinalShutdown()
     }
 
     // MARK: - Tunables

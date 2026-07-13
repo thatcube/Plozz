@@ -19,31 +19,34 @@ enum MediaShareRouteError: Error, Equatable, Sendable {
     case unreachable
 }
 
-/// Reachability result for one candidate WebDAV URL.
-enum WebDAVReachability: Equatable, Sendable {
-    case reachable      // an HTTP server answered (DAV header optional at this stage)
-    case unreachable
+/// Result of probing one candidate URL for WebDAV.
+enum WebDAVProbeResult: Equatable, Sendable {
+    case webDAV       // an HTTP server answered AND advertised the DAV header
+    case notWebDAV    // an HTTP server answered but is not WebDAV
+    case unreachable  // nothing answered (or TLS failed)
 }
 
-/// Probes whether an HTTP(S) endpoint answers. For detection only — it accepts
-/// any server certificate (a self-signed WebDAV server must still be
+/// Probes whether an HTTP(S) endpoint is a WebDAV server. For detection only —
+/// it accepts any server certificate (a self-signed WebDAV server must still be
 /// *detectable*; the real trust decision + pin approval happens later in the
 /// WebDAV flow) and never sends credentials.
 protocol WebDAVReachabilityProbing: Sendable {
-    func reachability(of url: URL) async -> WebDAVReachability
+    func probe(url: URL) async -> WebDAVProbeResult
 }
 
 /// Turns a raw typed address into a `MediaShareRoute`. Deterministic and
 /// unit-testable (the network probe is injected).
 ///
-/// Rules (no guessing games, and no unauthenticated DAV sniffing that real
-/// servers don't reliably answer):
-///  - explicit `smb://` → SMB; explicit `http(s)://` → WebDAV at that scheme.
-///  - no scheme **with a path** (e.g. `nas.local/dav`) → WebDAV: probe https,
-///    then http; whichever answers wins (so the user types neither scheme).
-///  - no scheme, **bare host** (e.g. `192.168.2.1`) → SMB (the overwhelmingly
-///    common bare-host LAN share; a WebDAV server virtually always lives under
-///    a path, and the user can still type `http(s)://` to force WebDAV at root).
+/// No path heuristics and no "which port means what" guessing — it **probes**:
+///  - explicit `smb://` → SMB; explicit `http(s)://` → WebDAV at that scheme
+///    (the user stated intent; the WebDAV flow's own `OPTIONS`+`DAV` check
+///    confirms it and errors clearly if it isn't WebDAV).
+///  - port `445` → SMB (that's SMB's port, unambiguous).
+///  - otherwise → probe the address for WebDAV (`OPTIONS` → `DAV` header),
+///    trying https then http; if a WebDAV server answers, route WebDAV at that
+///    scheme; if not, fall back to SMB. So `192.168.68.71:8384` (a WebDAV
+///    server on a non-standard port, no path) is correctly detected, and a bare
+///    NAS with only a web admin page is not mistaken for WebDAV.
 struct MediaShareRouteDetector: Sendable {
     private let probe: any WebDAVReachabilityProbing
 
@@ -63,7 +66,7 @@ struct MediaShareRouteDetector: Sendable {
             return .success(.smb(host: host, port: port))
         }
         if lower.hasPrefix("http://") || lower.hasPrefix("https://") {
-            guard let url = Self.webDAVURL(raw), TransportOrigin(url: url) != nil else {
+            guard let url = URL(string: raw), TransportOrigin(url: url) != nil else {
                 return .failure(.invalidAddress)
             }
             return .success(.webDAV(baseURL: url, insecureHTTP: url.scheme?.lowercased() == "http"))
@@ -73,23 +76,25 @@ struct MediaShareRouteDetector: Sendable {
         let (host, port, path) = Self.split(raw, droppingScheme: nil)
         guard !host.isEmpty else { return .failure(.invalidAddress) }
 
-        let hasPath = !path.isEmpty && path != "/"
-        guard hasPath else {
-            // Bare host → SMB.
+        // Port 445 is unambiguously SMB.
+        if port == 445 {
             return .success(.smb(host: host, port: port))
         }
 
-        // Host + path → WebDAV. Probe https first, then http.
+        // Probe for a WebDAV server (https first, then http) on the given
+        // port/path, matching a real DAV response — not a path or port guess.
         let hostPort = port.map { "\(host):\($0)" } ?? host
         if let httpsURL = URL(string: "https://\(hostPort)\(path)"),
-           await probe.reachability(of: httpsURL) == .reachable {
+           await probe.probe(url: httpsURL) == .webDAV {
             return .success(.webDAV(baseURL: httpsURL, insecureHTTP: false))
         }
         if let httpURL = URL(string: "http://\(hostPort)\(path)"),
-           await probe.reachability(of: httpURL) == .reachable {
+           await probe.probe(url: httpURL) == .webDAV {
             return .success(.webDAV(baseURL: httpURL, insecureHTTP: true))
         }
-        return .failure(.unreachable)
+
+        // Not a WebDAV server → treat as SMB (its own flow validates/erros).
+        return .success(.smb(host: host, port: port))
     }
 
     // MARK: - Parsing helpers
@@ -129,16 +134,13 @@ struct MediaShareRouteDetector: Sendable {
         }
         return (authority, nil, path)
     }
-
-    private static func webDAVURL(_ raw: String) -> URL? {
-        URL(string: raw)
-    }
 }
 
-/// Real reachability probe: a short-timeout `OPTIONS` that accepts any server
-/// trust and reports whether an HTTP response came back. Credential-free.
+/// Real WebDAV probe: a short-timeout `OPTIONS` that accepts any server trust
+/// and reports whether the response advertised the `DAV` compliance header
+/// (RFC 4918 §10.1). Credential-free.
 struct WebDAVReachabilityProbe: WebDAVReachabilityProbing {
-    func reachability(of url: URL) async -> WebDAVReachability {
+    func probe(url: URL) async -> WebDAVProbeResult {
         await withCheckedContinuation { continuation in
             let delegate = AnyTrustProbeDelegate()
             let config = URLSessionConfiguration.ephemeral
@@ -148,8 +150,14 @@ struct WebDAVReachabilityProbe: WebDAVReachabilityProbing {
             request.httpMethod = "OPTIONS"
             let box = ContinuationBox(continuation)
             let task = session.dataTask(with: request) { _, response, _ in
-                let reachable = response is HTTPURLResponse
-                box.resume(reachable ? .reachable : .unreachable)
+                let result: WebDAVProbeResult
+                if let http = response as? HTTPURLResponse {
+                    let headers = HTTPHeaderUtilities.normalizedHeaders(from: http.allHeaderFields)
+                    result = headers["dav"] != nil ? .webDAV : .notWebDAV
+                } else {
+                    result = .unreachable
+                }
+                box.resume(result)
                 session.invalidateAndCancel()
             }
             task.resume()
@@ -159,12 +167,12 @@ struct WebDAVReachabilityProbe: WebDAVReachabilityProbing {
 
 private final class ContinuationBox: @unchecked Sendable {
     private let lock = NSLock()
-    private var continuation: CheckedContinuation<WebDAVReachability, Never>?
-    init(_ continuation: CheckedContinuation<WebDAVReachability, Never>) {
+    private var continuation: CheckedContinuation<WebDAVProbeResult, Never>?
+    init(_ continuation: CheckedContinuation<WebDAVProbeResult, Never>) {
         self.continuation = continuation
     }
-    func resume(_ value: WebDAVReachability) {
-        let cont = lock.withLock { () -> CheckedContinuation<WebDAVReachability, Never>? in
+    func resume(_ value: WebDAVProbeResult) {
+        let cont = lock.withLock { () -> CheckedContinuation<WebDAVProbeResult, Never>? in
             let c = continuation
             continuation = nil
             return c

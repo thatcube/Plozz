@@ -134,7 +134,7 @@ struct AddShareView: View {
 
             SharePanel(
                 title: "Enter address",
-                footer: "Enter your server’s address — an IP or name like 192.168.1.10 or mynas.local, or a full web address for a WebDAV server like nas.local/dav. Plozz detects the rest."
+                footer: "Enter your server’s address — an IP or name like 192.168.1.10 or mynas.local, with a port if it uses one (192.168.68.71:8384). Plozz detects whether it’s SMB or WebDAV automatically."
             ) {
                 VStack(alignment: .leading, spacing: 18) {
                     TextField("Server address", text: $viewModel.manualHost)

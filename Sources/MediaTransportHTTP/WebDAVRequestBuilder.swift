@@ -45,4 +45,16 @@ public enum WebDAVRequestBuilder {
         )
         return request
     }
+
+    /// A plain, unconditional `GET` used for a bounded whole-file read (small
+    /// sidecar/metadata files). `Accept-Encoding: identity` keeps a transparent
+    /// compressing proxy from resizing the body so the caller's byte cap and
+    /// any length reasoning stay accurate.
+    public static func get(url: URL) -> URLRequest {
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+        request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
+        return request
+    }
 }

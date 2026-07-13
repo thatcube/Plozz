@@ -28,16 +28,30 @@ import Foundation
 ///    are both hard failures, never a silent truncation.
 public enum PropfindXMLParser {
     /// Parses an in-memory multistatus response.
+    ///
+    /// `includeSelfEntry` controls whether the queried resource's own entry
+    /// (the href matching `requestPath`) is returned. `false` (default) is the
+    /// directory-listing case — the collection echoes itself alongside its
+    /// children and the self-entry is dropped. `true` is the single-resource
+    /// `stat` case (a `Depth: 0` PROPFIND, whose only response *is* the
+    /// self-entry) — dropping it there would yield nothing.
     public static func parse(
         data: Data,
         root: WebDAVRoot,
         requestPath: String,
-        limits: PropfindParseLimits = .default
+        limits: PropfindParseLimits = .default,
+        includeSelfEntry: Bool = false
     ) throws -> [WebDAVEntry] {
         guard data.count <= limits.maxResponseBytes else {
             throw TransportError.responseTooLarge(limitBytes: limits.maxResponseBytes)
         }
-        return try runParser(data: data, root: root, requestPath: requestPath, limits: limits)
+        return try runParser(
+            data: data,
+            root: root,
+            requestPath: requestPath,
+            limits: limits,
+            includeSelfEntry: includeSelfEntry
+        )
     }
 
     /// Parses a multistatus response from a stream (e.g. a large response
@@ -50,7 +64,8 @@ public enum PropfindXMLParser {
         stream: InputStream,
         root: WebDAVRoot,
         requestPath: String,
-        limits: PropfindParseLimits = .default
+        limits: PropfindParseLimits = .default,
+        includeSelfEntry: Bool = false
     ) throws -> [WebDAVEntry] {
         let bounded = BoundedInputStream(stream: stream, limit: limits.maxResponseBytes)
         let parser = XMLParser(stream: bounded)
@@ -59,7 +74,8 @@ public enum PropfindXMLParser {
             boundedStream: bounded,
             root: root,
             requestPath: requestPath,
-            limits: limits
+            limits: limits,
+            includeSelfEntry: includeSelfEntry
         )
     }
 
@@ -67,7 +83,8 @@ public enum PropfindXMLParser {
         data: Data,
         root: WebDAVRoot,
         requestPath: String,
-        limits: PropfindParseLimits
+        limits: PropfindParseLimits,
+        includeSelfEntry: Bool
     ) throws -> [WebDAVEntry] {
         let parser = XMLParser(data: data)
         return try runParser(
@@ -75,7 +92,8 @@ public enum PropfindXMLParser {
             boundedStream: nil,
             root: root,
             requestPath: requestPath,
-            limits: limits
+            limits: limits,
+            includeSelfEntry: includeSelfEntry
         )
     }
 
@@ -84,9 +102,15 @@ public enum PropfindXMLParser {
         boundedStream: BoundedInputStream?,
         root: WebDAVRoot,
         requestPath: String,
-        limits: PropfindParseLimits
+        limits: PropfindParseLimits,
+        includeSelfEntry: Bool
     ) throws -> [WebDAVEntry] {
-        let delegate = MultistatusParserDelegate(root: root, requestPath: requestPath, maxEntries: limits.maxEntries)
+        let delegate = MultistatusParserDelegate(
+            root: root,
+            requestPath: requestPath,
+            maxEntries: limits.maxEntries,
+            includeSelfEntry: includeSelfEntry
+        )
         parser.delegate = delegate
         parser.shouldProcessNamespaces = true
         parser.shouldReportNamespacePrefixes = false
@@ -173,6 +197,7 @@ private final class MultistatusParserDelegate: NSObject, XMLParserDelegate {
     private let root: WebDAVRoot
     private let requestPath: String
     private let maxEntries: Int
+    private let includeSelfEntry: Bool
 
     private(set) var entries: [WebDAVEntry] = []
     private(set) var limitError: TransportError?
@@ -205,10 +230,11 @@ private final class MultistatusParserDelegate: NSObject, XMLParserDelegate {
     private var pendingContentType: String?
     private var pendingPropstatStatusIsSuccess = false
 
-    init(root: WebDAVRoot, requestPath: String, maxEntries: Int) {
+    init(root: WebDAVRoot, requestPath: String, maxEntries: Int, includeSelfEntry: Bool) {
         self.root = root
         self.requestPath = requestPath
         self.maxEntries = maxEntries
+        self.includeSelfEntry = includeSelfEntry
     }
 
     // MARK: XMLParserDelegate
@@ -376,8 +402,11 @@ private final class MultistatusParserDelegate: NSObject, XMLParserDelegate {
         }
 
         // Drop the collection's own "self" entry (the queried collection,
-        // echoed back alongside its children in a Depth:1 response).
-        if WebDAVPathPolicy.isSelfEntry(resolvedPath: resolvedPath, requestPath: requestPath) {
+        // echoed back alongside its children in a Depth:1 response) — unless
+        // this is a single-resource `stat` (Depth:0), whose only response IS
+        // the self-entry and must be kept.
+        if !includeSelfEntry,
+           WebDAVPathPolicy.isSelfEntry(resolvedPath: resolvedPath, requestPath: requestPath) {
             return
         }
 

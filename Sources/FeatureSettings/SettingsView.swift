@@ -696,21 +696,24 @@ public struct SettingsView: View {
                 .font(.footnote)
                 .settingsRowSecondary()
         } else {
-            HStack(alignment: .center, spacing: 8) {
+            HStack(alignment: .center, spacing: 10) {
                 let visible = Array(watchedServerGroups.prefix(3))
                 let overflow = max(0, watchedServerGroups.count - visible.count)
                 ForEach(Array(visible.enumerated()), id: \.element.serverKey) { idx, group in
                     if idx > 0 {
                         Text("·")
-                            .font(.subheadline.weight(.bold))
+                            .font(.footnote)
                             .settingsRowSecondary()
                     }
-                    HStack(spacing: 6) {
+                    HStack(spacing: 8) {
                         ProviderIcon(provider: group.providerKind, size: 24, mediaShareTransport: group.transportKind)
                             // Render larger without growing the row: scaleEffect
                             // enlarges the drawing but keeps the 24pt layout
-                            // footprint, so the line height is unchanged.
+                            // footprint, so the line height is unchanged. The
+                            // horizontal padding reserves real space for the
+                            // enlarged drawing so it doesn't crowd the label/dots.
                             .scaleEffect(1.3)
+                            .padding(.horizontal, 4)
                         Text(group.serverName)
                             .font(.footnote.weight(.medium))
                             .settingsRowSecondary()

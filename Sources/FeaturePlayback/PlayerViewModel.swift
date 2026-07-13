@@ -209,6 +209,14 @@ public final class PlayerViewModel {
     /// into an engine failure so the cross-engine / transcode fallback chain runs.
     private var watchdogTask: Task<Void, Never>?
 
+    /// The stall-recovery work the watchdog launches once it declares a hang.
+    /// Deliberately kept OFF ``watchdogTask``: recovery re-arms the watchdog (via
+    /// ``playResolved`` → ``armPlaybackWatchdog``), which cancels ``watchdogTask``.
+    /// If recovery ran on that same task it would cancel its own in-flight
+    /// re-resolve mid-flight — observed on device as the fresh-engine retry
+    /// failing instantly with `LOAD_FAILED stage=resolve detail=cancelled`.
+    private var recoveryTask: Task<Void, Never>?
+
     /// How long the watchdog waits for the first real progress before declaring a
     /// stall. Generous enough for legitimate 4K start-up buffering.
     private let watchdogTimeout: TimeInterval = 30
@@ -1622,11 +1630,23 @@ public final class PlayerViewModel {
             // Still no progress after the deadline → treat as a stalled stream.
             if self.engine.currentTime <= threshold, !self.engine.isPaused {
                 PlozzLog.playback.info("Playback watchdog: no progress before deadline; triggering fallback")
-                await self.handleEngineFailure(
-                    .invalidResponse,
-                    sourceEngineToken: watchedEngineToken
-                )
+                // Run recovery on a SEPARATE task, not this watchdog task.
+                // handleEngineFailure → playResolved re-arms the watchdog, which
+                // cancels `watchdogTask`; doing the recovery inline here would
+                // cancel its own re-resolve (LOAD_FAILED stage=resolve
+                // detail=cancelled). Mirrors the `onFailure` dispatch.
+                self.launchStallRecovery(token: watchedEngineToken)
             }
+        }
+    }
+
+    /// Runs stall recovery off ``watchdogTask`` (see ``recoveryTask``). Replaces any
+    /// in-flight recovery so a later watchdog fire can't stack two retries.
+    private func launchStallRecovery(token: UUID) {
+        recoveryTask?.cancel()
+        recoveryTask = Task { [weak self] in
+            guard let self else { return }
+            await self.handleEngineFailure(.invalidResponse, sourceEngineToken: token)
         }
     }
 
@@ -2249,6 +2269,8 @@ public final class PlayerViewModel {
         autoSkipNoticeTask?.cancel()
         autoSkipNoticeTask = nil
         cancelWatchdog()
+        recoveryTask?.cancel()
+        recoveryTask = nil
         cancelSeekCommit()
         seekTask?.cancel()
         seekTask = nil

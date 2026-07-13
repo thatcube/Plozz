@@ -416,7 +416,7 @@ actor ShareScanner {
                 modifiedAt: entry.modifiedAt ?? .distantPast, kind: .episode, library: library,
                 title: ep.title ?? fallback, year: ep.year,
                 seriesTitle: ep.series,
-                seriesKey: ShareCatalogID.seriesKey(fromTitle: ep.series),
+                seriesKey: ShareCatalogID.seriesKey(fromTitle: ep.series, providerTag: ep.providerTag),
                 season: ep.season, episode: ep.episode,
                 movieKey: nil, movieTitleKey: nil
             )

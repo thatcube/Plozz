@@ -19,7 +19,7 @@ enum ShareMediaParser {
     /// v10: normalize series titles (strip year/season/edition/quality junk),
     /// prefer the clean filename title over a junky folder, and capture the series
     /// year — collapses split/variant folders and fixes same-name matches.
-    static let classifierVersion = 10
+    static let classifierVersion = 11
 
     /// File extensions we treat as playable video.
     static let videoExtensions: Set<String> = [
@@ -128,6 +128,12 @@ enum ShareMediaParser {
         /// Release year of the SERIES, recovered from the filename/folder (e.g.
         /// `Show (2024)`), used to disambiguate same-name shows at enrichment.
         var year: Int?
+        /// An EXPLICIT external id embedded in the folder/filename by the user's
+        /// media manager (Plex/Jellyfin/Sonarr style `[tvdb-81797]`, `{tmdb-123}`),
+        /// normalized as `source-number`. The strongest possible signal: it keeps a
+        /// genuinely different same-named show apart (One Piece anime `[tvdb-81797]`
+        /// vs the live-action reboot) and can seed authoritative enrichment.
+        var providerTag: String?
     }
 
     struct Movie: Equatable {
@@ -199,10 +205,11 @@ enum ShareMediaParser {
         // filename DOES carry a title we prefer it (it's usually the cleanest
         // signal); see `resolveSeries`.
         let showFolder = authoritativeShowFolder(fromAncestors: ancestors)
+        let providerTag = embeddedProviderTag(relPath: relPath)
 
         // (1) Explicit episode marker — strongest, works in any folder.
         if let ep = parseEpisode(stem: stem, parentFolder: showHint) {
-            return .episode(resolveSeries(ep, showFolder: showFolder))
+            return .episode(resolveSeries(ep, showFolder: showFolder, providerTag: providerTag))
         }
 
         // (2) Folder says "this is a series" → accept a bare episode number.
@@ -228,7 +235,7 @@ enum ShareMediaParser {
                    yearBearingMovieFolder(parent, containsTitleNumber: ep.episode) {
                     return .movie(parseMovie(stem: stem, parentFolder: parent))
                 }
-                return .episode(resolveSeries(ep, showFolder: showFolder))
+                return .episode(resolveSeries(ep, showFolder: showFolder, providerTag: providerTag))
             }
         }
 
@@ -236,6 +243,30 @@ enum ShareMediaParser {
         // filename fallback. `ancestors.last` gives the movie folder its year/title
         // when the filename lacks them (`Star Wars (1977)/movie.mkv`).
         return .movie(parseMovie(stem: stem, parentFolder: ancestors.last))
+    }
+
+    /// An explicit external id embedded in a share-relative path by a media manager
+    /// (Plex/Jellyfin/Sonarr conventions): `[tvdb-81797]`, `{tmdb-1399}`,
+    /// `[imdb-tt0944947]`, `[anidb-69]`, `tvdbid=81797`. Normalized to
+    /// `source-number` (e.g. `tvdb-81797`), preferring the strongest source. Nil
+    /// when the path carries none. Case-insensitive.
+    static func embeddedProviderTag(relPath: String) -> String? {
+        let sources = ["tvdb", "tmdb", "imdb", "anidb", "tvmaze", "anilist"]
+        var found: [String: String] = [:]
+        for src in sources {
+            let pattern = "[\\[{(]\\s*\(src)(?:id)?[-_=:]?\\s*(tt)?(\\d+)\\s*[\\]})]"
+            guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { continue }
+            let ns = relPath as NSString
+            if let m = regex.firstMatch(in: relPath, range: NSRange(location: 0, length: ns.length)),
+               m.numberOfRanges >= 3 {
+                let tt = m.range(at: 1).location != NSNotFound ? ns.substring(with: m.range(at: 1)) : ""
+                let num = ns.substring(with: m.range(at: 2))
+                found[src] = "\(src)-\(tt)\(num)".lowercased()
+            }
+        }
+        // Prefer the most authoritative source present.
+        for src in sources { if let tag = found[src] { return tag } }
+        return nil
     }
 
     /// Resolves an episode's final series name + year for GROUPING and display.
@@ -249,7 +280,7 @@ enum ShareMediaParser {
     /// loose "Downloads/Show S01E01.mkv"). The generic-folder case (Avatar (2024) →
     /// "Avatar") is handled at enrichment, which also searches the richer filename
     /// title. Year = filename (usually explicit) else folder.
-    private static func resolveSeries(_ ep: Episode, showFolder: String?) -> Episode {
+    private static func resolveSeries(_ ep: Episode, showFolder: String?, providerTag: String? = nil) -> Episode {
         var ep = ep
         let folder = showFolder.map(normalizeSeriesTitleAndYear)
         if let folderTitle = folder?.title, !folderTitle.isEmpty {
@@ -258,6 +289,7 @@ enum ShareMediaParser {
             ep.series = "Unknown"
         }
         ep.year = ep.year ?? folder?.year
+        ep.providerTag = providerTag
         return ep
     }
 

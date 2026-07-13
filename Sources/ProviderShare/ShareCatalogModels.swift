@@ -144,16 +144,48 @@ enum ShareCatalogID {
         return (key, season)
     }
 
-    /// Stable, filesystem/id-safe grouping key for a series title (case- and
-    /// punctuation-insensitive) so "Breaking Bad" / "breaking.bad" collapse to one
-    /// series. Never contains a colon (so `seasonComponents` can split safely).
+    /// Series key that folds in an EXPLICIT embedded provider id (e.g.
+    /// `tvdb-81797`) when the path carried one, so two genuinely different shows
+    /// that share a title but are tagged with distinct ids (One Piece anime
+    /// `[tvdb-81797]` vs the live-action reboot) never collapse into one card. When
+    /// no tag is present this is exactly `seriesKey(fromTitle:)`, so ordinary shows
+    /// are unaffected and a show tagged in only some folders errs toward a harmless
+    /// extra card rather than a wrong merge.
+    static func seriesKey(fromTitle title: String, providerTag: String?) -> String {
+        let base = seriesKey(fromTitle: title)
+        guard let tag = providerTag, !tag.isEmpty else { return base }
+        let safeTag = seriesKey(fromTitle: tag)   // normalize the tag to the same alphabet
+        return safeTag.isEmpty ? base : "\(base)-\(safeTag)"
+    }
+
+    /// Stable, filesystem/id-safe grouping key for a series title (case-,
+    /// punctuation- and article-insensitive) so "Breaking Bad" / "breaking.bad"
+    /// collapse to one series — and, crucially, so the SAME show under
+    /// inconsistently-named folders collapses too: "The Mandalorian" == "mandalorian"
+    /// (leading article dropped) and "The Handmaid's Tale" == "The Handmaids Tale"
+    /// (possessive apostrophe folded). Mirrors the cross-library title-normalization
+    /// conventions (accent/case fold, punctuation stripped) so a share series keys
+    /// the same way Plex/Jellyfin ones do. Never contains a colon (so
+    /// `seasonComponents` can split safely).
     static func seriesKey(fromTitle title: String) -> String {
-        let lower = title.lowercased()
-        let mapped = lower.unicodeScalars.map { scalar -> Character in
+        // Fold accents + case, then DELETE apostrophes in place (so "Handmaid's" →
+        // "handmaids", not "handmaid s") before mapping other punctuation to spaces.
+        let folded = title.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: nil)
+        let deapostrophed = folded.replacingOccurrences(of: "'", with: "")
+            .replacingOccurrences(of: "\u{2019}", with: "")
+            .replacingOccurrences(of: "\u{02BC}", with: "")
+        let mapped = deapostrophed.unicodeScalars.map { scalar -> Character in
             CharacterSet.alphanumerics.contains(scalar) ? Character(scalar) : " "
         }
-        return String(mapped)
+        var tokens = String(mapped)
             .split(separator: " ", omittingEmptySubsequences: true)
-            .joined(separator: "-")
+            .map(String.init)
+        // Drop a single LEADING article ("the"/"a"/"an") — the most common reason the
+        // same show splits across folders — but never empty the key (a show literally
+        // named "The"/"A" keeps its token).
+        if tokens.count > 1, ["the", "a", "an"].contains(tokens[0]) {
+            tokens.removeFirst()
+        }
+        return tokens.joined(separator: "-")
     }
 }

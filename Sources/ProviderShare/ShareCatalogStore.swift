@@ -557,7 +557,11 @@ actor ShareCatalogStore {
         let remaining = max(0, limit - out.count)
         if remaining > 0 {
             query("""
-            SELECT a.series_key, a.series_title, a.library, MAX(a.year) FROM assets a
+            SELECT a.series_key, a.series_title, a.library, (
+                SELECT b.year FROM assets b
+                WHERE b.series_key = a.series_key AND b.kind='episode' AND b.year IS NOT NULL
+                GROUP BY b.year ORDER BY COUNT(*) DESC, b.year ASC LIMIT 1
+            ) FROM assets a
             LEFT JOIN enrichment e ON e.item_id = 'series:' || a.series_key AND e.enrich_version = ?
             WHERE a.kind='episode' AND a.series_key IS NOT NULL
               AND (e.item_id IS NULL OR (\(Self.unusableEnrichmentPredicate) AND e.attempts < ?))
@@ -608,7 +612,13 @@ actor ShareCatalogStore {
             let itemID = ShareCatalogID.series(key)
             if hasUsableEnrichment(itemID: itemID, version: version) { return nil }
             var out: PendingEnrichment?
-            query("SELECT series_title, library, MAX(year) FROM assets WHERE series_key=? AND kind='episode';",
+            query("""
+            SELECT series_title, library, (
+                SELECT b.year FROM assets b
+                WHERE b.series_key = ?1 AND b.kind='episode' AND b.year IS NOT NULL
+                GROUP BY b.year ORDER BY COUNT(*) DESC, b.year ASC LIMIT 1
+            ) FROM assets WHERE series_key=?1 AND kind='episode';
+            """,
                   bind: { self.bindText($0, 1, key) }) { stmt in
                 guard sqlite3_column_type(stmt, 0) != SQLITE_NULL else { return }
                 let lib = self.columnText(stmt, 1) ?? "tv"
@@ -1198,7 +1208,13 @@ actor ShareCatalogStore {
             var library: CatalogLibrary = .tv
             var year: Int?
             var found = false
-            query("SELECT series_title, library, MAX(year) FROM assets WHERE series_key=? AND kind='episode';",
+            query("""
+            SELECT series_title, library, (
+                SELECT b.year FROM assets b
+                WHERE b.series_key = ?1 AND b.kind='episode' AND b.year IS NOT NULL
+                GROUP BY b.year ORDER BY COUNT(*) DESC, b.year ASC LIMIT 1
+            ) FROM assets WHERE series_key=?1 AND kind='episode';
+            """,
                   bind: { self.bindText($0, 1, key) }) { stmt in
                 if sqlite3_column_type(stmt, 0) != SQLITE_NULL { title = self.columnText(stmt, 0) ?? key; found = true }
                 library = CatalogLibrary(rawValue: self.columnText(stmt, 1) ?? "tv") ?? .tv

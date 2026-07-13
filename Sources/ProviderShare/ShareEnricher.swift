@@ -20,7 +20,10 @@ actor ShareEnricher {
     /// up clean titles + year-based disambiguation.
     /// v4: a generic show folder ("Avatar (2024)") also searches richer
     /// filename-derived titles ("Avatar The Last Airbender"), so re-enrich.
-    static let version = 4
+    /// v5: robust series keys (article/apostrophe folding) + a representative
+    /// (most-common) series year instead of MAX, so re-enrich with the corrected
+    /// grouping and years.
+    static let version = 5
 
     private let store: ShareCatalogStore
     private let resolver: ShareMetadataResolving

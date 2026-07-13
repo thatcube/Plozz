@@ -337,4 +337,68 @@ final class ShareMediaParserTests: XCTestCase {
         // A genuine trailing title is still kept.
         XCTAssertEqual(episode("TV/Show/Show.S01E03.The Reveal.mkv")?.title, "The Reveal")
     }
+
+    // MARK: - Robust series keys (same show under inconsistent folder names merges)
+
+    func testLeadingArticleFoldedInSeriesKey() {
+        // "The Mandalorian" folder vs a bare "mandalorian" folder must be ONE series.
+        XCTAssertEqual(seriesKey("The Mandalorian"), seriesKey("mandalorian"))
+        XCTAssertEqual(seriesKey("mandalorian"), "mandalorian")
+        // An internal "the" is preserved (only a LEADING article is dropped).
+        XCTAssertEqual(seriesKey("House of the Dragon"), "house-of-the-dragon")
+        // A one-word title that IS an article keeps its token (never emptied).
+        XCTAssertEqual(seriesKey("The"), "the")
+    }
+
+    func testPossessiveApostropheFoldedInSeriesKey() {
+        // "The Handmaid's Tale" and "The Handmaids Tale" are the same show.
+        XCTAssertEqual(seriesKey("The Handmaid's Tale"), seriesKey("The Handmaids Tale"))
+        XCTAssertEqual(seriesKey("The Handmaid's Tale"), "handmaids-tale")
+    }
+
+    func testDifferentTitlesStillGetDifferentKeys() {
+        // Guard against over-merging: distinct shows keep distinct keys.
+        XCTAssertNotEqual(seriesKey("Avatar"), seriesKey("Avatar The Last Airbender"))
+    }
+
+    // MARK: - Embedded provider ids split a same-named different show
+
+    func testEmbeddedProviderTagExtraction() {
+        XCTAssertEqual(
+            ShareMediaParser.embeddedProviderTag(relPath: "TV/One Piece (1999) [tvdb-81797]/One Piece - 009.mkv"),
+            "tvdb-81797"
+        )
+        XCTAssertEqual(
+            ShareMediaParser.embeddedProviderTag(relPath: "TV/Show {tmdb-1399}/Show.S01E01.mkv"),
+            "tmdb-1399"
+        )
+        XCTAssertEqual(
+            ShareMediaParser.embeddedProviderTag(relPath: "TV/Show [imdb-tt0944947]/Show.S01E01.mkv"),
+            "imdb-tt0944947"
+        )
+        XCTAssertNil(ShareMediaParser.embeddedProviderTag(relPath: "TV/Plain Show/Plain.Show.S01E01.mkv"))
+    }
+
+    func testOnePieceAnimeAndLiveActionSplitByEmbeddedTvdbId() {
+        // The anime folder carries an explicit [tvdb-81797]; the live-action reboot
+        // does not. They must resolve to DIFFERENT series keys even though both
+        // normalize to "One Piece".
+        let anime = episode("Anime/One Piece (1999) [tvdb-81797]/One Piece - 009 - The Liar.mkv")
+        let live = episode("TV/One Piece (2023)/One.Piece.2023.S01E01.mkv")
+        XCTAssertEqual(anime?.series, "One Piece")
+        XCTAssertEqual(anime?.providerTag, "tvdb-81797")
+        XCTAssertNil(live?.providerTag)
+        XCTAssertNotEqual(
+            ShareCatalogID.seriesKey(fromTitle: anime?.series ?? "a", providerTag: anime?.providerTag),
+            ShareCatalogID.seriesKey(fromTitle: live?.series ?? "b", providerTag: live?.providerTag)
+        )
+    }
+
+    func testProviderTagKeyMatchesPlainKeyWhenAbsent() {
+        // No tag → identical to the plain key, so ordinary shows are unaffected.
+        XCTAssertEqual(
+            ShareCatalogID.seriesKey(fromTitle: "Breaking Bad", providerTag: nil),
+            ShareCatalogID.seriesKey(fromTitle: "Breaking Bad")
+        )
+    }
 }

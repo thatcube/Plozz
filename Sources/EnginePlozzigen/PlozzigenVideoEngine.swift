@@ -184,9 +184,20 @@ public final class PlozzigenVideoEngine: VideoEngine {
             let isFailureDetail = [
                 "failed", "failure", "error", "starved", "stalled", "watchdog"
             ].contains { lowered.contains($0) }
+            // Stall diagnostics (SMB/DV first-segment wedge after the DV switch):
+            //  • [LagDiag] — 1 Hz AVPlayer transport state (tcs / wait-reason /
+            //    dclk / req delta / buffer). The engine promotes it to the host
+            //    handler only while the player is NOT cleanly advancing (plus a
+            //    1-in-10 heartbeat), so this stays quiet during smooth playback.
+            //  • [HLSLocalServer] GET — every segment/playlist request AVPlayer
+            //    issues, so a stall shows whether it re-requests the reset segment
+            //    (server fault) or goes silent (AVPlayer wedge).
+            let isStallDiag = line.contains("[LagDiag]")
+                || (line.contains("[HLSLocalServer]") && line.contains("GET "))
             if handoff,
                line.contains("[TTFF]")
                 || line.contains("[DisplayCriteria]")
+                || isStallDiag
                 || isFailureDetail {
                 HandoffDiagnostics.emit(
                     "aether " + HandoffDiagnostics.redactedDetail(line)

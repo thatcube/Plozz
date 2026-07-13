@@ -82,7 +82,13 @@ let package = Package(
         // muxer needs a PARSED audio packet to build the AC-3/E-AC-3/TrueHD sample
         // entry, else a mid-file backward seek wedged the muxer. See
         // docs/media-share-proposal.md § 5.1.
-        .package(url: "https://github.com/thatcube/AetherEngine", revision: "d97fad242c069711fb3065df449444cc31267251"),
+        //
+        // TEMPORARY DIAGNOSTIC PIN: `f1a3c56` (branch plozz-dv-stall-diag) is
+        // `d97fad24` + ONE diagnostic-only commit that promotes the 1 Hz [LagDiag]
+        // AVPlayer transport line to the host journal during stalls (to root-cause
+        // the SMB/DV first-segment wedge). No behavior change. Revert this pin back
+        // to d97fad24 once the stall root cause is confirmed and the real fix lands.
+        .package(url: "https://github.com/thatcube/AetherEngine", revision: "f1a3c5675d7d27da8fa1f787cde96b400633277d"),
         // NOTE: FFmpegBuild (FFmpeg n8.1.x decode-only) and LibDovi (Dolby Vision
         // RPU parser) are pulled in TRANSITIVELY by AetherEngine — its own manifest
         // declares and consumes them. Plozz used to declare them directly only for

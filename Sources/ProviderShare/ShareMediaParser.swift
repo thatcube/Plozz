@@ -16,7 +16,10 @@ enum ShareMediaParser {
     /// waiting for each file to change on disk. See `ShareScanner.scanIfStale`.
     /// v9: anchor a series to its show folder (override filename variant prefixes
     /// and redundant nested season/variant subfolders).
-    static let classifierVersion = 9
+    /// v10: normalize series titles (strip year/season/edition/quality junk),
+    /// prefer the clean filename title over a junky folder, and capture the series
+    /// year — collapses split/variant folders and fixes same-name matches.
+    static let classifierVersion = 10
 
     /// File extensions we treat as playable video.
     static let videoExtensions: Set<String> = [
@@ -122,6 +125,9 @@ enum ShareMediaParser {
         var episode: Int
         /// Episode title when the name carried one after the SxxEyy token.
         var title: String?
+        /// Release year of the SERIES, recovered from the filename/folder (e.g.
+        /// `Show (2024)`), used to disambiguate same-name shows at enrichment.
+        var year: Int?
     }
 
     struct Movie: Equatable {
@@ -156,7 +162,9 @@ enum ShareMediaParser {
     static func classify(fileName: String, parentFolder: String?) -> Kind {
         let stem = (fileName as NSString).deletingPathExtension
         if let ep = parseEpisode(stem: stem, parentFolder: parentFolder) {
-            return .episode(ep)
+            // No folder tree here, so the immediate parent is the only fallback
+            // when the filename carried no series title.
+            return .episode(resolveSeries(ep, showFolder: parentFolder))
         }
         return .movie(parseMovie(stem: stem, parentFolder: parentFolder))
     }
@@ -185,15 +193,16 @@ enum ShareMediaParser {
         let stem = (fileName as NSString).deletingPathExtension
         let ancestors = Array(comps.dropLast())            // folders, root-first
         let showHint = seriesHintFolder(fromAncestors: ancestors)
-        // The show folder (when the tree proves one) is authoritative for the
-        // series NAME — overriding a filename variant prefix ("…Remix.S04E01…")
-        // or a redundant nested subfolder ("Show/Season 1/Show S01/…"), matching
-        // how Plex/Jellyfin anchor a series to its show folder.
+        // The authoritative show folder (outermost, above any season folder), used
+        // to resolve the series when the FILENAME carries no usable title — a
+        // "S01E01 - Title.mkv" file, or a nested/variant subfolder. When the
+        // filename DOES carry a title we prefer it (it's usually the cleanest
+        // signal); see `resolveSeries`.
         let showFolder = authoritativeShowFolder(fromAncestors: ancestors)
 
         // (1) Explicit episode marker — strongest, works in any folder.
         if let ep = parseEpisode(stem: stem, parentFolder: showHint) {
-            return .episode(seriesAnchored(ep, toShowFolder: showFolder))
+            return .episode(resolveSeries(ep, showFolder: showFolder))
         }
 
         // (2) Folder says "this is a series" → accept a bare episode number.
@@ -219,7 +228,7 @@ enum ShareMediaParser {
                    yearBearingMovieFolder(parent, containsTitleNumber: ep.episode) {
                     return .movie(parseMovie(stem: stem, parentFolder: parent))
                 }
-                return .episode(seriesAnchored(ep, toShowFolder: showFolder))
+                return .episode(resolveSeries(ep, showFolder: showFolder))
             }
         }
 
@@ -229,15 +238,26 @@ enum ShareMediaParser {
         return .movie(parseMovie(stem: stem, parentFolder: ancestors.last))
     }
 
-    /// Replaces an episode's series name with the show folder's when the tree
-    /// gave us an authoritative one, so every episode under a show folder groups
-    /// into ONE series regardless of filename variant prefixes or nested variant
-    /// subfolders. A no-op when there's no authoritative show folder (loose files
-    /// keep their filename-derived series).
-    private static func seriesAnchored(_ ep: Episode, toShowFolder folder: String?) -> Episode {
-        guard let folder, let title = seriesFromFolder(folder) else { return ep }
+    /// Resolves an episode's final series name + year for GROUPING and display.
+    /// Prefers the normalized SHOW FOLDER title: normalization cleans junk/variant
+    /// folders ("Deadloch.cc"→"Deadloch", "…(2022) Season 1 S01 (…)"→"House of the
+    /// Dragon"), so a show split across differently-named folders collapses into
+    /// ONE series, while genuinely different same-named shows in distinctly-named
+    /// folders stay separate (the user's animated "Avatar the Last Airbender"
+    /// folder vs the live-action "Avatar (2024)" folder). Falls back to the
+    /// filename-derived title only when there's no authoritative show folder (a
+    /// loose "Downloads/Show S01E01.mkv"). The generic-folder case (Avatar (2024) →
+    /// "Avatar") is handled at enrichment, which also searches the richer filename
+    /// title. Year = filename (usually explicit) else folder.
+    private static func resolveSeries(_ ep: Episode, showFolder: String?) -> Episode {
         var ep = ep
-        ep.series = title
+        let folder = showFolder.map(normalizeSeriesTitleAndYear)
+        if let folderTitle = folder?.title, !folderTitle.isEmpty {
+            ep.series = folderTitle
+        } else if ep.series.isEmpty {
+            ep.series = "Unknown"
+        }
+        ep.year = ep.year ?? folder?.year
         return ep
     }
 
@@ -284,6 +304,28 @@ enum ShareMediaParser {
     enum Kind: Equatable {
         case movie(Movie)
         case episode(Episode)
+    }
+
+    /// The series title carried by the FILENAME alone (folder tree ignored), used
+    /// at enrichment to recover a richer search title than a generic show folder
+    /// gives — e.g. an "Avatar (2024)" folder whose files are named
+    /// "Avatar The Last Airbender 2024 S01E01". Returns the normalized filename
+    /// title (empty stripped) so the caller can offer it as an extra TVDB search
+    /// candidate. Nil when the filename carries no usable title.
+    static func filenameSeriesTitle(relPath: String) -> String? {
+        let comps = relPath.split(separator: "/").map(String.init)
+        guard let fileName = comps.last else { return nil }
+        let stem = (fileName as NSString).deletingPathExtension
+        let series: String
+        if let ep = parseEpisode(stem: stem, parentFolder: nil) {
+            series = ep.series
+        } else if let ep = parseBareEpisode(stem: stem, seasonFolder: nil, showFolder: nil) {
+            series = ep.series
+        } else {
+            return nil
+        }
+        let trimmed = series.trimmingCharacters(in: .whitespaces)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     // MARK: - Folder context
@@ -354,14 +396,12 @@ enum ShareMediaParser {
                   let season = Int(ns.substring(with: m.range(at: 1))),
                   let episode = Int(ns.substring(with: m.range(at: 2))) else { continue }
 
-            // Series name = the text before the marker, cleaned. If that's empty
-            // (the file is just "S01E02"), fall back to the parent folder — but
-            // strip a trailing "Season N" so we get the show, not the season.
+            // Series name = the text before the marker, normalized (junk/year
+            // stripped). Empty (file is just "S01E02") → the caller resolves the
+            // series from the folder tree.
             let before = ns.substring(to: m.range.location)
-            var series = clean(before)
-            if series.isEmpty {
-                series = seriesFromFolder(parentFolder) ?? "Unknown"
-            }
+            let normalized = normalizeSeriesTitleAndYear(before)
+            let series = normalized.title
 
             // Episode title = whatever trails the marker, cleaned (often junk /
             // release tags — kept only if it looks like words, not a scene tag).
@@ -369,7 +409,8 @@ enum ShareMediaParser {
             let after = afterStart < ns.length ? ns.substring(from: afterStart) : ""
             let title = episodeTitle(from: after)
 
-            return Episode(series: series, season: season, episode: episode, title: title)
+            return Episode(series: series, season: season, episode: episode,
+                           title: title, year: normalized.year)
         }
         return nil
     }
@@ -389,11 +430,9 @@ enum ShareMediaParser {
     static func parseBareEpisode(stem: String, seasonFolder: String?, showFolder: String?) -> Episode? {
         guard let (episode, before) = bareEpisodeNumber(fromStem: stem) else { return nil }
         let season = seasonFolder.flatMap(seasonNumber(fromFolder:)) ?? 1
-        var series = clean(before)
-        if series.isEmpty {
-            series = seriesFromFolder(showFolder) ?? "Unknown"
-        }
-        return Episode(series: series, season: season, episode: episode, title: nil)
+        let normalized = normalizeSeriesTitleAndYear(before)
+        return Episode(series: normalized.title, season: season, episode: episode,
+                       title: nil, year: normalized.year)
     }
 
     /// Extracts a bare episode number and the series text that precedes it. Tries,
@@ -475,35 +514,26 @@ enum ShareMediaParser {
         return parent
     }
 
-    private static func seriesFromFolder(_ folder: String?) -> String? {
-        guard let folder, !folder.isEmpty else { return nil }
-        // A season folder names the season, not the show; a library-root folder
-        // (`Anime`, `Movies`, `TV`) names neither — never use either as a title.
-        if isSeasonFolder(folder) { return nil }
-        let name = folder.lowercased().trimmingCharacters(in: .whitespaces)
-        if seriesLibraryNames.contains(name) || movieLibraryNames.contains(name) { return nil }
-        let cleaned = clean(folder)
-        return cleaned.isEmpty ? nil : cleaned
-    }
-
     private static func episodeTitle(from raw: String) -> String? {
         let cleaned = clean(raw)
         guard !cleaned.isEmpty else { return nil }
         // Release names put the real episode title first, then scene/quality tags
-        // ("Pilot 720p WEB-DL x264"). Keep words up to the first tag so we show
-        // "Pilot", not "Pilot 720p". Require at least one real (non-numeric) word.
-        let tags: Set<String> = [
-            "1080p", "720p", "2160p", "480p", "4k", "web", "webdl",
-            "bluray", "hdtv", "x264", "x265", "hevc", "aac", "ddp", "dd", "amzn",
-            "nf", "dsnp", "hmax", "atvp", "repack", "proper", "internal",
-        ]
+        // ("Pilot 720p WEB-DL x264", "The Body HDR 2160p WEB h265-EDITH"). Keep
+        // words up to the first tag so we show "Pilot", not "Pilot 720p" — and so
+        // a title-less "S01E06.HDR..." doesn't become an episode called "HDR".
+        // Reuse the series stop-token set (quality/codec/HDR/audio/network/edition)
+        // plus resolution tokens. Require at least one real (non-numeric) word.
+        let extraTags: Set<String> = ["1080p", "720p", "2160p", "480p", "4k"]
         var kept: [String] = []
         for word in cleaned.split(separator: " ").map(String.init) {
             // Match hyphen-insensitively so tight scene spellings like "WEB-DL"
             // (which `clean` leaves intact — it only splits space-flanked dashes)
             // still cut the title, not just the space-separated forms.
-            let normalized = word.lowercased().replacingOccurrences(of: "-", with: "")
-            if tags.contains(word.lowercased()) || tags.contains(normalized) { break }
+            let lower = word.lowercased()
+            let dehyphenated = lower.replacingOccurrences(of: "-", with: "")
+            if extraTags.contains(lower)
+                || seriesTitleStopTokens.contains(lower)
+                || seriesTitleStopTokens.contains(dehyphenated) { break }
             kept.append(word)
         }
         let meaningful = kept.filter { $0.count >= 2 && Int($0) == nil }
@@ -600,5 +630,84 @@ enum ShareMediaParser {
         // Collapse whitespace.
         s = s.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
         return s.trimmingCharacters(in: CharacterSet(charactersIn: " -"))
+    }
+
+    // MARK: - Series title normalization
+
+    /// Tokens that TERMINATE a series title: everything from the first such token
+    /// on is a season marker, edition, source/quality/codec/audio tag, network, or
+    /// caption marker — not part of the show name. Scene releases always put the
+    /// real title first, then these, so cutting at the first one recovers the name.
+    /// (Matched only AFTER at least one title token is kept, so a legitimate
+    /// single-word title that happens to collide — e.g. "Max Headroom" — survives.)
+    private static let seriesTitleStopTokens: Set<String> = [
+        // Editions / packaging
+        "remix", "uncut", "extended", "remastered", "unrated", "theatrical",
+        "complete", "collection", "proper", "repack", "internal", "limited", "hybrid",
+        // Caption / subtitle / language markers
+        "cc", "sdh", "subbed", "dubbed", "subs", "multi", "dual",
+        // Source / quality
+        "bluray", "brrip", "bdrip", "webrip", "web", "webdl", "hdtv", "dvdrip",
+        "dvdscr", "hdrip", "remux", "uhd", "imax",
+        // Codecs / bit depth
+        "x264", "x265", "h264", "h265", "hevc", "avc", "xvid", "divx", "10bit", "8bit",
+        // Dynamic range
+        "hdr", "hdr10", "sdr", "dv", "dovi", "dolby", "hlg",
+        // Audio
+        "aac", "ac3", "eac3", "dd", "ddp", "dts", "truehd", "atmos", "flac", "opus",
+        // Networks / sources
+        "amzn", "nf", "dsnp", "hmax", "max", "atvp", "hulu", "pcok", "stan", "itv",
+    ]
+
+    /// Season-marker tokens that also terminate a title (`Season`, `Staffel`,
+    /// `S01`, `S1`) so a folder like "House of the Dragon Season 1 S01" or a
+    /// filename prefix "Show 2024 S01" collapses to the show name.
+    private static func isSeasonToken(_ lower: String) -> Bool {
+        if lower == "season" || lower == "staffel" { return true }
+        return lower.range(of: #"^s\d{1,2}$"#, options: .regularExpression) != nil
+    }
+
+    private static func isYearToken(_ lower: String) -> Bool {
+        lower.range(of: #"^(19|20)\d{2}$"#, options: .regularExpression) != nil
+    }
+
+    /// The last 4-digit year in `raw` (before `clean` strips `(YYYY)` parens), or
+    /// nil. Excludes resolution-like numbers via the shared `yearPattern`.
+    static func extractYear(_ raw: String) -> Int? {
+        let ns = raw as NSString
+        let full = NSRange(location: 0, length: ns.length)
+        guard let match = yearPattern.matches(in: raw, range: full).last else { return nil }
+        return Int(ns.substring(with: match.range))
+    }
+
+    /// Normalizes a raw title fragment (a filename prefix or a folder name) into a
+    /// clean SERIES title plus any recovered year. The title is cut at the first
+    /// junk token (year / season marker / quality-edition tag), so
+    /// "The Last of Us (2023) - Season 01 - LVL7T7" → ("The Last of Us", 2023),
+    /// "Deadloch.cc" → ("Deadloch", nil), "Avatar The Last Airbender 2024" →
+    /// ("Avatar The Last Airbender", 2024), "Arrested Development Remix" →
+    /// ("Arrested Development", nil). The first token is always kept, so a title
+    /// that IS a year ("1883") or collides with a tag word ("Max Headroom")
+    /// survives. Empty title in → empty out (caller falls back to another source).
+    static func normalizeSeriesTitleAndYear(_ raw: String) -> (title: String, year: Int?) {
+        let year = extractYear(raw)
+        let cleaned = clean(raw)
+        guard !cleaned.isEmpty else { return ("", year) }
+        var kept: [String] = []
+        for word in cleaned.split(separator: " ").map(String.init) {
+            if !kept.isEmpty {
+                let lw = word.lowercased()
+                if isYearToken(lw) || isSeasonToken(lw) || seriesTitleStopTokens.contains(lw) {
+                    break
+                }
+            }
+            kept.append(word)
+        }
+        return (kept.joined(separator: " ").trimmingCharacters(in: .whitespaces), year)
+    }
+
+    /// Convenience: just the normalized title.
+    static func normalizeSeriesTitle(_ raw: String) -> String {
+        normalizeSeriesTitleAndYear(raw).title
     }
 }

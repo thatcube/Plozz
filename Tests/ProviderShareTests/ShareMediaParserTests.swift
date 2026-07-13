@@ -253,4 +253,88 @@ final class ShareMediaParserTests: XCTestCase {
         XCTAssertNil(ShareMediaParser.seasonNumber(fromFolder: "Anime"))
         XCTAssertNil(ShareMediaParser.seasonNumber(fromFolder: "Series"))
     }
+
+    // MARK: - Real-library series-title normalization (junky folder → clean title)
+
+    private func seriesKey(_ title: String) -> String {
+        ShareCatalogID.seriesKey(fromTitle: title)
+    }
+
+    func testJunkFolderTokensAreStrippedFromSeriesTitle() {
+        // Folders carrying release/season junk resolve to a clean show title, so a
+        // no-match becomes a confident match. (Ground-truth cases from a real share.)
+        XCTAssertEqual(episode("TV/Deadloch.cc/Deadloch.S01E01.mkv")?.series, "Deadloch")
+        XCTAssertEqual(episode("TV/Sharp Objects cc/Sharp.Objects.S01E01.mkv")?.series, "Sharp Objects")
+        XCTAssertEqual(episode("TV/Yellowjackets cc/Yellowjackets.S02E01.mkv")?.series, "Yellowjackets")
+        XCTAssertEqual(episode("TV/Barry Season 02/Barry.S02E01.mkv")?.series, "Barry")
+    }
+
+    func testLastOfUsJunkyFolderNormalizes() {
+        // Folder carries season/release junk and no inline year; the title still
+        // resolves cleanly (year comes from enrichment). A year BEFORE the marker
+        // is captured — see the live-action Avatar case below.
+        let ep = episode("TV/The Last of Us Season 01 LVL7T7/The.Last.of.Us.S01E01.mkv")
+        XCTAssertEqual(ep?.series, "The Last of Us")
+        let withYear = episode("TV/The Last of Us/The.Last.of.Us.2023.S01E01.mkv")
+        XCTAssertEqual(withYear?.series, "The Last of Us")
+        XCTAssertEqual(withYear?.year, 2023)
+    }
+
+    func testHouseOfTheDragonSplitFoldersMergeToOneSeries() {
+        // The same show in two differently-named folders must collapse to ONE card:
+        // grouping keys off the NORMALIZED folder title, so both resolve equal.
+        let plain = episode("TV/House of the Dragon/House.of.the.Dragon.S01E01.mkv")
+        let junky = episode(
+            "TV/House of the Dragon (2022) Season 1 S01 (1080p BluRay x265)/House.of.the.Dragon.S01E02.mkv"
+        )
+        XCTAssertEqual(plain?.series, "House of the Dragon")
+        XCTAssertEqual(junky?.series, "House of the Dragon")
+        XCTAssertEqual(seriesKey(plain?.series ?? "a"), seriesKey(junky?.series ?? "b"))
+    }
+
+    func testAvatarAnimatedAndLiveActionStaySeparateSeries() {
+        // Distinctly-named folders for genuinely different shows must NOT merge.
+        let animated = episode("TV/Avatar the Last Airbender/Avatar.the.Last.Airbender.S01E01.mkv")
+        let liveAction = episode("TV/Avatar (2024)/Avatar.The.Last.Airbender.2024.S01E01.mkv")
+        // Live-action groups by its generic folder ("Avatar") + carries its year.
+        XCTAssertEqual(liveAction?.series, "Avatar")
+        XCTAssertEqual(liveAction?.year, 2024)
+        XCTAssertNotEqual(
+            seriesKey(animated?.series ?? "a"),
+            seriesKey(liveAction?.series ?? "b")
+        )
+    }
+
+    func testGenericFolderRecoversRicherFilenameTitleAsSearchAlternate() {
+        // The Avatar (2024) fix: a generic folder groups as "Avatar", but the files
+        // carry the richer "Avatar The Last Airbender" used as an extra search title.
+        XCTAssertEqual(
+            ShareMediaParser.filenameSeriesTitle(
+                relPath: "TV/Avatar (2024)/Avatar.The.Last.Airbender.2024.S01E01.mkv"
+            ),
+            "Avatar The Last Airbender"
+        )
+        // A file that already matches its folder yields the same title (dedup-able).
+        XCTAssertEqual(
+            ShareMediaParser.filenameSeriesTitle(relPath: "TV/Barry Season 02/Barry.S02E01.mkv"),
+            "Barry"
+        )
+    }
+
+    func testNumericAndShortTitlesSurviveNormalization() {
+        // Guard: the "cut at first junk token" logic always keeps the first token, so
+        // legitimately numeric/short show titles are never emptied.
+        XCTAssertEqual(episode("TV/1883/1883.S01E01.mkv")?.series, "1883")
+        XCTAssertEqual(episode("TV/1923/1923.S01E02.mkv")?.series, "1923")
+        XCTAssertEqual(episode("TV/Max Headroom/Max.Headroom.S01E01.mkv")?.series, "Max Headroom")
+    }
+
+    func testReleaseTagIsNotMistakenForEpisodeTitle() {
+        // Trailing HDR/DV/resolution tags after the SxxEyy marker are release junk,
+        // not an episode title.
+        XCTAssertNil(episode("TV/Show/Show.S01E01.HDR.mkv")?.title)
+        XCTAssertNil(episode("TV/Show/Show.S01E02.2160p.DV.mkv")?.title)
+        // A genuine trailing title is still kept.
+        XCTAssertEqual(episode("TV/Show/Show.S01E03.The Reveal.mkv")?.title, "The Reveal")
+    }
 }

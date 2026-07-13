@@ -68,12 +68,31 @@ public actor TVDBClient {
         isMovie: Bool,
         episodeHints: [SeriesEpisodeHint] = []
     ) async -> TVDBMetadata? {
-        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard config.isConfigured, !trimmed.isEmpty else { return nil }
+        await resolve(titles: [title], year: year, isMovie: isMovie, episodeHints: episodeHints)
+    }
 
-        if let result = await search(query: trimmed, year: year, isMovie: isMovie,
-                                     episodeHints: episodeHints, allowRelogin: true) {
-            return result
+    /// Resolve metadata trying SEVERAL candidate titles in order, returning the
+    /// first that yields a match. Callers pass the most specific/reliable title
+    /// first (e.g. a rich filename title like "Avatar The Last Airbender" ahead of
+    /// a generic folder title "Avatar"), so a generic show-folder name still finds
+    /// the right series via the filename. Year + episode hints disambiguate within
+    /// each candidate's results.
+    public func resolve(
+        titles: [String],
+        year: Int?,
+        isMovie: Bool,
+        episodeHints: [SeriesEpisodeHint] = []
+    ) async -> TVDBMetadata? {
+        guard config.isConfigured else { return nil }
+        var seen = Set<String>()
+        for raw in titles {
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            let key = trimmed.lowercased()
+            guard !trimmed.isEmpty, seen.insert(key).inserted else { continue }
+            if let result = await search(query: trimmed, year: year, isMovie: isMovie,
+                                         episodeHints: episodeHints, allowRelogin: true) {
+                return result
+            }
         }
         return nil
     }

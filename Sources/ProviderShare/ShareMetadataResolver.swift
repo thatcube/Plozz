@@ -12,6 +12,12 @@ struct ShareEnrichRequest: Sendable, Equatable {
     /// On-disk episode fingerprints (season/episode/title), used to disambiguate a
     /// same-name series collision by content. Empty for movies or when unknown.
     var episodeHints: [SeriesEpisodeHint] = []
+    /// Extra, more-specific series titles recovered from the FILENAMES when the
+    /// (folder-derived) `title` is generic — e.g. an "Avatar (2024)" folder whose
+    /// files say "Avatar The Last Airbender". Tried ahead of `title` at search so a
+    /// generic folder still resolves. Most-specific first; empty for movies or when
+    /// filenames match the folder title.
+    var titleAlternates: [String] = []
 }
 
 /// Resolves metadata (external ids + overview + artwork) for a bare share item.
@@ -79,7 +85,12 @@ struct TVDBShareResolver: ShareMetadataResolving {
         async let keylessIDsTask = KeylessIDResolver().externalIDs(
             title: request.title, year: request.year, isAnime: request.isAnime, isTV: !request.isMovie
         )
-        async let tvdbTask = tvdb.resolve(title: request.title, year: request.year,
+        // Try the more-specific filename-derived titles first (a generic folder
+        // like "Avatar (2024)" resolves via "Avatar The Last Airbender"), then the
+        // stored folder title. `search` prefers an exact-year hit but falls back to
+        // relevance, so a specific query is far less likely to mis-match.
+        async let tvdbTask = tvdb.resolve(titles: request.titleAlternates + [request.title],
+                                          year: request.year,
                                           isMovie: request.isMovie, episodeHints: request.episodeHints)
         var ids = await keylessIDsTask
         let meta = await tvdbTask

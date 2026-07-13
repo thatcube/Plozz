@@ -414,7 +414,7 @@ actor ShareScanner {
             return CatalogAsset(
                 relPath: relPath, basename: name, size: entry.size ?? 0,
                 modifiedAt: entry.modifiedAt ?? .distantPast, kind: .episode, library: library,
-                title: ep.title ?? fallback, year: nil,
+                title: ep.title ?? fallback, year: ep.year,
                 seriesTitle: ep.series,
                 seriesKey: ShareCatalogID.seriesKey(fromTitle: ep.series),
                 season: ep.season, episode: ep.episode,

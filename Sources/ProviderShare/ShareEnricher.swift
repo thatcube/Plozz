@@ -16,7 +16,11 @@ actor ShareEnricher {
     /// Bump when the resolver's output materially changes, to re-enrich everything.
     /// v2: TVDB same-name collisions now disambiguate by on-disk episode titles
     /// (fixes e.g. animated "Archer" matching the 1975 detective drama).
-    static let version = 2
+    /// v3: series titles are normalized and now carry a year, so re-enrich to pick
+    /// up clean titles + year-based disambiguation.
+    /// v4: a generic show folder ("Avatar (2024)") also searches richer
+    /// filename-derived titles ("Avatar The Last Airbender"), so re-enrich.
+    static let version = 4
 
     private let store: ShareCatalogStore
     private let resolver: ShareMetadataResolving
@@ -143,14 +147,17 @@ actor ShareEnricher {
     /// by content (see ``TVDBClient`` disambiguation). No hints for movies.
     private func request(for pending: ShareCatalogStore.PendingEnrichment) async -> ShareEnrichRequest {
         var hints: [SeriesEpisodeHint] = []
+        var alternates: [String] = []
         if !pending.isMovie, let key = ShareCatalogID.seriesKey(forSeriesID: pending.itemID) {
             hints = await store.episodeTitleHints(seriesKey: key).map {
                 SeriesEpisodeHint(season: $0.season, episode: $0.episode, title: $0.title)
             }
+            alternates = await store.seriesSearchTitleAlternates(seriesKey: key, storedTitle: pending.title)
         }
         return ShareEnrichRequest(
             itemID: pending.itemID, title: pending.title, year: pending.year,
-            isMovie: pending.isMovie, isAnime: pending.isAnime, episodeHints: hints
+            isMovie: pending.isMovie, isAnime: pending.isAnime, episodeHints: hints,
+            titleAlternates: alternates
         )
     }
 }

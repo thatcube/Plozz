@@ -1136,7 +1136,42 @@ actor ShareCatalogStore {
         return out
     }
 
-    /// Episode items for one season of a series, in episode order.
+    /// Distinct FILENAME-derived series titles for a series that differ from its
+    /// stored (folder-derived) title — extra TVDB search candidates for a show
+    /// whose folder is generic. A generic "Avatar (2024)" folder stores title
+    /// "Avatar", but the files say "Avatar The Last Airbender"; offering that as a
+    /// search alternate lets enrichment find the right series. Returns candidates
+    /// longest-first (most specific), capped, excluding the stored title.
+    func seriesSearchTitleAlternates(seriesKey: String, storedTitle: String, sampleLimit: Int = 24) -> [String] {
+        ensureOpen()
+        guard db != nil, sampleLimit > 0 else { return [] }
+        var relPaths: [String] = []
+        query("""
+        SELECT rel_path FROM assets
+        WHERE series_key=? AND kind='episode' AND rel_path IS NOT NULL AND rel_path <> ''
+        ORDER BY COALESCE(season,1), COALESCE(episode, 999999)
+        LIMIT ?;
+        """, bind: {
+            self.bindText($0, 1, seriesKey)
+            sqlite3_bind_int64($0, 2, Int64(sampleLimit))
+        }) { stmt in
+            if let p = self.columnText(stmt, 0) { relPaths.append(p) }
+        }
+        let storedNorm = storedTitle.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: nil)
+            .trimmingCharacters(in: .whitespaces)
+        var seen = Set<String>()
+        var alternates: [String] = []
+        for path in relPaths {
+            guard let title = ShareMediaParser.filenameSeriesTitle(relPath: path) else { continue }
+            let norm = title.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: nil)
+                .trimmingCharacters(in: .whitespaces)
+            guard !norm.isEmpty, norm != storedNorm, seen.insert(norm).inserted else { continue }
+            alternates.append(title)
+        }
+        // Most specific first: a longer filename title ("Avatar The Last
+        // Airbender") is a stronger search than a short one.
+        return alternates.sorted { $0.count > $1.count }
+    }
     func episodes(seriesKey: String, season: Int) -> [MediaItem] {        ensureOpen()
         guard db != nil else { return [] }
         var out: [MediaItem] = []

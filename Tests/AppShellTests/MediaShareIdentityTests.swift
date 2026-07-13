@@ -15,24 +15,38 @@ final class MediaShareIdentityTests: XCTestCase {
 
     // MARK: - Pure identity helper
 
-    func testServerIDIsCaseInsensitiveOnHostAndShare() {
-        let a = AppState.mediaShareServerID(host: "NAS", port: nil, share: "Media")
-        let b = AppState.mediaShareServerID(host: "nas", port: nil, share: "media")
+    func testServerIDIsCaseInsensitiveOnHostShareAndUsername() {
+        let a = AppState.mediaShareServerID(host: "NAS", port: nil, share: "Media", username: "COPILOT2")
+        let b = AppState.mediaShareServerID(host: "nas", port: nil, share: "media", username: "Copilot2")
         XCTAssertEqual(a, b)
-        XCTAssertEqual(a, "share:nas/media")
+        XCTAssertEqual(a, "share:nas/media#copilot2")
     }
 
     func testServerIDIncludesPortWhenPresent() {
         XCTAssertEqual(
-            AppState.mediaShareServerID(host: "host", port: 4455, share: "Movies"),
-            "share:host:4455/movies"
+            AppState.mediaShareServerID(host: "host", port: 4455, share: "Movies", username: "u"),
+            "share:host:4455/movies#u"
         )
     }
 
     func testServerIDDistinguishesDifferentShares() {
         XCTAssertNotEqual(
-            AppState.mediaShareServerID(host: "host", port: nil, share: "movies"),
-            AppState.mediaShareServerID(host: "host", port: nil, share: "tv")
+            AppState.mediaShareServerID(host: "host", port: nil, share: "movies", username: "u"),
+            AppState.mediaShareServerID(host: "host", port: nil, share: "tv", username: "u")
+        )
+    }
+
+    func testServerIDDistinguishesDifferentUsersOnSameShare() {
+        XCTAssertNotEqual(
+            AppState.mediaShareServerID(host: "host", port: nil, share: "media", username: "brandon"),
+            AppState.mediaShareServerID(host: "host", port: nil, share: "media", username: "sister")
+        )
+    }
+
+    func testServerIDFoldsEmptyUsernameToGuest() {
+        XCTAssertEqual(
+            AppState.mediaShareServerID(host: "host", port: nil, share: "media", username: "   "),
+            "share:host/media#guest"
         )
     }
 
@@ -83,6 +97,28 @@ final class MediaShareIdentityTests: XCTestCase {
         XCTAssertEqual(shares.count, 1)
         XCTAssertEqual(try XCTUnwrap(shares.first).credentialRevision, first.credentialRevision,
                        "An identical re-add must not rotate the credential revision")
+    }
+
+    func testDifferentUsersOnSameShareAreSeparateAccounts() throws {
+        let harness = try makeState()
+
+        harness.state.didConfigureShare(
+            host: "192.168.1.10", port: nil, share: "Media",
+            username: "brandon", password: "b-pw", displayName: "Media"
+        )
+        harness.state.didConfigureShare(
+            host: "192.168.1.10", port: nil, share: "Media",
+            username: "sister", password: "s-pw", displayName: "Media"
+        )
+
+        let shares = harness.state.accounts.filter { $0.server.provider == .mediaShare }
+        XCTAssertEqual(shares.count, 2, "Distinct users on the same share must each get an account")
+        XCTAssertEqual(Set(shares.map(\.id)).count, 2)
+        // Each account keeps its own credential.
+        for account in shares {
+            let expected = account.userName == "brandon" ? "b-pw" : "s-pw"
+            XCTAssertEqual(harness.store.token(for: account.id), expected)
+        }
     }
 
     // MARK: - Harness

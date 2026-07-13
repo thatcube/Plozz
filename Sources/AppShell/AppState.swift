@@ -2231,7 +2231,7 @@ public final class AppState {
         let trimmedName = displayName.trimmingCharacters(in: .whitespaces)
         let name = trimmedName.isEmpty ? "\(host)/\(share)" : trimmedName
         let server = MediaServer(
-            id: Self.mediaShareServerID(host: host, port: port, share: share),
+            id: Self.mediaShareServerID(host: host, port: port, share: share, username: username),
             name: name,
             baseURL: baseURL,
             provider: .mediaShare
@@ -2255,14 +2255,26 @@ public final class AppState {
     /// — e.g. to update its password — updates the existing account in place
     /// instead of creating a duplicate.
     ///
-    /// Host and share name are folded to lowercase because SMB treats both as
-    /// case-insensitive: `//NAS/Media` and `//nas/media` are the same share, and
-    /// `COPILOT2` vs `Copilot2` must not fork the account. The user's original
-    /// casing is preserved in the display name and the connection `baseURL`
-    /// (SMB ignores case on the wire), only the identity is normalized.
-    static func mediaShareServerID(host: String, port: Int?, share: String) -> String {
+    /// Identity = host + port + share + user, all case-folded, because SMB treats
+    /// host, share, and username as case-insensitive. Folding to lowercase means
+    /// `//NAS/Media` and `//nas/media`, and `COPILOT2` vs `Copilot2`, resolve to
+    /// the same account (no accidental fork). The username IS part of the identity
+    /// so genuinely different users on the SAME share (e.g. `brandon` and `sister`,
+    /// who may see different files) can both be added as separate accounts. An
+    /// empty username is a guest/anonymous share and folds to a stable `guest`
+    /// identity. Only the identity is normalized; the display name and the
+    /// connection `baseURL` keep the user's original casing (SMB ignores case on
+    /// the wire).
+    static func mediaShareServerID(
+        host: String,
+        port: Int?,
+        share: String,
+        username: String
+    ) -> String {
         let portKey = port.map { ":\($0)" } ?? ""
-        return "share:\(host.lowercased())\(portKey)/\(share.lowercased())"
+        let normalizedUser = username.trimmingCharacters(in: .whitespaces).lowercased()
+        let user = normalizedUser.isEmpty ? "guest" : normalizedUser
+        return "share:\(host.lowercased())\(portKey)/\(share.lowercased())#\(user)"
     }
 
     /// Begins adding another account from inside the signed-in app.

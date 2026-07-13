@@ -19,7 +19,7 @@ enum ShareMediaParser {
     /// v10: normalize series titles (strip year/season/edition/quality junk),
     /// prefer the clean filename title over a junky folder, and capture the series
     /// year — collapses split/variant folders and fixes same-name matches.
-    static let classifierVersion = 11
+    static let classifierVersion = 12
 
     /// File extensions we treat as playable video.
     static let videoExtensions: Set<String> = [
@@ -206,10 +206,12 @@ enum ShareMediaParser {
         // signal); see `resolveSeries`.
         let showFolder = authoritativeShowFolder(fromAncestors: ancestors)
         let providerTag = embeddedProviderTag(relPath: relPath)
+        let nestedSubShow = nestedSubShowPresent(ancestors: ancestors, showFolder: showFolder)
 
         // (1) Explicit episode marker — strongest, works in any folder.
         if let ep = parseEpisode(stem: stem, parentFolder: showHint) {
-            return .episode(resolveSeries(ep, showFolder: showFolder, providerTag: providerTag))
+            return .episode(resolveSeries(ep, showFolder: showFolder, providerTag: providerTag,
+                                          allowNestedSubShow: nestedSubShow))
         }
 
         // (2) Folder says "this is a series" → accept a bare episode number.
@@ -235,7 +237,8 @@ enum ShareMediaParser {
                    yearBearingMovieFolder(parent, containsTitleNumber: ep.episode) {
                     return .movie(parseMovie(stem: stem, parentFolder: parent))
                 }
-                return .episode(resolveSeries(ep, showFolder: showFolder, providerTag: providerTag))
+                return .episode(resolveSeries(ep, showFolder: showFolder, providerTag: providerTag,
+                                              allowNestedSubShow: nestedSubShow))
             }
         }
 
@@ -280,10 +283,23 @@ enum ShareMediaParser {
     /// loose "Downloads/Show S01E01.mkv"). The generic-folder case (Avatar (2024) →
     /// "Avatar") is handled at enrichment, which also searches the richer filename
     /// title. Year = filename (usually explicit) else folder.
-    private static func resolveSeries(_ ep: Episode, showFolder: String?, providerTag: String? = nil) -> Episode {
+    private static func resolveSeries(_ ep: Episode, showFolder: String?, providerTag: String? = nil,
+                                     allowNestedSubShow: Bool = false) -> Episode {
         var ep = ep
         let folder = showFolder.map(normalizeSeriesTitleAndYear)
-        if let folderTitle = folder?.title, !folderTitle.isEmpty {
+        let folderTitle = folder?.title ?? ""
+        let fileTitle = ep.series   // filename-derived, already normalized in parse
+        // Nested sub-show: the file sits in a non-season subfolder BELOW the show
+        // folder AND its filename names a MORE-SPECIFIC series that extends the show
+        // folder title ("The Witcher/Blood Origin/The Witcher Blood Origin SxxEyy").
+        // Prefer the filename so the spinoff groups on its own (and merges with a
+        // sibling "The Witcher Blood Origin" folder) instead of being absorbed into
+        // the parent — while an ordinary variant prefix ("Arrested Development
+        // Remix", stripped by normalization to the show name) still folds in.
+        if allowNestedSubShow, !fileTitle.isEmpty,
+           titleStrictlyExtends(fileTitle, base: folderTitle) {
+            ep.series = fileTitle
+        } else if !folderTitle.isEmpty {
             ep.series = folderTitle
         } else if ep.series.isEmpty {
             ep.series = "Unknown"
@@ -291,6 +307,33 @@ enum ShareMediaParser {
         ep.year = ep.year ?? folder?.year
         ep.providerTag = providerTag
         return ep
+    }
+
+    /// Whether `title` is a STRICT word-extension of `base` (base is a proper
+    /// word-prefix): "The Witcher Blood Origin" extends "The Witcher", but neither an
+    /// identical title nor an unrelated one qualifies. Case/punctuation-insensitive.
+    static func titleStrictlyExtends(_ title: String, base: String) -> Bool {
+        let a = seriesMatchKey(title)
+        let b = seriesMatchKey(base)
+        guard !b.isEmpty, a != b else { return false }
+        return a.hasPrefix(b + " ")
+    }
+
+    /// Lowercased, alphanumerics-only, single-space title key for prefix comparison.
+    private static func seriesMatchKey(_ raw: String) -> String {
+        let folded = raw.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: nil)
+        let mapped = folded.unicodeScalars.map { CharacterSet.alphanumerics.contains($0) ? Character($0) : " " }
+        return String(mapped).split(separator: " ", omittingEmptySubsequences: true).joined(separator: " ")
+    }
+
+    /// Whether a non-season, non-library-root folder sits STRICTLY BELOW the show
+    /// folder in the tree — the structural mark of a nested sub-show container
+    /// (`The Witcher/Blood Origin/…`) as opposed to a plain `Show/Season N/…` layout.
+    static func nestedSubShowPresent(ancestors: [String], showFolder: String?) -> Bool {
+        guard let showFolder, let idx = ancestors.firstIndex(of: showFolder), idx + 1 < ancestors.count else {
+            return false
+        }
+        return ancestors[(idx + 1)...].contains { !isSeasonFolder($0) && !isLibraryRootName($0) }
     }
 
     /// Whether a folder component names a known library root (series OR movie),

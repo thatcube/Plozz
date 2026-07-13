@@ -126,16 +126,35 @@ public actor TVDBClient {
             if source.contains("imdb") { imdb = v }
             else if source.contains("themoviedb") || source == "tmdb" { tmdb = v }
         }
+        // The extended record carries the PRIMARY-language name/overview (e.g.
+        // Japanese for an anime like One Piece). Prefer the English translation when
+        // available so descriptions read in English; fall back to the base fields.
+        let english = await translation(type: type, id: trimmed, language: "eng", token: token)
+        let overview = (english?.overview ?? data.overview)?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty
+        let name = (english?.name ?? data.name)?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty
         return TVDBMetadata(
             tvdbID: data.id.map(String.init) ?? trimmed,
             imdbID: imdb,
             tmdbID: tmdb,
-            overview: data.overview?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty,
+            overview: overview,
             posterURL: data.image.flatMap(Self.imageURL),
             genres: (data.genres ?? []).compactMap { $0.name?.nonEmpty },
             year: data.year.flatMap { Int($0) },
-            title: data.name?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty
+            title: name
         )
+    }
+
+    /// Fetch a single-language name/overview translation for a series/movie
+    /// (`/{type}/{id}/translations/{language}`). Best-effort; nil on any miss so the
+    /// caller falls back to the base record's primary-language fields.
+    private func translation(type: String, id: String, language: String, token: String)
+        async -> (name: String?, overview: String?)? {
+        guard let url = URL(string: "\(config.apiBaseURL.absoluteString)/\(type)/\(id)/translations/\(language)") else { return nil }
+        let (response, _) = await MetadataHTTP.getWithStatus(
+            TranslationResponse.self, url: url, headers: ["Authorization": "Bearer \(token)"]
+        )
+        guard let t = response?.data else { return nil }
+        return (t.name?.nonEmpty, t.overview?.nonEmpty)
     }
 
     /// Resolve a wide **backdrop** (fanart) URL for a title, or `nil`. Uses a known
@@ -371,6 +390,17 @@ public actor TVDBClient {
         let remoteIds: [RemoteID]?
         struct Genre: Decodable { let name: String? }
         struct RemoteID: Decodable { let id: String?; let sourceName: String? }
+    }
+
+    /// TheTVDB v4 `/{type}/{id}/translations/{language}` payload — a single
+    /// language's localized name + overview.
+    private struct TranslationResponse: Decodable {
+        let data: Translation?
+        struct Translation: Decodable {
+            let name: String?
+            let overview: String?
+            let language: String?
+        }
     }
 
     private struct Artwork: Decodable {

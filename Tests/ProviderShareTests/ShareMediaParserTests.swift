@@ -427,4 +427,53 @@ final class ShareMediaParserTests: XCTestCase {
         XCTAssertEqual(ep?.year, 1990)
         XCTAssertEqual(ep?.providerTag, "tmdb-2019")
     }
+
+    // MARK: - Nested sub-show folders (spinoff under a parent show folder)
+
+    func testNestedSubShowFolderUsesSpecificFilenameTitle() {
+        // "The Witcher/Blood Origin/…" is a spinoff nested under the parent show
+        // folder; its files name the full series. It must NOT be absorbed into the
+        // parent "The Witcher" — it groups as its own series.
+        let ep = episode(
+            "TV Shows/The Witcher/Blood Origin/The.Witcher.Blood.Origin.S01E01.Of.Ballads.1080p.mkv"
+        )
+        XCTAssertEqual(ep?.series, "The Witcher Blood Origin")
+        XCTAssertEqual(ep?.season, 1)
+        XCTAssertEqual(ep?.episode, 1)
+    }
+
+    func testNestedSubShowMergesWithSiblingSpinoffFolder() {
+        // The same spinoff also exists as its own top-level folder; both copies must
+        // land on ONE grouping key.
+        let nested = episode(
+            "TV Shows/The Witcher/Blood Origin/The.Witcher.Blood.Origin.S01E01.x.mkv"
+        )
+        let sibling = episode(
+            "TV Shows/The Witcher Blood Origin/Season 1/The.Witcher.Blood.Origin.S01E01.x.mkv"
+        )
+        XCTAssertEqual(
+            ShareCatalogID.seriesKey(fromTitle: nested?.series ?? "a"),
+            ShareCatalogID.seriesKey(fromTitle: sibling?.series ?? "b")
+        )
+    }
+
+    func testParentShowNotAffectedByNestedSpinoff() {
+        // The real parent episodes (under their own Season folder) still key to the
+        // parent, unpolluted by the spinoff.
+        let ep = episode("TV Shows/The Witcher/Season 1/The.Witcher.S01E01.HDR.mkv")
+        XCTAssertEqual(ep?.series, "The Witcher")
+        XCTAssertNotEqual(
+            ShareCatalogID.seriesKey(fromTitle: ep?.series ?? "a"),
+            ShareCatalogID.seriesKey(fromTitle: "The Witcher Blood Origin")
+        )
+    }
+
+    func testNestedFolderDoesNotOverrideOrdinaryVariantPrefix() {
+        // Guard: a plain "Show/Season N/Show Variant SxxEyy" (variant stripped by
+        // normalization) is NOT treated as a sub-show — it still folds into the show.
+        let ep = episode(
+            "TV Shows/Arrested Development/Season 4/Arrested.Development.Remix.S04E01.mkv"
+        )
+        XCTAssertEqual(ep?.series, "Arrested Development")
+    }
 }

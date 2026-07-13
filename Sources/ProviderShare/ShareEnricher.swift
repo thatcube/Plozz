@@ -46,7 +46,11 @@ actor ShareEnricher {
     /// candidates (a popular show ranking below a foreign namesake — Outlander vs
     /// "O Caçador" — is now scored), and a cryptic filename abbreviation ("TP" under
     /// a "The Punisher" folder) is no longer used as a search alternate.
-    static let version = 12
+    /// v13: a re-enrich after a version bump now REPLACES the stored record instead
+    /// of merging, so stale artwork from a previous wrong match is dropped (a "TP"
+    /// folder that once cached TAP Portugal's logo no longer keeps it under the
+    /// corrected "The Punisher").
+    static let version = 13
 
     private let store: ShareCatalogStore
     private let resolver: ShareMetadataResolving

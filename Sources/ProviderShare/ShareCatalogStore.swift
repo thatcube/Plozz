@@ -716,17 +716,21 @@ actor ShareCatalogStore {
         guard db != nil else { return false }
 
         // Merge onto the existing row (if any) so a sparse write never clobbers
-        // richer data. An unusable (empty) resolve — usually a transient rate-limit
-        // or timeout — bumps an attempt counter but is still stored at `version`;
-        // `pendingEnrichment` keeps such rows pending until `attempts` reach the cap,
-        // so a miss is retried across passes and then settled, never cached as a
-        // permanent blank and never looped forever.
-        let merged = Self.merged(existing: enrichmentRow(itemID: itemID), new: record)
+        // richer data — but ONLY within the same enrichment version. A version bump
+        // means the resolver logic changed (often to CORRECT a wrong match), so its
+        // result must fully REPLACE the old row rather than union with it; otherwise
+        // stale artwork from a previous wrong match survives (e.g. a "TP" abbreviation
+        // that once resolved TAP Portugal's logo would persist under the corrected
+        // "The Punisher"). A usable fresh result at a new version is authoritative.
+        let prior = enrichmentVersionAndAttempts(itemID: itemID)
+        let isReResolveAfterBump = prior != nil && prior?.version != version && record.isUsable
+        let merged = isReResolveAfterBump
+            ? record
+            : Self.merged(existing: enrichmentRow(itemID: itemID), new: record)
         // Attempt budget is PER VERSION: a future `ShareEnricher.version` bump (the
         // mechanism to re-enrich everything with improved sources) resets the budget
         // so a previously-exhausted miss gets the full retry count again, not one.
         // Within the same version the count accrues as before.
-        let prior = enrichmentVersionAndAttempts(itemID: itemID)
         let priorAttempts = (prior?.version == version) ? (prior?.attempts ?? 0) : 0
         let attempts = merged.isUsable ? 0 : priorAttempts + 1
 

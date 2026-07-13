@@ -284,6 +284,32 @@ final class ShareEnricherTests: XCTestCase {
         XCTAssertEqual(item?.backdropURL?.absoluteString, "https://img/b.jpg", "backdrop survives")
     }
 
+    func testVersionBumpReplacesStaleArtworkInsteadOfMerging() async {
+        // A re-enrich at a NEW version must REPLACE the row (drop stale artwork from a
+        // previous wrong match), not union — the Punisher/"TAP" logo bug.
+        let store = ShareCatalogStore(accountKey: "a", directory: tempDir())
+        await store.upsert([movie("Movies/The Punisher (2017).mkv", "The Punisher", 2017)], scanID: 1)
+        let id = ShareCatalogID.file("Movies/The Punisher (2017).mkv")
+
+        // v1: a WRONG match cached a bogus logo (as if resolved for the "TP" alias).
+        await store.saveEnrichment(itemID: id, .init(
+            providerIDs: ["Tmdb": "999999"],
+            logoURL: URL(string: "https://commons/TAP-Portugal-Logo.svg")
+        ), version: 1)
+
+        // v2: the corrected match has proper ids + poster but NO logo. The stale TAP
+        // logo must NOT survive the version bump.
+        await store.saveEnrichment(itemID: id, .init(
+            providerIDs: ["Tmdb": "67178", "Imdb": "tt5675620"],
+            posterURL: URL(string: "https://tvdb/punisher-poster.jpg")
+        ), version: 2)
+
+        let item = await store.item(id: id)
+        XCTAssertNil(item?.logoURL, "stale wrong logo dropped on version bump")
+        XCTAssertEqual(item?.providerID(.tmdb), "67178")
+        XCTAssertEqual(item?.posterURL?.absoluteString, "https://tvdb/punisher-poster.jpg")
+    }
+
     func testSingleItemPendingLookupTargetsTheOpenedItem() async {
         let store = ShareCatalogStore(accountKey: "a", directory: tempDir())
         await store.upsert([movie("Movies/Dune (2021).mkv", "Dune", 2021)], scanID: 1)

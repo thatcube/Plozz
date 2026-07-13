@@ -23,6 +23,31 @@ public enum MediaShareTransportKind: String, Codable, CaseIterable, Hashable, Se
     case webDAV
     case nfs
     case sftp
+
+    /// Maps a media-share base-URL scheme to its transport kind. `nil` for a
+    /// scheme that isn't a known file-share transport. Single source of truth so
+    /// the account store and the Settings UI don't each hard-code the mapping.
+    public init?(mediaShareScheme scheme: String?) {
+        switch scheme?.lowercased() {
+        case "smb": self = .smb
+        case "http", "https": self = .webDAV
+        case "nfs": self = .nfs
+        case "sftp": self = .sftp
+        default: return nil
+        }
+    }
+
+    /// Short, user-facing label for the transport — shown as a badge on the
+    /// shared drive icon in the Servers list. Dedicated media servers
+    /// (Jellyfin/Plex) use their branded logo instead of a badge.
+    public var badgeLabel: String {
+        switch self {
+        case .smb: return "SMB"
+        case .webDAV: return "WebDAV"
+        case .nfs: return "NFS"
+        case .sftp: return "SFTP"
+        }
+    }
 }
 
 public struct SMBTransportOptions: Hashable, Sendable {

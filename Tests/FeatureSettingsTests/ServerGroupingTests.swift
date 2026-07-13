@@ -60,5 +60,34 @@ final class ServerGroupingTests: XCTestCase {
         XCTAssertNotEqual(serverKey(for: jelly), serverKey(for: dav))
         XCTAssertEqual(serverGroups(from: [jelly, dav]).count, 2)
     }
+
+    // MARK: - Transport badge
+
+    func testGroupDerivesTransportKindFromScheme() {
+        let smb = account(id: "s", url: "smb://192.168.68.71/Media", provider: .mediaShare)
+        let dav = account(id: "d", url: "http://192.168.68.71:8384/", provider: .mediaShare)
+        let davs = account(id: "ds", url: "https://nas.local/dav", provider: .mediaShare)
+        let jelly = account(id: "j", url: "https://192.168.68.71:8096", provider: .jellyfin)
+
+        XCTAssertEqual(serverGroups(from: [smb]).first?.transportKind, .smb)
+        XCTAssertEqual(serverGroups(from: [dav]).first?.transportKind, .webDAV)
+        XCTAssertEqual(serverGroups(from: [davs]).first?.transportKind, .webDAV)
+        XCTAssertNil(serverGroups(from: [jelly]).first?.transportKind, "a media server has no share-transport badge")
+    }
+
+    func testTransportKindSchemeMappingAndBadgeLabels() {
+        XCTAssertEqual(MediaShareTransportKind(mediaShareScheme: "smb"), .smb)
+        XCTAssertEqual(MediaShareTransportKind(mediaShareScheme: "HTTP"), .webDAV)
+        XCTAssertEqual(MediaShareTransportKind(mediaShareScheme: "https"), .webDAV)
+        XCTAssertEqual(MediaShareTransportKind(mediaShareScheme: "nfs"), .nfs)
+        XCTAssertEqual(MediaShareTransportKind(mediaShareScheme: "sftp"), .sftp)
+        XCTAssertNil(MediaShareTransportKind(mediaShareScheme: "ftp"))
+        XCTAssertNil(MediaShareTransportKind(mediaShareScheme: nil))
+
+        XCTAssertEqual(MediaShareTransportKind.smb.badgeLabel, "SMB")
+        XCTAssertEqual(MediaShareTransportKind.webDAV.badgeLabel, "WebDAV")
+        XCTAssertEqual(MediaShareTransportKind.nfs.badgeLabel, "NFS")
+        XCTAssertEqual(MediaShareTransportKind.sftp.badgeLabel, "SFTP")
+    }
 }
 #endif

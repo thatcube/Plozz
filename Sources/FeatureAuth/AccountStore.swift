@@ -579,16 +579,11 @@ public final class AccountStore: AccountPersisting, @unchecked Sendable {
     }
 
     private func transportKind(for account: Account) throws -> MediaShareTransportKind {
-        guard account.server.provider == .mediaShare else {
+        guard account.server.provider == .mediaShare,
+              let kind = MediaShareTransportKind(mediaShareScheme: account.server.baseURL.scheme) else {
             throw AccountStoreError.invalidMediaShareAccount
         }
-        switch account.server.baseURL.scheme?.lowercased() {
-        case "smb": return .smb
-        case "http", "https": return .webDAV
-        case "sftp": return .sftp
-        case "nfs": return .nfs
-        default: throw AccountStoreError.invalidMediaShareAccount
-        }
+        return kind
     }
 
     private func tokenKey(_ accountID: String) -> String {

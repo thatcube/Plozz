@@ -115,16 +115,26 @@ struct ServerDetailView: View {
 
     private func header(_ group: ServerAccountGroup) -> some View {
         HStack(spacing: 16) {
-            ProviderIcon(provider: group.providerKind, size: 44)
+            ServerRowIcon(providerKind: group.providerKind, transportKind: group.transportKind, size: 44)
                 .frame(width: 44)
             VStack(alignment: .leading, spacing: 4) {
                 Text(group.serverName).font(.largeTitle.bold())
-                Text(group.providerKind.displayName)
+                Text(headerSubtitle(for: group))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
             Spacer()
         }
+    }
+
+    /// Names what kind of server this is. A file share reads as its transport
+    /// (e.g. "WebDAV share") so it's unmistakable; other providers use their
+    /// brand name.
+    private func headerSubtitle(for group: ServerAccountGroup) -> String {
+        if let transport = group.transportKind {
+            return "\(transport.badgeLabel) share"
+        }
+        return group.providerKind.displayName
     }
 
     // MARK: - Media-share library status

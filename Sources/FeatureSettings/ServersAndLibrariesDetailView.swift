@@ -63,7 +63,7 @@ struct ServersAndLibrariesDetailView: View {
     private func serverSummaryRow(_ group: ServerAccountGroup) -> some View {
         NavigationLink(value: SettingsRoute.server(key: group.serverKey)) {
             HStack(spacing: 16) {
-                ProviderIcon(provider: group.providerKind, size: 48)
+                ServerRowIcon(providerKind: group.providerKind, transportKind: group.transportKind, size: 48)
                     .frame(width: 36)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(group.serverName).font(.headline)
@@ -107,6 +107,14 @@ struct ServerAccountGroup {
     let serverName: String
     let providerKind: ProviderKind
     let accounts: [Account]
+
+    /// For a media share, the file-share transport (SMB/WebDAV/NFS/…) shown as a
+    /// badge on the shared drive icon. `nil` for a dedicated media server, which
+    /// uses its branded logo instead.
+    var transportKind: MediaShareTransportKind? {
+        guard providerKind == .mediaShare else { return nil }
+        return MediaShareTransportKind(mediaShareScheme: accounts.first?.server.baseURL.scheme)
+    }
 }
 
 func serverGroups(from accounts: [Account]) -> [ServerAccountGroup] {

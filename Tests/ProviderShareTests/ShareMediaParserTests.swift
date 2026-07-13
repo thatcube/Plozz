@@ -86,6 +86,59 @@ final class ShareMediaParserTests: XCTestCase {
         XCTAssertNotNil(episode("Downloads/Breaking Bad S01E01.mkv"))
     }
 
+    // MARK: - Series anchored to the show folder (not filename/nested folders)
+
+    func testShowFolderOverridesFilenameVariantPrefix() {
+        // Netflix "Remix" re-cut of Arrested Development S4: the files carry a
+        // variant prefix in the name, but they live in the show's Season 4 folder
+        // and must group under the show, not a separate "…Remix" series.
+        let ep = episode(
+            "TV Shows/Arrested Development/Season 4/Arrested.Development.Remix.S04E01.The.Fall.1080p.mkv"
+        )
+        XCTAssertEqual(ep?.series, "Arrested Development")
+        XCTAssertEqual(ep?.season, 4)
+        XCTAssertEqual(ep?.episode, 1)
+    }
+
+    func testShowFolderOverridesRedundantNestedSubfolder() {
+        // A redundant nested folder below the season folder must not fork a
+        // separate series; the show folder above the season wins.
+        let ep = episode(
+            "TV Shows/Arrested Development/Season 1/Arrested Development S01/S01E01 - Pilot.mkv"
+        )
+        XCTAssertEqual(ep?.series, "Arrested Development")
+        XCTAssertEqual(ep?.season, 1)
+        XCTAssertEqual(ep?.episode, 1)
+    }
+
+    func testVariantPrefixAndCleanNameGroupToSameSeriesKey() {
+        // The real fix: the two forms must land on the SAME grouping key so they
+        // fold into one card.
+        let remix = episode(
+            "TV Shows/Arrested Development/Season 4/Arrested.Development.Remix.S04E01.x.mkv"
+        )
+        let plain = episode(
+            "TV Shows/Arrested Development/Season 1/S01E09 - Storming the Castle.mkv"
+        )
+        XCTAssertEqual(
+            ShareCatalogID.seriesKey(fromTitle: remix?.series ?? ""),
+            ShareCatalogID.seriesKey(fromTitle: plain?.series ?? "")
+        )
+    }
+
+    func testShowFolderAnchorHopsStackedSeasonFolders() {
+        // A season folder directly under the show, with the show under a TV root.
+        let ep = episode("TV/Better Call Saul/Season 3/Better.Call.Saul.S03E05.mkv")
+        XCTAssertEqual(ep?.series, "Better Call Saul")
+    }
+
+    func testLooseFileKeepsFilenameSeriesWithoutShowFolder() {
+        // No season folder and no recognized library root → the junk container
+        // must NOT override the filename-derived series.
+        let ep = episode("Downloads/Breaking Bad S01E01.mkv")
+        XCTAssertEqual(ep?.series, "Breaking Bad")
+    }
+
     func testBareNumberStripsResolutionBeforePickingEpisode() {
         // The 1080p must not be mistaken for the episode number.
         let ep = episode("Anime/Show/Show - 09 [1080p].mkv")

@@ -14,7 +14,9 @@ enum ShareMediaParser {
     /// from them) change, so a share's catalog can force a one-time full re-walk
     /// that reclassifies every already-indexed file under the new rules instead of
     /// waiting for each file to change on disk. See `ShareScanner.scanIfStale`.
-    static let classifierVersion = 8
+    /// v9: anchor a series to its show folder (override filename variant prefixes
+    /// and redundant nested season/variant subfolders).
+    static let classifierVersion = 9
 
     /// File extensions we treat as playable video.
     static let videoExtensions: Set<String> = [
@@ -183,10 +185,15 @@ enum ShareMediaParser {
         let stem = (fileName as NSString).deletingPathExtension
         let ancestors = Array(comps.dropLast())            // folders, root-first
         let showHint = seriesHintFolder(fromAncestors: ancestors)
+        // The show folder (when the tree proves one) is authoritative for the
+        // series NAME — overriding a filename variant prefix ("…Remix.S04E01…")
+        // or a redundant nested subfolder ("Show/Season 1/Show S01/…"), matching
+        // how Plex/Jellyfin anchor a series to its show folder.
+        let showFolder = authoritativeShowFolder(fromAncestors: ancestors)
 
         // (1) Explicit episode marker — strongest, works in any folder.
         if let ep = parseEpisode(stem: stem, parentFolder: showHint) {
-            return .episode(ep)
+            return .episode(seriesAnchored(ep, toShowFolder: showFolder))
         }
 
         // (2) Folder says "this is a series" → accept a bare episode number.
@@ -212,7 +219,7 @@ enum ShareMediaParser {
                    yearBearingMovieFolder(parent, containsTitleNumber: ep.episode) {
                     return .movie(parseMovie(stem: stem, parentFolder: parent))
                 }
-                return .episode(ep)
+                return .episode(seriesAnchored(ep, toShowFolder: showFolder))
             }
         }
 
@@ -220,6 +227,58 @@ enum ShareMediaParser {
         // filename fallback. `ancestors.last` gives the movie folder its year/title
         // when the filename lacks them (`Star Wars (1977)/movie.mkv`).
         return .movie(parseMovie(stem: stem, parentFolder: ancestors.last))
+    }
+
+    /// Replaces an episode's series name with the show folder's when the tree
+    /// gave us an authoritative one, so every episode under a show folder groups
+    /// into ONE series regardless of filename variant prefixes or nested variant
+    /// subfolders. A no-op when there's no authoritative show folder (loose files
+    /// keep their filename-derived series).
+    private static func seriesAnchored(_ ep: Episode, toShowFolder folder: String?) -> Episode {
+        guard let folder, let title = seriesFromFolder(folder) else { return ep }
+        var ep = ep
+        ep.series = title
+        return ep
+    }
+
+    /// Whether a folder component names a known library root (series OR movie),
+    /// so it is never mistaken for a show/season/movie title.
+    static func isLibraryRootName(_ name: String) -> Bool {
+        let n = name.lowercased().trimmingCharacters(in: .whitespaces)
+        return seriesLibraryNames.contains(n) || movieLibraryNames.contains(n)
+    }
+
+    /// The folder that AUTHORITATIVELY names the series — preferred over the
+    /// filename — but only when the folder tree *proves* it is a show folder, so a
+    /// junk container (`Downloads/Breaking Bad S01E01.mkv`) never overrides a good
+    /// filename. Two proofs, in order:
+    ///  1. A `Season N` ancestor exists → the show folder is the nearest non-season
+    ///     ancestor ABOVE the outermost season folder. This hops over a redundant
+    ///     nested subfolder below the season (e.g. `Show/Season 1/Show S01/…`) and
+    ///     over stacked season-ish folders.
+    ///  2. Otherwise, a recognized library root (`TV`, `Anime`, …) exists → the
+    ///     show folder is the ancestor immediately below it.
+    /// Returns nil when neither proof holds, leaving the filename as the series
+    /// source. `ancestors` are root-first.
+    static func authoritativeShowFolder(fromAncestors ancestors: [String]) -> String? {
+        // (1) Directly above the outermost season folder.
+        if let seasonIdx = ancestors.firstIndex(where: isSeasonFolder), seasonIdx >= 1 {
+            var idx = seasonIdx - 1
+            while idx > 0, isSeasonFolder(ancestors[idx]) { idx -= 1 }
+            let candidate = ancestors[idx]
+            if !isSeasonFolder(candidate), !isLibraryRootName(candidate) {
+                return candidate
+            }
+        }
+        // (2) Directly below a recognized library root.
+        if let rootIdx = ancestors.firstIndex(where: isLibraryRootName),
+           rootIdx + 1 < ancestors.count {
+            let candidate = ancestors[rootIdx + 1]
+            if !isSeasonFolder(candidate), !isLibraryRootName(candidate) {
+                return candidate
+            }
+        }
+        return nil
     }
 
     enum Kind: Equatable {

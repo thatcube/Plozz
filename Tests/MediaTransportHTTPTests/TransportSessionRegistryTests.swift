@@ -28,6 +28,18 @@ final class TransportSessionRegistryTests: XCTestCase {
         XCTAssertEqual(count, 1)
     }
 
+    /// Regression guard for the WebDAV scan-parallelism fix: the parallel share
+    /// scanner shares ONE scanner-role session across its lister pool, so that
+    /// session must allow several connections to the host. A cap of 1 (the prior
+    /// value) silently serialized the whole walk onto one connection.
+    func testManagedSessionAllowsParallelConnectionsPerHost() async throws {
+        let registry = TransportSessionRegistry()
+        let session = try await registry.session(for: makeKey(), credential: .anonymous, trustPolicy: .system)
+        let cap = session.session.configuration.httpMaximumConnectionsPerHost
+        XCTAssertGreaterThanOrEqual(cap, 4, "scanner session must fan the scan pool across connections, not serialize on one")
+        XCTAssertEqual(cap, TransportSessionRegistry.maxConnectionsPerHost)
+    }
+
     func testDifferentAccountIDYieldsDistinctSession() async throws {
         let registry = TransportSessionRegistry()
         let revision = UUID()

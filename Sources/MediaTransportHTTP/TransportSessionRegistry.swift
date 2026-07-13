@@ -123,6 +123,20 @@ public actor TransportSessionRegistry {
     private var sessions: [TransportSessionKey: TransportSession] = [:]
     private let testProtocolClasses: [AnyClass]
 
+    /// Max simultaneous connections one managed session opens to its host.
+    ///
+    /// The parallel share scanner (`ShareScanner`) runs a pool of independent
+    /// listers (default 4) that all share ONE scanner-role session per account.
+    /// SMB needs a separate socket per lister because its client is serial per
+    /// connection — but HTTP has no such limit: a single `URLSession` is built
+    /// to fan concurrent requests across a per-host connection pool. Capping
+    /// this at 1 would silently serialize the whole scan onto one connection
+    /// (making a WebDAV first-scan ~Nx slower than the equivalent SMB walk), so
+    /// we allow enough connections to cover the scan pool plus a little headroom
+    /// for an overlapping interactive read. Playback is unaffected — its reads
+    /// are issued sequentially, so it simply never opens more than one.
+    static let maxConnectionsPerHost = 6
+
     public init() {
         self.testProtocolClasses = []
     }
@@ -209,7 +223,9 @@ public actor TransportSessionRegistry {
         configuration.httpShouldSetCookies = false
         configuration.httpCookieStorage = nil
         configuration.urlCredentialStorage = nil
-        configuration.httpMaximumConnectionsPerHost = 1
+        // Allow the shared scanner session to parallelize across the scan pool;
+        // see `maxConnectionsPerHost`. (Was 1, which serialized WebDAV scans.)
+        configuration.httpMaximumConnectionsPerHost = Self.maxConnectionsPerHost
         if !testProtocolClasses.isEmpty {
             configuration.protocolClasses = testProtocolClasses
         }

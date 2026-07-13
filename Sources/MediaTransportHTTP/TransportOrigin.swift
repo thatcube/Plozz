@@ -59,7 +59,11 @@ public struct TransportOrigin: Hashable, Sendable {
         return "\(scheme)://\(displayedHost):\(port)"
     }
 
-    func url(path: String) -> URL? {
+    /// Builds a URL for `path` on this origin, bracketing IPv6 hosts and
+    /// omitting a redundant default port. Public so a composing transport
+    /// adapter can construct request URLs (e.g. for a ranged read) through the
+    /// same origin discipline the rest of the module uses.
+    public func url(path: String) -> URL? {
         var components = URLComponents()
         components.scheme = scheme
         components.host = host.contains(":") ? "[\(host)]" : host

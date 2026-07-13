@@ -46,6 +46,7 @@ let package = Package(
         .library(name: "MediaTransportCore", targets: ["MediaTransportCore"]),
         .library(name: "MediaTransportHTTP", targets: ["MediaTransportHTTP"]),
         .library(name: "MediaTransportSMB", targets: ["MediaTransportSMB"]),
+        .library(name: "MediaTransportWebDAV", targets: ["MediaTransportWebDAV"]),
         .library(name: "AppShell", targets: ["AppShell"])
     ],
     dependencies: [
@@ -329,6 +330,23 @@ let package = Package(
             swiftSettings: [.unsafeFlags(["-strict-concurrency=complete"])]
         ),
 
+        // MARK: WebDAV transport
+        //
+        // Composes the MediaTransportHTTP primitives (OPTIONS/PROPFIND/range
+        // reads, origin/redirect/trust discipline) into a MediaTransportCore
+        // adapter, mirroring MediaTransportSMB's shape. No SMBClient/URLSession
+        // logic of its own — it only wires the HTTP primitives to the
+        // protocol-neutral filesystem/byte-source contracts.
+        .target(
+            name: "MediaTransportWebDAV",
+            dependencies: [
+                "CoreModels",
+                "MediaTransportCore",
+                "MediaTransportHTTP",
+            ],
+            swiftSettings: [.unsafeFlags(["-strict-concurrency=complete"])]
+        ),
+
         // MARK: AetherEngine integration (native HLS-fMP4 remux engine)
         //
         // Wraps AetherEngine (the upstream media-player library) behind Plozz's
@@ -476,6 +494,16 @@ let package = Package(
                 "CoreModels",
                 "MediaTransportCore",
                 "MediaTransportSMB",
+            ],
+            swiftSettings: [.unsafeFlags(["-strict-concurrency=complete"])]
+        ),
+        .testTarget(
+            name: "MediaTransportWebDAVTests",
+            dependencies: [
+                "CoreModels",
+                "MediaTransportCore",
+                "MediaTransportHTTP",
+                "MediaTransportWebDAV",
             ],
             swiftSettings: [.unsafeFlags(["-strict-concurrency=complete"])]
         ),

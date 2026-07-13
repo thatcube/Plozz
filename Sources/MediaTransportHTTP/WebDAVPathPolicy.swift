@@ -68,7 +68,7 @@ public enum WebDAVPathPolicy {
         return hadTrailingSlash ? joined + "/" : joined
     }
 
-    static func isNormalizedDecodedPath(_ path: String) -> Bool {
+    public static func isNormalizedDecodedPath(_ path: String) -> Bool {
         guard path.hasPrefix("/") else { return false }
         let hadTrailingSlash = path.count > 1 && path.hasSuffix("/")
         let segments = path.split(separator: "/", omittingEmptySubsequences: true)
@@ -133,7 +133,7 @@ public enum WebDAVPathPolicy {
     /// Purely a string-prefix check on already-`..`-free, decoded,
     /// slash-collapsed paths — safe because ``normalizedPath(_:)`` has
     /// already ruled out traversal segments.
-    static func isWithinRoot(_ path: String, root rootPath: String) -> Bool {
+    public static func isWithinRoot(_ path: String, root rootPath: String) -> Bool {
         let trimmedRoot = rootPath.hasSuffix("/") && rootPath != "/" ? String(rootPath.dropLast()) : rootPath
         if trimmedRoot == "/" { return true }
         if path == trimmedRoot { return true }

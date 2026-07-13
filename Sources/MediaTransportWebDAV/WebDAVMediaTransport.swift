@@ -240,6 +240,7 @@ final class WebDAVMediaTransportFileSystem: MediaTransportFileSystem, @unchecked
         }
         do {
             return try await client.getBounded(
+                root: root,
                 url: url,
                 maxBytes: maximumBytes,
                 sessionKey: sessionKey,
@@ -271,6 +272,7 @@ final class WebDAVMediaTransportFileSystem: MediaTransportFileSystem, @unchecked
         }
         do {
             let probe = try await client.probeRange(
+                root: root,
                 url: url,
                 sessionKey: sessionKey,
                 credential: credential,

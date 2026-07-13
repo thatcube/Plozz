@@ -30,6 +30,10 @@ final class WebDAVClientStatAndGetTests: XCTestCase {
         WebDAVClient(registry: TransportSessionRegistry(testProtocolClasses: [StubURLProtocol.self]))
     }
 
+    private func makeRoot(origin: TransportOrigin, path: String = "/dav") -> WebDAVRoot {
+        WebDAVRoot(origin: origin, rawPath: path)!
+    }
+
     // MARK: - stat (Depth:0)
 
     func testPropertiesReturnsSelfEntryForFile() async throws {
@@ -119,6 +123,7 @@ final class WebDAVClientStatAndGetTests: XCTestCase {
         )
 
         let data = try await makeClient().getBounded(
+            root: makeRoot(origin: origin),
             url: url,
             maxBytes: 4096,
             sessionKey: try makeKey(origin: origin),
@@ -139,6 +144,7 @@ final class WebDAVClientStatAndGetTests: XCTestCase {
 
         do {
             _ = try await makeClient().getBounded(
+                root: makeRoot(origin: origin),
                 url: url,
                 maxBytes: 1024,
                 sessionKey: try makeKey(origin: origin),
@@ -160,6 +166,7 @@ final class WebDAVClientStatAndGetTests: XCTestCase {
 
         do {
             _ = try await makeClient().getBounded(
+                root: makeRoot(origin: origin),
                 url: url,
                 maxBytes: 4096,
                 sessionKey: try makeKey(origin: origin),
@@ -192,6 +199,7 @@ final class WebDAVClientStatAndGetTests: XCTestCase {
         )
 
         _ = try await makeClient().getBounded(
+            root: makeRoot(origin: origin),
             url: url,
             maxBytes: 4096,
             sessionKey: try makeKey(origin: origin),
@@ -199,5 +207,79 @@ final class WebDAVClientStatAndGetTests: XCTestCase {
             trustPolicy: .system
         )
         XCTAssertEqual(observedAuth.get(), "Bearer \(token)")
+    }
+
+    // MARK: - transient status, forbidden, and off-root redirect (review fixes)
+
+    func testProbeServerErrorSurfacesAsProtocolErrorNotRangeUnsupported() async throws {
+        let origin = TransportOrigin(url: URL(string: "https://nas.example.com/")!)!
+        let url = URL(string: "https://nas.example.com/dav/movie.mkv")!
+        StubURLProtocol.queue(StubResponse(statusCode: 503), for: url)
+        do {
+            _ = try await makeClient().probeRange(
+                root: makeRoot(origin: origin),
+                url: url,
+                sessionKey: try makeKey(origin: origin, role: .playback),
+                credential: .anonymous,
+                trustPolicy: .system
+            )
+            XCTFail("expected protocolError")
+        } catch let error as TransportError {
+            // Must NOT be .rangeNotSupported — a transient 5xx has to stay
+            // classifiable as a (reconnectable) server error.
+            guard case .protocolError(let status, _) = error, status == 503 else {
+                return XCTFail("expected protocolError(503), got \(error)")
+            }
+        }
+    }
+
+    func testForbiddenGetSurfacesAsProtocolErrorNotAuthFailure() async throws {
+        let origin = TransportOrigin(url: URL(string: "https://nas.example.com/")!)!
+        let url = URL(string: "https://nas.example.com/dav/forbidden.nfo")!
+        StubURLProtocol.queue(StubResponse(statusCode: 403), for: url)
+        do {
+            _ = try await makeClient().getBounded(
+                root: makeRoot(origin: origin),
+                url: url,
+                maxBytes: 4096,
+                sessionKey: try makeKey(origin: origin),
+                credential: .anonymous,
+                trustPolicy: .system
+            )
+            XCTFail("expected protocolError")
+        } catch let error as TransportError {
+            guard case .protocolError(let status, _) = error, status == 403 else {
+                return XCTFail("expected protocolError(403), got \(error)")
+            }
+        }
+    }
+
+    func testProbeRejectsSameOriginRedirectOutsideRoot() async throws {
+        let origin = TransportOrigin(url: URL(string: "https://nas.example.com/")!)!
+        let inRoot = URL(string: "https://nas.example.com/dav/movie.mkv")!
+        let offRoot = URL(string: "https://nas.example.com/other/movie.mkv")!
+        StubURLProtocol.queue(redirect: StubRedirect(location: offRoot), for: inRoot)
+        StubURLProtocol.queue(
+            StubResponse(
+                statusCode: 206,
+                headers: ["ETag": "\"strong-1\"", "Content-Range": "bytes 0-0/1000"],
+                body: Data([0x00])
+            ),
+            for: offRoot
+        )
+        do {
+            _ = try await makeClient().probeRange(
+                root: makeRoot(origin: origin),
+                url: inRoot,
+                sessionKey: try makeKey(origin: origin, role: .playback),
+                credential: .anonymous,
+                trustPolicy: .system
+            )
+            XCTFail("expected pathEscapesRoot")
+        } catch let error as TransportError {
+            guard case .pathEscapesRoot = error else {
+                return XCTFail("expected pathEscapesRoot, got \(error)")
+            }
+        }
     }
 }

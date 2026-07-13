@@ -298,6 +298,7 @@ final class WebDAVClientIntegrationTests: XCTestCase {
         )
 
         let probeResult = try await client.probeRange(
+            root: WebDAVRoot(origin: origin, normalizedPath: "/dav"),
             url: url,
             sessionKey: try makeKey(origin: origin, role: .playback),
             credential: .anonymous,
@@ -356,6 +357,7 @@ final class WebDAVClientIntegrationTests: XCTestCase {
         )
 
         let result = try await client.probeRange(
+            root: WebDAVRoot(origin: origin, normalizedPath: "/dav"),
             url: originalURL,
             sessionKey: try makeKey(origin: origin, role: .playback),
             credential: .anonymous,
@@ -426,11 +428,12 @@ final class WebDAVClientIntegrationTests: XCTestCase {
         let readURL = URL(string: "https://nas.example.com/dav/read.mkv")!
         let registry = TransportSessionRegistry(testProtocolClasses: [StubURLProtocol.self])
         let client = WebDAVClient(registry: registry)
-        StubURLProtocol.queue(StubResponse(statusCode: 403), for: probeURL)
+        StubURLProtocol.queue(StubResponse(statusCode: 401), for: probeURL)
         StubURLProtocol.queue(StubResponse(statusCode: 401), for: readURL)
 
         do {
             _ = try await client.probeRange(
+                root: WebDAVRoot(origin: origin, normalizedPath: "/dav"),
                 url: probeURL,
                 sessionKey: try makeKey(origin: origin, role: .playback),
                 credential: .anonymous,

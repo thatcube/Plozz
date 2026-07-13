@@ -91,8 +91,11 @@ public struct WebDAVClient: Sendable {
     }
 
     /// Establishes seekability for `url`: a 1-byte range probe that must
-    /// come back `206` with a strong `ETag`.
+    /// come back `206` with a strong `ETag`. `root` bounds the *final* resolved
+    /// URL so a same-origin redirect can't move the read outside the configured
+    /// folder (matching ``listChildren``/``properties``).
     public func probeRange(
+        root: WebDAVRoot,
         url: URL,
         sessionKey: TransportSessionKey,
         credential: WebDAVCredential,
@@ -107,9 +110,20 @@ public struct WebDAVClient: Sendable {
             maxResponseBytes: 1
         )
         try validateAuthenticationStatus(response)
+        // Surface a transient/error status as a classifiable protocol error
+        // *before* range validation, which would otherwise mislabel a 500/503/
+        // 408 as a terminal "range unsupported". 412 (precondition) is left for
+        // RangeProbe to interpret as a source change.
+        guard response.statusCode < 400 || response.statusCode == 412 else {
+            throw TransportError.protocolError(status: response.statusCode, detail: "unexpected status during range probe")
+        }
         guard let resourceURL = response.url,
               TransportOrigin(url: resourceURL) == sessionKey.origin else {
             throw TransportError.invalidOrigin(reason: "range probe response URL did not match the session origin")
+        }
+        guard let finalPath = WebDAVPathPolicy.normalizedPath(of: resourceURL),
+              WebDAVPathPolicy.isWithinRoot(finalPath, root: root.path) else {
+            throw TransportError.pathEscapesRoot
         }
         let headers = HTTPHeaderUtilities.normalizedHeaders(from: response.allHeaderFields)
         switch RangeProbe.validateProbe(
@@ -172,6 +186,13 @@ public struct WebDAVClient: Sendable {
             maxResponseBytes: Int(readSize)
         )
         try validateAuthenticationStatus(response)
+        // A transient/error status (500/503/408/504/…) must be classifiable as
+        // such, not funneled through range validation into a terminal
+        // `.rangeValidationFailed`. 412 (If-Match precondition failed) is left
+        // for RangeProbe to map to `.sourceChanged`.
+        guard response.statusCode < 400 || response.statusCode == 412 else {
+            throw TransportError.protocolError(status: response.statusCode, detail: "unexpected status during ranged read")
+        }
         guard response.url?.absoluteString == representation.resourceURL.absoluteString else {
             throw TransportError.sourceChanged(reason: "read response URL did not match the probed resource")
         }
@@ -258,6 +279,7 @@ public struct WebDAVClient: Sendable {
     /// a large file for a complete small one. Intended for small sidecar/
     /// metadata files, not media byte-ranges (use ``readRange`` for those).
     public func getBounded(
+        root: WebDAVRoot,
         url: URL,
         maxBytes: Int,
         sessionKey: TransportSessionKey,
@@ -285,6 +307,12 @@ public struct WebDAVClient: Sendable {
         guard let resourceURL = response.url,
               TransportOrigin(url: resourceURL) == sessionKey.origin else {
             throw TransportError.invalidOrigin(reason: "bounded GET response URL did not match the session origin")
+        }
+        // Bound the final resolved URL to the configured root so a same-origin
+        // redirect can't serve a file outside the user's chosen folder.
+        guard let finalPath = WebDAVPathPolicy.normalizedPath(of: resourceURL),
+              WebDAVPathPolicy.isWithinRoot(finalPath, root: root.path) else {
+            throw TransportError.pathEscapesRoot
         }
         return data
     }
@@ -323,7 +351,12 @@ public struct WebDAVClient: Sendable {
     }
 
     private func validateAuthenticationStatus(_ response: HTTPURLResponse) throws {
-        if response.statusCode == 401 || response.statusCode == 403 {
+        // Only 401 (Unauthorized) is a credential-authentication failure. 403
+        // (Forbidden) is authenticated-but-not-permitted: it is left to flow to
+        // each method's status guard as a `protocolError(status: 403)` so it can
+        // map to `.permissionDenied` (a distinct, terminal error) rather than
+        // being conflated with an auth failure.
+        if response.statusCode == 401 {
             throw TransportError.authenticationFailed(reason: "server rejected the request")
         }
     }

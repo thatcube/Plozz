@@ -141,6 +141,11 @@ public struct LibraryBrowseView: View {
                 }
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .mediaItemDidMutate)) { note in
+            if let mutation = MediaItemMutation.from(note) {
+                viewModel.applyWatchedState(mutation)
+            }
+        }
         .task {
             // Opt-in (PLZXMEM=1) memory/background-activity sampler. Fully inert
             // when disabled — returns before starting any timer or keep-alive loop.

@@ -112,6 +112,8 @@ public struct RootView: View {
                     if !accounts.isEmpty {
                     MainTabView(
                         accounts: accounts,
+                        networkFileResolver: appState.networkFileResolver,
+                        authenticatedHTTPResolver: appState.authenticatedHTTPResolver,
                         subtitleBehaviorModel: appState.subtitleBehaviorModel,
                         subtitleStyleModel: appState.subtitleStyleModel,
                         spoilerModel: appState.spoilerModel,

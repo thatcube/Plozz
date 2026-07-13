@@ -23,6 +23,7 @@ enum MusicRoute: Hashable {
 public struct MusicTabView: View {
     private let context: MusicContext
     private let controller: AudioPlaybackController
+    private let authenticatedHTTPResolver: any AuthenticatedHTTPResourceResolving
     private let appTheme: AppTheme
     private let musicPlayer: MusicPlayerSettingsModel
 
@@ -35,12 +36,13 @@ public struct MusicTabView: View {
     @Binding var showNowPlaying: Bool
     @State private var layoutModel = MusicLandingLayoutModel()
 
-    public init(accounts: [ResolvedAccount], visibleLibraryIDs: [String: [String]] = [:], controller: AudioPlaybackController, appTheme: AppTheme = .system, musicPlayer: MusicPlayerSettingsModel, showNowPlaying: Binding<Bool>) {
+    public init(accounts: [ResolvedAccount], visibleLibraryIDs: [String: [String]] = [:], controller: AudioPlaybackController, authenticatedHTTPResolver: any AuthenticatedHTTPResourceResolving, appTheme: AppTheme = .system, musicPlayer: MusicPlayerSettingsModel, showNowPlaying: Binding<Bool>) {
         self.context = MusicContext(
             accounts: accounts,
             visibleLibraryIDs: visibleLibraryIDs.isEmpty ? nil : visibleLibraryIDs
         )
         self.controller = controller
+        self.authenticatedHTTPResolver = authenticatedHTTPResolver
         self.appTheme = appTheme
         self.musicPlayer = musicPlayer
         self._showNowPlaying = showNowPlaying
@@ -85,7 +87,10 @@ public struct MusicTabView: View {
         controller.play(
             tracks: [track],
             startIndex: 0,
-            resolveStreamURL: streamURLResolver(for: provider),
+            resolveStreamURL: streamURLResolver(
+                for: provider,
+                authenticatedHTTPResolver: authenticatedHTTPResolver
+            ),
             resolveLyrics: lyricsResolver(for: provider),
             refreshLyrics: lyricsRefresher(for: provider),
             reportPlayback: playbackReporter(for: provider)
@@ -113,12 +118,14 @@ public struct MusicTabView: View {
             case let .album(album):
                 AlbumDetailView(
                     viewModel: AlbumDetailViewModel(album: album, context: context),
-                    controller: controller
+                    controller: controller,
+                    authenticatedHTTPResolver: authenticatedHTTPResolver
                 )
             case let .playlist(playlist):
                 PlaylistDetailView(
                     viewModel: PlaylistDetailViewModel(playlist: playlist, context: context),
-                    controller: controller
+                    controller: controller,
+                    authenticatedHTTPResolver: authenticatedHTTPResolver
                 )
             }
         }
@@ -134,15 +141,30 @@ public struct MusicTabView: View {
 
 // MARK: - Playback starting helper
 
-/// Builds a stream-URL resolver bound to a music provider, so the engine can
+/// Builds a stream resolver bound to a music provider, so the engine can
 /// advance through a queue without coupling to any concrete provider.
 @MainActor
-func streamURLResolver(for provider: any MusicProvider) -> AudioPlaybackController.StreamURLResolver {
+func streamURLResolver(
+    for provider: any MusicProvider,
+    authenticatedHTTPResolver: any AuthenticatedHTTPResourceResolving
+) -> AudioPlaybackController.StreamURLResolver {
     { track in
         guard let info = try? await provider.audioPlaybackInfo(for: track.id, queueContext: nil) else {
             return nil
         }
-        return AudioPlaybackController.ResolvedStream(url: info.streamURL, quality: info.quality)
+        let url: URL
+        switch info.playbackSource {
+        case .publicURL(let source):
+            url = source.url
+        case .authenticatedHTTP(let locator):
+            guard let resolved = try? await authenticatedHTTPResolver.resolve(locator) else {
+                return nil
+            }
+            url = resolved
+        case .networkFile, .dlnaResource:
+            return nil
+        }
+        return AudioPlaybackController.ResolvedStream(url: url, quality: info.quality)
     }
 }
 

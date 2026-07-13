@@ -48,7 +48,7 @@ public struct PlayerEngineCapabilities: OptionSet, Sendable {
     /// cues via `onSecondarySubtitleCues`, so the dual/second line can be drawn
     /// from the container itself (AetherEngine/Plozzigen) — no fetchable sidecar
     /// URL required. Engines without this fall back to the sidecar overlay, which
-    /// needs a provider-supplied `deliveryURL` on the secondary track.
+    /// needs a provider-supplied delivery source on the secondary track.
     public static let dualSubtitleDecode = PlayerEngineCapabilities(rawValue: 1 << 4)
 }
 
@@ -110,6 +110,16 @@ public protocol VideoEngine: AnyObject {
     /// program the panel act on it; others perform a normal stop. Defaulted in the
     /// protocol extension so existing engines need no change.
     func stop(preserveDisplayMode: Bool)
+
+    /// Deterministically tears down any external transport this engine opened
+    /// (e.g. a leased SMB session + source cursor) and **awaits** its full
+    /// shutdown before returning. `stop()` only halts decode; the transport it
+    /// held is otherwise released asynchronously on deinit, which lets a fresh
+    /// engine's re-open race the draining cursor. The stall-recovery retry awaits
+    /// this first so the new session opens against a clean slate. Defaulted to a
+    /// no-op (see the protocol extension) — only engines that lease their own
+    /// transport (Plozzigen's network-file path) do real work here.
+    func drainTransport() async
 
     // MARK: Live tunables
 
@@ -306,6 +316,10 @@ public extension VideoEngine {
     /// the `preserveDisplayMode` hint is only meaningful to the on-device engine,
     /// which drives `AVDisplayManager` for HDR/Dolby Vision.
     func stop(preserveDisplayMode: Bool) { stop() }
+
+    /// Default no-op: engines that don't lease an external transport have nothing
+    /// to drain — `stop()` already released everything they own.
+    func drainTransport() async {}
 
     /// Default no-op: only engines advertising
     /// ``PlayerEngineCapabilities/dualSubtitleDecode`` decode a second subtitle

@@ -577,7 +577,7 @@ final class JellyfinProviderMappingTests: XCTestCase {
         XCTAssertTrue(item.providerIDs.isEmpty)
     }
 
-    func testPlaybackInfoResolvesDirectStreamWithApiKey() async throws {
+    func testPlaybackInfoReturnsCredentialFreeDirectStreamLocator() async throws {
         let stub = StubHTTPClient()
         stub.stub(pathSuffix: "/Users/u1/Items/i1", json: """
         {"Id":"i1","Name":"Movie","Type":"Movie","RunTimeTicks":0,
@@ -587,7 +587,8 @@ final class JellyfinProviderMappingTests: XCTestCase {
         {"MediaSources":[{"Id":"src1","ETag":"etag9","Container":"mp4","SupportsDirectPlay":true,
         "MediaStreams":[{"Index":0,"Type":"Video","Codec":"h264","IsInterlaced":true},
         {"Index":1,"Type":"Audio","Language":"eng","DisplayTitle":"English"},
-        {"Index":2,"Type":"Subtitle","Language":"eng","DisplayTitle":"English (SRT)"}]}],
+        {"Index":2,"Type":"Subtitle","Language":"eng","Codec":"srt",
+         "IsTextSubtitleStream":true,"DisplayTitle":"English (SRT)"}]}],
         "PlaySessionId":"ps1"}
         """)
         let provider = JellyfinProvider(session: makeSession(), http: stub)
@@ -596,12 +597,32 @@ final class JellyfinProviderMappingTests: XCTestCase {
         XCTAssertEqual(request.playSessionID, "ps1")
         XCTAssertEqual(request.audioTracks.count, 1)
         XCTAssertEqual(request.subtitleTracks.count, 1)
-        let url = request.streamURL.absoluteString
-        XCTAssertTrue(url.contains("/Videos/i1/stream.mp4"))
-        XCTAssertTrue(url.contains("api_key=TOKEN"))
-        XCTAssertTrue(url.contains("mediaSourceId=src1"))
-        XCTAssertTrue(url.contains("playSessionId=ps1"))
-        XCTAssertTrue(url.contains("tag=etag9"))
+        guard case .some(.authenticatedHTTP(let subtitleLocator)) =
+            request.subtitleTracks.first?.deliverySource else {
+            return XCTFail("expected authenticated subtitle source")
+        }
+        XCTAssertEqual(subtitleLocator.purpose, .subtitle)
+        XCTAssertEqual(
+            subtitleLocator.resource.path,
+            "Videos/i1/src1/Subtitles/2/0/Stream.vtt"
+        )
+        XCTAssertTrue(subtitleLocator.resource.queryItems.isEmpty)
+        XCTAssertFalse(String(describing: subtitleLocator).contains("TOKEN"))
+        guard case .authenticatedHTTP(let locator) = request.playbackSource else {
+            return XCTFail("expected authenticated HTTP locator")
+        }
+        XCTAssertEqual(locator.resource.path, "Videos/i1/stream.mp4")
+        XCTAssertEqual(locator.playSessionID, "ps1")
+        XCTAssertEqual(
+            locator.resource.queryItems,
+            [
+                try AuthenticatedHTTPQueryItem(name: "static", value: "true"),
+                try AuthenticatedHTTPQueryItem(name: "mediaSourceId", value: "src1"),
+                try AuthenticatedHTTPQueryItem(name: "tag", value: "etag9")
+            ]
+        )
+        XCTAssertFalse(String(describing: locator).contains("TOKEN"))
+        XCTAssertNil(request.streamURL)
         XCTAssertEqual(request.sourceMetadata?.video?.isInterlaced, true)
     }
 
@@ -626,11 +647,17 @@ final class JellyfinProviderMappingTests: XCTestCase {
 
         let request = try await provider.playbackInfo(for: "i1")
         let source = try XCTUnwrap(request.localRemuxSource)
-        let url = source.originalURL.absoluteString
-        XCTAssertTrue(url.contains("/Videos/i1/stream.mkv"), url)
-        XCTAssertTrue(url.contains("static=true"), url)
-        XCTAssertTrue(url.contains("mediaSourceId=src1"), url)
-        XCTAssertTrue(url.contains("api_key=TOKEN"), url)
+        guard case .authenticatedHTTP(let locator) = source.originalSource else {
+            return XCTFail("expected typed original source")
+        }
+        XCTAssertEqual(locator.resource.path, "Videos/i1/stream.mkv")
+        XCTAssertTrue(locator.resource.queryItems.contains {
+            $0.name == "static" && $0.value == "true"
+        })
+        XCTAssertTrue(locator.resource.queryItems.contains {
+            $0.name == "mediaSourceId" && $0.value == "src1"
+        })
+        XCTAssertFalse(String(describing: locator).contains("TOKEN"))
     }
 
     func testPlaybackInfoPrefersTranscodingHLSURL() async throws {
@@ -642,16 +669,19 @@ final class JellyfinProviderMappingTests: XCTestCase {
         stub.stub(pathSuffix: "/Items/i1/PlaybackInfo", json: """
         {"MediaSources":[{"Id":"src1","Container":"mkv","SupportsDirectPlay":false,
         "SupportsTranscoding":true,"TranscodingSubProtocol":"hls",
-        "TranscodingUrl":"/videos/i1/master.m3u8?api_key=TOKEN&PlaySessionId=ps1"}],
+        "TranscodingUrl":"/videos/My%20Movie/master.m3u8?api_key=TOKEN&PlaySessionId=ps1&"}],
         "PlaySessionId":"ps1"}
         """)
         let provider = JellyfinProvider(session: makeSession(), http: stub)
 
         let request = try await provider.playbackInfo(for: "i1")
-        let url = request.streamURL.absoluteString
-        XCTAssertTrue(url.contains("/videos/i1/master.m3u8"), url)
-        XCTAssertTrue(url.hasPrefix("http://host:8096"), url)
-        XCTAssertFalse(url.contains("static=true"))
+        guard case .authenticatedHTTP(let locator) = request.playbackSource else {
+            return XCTFail("expected authenticated HTTP locator")
+        }
+        XCTAssertEqual(locator.resource.path, "videos/My%20Movie/master.m3u8")
+        XCTAssertEqual(locator.playSessionID, "ps1")
+        XCTAssertTrue(locator.resource.queryItems.isEmpty)
+        XCTAssertNil(request.streamURL)
     }
 
     func testStopReleasesActiveEncoding() async throws {
@@ -704,11 +734,19 @@ final class JellyfinProviderMappingTests: XCTestCase {
         XCTAssertEqual(manifest.thumbnailCount, 250)
         XCTAssertEqual(manifest.intervalMs, 10000)
         // 250 thumbs / 100 per tile -> 3 tiles.
-        XCTAssertEqual(manifest.tileURLs.count, 3)
-        let first = manifest.tileURLs[0].absoluteString
-        XCTAssertTrue(first.contains("/Videos/i1/Trickplay/320/0.jpg"), first)
-        XCTAssertTrue(first.contains("api_key=TOKEN"), first)
-        XCTAssertTrue(first.contains("mediaSourceId=src1"), first)
+        XCTAssertEqual(manifest.tileResources.count, 3)
+        guard case .authenticatedHTTP(let first) =
+            manifest.tileResources[0] else {
+            return XCTFail("expected authenticated trickplay resource")
+        }
+        XCTAssertEqual(
+            first.resource.path,
+            "Videos/i1/Trickplay/320/0.jpg"
+        )
+        XCTAssertEqual(first.purpose, .scrubPreview)
+        XCTAssertEqual(first.resource.queryItems.first?.name, "mediaSourceId")
+        XCTAssertEqual(first.resource.queryItems.first?.value, "src1")
+        XCTAssertFalse(String(describing: first).contains("TOKEN"))
     }
 
     func testPlaybackInfoParsesTrickplayManifestForEpisode() async throws {
@@ -727,7 +765,11 @@ final class JellyfinProviderMappingTests: XCTestCase {
         let request = try await provider.playbackInfo(for: "e1")
         let manifest = try XCTUnwrap(request.scrubPreview?.tiledManifest)
         XCTAssertEqual(manifest.thumbnailCount, 150)
-        XCTAssertTrue(manifest.tileURLs[0].absoluteString.contains("/Videos/e1/Trickplay/320/0.jpg"))
+        guard case .authenticatedHTTP(let first) =
+            manifest.tileResources[0] else {
+            return XCTFail("expected authenticated trickplay resource")
+        }
+        XCTAssertEqual(first.resource.path, "Videos/e1/Trickplay/320/0.jpg")
     }
 
     func testPlaybackInfoTrickplayFallbackUsesManifestSourceID() async throws {
@@ -745,9 +787,11 @@ final class JellyfinProviderMappingTests: XCTestCase {
 
         let request = try await provider.playbackInfo(for: "i2")
         let manifest = try XCTUnwrap(request.scrubPreview?.tiledManifest)
-        let first = manifest.tileURLs[0].absoluteString
-        XCTAssertTrue(first.contains("mediaSourceId=actual-src"), first)
-        XCTAssertFalse(first.contains("mediaSourceId=playback-src"), first)
+        guard case .authenticatedHTTP(let first) =
+            manifest.tileResources[0] else {
+            return XCTFail("expected authenticated trickplay resource")
+        }
+        XCTAssertEqual(first.resource.queryItems.first?.value, "actual-src")
     }
 
     func testPlaybackInfoTrickplayParsesCompositeWidthKey() async throws {
@@ -766,7 +810,11 @@ final class JellyfinProviderMappingTests: XCTestCase {
         let request = try await provider.playbackInfo(for: "i3")
         let manifest = try XCTUnwrap(request.scrubPreview?.tiledManifest)
         XCTAssertEqual(manifest.thumbnailWidth, 320)
-        XCTAssertTrue(manifest.tileURLs[0].absoluteString.contains("/Trickplay/320/0.jpg"))
+        guard case .authenticatedHTTP(let first) =
+            manifest.tileResources[0] else {
+            return XCTFail("expected authenticated trickplay resource")
+        }
+        XCTAssertTrue(first.resource.path.contains("/Trickplay/320/0.jpg"))
     }
 
     func testPlaybackInfoHasNoTrickplayWhenServerOmitsIt() async throws {

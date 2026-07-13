@@ -41,13 +41,22 @@ public final class TraktService {
     @ObservationIgnored private let auth: TraktAuthService
     @ObservationIgnored private let tokenStore: TraktTokenStoring
     @ObservationIgnored private var connectTask: Task<Void, Never>?
+    @ObservationIgnored private let profileGeneration:
+        TraktProfileGeneration
 
     public init(config: TraktConfig, http: HTTPClient = URLSessionHTTPClient(), tokenStore: TraktTokenStoring) {
         self.config = config
         self.auth = TraktAuthService(config: config, http: http)
         self.tokenStore = tokenStore
+        let profileGeneration = TraktProfileGeneration()
+        self.profileGeneration = profileGeneration
         if config.isConfigured {
-            self.scrobbler = TraktScrobbler(config: config, http: http, tokenStore: tokenStore)
+            self.scrobbler = TraktScrobbler(
+                config: config,
+                http: http,
+                tokenStore: tokenStore,
+                profileGeneration: profileGeneration
+            )
             self.phase = .unknown
         } else {
             self.scrobbler = DisabledTraktScrobbler()
@@ -63,24 +72,35 @@ public final class TraktService {
     /// the default profile uses `nil` (legacy un-namespaced storage). Cancels any
     /// in-flight connect, repoints the shared token store, then re-resolves status.
     public func setActiveProfile(namespace: String?) async {
+        let generation = profileGeneration.advance {
+            tokenStore.setNamespace(namespace)
+        }
         connectTask?.cancel()
         connectTask = nil
-        tokenStore.setNamespace(namespace)
         phase = config.isConfigured ? .unknown : .unavailable
-        await refreshStatus()
+        await refreshStatus(generation: generation)
     }
 
     /// Resolves the current connection status: verifies any stored token (and
     /// refreshes it if expired), then loads the username for display. Safe to
     /// call repeatedly (e.g. when Settings appears).
     public func refreshStatus() async {
+        await refreshStatus(generation: profileGeneration.current)
+    }
+
+    private func refreshStatus(generation: UInt64) async {
         guard config.isConfigured else { phase = .unavailable; return }
         guard let tokens = tokenStore.load() else { phase = .disconnected; return }
         do {
-            let access = try await validAccessToken(tokens)
+            let access = try await validAccessToken(
+                tokens,
+                generation: generation
+            )
             let settings = try await auth.userSettings(accessToken: access)
+            guard generation == profileGeneration.current else { return }
             phase = .connected(username: settings.displayName)
         } catch {
+            guard generation == profileGeneration.current else { return }
             // Token rejected/unusable — surface as disconnected so the user can
             // reconnect. The stale token is cleared so the scrobbler no-ops.
             try? tokenStore.clear()
@@ -95,6 +115,7 @@ public final class TraktService {
     public func connect() {
         guard config.isConfigured else { phase = .unavailable; return }
         connectTask?.cancel()
+        let generation = profileGeneration.advance()
         connectTask = Task { [weak self] in
             guard let self else { return }
             do {
@@ -102,6 +123,9 @@ public final class TraktService {
                     try Task.checkCancellation()
                     let code = try await self.auth.beginDeviceCode()
                     try Task.checkCancellation()
+                    guard generation == self.profileGeneration.current else {
+                        return
+                    }
                     self.codeLifetime = code.expiresIn
                     self.phase = .connecting(
                         userCode: code.userCode,
@@ -111,8 +135,16 @@ public final class TraktService {
                     do {
                         let tokens = try await self.auth.awaitToken(for: code)
                         try Task.checkCancellation()
-                        try? self.tokenStore.save(tokens)
+                        guard self.profileGeneration.performIfCurrent(
+                            generation,
+                            operation: { try? self.tokenStore.save(tokens) }
+                        ) else {
+                            return
+                        }
                         let settings = try? await self.auth.userSettings(accessToken: tokens.accessToken)
+                        guard generation == self.profileGeneration.current else {
+                            return
+                        }
                         self.phase = .connected(username: settings?.displayName ?? "Trakt")
                         return
                     } catch let error as AppError where error == .quickConnectExpired {
@@ -123,8 +155,14 @@ public final class TraktService {
                 // Cancelled by the user; `cancelConnect()` set the phase.
             } catch let error as AppError {
                 if error == .cancelled { return }
+                guard generation == self.profileGeneration.current else {
+                    return
+                }
                 self.phase = .error(error.userMessage)
             } catch {
+                guard generation == self.profileGeneration.current else {
+                    return
+                }
                 self.phase = .error(AppError.unknown("").userMessage)
             }
         }
@@ -132,6 +170,7 @@ public final class TraktService {
 
     /// Aborts an in-flight connection attempt.
     public func cancelConnect() {
+        _ = profileGeneration.advance()
         connectTask?.cancel()
         connectTask = nil
         phase = config.isConfigured ? .disconnected : .unavailable
@@ -139,20 +178,32 @@ public final class TraktService {
 
     /// Disconnects: revokes the token server-side (best-effort) and clears it.
     public func disconnect() async {
+        let generation = profileGeneration.advance()
         connectTask?.cancel()
         connectTask = nil
         if let tokens = tokenStore.load() {
             try? await auth.revoke(accessToken: tokens.accessToken)
         }
-        try? tokenStore.clear()
+        guard profileGeneration.performIfCurrent(
+            generation,
+            operation: { try? tokenStore.clear() }
+        ) else { return }
         phase = config.isConfigured ? .disconnected : .unavailable
     }
 
     /// Returns a usable access token, refreshing + persisting an expired one.
-    private func validAccessToken(_ tokens: TraktTokens) async throws -> String {
+    private func validAccessToken(
+        _ tokens: TraktTokens,
+        generation: UInt64
+    ) async throws -> String {
         guard tokens.isExpired else { return tokens.accessToken }
         let refreshed = try await auth.refresh(tokens.refreshToken)
-        try? tokenStore.save(refreshed)
+        guard profileGeneration.performIfCurrent(
+            generation,
+            operation: { try? tokenStore.save(refreshed) }
+        ) else {
+            throw CancellationError()
+        }
         return refreshed.accessToken
     }
 }

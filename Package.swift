@@ -43,6 +43,9 @@ let package = Package(
         .library(name: "FeatureMusic", targets: ["FeatureMusic"]),
         .library(name: "TopShelfKit", targets: ["TopShelfKit"]),
         .library(name: "CrashReporting", targets: ["CrashReporting"]),
+        .library(name: "MediaTransportCore", targets: ["MediaTransportCore"]),
+        .library(name: "MediaTransportHTTP", targets: ["MediaTransportHTTP"]),
+        .library(name: "MediaTransportSMB", targets: ["MediaTransportSMB"]),
         .library(name: "AppShell", targets: ["AppShell"])
     ],
     dependencies: [
@@ -61,20 +64,25 @@ let package = Package(
         // decodes cleanly (#92), software-path seek holds last frame (#90). See
         // AGENTS.local.md › "Playback engine (AetherEngine / Plozzigen)".
         //
-        // Pinned to a fork commit that carries the tvOS SMB transport fix on top
-        // of the backward-seek muxer wedge fix. AetherEngine's stock SMB transport
-        // (`SMBConnection`, AMSMB2/libsmb2) fails POSIX EPERM on tvOS — a known,
-        // unfixed libsmb2-on-iOS/tvOS bug (AMSMB2 #32/#63/#64). The fork swaps that
-        // transport to kishikawakatsumi/SMBClient (pure-Swift, MIT, speaks SMB2
-        // over NWConnection), which completes a full handshake on-device where
-        // libsmb2 does not. Same public surface, so `SMBConnection`/`SMBIOReader`/
-        // `SMBURL` are unchanged. Upstreamed as superuser404notfound/AetherEngine
-        // PR #97; move this pin back to the upstream merge commit once it lands.
-        // (Also includes PR #94: backward-seek muxer wedge fix — under +delay_moov
-        // the fMP4 muxer needs a PARSED audio packet to build the AC-3/E-AC-3/TrueHD
-        // sample entry, else a mid-file backward seek wedged the muxer.) See
+        // Pinned to AetherEngine 5.0.1 + Plozz's re-applied local patches + the
+        // bounded stalled-seek / sparse-cache fix. Lineage (verified in the fork
+        // history): upstream 5.0.1 (carries the merged Dolby Vision startup fix,
+        // PR #118) → `9fb4907` "Carry Plozz's local patches on top of 5.0.1"
+        // (public `stop(resetDisplayCriteria:)` + the SDR pre-play settle gate that
+        // skips the ~1000ms waitForSwitch for SDR/non-switching loads; DV/HDR
+        // behavior byte-for-byte identical to 5.0.1) → this commit adds the
+        // bounded seek/sparse-cache recovery. This is `d97fad24` and is a strict
+        // superset of the old pre-5.0.1 pin (`b62837d5`, 177 commits behind): the
+        // five "extra" commits on that old line are just older copies of the same
+        // Plozz patches, already re-applied here on top of 5.0.1.
+        //
+        // SMB enters AetherEngine only through Plozz's protocol-neutral custom-source
+        // bridge; the engine's legacy SMB URL product is not linked. PR #94's
+        // backward-seek muxer wedge fix is included: under +delay_moov the fMP4
+        // muxer needs a PARSED audio packet to build the AC-3/E-AC-3/TrueHD sample
+        // entry, else a mid-file backward seek wedged the muxer. See
         // docs/media-share-proposal.md § 5.1.
-        .package(url: "https://github.com/thatcube/AetherEngine", revision: "b62837d52e78af494746d616202426654a956dda"),
+        .package(url: "https://github.com/thatcube/AetherEngine", revision: "d97fad242c069711fb3065df449444cc31267251"),
         // NOTE: FFmpegBuild (FFmpeg n8.1.x decode-only) and LibDovi (Dolby Vision
         // RPU parser) are pulled in TRANSITIVELY by AetherEngine — its own manifest
         // declares and consumes them. Plozz used to declare them directly only for
@@ -90,9 +98,9 @@ let package = Package(
         .package(url: "https://github.com/getsentry/sentry-cocoa", from: "9.19.0"),
 
         // SMBClient — pure-Swift, MIT SMB client over NWConnection. Declared here
-        // for the **ProviderShare** target, which uses it to *browse/enumerate* a
-        // media share (listDirectory/listShares) and scan it into a library. This
-        // is an app concern distinct from playback: AetherEngine already pulls
+        // for the isolated **MediaTransportSMB** adapter and ProviderShare's
+        // pre-save discovery/share enumeration. Browsing and scanning consume the
+        // protocol-neutral MediaTransportCore contracts. AetherEngine already pulls
         // SMBClient transitively and owns the playback byte-reads (SMBConnection);
         // SwiftPM unifies both onto one version.
         //
@@ -108,7 +116,12 @@ let package = Package(
     ],
     targets: [
         // MARK: Core
-        .target(name: "CoreModels"),
+        .target(
+            name: "CoreModels",
+            swiftSettings: [
+                .define("PLOZZ_DIAGNOSTICS", .when(configuration: .debug))
+            ]
+        ),
         .target(
             name: "CoreNetworking",
             dependencies: ["CoreModels"]
@@ -144,14 +157,16 @@ let package = Package(
         ),
         // Second-class local media-share backend (SMB today). Scans a share into
         // a synthesised library and conforms to `MediaProvider` so the rest of the
-        // app treats it like Plex/Jellyfin. Depends on SMBClient for directory
-        // enumeration; playback still flows through EnginePlozzigen's engine
-        // SMBConnection (this target never plays). See docs/media-share-proposal.md.
+        // app treats it like Plex/Jellyfin. Runtime browsing/scanning use injected
+        // MediaTransportCore sessions; SMBClient remains here only for setup-time
+        // SMB discovery/share enumeration. Playback still flows through
+        // EnginePlozzigen's existing SMB path. See docs/media-share-proposal.md.
         .target(
             name: "ProviderShare",
             dependencies: [
                 "CoreModels",
                 "CoreNetworking",
+                "MediaTransportCore",
                 "MetadataKit",
                 .product(name: "SMBClient", package: "SMBClient"),
             ]
@@ -274,6 +289,46 @@ let package = Package(
             ]
         ),
 
+        // MARK: Protocol-neutral media transport
+        .target(
+            name: "MediaTransportCore",
+            dependencies: ["CoreModels"],
+            swiftSettings: [.unsafeFlags(["-strict-concurrency=complete"])]
+        ),
+
+        // MARK: WebDAV/HTTP transport
+        //
+        // Foundation-only WebDAV/plain-HTTP adapter primitives built on the
+        // protocol-neutral MediaTransportCore: origin/redirect discipline,
+        // credential preflight + password/Bearer auth policy, exact-leaf TLS
+        // pinning, per-(account, credential revision, origin, trust
+        // revision, role) ephemeral session isolation, bounded PROPFIND
+        // parsing, and validated ranged reads. See
+        // `Sources/MediaTransportHTTP/README.md` for the adapter's scope.
+        //
+        // NOT consumed by AppShell/the App target — this is a standalone,
+        // independently-testable module, not shipping app behavior yet.
+        // Strict concurrency is opted into explicitly for this target only
+        // (the package as a whole stays pinned to Swift 5 language mode; see
+        // `swiftLanguageModes` below) so this new surface is held to a
+        // stricter bar from day one.
+        .target(
+            name: "MediaTransportHTTP",
+            dependencies: ["CoreModels", "MediaTransportCore"],
+            swiftSettings: [.unsafeFlags(["-strict-concurrency=complete"])]
+        ),
+
+        // MARK: SMB transport
+        .target(
+            name: "MediaTransportSMB",
+            dependencies: [
+                "CoreModels",
+                "MediaTransportCore",
+                .product(name: "SMBClient", package: "SMBClient"),
+            ],
+            swiftSettings: [.unsafeFlags(["-strict-concurrency=complete"])]
+        ),
+
         // MARK: AetherEngine integration (native HLS-fMP4 remux engine)
         //
         // Wraps AetherEngine (the upstream media-player library) behind Plozz's
@@ -287,15 +342,9 @@ let package = Package(
             name: "EnginePlozzigen",
             dependencies: [
                 "CoreModels",
+                "MediaTransportCore",
                 "FeaturePlayback",
                 .product(name: "AetherEngine", package: "AetherEngine"),
-                // SMB2/3 byte-source product. Lets the engine wrapper play a
-                // media-share file over an `IOReader` custom source with no server.
-                // Second-class transport behind Plex/Jellyfin; see
-                // docs/media-share-proposal.md. The engine's `SMBConnection` speaks
-                // SMB2 over NWConnection (pinned fork / PR #97), so it works on
-                // tvOS where the stock AMSMB2/libsmb2 transport EPERMs.
-                .product(name: "AetherEngineSMB", package: "AetherEngine"),
             ]
         ),
 
@@ -309,6 +358,8 @@ let package = Package(
                 "EnginePlozzigen",
                 "FeatureDiscovery",
                 "FeatureAuth",
+                "MediaTransportCore",
+                "MediaTransportSMB",
                 "MetadataKit",
                 "ProviderJellyfin",
                 "ProviderPlex",
@@ -407,7 +458,34 @@ let package = Package(
         ),
         .testTarget(
             name: "ProviderShareTests",
-            dependencies: ["ProviderShare", "CoreModels"]
+            dependencies: ["ProviderShare", "CoreModels", "MediaTransportCore"]
+        ),
+        .testTarget(
+            name: "MediaTransportCoreTests",
+            dependencies: ["MediaTransportCore", "CoreModels"],
+            swiftSettings: [.unsafeFlags(["-strict-concurrency=complete"])]
+        ),
+        .testTarget(
+            name: "MediaTransportHTTPTests",
+            dependencies: ["MediaTransportHTTP", "MediaTransportCore"],
+            swiftSettings: [.unsafeFlags(["-strict-concurrency=complete"])]
+        ),
+        .testTarget(
+            name: "MediaTransportSMBTests",
+            dependencies: [
+                "CoreModels",
+                "MediaTransportCore",
+                "MediaTransportSMB",
+            ],
+            swiftSettings: [.unsafeFlags(["-strict-concurrency=complete"])]
+        ),
+        .testTarget(
+            name: "EnginePlozzigenTests",
+            dependencies: [
+                "EnginePlozzigen",
+                "MediaTransportCore",
+                .product(name: "AetherEngine", package: "AetherEngine"),
+            ]
         ),
     ],
     // Pin Swift 5 language mode: bumping tools-version to 6.0 (required for the

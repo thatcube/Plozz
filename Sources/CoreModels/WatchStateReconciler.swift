@@ -72,6 +72,7 @@ public actor WatchStateReconciler {
     /// reload (both around app-foreground), and a short window guarantees a stale
     /// record can never override a genuine later play made on another client.
     private let resumeRecencyTTL: TimeInterval
+    private let onPersistenceFailure: @Sendable () -> Void
 
     private var state: WatchOutboxState
     private var isDraining = false
@@ -94,7 +95,8 @@ public actor WatchStateReconciler {
         now: @escaping @Sendable () -> Date = Date.init,
         traktTTL: TimeInterval = 48 * 3600,
         clockTTL: TimeInterval = 30 * 24 * 3600,
-        resumeRecencyTTL: TimeInterval = 30 * 60
+        resumeRecencyTTL: TimeInterval = 30 * 60,
+        onPersistenceFailure: @escaping @Sendable () -> Void = {}
     ) {
         self.store = store
         self.applier = applier
@@ -102,6 +104,7 @@ public actor WatchStateReconciler {
         self.traktTTL = traktTTL
         self.clockTTL = clockTTL
         self.resumeRecencyTTL = resumeRecencyTTL
+        self.onPersistenceFailure = onPersistenceFailure
         self.state = store.load()
     }
 
@@ -152,7 +155,6 @@ public actor WatchStateReconciler {
 
         // Stale-write suppression vs the accepted high-water mark.
         if let accepted = state.clock[key], mutation.capturedAt < accepted {
-            persist()
             return false
         }
 
@@ -182,14 +184,25 @@ public actor WatchStateReconciler {
         // Union targets, incoming first (keeps freshest providerKind), de-duped by id.
         var seen = Set<String>()
         merged.targets = (incoming.targets + existing.targets).filter { seen.insert($0.id).inserted }
-        if incoming.trakt == nil, let carried = existing.trakt {
-            merged.trakt = carried
-            merged.traktPending = existing.traktPending
+        if incoming.played == false {
+            // An explicit unwatch supersedes any queued finished-watch mirror. The
+            // media servers are being set unwatched, so carrying the older tracker
+            // intent would permanently diverge Trakt/Simkl/AniList/MAL.
+            merged.trakt = nil
+            merged.traktPending = false
+            merged.simklPending = false
+            merged.anilistPending = false
+            merged.malPending = false
+        } else {
+            if incoming.trakt == nil, let carried = existing.trakt {
+                merged.trakt = carried
+                merged.traktPending = existing.traktPending
+            }
+            // A still-owed tracker write survives later non-unwatch convergence.
+            merged.simklPending = incoming.simklPending || existing.simklPending
+            merged.anilistPending = incoming.anilistPending || existing.anilistPending
+            merged.malPending = incoming.malPending || existing.malPending
         }
-        // Preserve pending tracker flags from either side (either still owed keeps it owed).
-        merged.simklPending = incoming.simklPending || existing.simklPending
-        merged.anilistPending = incoming.anilistPending || existing.anilistPending
-        merged.malPending = incoming.malPending || existing.malPending
         // Either side still owing twin expansion keeps it owed; preserve the origin
         // seed if the newer mutation lacked one (e.g. a mark-watched coalescing onto
         // a queued playback-stop).
@@ -462,6 +475,10 @@ public actor WatchStateReconciler {
     }
 
     private func persist() {
-        try? store.save(state)
+        do {
+            try store.save(state)
+        } catch {
+            onPersistenceFailure()
+        }
     }
 }

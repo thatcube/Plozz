@@ -16,6 +16,8 @@ final class CrossServerMergeEdgeTests: XCTestCase {
         year: Int? = nil,
         account: String,
         ids: [String: String] = [:],
+        season: Int? = nil,
+        episode: Int? = nil,
         versions: [MediaVersion] = [],
         resume: TimeInterval? = nil,
         played: Bool = false,
@@ -25,6 +27,8 @@ final class CrossServerMergeEdgeTests: XCTestCase {
             id: id,
             title: title,
             kind: kind,
+            seasonNumber: season,
+            episodeNumber: episode,
             productionYear: year,
             resumePosition: resume,
             isPlayed: played,
@@ -51,8 +55,24 @@ final class CrossServerMergeEdgeTests: XCTestCase {
     func testEpisodesWithSameExternalIDMergeAcrossServers() {
         // Two servers' copy of the *same* episode (shared external id) is a real
         // duplicate and must merge — external identity is kind-agnostic.
-        let a = item("a", title: "Ozymandias", kind: .episode, account: "plex", ids: ["Tvdb": "4877506"])
-        let b = item("b", title: "Ozymandias", kind: .episode, account: "jelly", ids: ["Tvdb": "4877506"])
+        let a = item(
+            "a",
+            title: "Ozymandias",
+            kind: .episode,
+            account: "plex",
+            ids: ["Tvdb": "4877506"],
+            season: 5,
+            episode: 14
+        )
+        let b = item(
+            "b",
+            title: "Ozymandias",
+            kind: .episode,
+            account: "jelly",
+            ids: ["Tvdb": "4877506"],
+            season: 5,
+            episode: 14
+        )
         let merged = MediaItemMerger.merge([a, b])
         XCTAssertEqual(merged.count, 1)
         XCTAssertEqual(merged[0].sources.map(\.accountID), ["plex", "jelly"])

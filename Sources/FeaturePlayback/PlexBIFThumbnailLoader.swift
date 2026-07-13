@@ -23,7 +23,9 @@ private struct SendableCGImage: @unchecked Sendable {
 /// coalesce onto the single download.
 @MainActor
 final class PlexBIFThumbnailLoader: ScrubThumbnailProviding {
-    private let url: URL
+    private let resource: ScrubPreviewResource
+    private let authenticatedHTTPResolver:
+        (any AuthenticatedHTTPResourceResolving)?
     private let session: URLSession
 
     private var blob: Data?
@@ -36,8 +38,14 @@ final class PlexBIFThumbnailLoader: ScrubThumbnailProviding {
     private var decodeOrder: [Int] = []
     private let maxDecodedFrames = 90
 
-    init(url: URL, session: URLSession = .shared) {
-        self.url = url
+    init(
+        resource: ScrubPreviewResource,
+        authenticatedHTTPResolver:
+            (any AuthenticatedHTTPResourceResolving)? = nil,
+        session: URLSession = .shared
+    ) {
+        self.resource = resource
+        self.authenticatedHTTPResolver = authenticatedHTTPResolver
         self.session = session
     }
 
@@ -112,16 +120,26 @@ final class PlexBIFThumbnailLoader: ScrubThumbnailProviding {
         let task = Task<Bool, Never> { [weak self] in
             guard let self else { return false }
             do {
-                let (data, response) = try await self.session.data(from: self.url)
+                let url: URL
+                switch self.resource {
+                case .publicURL(let source):
+                    url = source.url
+                case .authenticatedHTTP(let locator):
+                    guard let resolver = self.authenticatedHTTPResolver else {
+                        return false
+                    }
+                    url = try await resolver.resolve(locator)
+                }
+                let (data, response) = try await self.session.data(from: url)
                 if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
                     PlozzLog.playback.debug(
-                        "Plex BIF request failed status=\(http.statusCode) url=\(PlozzLog.redact(url: self.url))"
+                        "Plex BIF request failed status=\(http.statusCode) url=\(PlozzLog.redact(url: url))"
                     )
                     return false
                 }
                 guard let parsed = BIFIndex(data: data) else {
                     PlozzLog.playback.debug(
-                        "Plex BIF parse failed url=\(PlozzLog.redact(url: self.url)) size=\(data.count)"
+                        "Plex BIF parse failed url=\(PlozzLog.redact(url: url)) size=\(data.count)"
                     )
                     return false
                 }
@@ -131,8 +149,9 @@ final class PlexBIFThumbnailLoader: ScrubThumbnailProviding {
                 self.decodeOrder.removeAll(keepingCapacity: true)
                 return true
             } catch {
+                let error = error as NSError
                 PlozzLog.playback.debug(
-                    "Plex BIF request error=\(String(reflecting: error)) url=\(PlozzLog.redact(url: self.url))"
+                    "Plex BIF request failed domain=\(error.domain) code=\(error.code)"
                 )
                 return false
             }

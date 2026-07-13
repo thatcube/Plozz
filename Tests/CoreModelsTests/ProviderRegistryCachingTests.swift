@@ -21,51 +21,162 @@ final class ProviderRegistryCachingTests: XCTestCase {
         func imageURL(itemID: String, kind: ImageKind, maxWidth: Int?) -> URL? { nil }
     }
 
-    private func session(token: String, server: String = "srv", user: String = "u") -> UserSession {
-        UserSession(
-            server: MediaServer(id: server, name: "Home", baseURL: URL(string: "http://host")!, provider: .plex),
-            userID: user, userName: "User", deviceID: "d", accessToken: token
+    private func context(
+        token: String,
+        accountID: String = "account",
+        revision: CredentialRevision = CredentialRevision(
+            rawValue: UUID(uuidString: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")!
+        ),
+        profileID: String? = nil
+    ) -> ProviderResolutionContext {
+        let session = UserSession(
+            server: MediaServer(
+                id: "srv",
+                name: "Home",
+                baseURL: URL(string: "http://host")!,
+                provider: .plex
+            ),
+            userID: "u",
+            userName: "User",
+            deviceID: "d",
+            accessToken: token
+        )
+        return ProviderResolutionContext(
+            session: session,
+            accountID: accountID,
+            credentialRevision: revision,
+            localMediaContext: profileID.map {
+                LocalMediaContext(
+                    accountID: accountID,
+                    profileID: $0,
+                    profileNamespace: $0
+                )
+            }
         )
     }
 
-    func testSameSessionVendsSameInstanceAndBuildsOnce() throws {
+    private func session(token: String) -> UserSession {
+        UserSession(
+            server: MediaServer(id: "srv", name: "Home", baseURL: URL(string: "http://host")!, provider: .plex),
+            userID: "u", userName: "User", deviceID: "d", accessToken: token
+        )
+    }
+
+    func testSameContextVendsSameInstanceAndBuildsOnce() throws {
         let registry = ProviderRegistry()
         var builds = 0
-        registry.register(.plex) { s in builds += 1; return StubProvider(session: s) }
+        registry.register(.plex) { context in
+            builds += 1
+            return StubProvider(session: context.session)
+        }
 
-        let a = try XCTUnwrap(registry.provider(for: session(token: "T")) as? StubProvider)
-        let b = try XCTUnwrap(registry.provider(for: session(token: "T")) as? StubProvider)
-        let c = try XCTUnwrap(registry.provider(for: session(token: "T")) as? StubProvider)
+        let context = context(token: "T")
+        let a = try XCTUnwrap(registry.provider(for: context) as? StubProvider)
+        let b = try XCTUnwrap(registry.provider(for: context) as? StubProvider)
+        let c = try XCTUnwrap(registry.provider(for: context) as? StubProvider)
 
         XCTAssertTrue(a === b && b === c, "Same session must reuse one provider instance")
         XCTAssertEqual(builds, 1, "Factory must run exactly once for a repeated session")
     }
 
-    func testTokenRefreshRebuildsAndEvictsStale() throws {
+    func testCredentialRevisionRebuildsAndEvictsStale() throws {
         let registry = ProviderRegistry()
         var builds = 0
-        registry.register(.plex) { s in builds += 1; return StubProvider(session: s) }
+        registry.register(.plex) { context in
+            builds += 1
+            return StubProvider(session: context.session)
+        }
+        let oldRevision = CredentialRevision(
+            rawValue: UUID(uuidString: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")!
+        )
+        let newRevision = CredentialRevision(
+            rawValue: UUID(uuidString: "BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB")!
+        )
 
-        let old = try XCTUnwrap(registry.provider(for: session(token: "OLD")) as? StubProvider)
-        let new = try XCTUnwrap(registry.provider(for: session(token: "NEW")) as? StubProvider)
+        let old = try XCTUnwrap(
+            registry.provider(for: context(token: "OLD", revision: oldRevision)) as? StubProvider
+        )
+        let newContext = context(token: "NEW", revision: newRevision)
+        let new = try XCTUnwrap(registry.provider(for: newContext) as? StubProvider)
         XCTAssertFalse(old === new, "A refreshed token must build a new provider")
         XCTAssertEqual(builds, 2)
 
-        // Re-requesting the new token reuses the cached instance (no extra build),
-        // and the stale-token entry was evicted (cache holds one per account).
-        let newAgain = try XCTUnwrap(registry.provider(for: session(token: "NEW")) as? StubProvider)
+        let newAgain = try XCTUnwrap(registry.provider(for: newContext) as? StubProvider)
         XCTAssertTrue(new === newAgain)
         XCTAssertEqual(builds, 2)
+    }
+
+    func testChangedCredentialMaterialRequiresNewRevision() throws {
+        let registry = ProviderRegistry()
+        registry.register(.plex) { StubProvider(session: $0.session) }
+        _ = try registry.provider(for: context(token: "OLD"))
+
+        XCTAssertThrowsError(try registry.provider(for: context(token: "NEW"))) { error in
+            XCTAssertEqual(
+                error as? ProviderResolutionError,
+                .contextChangedWithoutRevision(accountID: "account")
+            )
+        }
+    }
+
+    func testContextDescriptionRedactsCredentialMaterial() {
+        let context = context(token: "TOP-SECRET")
+
+        XCTAssertFalse(context.description.contains("TOP-SECRET"))
+        XCTAssertTrue(context.description.contains("<redacted>"))
+    }
+
+    func testLocalProfilesReceiveIsolatedProviders() throws {
+        let registry = ProviderRegistry()
+        registry.register(.plex) { StubProvider(session: $0.session) }
+
+        let first = try XCTUnwrap(
+            registry.provider(for: context(token: "T", profileID: "profile-a")) as? StubProvider
+        )
+        let second = try XCTUnwrap(
+            registry.provider(for: context(token: "T", profileID: "profile-b")) as? StubProvider
+        )
+
+        XCTAssertFalse(first === second)
+    }
+
+    func testRejectsMismatchedLocalAccountIdentity() {
+        let registry = ProviderRegistry()
+        registry.register(.plex) { StubProvider(session: $0.session) }
+        let invalid = ProviderResolutionContext(
+            session: session(token: "T"),
+            accountID: "account",
+            credentialRevision: CredentialRevision(),
+            localMediaContext: LocalMediaContext(
+                accountID: "different-account",
+                profileID: "profile",
+                profileNamespace: nil
+            )
+        )
+
+        XCTAssertThrowsError(try registry.provider(for: invalid)) { error in
+            XCTAssertEqual(
+                error as? ProviderResolutionError,
+                .localContextAccountMismatch(
+                    accountID: "account",
+                    localAccountID: "different-account"
+                )
+            )
+        }
     }
 
     func testInvalidateCacheForcesRebuild() throws {
         let registry = ProviderRegistry()
         var builds = 0
-        registry.register(.plex) { s in builds += 1; return StubProvider(session: s) }
+        registry.register(.plex) { context in
+            builds += 1
+            return StubProvider(session: context.session)
+        }
+        let context = context(token: "T")
 
-        _ = try registry.provider(for: session(token: "T"))
+        _ = try registry.provider(for: context)
         registry.invalidateCache()
-        _ = try registry.provider(for: session(token: "T"))
+        _ = try registry.provider(for: context)
         XCTAssertEqual(builds, 2, "invalidateCache must drop memoized providers")
     }
 }

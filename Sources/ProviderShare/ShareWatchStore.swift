@@ -1,11 +1,12 @@
 import Foundation
+import CoreModels
 import CoreNetworking
 
 /// Local, on-device watch state for a media share.
 ///
 /// Plex/Jellyfin keep watched/resume state on the server, but a plain file share
 /// has no such backend — so the app is the source of truth. This actor persists a
-/// small JSON record per playable item (keyed by its share item id, e.g.
+/// bounded durable record per playable item (keyed by its share item id, e.g.
 /// `"f:TV Shows/Show/S01E01.mkv"`) so a share can answer "resume from here" and
 /// "already watched" across relaunches, and surface a Continue Watching row.
 ///
@@ -22,9 +23,9 @@ import CoreNetworking
 /// never clobbers a newer one, so a stale resume can't resurrect an item a newer
 /// `setPlayed` marked finished.
 ///
-/// Scope: one file per share account. Watch state on a local share is inherently
-/// device-local; per-*profile* scoping is a future refinement (documented in the
-/// media-share plan).
+/// Scope: one Keychain envelope per share account and Plozz profile. Watch state
+/// on a local
+/// share is device-local, but profiles never read or overwrite each other's state.
 public actor ShareWatchStore {
     /// One item's persisted watch state.
     public struct Record: Codable, Sendable, Equatable {
@@ -49,19 +50,70 @@ public actor ShareWatchStore {
         }
     }
 
-    private let url: URL
-    /// Lazily loaded so constructing a provider (which happens constantly as
-    /// SwiftUI reads `AppState`) never touches disk until watch state is used.
-    private var records: [String: Record]?
+    private struct PersistedState: DurableLocalStateValue {
+        static let durableLocalStateSchemaID =
+            "com.plozz.local-media-watch.v1"
 
-    /// - Parameters:
-    ///   - accountKey: stable per-account id (the share's `server.id`), used to
-    ///     name the file so two shares/accounts keep separate state.
-    ///   - directory: container dir (defaults to Application Support/Plozz).
+        var records: [String: Record]
+    }
+
+    private static let maximumRecordCount = 2_000
+    private let durableStore: DurableLocalStateStore?
+    private let durableKey: DurableLocalStateKey?
+    private var records: [String: Record]?
+    private var loadFailed = false
+
+    public init(
+        localMediaContext: LocalMediaContext,
+        durableStore: DurableLocalStateStore? = nil
+    ) {
+        self.durableStore = durableStore
+        do {
+            self.durableKey = try DurableLocalStateKey(
+                collection: .localMediaWatch,
+                scope: .source(
+                    profileID: localMediaContext.profileID,
+                    sourceID: localMediaContext.accountID
+                )
+            )
+        } catch {
+            self.durableKey = nil
+            PlozzLog.playback.error(
+                "Durable share watch address invalid; using memory only"
+            )
+        }
+
+    }
+
+    @available(
+        *,
+        deprecated,
+        message: "Inject DurableLocalStateStore; file-backed watch state is retired"
+    )
     public init(accountKey: String, directory: URL? = nil) {
-        let base = directory ?? Self.defaultDirectory()
-        try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
-        self.url = base.appendingPathComponent("share-watch-\(Self.sanitize(accountKey)).json")
+        self.init(
+            localMediaContext: LocalMediaContext(
+                accountID: accountKey,
+                profileID: ProfileStore.defaultProfileID,
+                profileNamespace: nil
+            ),
+            durableStore: nil
+        )
+    }
+
+    init(
+        accountKey: String,
+        durableStore: DurableLocalStateStore,
+        profileID: String = ProfileStore.defaultProfileID
+    ) {
+        self.init(
+            localMediaContext: LocalMediaContext(
+                accountID: accountKey,
+                profileID: profileID,
+                profileNamespace: nil
+            ),
+            durableStore: durableStore
+        )
     }
 
     // MARK: - Reads
@@ -134,56 +186,94 @@ public actor ShareWatchStore {
 
     private func loaded() -> [String: Record] {
         if let records { return records }
-        let decoded: [String: Record]
-        if let data = try? Data(contentsOf: url),
-           let map = try? JSONDecoder().decode([String: Record].self, from: data) {
-            decoded = map
-        } else {
-            decoded = [:]
+        guard let durableStore, let durableKey else {
+            records = [:]
+            return [:]
         }
-        records = decoded
-        return decoded
+        do {
+            let loaded = try durableStore.load(
+                PersistedState.self,
+                for: durableKey
+            )?.records ?? [:]
+            records = loaded
+            return loaded
+        } catch {
+            loadFailed = true
+            records = [:]
+            PlozzLog.playback.error(
+                "Durable share watch state unavailable; refusing to overwrite it"
+            )
+            return [:]
+        }
     }
 
     private func persist(_ all: [String: Record]) {
-        records = all
-        guard let data = try? JSONEncoder().encode(all) else {
-            PlozzLog.playback.error("share.watchStore encode FAILED url=\(url.lastPathComponent)")
+        let bounded = Self.boundedRecords(
+            all,
+            maximumPayloadBytes: durableStore?.maximumPayloadBytes
+        )
+        records = bounded
+        guard !loadFailed else {
+            PlozzLog.playback.error(
+                "Durable share watch write blocked after load failure"
+            )
             return
         }
+        guard let durableStore, let durableKey else { return }
         do {
-            try data.write(to: url, options: .atomic)
-            PlozzLog.playback.info("share.watchStore wrote \(all.count) record(s) bytes=\(data.count) file=\(url.lastPathComponent)")
+            try durableStore.save(
+                PersistedState(records: bounded),
+                for: durableKey
+            )
+            PlozzLog.playback.info(
+                "Durable share watch state wrote \(bounded.count) record(s)"
+            )
         } catch {
-            PlozzLog.playback.error("share.watchStore write FAILED file=\(url.lastPathComponent) err=\(error.localizedDescription)")
+            PlozzLog.playback.error(
+                "Durable share watch state write failed"
+            )
         }
     }
 
-    private static func defaultDirectory() -> URL {
-        // tvOS does NOT persist `Application Support` (the directory doesn't even
-        // survive a relaunch on device), so watch state written there silently
-        // vanished on every restart — the item showed in Continue Watching only for
-        // the live session (served from this actor's in-memory cache) and was gone
-        // after a force-quit. Every other durable store in the app uses
-        // `Library/Caches`, which persists across normal launches on tvOS (it's only
-        // purgeable under genuine storage pressure), so match it here.
-        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
-            ?? FileManager.default.temporaryDirectory
-        return caches.appendingPathComponent("Plozz", isDirectory: true)
-    }
-
-    /// Reduce an arbitrary account id to a filesystem-safe file-name fragment.
-    /// Uses a *stable* hash (FNV-1a) — `String.hashValue` is seeded per process
-    /// launch, which would change the file name every launch and orphan the
-    /// saved state.
-    private static func sanitize(_ raw: String) -> String {
-        let allowed = CharacterSet.alphanumerics
-        let mapped = String(raw.unicodeScalars.map { allowed.contains($0) ? Character($0) : "-" })
-        // Keep it bounded and collision-resistant even after the char mapping.
-        var hash: UInt64 = 0xcbf29ce484222325
-        for byte in raw.utf8 {
-            hash = (hash ^ UInt64(byte)) &* 0x100000001b3
+    private static func boundedRecords(
+        _ all: [String: Record],
+        maximumPayloadBytes: Int?
+    ) -> [String: Record] {
+        let ordered = all.sorted {
+            $0.value.updatedAt > $1.value.updatedAt
         }
-        return "\(mapped.prefix(80))-\(String(hash, radix: 16))"
+        let countLimit = min(maximumRecordCount, ordered.count)
+        guard let maximumPayloadBytes else {
+            return Dictionary(
+                uniqueKeysWithValues: ordered.prefix(countLimit).map {
+                    ($0.key, $0.value)
+                }
+            )
+        }
+
+        let byteBudget = max(1, maximumPayloadBytes - 1_024)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        var lower = 0
+        var upper = countLimit
+        var best: [String: Record] = [:]
+        while lower <= upper {
+            let midpoint = lower + (upper - lower) / 2
+            let candidate = Dictionary(
+                uniqueKeysWithValues: ordered.prefix(midpoint).map {
+                    ($0.key, $0.value)
+                }
+            )
+            let size = (try? encoder.encode(
+                PersistedState(records: candidate)
+            ).count) ?? Int.max
+            if size <= byteBudget {
+                best = candidate
+                lower = midpoint + 1
+            } else {
+                upper = midpoint - 1
+            }
+        }
+        return best
     }
 }

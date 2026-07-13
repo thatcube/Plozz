@@ -802,31 +802,37 @@ public struct JellyfinClient: Sendable {
         return try await http.decode(ItemsResponse.self, from: endpoint, baseURL: baseURL)
     }
 
-    /// Builds the `/Audio/{id}/universal` stream URL. The universal endpoint lets
-    /// the server pick direct-play vs an HLS transcode for the device, mirroring
-    /// the video `playbackInfo` decision but resolvable without a round-trip — it
-    /// is a deterministic, token-authenticated URL, so the audio engine can build
-    /// stream URLs for a whole queue without N PlaybackInfo calls.
-    func audioStreamURL(itemID: String, playSessionID: String) -> URL? {
-        guard var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else { return nil }
-        let basePath = components.path.hasSuffix("/") ? String(components.path.dropLast()) : components.path
-        components.path = basePath + "/Audio/\(itemID)/universal"
-        var query = [
-            URLQueryItem(name: "DeviceId", value: deviceProfile.deviceID),
-            URLQueryItem(name: "MaxStreamingBitrate", value: String(capabilityProfile.maxStreamingBitrate)),
+    /// Builds credential-free `/Audio/{id}/universal` instructions. Authentication
+    /// and the per-play session are attached only when playback begins.
+    func audioStreamResource(itemID: String) throws -> AuthenticatedHTTPResource {
+        var pathComponents = URLComponents()
+        pathComponents.path = "/Audio/\(itemID)/universal"
+        let query = try [
+            AuthenticatedHTTPQueryItem(
+                name: "DeviceId",
+                value: deviceProfile.deviceID
+            ),
+            AuthenticatedHTTPQueryItem(
+                name: "MaxStreamingBitrate",
+                value: String(capabilityProfile.maxStreamingBitrate)
+            ),
             // Containers AVPlayer can direct-play; anything else the server
             // transcodes down the HLS/AAC fallback below.
-            URLQueryItem(name: "Container", value: "mp3,aac,m4a,flac,alac,wav,m4b"),
-            URLQueryItem(name: "TranscodingContainer", value: "ts"),
-            URLQueryItem(name: "TranscodingProtocol", value: "hls"),
-            URLQueryItem(name: "AudioCodec", value: "aac"),
-            URLQueryItem(name: "PlaySessionId", value: playSessionID)
+            AuthenticatedHTTPQueryItem(
+                name: "Container",
+                value: "mp3,aac,m4a,flac,alac,wav,m4b"
+            ),
+            AuthenticatedHTTPQueryItem(name: "TranscodingContainer", value: "ts"),
+            AuthenticatedHTTPQueryItem(name: "TranscodingProtocol", value: "hls"),
+            AuthenticatedHTTPQueryItem(name: "AudioCodec", value: "aac")
         ]
-        if let token, !token.isEmpty {
-            query.append(URLQueryItem(name: "api_key", value: token))
-        }
-        components.queryItems = query
-        return components.url
+        return try AuthenticatedHTTPResource(
+            pathBase: .configuredBaseURL,
+            path: String(
+                pathComponents.percentEncodedPath.drop(while: { $0 == "/" })
+            ),
+            queryItems: query
+        )
     }
 
     /// `GET /Audio/{itemId}/Lyrics` — the track's lyrics, timestamped (ticks) or
@@ -883,21 +889,6 @@ public struct JellyfinClient: Sendable {
         return components.url
     }
 
-    /// Absolute URL for one trickplay tile image
-    /// (`GET /Videos/{itemId}/Trickplay/{width}/{index}.jpg`). The endpoint
-    /// requires auth, so we embed the token as `api_key` because image loaders
-    /// (URLSession data tasks here) don't carry our auth headers.
-    func trickplayTileURL(itemID: String, mediaSourceID: String?, width: Int, tileIndex: Int) -> URL? {
-        guard var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else { return nil }
-        let basePath = components.path.hasSuffix("/") ? String(components.path.dropLast()) : components.path
-        components.path = basePath + "/Videos/\(itemID)/Trickplay/\(width)/\(tileIndex).jpg"
-        var query = [URLQueryItem(name: "api_key", value: token ?? "")]
-        if let mediaSourceID, !mediaSourceID.isEmpty {
-            query.append(URLQueryItem(name: "mediaSourceId", value: mediaSourceID))
-        }
-        components.queryItems = query
-        return components.url
-    }
 }
 
 private struct PlaybackProgressBody: Encodable {

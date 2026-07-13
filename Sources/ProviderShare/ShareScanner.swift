@@ -1,6 +1,7 @@
 import Foundation
 import CoreModels
 import CoreNetworking
+import MediaTransportCore
 
 /// Walks a share's directory tree and populates a `ShareCatalogStore`, so the
 /// share can serve Recently Added / Search / indexed libraries without a live walk.
@@ -25,14 +26,50 @@ import CoreNetworking
 /// The lister *factory* is injected so the walk is unit-testable with a fake tree
 /// (each pool slot gets its own lister; fakes can share a concurrency-safe tree).
 actor ShareScanner {
-    typealias Lister = @Sendable (_ relPath: String) async throws -> [SMBShareBrowser.Entry]
+    typealias Lister = @Sendable (_ relPath: String) async throws -> [RemoteFileEntry]
 
     /// One pool slot: an independent directory lister + its teardown. In production
-    /// each wraps a dedicated `SMBShareBrowser` (its own SMB connection); in tests a
+    /// each wraps a dedicated transport session (its own SMB connection); in tests a
     /// closure over a shared fake tree with a no-op close.
     struct ScanLister: Sendable {
         let list: Lister
-        let close: @Sendable () async -> Void
+        private let closer: ScanListerCloser
+
+        init(
+            list: @escaping Lister,
+            close: @escaping @Sendable () async -> Void
+        ) {
+            self.list = list
+            closer = ScanListerCloser(close: close)
+        }
+
+        func close() async {
+            await closer.close()
+        }
+    }
+
+    private actor ScanListerCloser {
+        private let closeAction: @Sendable () async -> Void
+        private var closeTask: Task<Void, Never>?
+
+        init(close: @escaping @Sendable () async -> Void) {
+            closeAction = close
+        }
+
+        func close() async {
+            let task: Task<Void, Never>
+            if let closeTask {
+                task = closeTask
+            } else {
+                let closeAction = self.closeAction
+                let created = Task.detached(priority: .utility) {
+                    await closeAction()
+                }
+                closeTask = created
+                task = created
+            }
+            await task.value
+        }
     }
 
     private let store: ShareCatalogStore
@@ -43,6 +80,8 @@ actor ShareScanner {
     private let name: String
     private var reporter: ShareScanReporter
     private var isRunning = false
+    private var isInvalidated = false
+    private var activeListers: [ScanLister] = []
 
     /// Folder names whose subtree is skipped wholesale (extras/junk, not library
     /// content). Matched case-insensitively against a directory's own name.
@@ -91,10 +130,25 @@ actor ShareScanner {
         if isRunning { reporter.scanStarted(shareID, name) }
     }
 
+    func invalidate() {
+        isInvalidated = true
+    }
+
+    func forceCloseActiveListers() async {
+        let listers = activeListers
+        await withTaskGroup(of: Void.self) { group in
+            for lister in listers {
+                group.addTask {
+                    await lister.close()
+                }
+            }
+        }
+    }
+
     /// Run a scan unless one already ran within `minInterval` (or is running).
     /// Called fire-and-forget from the Home hot path, so it must be cheap to no-op.
     func scanIfStale(minInterval: TimeInterval = 600) async {
-        if isRunning { return }
+        if isRunning || isInvalidated { return }
         // Force a walk (ignoring the staleness throttle) when the CLASSIFIER changed
         // since the last completed pass, so every already-indexed file is
         // reclassified under the new movie/episode rules right away instead of
@@ -114,29 +168,35 @@ actor ShareScanner {
     /// Full breadth-first walk from the share root, using a pool of independent
     /// connections to list `concurrency` directories at once. Idempotent.
     func scan() async {
-        if isRunning { return }
+        if isRunning || isInvalidated || Task.isCancelled { return }
         isRunning = true
+        let scanGeneration = UUID()
+        await store.activateScanGeneration(scanGeneration)
         let started = Date()
         reporter.scanStarted(shareID, name)
+
+        guard !Task.isCancelled, !isInvalidated else {
+            await finishScan(listers: [])
+            return
+        }
 
         // Pre-build the pool of independent listers (each its own SMB connection).
         // `pool` tracks EVERY lister we create (including ones swapped in to replace
         // a wedged connection) so all are torn down when the scan ends. Each close
         // runs in its own task so one hung teardown can't block the others.
         var pool = (0..<concurrency).map { _ in makeLister() }
+        activeListers = pool
         // The live free-list of healthy connections, carried ACROSS BFS levels. Every
         // dispatched lister returns here exactly once per level (healthy back as-is; a
         // failed one replaced by a fresh connection), so at each level boundary it
         // holds exactly `concurrency` healthy listers.
         var free = pool
-        defer {
-            isRunning = false
-            reporter.scanFinished(shareID)
-            let toClose = pool
-            Task { for lister in toClose { Task { await lister.close() } } }
-        }
 
-        let scanID = await nextScanID()
+        guard let scanID = await store.nextScanID(for: scanGeneration),
+              !isInvalidated else {
+            await finishScan(listers: pool)
+            return
+        }
         PlozzLog.boot("share.scan begin scanID=\(scanID) concurrency=\(concurrency)")
 
         var frontier: [String] = [""] // "" == share root
@@ -156,6 +216,7 @@ actor ShareScanner {
         while !frontier.isEmpty {
             if Task.isCancelled {
                 PlozzLog.boot("share.scan cancelled after \(dirsWalked) dirs, \(filesFound) files — no prune")
+                await finishScan(listers: pool)
                 return
             }
             var nextFrontier: [String] = []
@@ -172,6 +233,10 @@ actor ShareScanner {
                 for _ in 0..<concurrency { spawnNext() }
                 // Drain results, committing each directory and launching the next.
                 while let result = await group.next() {
+                    guard !isInvalidated else {
+                        group.cancelAll()
+                        continue
+                    }
                     if result.ok {
                         free.append(result.lister)     // healthy — return it to the pool
                     } else {
@@ -187,13 +252,18 @@ actor ShareScanner {
                         Task { await dead.close() }
                         let fresh = makeLister()
                         pool.append(fresh)
+                        activeListers.append(fresh)
                         free.append(fresh)
                     }
                     dirsWalked += 1
                     nextFrontier.append(contentsOf: result.subdirs)
                     if !result.assets.isEmpty {
                         filesFound += result.assets.count
-                        await store.upsert(result.assets, scanID: scanID)
+                        await store.upsert(
+                            result.assets,
+                            scanID: scanID,
+                            scanGeneration: scanGeneration
+                        )
                     }
                     let now = progressClock.now
                     if dirsWalked == 1
@@ -212,8 +282,9 @@ actor ShareScanner {
                 }
             }
 
-            if Task.isCancelled {
+            if Task.isCancelled || isInvalidated {
                 PlozzLog.boot("share.scan cancelled after \(dirsWalked) dirs, \(filesFound) files — no prune")
+                await finishScan(listers: pool)
                 return
             }
             frontier = nextFrontier
@@ -226,18 +297,56 @@ actor ShareScanner {
         // completion time either way so `scanIfStale` throttles the next walk (a
         // permanently-inaccessible folder can't cause a perpetual re-scan); the next
         // clean pass performs the deferred prune.
-        if !anyListingFailed {
-            await store.preserveMovieAliasesBeforePrune()
-            await store.pruneNotSeen(inScan: scanID)
-            await store.rebuildMovieGroups()
+        guard !isInvalidated else {
+            await finishScan(listers: pool)
+            return
         }
-        await store.setMeta("last_full_scan_at", String(Date().timeIntervalSince1970))
+        if !anyListingFailed {
+            await store.preserveMovieAliasesBeforePrune(scanGeneration: scanGeneration)
+            guard !isInvalidated else {
+                await finishScan(listers: pool)
+                return
+            }
+            await store.pruneNotSeen(inScan: scanID, scanGeneration: scanGeneration)
+            guard !isInvalidated else {
+                await finishScan(listers: pool)
+                return
+            }
+            await store.rebuildMovieGroups(scanGeneration: scanGeneration)
+        }
+        guard !isInvalidated else {
+            await finishScan(listers: pool)
+            return
+        }
+        await store.setMeta(
+            "last_full_scan_at",
+            String(Date().timeIntervalSince1970),
+            scanGeneration: scanGeneration
+        )
         // Record the classifier the catalog was built with, so `scanIfStale` only
         // force-reparses once per classifier bump (and doesn't perpetually re-walk).
-        await store.setMeta("parser_version", String(ShareMediaParser.classifierVersion))
+        await store.setMeta(
+            "parser_version",
+            String(ShareMediaParser.classifierVersion),
+            scanGeneration: scanGeneration
+        )
         PlozzLog.boot(
             "share.scan done scanID=\(scanID) dirs=\(dirsWalked) files=\(filesFound) pruned=\(!anyListingFailed) elapsed=\(Int(Date().timeIntervalSince(started) * 1_000))ms"
         )
+        await finishScan(listers: pool)
+    }
+
+    private func finishScan(listers: [ScanLister]) async {
+        await withTaskGroup(of: Void.self) { group in
+            for lister in listers {
+                group.addTask {
+                    await lister.close()
+                }
+            }
+        }
+        activeListers = []
+        isRunning = false
+        reporter.scanFinished(shareID)
     }
 
     /// Result of listing one directory: the connection it used (returned to the
@@ -256,7 +365,7 @@ actor ShareScanner {
     /// is swallowed to an empty result (so one bad folder never aborts the walk) but
     /// is flagged `ok: false` so the caller can skip the global prune.
     private static func processDirectory(_ dir: String, using lister: ScanLister) async -> DirResult {
-        let entries: [SMBShareBrowser.Entry]
+        let entries: [RemoteFileEntry]
         do {
             entries = try await lister.list(dir)
         } catch {
@@ -267,7 +376,7 @@ actor ShareScanner {
         var assets: [CatalogAsset] = []
         for entry in entries {
             let childPath = dir.isEmpty ? entry.name : "\(dir)/\(entry.name)"
-            if entry.isDirectory {
+            if entry.kind == .directory {
                 if excludedDirs.contains(entry.name.lowercased()) { continue }
                 subdirs.append(childPath)
             } else if ShareMediaParser.isVideoFile(entry.name), !isSampleFile(entry.name) {
@@ -280,7 +389,7 @@ actor ShareScanner {
 
     // MARK: - Parse one file into a catalog asset
 
-    static func asset(relPath: String, entry: SMBShareBrowser.Entry) -> CatalogAsset {
+    static func asset(relPath: String, entry: RemoteFileEntry) -> CatalogAsset {
         let name = entry.name
         switch ShareMediaParser.classify(relPath: relPath) {
         case .movie(let movie):
@@ -293,8 +402,8 @@ actor ShareScanner {
                 movieTitleKey += "-\(part)"
             }
             return CatalogAsset(
-                relPath: relPath, basename: name, size: Int64(entry.size),
-                modifiedAt: entry.modifiedAt, kind: .movie, library: .movies,
+                relPath: relPath, basename: name, size: entry.size ?? 0,
+                modifiedAt: entry.modifiedAt ?? .distantPast, kind: .movie, library: .movies,
                 title: g.title, year: g.year,
                 seriesTitle: nil, seriesKey: nil, season: nil, episode: nil,
                 movieKey: movieKey, movieTitleKey: movieTitleKey
@@ -303,11 +412,11 @@ actor ShareScanner {
             let library: CatalogLibrary = isAnimePath(relPath) ? .anime : .tv
             let fallback = "S\(ep.season)·E\(String(format: "%02d", ep.episode))"
             return CatalogAsset(
-                relPath: relPath, basename: name, size: Int64(entry.size),
-                modifiedAt: entry.modifiedAt, kind: .episode, library: library,
-                title: ep.title ?? fallback, year: nil,
+                relPath: relPath, basename: name, size: entry.size ?? 0,
+                modifiedAt: entry.modifiedAt ?? .distantPast, kind: .episode, library: library,
+                title: ep.title ?? fallback, year: ep.year,
                 seriesTitle: ep.series,
-                seriesKey: ShareCatalogID.seriesKey(fromTitle: ep.series),
+                seriesKey: ShareCatalogID.seriesKey(fromTitle: ep.series, providerTag: ep.providerTag),
                 season: ep.season, episode: ep.episode,
                 movieKey: nil, movieTitleKey: nil
             )
@@ -338,12 +447,6 @@ actor ShareScanner {
 
     // MARK: - Scan id
 
-    private func nextScanID() async -> Int64 {
-        let current = Int64(await store.meta("scan_counter") ?? "0") ?? 0
-        let next = current + 1
-        await store.setMeta("scan_counter", String(next))
-        return next
-    }
 }
 
 /// Bounded scan admission control shared by interactive ShareProvider requests

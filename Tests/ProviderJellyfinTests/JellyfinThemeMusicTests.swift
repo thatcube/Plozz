@@ -19,7 +19,7 @@ final class JellyfinThemeMusicTests: XCTestCase {
         )
     }
 
-    func testThemeMusicMapsFirstServerThemeToTokenedStream() async throws {
+    func testThemeMusicMapsFirstServerThemeToCredentialFreeStream() async throws {
         let stub = StubHTTPClient()
         stub.stub(pathSuffix: "/Items/movie1/ThemeSongs", json: """
         {"Items":[
@@ -33,13 +33,19 @@ final class JellyfinThemeMusicTests: XCTestCase {
         let theme = try XCTUnwrap(resolved)
         XCTAssertEqual(theme.itemID, "movie1")
         XCTAssertEqual(theme.title, "Main Title")
-        XCTAssertTrue(theme.streamURL.path.hasSuffix("/Audio/song1/universal"))
-        let query = URLComponents(
-            url: theme.streamURL,
-            resolvingAgainstBaseURL: false
-        )?.queryItems ?? []
-        XCTAssertTrue(
-            query.contains { $0.name == "api_key" && $0.value == "SECRET_TOKEN" }
+        guard case .authenticatedHTTP(let locator) = theme.playbackSource else {
+            return XCTFail("expected authenticated HTTP theme source")
+        }
+        XCTAssertEqual(locator.itemID, "song1")
+        XCTAssertEqual(locator.purpose, .themeMusic)
+        XCTAssertEqual(locator.deliveryMode, .serverTranscode)
+        XCTAssertEqual(locator.resource.path, "Audio/song1/universal")
+        XCTAssertNotNil(locator.playSessionID)
+        XCTAssertFalse(
+            locator.resource.queryItems.contains {
+                $0.name.localizedCaseInsensitiveContains("token")
+                    || $0.name.localizedCaseInsensitiveContains("session")
+            }
         )
     }
 
@@ -74,7 +80,7 @@ final class JellyfinThemeMusicTests: XCTestCase {
 
         let resolved = try await provider.themeMusic(for: "show1")
         let theme = try XCTUnwrap(resolved)
-        XCTAssertEqual(theme.streamURL, archiveURL)
+        XCTAssertEqual(theme.playbackSource.publicURL, archiveURL)
         XCTAssertEqual(theme.title, "Sailor Moon")
     }
 

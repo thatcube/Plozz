@@ -5,8 +5,8 @@ import CoreModels
 /// Verifies that a brand-new *in-progress* resume for a title not already on the
 /// Continue Watching row triggers a silent re-aggregation so the just-started card
 /// appears — the "I played something new and it never showed in Continue Watching
-/// until I relaunched" gap. Mark-watched / finish / re-watch of an existing card
-/// must NOT force a reload (those update in place).
+/// until I relaunched" gap. Mark-watched / finish removes an existing card without
+/// a reload; re-watch progress updates it in place.
 @MainActor
 final class HomeViewModelNewResumeReloadTests: XCTestCase {
     private func makeViewModel(provider: FakeMediaProvider) -> HomeViewModel {
@@ -99,5 +99,38 @@ final class HomeViewModelNewResumeReloadTests: XCTestCase {
         await Task.yield()
         try? await Task.sleep(nanoseconds: 20_000_000)
         XCTAssertEqual(provider.librariesCallCount, 1, "a finish must not re-aggregate")
+    }
+
+    func testMarkWatchedRemovesExistingContinueWatchingCard() async {
+        let provider = FakeMediaProvider(allItems: [])
+        provider.continueWatchingItems = [
+            MediaItem(
+                id: "episode",
+                title: "Episode",
+                kind: .episode,
+                resumePosition: 420,
+                playedPercentage: 0.2
+            )
+        ]
+        let vm = makeViewModel(provider: provider)
+        await vm.load()
+        XCTAssertEqual(cw(vm).map(\.id), ["episode"])
+
+        vm.applyWatchedState(
+            MediaItemMutation(
+                itemIDs: ["episode"],
+                scopedItemIDs: ["a:episode"],
+                played: true,
+                resumePosition: 0,
+                playedPercentage: 1
+            )
+        )
+
+        XCTAssertTrue(cw(vm).isEmpty)
+        XCTAssertEqual(
+            provider.librariesCallCount,
+            1,
+            "marking watched should remove the card without reloading Home"
+        )
     }
 }

@@ -1,5 +1,16 @@
 import Foundation
 
+/// Credential-free instructions for loading one scrub-preview resource.
+public enum ScrubPreviewResource: Hashable, Sendable {
+    case publicURL(SecretFreeURLSource)
+    case authenticatedHTTP(AuthenticatedHTTPPlaybackLocator)
+
+    public var immediateURL: URL? {
+        guard case .publicURL(let source) = self else { return nil }
+        return source.url
+    }
+}
+
 /// Where the custom player sources its scrubbing-preview ("trickplay")
 /// thumbnails from for one playable item.
 ///
@@ -19,7 +30,7 @@ public enum ScrubPreviewSource: Hashable, Sendable {
     /// A single Plex **BIF** index file (Roku trickplay format) to download and
     /// parse lazily. The blob packs every preview frame plus a fixed-interval
     /// index; the player slices frames out of it while scrubbing.
-    case plexBIF(url: URL)
+    case plexBIF(resource: ScrubPreviewResource)
 
     /// Whether this source can actually yield previews.
     public var isUsable: Bool {
@@ -36,8 +47,8 @@ public enum ScrubPreviewSource: Hashable, Sendable {
     }
 
     /// The Plex BIF index URL, when this source is BIF-based; `nil` otherwise.
-    public var plexBIFURL: URL? {
-        if case .plexBIF(let url) = self { return url }
+    public var plexBIFResource: ScrubPreviewResource? {
+        if case .plexBIF(let resource) = self { return resource }
         return nil
     }
 }

@@ -111,6 +111,7 @@ private final class InMemorySecureStoringDouble: SecureStoring, @unchecked Senda
     private var storage: [String: String] = [:]
     func setString(_ value: String, for key: String) throws { storage[key] = value }
     func string(for key: String) -> String? { storage[key] }
+    func readString(for key: String) throws -> String? { storage[key] }
     func removeValue(for key: String) throws { storage[key] = nil }
 }
 

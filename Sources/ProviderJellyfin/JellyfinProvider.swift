@@ -10,11 +10,15 @@ import CoreNetworking
 public struct JellyfinProvider: MediaProvider {
     public let kind: ProviderKind = .jellyfin
     public let session: UserSession
+    public let accountID: String
+    public let credentialRevision: CredentialRevision
     let client: JellyfinClient
     let themeArchiveResolver: @Sendable (String?) async -> URL?
 
     public init(
         session: UserSession,
+        accountID: String? = nil,
+        credentialRevision: CredentialRevision = CredentialRevision(),
         http: HTTPClient = URLSessionHTTPClient(),
         interactiveHTTP: HTTPClient? = nil,
         hybridEngineEnabled: Bool = false,
@@ -23,6 +27,8 @@ public struct JellyfinProvider: MediaProvider {
         }
     ) {
         self.session = session
+        self.accountID = accountID ?? session.server.id
+        self.credentialRevision = credentialRevision
         self.themeArchiveResolver = themeArchiveResolver
         self.client = JellyfinClient(
             baseURL: session.server.baseURL,
@@ -266,17 +272,36 @@ public struct JellyfinProvider: MediaProvider {
 
     public func themeMusic(for itemID: String) async throws -> ThemeMusic? {
         if let song = try? await client.themeSongs(userID: session.userID, id: itemID).Items.first,
-           let streamURL = client.audioStreamURL(
-               itemID: song.Id,
-               playSessionID: UUID().uuidString
-           ) {
-            return ThemeMusic(itemID: itemID, streamURL: streamURL, title: song.Name)
+           !song.Id.isEmpty {
+            let playSessionID = UUID().uuidString
+            let locator = try AuthenticatedHTTPPlaybackLocator(
+                provider: .jellyfin,
+                accountID: accountID,
+                credentialRevision: credentialRevision,
+                itemID: song.Id,
+                deliveryMode: .serverTranscode,
+                formatHint: MediaFormatHint(container: "ts"),
+                purpose: .themeMusic,
+                resource: try client.audioStreamResource(itemID: song.Id),
+                playSessionID: playSessionID
+            )
+            return ThemeMusic(
+                itemID: itemID,
+                playbackSource: .authenticatedHTTP(locator),
+                title: song.Name
+            )
         }
 
         let item = try? await client.item(userID: session.userID, id: itemID)
         let tvdbID = item?.ProviderIds?["Tvdb"] ?? item?.ProviderIds?["tvdb"]
         guard let archiveURL = await themeArchiveResolver(tvdbID) else { return nil }
-        return ThemeMusic(itemID: itemID, streamURL: archiveURL, title: item?.Name)
+        return ThemeMusic(
+            itemID: itemID,
+            playbackSource: .publicURL(
+                try SecretFreeURLSource(url: archiveURL)
+            ),
+            title: item?.Name
+        )
     }
 
     public func children(of itemID: String) async throws -> [MediaItem] {
@@ -556,14 +581,19 @@ public struct JellyfinProvider: MediaProvider {
             }
         }
 
-        let streamURL = try resolveStreamURL(itemID: itemID, source: source, playSessionID: info.PlaySessionId)
+        let playbackLocator = try authenticatedPlaybackLocator(
+            itemID: itemID,
+            source: source,
+            playSessionID: info.PlaySessionId,
+            didRemux: didRemux
+        )
         let mappedItem = map(item: detail)
 
         let streams = source.MediaStreams ?? detail.MediaStreams ?? []
         let audio = streams.filter { $0.`Type` == "Audio" }.map(map(stream:))
         let sourceID = source.Id ?? itemID
-        let subs = streams.filter { $0.`Type` == "Subtitle" }.map { stream in
-            map(subtitleStream: stream, itemID: itemID, sourceID: sourceID)
+        let subs = try streams.filter { $0.`Type` == "Subtitle" }.map { stream in
+            try map(subtitleStream: stream, itemID: itemID, sourceID: sourceID)
         }
         let localRemuxSource = try? localRemuxSourceDescriptor(
             itemID: itemID,
@@ -571,13 +601,13 @@ public struct JellyfinProvider: MediaProvider {
             originalContainer: originalContainer,
             originalStreams: originalStreams,
             playSessionID: info.PlaySessionId,
-            referencePlaybackURL: streamURL,
+            referencePlaybackLocator: playbackLocator,
             durationSeconds: mappedItem.runtime
         )
 
         return PlaybackRequest(
             item: mappedItem,
-            streamURL: streamURL,
+            playbackSource: .authenticatedHTTP(playbackLocator),
             playSessionID: info.PlaySessionId,
             audioTracks: audio,
             subtitleTracks: subs,
@@ -670,12 +700,17 @@ public struct JellyfinProvider: MediaProvider {
             guard let id = selectedSource.id, !id.isEmpty else { return nil }
             return id
         }()
-        let tileURLs = (0..<tileCount).compactMap {
-            client.trickplayTileURL(itemID: itemID, mediaSourceID: tileSourceID, width: chosen.width, tileIndex: $0)
+        let tileResources = (0..<tileCount).compactMap { tileIndex in
+            try? trickplayTileResource(
+                itemID: itemID,
+                mediaSourceID: tileSourceID,
+                width: chosen.width,
+                tileIndex: tileIndex
+            )
         }
-        guard tileURLs.count == tileCount else {
+        guard tileResources.count == tileCount else {
             PlozzLog.playback.debug(
-                "Jellyfin trickplay unavailable: tile URL generation mismatch itemID=\(itemID) expected=\(tileCount) got=\(tileURLs.count)"
+                "Jellyfin trickplay unavailable: tile resource generation mismatch itemID=\(itemID) expected=\(tileCount) got=\(tileResources.count)"
             )
             return nil
         }
@@ -687,7 +722,47 @@ public struct JellyfinProvider: MediaProvider {
             tileRows: tileRows,
             thumbnailCount: count,
             intervalMs: interval,
-            tileURLs: tileURLs
+            tileResources: tileResources
+        )
+    }
+
+    private func trickplayTileResource(
+        itemID: String,
+        mediaSourceID: String?,
+        width: Int,
+        tileIndex: Int
+    ) throws -> ScrubPreviewResource {
+        var pathComponents = URLComponents()
+        pathComponents.path =
+            "/Videos/\(itemID)/Trickplay/\(width)/\(tileIndex).jpg"
+        var queryItems: [AuthenticatedHTTPQueryItem] = []
+        if let mediaSourceID, !mediaSourceID.isEmpty {
+            queryItems.append(
+                try AuthenticatedHTTPQueryItem(
+                    name: "mediaSourceId",
+                    value: mediaSourceID
+                )
+            )
+        }
+        let resource = try AuthenticatedHTTPResource(
+            pathBase: .configuredBaseURL,
+            path: String(
+                pathComponents.percentEncodedPath.drop(while: { $0 == "/" })
+            ),
+            queryItems: queryItems
+        )
+        return .authenticatedHTTP(
+            try AuthenticatedHTTPPlaybackLocator(
+                provider: .jellyfin,
+                accountID: accountID,
+                credentialRevision: credentialRevision,
+                itemID: itemID,
+                mediaSourceID: mediaSourceID,
+                deliveryMode: .directFile,
+                formatHint: MediaFormatHint(container: "jpg"),
+                purpose: .scrubPreview,
+                resource: resource
+            )
         )
     }
 
@@ -856,7 +931,7 @@ public struct JellyfinProvider: MediaProvider {
         try await client.downloadRemoteSubtitle(itemID: itemID, subtitleID: subtitleID)
     }
 
-    /// The item's current subtitle tracks (text sidecars get a VTT `deliveryURL`),
+    /// The item's current subtitle tracks (text sidecars get VTT delivery sources),
     /// fetched via a plain item lookup — no `PlaybackInfo`/transcode. Used to
     /// observe a just-downloaded subtitle so it can be hot-loaded.
     public func subtitleTracks(forItemID itemID: String) async throws -> [MediaTrack] {
@@ -864,49 +939,53 @@ public struct JellyfinProvider: MediaProvider {
         let source = dto.MediaSources?.first
         let sourceID = source?.Id ?? itemID
         let streams = source?.MediaStreams ?? dto.MediaStreams ?? []
-        return streams
+        return try streams
             .filter { $0.`Type` == "Subtitle" }
-            .map { map(subtitleStream: $0, itemID: itemID, sourceID: sourceID) }
+            .map { try map(subtitleStream: $0, itemID: itemID, sourceID: sourceID) }
     }
 
     // MARK: - Mapping
 
-    private func resolveStreamURL(itemID: String, source: MediaSourceInfo, playSessionID: String?) throws -> URL {
-        // Prefer the server-provided HLS transcode/remux URL when present: the
-        // server returns one whenever the file can't be direct-played for this
-        // device profile (e.g. MKV, or an unsupported codec). HLS (fMP4 segments,
-        // BreakOnNonKeyFrames) is fully seekable in AVPlayer, which fixes far
-        // seeks that fail on non-fragmented direct streams.
-        if let transcoding = source.TranscodingUrl, let url = absoluteURL(fromServerPath: transcoding) {
-            return url
-        }
-        // DirectPlay: stream the original container as-is. Preferred for local
-        // servers (no transcode, best quality).
-        return try staticStreamURL(itemID: itemID, source: source, playSessionID: playSessionID)
-    }
-
-    private func staticStreamURL(itemID: String, source: MediaSourceInfo, playSessionID: String?) throws -> URL {
+    private func authenticatedPlaybackLocator(
+        itemID: String,
+        source: MediaSourceInfo,
+        playSessionID: String?,
+        didRemux: Bool,
+        forceDirect: Bool = false
+    ) throws -> AuthenticatedHTTPPlaybackLocator {
         let container = source.Container ?? "mp4"
         let sourceID = source.Id ?? itemID
-        guard var components = URLComponents(url: session.server.baseURL, resolvingAgainstBaseURL: false) else {
-            throw AppError.invalidResponse
+        let deliveryMode: AuthenticatedHTTPDeliveryMode
+        let resource: AuthenticatedHTTPResource
+        if !forceDirect, let transcoding = source.TranscodingUrl {
+            deliveryMode = didRemux ? .serverRemux : .serverTranscode
+            resource = try credentialFreeResource(fromServerPath: transcoding)
+        } else {
+            deliveryMode = .directFile
+            var query = [
+                try AuthenticatedHTTPQueryItem(name: "static", value: "true"),
+                try AuthenticatedHTTPQueryItem(name: "mediaSourceId", value: sourceID)
+            ]
+            if let tag = source.ETag, !tag.isEmpty {
+                query.append(try AuthenticatedHTTPQueryItem(name: "tag", value: tag))
+            }
+            resource = try AuthenticatedHTTPResource(
+                pathBase: .configuredBaseURL,
+                path: "Videos/\(itemID)/stream.\(container)",
+                queryItems: query
+            )
         }
-        let basePath = components.path.hasSuffix("/") ? String(components.path.dropLast()) : components.path
-        components.path = basePath + "/Videos/\(itemID)/stream.\(container)"
-        var query = [
-            URLQueryItem(name: "static", value: "true"),
-            URLQueryItem(name: "mediaSourceId", value: sourceID),
-            URLQueryItem(name: "api_key", value: session.accessToken)
-        ]
-        if let playSessionID, !playSessionID.isEmpty {
-            query.append(URLQueryItem(name: "playSessionId", value: playSessionID))
-        }
-        if let tag = source.ETag, !tag.isEmpty {
-            query.append(URLQueryItem(name: "tag", value: tag))
-        }
-        components.queryItems = query
-        guard let url = components.url else { throw AppError.invalidResponse }
-        return url
+        return try AuthenticatedHTTPPlaybackLocator(
+            provider: .jellyfin,
+            accountID: accountID,
+            credentialRevision: credentialRevision,
+            itemID: itemID,
+            mediaSourceID: sourceID,
+            deliveryMode: deliveryMode,
+            formatHint: MediaFormatHint(container: container),
+            resource: resource,
+            playSessionID: playSessionID
+        )
     }
 
     private func localRemuxSourceDescriptor(
@@ -915,35 +994,70 @@ public struct JellyfinProvider: MediaProvider {
         originalContainer: String?,
         originalStreams: [MediaStreamDto],
         playSessionID: String?,
-        referencePlaybackURL: URL?,
+        referencePlaybackLocator: AuthenticatedHTTPPlaybackLocator,
         durationSeconds: TimeInterval?
     ) throws -> LocalRemuxSourceDescriptor? {
         guard let metadata = Self.sourceMetadata(container: originalContainer, streams: originalStreams) else {
             return nil
         }
-        let originalURL = try staticStreamURL(itemID: itemID, source: source, playSessionID: playSessionID)
+        let originalLocator = try authenticatedPlaybackLocator(
+            itemID: itemID,
+            source: source,
+            playSessionID: playSessionID,
+            didRemux: false,
+            forceDirect: true
+        )
         return LocalRemuxSourceDescriptor(
             itemID: itemID,
             mediaSourceID: source.Id,
             provider: .jellyfin,
-            originalURL: originalURL,
-            referencePlaybackURL: referencePlaybackURL,
+            originalSource: .authenticatedHTTP(originalLocator),
+            referencePlaybackSource: .authenticatedHTTP(referencePlaybackLocator),
             durationSeconds: durationSeconds,
             byteRangeSupported: true,
             sourceMetadata: metadata
         )
     }
 
-    private func absoluteURL(fromServerPath path: String) -> URL? {
-        if let absolute = URL(string: path), absolute.scheme != nil { return absolute }
-        guard var components = URLComponents(url: session.server.baseURL, resolvingAgainstBaseURL: false) else {
-            return nil
+    func credentialFreeResource(
+        fromServerPath value: String
+    ) throws -> AuthenticatedHTTPResource {
+        guard let components = URLComponents(string: value),
+              !components.percentEncodedPath.isEmpty else {
+            throw AppError.invalidResponse
         }
-        if let pathComponents = URLComponents(string: path) {
-            components.path = (components.path.hasSuffix("/") ? String(components.path.dropLast()) : components.path) + pathComponents.path
-            components.queryItems = pathComponents.queryItems
+        let pathBase: AuthenticatedHTTPResource.PathBase
+        let path: String
+        if components.scheme != nil {
+            pathBase = .serverRoot
+            path = components.percentEncodedPath
+        } else {
+            pathBase = .configuredBaseURL
+            path = String(
+                components.percentEncodedPath.drop(while: { $0 == "/" })
+            )
         }
-        return components.url
+        var queryItems: [AuthenticatedHTTPQueryItem] = []
+        for item in components.queryItems ?? [] {
+            guard !item.name.trimmingCharacters(
+                in: .whitespacesAndNewlines
+            ).isEmpty else {
+                continue
+            }
+            let normalized = item.name.lowercased()
+            if normalized == "api_key" || normalized == "apikey"
+                || normalized == "playsessionid" {
+                continue
+            }
+            queryItems.append(
+                try AuthenticatedHTTPQueryItem(name: item.name, value: item.value)
+            )
+        }
+        return try AuthenticatedHTTPResource(
+            pathBase: pathBase,
+            path: path,
+            queryItems: queryItems
+        )
     }
 
     private func map(item dto: BaseItemDto) -> MediaItem {
@@ -1142,13 +1256,23 @@ public struct JellyfinProvider: MediaProvider {
         )
     }
 
-    /// Maps a subtitle stream, attaching a WebVTT delivery URL for text-based
+    /// Maps a subtitle stream, attaching a WebVTT delivery source for text-based
     /// subtitles so the player can inject them into the native picker even on
     /// direct play. Image-based subs (PGS/VOBSUB) get no URL — they need server
     /// burn-in, which the native picker can't drive.
-    private func map(subtitleStream dto: MediaStreamDto, itemID: String, sourceID: String) -> MediaTrack {
+    private func map(
+        subtitleStream dto: MediaStreamDto,
+        itemID: String,
+        sourceID: String
+    ) throws -> MediaTrack {
         let isText = dto.IsTextSubtitleStream ?? isTextSubtitleCodec(dto.Codec)
-        let deliveryURL = isText ? subtitleVTTURL(itemID: itemID, sourceID: sourceID, streamIndex: dto.Index) : nil
+        let deliverySource = isText
+            ? try subtitleDeliverySource(
+                itemID: itemID,
+                sourceID: sourceID,
+                streamIndex: dto.Index
+            )
+            : nil
         return MediaTrack(
             id: dto.Index,
             kind: .subtitle,
@@ -1157,7 +1281,7 @@ public struct JellyfinProvider: MediaProvider {
             codec: dto.Codec,
             isDefault: dto.IsDefault ?? false,
             isForced: dto.IsForced ?? false,
-            deliveryURL: deliveryURL,
+            deliverySource: deliverySource,
             isImageBasedSubtitle: !isText
         )
     }
@@ -1171,14 +1295,33 @@ public struct JellyfinProvider: MediaProvider {
 
     /// `GET /Videos/{itemId}/{mediaSourceId}/Subtitles/{index}/0/Stream.vtt` —
     /// the server converts SRT/ASS/embedded-text subtitles to WebVTT on the fly.
-    private func subtitleVTTURL(itemID: String, sourceID: String, streamIndex: Int) -> URL? {
-        guard var components = URLComponents(url: session.server.baseURL, resolvingAgainstBaseURL: false) else {
-            return nil
-        }
-        let basePath = components.path.hasSuffix("/") ? String(components.path.dropLast()) : components.path
-        components.path = basePath + "/Videos/\(itemID)/\(sourceID)/Subtitles/\(streamIndex)/0/Stream.vtt"
-        components.queryItems = [URLQueryItem(name: "api_key", value: session.accessToken)]
-        return components.url
+    private func subtitleDeliverySource(
+        itemID: String,
+        sourceID: String,
+        streamIndex: Int
+    ) throws -> SubtitleDeliverySource {
+        var pathComponents = URLComponents()
+        pathComponents.path =
+            "/Videos/\(itemID)/\(sourceID)/Subtitles/\(streamIndex)/0/Stream.vtt"
+        let resource = try AuthenticatedHTTPResource(
+            pathBase: .configuredBaseURL,
+            path: String(
+                pathComponents.percentEncodedPath.drop(while: { $0 == "/" })
+            )
+        )
+        return .authenticatedHTTP(
+            try AuthenticatedHTTPPlaybackLocator(
+                provider: .jellyfin,
+                accountID: accountID,
+                credentialRevision: credentialRevision,
+                itemID: itemID,
+                mediaSourceID: sourceID,
+                deliveryMode: .directFile,
+                formatHint: MediaFormatHint(container: "vtt"),
+                purpose: .subtitle,
+                resource: resource
+            )
+        )
     }
 
     private func map(remoteSubtitle dto: RemoteSubtitleInfoDto) -> RemoteSubtitle {

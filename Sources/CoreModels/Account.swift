@@ -1,5 +1,18 @@
 import Foundation
 
+/// A non-secret, random identity for one immutable set of account credentials.
+///
+/// Connection and provider caches key by this value rather than by tokens,
+/// passwords, or hashes derived from either. Replacing credentials creates a
+/// new revision so state authenticated under the old material cannot be reused.
+public struct CredentialRevision: Codable, Hashable, Sendable {
+    public let rawValue: UUID
+
+    public init(rawValue: UUID = UUID()) {
+        self.rawValue = rawValue
+    }
+}
+
 /// A persisted, **non-secret** account identity.
 ///
 /// Plozz supports multiple simultaneous accounts (one per signed-in
@@ -21,6 +34,9 @@ public struct Account: Codable, Hashable, Identifiable, Sendable {
     public var avatarURL: URL?
     /// Stable per-install device identifier sent on every authenticated request.
     public var deviceID: String
+    /// Random identity of the Keychain credential currently active for this
+    /// account. This is safe to persist and log; it contains no credential data.
+    public var credentialRevision: CredentialRevision
     /// When the account was first added — used for stable ordering.
     public var addedAt: Date
 
@@ -31,6 +47,7 @@ public struct Account: Codable, Hashable, Identifiable, Sendable {
         userName: String,
         avatarURL: URL? = nil,
         deviceID: String,
+        credentialRevision: CredentialRevision = CredentialRevision(),
         addedAt: Date = Date()
     ) {
         self.id = id
@@ -39,6 +56,7 @@ public struct Account: Codable, Hashable, Identifiable, Sendable {
         self.userName = userName
         self.avatarURL = avatarURL
         self.deviceID = deviceID
+        self.credentialRevision = credentialRevision
         self.addedAt = addedAt
     }
 
@@ -51,6 +69,7 @@ public struct Account: Codable, Hashable, Identifiable, Sendable {
             userName: session.userName,
             avatarURL: session.avatarURL,
             deviceID: session.deviceID,
+            credentialRevision: CredentialRevision(),
             addedAt: addedAt
         )
     }

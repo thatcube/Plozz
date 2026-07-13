@@ -55,7 +55,7 @@ public protocol MediaProvider: Sendable {
     /// backend has no (playable) trailer for the item.
     func trailers(for itemID: String) async throws -> [MediaItem]
 
-    /// The title's theme song as a directly playable audio stream, or `nil`
+    /// The title's theme song as a credential-free playback source, or `nil`
     /// when the backend and fallback archive have no theme.
     func themeMusic(for itemID: String) async throws -> ThemeMusic?
 

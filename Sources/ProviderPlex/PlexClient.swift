@@ -656,14 +656,6 @@ public struct PlexClient: Sendable {
         absoluteURL(serverPath: key, extraQuery: [URLQueryItem(name: "X-Plex-Token", value: token)])
     }
 
-    /// Builds an absolute, token-bearing URL from a metadata `theme` path.
-    func themeStreamURL(forThemePath path: String) -> URL? {
-        absoluteURL(
-            serverPath: path,
-            extraQuery: [URLQueryItem(name: "X-Plex-Token", value: token)]
-        )
-    }
-
     /// Builds the absolute raw-file URL for a part `key`, explicitly asking Plex
     /// for the original file bytes (`download=1`). Used by the local-remux seam,
     /// which needs stable range-readable access to the untouched MKV.
@@ -677,18 +669,6 @@ public struct PlexClient: Sendable {
         )
     }
 
-    /// Absolute, token-bearing URL of a part's **BIF** trickplay index file
-    /// (`GET /library/parts/{partID}/indexes/{quality}`). The whole BIF blob is
-    /// downloaded and parsed client-side for scrubbing previews; the token rides
-    /// as a query param because the image/data loader doesn't send our X-Plex
-    /// headers.
-    func bifIndexURL(partID: Int, quality: String = "sd") -> URL? {
-        absoluteURL(
-            serverPath: "/library/parts/\(partID)/indexes/\(quality)",
-            extraQuery: [URLQueryItem(name: "X-Plex-Token", value: token)]
-        )
-    }
-
     /// Resolves the playable URL for a media item, choosing **direct play** when
     /// tvOS/AVFoundation can demux the original container/codecs, and otherwise a
     /// server-side **HLS transcode** (Plex's universal transcoder).
@@ -697,13 +677,26 @@ public struct PlexClient: Sendable {
     /// container (e.g. MKV) or codec must be remuxed/transcoded to HLS, because
     /// AVPlayer cannot play it directly. Handing AVPlayer the raw MKV part was
     /// why Plex items "didn't play" while the same files played via Jellyfin.
-    func playbackURL(ratingKey: String, media: PlexMedia, part: PlexPart, sessionID: String, forceTranscode: Bool = false) -> (url: URL, isTranscoding: Bool)? {
+    func playbackURL(
+        ratingKey: String,
+        media: PlexMedia,
+        part: PlexPart,
+        sessionID: String,
+        mediaIndex: Int = 0,
+        partIndex: Int = 0,
+        forceTranscode: Bool = false
+    ) -> (url: URL, isTranscoding: Bool)? {
         // Forcing a transcode (player fallback after a failed direct play): skip
         // the direct-play path entirely and go straight to the universal
         // transcoder. If even that can't be built, fail rather than silently
         // handing back the same direct URL that just failed.
         if forceTranscode {
-            if let transcode = transcodeURL(ratingKey: ratingKey, sessionID: sessionID) {
+            if let transcode = transcodeURL(
+                ratingKey: ratingKey,
+                sessionID: sessionID,
+                mediaIndex: mediaIndex,
+                partIndex: partIndex
+            ) {
                 return (transcode, true)
             }
             return nil
@@ -711,7 +704,12 @@ public struct PlexClient: Sendable {
         if canDirectPlay(media: media, part: part), let key = part.key, let direct = streamURL(forPartKey: key) {
             return (direct, false)
         }
-        if let transcode = transcodeURL(ratingKey: ratingKey, sessionID: sessionID) {
+        if let transcode = transcodeURL(
+            ratingKey: ratingKey,
+            sessionID: sessionID,
+            mediaIndex: mediaIndex,
+            partIndex: partIndex
+        ) {
             return (transcode, true)
         }
         // Last-resort fallback: better to attempt direct play than fail outright.
@@ -725,11 +723,16 @@ public struct PlexClient: Sendable {
     /// `start.m3u8` and its segments are produced on demand by the server and
     /// are fully seekable in AVPlayer. Identity + token travel as query params
     /// because the transcoder reads them from the query string for HLS sessions.
-    func transcodeURL(ratingKey: String, sessionID: String) -> URL? {
+    func transcodeURL(
+        ratingKey: String,
+        sessionID: String,
+        mediaIndex: Int = 0,
+        partIndex: Int = 0
+    ) -> URL? {
         var query: [URLQueryItem] = [
             URLQueryItem(name: "path", value: "/library/metadata/\(ratingKey)"),
-            URLQueryItem(name: "mediaIndex", value: "0"),
-            URLQueryItem(name: "partIndex", value: "0"),
+            URLQueryItem(name: "mediaIndex", value: String(mediaIndex)),
+            URLQueryItem(name: "partIndex", value: String(partIndex)),
             URLQueryItem(name: "protocol", value: "hls"),
             URLQueryItem(name: "fastSeek", value: "1"),
             URLQueryItem(name: "directPlay", value: "0"),

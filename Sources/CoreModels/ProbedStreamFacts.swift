@@ -44,11 +44,11 @@ public struct ProbedStreamFacts: Codable, Hashable, Sendable {
     }
 }
 
-/// Probes an SMB file's headers for real stream facts. Implemented by the engine
-/// layer (which owns the SMB byte reader + demuxer); injected into ShareProvider so
-/// ProviderShare doesn't depend on the engine. Must run OFF the main actor.
-public protocol SMBStreamProbing: Sendable {
-    /// Open `smbURL`, read its headers, and return the probed facts — or nil if the
-    /// probe failed/timed out (the caller then shows nothing, never a guess).
-    func probe(smbURL: URL) async -> ProbedStreamFacts?
+/// Probes a credential-free network file's headers for real stream facts.
+/// Implemented by the engine layer and injected into providers so transport
+/// packages never depend on the demuxer. Must run off the main actor.
+public protocol NetworkFileStreamProbing: Sendable {
+    /// Resolve `locator`, read its headers, and return the probed facts — or nil
+    /// if the probe failed/timed out (the caller then shows nothing, never a guess).
+    func probe(locator: NetworkFileLocator) async -> ProbedStreamFacts?
 }

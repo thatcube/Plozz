@@ -10,5 +10,8 @@ import Foundation
 public protocol SecureStoring: Sendable {
     func setString(_ value: String, for key: String) throws
     func string(for key: String) -> String?
+    /// Throwing read for non-recreatable state. Only an absent item returns nil;
+    /// storage and decoding failures must remain distinguishable.
+    func readString(for key: String) throws -> String?
     func removeValue(for key: String) throws
 }

@@ -183,6 +183,8 @@ public final class PlayerViewModel {
     /// Builds the engine for a routed ``PlaybackEngineKind``. Injected by the
     /// composition root so this module never depends on the VLCKit engine.
     private let engineFactory: EngineFactory
+    let authenticatedHTTPResolver:
+        (any AuthenticatedHTTPResourceResolving)?
     /// Device/display/audio policy the router uses to pick an engine.
     private let capabilities: MediaCapabilities
 
@@ -207,6 +209,14 @@ public final class PlayerViewModel {
     /// into an engine failure so the cross-engine / transcode fallback chain runs.
     private var watchdogTask: Task<Void, Never>?
 
+    /// The stall-recovery work the watchdog launches once it declares a hang.
+    /// Deliberately kept OFF ``watchdogTask``: recovery re-arms the watchdog (via
+    /// ``playResolved`` → ``armPlaybackWatchdog``), which cancels ``watchdogTask``.
+    /// If recovery ran on that same task it would cancel its own in-flight
+    /// re-resolve mid-flight — observed on device as the fresh-engine retry
+    /// failing instantly with `LOAD_FAILED stage=resolve detail=cancelled`.
+    private var recoveryTask: Task<Void, Never>?
+
     /// How long the watchdog waits for the first real progress before declaring a
     /// stall. Generous enough for legitimate 4K start-up buffering.
     private let watchdogTimeout: TimeInterval = 30
@@ -219,7 +229,7 @@ public final class PlayerViewModel {
     /// Subtitles downloaded (Jellyfin/Plex) or otherwise sourced during *this*
     /// playback session and hot-loaded into the track menu — kept separate from
     /// the engine's demuxed track list (which the VM can't mutate). Rendered
-    /// through Plozz's overlay via their `deliveryURL`.
+    /// through Plozz's overlay via their delivery source.
     private var hotLoadedSubtitleTracks: [MediaTrack] = []
     /// Next synthetic id for a hot-loaded subtitle track. Starts high so it can
     /// never collide with an engine/provider stream id.
@@ -231,6 +241,10 @@ public final class PlayerViewModel {
     /// Guards the cross-engine swap so it only ever fires once: a chosen engine's
     /// failure swaps to the *other* engine exactly once before escalating.
     private var hasTriedAlternateEngine = false
+    /// A typed network file has no native/server-transcode fallback. One fresh
+    /// Plozzigen instance retry recovers the observed intermittent AVPlayer/HLS
+    /// post-start stall without requiring the viewer to Back out and press Play.
+    private var hasRetriedNetworkFileEngine = false
     /// Guards the automatic transcode fallback so it only ever fires once — a
     /// second failure surfaces the error instead of looping.
     private var hasAttemptedTranscodeFallback = false
@@ -454,6 +468,8 @@ public final class PlayerViewModel {
         startPosition: TimeInterval? = nil,
         scrobbler: any TraktScrobbling = DisabledTraktScrobbler(),
         engineFactory: EngineFactory = .native,
+        authenticatedHTTPResolver:
+            (any AuthenticatedHTTPResourceResolving)? = nil,
         capabilities: MediaCapabilities = .detected(),
         preferencesStore: PlaybackPreferencesStoring = PlaybackPreferencesStore(),
         autoDismissOnEnd: Bool = false,
@@ -479,6 +495,7 @@ public final class PlayerViewModel {
         self.startPositionOverride = startPosition
         self.scrobbler = scrobbler
         self.engineFactory = engineFactory
+        self.authenticatedHTTPResolver = authenticatedHTTPResolver
         self.capabilities = capabilities
         self.preferencesStore = preferencesStore
         self.autoDismissOnEnd = autoDismissOnEnd
@@ -523,6 +540,9 @@ public final class PlayerViewModel {
         // Kick off bring-up now so playbackInfo + engine warm-up run *during* the
         // navigation transition. `load()` (from the view's `.task`) adopts this
         // task; `stop()` cancels it on an early Back.
+        HandoffDiagnostics.emit(
+            "viewModel INIT item=\(itemID) provider=\(provider.kind.rawValue)"
+        )
         prefetchTask = Task { @MainActor [weak self] in
             await self?.startPlayback(forceTranscode: false, resumeOverride: nil)
         }
@@ -538,8 +558,9 @@ public final class PlayerViewModel {
     }
 
     private func configureEngineCallbacks() {
+        let callbackEngineToken = engineToken
         engine.onProgress = { [weak self] in
-            guard let self else { return }
+            guard let self, self.engineToken == callbackEngineToken else { return }
             // Jellyfin (non-idempotent) next-episode prefetch fires once the
             // hand-off window opens; idempotent providers prefetch eagerly instead.
             self.maybeStartWindowedNextPrefetch()
@@ -547,11 +568,17 @@ public final class PlayerViewModel {
             Task { await self.report(event: .progress, isPaused: false) }
         }
         engine.onFailure = { [weak self] error in
-            guard let self else { return }
-            Task { await self.handleEngineFailure(error) }
+            guard let self, self.engineToken == callbackEngineToken else { return }
+            Task {
+                await self.handleEngineFailure(
+                    error,
+                    sourceEngineToken: callbackEngineToken
+                )
+            }
         }
         engine.onEnded = { [weak self] in
-            self?.handlePlaybackEnded()
+            guard let self, self.engineToken == callbackEngineToken else { return }
+            self.handlePlaybackEnded()
         }
         // Engines that discover tracks asynchronously (Plozzigen) tell us to
         // rebuild the options menu once their lists arrive — otherwise the menu,
@@ -559,7 +586,7 @@ public final class PlayerViewModel {
         // also the moment Plozzigen's tracks first become known, so it's where we
         // route its load-time default subtitle through the overlay.
         engine.onTracksChanged = { [weak self] in
-            guard let self else { return }
+            guard let self, self.engineToken == callbackEngineToken else { return }
             self.loadTrackOptions()
             self.applyImportedAudioIfPossible()
             if let request = self.request {
@@ -571,7 +598,7 @@ public final class PlayerViewModel {
         // native. Guarded by live-feed mode inside the model, so it's inert unless
         // a Plozzigen subtitle is actually selected.
         engine.onSubtitleCues = { [weak self] cues in
-            guard let self else { return }
+            guard let self, self.engineToken == callbackEngineToken else { return }
             self.liveSubtitles.updateLiveCues(cues)
             #if DEBUG
             if self.selectedSubtitleTrackID != nil {
@@ -585,7 +612,7 @@ public final class PlayerViewModel {
         // the second track itself and pushes its cues here. Inert unless
         // `beginSecondaryLiveFeed()` has been called (guarded inside the model).
         engine.onSecondarySubtitleCues = { [weak self] cues in
-            guard let self else { return }
+            guard let self, self.engineToken == callbackEngineToken else { return }
             self.liveSubtitles.updateSecondaryLiveCues(cues)
             if self.selectedSecondarySubtitleTrackID != nil {
                 self.controls.secondarySubtitleStatus = .loaded(cueCount: cues.count)
@@ -599,6 +626,7 @@ public final class PlayerViewModel {
     /// return to detail, a season finale returns to the series page.
     private func handlePlaybackEnded() {
         PlaybackTrace.note("handlePlaybackEnded curr=\(String(format: "%.2f", engine.currentTime)) furthest=\(String(format: "%.2f", engine.furthestObservedPosition)) dur=\(String(format: "%.2f", engine.duration)) hasNext=\(nextEpisode != nil) isSeeking=\(controls.isSeeking) isScrubbing=\(controls.isScrubbing) intendsPlayback=\(intendsPlayback)")
+        didReachNaturalEnd = true
         if let next = nextEpisode {
             pendingNextEpisode = next
         } else {
@@ -933,11 +961,39 @@ public final class PlayerViewModel {
         guard kind != currentEngineKind else {
             return
         }
+        clearEngineCallbacks()
         engine.stop()
         engine = makeEngine(kind)
         currentEngineKind = kind
-        configureEngineCallbacks()
         engineToken = UUID()
+        configureEngineCallbacks()
+    }
+
+    private func clearEngineCallbacks() {
+        engine.onProgress = nil
+        engine.onFailure = nil
+        engine.onEnded = nil
+        engine.onTracksChanged = nil
+        engine.onSubtitleCues = nil
+        engine.onSecondarySubtitleCues = nil
+    }
+
+    private func replaceEngineForRetry(
+        _ kind: PlaybackEngineKind,
+        preserveDisplayMode: Bool
+    ) async {
+        let oldEngine = engine
+        clearEngineCallbacks()
+        oldEngine.stop(preserveDisplayMode: preserveDisplayMode)
+        // Deterministically drain the old engine's leased transport (SMB session +
+        // source cursor) before opening a fresh one, so the retry's re-resolve
+        // doesn't race the old cursor's asynchronous deinit release — the race
+        // that made the previous fresh-engine retry re-fail in ~3ms.
+        await oldEngine.drainTransport()
+        engine = makeEngine(kind)
+        currentEngineKind = kind
+        engineToken = UUID()
+        configureEngineCallbacks()
     }
 
     /// Commits the first routed engine without forcing a host `.id` rebuild.
@@ -948,6 +1004,7 @@ public final class PlayerViewModel {
             guard kind != currentEngineKind else {
                 return
             }
+            clearEngineCallbacks()
             engine.stop()
             engine = makeEngine(kind)
             currentEngineKind = kind
@@ -1004,6 +1061,10 @@ public final class PlayerViewModel {
         phase = .loading
         let bringUpStart = Date()
         bringUpStartedAt = bringUpStart
+        HandoffDiagnostics.emit(
+            "bringup START item=\(itemID) provider=\(provider.kind.rawValue) "
+                + "transcode=\(forceTranscode)"
+        )
         do {
             let resolved: PrefetchedPlayback
             if !forceTranscode, let adopted = adoptedResolved, adopted.itemID == itemID {
@@ -1066,9 +1127,17 @@ public final class PlayerViewModel {
             // Leave `phase` as `.loading`; the view is dismissing.
             return
         } catch let error as AppError {
+            HandoffDiagnostics.emit(
+                "bringup FAILED item=\(itemID) provider=\(provider.kind.rawValue) "
+                    + "error=\(HandoffDiagnostics.errorCode(error))"
+            )
             clearFirstFrameWait()
             phase = .failed(error)
         } catch {
+            HandoffDiagnostics.emit(
+                "bringup FAILED item=\(itemID) provider=\(provider.kind.rawValue) "
+                    + "error=nonAppError"
+            )
             clearFirstFrameWait()
             phase = .failed(.unknown(""))
         }
@@ -1102,6 +1171,10 @@ public final class PlayerViewModel {
     /// engine mutation or network. Extracted so the current-item load and the
     /// next-episode prefetch pick the engine the same way.
     private func routeEngine(for request: PlaybackRequest, forceTranscode: Bool) -> PlaybackEngineKind {
+        if case .some(.networkFile) = request.playbackSource {
+            return .plozzigen
+        }
+
         var kind: PlaybackEngineKind
         if !forceTranscode, engineFactory.plozzigenAvailable,
                   let descriptor = request.localRemuxSource,
@@ -1109,7 +1182,7 @@ public final class PlayerViewModel {
             // Plozzigen handles the full pipeline: FFmpeg demux → HLS-fMP4 →
             // localhost → AVPlayer. Covers HEVC/H.264/VP9/AV1 video with any
             // audio (stream-copy or lossless bridge). The engine reads
-            // localRemuxSource.originalURL directly.
+            // localRemuxSource.originalSource directly.
             kind = .plozzigen
         } else {
             kind = EngineRouter.selectEngine(
@@ -1140,17 +1213,6 @@ public final class PlayerViewModel {
                mode: subtitleRule.mode,
                preferredLanguage: subtitleRule.preferredLanguage) {
             PlozzLog.playback.info("Default subtitle is image-based; routing to Plozzigen so it can be rendered on-device")
-            kind = .plozzigen
-        }
-
-        // A raw SMB share stream can ONLY be opened by the on-device engine —
-        // AVPlayer/AVFoundation cannot demux or even open an `smb://` URL. Force
-        // Plozzigen for any smb:// source regardless of container/codec facts
-        // (which a share provider doesn't report).
-        let resolvedURL = request.localRemuxSource?.originalURL ?? request.streamURL
-        if kind != .plozzigen, engineFactory.plozzigenAvailable,
-           resolvedURL.scheme?.lowercased() == "smb" {
-            PlozzLog.playback.info("SMB share source; routing to Plozzigen (AVPlayer can't open smb://)")
             kind = .plozzigen
         }
 
@@ -1548,6 +1610,7 @@ public final class PlayerViewModel {
         watchdogTask?.cancel()
         let timeout = watchdogTimeout
         let threshold = startPosition + 0.5
+        let watchedEngineToken = engineToken
         watchdogTask = Task { [weak self] in
             let pollNanos: UInt64 = 2_000_000_000
             var waited: TimeInterval = 0
@@ -1567,8 +1630,23 @@ public final class PlayerViewModel {
             // Still no progress after the deadline → treat as a stalled stream.
             if self.engine.currentTime <= threshold, !self.engine.isPaused {
                 PlozzLog.playback.info("Playback watchdog: no progress before deadline; triggering fallback")
-                await self.handleEngineFailure(.invalidResponse)
+                // Run recovery on a SEPARATE task, not this watchdog task.
+                // handleEngineFailure → playResolved re-arms the watchdog, which
+                // cancels `watchdogTask`; doing the recovery inline here would
+                // cancel its own re-resolve (LOAD_FAILED stage=resolve
+                // detail=cancelled). Mirrors the `onFailure` dispatch.
+                self.launchStallRecovery(token: watchedEngineToken)
             }
+        }
+    }
+
+    /// Runs stall recovery off ``watchdogTask`` (see ``recoveryTask``). Replaces any
+    /// in-flight recovery so a later watchdog fire can't stack two retries.
+    private func launchStallRecovery(token: UUID) {
+        recoveryTask?.cancel()
+        recoveryTask = Task { [weak self] in
+            guard let self else { return }
+            await self.handleEngineFailure(.invalidResponse, sourceEngineToken: token)
         }
     }
 
@@ -1579,13 +1657,43 @@ public final class PlayerViewModel {
 
     // MARK: - Cross-engine fallback policy
 
+    /// Formats the typed `.unknown` payload as a redacted ` detail=…` suffix for a
+    /// failure log line (empty string for classified errors or an empty payload),
+    /// so a stall/retry line names the underlying throw without leaking URLs or
+    /// credentials.
+    private static func redactedFailureDetail(_ error: AppError) -> String {
+        guard case .unknown(let message) = error, !message.isEmpty else {
+            return ""
+        }
+        return " detail=\(HandoffDiagnostics.redactedDetail(message))"
+    }
+
     /// Decides what to do when the active engine reports a playback failure,
     /// following the fallback chain: the chosen engine's failure swaps to the
     /// *other* engine (once) at the last known position; if that also fails, force
     /// a server transcode (once); if even that fails, surface the error. Each step
     /// fires at most once so the chain can never loop.
-    private func handleEngineFailure(_ error: AppError) async {
+    private func handleEngineFailure(
+        _ error: AppError,
+        sourceEngineToken: UUID
+    ) async {
+        // The engine's best failure classification collapses to a short code
+        // (`unknown`), which for the network-file stall discarded the ACTUAL throw
+        // reason. Surface the typed `.unknown` payload (redacted) on every branch
+        // so the journal names why a stall/retry failed instead of a bare code.
+        let detail = Self.redactedFailureDetail(error)
+        guard sourceEngineToken == engineToken else {
+            HandoffDiagnostics.emit(
+                "engine FAILURE_IGNORED stale-callback item=\(itemID) "
+                    + "error=\(HandoffDiagnostics.errorCode(error))\(detail)"
+            )
+            return
+        }
         guard let request else {
+            HandoffDiagnostics.emit(
+                "engine FAILED item=\(itemID) request=nil "
+                    + "error=\(HandoffDiagnostics.errorCode(error))\(detail)"
+            )
             phase = .failed(error)
             return
         }
@@ -1597,15 +1705,37 @@ public final class PlayerViewModel {
         //    adaptive source (separate audio track): only the hybrid engine can
         //    mux it, so swapping to native would play silent video — go straight
         //    to the re-resolved safe (muxed) fallback below instead. Also skipped
-        //    when the only alternate is native AVPlayer and the source is an
-        //    `smb://` share: AVPlayer can't open an SMB URL at all, so a swap is a
-        //    guaranteed-fail wasted attempt — fall through to the (re-resolving)
-        //    transcode step, which re-routes back to Plozzigen for the share.
-        let resolvedURL = request.localRemuxSource?.originalURL ?? request.streamURL
-        let isSMBSource = resolvedURL.scheme?.lowercased() == "smb"
+        //    when the only alternate is native AVPlayer and the source is a typed
+        //    network file: native URL loaders must never reinterpret that source.
+        let isNetworkFile: Bool
+        if case .some(.networkFile) = request.playbackSource {
+            isNetworkFile = true
+        } else {
+            isNetworkFile = false
+        }
+        if isNetworkFile,
+           currentEngineKind == .plozzigen,
+           !hasRetriedNetworkFileEngine {
+            hasRetriedNetworkFileEngine = true
+            HandoffDiagnostics.emit(
+                "engine RETRY_FRESH item=\(itemID) engine=plozzigen "
+                    + "error=\(HandoffDiagnostics.errorCode(error))\(detail)"
+            )
+            phase = .loading
+            await replaceEngineForRetry(
+                .plozzigen,
+                preserveDisplayMode: contentDisplayMode.isHDR
+            )
+            await playResolved(
+                request,
+                engineKind: .plozzigen,
+                startPosition: resume
+            )
+            return
+        }
         if !request.isTranscoding, !hasTriedAlternateEngine, request.externalAudioURL == nil,
            let alternate = alternateEngineKind,
-           !(alternate == .native && isSMBSource) {
+           !(alternate == .native && isNetworkFile) {
             hasTriedAlternateEngine = true
             PlozzLog.playback.info("Engine failed; swapping to the alternate engine")
             await playResolved(request, engineKind: alternate, startPosition: resume)
@@ -1614,7 +1744,7 @@ public final class PlayerViewModel {
 
         // 2) Both engines exhausted (or none to swap to) → force a server
         //    transcode once, resuming where the failed attempt left off.
-        if !request.isTranscoding, !hasAttemptedTranscodeFallback {
+        if !isNetworkFile, !request.isTranscoding, !hasAttemptedTranscodeFallback {
             hasAttemptedTranscodeFallback = true
             PlozzLog.playback.info("Direct play failed; retrying with server transcode")
             await startPlayback(forceTranscode: true, resumeOverride: resume > 1 ? resume : nil)
@@ -1622,6 +1752,10 @@ public final class PlayerViewModel {
         }
 
         // 3) Already transcoding (or out of options): surface the error.
+        HandoffDiagnostics.emit(
+            "engine FAILED item=\(itemID) engine=\(currentEngineKind.rawValue) "
+                + "error=\(HandoffDiagnostics.errorCode(error))\(detail) exhausted=true"
+        )
         clearFirstFrameWait()
         phase = .failed(error)
     }
@@ -1632,13 +1766,15 @@ public final class PlayerViewModel {
     /// interrupt playback, so errors are swallowed (and never logged with data).
     /// The same lifecycle is forwarded to Trakt so watches sync to the user's
     /// Trakt history.
-    private func report(event: PlaybackEvent, isPaused: Bool, positionOverride: TimeInterval? = nil) async {
+    private func report(
+        event: PlaybackEvent,
+        isPaused: Bool,
+        positionOverride: TimeInterval? = nil,
+        durationOverride: TimeInterval? = nil
+    ) async {
         guard let request else { return }
         let position = positionOverride ?? engine.currentTime
-        let engineDuration = engine.duration
-        let knownDuration: TimeInterval? = (engineDuration.isFinite && engineDuration > 0)
-            ? engineDuration
-            : request.item.runtime
+        let knownDuration = durationOverride ?? knownPlaybackDuration()
         let progress = PlaybackProgress(
             itemID: itemID,
             playSessionID: request.playSessionID,
@@ -1657,6 +1793,15 @@ public final class PlayerViewModel {
         // (otherwise Trakt would see 0% and never mark the title watched).
         let scrobblePercent = positionOverride.map { watchedPercent(at: $0) } ?? watchedPercent()
         await scrobbler.scrobble(item: request.item, progress: scrobblePercent, event: event)
+    }
+
+    private func knownPlaybackDuration() -> TimeInterval? {
+        let candidates = [
+            engine.duration,
+            controls.duration,
+            request?.item.runtime ?? 0
+        ]
+        return candidates.first { $0.isFinite && $0 > 0 }
     }
 
     /// Watched percentage (0...100) from the engine's current position over the
@@ -1707,10 +1852,10 @@ public final class PlayerViewModel {
     /// so a paused or stuck player never re-writes the same position to N servers.
     /// Pure enqueue (no network on this path); safe to call from the timer or, on
     /// app background, from `checkpointNow()`.
-    private func emitCheckpoint() {
-        guard request != nil, !engine.isPaused else { return }
-        let position = max(engine.furthestObservedPosition, engine.currentTime)
-        guard position > 1, position - lastCheckpointPosition >= 1 else { return }
+    private func emitCheckpoint(includingPaused: Bool = false) {
+        guard request != nil, includingPaused || !engine.isPaused else { return }
+        let position = currentResumePosition()
+        guard position > 1, abs(position - lastCheckpointPosition) >= 1 else { return }
         lastCheckpointPosition = position
         onPlaybackCheckpoint(position, watchedPercent(at: position))
     }
@@ -1720,7 +1865,7 @@ public final class PlayerViewModel {
     /// sleep path, which never fires the view's `onDisappear`/`stop()`), so the
     /// latest position is durably captured before the process can be killed.
     public func checkpointNow() {
-        emitCheckpoint()
+        emitCheckpoint(includingPaused: true)
     }
 
     /// Handles the app leaving the foreground (TV Home button, sleep, or app
@@ -1732,7 +1877,7 @@ public final class PlayerViewModel {
     /// paused so the user resumes intentionally, rather than audio springing back
     /// to life on its own.
     public func suspendForBackground() {
-        emitCheckpoint()
+        emitCheckpoint(includingPaused: true)
         // Key off intent, not `engine.isPaused`: if we mean to be playing (even
         // while the engine is mid post-seek settle), pause for real — this also
         // routes through `cancelResumeConfirm()` so a recovery loop can't wake the
@@ -2089,6 +2234,18 @@ public final class PlayerViewModel {
     /// view's `onDisappear` fires a second `stop()` once it's torn down. Without
     /// this the server would get two `.stop` reports for one playback.
     private var didStop = false
+    /// Natural EOF can zero an engine's current time before dismissal. Only that
+    /// path falls back to the furthest observed point; manual exits save the actual
+    /// current position so rewinding intentionally moves the resume point backward.
+    private var didReachNaturalEnd = false
+
+    private func currentResumePosition() -> TimeInterval {
+        let current = engine.currentTime
+        if current.isFinite, current >= 0 {
+            return current
+        }
+        return max(0, engine.furthestObservedPosition)
+    }
 
     /// Call when leaving playback: report a final stop so the server records the
     /// resume point, then tear the engine down.
@@ -2112,6 +2269,8 @@ public final class PlayerViewModel {
         autoSkipNoticeTask?.cancel()
         autoSkipNoticeTask = nil
         cancelWatchdog()
+        recoveryTask?.cancel()
+        recoveryTask = nil
         cancelSeekCommit()
         seekTask?.cancel()
         seekTask = nil
@@ -2128,7 +2287,10 @@ public final class PlayerViewModel {
         // network round-trip that can take a second or two; stopping first means
         // leaving the player never keeps playing audio while it completes. Grab
         // the resume position up front since the engine is torn down here.
-        let finalPosition = max(engine.furthestObservedPosition, engine.currentTime)
+        let finalPosition = didReachNaturalEnd
+            ? max(engine.furthestObservedPosition, engine.currentTime)
+            : currentResumePosition()
+        let finalDuration = knownPlaybackDuration()
         let percent = watchedPercent(at: finalPosition)
         engine.stop(preserveDisplayMode: preserveDisplayMode)
         // Release any prefetched next-episode session that was never adopted, and
@@ -2155,7 +2317,12 @@ public final class PlayerViewModel {
                 group.cancelAll()
             }
         }
-        await report(event: .stop, isPaused: true, positionOverride: finalPosition)
+        await report(
+            event: .stop,
+            isPaused: true,
+            positionOverride: finalPosition,
+            durationOverride: finalDuration
+        )
         onPlaybackStopped(finalPosition, percent)
     }
 
@@ -2610,7 +2777,7 @@ public final class PlayerViewModel {
         guard let track = engine.subtitleTracks.first(where: { $0.id == id }) else {
             // Not an engine-demuxed track: it may be a subtitle we downloaded and
             // hot-loaded this session. Those are always text sidecars with a
-            // `deliveryURL`, so render them through Plozz's overlay regardless of
+            // delivery source, so render them through Plozz's overlay regardless of
             // engine (suppressing any engine-drawn sub).
             if let hot = hotLoadedSubtitleTracks.first(where: { $0.id == id }) {
                 if userInitiated { recordSeriesSubtitleSelection(hot.language.map(RememberedSubtitleSelection.language)) }
@@ -2631,7 +2798,7 @@ public final class PlayerViewModel {
         // (AetherEngine) at the current position: it decodes the bitmap subtitle
         // packets into image cues that Plozz's overlay draws at their authored
         // position — no server burn-in. Key off `isImageBasedSubtitle` — NOT
-        // `deliveryURL == nil` — so an embedded text SRT (no sidecar URL, but
+        // `deliverySource == nil` — so an embedded text SRT (no sidecar, but
         // renderable) stays on the native engine.
         if track.isImageBasedSubtitle, currentEngineKind == .native,
            let request, !request.isTranscoding, engineFactory.plozzigenAvailable {
@@ -2650,7 +2817,7 @@ public final class PlayerViewModel {
         // the overlay is a later Plozzigen-extraction task.
         if !track.isImageBasedSubtitle, currentEngineKind == .native {
             selectedSubtitleTrackID = id
-            if track.deliveryURL != nil {
+            if track.deliverySource != nil {
                 engine.selectSubtitleTrack(nil)
                 #if DEBUG
                 setPrimarySubtitleDiagnostic(route: "overlay")
@@ -2704,10 +2871,12 @@ public final class PlayerViewModel {
         // primary track change.
         liveSubtitles.loadPrimary(nil)
         refreshSubtitleDelayAvailability()
-        guard let url = track.deliveryURL else {
-            // Embedded text without a sidecar URL: container extraction arrives
+        guard track.deliverySource != nil else {
+            // Embedded text without a sidecar source: container extraction arrives
             // with the Plozzigen cue path; leave nothing showing until then.
-            PlozzLog.playback.debug("Selected subtitle has no sidecar URL; overlay not loaded")
+            PlozzLog.playback.debug(
+                "Selected subtitle has no sidecar source; overlay not loaded"
+            )
             return
         }
         let id = track.id
@@ -2717,52 +2886,107 @@ public final class PlayerViewModel {
         // Only spend a detection pass when the provider gave us no language tag
         // and we haven't already guessed one for this track this session.
         let needsDetection = (language == nil) && detectedSubtitleLanguages[id] == nil
-        subtitleCueLoadTask = Task.detached(priority: .userInitiated) { [weak self] in
+        subtitleCueLoadTask = Task(priority: .userInitiated) { @MainActor [weak self] in
+            guard let self else { return }
             do {
-                let (data, _) = try await URLSession.shared.data(from: url)
-                try Task.checkCancellation()
-                guard let text = SubtitleCueParser.decodeText(data) else {
-                    PlozzLog.playback.error("Subtitle sidecar decode failed (\(data.count) bytes); unknown text encoding")
-                    await MainActor.run { [weak self] in
-                        guard let self, self.selectedSubtitleTrackID == id else { return }
-                        #if DEBUG
-                        self.setPrimarySubtitleDiagnostic(route: "overlay · decode-fail")
-                        #endif
-                    }
+                guard let url = try await self.resolveSubtitleDeliveryURL(track)
+                else {
                     return
                 }
-                let stream = SubtitleCueParser.parse(
-                    text, id: id, language: language, title: title,
-                    sourceTrackID: id, isForced: forced
-                )
-                try Task.checkCancellation()
-                let detected = needsDetection ? Self.detectLanguage(in: stream.cues) : nil
-                await MainActor.run { [weak self] in
-                    guard let self else { return }
-                    let storedNew = detected != nil && self.detectedSubtitleLanguages[id] == nil
-                    if let detected, storedNew { self.detectedSubtitleLanguages[id] = detected }
-                    if self.selectedSubtitleTrackID == id {
-                        self.liveSubtitles.loadPrimary(stream)
-                        self.refreshSubtitleDelayAvailability()
-                        #if DEBUG
-                        self.setPrimarySubtitleDiagnostic(route: "overlay", cues: stream.cues.count)
-                        #endif
-                    }
-                    // A fresh guess changes a track's menu label, so rebuild.
-                    if storedNew { self.loadTrackOptions() }
+                guard let payload = try await Self.fetchSubtitlePayload(
+                    from: url,
+                    id: id,
+                    language: language,
+                    title: title,
+                    forced: forced,
+                    shouldDetectLanguage: needsDetection
+                ) else {
+                    guard self.selectedSubtitleTrackID == id else { return }
+                    #if DEBUG
+                    self.setPrimarySubtitleDiagnostic(
+                        route: "overlay · decode-fail"
+                    )
+                    #endif
+                    return
                 }
+                try Task.checkCancellation()
+                let storedNew = payload.detectedLanguage != nil
+                    && self.detectedSubtitleLanguages[id] == nil
+                if let detected = payload.detectedLanguage, storedNew {
+                    self.detectedSubtitleLanguages[id] = detected
+                }
+                if self.selectedSubtitleTrackID == id {
+                    self.liveSubtitles.loadPrimary(payload.stream)
+                    self.refreshSubtitleDelayAvailability()
+                    #if DEBUG
+                    self.setPrimarySubtitleDiagnostic(
+                        route: "overlay",
+                        cues: payload.stream.cues.count
+                    )
+                    #endif
+                }
+                if storedNew { self.loadTrackOptions() }
             } catch is CancellationError {
                 // Selection changed; the newer selection owns the overlay.
             } catch {
                 PlozzLog.playback.debug("Overlay subtitle fetch failed (non-fatal)")
-                await MainActor.run { [weak self] in
-                    guard let self, self.selectedSubtitleTrackID == id else { return }
-                    #if DEBUG
-                    self.setPrimarySubtitleDiagnostic(route: "overlay · fetch-fail")
-                    #endif
-                }
+                guard self.selectedSubtitleTrackID == id else { return }
+                #if DEBUG
+                self.setPrimarySubtitleDiagnostic(route: "overlay · fetch-fail")
+                #endif
             }
         }
+    }
+
+    private struct ParsedSubtitlePayload: Sendable {
+        let stream: SubtitleCueStream
+        let detectedLanguage: String?
+        let byteCount: Int
+    }
+
+    private func resolveSubtitleDeliveryURL(
+        _ track: MediaTrack
+    ) async throws -> URL? {
+        guard let source = track.deliverySource else { return nil }
+        switch source {
+        case .localFile(let url):
+            return url
+        case .authenticatedHTTP(let locator):
+            return try await authenticatedHTTPResolver?.resolve(locator)
+        }
+    }
+
+    private nonisolated static func fetchSubtitlePayload(
+        from url: URL,
+        id: Int,
+        language: String?,
+        title: String,
+        forced: Bool,
+        shouldDetectLanguage: Bool
+    ) async throws -> ParsedSubtitlePayload? {
+        let (data, _) = try await URLSession.shared.data(from: url)
+        try Task.checkCancellation()
+        guard let text = SubtitleCueParser.decodeText(data) else {
+            PlozzLog.playback.error(
+                "Subtitle sidecar decode failed (\(data.count) bytes); unknown text encoding"
+            )
+            return nil
+        }
+        let stream = SubtitleCueParser.parse(
+            text,
+            id: id,
+            language: language,
+            title: title,
+            sourceTrackID: id,
+            isForced: forced
+        )
+        try Task.checkCancellation()
+        let detected = shouldDetectLanguage ? detectLanguage(in: stream.cues) : nil
+        return ParsedSubtitlePayload(
+            stream: stream,
+            detectedLanguage: detected,
+            byteCount: data.count
+        )
     }
 
     // MARK: - Dual (secondary) subtitle
@@ -2770,7 +2994,7 @@ public final class PlayerViewModel {
     /// The tracks a second subtitle line can show. Sourced from the PROVIDER's
     /// subtitle probe (`request.subtitleTracks`), not the engine's demuxed tracks,
     /// because the overlay fetches + parses the sidecar itself and only the provider
-    /// reliably carries a text sub's VTT `deliveryURL` — the advanced engine's
+    /// reliably carries a text sub's delivery source — the advanced engine's
     /// embedded-text tracks have none, and their ids may not even line up with the
     /// provider's (which is why matching by id showed "None available"). Every
     /// non-image text track Jellyfin exposes is therefore eligible; the current
@@ -2820,7 +3044,9 @@ public final class PlayerViewModel {
         // requirement here but kept for symmetry / defence in depth.)
         let providerSubs = request?.subtitleTracks ?? []
         let eligible = providerSubs.filter {
-            !$0.isBitmapSubtitle && $0.deliveryURL != nil && $0.id != selectedSubtitleTrackID
+            !$0.isBitmapSubtitle
+                && $0.deliverySource != nil
+                && $0.id != selectedSubtitleTrackID
         }
         #if DEBUG
         PlozzLog.playback.debug(
@@ -2893,7 +3119,7 @@ public final class PlayerViewModel {
     private func loadSecondaryOverlaySubtitle(_ track: MediaTrack) {
         secondaryCueLoadTask?.cancel()
         liveSubtitles.loadSecondary(nil)
-        guard let url = track.deliveryURL else {
+        guard track.deliverySource != nil else {
             controls.secondarySubtitleStatus = .unavailable
             return
         }
@@ -2902,44 +3128,46 @@ public final class PlayerViewModel {
         let language = track.language
         let title = track.displayTitle
         let forced = track.isForced
-        secondaryCueLoadTask = Task.detached(priority: .userInitiated) { [weak self] in
+        secondaryCueLoadTask = Task(
+            priority: .userInitiated
+        ) { @MainActor [weak self] in
+            guard let self else { return }
             do {
-                let (data, _) = try await URLSession.shared.data(from: url)
-                try Task.checkCancellation()
-                guard let text = SubtitleCueParser.decodeText(data) else {
-                    PlozzLog.playback.error("Secondary subtitle sidecar decode failed (\(data.count) bytes)")
-                    await MainActor.run { [weak self] in
-                        guard let self, self.selectedSecondarySubtitleTrackID == id else { return }
-                        self.controls.secondarySubtitleStatus = .unavailable
+                guard let url = try await self.resolveSubtitleDeliveryURL(track),
+                      let payload = try await Self.fetchSubtitlePayload(
+                          from: url,
+                          id: id,
+                          language: language,
+                          title: title,
+                          forced: forced,
+                          shouldDetectLanguage: false
+                      ) else {
+                    guard self.selectedSecondarySubtitleTrackID == id else {
+                        return
                     }
+                    self.controls.secondarySubtitleStatus = .unavailable
                     return
                 }
-                let stream = SubtitleCueParser.parse(
-                    text, id: id, language: language, title: title,
-                    sourceTrackID: id, isForced: forced
-                )
                 try Task.checkCancellation()
                 #if DEBUG
-                let range = stream.cues.isEmpty
+                let range = payload.stream.cues.isEmpty
                     ? "none"
-                    : "\(Int(stream.cues.first!.start))s–\(Int(stream.cues.last!.end))s"
+                    : "\(Int(payload.stream.cues.first!.start))s–\(Int(payload.stream.cues.last!.end))s"
                 PlozzLog.playback.debug(
-                    "Secondary track \(id): fetched \(data.count) bytes → \(stream.cues.count) cues (\(range))"
+                    "Secondary track \(id): fetched \(payload.byteCount) bytes → \(payload.stream.cues.count) cues (\(range))"
                 )
                 #endif
-                await MainActor.run { [weak self] in
-                    guard let self, self.selectedSecondarySubtitleTrackID == id else { return }
-                    self.liveSubtitles.loadSecondary(stream)
-                    self.controls.secondarySubtitleStatus = .loaded(cueCount: stream.cues.count)
-                }
+                guard self.selectedSecondarySubtitleTrackID == id else { return }
+                self.liveSubtitles.loadSecondary(payload.stream)
+                self.controls.secondarySubtitleStatus = .loaded(
+                    cueCount: payload.stream.cues.count
+                )
             } catch is CancellationError {
                 // Selection changed; the newer secondary owns the stream.
             } catch {
                 PlozzLog.playback.debug("Secondary track \(id) sidecar fetch failed (non-fatal): \(error.localizedDescription)")
-                await MainActor.run { [weak self] in
-                    guard let self, self.selectedSecondarySubtitleTrackID == id else { return }
-                    self.controls.secondarySubtitleStatus = .unavailable
-                }
+                guard self.selectedSecondarySubtitleTrackID == id else { return }
+                self.controls.secondarySubtitleStatus = .unavailable
             }
         }
     }
@@ -3107,7 +3335,9 @@ public final class PlayerViewModel {
             let tracks = (try? await provider.subtitleTracks(forItemID: itemID)) ?? []
             // Only consider text sidecars that appeared *after* the download.
             let newTextSubs = tracks.filter {
-                $0.deliveryURL != nil && !$0.isImageBasedSubtitle && !knownIDs.contains($0.id)
+                $0.deliverySource != nil
+                    && !$0.isImageBasedSubtitle
+                    && !knownIDs.contains($0.id)
             }
             // Prefer a language match among the new tracks; else any new sidecar.
             if let language, !language.isEmpty,

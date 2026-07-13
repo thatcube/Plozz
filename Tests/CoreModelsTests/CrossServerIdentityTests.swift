@@ -52,6 +52,129 @@ final class MediaItemIdentityTests: XCTestCase {
             .external(source: "tvdb", value: "x")
         ])
     }
+
+    func testEpisodeShowIDsAreScopedBySeasonAndEpisode() {
+        let s1e1 = MediaItem(
+            id: "s1e1",
+            title: "Episode 1",
+            kind: .episode,
+            seasonNumber: 1,
+            episodeNumber: 1,
+            providerIDs: ["Tmdb": "82452"]
+        )
+        let s2e5 = MediaItem(
+            id: "s2e5",
+            title: "Ten Thousand Things",
+            kind: .episode,
+            seasonNumber: 2,
+            episodeNumber: 5,
+            providerIDs: ["Tmdb": "82452"]
+        )
+
+        XCTAssertEqual(
+            MediaItemIdentity.identities(for: s1e1),
+            [.external(source: "tmdb:s1e1", value: "82452")]
+        )
+        XCTAssertEqual(
+            MediaItemIdentity.identities(for: s2e5),
+            [.external(source: "tmdb:s2e5", value: "82452")]
+        )
+        XCTAssertEqual(
+            MediaItemMerger.merge([
+                s1e1.taggingSource("smb"),
+                s2e5.taggingSource("plex")
+            ]).count,
+            2,
+            "Show-level IDs must not merge different episodes"
+        )
+    }
+
+    func testSameEpisodeStillMergesAcrossServers() {
+        let plex = MediaItem(
+            id: "plex-e5",
+            title: "Ten Thousand Things",
+            kind: .episode,
+            seasonNumber: 2,
+            episodeNumber: 5,
+            providerIDs: ["Tmdb": "82452"]
+        ).taggingSource("plex")
+        let smb = MediaItem(
+            id: "smb-e5",
+            title: "Ten Thousand Things",
+            kind: .episode,
+            seasonNumber: 2,
+            episodeNumber: 5,
+            providerIDs: ["Tmdb": "82452"]
+        ).taggingSource("smb")
+
+        let merged = MediaItemMerger.merge([plex, smb])
+
+        XCTAssertEqual(merged.count, 1)
+        XCTAssertEqual(Set(merged[0].sources.map(\.id)), ["plex:plex-e5", "smb:smb-e5"])
+    }
+
+    func testSeriesEpisodeIdentityBridgesManagedAndFilesystemIDs() {
+        let plex = MediaItem(
+            id: "plex-e4",
+            title: "The Water Falls, the Stones Emerge",
+            kind: .episode,
+            parentTitle: "Avatar: The Last Airbender (2024)",
+            seasonNumber: 2,
+            episodeNumber: 4,
+            productionYear: 2026,
+            providerIDs: [
+                "Tvdb": "11597652",
+                "SeriesTvdb": "385925"
+            ],
+            sourceAccountID: "plex"
+        )
+        let share = MediaItem(
+            id: "share-e4",
+            title: "The Water Falls the Stones Emerge",
+            kind: .episode,
+            parentTitle: "Avatar The Last Airbender 2024",
+            seasonNumber: 2,
+            episodeNumber: 4,
+            productionYear: nil,
+            providerIDs: [
+                "Tvdb": "385925",
+                "SeriesTvdb": "385925"
+            ],
+            sourceAccountID: "share"
+        )
+
+        let merged = MediaItemMerger.merge([plex, share])
+
+        XCTAssertEqual(merged.count, 1)
+        XCTAssertEqual(Set(merged[0].sources.map(\.id)), ["plex:plex-e4", "share:share-e4"])
+    }
+
+    func testSeriesEpisodeIdentityDoesNotMergeDifferentSeriesIDs() {
+        let original = MediaItem(
+            id: "original",
+            title: "The Cave of Two Lovers",
+            kind: .episode,
+            parentTitle: "Avatar: The Last Airbender",
+            seasonNumber: 2,
+            episodeNumber: 2,
+            productionYear: 2006,
+            providerIDs: ["SeriesTvdb": "74852"],
+            sourceAccountID: "original"
+        )
+        let remake = MediaItem(
+            id: "remake",
+            title: "The Cave of Two Lovers",
+            kind: .episode,
+            parentTitle: "Avatar: The Last Airbender (2024)",
+            seasonNumber: 2,
+            episodeNumber: 2,
+            productionYear: 2026,
+            providerIDs: ["SeriesTvdb": "385925"],
+            sourceAccountID: "remake"
+        )
+
+        XCTAssertEqual(MediaItemMerger.merge([original, remake]).count, 2)
+    }
 }
 
 final class MediaItemMergerTests: XCTestCase {

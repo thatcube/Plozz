@@ -112,6 +112,45 @@ final class ShareEnricherTests: XCTestCase {
         XCTAssertFalse(shareIDs.isDisjoint(with: twinIDs), "share + server twin must share an identity so they merge")
     }
 
+    func testTypoFolderMergesWithTwinBySharedStrongID() async {
+        // Id-corroborated reconciliation: a typo'd folder ("Peaky Blinder") and its
+        // correct twin ("Peaky Blinders") that resolve to the SAME Tvdb id fold into
+        // one series titled with the resolved canonical name.
+        let store = ShareCatalogStore(accountKey: "a", directory: tempDir())
+        await store.upsert([
+            episode("TV/Peaky Blinder/Season 1/Peaky.Blinder.S01E01.mkv", series: "Peaky Blinder", s: 1, e: 1),
+            episode("TV/Peaky Blinder/Season 1/Peaky.Blinder.S01E02.mkv", series: "Peaky Blinder", s: 1, e: 2),
+            episode("TV/Peaky Blinders/Season 1/Peaky.Blinders.S01E01.mkv", series: "Peaky Blinders", s: 1, e: 1),
+        ], scanID: 1)
+        let before = await store.series(in: .tv, offset: 0, limit: 10)
+        XCTAssertEqual(before.count, 2, "two keys before merge")
+
+        let rec = ShareCatalogStore.EnrichmentRecord(providerIDs: ["Tvdb": "270261"], title: "Peaky Blinders")
+        await ShareEnricher(store: store, resolver: FakeResolver(byTitle: [
+            "Peaky Blinder": rec, "Peaky Blinders": rec,
+        ])).enrichPending()
+
+        let series = await store.series(in: .tv, offset: 0, limit: 10)
+        XCTAssertEqual(series.count, 1, "shared Tvdb id + near title folds them into one card")
+        XCTAssertEqual(series.first?.title, "Peaky Blinders", "shows the resolved canonical title")
+    }
+
+    func testDifferentShowsSharingNoIDDoNotMerge() async {
+        // Two near-titled shows that DON'T share an id must stay separate — the id is
+        // the authoritative gate, not the title similarity.
+        let store = ShareCatalogStore(accountKey: "a", directory: tempDir())
+        await store.upsert([
+            episode("TV/1883/Season 1/1883.S01E01.mkv", series: "1883", s: 1, e: 1),
+            episode("TV/1923/Season 1/1923.S01E01.mkv", series: "1923", s: 1, e: 1),
+        ], scanID: 1)
+        await ShareEnricher(store: store, resolver: FakeResolver(byTitle: [
+            "1883": ShareCatalogStore.EnrichmentRecord(providerIDs: ["Tvdb": "355774"], title: "1883"),
+            "1923": ShareCatalogStore.EnrichmentRecord(providerIDs: ["Tvdb": "403361"], title: "1923"),
+        ])).enrichPending()
+        let series = await store.series(in: .tv, offset: 0, limit: 10)
+        XCTAssertEqual(series.count, 2, "distinct ids never merge")
+    }
+
     func testAniListIDReclassifiesSeriesToAnime() async {
         // A series indexed under TV that resolves an AniList/MAL id is confirmed
         // anime and must move to the Anime library.
@@ -243,6 +282,32 @@ final class ShareEnricherTests: XCTestCase {
         XCTAssertEqual(item?.providerID(.tmdb), "1", "ids survive a later sparse write")
         XCTAssertEqual(item?.posterURL?.absoluteString, "https://img/p.jpg", "poster survives")
         XCTAssertEqual(item?.backdropURL?.absoluteString, "https://img/b.jpg", "backdrop survives")
+    }
+
+    func testVersionBumpReplacesStaleArtworkInsteadOfMerging() async {
+        // A re-enrich at a NEW version must REPLACE the row (drop stale artwork from a
+        // previous wrong match), not union — the Punisher/"TAP" logo bug.
+        let store = ShareCatalogStore(accountKey: "a", directory: tempDir())
+        await store.upsert([movie("Movies/The Punisher (2017).mkv", "The Punisher", 2017)], scanID: 1)
+        let id = ShareCatalogID.file("Movies/The Punisher (2017).mkv")
+
+        // v1: a WRONG match cached a bogus logo (as if resolved for the "TP" alias).
+        await store.saveEnrichment(itemID: id, .init(
+            providerIDs: ["Tmdb": "999999"],
+            logoURL: URL(string: "https://commons/TAP-Portugal-Logo.svg")
+        ), version: 1)
+
+        // v2: the corrected match has proper ids + poster but NO logo. The stale TAP
+        // logo must NOT survive the version bump.
+        await store.saveEnrichment(itemID: id, .init(
+            providerIDs: ["Tmdb": "67178", "Imdb": "tt5675620"],
+            posterURL: URL(string: "https://tvdb/punisher-poster.jpg")
+        ), version: 2)
+
+        let item = await store.item(id: id)
+        XCTAssertNil(item?.logoURL, "stale wrong logo dropped on version bump")
+        XCTAssertEqual(item?.providerID(.tmdb), "67178")
+        XCTAssertEqual(item?.posterURL?.absoluteString, "https://tvdb/punisher-poster.jpg")
     }
 
     func testSingleItemPendingLookupTargetsTheOpenedItem() async {

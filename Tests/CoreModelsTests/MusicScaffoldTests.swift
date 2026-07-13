@@ -66,9 +66,17 @@ final class MusicScaffoldTests: XCTestCase {
 
     func testAudioPlaybackRequestDefaultsToSingleTrackQueue() {
         let track = MusicTrack(id: "t1", title: "Solo")
-        let request = AudioPlaybackRequest(track: track, streamURL: URL(string: "https://x/a.mp3")!)
+        let request = AudioPlaybackRequest(
+            track: track,
+            playbackSource: .publicURL(
+                try! SecretFreeURLSource(
+                    url: URL(string: "https://x/a.mp3")!
+                )
+            )
+        )
         XCTAssertEqual(request.queue, [track])
         XCTAssertEqual(request.queueIndex, 0)
+        XCTAssertEqual(request.streamURL, URL(string: "https://x/a.mp3"))
     }
 
     // MARK: Capability detection (gates music UI)
@@ -103,7 +111,14 @@ private struct StubMusicCapable: MusicProvider {
         MusicPage()
     }
     func audioPlaybackInfo(for trackID: String, queueContext: [String]?) async throws -> AudioPlaybackRequest {
-        AudioPlaybackRequest(track: MusicTrack(id: trackID, title: ""), streamURL: URL(string: "https://x/a.mp3")!)
+        AudioPlaybackRequest(
+            track: MusicTrack(id: trackID, title: ""),
+            playbackSource: .publicURL(
+                try SecretFreeURLSource(
+                    url: URL(string: "https://x/a.mp3")!
+                )
+            )
+        )
     }
     // artist/album/tracks/musicImageURL intentionally rely on the protocol's
     // default implementations, proving incremental conformance compiles.

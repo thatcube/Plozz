@@ -40,6 +40,11 @@ public extension Notification.Name {
 /// — flipping a badge without rebuilding the rail — so the user's focus is never
 /// yanked back to the top of the screen after a menu action.
 ///
+/// This is the single UI-facing watch-state channel for every managed provider,
+/// filesystem share, and tracker-backed playback. New source types participate by
+/// producing the same account-scoped mutation; views never need provider-specific
+/// refresh logic.
+///
 /// A mutation can carry a watched-state change (`played`), a watchlist change
 /// (`favorite`), a resume-progress change (`resumePosition` / `playedPercentage`),
 /// or any combination; an absent (`nil`) field means "unchanged", so a screen only

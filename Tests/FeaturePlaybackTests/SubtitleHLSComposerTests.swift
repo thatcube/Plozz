@@ -1,4 +1,5 @@
 import XCTest
+import CoreModels
 @testable import FeaturePlayback
 
 final class SubtitleHLSComposerTests: XCTestCase {
@@ -11,6 +12,74 @@ final class SubtitleHLSComposerTests: XCTestCase {
             isForced: isForced,
             sourceURL: URL(string: "https://server/Subtitles/\(index).vtt")!
         )
+    }
+
+    @MainActor
+    final class AuthenticatedSubtitleResolutionTests: XCTestCase {
+        func testNativeEngineResolvesSubtitleAtLoadBoundary() async throws {
+            let locator = try AuthenticatedHTTPPlaybackLocator(
+                provider: .jellyfin,
+                accountID: "account",
+                credentialRevision: CredentialRevision(),
+                itemID: "item",
+                mediaSourceID: "source",
+                deliveryMode: .directFile,
+                purpose: .subtitle,
+                resource: try AuthenticatedHTTPResource(
+                    pathBase: .configuredBaseURL,
+                    path: "Videos/item/source/Subtitles/2/0/Stream.vtt"
+                )
+            )
+            let resolver = RecordingSubtitleResolver(
+                resolvedURL: URL(fileURLWithPath: "/tmp/subtitle.vtt")
+            )
+            let engine = NativeVideoEngine(
+                authenticatedHTTPResolver: resolver
+            )
+            var request = PlaybackRequest(
+                item: MediaItem(
+                    id: "item",
+                    title: "Movie",
+                    kind: .movie,
+                    runtime: 120
+                ),
+                streamURL: URL(string: "https://media.example/movie.mp4")!
+            )
+            request.subtitleTracks = [
+                MediaTrack(
+                    id: 2,
+                    kind: .subtitle,
+                    displayTitle: "English",
+                    language: "en",
+                    codec: "srt",
+                    deliverySource: .authenticatedHTTP(locator)
+                )
+            ]
+
+            await engine.load(request: request, startPosition: 0)
+
+            XCTAssertEqual(resolver.locators, [locator])
+            await engine.stop()
+        }
+    }
+
+    @MainActor
+    private final class RecordingSubtitleResolver:
+        AuthenticatedHTTPResourceResolving
+    {
+        let resolvedURL: URL
+        private(set) var locators: [AuthenticatedHTTPPlaybackLocator] = []
+
+        init(resolvedURL: URL) {
+            self.resolvedURL = resolvedURL
+        }
+
+        func resolve(
+            _ locator: AuthenticatedHTTPPlaybackLocator
+        ) async throws -> URL {
+            locators.append(locator)
+            return resolvedURL
+        }
     }
 
     func testMasterListsEachSubtitleAndTiesGroup() {

@@ -31,6 +31,10 @@ public final class ItemDetailViewModel {
     /// season is shown/focused and cached so re-focusing a tab is instant. Keyed
     /// by season id. Observed by `SeriesDetailView` to populate its episode rail.
     public private(set) var seasonEpisodes: [String: [MediaItem]] = [:]
+    /// Seasons painted from the stale-while-revalidate snapshot. They render
+    /// instantly, but the first `loadEpisodes` must still fetch live provider state
+    /// so watched/resume changes made since the snapshot are not frozen on revisit.
+    private var snapshotRestoredSeasonIDs: Set<String> = []
     private final class SeasonLoad: @unchecked Sendable {
         enum WaitResult: Sendable {
             case completed
@@ -134,6 +138,12 @@ public final class ItemDetailViewModel {
         return "\(activeSourceAccountID ?? activeProvider.kind.rawValue):\(activeItemID)"
     }
 
+    /// A source-specific library browse is an intentional source choice. Playback
+    /// must remain on that server unless the viewer changes the source picker.
+    public var isLibraryOriginPinned: Bool {
+        originSourceAccountID != nil
+    }
+
     /// Resolves theme audio as a best-effort decorative enhancement.
     public func resolveThemeMusic() async -> ThemeMusic? {
         guard themeMusicPlaybackID != nil else { return nil }
@@ -141,7 +151,7 @@ public final class ItemDetailViewModel {
             let theme = try await activeProvider.themeMusic(for: activeItemID)
             if let theme {
                 PlozzLog.app.info(
-                    "Theme music: resolved item=\(activeItemID) url=\(PlozzLog.redact(url: theme.streamURL))"
+                    "Theme music: resolved item=\(activeItemID) source=\(theme.playbackSource.redactedLabel)"
                 )
             }
             return theme
@@ -454,6 +464,9 @@ public final class ItemDetailViewModel {
         crossServerDiscoveryTask = nil
         hasPaintedFreshDetail = false
 
+        // A source-specific library is authoritative even when an aggregated or
+        // cached grid item happens to carry another server as its merge primary.
+        applyLibraryOriginPreferenceIfAvailable(in: initialSources)
         // Before the very first fetch, retarget a cross-server-merged Home/Search
         // open onto its most-local copy (see doc on the method): a SERIES loads
         // its whole tree from ONE server and its per-server episodes can't
@@ -898,13 +911,29 @@ public final class ItemDetailViewModel {
     /// SwiftUI updates just the affected cards and the user's focus stays exactly
     /// where it was.
     public func applyWatchedState(_ mutation: MediaItemMutation) {
+        var seriesPlayedCascade: Bool?
         if case var .loaded(detail) = state {
+            if detail.item.kind == .series, mutation.targets(detail.item) {
+                seriesPlayedCascade = mutation.played
+            }
             detail.item = mutation.applied(to: detail.item)
-            detail.children = detail.children.map { mutation.applied(to: $0) }
+            detail.children = detail.children.map { child in
+                var updated = mutation.applied(to: child)
+                if let seriesPlayedCascade {
+                    updated.isPlayed = seriesPlayedCascade
+                }
+                return updated
+            }
             state = .loaded(detail)
         }
         for (seasonID, episodes) in seasonEpisodes {
-            seasonEpisodes[seasonID] = episodes.map { mutation.applied(to: $0) }
+            seasonEpisodes[seasonID] = episodes.map { episode in
+                var updated = mutation.applied(to: episode)
+                if let seriesPlayedCascade {
+                    updated.isPlayed = seriesPlayedCascade
+                }
+                return updated
+            }
         }
     }
 
@@ -956,6 +985,7 @@ public final class ItemDetailViewModel {
         loadedSeasonIDs.append(contentsOf: seasonLoads.keys.filter { !loadedSeasonIDs.contains($0) })
         cancelSeasonLoads(retryWaiters: true)
         seasonEpisodes = [:]
+        snapshotRestoredSeasonIDs = []
         for seasonID in loadedSeasonIDs {
             guard !Task.isCancelled, isCurrent() else { return }
             await loadEpisodes(for: seasonID)
@@ -1033,6 +1063,29 @@ public final class ItemDetailViewModel {
         activeSourceAccountID = best.accountID
     }
 
+    /// Retargets a merged grid item to the source-specific library that opened it.
+    /// The grid's merge primary is an implementation detail and may be a different
+    /// server; the library origin is the user's explicit navigation choice.
+    @discardableResult
+    private func applyLibraryOriginPreferenceIfAvailable(
+        in candidates: [MediaSourceRef]
+    ) -> Bool {
+        guard !userDidSwitchSource,
+              let originSourceAccountID,
+              activeSourceAccountID != originSourceAccountID,
+              let source = candidates.first(where: {
+                  $0.accountID == originSourceAccountID
+              }),
+              let provider = alternateProviderResolver(originSourceAccountID)
+        else { return false }
+
+        invalidateSourceOperations()
+        activeProvider = provider
+        activeItemID = source.itemID
+        activeSourceAccountID = originSourceAccountID
+        return true
+    }
+
     /// Deferred twin of ``applyInitialLocalityPreferenceIfNeeded`` for the common
     /// case where a series cold-loads with a SINGLE source and its local copy is
     /// only discovered later (async cross-server discovery).
@@ -1094,6 +1147,7 @@ public final class ItemDetailViewModel {
         seasonLoadingResumeSourceGeneration = sourceGeneration
         cancelSeasonLoads()
         seasonEpisodes = [:]
+        snapshotRestoredSeasonIDs = []
         preselectedSeasonID = nil
 
         await reload()
@@ -1139,6 +1193,7 @@ public final class ItemDetailViewModel {
         // Drop the old server's per-season episode caches so the rail reloads from
         // the new server (its ids differ); the season list reloads via reload().
         seasonEpisodes = [:]
+        snapshotRestoredSeasonIDs = []
         preselectedSeasonID = nil
 
         // Reload the new server's detail + children in place over the existing
@@ -1159,12 +1214,12 @@ public final class ItemDetailViewModel {
               activeItemID == sourceItemID,
               activeSourceAccountID == sourceAccountID {
             guard isCurrentSeasonID(seasonID) else { return }
-            if seasonEpisodes[seasonID] != nil { return }
-
             let load: SeasonLoad
             if let existing = seasonLoads[seasonID] {
                 load = existing
             } else {
+                let requiresLiveRefresh = snapshotRestoredSeasonIDs.remove(seasonID) != nil
+                if seasonEpisodes[seasonID] != nil, !requiresLiveRefresh { return }
                 let provider = activeProvider
                 let token = UUID()
                 load = SeasonLoad(token: token)
@@ -1337,6 +1392,7 @@ public final class ItemDetailViewModel {
         state = .loaded(Detail(item: item, children: snapshot.children.map(tagged), childrenLoaded: true))
         if !snapshot.seasonEpisodes.isEmpty {
             seasonEpisodes = snapshot.seasonEpisodes.mapValues { stampSeriesTMDb(into: $0.map(tagged)) }
+            snapshotRestoredSeasonIDs.formUnion(snapshot.seasonEpisodes.keys)
         }
         if snapshot.sources.count > 1 {
             let restored = prunedToActiveAccounts(snapshot.sources)
@@ -1369,6 +1425,7 @@ public final class ItemDetailViewModel {
         }
         if seasonEpisodes.isEmpty, !snapshot.seasonEpisodes.isEmpty {
             seasonEpisodes = snapshot.seasonEpisodes.mapValues { stampSeriesTMDb(into: $0.map(tagged)) }
+            snapshotRestoredSeasonIDs.formUnion(snapshot.seasonEpisodes.keys)
         }
         if sources.count <= 1, snapshot.sources.count > 1 {
             let restored = prunedToActiveAccounts(snapshot.sources)
@@ -1604,6 +1661,13 @@ public final class ItemDetailViewModel {
         sources = result
         applyUnifiedWatchState()
         persistSnapshot()
+        // A library-origin copy that was not present at first paint can arrive from
+        // async discovery. Prefer it before any Home/Search locality routing.
+        if applyLibraryOriginPreferenceIfAvailable(in: result) {
+            await reload()
+            startAlternateSourceEnrichment(primaryID: activeItemID)
+            return
+        }
         // If discovery surfaced a more-local copy of a SERIES, route there now so
         // its episode tree loads from the local (same-LAN) server — the initial
         // pass couldn't pick it because the twin wasn't known at first paint. The

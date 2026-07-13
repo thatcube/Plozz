@@ -5,6 +5,7 @@ import CoreUI
 import FeatureHome
 import FeatureMusic
 import FeaturePlayback
+import MediaTransportCore
 import MetadataKit
 import FeatureSearch
 import FeatureSettings
@@ -76,6 +77,8 @@ struct MainTabView: View {
     }
 
     let accounts: [ResolvedAccount]
+    let networkFileResolver: any MediaTransportNetworkFileResolving
+    let authenticatedHTTPResolver: any AuthenticatedHTTPResourceResolving
     /// Subtitle behaviour (mode / language / auto-download) and appearance
     /// (`SubtitleStyle`) split out of the retired `CaptionSettings`. Behaviour
     /// feeds the policy resolver; style seeds the player + live overlay.
@@ -323,6 +326,7 @@ struct MainTabView: View {
                     accounts: musicAvailability.detectedAccounts,
                     visibleLibraryIDs: musicAvailability.visibleLibraryIDs,
                     controller: audioController,
+                    authenticatedHTTPResolver: authenticatedHTTPResolver,
                     appTheme: themeModel.theme,
                     musicPlayer: musicPlayerModel,
                     showNowPlaying: $showNowPlaying
@@ -410,6 +414,8 @@ struct MainTabView: View {
             playRequest: $playRequest,
             resumePrompt: $resumePrompt,
             accounts: accounts,
+            networkFileResolver: networkFileResolver,
+            authenticatedHTTPResolver: authenticatedHTTPResolver,
             behavior: subtitleBehaviorModel.settings,
             style: subtitleStyleModel.style,
             playbackSettings: playbackModel.settings,
@@ -426,6 +432,10 @@ struct MainTabView: View {
         )
         .environment(\.themeMusicController, themeMusicController)
         .environment(\.themeMusicSettings, themeMusicModel.settings)
+        .environment(
+            \.themeMusicAuthenticatedHTTPResolver,
+            authenticatedHTTPResolver
+        )
         .onChange(of: audioController.hasActivePlayback, initial: true) { _, active in
             themeMusicController.setBlocked(active)
         }
@@ -1069,6 +1079,8 @@ private func failoverPlayItem(
 private func makePlayerViewModel(
     for request: PlayRequest,
     accounts: [ResolvedAccount],
+    networkFileResolver: any MediaTransportNetworkFileResolving,
+    authenticatedHTTPResolver: any AuthenticatedHTTPResourceResolving,
     behavior: SubtitleBehavior,
     style: SubtitleStyle,
     playbackSettings: PlaybackSettings,
@@ -1085,7 +1097,10 @@ private func makePlayerViewModel(
     if let videoID = request.item.youTubeTrailerVideoID {
         let trailerItem = request.item
         let onlineTrailerResolver = ItemDetailViewModel.defaultOnlineTrailerResolver
-        let engineFactory = HybridPlayback.engineFactory()
+        let engineFactory = HybridPlayback.engineFactory(
+            networkFileResolver: networkFileResolver,
+            authenticatedHTTPResolver: authenticatedHTTPResolver
+        )
         let trailerViewModel = PlayerViewModel(
             provider: YouTubeTrailerProvider(
                 item: trailerItem,
@@ -1118,6 +1133,7 @@ private func makePlayerViewModel(
             startPosition: request.startPosition,
             scrobbler: scrobbler,
             engineFactory: engineFactory,
+            authenticatedHTTPResolver: authenticatedHTTPResolver,
             autoDismissOnEnd: true
         )
         trailerViewModel.onSubtitleStyleChanged = onSubtitleStyleChanged
@@ -1175,7 +1191,11 @@ private func makePlayerViewModel(
         seriesAccountFallbackID: primaryAccountID,
         startPosition: request.startPosition,
         scrobbler: scrobbler,
-        engineFactory: HybridPlayback.engineFactory(),
+        engineFactory: HybridPlayback.engineFactory(
+            networkFileResolver: networkFileResolver,
+            authenticatedHTTPResolver: authenticatedHTTPResolver
+        ),
+        authenticatedHTTPResolver: authenticatedHTTPResolver,
         neighborResolver: neighborResolver,
         seriesIDResolver: seriesIDResolver,
         onPlaybackStopped: makePlaybackStoppedHandler(
@@ -1352,7 +1372,17 @@ private struct PlayerPresentation: View {
         }
         .task {
             if viewModel == nil {
+                HandoffDiagnostics.emit(
+                    "presentation READY trace=\(activeRequest.traceID.uuidString.prefix(8)) "
+                        + "item=\(activeRequest.item.id) "
+                        + "tapToPresentation=\(HandoffDiagnostics.ms(activeRequest.requestedAt))"
+                )
                 viewModel = make(activeRequest, nil)
+                HandoffDiagnostics.emit(
+                    "viewModel CREATED trace=\(activeRequest.traceID.uuidString.prefix(8)) "
+                        + "item=\(activeRequest.item.id) "
+                        + "tapToModel=\(HandoffDiagnostics.ms(activeRequest.requestedAt))"
+                )
             }
         }
         .onChange(of: viewModel?.pendingNextEpisode?.id) { _, nextID in
@@ -1510,7 +1540,12 @@ private struct HomeTab: View {
                     ),
                     title: library.title,
                     spoilerSettings: spoilerSettings,
-                    onSelect: { navigate($0, libraryOrigin: browse.sourceAccountID) }
+                    onSelect: {
+                        navigate(
+                            $0,
+                            libraryOrigin: browse.sourceAccountID ?? library.sourceAccountID
+                        )
+                    }
                 )
             }
             .navigationDestination(for: MediaItem.self) { item in
@@ -1535,6 +1570,7 @@ private struct HomeTab: View {
                         initialItem: route.episode,
                         ratingsProvider: ratingsProvider,
                         sourceAccountID: route.sourceAccountID,
+                        originSourceAccountID: route.originAccountID,
                         // The fronted page IS the series, so it gets the same
                         // cross-server "…" picker a directly-opened series does —
                         // discovery matches the series by provider IDs and fills
@@ -1545,7 +1581,7 @@ private struct HomeTab: View {
                     ),
                     spoilerSettings: spoilerSettings,
                     onPlay: { requestPlay($0) },
-                    onSelectChild: { navigate($0) },
+                    onSelectChild: { navigate($0, libraryOrigin: route.originAccountID) },
                     initialEpisode: route.episode,
                     seerConnected: seer.isConfigured,
                     requestAvailabilityRefresh: { await seer.requestAvailability(for: $0) },
@@ -1568,6 +1604,7 @@ private struct HomeTab: View {
                         initialItem: route.season,
                         ratingsProvider: ratingsProvider,
                         sourceAccountID: route.sourceAccountID,
+                        originSourceAccountID: route.originAccountID,
                         // The fronted page IS the series, so it gets the same
                         // cross-server "…" picker a directly-opened series does.
                         alternateProviderResolver: { resolveOptionalProvider($0, in: accounts) },
@@ -1576,7 +1613,7 @@ private struct HomeTab: View {
                     ),
                     spoilerSettings: spoilerSettings,
                     onPlay: { requestPlay($0) },
-                    onSelectChild: { navigate($0) },
+                    onSelectChild: { navigate($0, libraryOrigin: route.originAccountID) },
                     initialSeasonID: route.season.id,
                     seerConnected: seer.isConfigured,
                     requestAvailabilityRefresh: { await seer.requestAvailability(for: $0) },
@@ -1618,13 +1655,19 @@ private struct HomeTab: View {
     /// from a single-server library tile, so the pushed detail (and any movie/
     /// collection children it spawns) defaults its cross-server picker to that
     /// server. `nil` for Home/Search rows, which keep the smart best-version
-    /// default. Episode/season routes do no cross-server discovery (no picker), so
-    /// they need not carry the origin — they already play from their own provider.
+    /// default. Episode/season routes carry the same origin because their series
+    /// page can discover alternate servers after opening.
     private func navigate(_ item: MediaItem, libraryOrigin: String? = nil) {
         if item.kind == .episode, item.seriesID != nil {
-            path.append(EpisodeContextRoute(episode: item))
+            path.append(EpisodeContextRoute(
+                episode: item,
+                originAccountID: libraryOrigin
+            ))
         } else if item.kind == .season, item.seriesID != nil {
-            path.append(SeasonContextRoute(season: item))
+            path.append(SeasonContextRoute(
+                season: item,
+                originAccountID: libraryOrigin
+            ))
         } else if let libraryOrigin {
             path.append(LibraryDetailRoute(item: item, originAccountID: libraryOrigin))
         } else {
@@ -1706,9 +1749,17 @@ private struct HomeTab: View {
     /// (movie or episode), prompting Resume vs Start Over when it has progress.
     private func presentPlay(_ target: MediaItem) {
         if let resume = target.resumePosition, resume > 1 {
+            HandoffDiagnostics.emit(
+                "tap RESUME_PROMPT item=\(target.id) provider=\(target.sourceAccountID ?? "nil")"
+            )
             resumePrompt = target
         } else {
-            playRequest = PlayRequest(item: target, startPosition: 0)
+            let request = PlayRequest(item: target, startPosition: 0)
+            HandoffDiagnostics.emit(
+                "tap PLAY trace=\(request.traceID.uuidString.prefix(8)) item=\(target.id) "
+                    + "provider=\(target.sourceAccountID ?? "nil")"
+            )
+            playRequest = request
         }
     }
 
@@ -1749,6 +1800,21 @@ private struct HomeTab: View {
 private struct PlayRequest: Identifiable, Equatable {
     let item: MediaItem
     let startPosition: TimeInterval
+    let traceID: UUID
+    let requestedAt: Date
+
+    init(
+        item: MediaItem,
+        startPosition: TimeInterval,
+        traceID: UUID = UUID(),
+        requestedAt: Date = Date()
+    ) {
+        self.item = item
+        self.startPosition = startPosition
+        self.traceID = traceID
+        self.requestedAt = requestedAt
+    }
+
     var id: String { item.id }
 }
 
@@ -1760,6 +1826,8 @@ private extension View {
         playRequest: Binding<PlayRequest?>,
         resumePrompt: Binding<MediaItem?>,
         accounts: [ResolvedAccount],
+        networkFileResolver: any MediaTransportNetworkFileResolving,
+        authenticatedHTTPResolver: any AuthenticatedHTTPResourceResolving,
         behavior: SubtitleBehavior,
         style: SubtitleStyle,
         playbackSettings: PlaybackSettings,
@@ -1781,6 +1849,8 @@ private extension View {
                     makePlayerViewModel(
                         for: request,
                         accounts: accounts,
+                        networkFileResolver: networkFileResolver,
+                        authenticatedHTTPResolver: authenticatedHTTPResolver,
                         behavior: behavior,
                         style: style,
                         playbackSettings: playbackSettings,
@@ -1808,7 +1878,15 @@ private extension View {
             )
         }
         .resumePrompt(item: resumePrompt) { item, startPosition in
-            playRequest.wrappedValue = PlayRequest(item: item, startPosition: startPosition)
+            let request = PlayRequest(
+                item: item,
+                startPosition: startPosition
+            )
+            HandoffDiagnostics.emit(
+                "tap RESUME_CHOICE trace=\(request.traceID.uuidString.prefix(8)) "
+                    + "item=\(item.id) start=\(Int(startPosition))"
+            )
+            playRequest.wrappedValue = request
         }
     }
 }
@@ -1833,6 +1911,7 @@ private struct LibraryDetailRoute: Hashable {
 /// top — rather than a dead-end single-episode page.
 private struct EpisodeContextRoute: Hashable {
     let episode: MediaItem
+    let originAccountID: String?
     /// The owning series' id (falls back to the episode id only if unset, which
     /// shouldn't happen for an episode that carries a `seriesID`).
     var seriesID: String { episode.seriesID ?? episode.id }
@@ -1846,6 +1925,7 @@ private struct EpisodeContextRoute: Hashable {
 /// fronted in the hero.
 private struct SeasonContextRoute: Hashable {
     let season: MediaItem
+    let originAccountID: String?
     /// The owning series' id.
     var seriesID: String { season.seriesID ?? season.id }
     var sourceAccountID: String? { season.sourceAccountID }
@@ -2043,9 +2123,15 @@ private struct SearchTab: View {
         }
         .mediaItemNavigator { item in
             if item.kind == .episode, item.seriesID != nil {
-                path.append(EpisodeContextRoute(episode: item))
+                path.append(EpisodeContextRoute(
+                    episode: item,
+                    originAccountID: nil
+                ))
             } else if item.kind == .season, item.seriesID != nil {
-                path.append(SeasonContextRoute(season: item))
+                path.append(SeasonContextRoute(
+                    season: item,
+                    originAccountID: nil
+                ))
             } else {
                 path.append(item)
             }
@@ -2058,9 +2144,15 @@ private struct SearchTab: View {
     private func open(_ item: MediaItem) {
         switch item.kind {
         case .episode where item.seriesID != nil:
-            path.append(EpisodeContextRoute(episode: item))
+            path.append(EpisodeContextRoute(
+                episode: item,
+                originAccountID: nil
+            ))
         case .season where item.seriesID != nil:
-            path.append(SeasonContextRoute(season: item))
+            path.append(SeasonContextRoute(
+                season: item,
+                originAccountID: nil
+            ))
         default:
             path.append(item)
         }

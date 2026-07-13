@@ -96,7 +96,7 @@ public struct ShareScanState: Sendable, Equatable {
 @MainActor
 @Observable
 public final class ShareScanStatusModel {
-    /// Keyed by the share's stable id (`server.id`).
+    /// Keyed by the media-share account id used by the catalog coordinator.
     public private(set) var byShare: [String: ShareScanState] = [:]
 
     public init() {
@@ -117,6 +117,9 @@ public final class ShareScanStatusModel {
     /// pump makes application order deterministic and drop-free.
     @ObservationIgnored private nonisolated let continuation: AsyncStream<Event>.Continuation
     @ObservationIgnored private var pump: Task<Void, Never>?
+    /// Removed account ids are fenced so scanner events already queued during
+    /// cancellation cannot recreate a stale Home banner.
+    @ObservationIgnored private var removedShareIDs: Set<String> = []
 
     /// One reported scan/enrich event (see `reporter()`).
     enum Event: Sendable {
@@ -126,6 +129,7 @@ public final class ShareScanStatusModel {
         case enrichStarted(id: String, total: Int)
         case enrichProgress(id: String, done: Int)
         case enrichFinished(id: String)
+        case shareRemoved(id: String)
     }
 
     /// Apply one event, in stream order, on the main actor.
@@ -138,6 +142,7 @@ public final class ShareScanStatusModel {
         case let .enrichStarted(id, total): enrichStarted(shareID: id, total: total)
         case let .enrichProgress(id, done): enrichProgress(shareID: id, done: done)
         case let .enrichFinished(id): enrichFinished(shareID: id)
+        case let .shareRemoved(id): removeShare(shareID: id)
         }
     }
 
@@ -169,6 +174,7 @@ public final class ShareScanStatusModel {
     // MARK: - Mutations (called on the main actor via the reporter)
 
     public func scanStarted(shareID: String, name: String) {
+        guard !removedShareIDs.contains(shareID) else { return }
         var state = byShare[shareID] ?? ShareScanState(name: name)
         state.name = name
         state.isScanning = true
@@ -201,6 +207,7 @@ public final class ShareScanStatusModel {
     }
 
     public func enrichStarted(shareID: String, total: Int) {
+        guard !removedShareIDs.contains(shareID) else { return }
         // Create state if the enrich pass beat a (missed) scanStarted — the banner
         // should still reflect in-flight enrichment.
         var state = byShare[shareID] ?? ShareScanState(name: "")
@@ -224,6 +231,13 @@ public final class ShareScanStatusModel {
         byShare[shareID] = state
     }
 
+    /// Immediately removes a deleted share from every status surface and fences
+    /// progress already queued by its cancelling scanner.
+    public func removeShare(shareID: String) {
+        removedShareIDs.insert(shareID)
+        byShare[shareID] = nil
+    }
+
     /// A reporter that forwards scanner events onto this model **in order** via the
     /// serialized event stream (see `apply`). Held by the scanner/enricher (which
     /// run off-main), so passing it across the actor boundary is safe.
@@ -240,7 +254,8 @@ public final class ShareScanStatusModel {
             scanFinished: { id in c.yield(.scanFinished(id: id)) },
             enrichStarted: { id, total in c.yield(.enrichStarted(id: id, total: total)) },
             enrichProgress: { id, done in c.yield(.enrichProgress(id: id, done: done)) },
-            enrichFinished: { id in c.yield(.enrichFinished(id: id)) }
+            enrichFinished: { id in c.yield(.enrichFinished(id: id)) },
+            shareRemoved: { id in c.yield(.shareRemoved(id: id)) }
         )
     }
 }
@@ -258,6 +273,7 @@ public struct ShareScanReporter: Sendable {
     public var enrichStarted: @Sendable (_ shareID: String, _ total: Int) -> Void
     public var enrichProgress: @Sendable (_ shareID: String, _ done: Int) -> Void
     public var enrichFinished: @Sendable (_ shareID: String) -> Void
+    public var shareRemoved: @Sendable (_ shareID: String) -> Void
 
     public init(
         scanStarted: @escaping @Sendable (String, String) -> Void,
@@ -266,7 +282,8 @@ public struct ShareScanReporter: Sendable {
         scanFinished: @escaping @Sendable (String) -> Void,
         enrichStarted: @escaping @Sendable (String, Int) -> Void,
         enrichProgress: @escaping @Sendable (String, Int) -> Void,
-        enrichFinished: @escaping @Sendable (String) -> Void
+        enrichFinished: @escaping @Sendable (String) -> Void,
+        shareRemoved: @escaping @Sendable (String) -> Void = { _ in }
     ) {
         self.scanStarted = scanStarted
         self.scanProgress = scanProgress
@@ -277,12 +294,14 @@ public struct ShareScanReporter: Sendable {
         self.enrichStarted = enrichStarted
         self.enrichProgress = enrichProgress
         self.enrichFinished = enrichFinished
+        self.shareRemoved = shareRemoved
     }
 
     /// No-op sink (default when no status model is wired).
     public static let noop = ShareScanReporter(
         scanStarted: { _, _ in }, scanProgress: { _, _ in },
         scanDetailedProgress: { _, _, _ in }, scanFinished: { _ in },
-        enrichStarted: { _, _ in }, enrichProgress: { _, _ in }, enrichFinished: { _ in }
+        enrichStarted: { _, _ in }, enrichProgress: { _, _ in },
+        enrichFinished: { _ in }, shareRemoved: { _ in }
     )
 }

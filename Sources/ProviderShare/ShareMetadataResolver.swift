@@ -9,6 +9,19 @@ struct ShareEnrichRequest: Sendable, Equatable {
     var year: Int?
     var isMovie: Bool
     var isAnime: Bool
+    /// On-disk episode fingerprints (season/episode/title), used to disambiguate a
+    /// same-name series collision by content. Empty for movies or when unknown.
+    var episodeHints: [SeriesEpisodeHint] = []
+    /// Extra, more-specific series titles recovered from the FILENAMES when the
+    /// (folder-derived) `title` is generic — e.g. an "Avatar (2024)" folder whose
+    /// files say "Avatar The Last Airbender". Tried ahead of `title` at search so a
+    /// generic folder still resolves. Most-specific first; empty for movies or when
+    /// filenames match the folder title.
+    var titleAlternates: [String] = []
+    /// An EXPLICIT TheTVDB id the library folder declared (`[tvdb-####]`). When
+    /// present, enrichment resolves DIRECTLY by this id — authoritative, skipping
+    /// the ambiguous title search (fixes the tagged 1999 One Piece anime).
+    var knownTVDBID: String? = nil
 }
 
 /// Resolves metadata (external ids + overview + artwork) for a bare share item.
@@ -76,20 +89,46 @@ struct TVDBShareResolver: ShareMetadataResolving {
         async let keylessIDsTask = KeylessIDResolver().externalIDs(
             title: request.title, year: request.year, isAnime: request.isAnime, isTV: !request.isMovie
         )
-        async let tvdbTask = tvdb.resolve(title: request.title, year: request.year, isMovie: request.isMovie)
+        // TheTVDB metadata: when the folder declared an explicit [tvdb-####] id,
+        // resolve DIRECTLY by that id (authoritative) — otherwise try the
+        // more-specific filename-derived titles first (a generic folder like
+        // "Avatar (2024)" resolves via "Avatar The Last Airbender"), then the stored
+        // folder title. `search` prefers an exact-year hit but falls back to
+        // relevance, so a specific query is far less likely to mis-match.
+        let meta: TVDBMetadata?
+        if let knownID = request.knownTVDBID {
+            if let byID = await tvdb.resolve(byTVDBID: knownID, isMovie: request.isMovie) {
+                meta = byID
+            } else {
+                meta = await tvdb.resolve(titles: request.titleAlternates + [request.title],
+                                          year: request.year, isMovie: request.isMovie,
+                                          episodeHints: request.episodeHints)
+            }
+        } else {
+            meta = await tvdb.resolve(titles: request.titleAlternates + [request.title],
+                                      year: request.year,
+                                      isMovie: request.isMovie, episodeHints: request.episodeHints)
+        }
         var ids = await keylessIDsTask
-        let meta = await tvdbTask
         if let meta {
             if let t = meta.tvdbID, !t.isEmpty { ids["Tvdb"] = t }
             if let i = meta.imdbID, !i.isEmpty { ids["Imdb"] = i }
             if let t = meta.tmdbID, !t.isEmpty { ids["Tmdb"] = t }
         }
 
+        // The best display title: TheTVDB's canonical name (which upgrades a generic
+        // folder title like "Avatar" → "Avatar: The Last Airbender") else the stored
+        // one. Feeding it into the artwork item lets the id- and title-based logo
+        // providers target the RIGHT same-named show. (The year is set for
+        // completeness but title-based TV art providers currently key on title +
+        // provider id, not year.)
+        let resolvedTitle = meta?.title?.nonBlank
+        let artworkTitle = resolvedTitle ?? request.title
         let item = MediaItem(
             id: request.itemID,
-            title: request.title,
+            title: artworkTitle,
             kind: request.isMovie ? .movie : .series,
-            productionYear: request.isMovie ? request.year : nil,
+            productionYear: request.isMovie ? request.year : (meta?.year ?? request.year),
             genres: request.isAnime ? ["Anime"] : (meta?.genres ?? []),
             providerIDs: ids
         )
@@ -118,7 +157,15 @@ struct TVDBShareResolver: ShareMetadataResolving {
             runtime: nil,
             posterURL: poster,
             backdropURL: await hero,
-            logoURL: await logo
+            logoURL: await logo,
+            title: resolvedTitle
         )
+    }
+}
+
+private extension String {
+    var nonBlank: String? {
+        let t = trimmingCharacters(in: .whitespacesAndNewlines)
+        return t.isEmpty ? nil : t
     }
 }

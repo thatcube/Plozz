@@ -1,6 +1,7 @@
 import Foundation
 import CoreModels
 import CoreNetworking
+import MetadataKit
 
 /// Second pass after a scan: resolves + persists metadata (external ids, overview,
 /// artwork) for indexed movies/series that lack it, so a share's cards and detail
@@ -10,10 +11,49 @@ import CoreNetworking
 /// Foreground, incremental, cancellation-safe, and bounded: it processes a few
 /// items concurrently, persists each result (marking it done at the current
 /// enrichment version so it isn't re-fetched), and stops cleanly on cancel or when
-/// nothing is pending. Kicked by `ShareCatalogRegistry` after each scan.
+/// nothing is pending. Kicked by `ShareCatalogCoordinator` after each scan.
 actor ShareEnricher {
     /// Bump when the resolver's output materially changes, to re-enrich everything.
-    static let version = 1
+    /// v2: TVDB same-name collisions now disambiguate by on-disk episode titles
+    /// (fixes e.g. animated "Archer" matching the 1975 detective drama).
+    /// v3: series titles are normalized and now carry a year, so re-enrich to pick
+    /// up clean titles + year-based disambiguation.
+    /// v4: a generic show folder ("Avatar (2024)") also searches richer
+    /// filename-derived titles ("Avatar The Last Airbender"), so re-enrich.
+    /// v5: robust series keys (article/apostrophe folding) + a representative
+    /// (most-common) series year instead of MAX, so re-enrich with the corrected
+    /// grouping and years.
+    /// v6: resolve directly by an explicit [tvdb-####] folder tag, upgrade a generic
+    /// folder title to the resolved canonical name, and feed that name+year into
+    /// artwork so the logo matches the right same-named show.
+    /// v7: re-enrich after the nested-spinoff regroup so a parent show whose hints
+    /// were previously polluted (The Witcher, absorbing Blood Origin) resolves to its
+    /// own id; also fetch the English overview for id-resolved shows (One Piece).
+    /// v8: id-corroborated series reconciliation — fold a typo'd folder ("Peaky
+    /// Blinder") into its twin ("Peaky Blinders") when both resolve to the same
+    /// strong external id. Re-enrich so the merge runs on existing catalogs.
+    /// v9: reject non-canonical variant matches (a "Sword Art Online" folder no
+    /// longer resolves to the "Abridged" parody) and prefer the English name/overview
+    /// on the title-search path too (fixes Japanese descriptions for Death Note,
+    /// "…Slime", etc.). Re-enrich to correct them.
+    /// v10: episode-title hints skip synthetic "S1·E01" placeholders, so a show with
+    /// bare-numbered early seasons (Outlander) sends its real later-season titles and
+    /// disambiguates to the right show instead of a same-named foreign series.
+    /// v11: a release year after the episode marker ("Show S01E01 2025 …") is now
+    /// captured as the series year, enabling year-based disambiguation (The Eternaut
+    /// 2025 vs a same-fuzzy-named older title). Re-enrich to use it.
+    /// v12: episode-title disambiguation scores exact-name matches first and more
+    /// candidates (a popular show ranking below a foreign namesake — Outlander vs
+    /// "O Caçador" — is now scored), and a cryptic filename abbreviation ("TP" under
+    /// a "The Punisher" folder) is no longer used as a search alternate.
+    /// v13: a re-enrich after a version bump now REPLACES the stored record instead
+    /// of merging, so stale artwork from a previous wrong match is dropped (a "TP"
+    /// folder that once cached TAP Portugal's logo no longer keeps it under the
+    /// corrected "The Punisher").
+    /// v14: prefer the English title too (not just non-Latin overviews) when the
+    /// resolved name doesn't resemble the searched title — TheTVDB serves a foreign
+    /// primary name in Latin script for some shows ("The Eternaut" → "El eternauta").
+    static let version = 14
 
     private let store: ShareCatalogStore
     private let resolver: ShareMetadataResolving
@@ -96,11 +136,10 @@ actor ShareEnricher {
             let resolver = self.resolver
             func addNext() -> Bool {
                 guard !Task.isCancelled, let pending = iterator.next() else { return false }
-                let request = ShareEnrichRequest(
-                    itemID: pending.itemID, title: pending.title, year: pending.year,
-                    isMovie: pending.isMovie, isAnime: pending.isAnime
-                )
-                group.addTask { (pending.itemID, await resolver.resolve(request)) }
+                group.addTask { [self] in
+                    let request = await self.request(for: pending)
+                    return (pending.itemID, await resolver.resolve(request))
+                }
                 return true
             }
             for _ in 0..<concurrency { _ = addNext() }
@@ -130,12 +169,30 @@ actor ShareEnricher {
     /// guard) so opening an item during a full drain still fast-tracks it.
     func enrichOne(itemID: String) async {
         guard let pending = await store.pendingEnrichment(forItemID: itemID, version: Self.version) else { return }
-        let request = ShareEnrichRequest(
-            itemID: pending.itemID, title: pending.title, year: pending.year,
-            isMovie: pending.isMovie, isAnime: pending.isAnime
-        )
+        let request = await request(for: pending)
         let record = await resolver.resolve(request)
         guard !Task.isCancelled else { return }
         await store.saveEnrichment(itemID: pending.itemID, record, version: Self.version)
+    }
+
+    /// Builds the resolve request for a pending item, attaching on-disk episode
+    /// title hints for a series so a same-name metadata collision can be resolved
+    /// by content (see ``TVDBClient`` disambiguation). No hints for movies.
+    private func request(for pending: ShareCatalogStore.PendingEnrichment) async -> ShareEnrichRequest {
+        var hints: [SeriesEpisodeHint] = []
+        var alternates: [String] = []
+        var knownTVDBID: String?
+        if !pending.isMovie, let key = ShareCatalogID.seriesKey(forSeriesID: pending.itemID) {
+            hints = await store.episodeTitleHints(seriesKey: key).map {
+                SeriesEpisodeHint(season: $0.season, episode: $0.episode, title: $0.title)
+            }
+            alternates = await store.seriesSearchTitleAlternates(seriesKey: key, storedTitle: pending.title)
+            knownTVDBID = await store.seriesEmbeddedTVDBID(seriesKey: key)
+        }
+        return ShareEnrichRequest(
+            itemID: pending.itemID, title: pending.title, year: pending.year,
+            isMovie: pending.isMovie, isAnime: pending.isAnime, episodeHints: hints,
+            titleAlternates: alternates, knownTVDBID: knownTVDBID
+        )
     }
 }

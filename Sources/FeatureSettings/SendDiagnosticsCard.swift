@@ -1,5 +1,6 @@
 #if canImport(SwiftUI)
 import SwiftUI
+import CoreModels
 import CoreNetworking
 import CoreUI
 import CrashReporting
@@ -35,8 +36,15 @@ struct SendDiagnosticsCard: View {
 
                     Button {
                         let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+                        let recentActivity = PlozzLog.recentLogText(limit: 500)
+                        let playbackJournal = HandoffDiagnostics.persistentPlaybackLogText()
+                        let logText = playbackJournal.isEmpty
+                            ? recentActivity
+                            : recentActivity
+                                + "\n\n--- Persistent playback journal ---\n"
+                                + playbackJournal
                         let ok = CrashDiagnostics.send(
-                            logText: PlozzLog.recentLogText(limit: 500),
+                            logText: logText,
                             note: trimmed.isEmpty ? nil : trimmed
                         )
                         sendState = ok ? .sent : .failed

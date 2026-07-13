@@ -313,4 +313,89 @@ final class ShareCatalogStoreTests: XCTestCase {
                        ShareCatalogID.seriesKey(fromTitle: "breaking.bad"))
         XCTAssertEqual(ShareCatalogID.seriesKey(fromTitle: "Mr. Robot"), "mr-robot")
     }
+
+    // MARK: - Reconciliation primitives
+
+    func testLevenshtein() {
+        XCTAssertEqual(ShareCatalogStore.levenshtein("peaky blinder", "peaky blinders"), 1)
+        XCTAssertEqual(ShareCatalogStore.levenshtein("kitten", "sitting"), 3)
+        XCTAssertEqual(ShareCatalogStore.levenshtein("same", "same"), 0)
+        XCTAssertEqual(ShareCatalogStore.levenshtein("", "abc"), 3)
+    }
+
+    func testTitlesNearlyIdentical() {
+        // Typo / plural of one show.
+        XCTAssertTrue(ShareCatalogStore.titlesNearlyIdentical("Peaky Blinder", "Peaky Blinders"))
+        XCTAssertTrue(ShareCatalogStore.titlesNearlyIdentical("The Handmaids Tale", "The Handmaid's Tale"))
+        // A digit difference is a deliberate distinction — never "nearly identical".
+        XCTAssertFalse(ShareCatalogStore.titlesNearlyIdentical("1883", "1923"))
+        // Too short / too different.
+        XCTAssertFalse(ShareCatalogStore.titlesNearlyIdentical("Fargo", "Cargo"))
+        XCTAssertFalse(ShareCatalogStore.titlesNearlyIdentical("Lost", "Loki"))
+        XCTAssertFalse(ShareCatalogStore.titlesNearlyIdentical("The Office", "The Wire"))
+    }
+
+    func testResolveAliasFollowsChains() {
+        let map = ["a": "b", "b": "c", "x": "y"]
+        XCTAssertEqual(ShareCatalogStore.resolveAlias("a", in: map), "c")
+        XCTAssertEqual(ShareCatalogStore.resolveAlias("b", in: map), "c")
+        XCTAssertEqual(ShareCatalogStore.resolveAlias("x", in: map), "y")
+        XCTAssertEqual(ShareCatalogStore.resolveAlias("z", in: map), "z")
+        // A cycle terminates (rather than looping forever) at a cycle member.
+        XCTAssertTrue(["a", "b"].contains(ShareCatalogStore.resolveAlias("a", in: ["a": "b", "b": "a"])))
+    }
+
+    func testAddsVariantWordBlocksParodyUpgrade() {
+        // "sword art online" must never upgrade to "sword art online abridged".
+        XCTAssertTrue(ShareCatalogStore.addsVariantWord(base: "sword art online", extended: "sword art online abridged"))
+        // A genuine subtitle extension is allowed ("avatar" → "avatar the last airbender").
+        XCTAssertFalse(ShareCatalogStore.addsVariantWord(base: "avatar", extended: "avatar the last airbender"))
+    }
+
+    func testEpisodeHintsSkipSyntheticPlaceholders() async {
+        // A show with bare-numbered early seasons stores "S1·E01" placeholder titles;
+        // those must be excluded from disambiguation hints so the real later-season
+        // titles are used (the Outlander bug).
+        let store = ShareCatalogStore(accountKey: "a", directory: tempDir())
+        func ep(_ path: String, _ season: Int, _ episode: Int, title: String) -> CatalogAsset {
+            CatalogAsset(relPath: path, basename: (path as NSString).lastPathComponent, size: 1,
+                         modifiedAt: Date(), kind: .episode, library: .tv,
+                         title: title, year: nil, seriesTitle: "Outlander",
+                         seriesKey: ShareCatalogID.seriesKey(fromTitle: "Outlander"),
+                         season: season, episode: episode)
+        }
+        await store.upsert([
+            ep("TV/Outlander/S01/o.s01e01.mkv", 1, 1, title: "S1·E01"),
+            ep("TV/Outlander/S01/o.s01e02.mkv", 1, 2, title: "S1·E02"),
+            ep("TV/Outlander/S02/o.s02e01.mkv", 2, 1, title: "Through a Glass, Darkly"),
+            ep("TV/Outlander/S02/o.s02e02.mkv", 2, 2, title: "Not in Scotland Anymore"),
+        ], scanID: 1)
+        let key = ShareCatalogID.seriesKey(fromTitle: "Outlander")
+        let hints = await store.episodeTitleHints(seriesKey: key)
+        XCTAssertEqual(hints.map(\.title), ["Through a Glass, Darkly", "Not in Scotland Anymore"])
+        XCTAssertFalse(hints.contains { $0.title.hasPrefix("S1·E") }, "placeholders excluded")
+    }
+
+    func testSearchAlternatesExcludeShorterAbbreviations() async {
+        // A cryptic filename abbreviation ("TP" under a "The Punisher" folder) must
+        // NOT be offered as a search alternate — only a RICHER (more-word) filename
+        // title qualifies (the Punisher bug). A generic folder with a longer filename
+        // title ("Avatar" folder, "Avatar The Last Airbender" files) still yields one.
+        let store = ShareCatalogStore(accountKey: "a", directory: tempDir())
+        func ep(_ path: String, series: String, key: String, _ s: Int, _ e: Int) -> CatalogAsset {
+            CatalogAsset(relPath: path, basename: (path as NSString).lastPathComponent, size: 1,
+                         modifiedAt: Date(), kind: .episode, library: .tv,
+                         title: "t", year: nil, seriesTitle: series, seriesKey: key, season: s, episode: e)
+        }
+        let punisher = ShareCatalogID.seriesKey(fromTitle: "The Punisher")
+        let avatar = ShareCatalogID.seriesKey(fromTitle: "Avatar")
+        await store.upsert([
+            ep("TV/The Punisher/TP.S01E01.3AM.mkv", series: "The Punisher", key: punisher, 1, 1),
+            ep("TV/Avatar (2024)/Avatar.The.Last.Airbender.2024.S01E01.mkv", series: "Avatar", key: avatar, 1, 1),
+        ], scanID: 1)
+        let punisherAlts = await store.seriesSearchTitleAlternates(seriesKey: punisher, storedTitle: "The Punisher")
+        XCTAssertFalse(punisherAlts.contains { $0.caseInsensitiveCompare("TP") == .orderedSame }, "abbreviation excluded")
+        let avatarAlts = await store.seriesSearchTitleAlternates(seriesKey: avatar, storedTitle: "Avatar")
+        XCTAssertTrue(avatarAlts.contains("Avatar The Last Airbender"), "richer filename title kept")
+    }
 }

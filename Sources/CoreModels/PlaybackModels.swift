@@ -1,7 +1,18 @@
 import Foundation
 
+/// Credential-free instructions for loading a text subtitle sidecar.
+public enum SubtitleDeliverySource: Hashable, Sendable {
+    case localFile(URL)
+    case authenticatedHTTP(AuthenticatedHTTPPlaybackLocator)
+
+    public var immediateURL: URL? {
+        guard case .localFile(let url) = self else { return nil }
+        return url
+    }
+}
+
 /// A selectable audio or subtitle track exposed by a stream.
-public struct MediaTrack: Codable, Hashable, Identifiable, Sendable {
+public struct MediaTrack: Hashable, Identifiable, Sendable {
     public enum Kind: String, Codable, Sendable {
         case audio
         case subtitle
@@ -33,17 +44,15 @@ public struct MediaTrack: Codable, Hashable, Identifiable, Sendable {
     /// `true` for commentary tracks (director/cast). Surfaces a "Commentary"
     /// qualifier on audio and subtitle labels.
     public var isCommentary: Bool
-    /// For subtitle tracks: an absolute URL that yields the subtitle text
-    /// (WebVTT, or SRT which the player normalises to WebVTT). When non-`nil`
-    /// the player can inject this track into the native picker even on direct
-    /// play. `nil` for audio tracks and for subtitles that can't be delivered
-    /// as text (e.g. image-based PGS/VOBSUB, which need server burn-in).
-    public var deliveryURL: URL?
+    /// For subtitle tracks: credential-free instructions for loading subtitle
+    /// text. Managed-provider credentials are resolved only when the engine or
+    /// overlay begins I/O; local share sidecars reference their temporary file.
+    public var deliverySource: SubtitleDeliverySource?
     /// `true` for image-based subtitles (PGS/VOBSUB/DVDSUB) that no on-device
     /// engine can render — only a server burn-in transcode shows them. A *text*
-    /// subtitle embedded in the container (so it has no `deliveryURL`) is **not**
+    /// subtitle embedded in the container (so it has no delivery source) is **not**
     /// image-based: Plozzigen remuxes it into the playback stream. Routing must
-    /// key off this flag, not `deliveryURL == nil`, or embedded SRT gets pushed
+    /// key off this flag, not a missing delivery source, or embedded SRT gets pushed
     /// to the hybrid engine (and crashes on multichannel) needlessly.
     public var isImageBasedSubtitle: Bool
     /// `true` for a subtitle that isn't embedded in the media file — a subtitle the
@@ -65,7 +74,7 @@ public struct MediaTrack: Codable, Hashable, Identifiable, Sendable {
         isAtmos: Bool = false,
         isHearingImpaired: Bool = false,
         isCommentary: Bool = false,
-        deliveryURL: URL? = nil,
+        deliverySource: SubtitleDeliverySource? = nil,
         isImageBasedSubtitle: Bool = false,
         isExternal: Bool = false
     ) {
@@ -80,7 +89,7 @@ public struct MediaTrack: Codable, Hashable, Identifiable, Sendable {
         self.isAtmos = isAtmos
         self.isHearingImpaired = isHearingImpaired
         self.isCommentary = isCommentary
-        self.deliveryURL = deliveryURL
+        self.deliverySource = deliverySource
         self.isImageBasedSubtitle = isImageBasedSubtitle
         self.isExternal = isExternal
     }
@@ -252,11 +261,16 @@ public struct MediaSourceMetadata: Hashable, Sendable, Codable {
 /// Everything `FeaturePlayback` needs to start playing an item.
 ///
 /// Built by a provider's `playbackInfo(for:)`. The provider decides whether to
-/// direct-play or transcode and hands back a ready-to-play URL.
+/// direct-play or transcode and hands back either a legacy resolved URL or a
+/// credential-free typed source.
 public struct PlaybackRequest: Hashable, Sendable {
     public var item: MediaItem
-    /// The resolved media stream URL (HLS or direct file).
-    public var streamURL: URL
+    /// Credential-free source resolved at the engine boundary. Network files
+    /// use this path and never carry a diagnostic or placeholder URL.
+    public var playbackSource: PlaybackSource?
+    /// Legacy resolved media stream URL (HLS or direct file) while managed
+    /// providers migrate to typed authenticated-HTTP locators.
+    public var streamURL: URL?
     /// An optional *separate* audio track to be muxed with `streamURL` at playback
     /// time. Used for adaptive sources whose video and audio are delivered as two
     /// distinct streams (e.g. a high-resolution YouTube DASH trailer: `streamURL`
@@ -336,6 +350,7 @@ public struct PlaybackRequest: Hashable, Sendable {
         sourceFileName: String? = nil
     ) {
         self.item = item
+        self.playbackSource = nil
         self.streamURL = streamURL
         self.externalAudioURL = externalAudioURL
         self.playSessionID = playSessionID
@@ -348,6 +363,42 @@ public struct PlaybackRequest: Hashable, Sendable {
         self.localRemuxSource = localRemuxSource
         self.scrubPreview = scrubPreview
         self.isManifestStream = isTranscoding || streamURL.pathExtension.lowercased() == "m3u8"
+        self.sourceProvider = sourceProvider
+        self.serverName = serverName
+        self.sourceFileName = sourceFileName
+    }
+
+    public init(
+        item: MediaItem,
+        playbackSource: PlaybackSource,
+        externalAudioURL: URL? = nil,
+        playSessionID: String? = nil,
+        audioTracks: [MediaTrack] = [],
+        subtitleTracks: [MediaTrack] = [],
+        startPosition: TimeInterval = 0,
+        isTranscoding: Bool? = nil,
+        deliveryMode: PlaybackDiagnostics.PlaybackMode = .directPlay,
+        sourceMetadata: MediaSourceMetadata? = nil,
+        localRemuxSource: LocalRemuxSourceDescriptor? = nil,
+        scrubPreview: ScrubPreviewSource? = nil,
+        sourceProvider: ProviderKind? = nil,
+        serverName: String? = nil,
+        sourceFileName: String? = nil
+    ) {
+        self.item = item
+        self.playbackSource = playbackSource
+        self.streamURL = nil
+        self.externalAudioURL = externalAudioURL
+        self.playSessionID = playSessionID
+        self.audioTracks = audioTracks
+        self.subtitleTracks = subtitleTracks
+        self.startPosition = startPosition
+        self.isTranscoding = isTranscoding ?? (deliveryMode == .transcode)
+        self.deliveryMode = deliveryMode
+        self.sourceMetadata = sourceMetadata
+        self.localRemuxSource = localRemuxSource
+        self.scrubPreview = scrubPreview
+        self.isManifestStream = playbackSource.isManifestStream
         self.sourceProvider = sourceProvider
         self.serverName = serverName
         self.sourceFileName = sourceFileName

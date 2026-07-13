@@ -307,13 +307,15 @@ public struct PlaybackQuality: Hashable, Sendable {
 }
 
 /// Everything an audio playback engine needs to start a track and build its
-/// queue. The audio analogue of `PlaybackRequest`; the provider resolves the
-/// stream URL (direct-play or transcode) just as it does for video.
+/// queue. The audio analogue of `PlaybackRequest`; the provider returns a
+/// credential-free source that is resolved only when the audio engine needs it.
 public struct AudioPlaybackRequest: Hashable, Sendable {
     /// The track being played.
     public var track: MusicTrack
-    /// The resolved audio stream URL (HLS or direct file).
-    public var streamURL: URL
+    /// Credential-free audio source resolved at the AVPlayer boundary.
+    public var playbackSource: PlaybackSource
+    /// Compatibility access for genuinely public audio only.
+    public var streamURL: URL? { playbackSource.publicURL }
     /// Opaque session id used when reporting progress back to the server.
     public var playSessionID: String?
     /// The ordered queue this track plays within (album/playlist context),
@@ -331,7 +333,7 @@ public struct AudioPlaybackRequest: Hashable, Sendable {
 
     public init(
         track: MusicTrack,
-        streamURL: URL,
+        playbackSource: PlaybackSource,
         playSessionID: String? = nil,
         queue: [MusicTrack]? = nil,
         queueIndex: Int = 0,
@@ -340,7 +342,7 @@ public struct AudioPlaybackRequest: Hashable, Sendable {
         quality: PlaybackQuality? = nil
     ) {
         self.track = track
-        self.streamURL = streamURL
+        self.playbackSource = playbackSource
         self.playSessionID = playSessionID
         self.queue = queue ?? [track]
         self.queueIndex = queueIndex

@@ -70,10 +70,9 @@ public enum MediaItemIdentity {
     ///    name/year via a false transitive merge (anime vs live-action remake with
     ///    bad year metadata).
     /// 2. **Title identity is movies-only.** Two films with the same title and
-    ///    year are almost certainly the same release; two *series* with the same
-    ///    name routinely are not (original vs reboot, anime vs live-action), and
-    ///    a wrong year on one server would silently collapse them. Series must
-    ///    rely on external ids alone.
+    ///    year are almost certainly the same release; episodes and whole series
+    ///    require external IDs. Episodes may additionally use explicit `Series*`
+    ///    IDs scoped by exact season/episode numbers.
     /// 3. **No bare `.sameItemID`.** A raw item id is only unique *within one
     ///    server* — Plex `ratingKey`s are small per-server integers that collide
     ///    across unrelated servers, so emitting `.sameItemID(item.id)` here would
@@ -89,7 +88,11 @@ public enum MediaItemIdentity {
         // matches — the old plain-`.lowercased()` compare missed those.
         for entry in strongExternalNamespaces {
             if let value = item.providerIDs.providerID(entry.namespace) {
-                result.append(.external(source: entry.canonical, value: value.lowercased()))
+                guard let source = externalSource(
+                    entry.canonical,
+                    for: item
+                ) else { continue }
+                result.append(.external(source: source, value: value.lowercased()))
             }
         }
 
@@ -105,13 +108,32 @@ public enum MediaItemIdentity {
         // and the merge split-guard still ejects any genuinely contradictory pair.
         if let plexGuid = item.providerIDs["PlexGuid"]?.trimmingCharacters(in: .whitespacesAndNewlines),
            !plexGuid.isEmpty {
-            result.append(.external(source: "plexguid", value: plexGuid.lowercased()))
+            if let source = externalSource("plexguid", for: item) {
+                result.append(.external(source: source, value: plexGuid.lowercased()))
+            }
         }
+
+        result.append(contentsOf: seriesEpisodeIdentities(for: item))
 
         if result.isEmpty, let titleIdentity = titleIdentity(for: item) {
             result.append(titleIdentity)
         }
         return result
+    }
+
+    /// Episodes are scoped by `(season, episode)` even when an external ID exists.
+    /// Plex and metadata-enriched filesystem shares can expose the SHOW's IDs on
+    /// every episode; treating those raw IDs as episode identities collapses an
+    /// entire series into one cross-server source set. Scoping also remains safe
+    /// when the backend really supplied episode-level IDs.
+    private static func externalSource(
+        _ canonical: String,
+        for item: MediaItem
+    ) -> String? {
+        guard item.kind == .episode else { return canonical }
+        guard let season = item.seasonNumber,
+              let episode = item.episodeNumber else { return nil }
+        return "\(canonical):s\(season)e\(episode)"
     }
 
     private static func titleIdentity(for item: MediaItem) -> MediaIdentity? {
@@ -120,6 +142,32 @@ public enum MediaItemIdentity {
         let normalized = normalizedTitle(item.title)
         guard !normalized.isEmpty else { return nil }
         return .title(normalizedTitle: normalized, year: year, kind: item.kind)
+    }
+
+    private static func seriesEpisodeIdentities(
+        for item: MediaItem
+    ) -> [MediaIdentity] {
+        guard item.kind == .episode,
+              let season = item.seasonNumber,
+              let episode = item.episodeNumber else { return [] }
+        let namespaces: [(ProviderIDNamespace, String)] = [
+            (.seriesImdb, "imdb"),
+            (.seriesTmdb, "tmdb"),
+            (.seriesTvdb, "tvdb"),
+            (.seriesTvmaze, "tvmaze"),
+            (.seriesAniList, "anilist"),
+            (.seriesMal, "myanimelist"),
+            (.seriesAniDB, "anidb")
+        ]
+        return namespaces.compactMap { namespace, canonical in
+            guard let value = item.providerIDs.providerID(namespace) else {
+                return nil
+            }
+            return .external(
+                source: "series-\(canonical):s\(season)e\(episode)",
+                value: value.lowercased()
+            )
+        }
     }
 
     /// Whether two items almost certainly refer to **different works** despite

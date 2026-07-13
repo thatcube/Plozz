@@ -8,7 +8,7 @@ import FeaturePlayback
 import UIKit
 #endif
 @preconcurrency import AetherEngine
-@preconcurrency import AetherEngineSMB
+import MediaTransportCore
 
 // The module and main class are both named "AetherEngine", so we typealias
 // the class to avoid ambiguity. All other public types (LoadOptions,
@@ -134,16 +134,28 @@ public final class PlozzigenVideoEngine: VideoEngine {
     // MARK: - Private
 
     private let engine: AEEngine
+    private let networkFileResolver: (any MediaTransportNetworkFileResolving)?
+    private let authenticatedHTTPResolver: (any AuthenticatedHTTPResourceResolving)?
     private var cancellables = Set<AnyCancellable>()
     private var progressTimer: Task<Void, Never>?
+    /// The leased network source backing the current load (SMB/network-file path
+    /// only). Retained so ``drainTransport()`` can await its full shutdown before a
+    /// stall-recovery retry re-opens, instead of letting deinit release it
+    /// asynchronously and racing the fresh open. `nil` for URL-backed loads.
+    private var activeResolvedSource: MediaTransportResolvedSource?
     #if canImport(UIKit)
     private let videoView: UIView
     #endif
 
     // MARK: - Init
 
-    public init() throws {
+    public init(
+        networkFileResolver: (any MediaTransportNetworkFileResolving)? = nil,
+        authenticatedHTTPResolver: (any AuthenticatedHTTPResourceResolving)? = nil
+    ) throws {
         self.engine = try AEEngine()
+        self.networkFileResolver = networkFileResolver
+        self.authenticatedHTTPResolver = authenticatedHTTPResolver
         #if canImport(UIKit)
         let surface = AetherPlayerView()
         engine.bind(view: surface)
@@ -168,8 +180,28 @@ public final class PlozzigenVideoEngine: VideoEngine {
             // apply/reset lines to the hand-off telemetry stdout channel, so
             // time-to-first-frame and the panel HDR/DV enter/exit are visible on
             // device (e.g. confirm the panel resets to SDR when a title ends).
-            if handoff, line.contains("[TTFF]") || line.contains("[DisplayCriteria]") {
-                HandoffDiagnostics.emit("aether " + line)
+            let lowered = line.lowercased()
+            let isFailureDetail = [
+                "failed", "failure", "error", "starved", "stalled", "watchdog"
+            ].contains { lowered.contains($0) }
+            // Stall diagnostics (SMB/DV first-segment wedge after the DV switch):
+            //  • [LagDiag] — 1 Hz AVPlayer transport state (tcs / wait-reason /
+            //    dclk / req delta / buffer). The engine promotes it to the host
+            //    handler only while the player is NOT cleanly advancing (plus a
+            //    1-in-10 heartbeat), so this stays quiet during smooth playback.
+            //  • [HLSLocalServer] GET — every segment/playlist request AVPlayer
+            //    issues, so a stall shows whether it re-requests the reset segment
+            //    (server fault) or goes silent (AVPlayer wedge).
+            let isStallDiag = line.contains("[LagDiag]")
+                || (line.contains("[HLSLocalServer]") && line.contains("GET "))
+            if handoff,
+               line.contains("[TTFF]")
+                || line.contains("[DisplayCriteria]")
+                || isStallDiag
+                || isFailureDetail {
+                HandoffDiagnostics.emit(
+                    "aether " + HandoffDiagnostics.redactedDetail(line)
+                )
             }
         }
     }
@@ -181,12 +213,6 @@ public final class PlozzigenVideoEngine: VideoEngine {
         isPaused = false
         intendsPause = false
         furthestObservedPosition = startPosition
-
-        // Prefer the original range-readable URL (MKV bytes with embedded auth)
-        // for sources that have a localRemuxSource descriptor; AetherEngine
-        // handles the remux pipeline internally. Fall back to streamURL for
-        // standard HLS / direct-play URLs.
-        let url = request.localRemuxSource?.originalURL ?? request.streamURL
 
         // For >6-channel sources (7.1), prefer the lossless FLAC bridge so the
         // full 7.1 layout survives — the default `.surroundCompat` EAC3 bridge caps
@@ -204,20 +230,45 @@ public final class PlozzigenVideoEngine: VideoEngine {
         options.preferredAudioLanguages = request.preferredAudioLanguages
         options.preferredSubtitleLanguages = request.preferredSubtitleLanguages
 
+        var stage = "resolve"
         do {
-            if url.scheme?.lowercased() == "smb" {
-                // Media-share transport (second-class, behind Plex/Jellyfin). The
-                // provider mints a per-play `smb://user:password@host/share/path`
-                // URL with in-memory credentials; nothing is persisted here. We
-                // wrap it in an `IOReader` custom source so AetherEngine demuxes
-                // the raw file over SMB with no server-side transcode.
-                let source = try await makeSMBSource(from: url)
+            if case .some(.networkFile(let locator)) = request.playbackSource {
+                guard let networkFileResolver else {
+                    throw MediaTransportError.unsupportedCapability(
+                        "network-file playback resolver"
+                    )
+                }
+                let resolvedSource = try await networkFileResolver.resolve(locator)
+                activeResolvedSource = resolvedSource
+                stage = "engine.load"
+                let source = MediaSource.custom(
+                    TransportIOReader(resolvedSource: resolvedSource),
+                    formatHint: Self.networkFileFormatHint(for: locator)
+                )
                 try await engine.load(
                     source: source,
                     startPosition: startPosition > 0 ? startPosition : nil,
                     options: options
                 )
             } else {
+                let source = request.localRemuxSource?.originalSource
+                    ?? request.playbackSource
+                let resolvedURL: URL?
+                if case .some(.authenticatedHTTP(let locator)) = source {
+                    guard let authenticatedHTTPResolver else {
+                        throw MediaTransportError.unsupportedCapability(
+                            "authenticated HTTP resolver"
+                        )
+                    }
+                    resolvedURL = try await authenticatedHTTPResolver.resolve(locator)
+                } else {
+                    resolvedURL = request.streamURL
+                        ?? source?.publicURL
+                }
+                guard let url = resolvedURL else {
+                    throw MediaTransportError.invalidInput(reason: "missing playback source")
+                }
+                stage = "engine.load"
                 try await engine.load(
                     url: url,
                     startPosition: startPosition > 0 ? startPosition : nil,
@@ -229,44 +280,26 @@ public final class PlozzigenVideoEngine: VideoEngine {
             engine.play()
             syncTracks()
         } catch {
-            // Surface the real reason: AppError / SMBConnection.SMBError don't
-            // conform to LocalizedError, so `localizedDescription` collapses to a
-            // generic "error 0". `String(describing:)` keeps the actual message.
+            // Preserve typed error detail rather than collapsing it to a generic
+            // localized error code, and journal WHICH stage threw so a fast
+            // re-fail on retry is attributable (SMB/registry resolve vs the
+            // AetherEngine/localhost load) instead of a bare "unknown".
             let detail = String(describing: error)
+            HandoffDiagnostics.emit(
+                "aether LOAD_FAILED stage=\(stage) "
+                    + "detail=\(HandoffDiagnostics.redactedDetail(detail))"
+            )
             let err: AppError = .unknown(detail)
             status = .failed(err)
             onFailure?(err)
         }
     }
 
-    // MARK: - SMB custom source
-
-    /// Build an SMB `MediaSource` from an `smb://host[:port]/share/path/file.ext`
-    /// URL. Parses it with the engine's `SMBURL`, opens an `SMBConnection`
-    /// (NWConnection-backed SMB2, NTLMv2 / guest, read-only), and wraps it in an
-    /// `SMBIOReader` for the engine's custom-source path.
-    private func makeSMBSource(from url: URL) async throws -> MediaSource {
-        let parsed: SMBURL
-        do {
-            parsed = try SMBURL.parse(url.absoluteString)
-        } catch {
-            throw AppError.unknown("Malformed SMB URL: \(String(describing: error))")
-        }
-        let connection = try await SMBConnection.connect(
-            server: parsed.server,
-            share: parsed.share,
-            path: parsed.path,
-            user: parsed.user,
-            password: parsed.password
-        )
-        return .custom(SMBIOReader(source: connection), formatHint: Self.smbFormatHint(for: parsed.path))
-    }
-
     /// Optional container short-name hint for the demuxer probe, derived from the
-    /// file extension (there is no server MIME type for a raw share file). nil
-    /// lets AetherEngine probe from content.
-    private static func smbFormatHint(for path: String) -> String? {
-        switch (path as NSString).pathExtension.lowercased() {
+    /// typed locator. nil lets AetherEngine probe from content.
+    private static func networkFileFormatHint(for locator: NetworkFileLocator) -> String? {
+        switch locator.formatHint.container
+            ?? (locator.relativePath as NSString).pathExtension.lowercased() {
         case "mkv":                 return "matroska"
         case "webm":                return "webm"
         case "mp4", "m4v", "mov":   return "mp4"
@@ -317,6 +350,16 @@ public final class PlozzigenVideoEngine: VideoEngine {
         status = .idle
         intendsPause = true
         isPaused = true
+    }
+
+    /// Awaits the full shutdown of the leased network source (if any) before
+    /// returning, so a stall-recovery retry re-opens against a fully drained
+    /// session/cursor rather than racing the old one's asynchronous deinit
+    /// release. No-op for URL-backed loads (nothing leased). Call after `stop()`.
+    public func drainTransport() async {
+        let source = activeResolvedSource
+        activeResolvedSource = nil
+        await source?.waitForFinalShutdown()
     }
 
     // MARK: - Tunables
@@ -397,6 +440,10 @@ public final class PlozzigenVideoEngine: VideoEngine {
                 case .ended:
                     self.onEnded?()
                 case .error(let msg):
+                    HandoffDiagnostics.emit(
+                        "aether STATE_ERROR detail="
+                            + HandoffDiagnostics.redactedDetail(msg)
+                    )
                     let err: AppError = .unknown(msg)
                     self.status = .failed(err)
                     self.onFailure?(err)
@@ -562,8 +609,14 @@ public final class PlozzigenVideoEngine: VideoEngine {
 
 public enum PlozzigenVideoEngineFactory {
     @MainActor
-    public static func makeEngine() -> (any VideoEngine)? {
-        try? PlozzigenVideoEngine()
+    public static func makeEngine(
+        networkFileResolver: any MediaTransportNetworkFileResolving,
+        authenticatedHTTPResolver: any AuthenticatedHTTPResourceResolving
+    ) -> (any VideoEngine)? {
+        try? PlozzigenVideoEngine(
+            networkFileResolver: networkFileResolver,
+            authenticatedHTTPResolver: authenticatedHTTPResolver
+        )
     }
 }
 #endif

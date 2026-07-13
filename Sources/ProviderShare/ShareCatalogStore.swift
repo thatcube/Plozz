@@ -24,6 +24,7 @@ actor ShareCatalogStore {
     private let url: URL
     private var db: OpaquePointer?
     private var didOpen = false
+    private var activeScanGeneration: UUID?
 
     // SQLite wants a destructor sentinel for transient (copied) bound text; not
     // exported into Swift, so reconstruct it.
@@ -130,6 +131,13 @@ actor ShareCatalogStore {
         if !hasColumn(table: "enrichment", column: "attempts") {
             exec("ALTER TABLE enrichment ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0;")
         }
+        // Migration: the resolved canonical title (e.g. "Avatar: The Last Airbender"),
+        // applied over a generic folder-derived display title at READ time — durable
+        // across re-scans (which overwrite `assets.series_title`), unlike a direct
+        // assets mutation.
+        if !hasColumn(table: "enrichment", column: "title") {
+            exec("ALTER TABLE enrichment ADD COLUMN title TEXT;")
+        }
         // Migration: movie grouping key (added with within-share version dedup). NULL
         // for rows indexed before it existed; a classifier-version reparse backfills
         // it, and grouped queries `COALESCE(movie_key, rel_path)` so pre-reparse rows
@@ -154,6 +162,17 @@ actor ShareCatalogStore {
         );
         """)
         exec("CREATE INDEX IF NOT EXISTS idx_movie_alias_group ON movie_alias(group_key);")
+        // Durable series reconciliation: maps a redundant series key (e.g. a typo'd
+        // folder "peaky-blinder") to a canonical one ("peaky-blinders") once BOTH
+        // were proven the same show by a shared authoritative external id. Applied at
+        // upsert so a re-scan can't undo the merge.
+        exec("""
+        CREATE TABLE IF NOT EXISTS series_merge(
+            alias_key     TEXT PRIMARY KEY,
+            canonical_key TEXT NOT NULL
+        );
+        """)
+        exec("CREATE INDEX IF NOT EXISTS idx_series_merge_canonical ON series_merge(canonical_key);")
         exec("""
         CREATE INDEX IF NOT EXISTS idx_assets_movie_logical_sort
         ON assets(
@@ -169,9 +188,30 @@ actor ShareCatalogStore {
     /// Insert or update a batch of discovered assets under one scan id. Preserves
     /// `first_seen_at` for rows already present (so "date added" = first discovery,
     /// never a re-scan), and refreshes size/mtime/parse/library. Idempotent.
-    func upsert(_ assets: [CatalogAsset], scanID: Int64, now: Date = Date()) async {
+    func activateScanGeneration(_ generation: UUID) {
+        activeScanGeneration = generation
+    }
+
+    func invalidateScanGeneration() {
+        activeScanGeneration = nil
+    }
+
+    func nextScanID(for generation: UUID) -> Int64? {
+        guard activeScanGeneration == generation else { return nil }
+        let current = Int64(meta("scan_counter") ?? "0") ?? 0
+        let next = current + 1
+        setMeta("scan_counter", String(next))
+        return next
+    }
+
+    func upsert(
+        _ assets: [CatalogAsset],
+        scanID: Int64,
+        now: Date = Date(),
+        scanGeneration: UUID? = nil
+    ) async {
         ensureOpen()
-        guard db != nil, !assets.isEmpty else { return }
+        guard admits(scanGeneration), db != nil, !assets.isEmpty else { return }
         let started = Date()
         var slowestChunkMs = 0
         let sql = """
@@ -200,8 +240,13 @@ actor ShareCatalogStore {
         }
         defer { sqlite3_finalize(stmt) }
 
+        // Preload the series-merge alias map once so a reconciled typo key stays
+        // folded across re-scans without a per-row lookup in the hot write loop.
+        let seriesAliases = seriesMergeMap()
+
         var index = 0
         while index < assets.count {
+            guard admits(scanGeneration) else { return }
             let end = min(index + Self.writeChunkSize, assets.count)
             let chunkStarted = Date()
             exec("BEGIN IMMEDIATE;")
@@ -220,7 +265,7 @@ actor ShareCatalogStore {
                 bindText(stmt, 10, ShareCatalogID.sortTitle(from: libraryTitle))
                 bindOptInt(stmt, 11, a.year)
                 bindOptText(stmt, 12, a.seriesTitle)
-                bindOptText(stmt, 13, a.seriesKey)
+                bindOptText(stmt, 13, a.seriesKey.map { Self.resolveAlias($0, in: seriesAliases) })
                 bindOptInt(stmt, 14, a.season)
                 bindOptInt(stmt, 15, a.episode)
                 bindOptText(stmt, 16, a.movieKey)
@@ -244,9 +289,9 @@ actor ShareCatalogStore {
     /// versions of one movie (metadata commonly differs by festival/theatrical
     /// year); distant remakes remain separate. Existing group ids win so adding a
     /// version later does not churn watch-state or deep-link ids.
-    func rebuildMovieGroups() async {
+    func rebuildMovieGroups(scanGeneration: UUID? = nil) async {
         ensureOpen()
-        guard db != nil else { return }
+        guard admits(scanGeneration), db != nil else { return }
         let started = Date()
 
         var rows: [MovieGroupingRow] = []
@@ -321,9 +366,11 @@ actor ShareCatalogStore {
             }
             return MovieGroupingPlan(assignments: assignments, aliases: aliases)
         }.value
+        guard admits(scanGeneration) else { return }
         let computeMs = Int(Date().timeIntervalSince(computeStarted) * 1_000)
 
-        await persistMovieAliases(plan.aliases)
+        await persistMovieAliases(plan.aliases, scanGeneration: scanGeneration)
+        guard admits(scanGeneration) else { return }
 
         guard !plan.assignments.isEmpty else {
             PlozzLog.boot(
@@ -340,6 +387,7 @@ actor ShareCatalogStore {
         var index = 0
         var slowestChunkMs = 0
         while index < plan.assignments.count {
+            guard admits(scanGeneration) else { return }
             let end = min(index + Self.writeChunkSize, plan.assignments.count)
             let chunkStarted = Date()
             exec("BEGIN IMMEDIATE;")
@@ -361,9 +409,9 @@ actor ShareCatalogStore {
 
     /// Capture aliases from the pre-prune catalog so a removed movie version's
     /// legacy file id still resolves to the surviving logical group.
-    func preserveMovieAliasesBeforePrune() {
+    func preserveMovieAliasesBeforePrune(scanGeneration: UUID? = nil) {
         ensureOpen()
-        guard db != nil else { return }
+        guard admits(scanGeneration), db != nil else { return }
         exec("BEGIN IMMEDIATE;")
         exec("""
         INSERT INTO movie_alias(alias_id, group_key)
@@ -382,8 +430,11 @@ actor ShareCatalogStore {
         exec("COMMIT;")
     }
 
-    private func persistMovieAliases(_ aliases: [MovieAlias]) async {
-        guard !aliases.isEmpty else { return }
+    private func persistMovieAliases(
+        _ aliases: [MovieAlias],
+        scanGeneration: UUID?
+    ) async {
+        guard admits(scanGeneration), !aliases.isEmpty else { return }
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, """
         INSERT INTO movie_alias(alias_id, group_key) VALUES(?,?)
@@ -393,6 +444,7 @@ actor ShareCatalogStore {
 
         var index = 0
         while index < aliases.count {
+            guard admits(scanGeneration) else { return }
             let end = min(index + Self.writeChunkSize, aliases.count)
             exec("BEGIN IMMEDIATE;")
             for alias in aliases[index..<end] {
@@ -410,9 +462,9 @@ actor ShareCatalogStore {
     /// Delete rows not seen by `scanID` — assets removed from the share since the
     /// last full walk. Only call after a scan that fully completed (no cancel), so
     /// a partial walk can't wipe still-present content.
-    func pruneNotSeen(inScan scanID: Int64) {
+    func pruneNotSeen(inScan scanID: Int64, scanGeneration: UUID? = nil) {
         ensureOpen()
-        guard db != nil else { return }
+        guard admits(scanGeneration), db != nil else { return }
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, "DELETE FROM assets WHERE last_scan <> ?;", -1, &stmt, nil) == SQLITE_OK else { return }
         defer { sqlite3_finalize(stmt) }
@@ -420,9 +472,9 @@ actor ShareCatalogStore {
         _ = sqlite3_step(stmt)
     }
 
-    func setMeta(_ key: String, _ value: String) {
+    func setMeta(_ key: String, _ value: String, scanGeneration: UUID? = nil) {
         ensureOpen()
-        guard db != nil else { return }
+        guard admits(scanGeneration), db != nil else { return }
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, "INSERT INTO meta(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value;", -1, &stmt, nil) == SQLITE_OK else { return }
         defer { sqlite3_finalize(stmt) }
@@ -440,6 +492,11 @@ actor ShareCatalogStore {
         bindText(stmt, 1, key)
         guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
         return columnText(stmt, 0)
+    }
+
+    private func admits(_ scanGeneration: UUID?) -> Bool {
+        guard let scanGeneration else { return true }
+        return activeScanGeneration == scanGeneration
     }
 
     // MARK: - Enrichment (scan-time metadata resolution, persisted)
@@ -464,6 +521,10 @@ actor ShareCatalogStore {
         var posterURL: URL?
         var backdropURL: URL?
         var logoURL: URL?
+        /// The resolved canonical show/movie title (e.g. "Avatar: The Last
+        /// Airbender"), overlaid over a generic folder-derived display title at read
+        /// time. Persisted in the `title` enrichment column so it survives re-scans.
+        var title: String?
 
         /// Whether this record carries anything worth showing/merging. An *unusable*
         /// result (no ids, overview, or artwork) is treated as a miss — usually a
@@ -522,7 +583,11 @@ actor ShareCatalogStore {
         let remaining = max(0, limit - out.count)
         if remaining > 0 {
             query("""
-            SELECT a.series_key, a.series_title, a.library, MAX(a.year) FROM assets a
+            SELECT a.series_key, a.series_title, a.library, (
+                SELECT b.year FROM assets b
+                WHERE b.series_key = a.series_key AND b.kind='episode' AND b.year IS NOT NULL
+                GROUP BY b.year ORDER BY COUNT(*) DESC, b.year ASC LIMIT 1
+            ) FROM assets a
             LEFT JOIN enrichment e ON e.item_id = 'series:' || a.series_key AND e.enrich_version = ?
             WHERE a.kind='episode' AND a.series_key IS NOT NULL
               AND (e.item_id IS NULL OR (\(Self.unusableEnrichmentPredicate) AND e.attempts < ?))
@@ -573,7 +638,13 @@ actor ShareCatalogStore {
             let itemID = ShareCatalogID.series(key)
             if hasUsableEnrichment(itemID: itemID, version: version) { return nil }
             var out: PendingEnrichment?
-            query("SELECT series_title, library, MAX(year) FROM assets WHERE series_key=? AND kind='episode';",
+            query("""
+            SELECT series_title, library, (
+                SELECT b.year FROM assets b
+                WHERE b.series_key = ?1 AND b.kind='episode' AND b.year IS NOT NULL
+                GROUP BY b.year ORDER BY COUNT(*) DESC, b.year ASC LIMIT 1
+            ) FROM assets WHERE series_key=?1 AND kind='episode' LIMIT 1;
+            """,
                   bind: { self.bindText($0, 1, key) }) { stmt in
                 guard sqlite3_column_type(stmt, 0) != SQLITE_NULL else { return }
                 let lib = self.columnText(stmt, 1) ?? "tv"
@@ -645,31 +716,36 @@ actor ShareCatalogStore {
         guard db != nil else { return false }
 
         // Merge onto the existing row (if any) so a sparse write never clobbers
-        // richer data. An unusable (empty) resolve — usually a transient rate-limit
-        // or timeout — bumps an attempt counter but is still stored at `version`;
-        // `pendingEnrichment` keeps such rows pending until `attempts` reach the cap,
-        // so a miss is retried across passes and then settled, never cached as a
-        // permanent blank and never looped forever.
-        let merged = Self.merged(existing: enrichmentRow(itemID: itemID), new: record)
+        // richer data — but ONLY within the same enrichment version. A version bump
+        // means the resolver logic changed (often to CORRECT a wrong match), so its
+        // result must fully REPLACE the old row rather than union with it; otherwise
+        // stale artwork from a previous wrong match survives (e.g. a "TP" abbreviation
+        // that once resolved TAP Portugal's logo would persist under the corrected
+        // "The Punisher"). A usable fresh result at a new version is authoritative.
+        let prior = enrichmentVersionAndAttempts(itemID: itemID)
+        let isReResolveAfterBump = prior != nil && prior?.version != version && record.isUsable
+        let merged = isReResolveAfterBump
+            ? record
+            : Self.merged(existing: enrichmentRow(itemID: itemID), new: record)
         // Attempt budget is PER VERSION: a future `ShareEnricher.version` bump (the
         // mechanism to re-enrich everything with improved sources) resets the budget
         // so a previously-exhausted miss gets the full retry count again, not one.
         // Within the same version the count accrues as before.
-        let prior = enrichmentVersionAndAttempts(itemID: itemID)
         let priorAttempts = (prior?.version == version) ? (prior?.attempts ?? 0) : 0
         let attempts = merged.isUsable ? 0 : priorAttempts + 1
 
         var stmt: OpaquePointer?
         let sql = """
         INSERT INTO enrichment
-          (item_id, provider_ids_json, overview, genres_json, runtime, poster_url, backdrop_url, logo_url, enriched_at, enrich_version, attempts)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?)
+          (item_id, provider_ids_json, overview, genres_json, runtime, poster_url, backdrop_url, logo_url, enriched_at, enrich_version, attempts, title)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(item_id) DO UPDATE SET
           provider_ids_json=excluded.provider_ids_json, overview=excluded.overview,
           genres_json=excluded.genres_json, runtime=excluded.runtime,
           poster_url=excluded.poster_url, backdrop_url=excluded.backdrop_url,
           logo_url=excluded.logo_url, enriched_at=excluded.enriched_at,
-          enrich_version=excluded.enrich_version, attempts=excluded.attempts;
+          enrich_version=excluded.enrich_version, attempts=excluded.attempts,
+          title=excluded.title;
         """
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return false }
         bindText(stmt, 1, itemID)
@@ -683,6 +759,7 @@ actor ShareCatalogStore {
         sqlite3_bind_double(stmt, 9, now.timeIntervalSince1970)
         sqlite3_bind_int64(stmt, 10, Int64(version))
         sqlite3_bind_int64(stmt, 11, Int64(attempts))
+        bindOptText(stmt, 12, merged.title)
         let ok = sqlite3_step(stmt) == SQLITE_DONE
         sqlite3_finalize(stmt)
 
@@ -692,6 +769,13 @@ actor ShareCatalogStore {
            let key = ShareCatalogID.seriesKey(forSeriesID: itemID),
            merged.providerIDs.keys.contains(where: { ["anilist", "mal", "myanimelist"].contains($0.lowercased()) }) {
             reclassifySeriesToAnime(seriesKey: key)
+        }
+        // Id-corroborated reconciliation: if this series shares an authoritative
+        // external id with another near-identically-titled series (a typo'd folder
+        // like "Peaky Blinder" vs "Peaky Blinders"), fold them into one card.
+        if ok, ShareCatalogID.isSeries(itemID),
+           let key = ShareCatalogID.seriesKey(forSeriesID: itemID) {
+            reconcileSeriesByStrongID(key: key, ids: merged.providerIDs, resolvedTitle: merged.title)
         }
         return ok
     }
@@ -713,6 +797,7 @@ actor ShareCatalogStore {
         if let p = new.posterURL { out.posterURL = p }
         if let b = new.backdropURL { out.backdropURL = b }
         if let l = new.logoURL { out.logoURL = l }
+        if let t = new.title, !t.isEmpty { out.title = t }
         return out
     }
 
@@ -736,12 +821,183 @@ actor ShareCatalogStore {
         _ = sqlite3_step(stmt)
     }
 
+    // MARK: - Id-corroborated series reconciliation
+
+    /// The strong (authoritative) external-id namespaces, in preference order, that
+    /// are trustworthy enough to prove two series are the SAME show.
+    private static let strongIDNamespaces = ["Tvdb", "Imdb", "Tmdb"]
+
+    /// Fold `key` together with any OTHER already-enriched series that shares one of
+    /// its strong external ids AND is near-identically titled (a typo/plural folder
+    /// like "Peaky Blinder" vs "Peaky Blinders"). The shared id is the authoritative
+    /// signal; the title check is a conservative guard so a provider mis-id can never
+    /// collapse two genuinely different shows.
+    private func reconcileSeriesByStrongID(key: String, ids: [String: String], resolvedTitle: String?) {
+        guard db != nil else { return }
+        let myStrong = Self.strongIDNamespaces.compactMap { ns -> (String, String)? in
+            guard let v = ids[ns], !v.isEmpty else { return nil }
+            return (ns.lowercased(), v.lowercased())
+        }
+        guard !myStrong.isEmpty else { return }
+        let mySet = Set(myStrong.map { "\($0.0):\($0.1)" })
+
+        // Candidate other series carrying at least one of the same strong ids.
+        var candidates: [String] = []
+        query("SELECT item_id, provider_ids_json FROM enrichment WHERE item_id LIKE 'series:%';") { stmt in
+            guard let itemID = self.columnText(stmt, 0),
+                  let k = ShareCatalogID.seriesKey(forSeriesID: itemID), k != key,
+                  let json = self.columnText(stmt, 1),
+                  let other = self.decodeJSON([String: String].self, json) else { return }
+            let otherSet = Set(Self.strongIDNamespaces.compactMap { ns -> String? in
+                guard let v = other[ns], !v.isEmpty else { return nil }
+                return "\(ns.lowercased()):\(v.lowercased())"
+            })
+            if !mySet.isDisjoint(with: otherSet) { candidates.append(k) }
+        }
+        guard !candidates.isEmpty else { return }
+
+        let myTitle = seriesDisplayTitle(forKey: key)
+        for other in candidates {
+            let otherTitle = seriesDisplayTitle(forKey: other)
+            guard Self.titlesNearlyIdentical(myTitle, otherTitle) else { continue }
+            let (canonical, loser) = chooseCanonicalSeries(key, other, resolvedTitle: resolvedTitle)
+            mergeSeries(loser: loser, into: canonical)
+        }
+    }
+
+    /// A representative display title for a series key (any episode's `series_title`).
+    private func seriesDisplayTitle(forKey key: String) -> String {
+        var title = key
+        query("""
+        SELECT series_title FROM assets
+        WHERE series_key=? AND kind='episode' AND series_title IS NOT NULL AND series_title <> ''
+        LIMIT 1;
+        """, bind: { self.bindText($0, 1, key) }) { stmt in title = self.columnText(stmt, 0) ?? key }
+        return title
+    }
+
+    /// Which of two same-id series is canonical: prefer the one whose title matches
+    /// the resolved canonical name; else more episodes; else the lexicographically
+    /// smaller key (stable). Returns `(canonical, loser)`.
+    private func chooseCanonicalSeries(_ a: String, _ b: String, resolvedTitle: String?) -> (String, String) {
+        if let resolved = resolvedTitle.map({ MediaItemIdentity.normalizedTitle($0) }), !resolved.isEmpty {
+            let na = MediaItemIdentity.normalizedTitle(seriesDisplayTitle(forKey: a))
+            let nb = MediaItemIdentity.normalizedTitle(seriesDisplayTitle(forKey: b))
+            if na == resolved, nb != resolved { return (a, b) }
+            if nb == resolved, na != resolved { return (b, a) }
+        }
+        let ea = seriesEpisodeCount(a), eb = seriesEpisodeCount(b)
+        if ea != eb { return ea > eb ? (a, b) : (b, a) }
+        return a <= b ? (a, b) : (b, a)
+    }
+
+    private func seriesEpisodeCount(_ key: String) -> Int {
+        var n = 0
+        query("SELECT COUNT(*) FROM assets WHERE series_key=? AND kind='episode';",
+              bind: { self.bindText($0, 1, key) }) { stmt in n = Int(sqlite3_column_int64(stmt, 0)) }
+        return n
+    }
+
+    /// Physically fold `loser` into `canonical`: re-key its assets, record the alias
+    /// (so a re-scan re-applies it), retarget any aliases that pointed at `loser`,
+    /// and drop the loser's now-redundant enrichment row.
+    private func mergeSeries(loser: String, into canonical: String) {
+        guard loser != canonical else { return }
+        exec("BEGIN IMMEDIATE;")
+        runUpdate("UPDATE assets SET series_key=? WHERE series_key=?;") { self.bindText($0, 1, canonical); self.bindText($0, 2, loser) }
+        runUpdate("INSERT OR REPLACE INTO series_merge(alias_key, canonical_key) VALUES (?,?);") { self.bindText($0, 1, loser); self.bindText($0, 2, canonical) }
+        runUpdate("UPDATE series_merge SET canonical_key=? WHERE canonical_key=?;") { self.bindText($0, 1, canonical); self.bindText($0, 2, loser) }
+        runUpdate("DELETE FROM enrichment WHERE item_id=?;") { self.bindText($0, 1, ShareCatalogID.series(loser)) }
+        exec("COMMIT;")
+    }
+
+    /// Run a parameterized write statement with a binder; finalizes cleanly.
+    private func runUpdate(_ sql: String, bind: (OpaquePointer) -> Void) {
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else { return }
+        defer { sqlite3_finalize(stmt) }
+        bind(stmt)
+        _ = sqlite3_step(stmt)
+    }
+
+    /// All alias→canonical series-merge rows as a map, for in-memory resolution.
+    private func seriesMergeMap() -> [String: String] {
+        var map: [String: String] = [:]
+        query("SELECT alias_key, canonical_key FROM series_merge;") { stmt in
+            guard let a = self.columnText(stmt, 0), let c = self.columnText(stmt, 1) else { return }
+            map[a] = c
+        }
+        return map
+    }
+
+    /// Resolve a series key through the alias map, following chains (bounded) so a
+    /// transitively-merged key still lands on the final canonical.
+    static func resolveAlias(_ key: String, in map: [String: String]) -> String {
+        var current = key
+        var seen = Set<String>()
+        while let next = map[current], next != current, seen.insert(current).inserted {
+            current = next
+        }
+        return current
+    }
+
+    /// Non-canonical "variant" words that must never be introduced by a display-title
+    /// upgrade: a base show ("Sword Art Online") must not become a parody/recap
+    /// ("Sword Art Online: Abridged") even if a bad match slips through.
+    private static let variantWords: Set<String> = [
+        "abridged", "recap", "parody", "condensed", "compilation", "fandub", "gagdub", "reaction",
+    ]
+
+    /// Whether `extended` (a normalized word-prefix-extension of `base`) adds a
+    /// variant word not present in `base`.
+    static func addsVariantWord(base: String, extended: String) -> Bool {
+        let baseTokens = Set(base.split(separator: " ").map(String.init))
+        let addedTokens = Set(extended.split(separator: " ").map(String.init)).subtracting(baseTokens)
+        return !addedTokens.isDisjoint(with: variantWords)
+    }
+
+    /// Whether two series titles are near-identical enough to be a typo/plural of
+    /// one show (Levenshtein ≤ 2 on the normalized forms, no DIGIT difference, and
+    /// long enough that a couple of edits isn't most of the title). Combined with a
+    /// shared strong id this is a very tight merge gate.
+    static func titlesNearlyIdentical(_ a: String, _ b: String) -> Bool {
+        let na = MediaItemIdentity.normalizedTitle(a)
+        let nb = MediaItemIdentity.normalizedTitle(b)
+        guard !na.isEmpty, !nb.isEmpty, na != nb else { return na == nb && !na.isEmpty }
+        // A digit difference marks a deliberate distinction (1883 vs 1923, sequels).
+        let digitsA = na.filter { $0.isNumber }, digitsB = nb.filter { $0.isNumber }
+        guard digitsA == digitsB else { return false }
+        let dist = levenshtein(na, nb)
+        let shorter = min(na.count, nb.count)
+        // Long enough that a couple of edits isn't a big fraction of the title — a
+        // 5-letter word like "Fargo"/"Cargo" is one edit apart yet distinct.
+        return dist <= 2 && shorter >= 8 && dist * 6 <= shorter
+    }
+
+    /// Classic Levenshtein edit distance (two-row DP).
+    static func levenshtein(_ a: String, _ b: String) -> Int {
+        let s = Array(a), t = Array(b)
+        if s.isEmpty { return t.count }
+        if t.isEmpty { return s.count }
+        var prev = Array(0...t.count)
+        var curr = [Int](repeating: 0, count: t.count + 1)
+        for i in 1...s.count {
+            curr[0] = i
+            for j in 1...t.count {
+                let cost = s[i - 1] == t[j - 1] ? 0 : 1
+                curr[j] = min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost)
+            }
+            swap(&prev, &curr)
+        }
+        return prev[t.count]
+    }
+
     /// Persisted enrichment for a catalog id (movie file id or `series:<key>`).
     private func enrichmentRow(itemID: String) -> EnrichmentRecord? {
         guard db != nil else { return nil }
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, """
-        SELECT provider_ids_json, overview, genres_json, runtime, poster_url, backdrop_url, logo_url
+        SELECT provider_ids_json, overview, genres_json, runtime, poster_url, backdrop_url, logo_url, title
         FROM enrichment WHERE item_id=?;
         """, -1, &stmt, nil) == SQLITE_OK else { return nil }
         defer { sqlite3_finalize(stmt) }
@@ -750,12 +1006,13 @@ actor ShareCatalogStore {
         return enrichmentRecord(fromColumns: stmt, startingAt: 0)
     }
 
-    /// Decode the 7 enrichment columns (provider_ids_json, overview, genres_json,
-    /// runtime, poster_url, backdrop_url, logo_url) starting at `startingAt` into a
-    /// record. Shared by the standalone `enrichmentRow` lookup and the JOINed grid
-    /// queries (movies/series), so a page fetch reads enrichment in ONE query instead
-    /// of N+1 per-row lookups. Returns nil when every column is NULL (no enrichment
-    /// row matched the LEFT JOIN).
+    /// Decode the enrichment columns (provider_ids_json, overview, genres_json,
+    /// runtime, poster_url, backdrop_url, logo_url, title) starting at `startingAt`
+    /// into a record. Shared by the standalone `enrichmentRow` lookup and the JOINed
+    /// grid queries (movies/series), so a page fetch reads enrichment in ONE query
+    /// instead of N+1 per-row lookups. Returns nil when the core columns are all NULL
+    /// (no enrichment row matched the LEFT JOIN); `title` is a supplementary 8th
+    /// column not counted in that emptiness check.
     private func enrichmentRecord(fromColumns stmt: OpaquePointer?, startingAt base: Int32) -> EnrichmentRecord? {
         let allNull = (0..<7).allSatisfy { sqlite3_column_type(stmt, base + $0) == SQLITE_NULL }
         if allNull { return nil }
@@ -767,6 +1024,7 @@ actor ShareCatalogStore {
         rec.posterURL = columnText(stmt, base + 4).flatMap(URL.init(string:))
         rec.backdropURL = columnText(stmt, base + 5).flatMap(URL.init(string:))
         rec.logoURL = columnText(stmt, base + 6).flatMap(URL.init(string:))
+        rec.title = columnText(stmt, base + 7)
         return rec
     }
 
@@ -826,6 +1084,24 @@ actor ShareCatalogStore {
         if copy.backdropURL == nil { copy.backdropURL = rec.backdropURL }
         if copy.heroBackdropURL == nil { copy.heroBackdropURL = rec.backdropURL }
         if copy.logoURL == nil { copy.logoURL = rec.logoURL }
+        // Display-title upgrade (series/movies only, never episodes): overlay the
+        // resolved canonical name when it's IDENTICAL, MORE SPECIFIC (current is a
+        // word-prefix of resolved), or a NEAR-IDENTICAL typo/plural of the current
+        // ("Peaky Blinder" → "Peaky Blinders") — so a generic or misspelled folder
+        // shows the real name, but a spinoff that wrongly matched its parent is never
+        // renamed DOWN. A more-specific upgrade must NOT add a non-canonical variant
+        // word (abridged/recap/…): "Sword Art Online" must never become "Sword Art
+        // Online: Abridged" even if a bad match slips through. Applied at READ time
+        // so it's durable across re-scans.
+        if item.kind == .series || item.kind == .movie,
+           let resolved = rec.title, !resolved.isEmpty, resolved != copy.title {
+            let a = MediaItemIdentity.normalizedTitle(copy.title)
+            let b = MediaItemIdentity.normalizedTitle(resolved)
+            let moreSpecific = b.hasPrefix(a + " ") && !Self.addsVariantWord(base: a, extended: b)
+            if b == a || moreSpecific || Self.titlesNearlyIdentical(copy.title, resolved) {
+                copy.title = resolved
+            }
+        }
         // Episodes get the series art as a fallback, not as their own poster.
         if item.kind == .episode {
             if copy.seriesPosterURL == nil { copy.seriesPosterURL = rec.posterURL }
@@ -961,7 +1237,7 @@ actor ShareCatalogStore {
         query("""
         SELECT g.logical_id, g.title, g.year,
                e.provider_ids_json, e.overview, e.genres_json, e.runtime,
-               e.poster_url, e.backdrop_url, e.logo_url
+               e.poster_url, e.backdrop_url, e.logo_url, e.title
         FROM (
           SELECT
             CASE WHEN MIN(COALESCE(movie_group_key, movie_key)) IS NOT NULL
@@ -1002,7 +1278,7 @@ actor ShareCatalogStore {
         query("""
         SELECT a.series_key, MIN(a.series_title), MAX(a.year), MIN(a.sort_title) AS s,
                e.provider_ids_json, e.overview, e.genres_json, e.runtime,
-               e.poster_url, e.backdrop_url, e.logo_url
+               e.poster_url, e.backdrop_url, e.logo_url, e.title
         FROM assets a
         LEFT JOIN enrichment e ON e.item_id = 'series:' || a.series_key
         WHERE a.library=? AND a.kind='episode' AND a.series_key IS NOT NULL
@@ -1075,9 +1351,102 @@ actor ShareCatalogStore {
         }.map(withEnrichment)
     }
 
-    /// Episode items for one season of a series, in episode order.
-    func episodes(seriesKey: String, season: Int) -> [MediaItem] {
+    /// Up to `limit` on-disk episode fingerprints (season, episode, title) for a
+    /// series — the earliest seasons/episodes with a real title — used to
+    /// disambiguate a same-name metadata collision by content. Skips episodes with
+    /// no parsed title (nothing to match on).
+    /// On-disk episode-title fingerprints for content-based series disambiguation.
+    /// EXCLUDES the synthetic `S<n>·E<nn>` placeholder titles that bare-numbered
+    /// files get (they carry no real title) — otherwise a show whose early seasons
+    /// are bare-numbered (Outlander) would send only useless placeholders and match
+    /// nothing, falling through to a wrong same-named show. Real titles from any
+    /// season are used instead.
+    func episodeTitleHints(seriesKey: String, limit: Int = 12) -> [(season: Int, episode: Int, title: String)] {
         ensureOpen()
+        guard db != nil, limit > 0 else { return [] }
+        var out: [(season: Int, episode: Int, title: String)] = []
+        query("""
+        SELECT COALESCE(season,1) AS s, episode, title FROM assets
+        WHERE series_key=? AND kind='episode' AND episode IS NOT NULL
+          AND title IS NOT NULL AND title <> ''
+          AND title NOT LIKE 'S%·E%'
+        ORDER BY s, episode
+        LIMIT ?;
+        """, bind: {
+            self.bindText($0, 1, seriesKey)
+            sqlite3_bind_int64($0, 2, Int64(limit))
+        }) { stmt in
+            let s = Int(sqlite3_column_int64(stmt, 0))
+            let e = Int(sqlite3_column_int64(stmt, 1))
+            guard let t = self.columnText(stmt, 2) else { return }
+            out.append((season: s, episode: e, title: t))
+        }
+        return out
+    }
+
+    /// Distinct FILENAME-derived series titles for a series that differ from its
+    /// stored (folder-derived) title — extra TVDB search candidates for a show
+    /// whose folder is generic. A generic "Avatar (2024)" folder stores title
+    /// "Avatar", but the files say "Avatar The Last Airbender"; offering that as a
+    /// search alternate lets enrichment find the right series. Returns candidates
+    /// longest-first (most specific), capped, excluding the stored title.
+    func seriesSearchTitleAlternates(seriesKey: String, storedTitle: String, sampleLimit: Int = 24) -> [String] {
+        ensureOpen()
+        guard db != nil, sampleLimit > 0 else { return [] }
+        var relPaths: [String] = []
+        query("""
+        SELECT rel_path FROM assets
+        WHERE series_key=? AND kind='episode' AND rel_path IS NOT NULL AND rel_path <> ''
+        ORDER BY COALESCE(season,1), COALESCE(episode, 999999)
+        LIMIT ?;
+        """, bind: {
+            self.bindText($0, 1, seriesKey)
+            sqlite3_bind_int64($0, 2, Int64(sampleLimit))
+        }) { stmt in
+            if let p = self.columnText(stmt, 0) { relPaths.append(p) }
+        }
+        let storedNorm = storedTitle.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: nil)
+            .trimmingCharacters(in: .whitespaces)
+        // Only a RICHER filename title is a useful alternate: it must have more words
+        // than the stored folder title ("Avatar" → "Avatar The Last Airbender"). A
+        // shorter filename abbreviation ("TP" for a "The Punisher" folder) must NOT
+        // be searched — it fuzzy-matches unrelated shows ("The Syd + TP Show").
+        let storedWordCount = storedNorm.split(separator: " ").count
+        var seen = Set<String>()
+        var alternates: [String] = []
+        for path in relPaths {
+            guard let title = ShareMediaParser.filenameSeriesTitle(relPath: path) else { continue }
+            let norm = title.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: nil)
+                .trimmingCharacters(in: .whitespaces)
+            guard !norm.isEmpty, norm != storedNorm, seen.insert(norm).inserted,
+                  norm.split(separator: " ").count > storedWordCount else { continue }
+            alternates.append(title)
+        }
+        // Most specific first: a longer filename title ("Avatar The Last
+        // Airbender") is a stronger search than a short one.
+        return alternates.sorted { $0.count > $1.count }
+    }
+
+    /// The explicit TheTVDB id a series' folder/filenames declared via a
+    /// `[tvdb-####]` tag, or nil. Read from a sample rel_path — the enricher uses it
+    /// to resolve metadata authoritatively by id instead of an ambiguous title search.
+    func seriesEmbeddedTVDBID(seriesKey: String) -> String? {
+        ensureOpen()
+        guard db != nil else { return nil }
+        var relPath: String?
+        query("""
+        SELECT rel_path FROM assets
+        WHERE series_key=? AND kind='episode' AND rel_path IS NOT NULL AND rel_path <> ''
+        LIMIT 1;
+        """, bind: { self.bindText($0, 1, seriesKey) }) { stmt in
+            relPath = self.columnText(stmt, 0)
+        }
+        guard let relPath, let tag = ShareMediaParser.embeddedProviderTag(relPath: relPath),
+              tag.hasPrefix("tvdb-") else { return nil }
+        let id = String(tag.dropFirst("tvdb-".count))
+        return id.isEmpty ? nil : id
+    }
+    func episodes(seriesKey: String, season: Int) -> [MediaItem] {        ensureOpen()
         guard db != nil else { return [] }
         var out: [MediaItem] = []
         query("""
@@ -1103,7 +1472,13 @@ actor ShareCatalogStore {
             var library: CatalogLibrary = .tv
             var year: Int?
             var found = false
-            query("SELECT series_title, library, MAX(year) FROM assets WHERE series_key=? AND kind='episode';",
+            query("""
+            SELECT series_title, library, (
+                SELECT b.year FROM assets b
+                WHERE b.series_key = ?1 AND b.kind='episode' AND b.year IS NOT NULL
+                GROUP BY b.year ORDER BY COUNT(*) DESC, b.year ASC LIMIT 1
+            ) FROM assets WHERE series_key=?1 AND kind='episode' LIMIT 1;
+            """,
                   bind: { self.bindText($0, 1, key) }) { stmt in
                 if sqlite3_column_type(stmt, 0) != SQLITE_NULL { title = self.columnText(stmt, 0) ?? key; found = true }
                 library = CatalogLibrary(rawValue: self.columnText(stmt, 1) ?? "tv") ?? .tv

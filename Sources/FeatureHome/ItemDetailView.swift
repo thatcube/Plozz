@@ -3,6 +3,30 @@ import SwiftUI
 import CoreModels
 import CoreUI
 
+func preferredDetailSource(
+    sourceOverride: String?,
+    libraryOrigin: String?,
+    itemSourceAccountID: String?,
+    sources: [MediaSourceRef],
+    serverChoices: [MediaSourceRef],
+    capabilities: MediaCapabilities
+) -> MediaSourceRef? {
+    guard serverChoices.count > 1 || sources.count > 1 else { return nil }
+    if let sourceOverride,
+       let match = serverChoices.first(where: { $0.accountID == sourceOverride }) {
+        return match
+    }
+    if let libraryOrigin,
+       let match = serverChoices.first(where: { $0.accountID == libraryOrigin }) {
+        return match
+    }
+    return CrossSourceSelector.bestSelection(
+        from: serverChoices,
+        capabilities: capabilities,
+        preferring: itemSourceAccountID
+    )?.source ?? serverChoices.first ?? sources.first
+}
+
 /// Item detail screen: backdrop hero, metadata, Play/Resume, and children.
 public struct ItemDetailView: View {
     @State private var viewModel: ItemDetailViewModel
@@ -619,18 +643,14 @@ public struct ItemDetailView: View {
         sources: [MediaSourceRef],
         serverChoices: [MediaSourceRef]
     ) -> MediaSourceRef? {
-        guard serverChoices.count > 1 || sources.count > 1 else { return nil }
-        if let sourceOverride, let match = serverChoices.first(where: { $0.accountID == sourceOverride }) {
-            return match
-        }
-        if let selection = CrossSourceSelector.bestSelection(
-            from: serverChoices,
-            capabilities: capabilities,
-            preferring: viewModel.originSourceAccountID
-        ) {
-            return selection.source
-        }
-        return serverChoices.first ?? sources.first
+        preferredDetailSource(
+            sourceOverride: sourceOverride,
+            libraryOrigin: viewModel.originSourceAccountID,
+            itemSourceAccountID: item.sourceAccountID,
+            sources: sources,
+            serverChoices: serverChoices,
+            capabilities: capabilities
+        )
     }
 
     /// The list of server-picker entries: ``viewModel/sources`` deduped by
@@ -683,7 +703,9 @@ public struct ItemDetailView: View {
             sources: sources,
             activeAccountID: activeAccountID,
             versionID: versionID,
-            explicit: sourceOverride != nil || versionOverride != nil
+            explicit: viewModel.isLibraryOriginPinned
+                || sourceOverride != nil
+                || versionOverride != nil
         )
     }
 

@@ -64,11 +64,16 @@ struct CustomPlayerContainer: UIViewControllerRepresentable {
     let subtitleModel: LiveSubtitleModel
     let actions: PlayerActions
     let scrubPreview: ScrubPreviewSource?
+    let authenticatedHTTPResolver:
+        (any AuthenticatedHTTPResourceResolving)?
     let themePalette: ThemePaletteBox
 
     func makeUIViewController(context: Context) -> PlayerInputViewController {
         let controller = PlayerInputViewController(engine: engine, model: model, actions: actions)
-        controller.configureScrubPreview(scrubPreview)
+        controller.configureScrubPreview(
+            scrubPreview,
+            authenticatedHTTPResolver: authenticatedHTTPResolver
+        )
         controller.attachVideoSurface()
         controller.attachSubtitleOverlay(subtitleModel)
         controller.attachControls(themePalette: themePalette)
@@ -286,7 +291,11 @@ final class PlayerInputViewController: UIViewController {
 
     override var canBecomeFirstResponder: Bool { true }
 
-    func configureScrubPreview(_ source: ScrubPreviewSource?) {
+    func configureScrubPreview(
+        _ source: ScrubPreviewSource?,
+        authenticatedHTTPResolver:
+            (any AuthenticatedHTTPResourceResolving)?
+    ) {
         thumbnailTask?.cancel()
         thumbnailTask = nil
         thumbnailLoader = nil
@@ -302,11 +311,19 @@ final class PlayerInputViewController: UIViewController {
         }
         switch source {
         case .tiled(let manifest):
-            thumbnailLoader = TrickplayThumbnailLoader(manifest: manifest)
-            PlozzLog.playback.debug("Configured Jellyfin tiled scrub preview (\(manifest.tileURLs.count) tiles, intervalMs=\(manifest.intervalMs))")
-        case .plexBIF(let url):
-            thumbnailLoader = PlexBIFThumbnailLoader(url: url)
-            PlozzLog.playback.debug("Configured Plex BIF scrub preview url=\(PlozzLog.redact(url: url))")
+            thumbnailLoader = TrickplayThumbnailLoader(
+                manifest: manifest,
+                authenticatedHTTPResolver: authenticatedHTTPResolver
+            )
+            PlozzLog.playback.debug(
+                "Configured Jellyfin tiled scrub preview (\(manifest.tileResources.count) tiles, intervalMs=\(manifest.intervalMs))"
+            )
+        case .plexBIF(let resource):
+            thumbnailLoader = PlexBIFThumbnailLoader(
+                resource: resource,
+                authenticatedHTTPResolver: authenticatedHTTPResolver
+            )
+            PlozzLog.playback.debug("Configured Plex BIF scrub preview")
         }
         prefetchThumbnailsSoon()
     }

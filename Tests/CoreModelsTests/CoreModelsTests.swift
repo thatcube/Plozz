@@ -97,6 +97,24 @@ final class UserSessionRedactionTests: XCTestCase {
     }
 }
 
+final class HandoffDiagnosticsRedactionTests: XCTestCase {
+    func testRedactsURLsAndCredentialAssignments() {
+        let raw = """
+        NativeAVPlayerHost failed url=https://server.test/video?token=secret \
+        Authorization:Bearer-value api_key=key-value
+        """
+        let redacted = HandoffDiagnostics.redactedDetail(raw)
+
+        XCTAssertFalse(redacted.contains("server.test"))
+        XCTAssertFalse(redacted.contains("secret"))
+        XCTAssertFalse(redacted.contains("Bearer-value"))
+        XCTAssertFalse(redacted.contains("key-value"))
+        XCTAssertTrue(redacted.contains("<url>"))
+        XCTAssertTrue(redacted.contains("Authorization=<redacted>"))
+        XCTAssertTrue(redacted.contains("api_key=<redacted>"))
+    }
+}
+
 final class ProviderKindTests: XCTestCase {
     func testJellyfinAndPlexAreBothFirstClassProviders() {
         // Jellyfin and Plex are the first-class, co-equal backends; mediaShare is

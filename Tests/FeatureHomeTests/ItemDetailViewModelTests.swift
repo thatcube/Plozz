@@ -176,6 +176,7 @@ final class ItemDetailViewModelTests: XCTestCase {
         let vm = ItemDetailViewModel(provider: provider, itemID: "m1", sourceAccountID: "plex")
         XCTAssertNil(vm.originSourceAccountID,
                      "Home/Search details carry no origin, so the picker defaults to the smart best version")
+        XCTAssertFalse(vm.isLibraryOriginPinned)
     }
 
     func testOriginSourceAccountIDIsThreadedForLibraryOpenedItems() {
@@ -185,6 +186,8 @@ final class ItemDetailViewModelTests: XCTestCase {
         let vm = ItemDetailViewModel(provider: provider, itemID: "m1",
                                      sourceAccountID: "jelly", originSourceAccountID: "jelly")
         XCTAssertEqual(vm.originSourceAccountID, "jelly")
+        XCTAssertTrue(vm.isLibraryOriginPinned,
+                      "Playback from a source-specific library must remain on that source")
     }
 
     // MARK: - Initial locality preference (series server picking)
@@ -246,6 +249,103 @@ final class ItemDetailViewModelTests: XCTestCase {
 
         XCTAssertEqual(vm.state.value?.item.id, "r-show",
                        "A library-tile open keeps its own server, locality notwithstanding")
+    }
+
+    func testLibraryOriginRetargetsMergedPrimaryToLibraryCopy() async {
+        let jellyfinMovie = MediaItem(
+            id: "jellyfin-movie",
+            title: "Movie",
+            kind: .movie,
+            sourceAccountID: "jellyfin"
+        )
+        let plexMovie = MediaItem(
+            id: "plex-movie",
+            title: "Movie",
+            kind: .movie,
+            sourceAccountID: "plex"
+        )
+        let jellyfin = FakeMediaProvider(allItems: [jellyfinMovie])
+        let plex = FakeMediaProvider(allItems: [plexMovie])
+        let vm = ItemDetailViewModel(
+            provider: jellyfin,
+            itemID: jellyfinMovie.id,
+            initialItem: jellyfinMovie,
+            sourceAccountID: "jellyfin",
+            originSourceAccountID: "plex",
+            initialSources: [
+                MediaSourceRef(accountID: "jellyfin", itemID: jellyfinMovie.id),
+                MediaSourceRef(accountID: "plex", itemID: plexMovie.id)
+            ],
+            alternateProviderResolver: { accountID in
+                accountID == "plex" ? plex : jellyfin
+            }
+        )
+
+        await vm.load()
+
+        XCTAssertEqual(vm.state.value?.item.id, plexMovie.id)
+        XCTAssertEqual(vm.state.value?.item.sourceAccountID, "plex")
+        XCTAssertTrue(vm.isLibraryOriginPinned)
+    }
+
+    func testLibraryOriginWinsOverMoreLocalDetailSource() {
+        let jellyfin = MediaSourceRef(
+            accountID: "jellyfin",
+            itemID: "jellyfin-movie",
+            locality: .local
+        )
+        let plex = MediaSourceRef(
+            accountID: "plex",
+            itemID: "plex-movie",
+            locality: .remote
+        )
+
+        let selected = preferredDetailSource(
+            sourceOverride: nil,
+            libraryOrigin: "plex",
+            itemSourceAccountID: "plex",
+            sources: [jellyfin, plex],
+            serverChoices: [jellyfin, plex],
+            capabilities: .detected()
+        )
+
+        XCTAssertEqual(
+            selected?.accountID,
+            "plex",
+            "A source-specific library is authoritative even when another copy ranks as more local"
+        )
+    }
+
+    func testSeriesWatchMutationCascadesToLoadedEpisodes() async {
+        let series = MediaItem(id: "series", title: "Series", kind: .series)
+        let season = MediaItem(id: "season", title: "Season 1", kind: .season)
+        let episodes = [
+            MediaItem(id: "episode-1", title: "One", kind: .episode),
+            MediaItem(id: "episode-2", title: "Two", kind: .episode)
+        ]
+        let provider = FakeMediaProvider(allItems: [series, season] + episodes)
+        provider.childrenByParent = [
+            series.id: [season],
+            season.id: episodes
+        ]
+        let vm = ItemDetailViewModel(
+            provider: provider,
+            itemID: series.id,
+            sourceAccountID: "jellyfin"
+        )
+        await vm.load()
+        await vm.loadEpisodes(for: season.id)
+
+        vm.applyWatchedState(
+            MediaItemMutation(
+                itemIDs: [series.id],
+                scopedItemIDs: ["jellyfin:\(series.id)"],
+                played: true
+            )
+        )
+
+        XCTAssertTrue(vm.state.value?.item.isPlayed ?? false)
+        XCTAssertTrue(vm.episodes(for: season.id)?.allSatisfy(\.isPlayed) ?? false)
     }
 
     func testSwitchToSourceIsNotOverriddenByInitialLocalityPreference() async {
@@ -850,6 +950,53 @@ final class ItemDetailViewModelTests: XCTestCase {
                        "Enabled cross-server source must remain in the restored picker")
     }
 
+    func testSnapshotRestoredEpisodesRefreshLiveWatchStateOnSeasonOpen() async {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("plozz-watch-refresh-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        let cache = DetailSnapshotCache(directory: tempDir)
+
+        let show = series("show")
+        let seasonItem = season("season-2", "Season 2")
+        var staleEpisode = episode("episode-1", number: 1)
+        staleEpisode.isPlayed = false
+        var liveEpisode = staleEpisode
+        liveEpisode.isPlayed = true
+        let snapshot = DetailSnapshotCache.Snapshot(
+            item: show.taggingSource("share"),
+            children: [seasonItem.taggingSource("share")],
+            seasonEpisodes: [
+                seasonItem.id: [staleEpisode.taggingSource("share")]
+            ]
+        )
+        await cache.store(snapshot, for: "share|show")
+
+        let provider = FakeMediaProvider(allItems: [show, seasonItem, liveEpisode])
+        provider.childrenByParent = [
+            show.id: [seasonItem],
+            seasonItem.id: [liveEpisode]
+        ]
+        let vm = ItemDetailViewModel(
+            provider: provider,
+            itemID: show.id,
+            sourceAccountID: "share",
+            snapshotCache: cache
+        )
+        await vm.load()
+        await waitUntil { vm.episodes(for: seasonItem.id) != nil }
+        XCTAssertEqual(vm.episodes(for: seasonItem.id)?.first?.isPlayed, false)
+
+        await vm.loadEpisodes(for: seasonItem.id)
+
+        XCTAssertEqual(vm.episodes(for: seasonItem.id)?.first?.isPlayed, true)
+        XCTAssertGreaterThanOrEqual(
+            provider.childrenCallCount[seasonItem.id, default: 0],
+            1,
+            "A cached episode rail must still refresh live watch state"
+        )
+    }
+
     /// The Plex episode-badge bug: a season's `/children` listing can return a
     /// trimmed, SDR-looking episode (no per-stream DoVi/HDR, no Media-level Atmos
     /// hint), while the full per-item fetch carries the real 4K Dolby Vision /
@@ -1284,4 +1431,72 @@ private final class LockedFlag: @unchecked Sendable {
     private var flag = false
     func set() { lock.lock(); flag = true; lock.unlock() }
     var value: Bool { lock.lock(); defer { lock.unlock() }; return flag }
+}
+
+@MainActor
+final class ThemeMusicSourceResolutionTests: XCTestCase {
+    func testAuthenticatedThemeResolvesAtPlaybackBoundary() async throws {
+        let locator = try AuthenticatedHTTPPlaybackLocator(
+            provider: .plex,
+            accountID: "account",
+            credentialRevision: CredentialRevision(rawValue: UUID()),
+            itemID: "movie",
+            deliveryMode: .directFile,
+            purpose: .themeMusic,
+            resource: try AuthenticatedHTTPResource(
+                pathBase: .serverRoot,
+                path: "/library/metadata/movie/theme/1"
+            )
+        )
+        let theme = ThemeMusic(
+            itemID: "movie",
+            playbackSource: .authenticatedHTTP(locator)
+        )
+        let expected = URL(
+            string: "https://plex.example/library/metadata/movie/theme/1?X-Plex-Token=secret"
+        )!
+        let resolver = ThemeMusicResolverStub(url: expected)
+
+        let result = try await resolveThemeMusicURL(
+            theme,
+            authenticatedHTTPResolver: resolver
+        )
+
+        XCTAssertEqual(result, expected)
+        XCTAssertEqual(resolver.locator, locator)
+    }
+
+    func testPublicThemeDoesNotRequireAuthenticatedResolver() async throws {
+        let expected = URL(string: "https://themes.example/movie.mp3")!
+        let theme = ThemeMusic(
+            itemID: "movie",
+            playbackSource: .publicURL(
+                try SecretFreeURLSource(url: expected)
+            )
+        )
+
+        let result = try await resolveThemeMusicURL(
+            theme,
+            authenticatedHTTPResolver: nil
+        )
+
+        XCTAssertEqual(result, expected)
+    }
+}
+
+@MainActor
+private final class ThemeMusicResolverStub:
+    AuthenticatedHTTPResourceResolving
+{
+    let url: URL
+    private(set) var locator: AuthenticatedHTTPPlaybackLocator?
+
+    init(url: URL) {
+        self.url = url
+    }
+
+    func resolve(_ locator: AuthenticatedHTTPPlaybackLocator) async throws -> URL {
+        self.locator = locator
+        return url
+    }
 }

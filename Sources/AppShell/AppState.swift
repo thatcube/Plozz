@@ -6,6 +6,8 @@ import FeatureAuth
 import FeatureDiscovery
 import FeatureMusic
 import FeatureProfiles
+import MediaTransportCore
+import MediaTransportSMB
 import ProviderJellyfin
 import ProviderPlex
 import ProviderShare
@@ -177,6 +179,93 @@ public final class AppState {
         public let isFirstRun: Bool
     }
 
+    @MainActor
+    private final class AppAuthenticatedHTTPResourceResolver: AuthenticatedHTTPResourceResolving {
+        struct Context {
+            let provider: ProviderKind
+            let accountID: String
+            let credentialRevision: CredentialRevision
+            let baseURL: URL
+            let token: String
+        }
+
+        typealias ContextProvider = @MainActor @Sendable (
+            AuthenticatedHTTPPlaybackLocator
+        ) throws -> Context
+
+        private var contextProvider: ContextProvider?
+
+        func configure(contextProvider: @escaping ContextProvider) {
+            self.contextProvider = contextProvider
+        }
+
+        func resolve(_ locator: AuthenticatedHTTPPlaybackLocator) async throws -> URL {
+            guard let contextProvider else {
+                throw MediaTransportError.unsupportedCapability(
+                    "authenticated HTTP resolver"
+                )
+            }
+            let context = try contextProvider(locator)
+            guard context.provider == locator.provider,
+                  context.accountID == locator.accountID,
+                  context.credentialRevision == locator.credentialRevision,
+                  var components = URLComponents(
+                      url: context.baseURL,
+                      resolvingAgainstBaseURL: false
+                  ) else {
+                throw MediaTransportError.authentication(
+                    reason: "authenticated HTTP identity mismatch"
+                )
+            }
+
+            let encodedPath = locator.resource.path
+            switch locator.resource.pathBase {
+            case .configuredBaseURL:
+                let basePath = components.percentEncodedPath.hasSuffix("/")
+                    ? String(components.percentEncodedPath.dropLast())
+                    : components.percentEncodedPath
+                components.percentEncodedPath = basePath + "/" + encodedPath
+            case .serverRoot:
+                components.percentEncodedPath = encodedPath
+            }
+
+            var queryItems = locator.resource.queryItems.map {
+                URLQueryItem(name: $0.name, value: $0.value)
+            }
+            switch locator.provider {
+            case .jellyfin:
+                queryItems.append(URLQueryItem(name: "api_key", value: context.token))
+                if let playSessionID = locator.playSessionID {
+                    queryItems.append(
+                        URLQueryItem(name: "playSessionId", value: playSessionID)
+                    )
+                }
+            case .plex:
+                queryItems.append(URLQueryItem(name: "X-Plex-Token", value: context.token))
+                if let playSessionID = locator.playSessionID {
+                    queryItems.append(URLQueryItem(name: "session", value: playSessionID))
+                    queryItems.append(
+                        URLQueryItem(
+                            name: "X-Plex-Session-Identifier",
+                            value: playSessionID
+                        )
+                    )
+                }
+            case .mediaShare:
+                throw MediaTransportError.invalidInput(
+                    reason: "media shares cannot resolve authenticated HTTP resources"
+                )
+            }
+            components.queryItems = queryItems
+            guard let url = components.url else {
+                throw MediaTransportError.invalidInput(
+                    reason: "invalid authenticated HTTP resource"
+                )
+            }
+            return url
+        }
+    }
+
     /// Accounts just added in the current add flow whose libraries the
     /// "choose your libraries" step should offer. `RootView` renders that step
     /// from this; empty when none is pending.
@@ -262,36 +351,87 @@ public final class AppState {
     /// Durable cross-server watch-state outbox + reconciler. Persists each watch
     /// mutation's intent to disk before the network call and drains it on launch /
     /// foreground / reachability so a watch made while a server was asleep (or the
-    /// app offline) still converges every server + Trakt. Profile-scoped store, so
-    /// it is rebuilt (and the old one flushed) when the active profile changes.
+    /// app offline) still converges every server + Trakt. One reconciler is retained
+    /// per profile so a returning profile never creates a competing writer.
     @ObservationIgnored
-    private var _watchReconciler: WatchStateReconciler?
+    private var watchReconcilers: [String: WatchStateReconciler] = [:]
+    @ObservationIgnored
+    private var trackerProfileGeneration: UInt64 = 0
     public var watchReconciler: WatchStateReconciler {
-        if let existing = _watchReconciler { return existing }
-        let created = makeWatchReconciler()
-        _watchReconciler = created
+        let profileID = profilesModel.activeProfileID
+        if let existing = watchReconcilers[profileID] { return existing }
+        let created = makeWatchReconciler(profileID: profileID)
+        watchReconcilers[profileID] = created
         return created
     }
 
-    /// Builds the reconciler with a profile-scoped file store and an applier that
-    /// resolves providers / the Trakt scrobbler live on the main actor.
-    private func makeWatchReconciler() -> WatchStateReconciler {
-        let store = FileWatchMutationStore(namespace: profilesModel.activeNamespace)
+    /// Builds the reconciler with profile-scoped durable state and an applier that
+    /// resolves providers / tracker scrobblers live on the main actor.
+    private func makeWatchReconciler(
+        profileID: String
+    ) -> WatchStateReconciler {
+        let profile = profilesModel.profiles.first { $0.id == profileID }
+            ?? profilesModel.activeProfile
+        let trackerNamespace = profile.settingsNamespace(
+            isDefault: profilesModel.isDefault(profile)
+        )
+        let boundTraktScrobbler = TraktServiceFactory.make(
+            namespace: trackerNamespace
+        ).scrobbler
+        let boundSimklScrobbler = SimklServiceFactory.make(
+            namespace: trackerNamespace
+        ).scrobbler
+        let boundAniListScrobbler = AniListServiceFactory.make(
+            namespace: trackerNamespace
+        ).scrobbler
+        let boundMALScrobbler = MALServiceFactory.make(
+            namespace: trackerNamespace
+        ).scrobbler
+        let store: any WatchMutationStoring
+        if let durableLocalStateStore {
+            do {
+                store = try DurableWatchMutationStore(
+                    store: durableLocalStateStore,
+                    profileID: profileID,
+                    onLoadFailure: {
+                        PlozzLog.app.error(
+                            "Durable watch outbox unavailable; preserving corrupt state"
+                        )
+                    }
+                )
+            } catch {
+                PlozzLog.app.error(
+                    "Durable watch outbox address invalid; using memory only"
+                )
+                store = InMemoryWatchMutationStore()
+            }
+        } else {
+            store = InMemoryWatchMutationStore()
+        }
         let applier = AppShellWatchMutationApplier(
+            isActive: { [weak self] in
+                await MainActor.run {
+                    self?.profilesModel.activeProfileID == profileID
+                }
+            },
             resolveProvider: { [weak self] accountID in
-                await MainActor.run { self?.provider(forAccountID: accountID) }
+                await MainActor.run {
+                    guard self?.profilesModel.activeProfileID == profileID
+                    else { return nil }
+                    return self?.provider(forAccountID: accountID)
+                }
             },
-            traktScrobbler: { [weak self] in
-                await MainActor.run { self?.traktService.scrobbler ?? DisabledTraktScrobbler() }
+            traktScrobbler: {
+                boundTraktScrobbler
             },
-            simklScrobbler: { [weak self] in
-                await MainActor.run { self?.simklService.scrobbler ?? DisabledSimklScrobbler() }
+            simklScrobbler: {
+                boundSimklScrobbler
             },
-            anilistScrobbler: { [weak self] in
-                await MainActor.run { self?.anilistService.scrobbler ?? DisabledAniListScrobbler() }
+            anilistScrobbler: {
+                boundAniListScrobbler
             },
-            malScrobbler: { [weak self] in
-                await MainActor.run { self?.malService.scrobbler ?? DisabledMALScrobbler() }
+            malScrobbler: {
+                boundMALScrobbler
             },
             allAccountIDs: { [weak self] in
                 // The set the identity index actually warms and that Home/Search
@@ -318,15 +458,13 @@ public final class AppState {
                 identitySnapshotStore.current.indexedAccountIDs
             }
         )
-        return WatchStateReconciler(store: store, applier: applier)
-    }
-
-    /// Flushes and drops the current reconciler so the next access rebuilds it for
-    /// the now-active profile's namespace.
-    private func resetWatchReconciler() {
-        guard let old = _watchReconciler else { return }
-        _watchReconciler = nil
-        Task { await old.drain() }
+        return WatchStateReconciler(
+            store: store,
+            applier: applier,
+            onPersistenceFailure: {
+                PlozzLog.app.error("Durable watch outbox write failed")
+            }
+        )
     }
 
     /// Drains the watch-state outbox. Safe to call repeatedly (no-op when empty);
@@ -844,6 +982,11 @@ public final class AppState {
     private var machine = SessionStateMachine()
     private let accountStore: AccountPersisting
     private let registry: ProviderRegistry
+    public let networkFileResolver: any MediaTransportNetworkFileResolving
+    public let authenticatedHTTPResolver: any AuthenticatedHTTPResourceResolving
+    private let networkFileResolverRegistry: MediaTransportResolverRegistry?
+    private let shareCatalogCoordinator: ShareCatalogCoordinator
+    private let durableLocalStateStore: DurableLocalStateStore?
     /// Optional tvOS system-user seam (default app-owned no-op). See
     /// `SystemProfileBridging`.
     private let systemBridge: SystemProfileBridging
@@ -858,6 +1001,9 @@ public final class AppState {
     /// users are seeded synchronously from `plexHomeUserTokenCache` (see below)
     /// so their identity paints instantly without the startup double-load.
     private var plexTokenOverrides: [String: String] = [:]
+    /// Runtime revision for the effective Plex Home-user credential. Owner
+    /// credentials continue to use the account's persisted revision.
+    private var plexOverrideCredentialRevisions: [String: CredentialRevision] = [:]
 
     /// For each account, the Plex Home-user UUID the current override resolves to.
     /// Lets the reconciler tell an already-satisfied protected switch apart from a
@@ -910,6 +1056,10 @@ public final class AppState {
     public init(
         accountStore: AccountPersisting? = nil,
         registry: ProviderRegistry? = nil,
+        networkFileResolver: (any MediaTransportNetworkFileResolving)? = nil,
+        authenticatedHTTPResolver: (any AuthenticatedHTTPResourceResolving)? = nil,
+        shareCatalogCoordinator: ShareCatalogCoordinator? = nil,
+        durableLocalStateStore: DurableLocalStateStore? = nil,
         profilesModel: ProfilesModel? = nil,
         systemBridge: SystemProfileBridging? = nil,
         subtitleBehaviorModel: SubtitleBehaviorModel? = nil,
@@ -935,8 +1085,56 @@ public final class AppState {
         malService: MALService? = nil,
         lastfmService: LastFmService? = nil
     ) {
-        self.accountStore = accountStore ?? Self.makeDefaultAccountStore()
-        self.registry = registry ?? Self.makeDefaultRegistry()
+        let resolvedAccountStore = accountStore ?? Self.makeDefaultAccountStore()
+        self.accountStore = resolvedAccountStore
+        let resolvedDurableLocalStateStore: DurableLocalStateStore?
+        if let durableLocalStateStore {
+            resolvedDurableLocalStateStore = durableLocalStateStore
+        } else if accountStore == nil {
+            do {
+                resolvedDurableLocalStateStore =
+                    try DurableLocalStateStoreFactory.userIndependent()
+            } catch {
+                PlozzLog.app.error(
+                    "Durable local media state unavailable for this launch"
+                )
+                resolvedDurableLocalStateStore = nil
+            }
+        } else {
+            resolvedDurableLocalStateStore = nil
+        }
+        self.durableLocalStateStore = resolvedDurableLocalStateStore
+        let resolvedShareCatalogCoordinator = shareCatalogCoordinator
+            ?? ShareCatalogCoordinator()
+        self.shareCatalogCoordinator = resolvedShareCatalogCoordinator
+        let defaultAuthenticatedHTTPResolver: AppAuthenticatedHTTPResourceResolver?
+        if let authenticatedHTTPResolver {
+            self.authenticatedHTTPResolver = authenticatedHTTPResolver
+            defaultAuthenticatedHTTPResolver = nil
+        } else {
+            let resolver = AppAuthenticatedHTTPResourceResolver()
+            self.authenticatedHTTPResolver = resolver
+            defaultAuthenticatedHTTPResolver = resolver
+        }
+        let resolvedNetworkFileResolver: any MediaTransportNetworkFileResolving
+        if let networkFileResolver {
+            resolvedNetworkFileResolver = networkFileResolver
+            self.networkFileResolverRegistry = nil
+        } else {
+            let composition = Self.makeDefaultNetworkFileResolver(
+                accountStore: resolvedAccountStore,
+                shareCatalogCoordinator: resolvedShareCatalogCoordinator
+            )
+            resolvedNetworkFileResolver = composition.resolver
+            self.networkFileResolverRegistry = composition.registry
+        }
+        self.networkFileResolver = resolvedNetworkFileResolver
+        self.registry = registry ?? Self.makeDefaultRegistry(
+            accountStore: resolvedAccountStore,
+            networkFileResolver: resolvedNetworkFileResolver,
+            shareCatalogCoordinator: resolvedShareCatalogCoordinator,
+            durableLocalStateStore: resolvedDurableLocalStateStore
+        )
         self.profilesModel = profilesModel ?? Self.makeDefaultProfilesModel()
         self.systemBridge = systemBridge ?? Self.makeDefaultSystemBridge()
         self.ratingsProvider = ratingsProvider ?? RatingsServiceFactory.make()
@@ -1011,12 +1209,50 @@ public final class AppState {
             )
         }
 
-        // Wire the media-share scan/enrich progress reporter into the (process-wide)
-        // share catalog registry, so the first share query (from Home) reports into
+        // Wire the media-share scan/enrich progress reporter into the app-owned
+        // catalog coordinator, so the first share query (from Home) reports into
         // this model and the "Updating library…" banner + Settings last-scanned line
         // light up. The reporter is a Sendable value; capture it before the Task.
         let scanReporter = self.shareScanStatusModel.reporter()
-        Task { await ShareLibraryControl.configure(reporter: scanReporter) }
+        Task {
+            await resolvedShareCatalogCoordinator.configure(reporter: scanReporter)
+        }
+        defaultAuthenticatedHTTPResolver?.configure { [weak self] locator in
+            guard let self,
+                  let account = self.accountStore.loadAccounts().first(where: {
+                      $0.id == locator.accountID
+                  }),
+                  account.server.provider == locator.provider,
+                  self.effectiveCredentialRevision(for: account)
+                    == locator.credentialRevision,
+                  let token = self.resolvedToken(for: account.id),
+                  !token.isEmpty else {
+                throw MediaTransportError.authentication(
+                    reason: "inactive authenticated HTTP identity"
+                )
+            }
+            let baseURL: URL
+            if account.server.provider == .plex {
+                let provider = try self.registry.provider(
+                    for: self.providerResolutionContext(for: account, token: token)
+                )
+                guard let originProvider = provider as? AuthenticatedHTTPOriginProviding else {
+                    throw MediaTransportError.unsupportedCapability(
+                        "dynamic authenticated HTTP origin"
+                    )
+                }
+                baseURL = originProvider.authenticatedHTTPOrigin
+            } else {
+                baseURL = account.server.baseURL
+            }
+            return AppAuthenticatedHTTPResourceResolver.Context(
+                provider: account.server.provider,
+                accountID: account.id,
+                credentialRevision: self.effectiveCredentialRevision(for: account),
+                baseURL: baseURL,
+                token: token
+            )
+        }
     }
 
     /// Force a fresh scan + enrichment of a media share now (Settings "Scan now").
@@ -1028,13 +1264,26 @@ public final class AppState {
         guard let account = accounts.first(where: { $0.id == accountID }),
               account.server.provider == .mediaShare else { return }
         let token = resolvedToken(for: account.id) ?? ""
-        guard let shareProvider = try? registry.provider(for: account.session(token: token)) as? ShareProvider else { return }
+        guard let shareProvider = try? registry.provider(
+            for: providerResolutionContext(for: account, token: token)
+        ) as? ShareProvider else { return }
         Task { await shareProvider.rescan() }
     }
 
     private static func makeDefaultAccountStore() -> AccountPersisting {
         #if canImport(Security)
-        return AccountStore(secureStore: KeychainStore())
+        let secureStore = KeychainStore()
+        do {
+            let localStateStore = try DurableLocalStateStoreFactory.userIndependent()
+            return AccountStore(
+                secureStore: secureStore,
+                mediaCredentialVault: MediaCredentialVault(secureStore: secureStore),
+                credentialJournal: try CredentialMutationJournal(store: localStateStore)
+            )
+        } catch {
+            PlozzLog.auth.error("Media-share credential infrastructure unavailable")
+            return AccountStore(secureStore: secureStore)
+        }
         #else
         return AccountStore(secureStore: InMemorySecureStore())
         #endif
@@ -1078,34 +1327,164 @@ public final class AppState {
 
     /// Registers the providers this build links. Each backend is a single
     /// `register(kind, …)` line; nothing else in core changes.
-    private static func makeDefaultRegistry() -> ProviderRegistry {
+    private static func makeDefaultRegistry(
+        accountStore: any AccountPersisting,
+        networkFileResolver: any MediaTransportNetworkFileResolving,
+        shareCatalogCoordinator: ShareCatalogCoordinator,
+        durableLocalStateStore: DurableLocalStateStore?
+    ) -> ProviderRegistry {
         let registry = ProviderRegistry()
-        registry.register(.jellyfin) { session in
+        let smbAdapter = makeSMBAdapter(accountStore: accountStore)
+        registry.register(.jellyfin) { context in
             JellyfinProvider(
-                session: session,
+                session: context.session,
+                accountID: context.accountID,
+                credentialRevision: context.credentialRevision,
                 interactiveHTTP: URLSessionHTTPClient(session: .plozzInteractive),
                 hybridEngineEnabled: HybridPlayback.enabled
             )
         }
-        registry.register(.plex) { session in
+        registry.register(.plex) { context in
             PlexProvider(
-                session: session,
+                session: context.session,
+                accountID: context.accountID,
+                credentialRevision: context.credentialRevision,
                 interactiveHTTP: URLSessionHTTPClient(session: .plozzInteractive),
                 hybridEngineEnabled: HybridPlayback.enabled,
-                connectionRefresh: PlexProvider.connectionRefresh(for: session)
+                connectionRefresh: PlexProvider.connectionRefresh(for: context.session)
             )
         }
-        registry.register(.mediaShare) { session in
-            ShareProvider(session: session, streamProber: PlozzigenSMBStreamProber())
+        registry.register(.mediaShare) { context in
+            guard let localMediaContext = context.localMediaContext else {
+                throw ProviderResolutionError.localMediaContextRequired(.mediaShare)
+            }
+            let baseURL = context.session.server.baseURL
+            guard baseURL.scheme?.lowercased() == "smb",
+                  let host = baseURL.host else {
+                throw MediaTransportError.invalidInput(reason: "invalid SMB account endpoint")
+            }
+            let endpoint = try MediaTransportEndpointIdentity(
+                transportIdentifier: MediaShareTransportKind.smb.rawValue,
+                host: host,
+                port: baseURL.port,
+                rootPath: baseURL.path
+            )
+            let accountID = context.accountID
+            let credentialRevision = context.credentialRevision
+            let sessionFactory: ShareTransportSessionFactory = { role in
+                let key = MediaTransportSessionKey(
+                    accountID: accountID,
+                    credentialRevision: credentialRevision,
+                    endpoint: endpoint,
+                    trustRevision: UUID(
+                        uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+                    ),
+                    role: role
+                )
+                return try await smbAdapter.connect(for: key)
+            }
+            return ShareProvider(
+                session: context.session,
+                localMediaContext: localMediaContext,
+                credentialRevision: credentialRevision,
+                sessionFactory: sessionFactory,
+                catalogCoordinator: shareCatalogCoordinator,
+                durableLocalStateStore: durableLocalStateStore,
+                streamProber: PlozzigenNetworkFileStreamProber(
+                    resolver: networkFileResolver
+                )
+            )
         }
         return registry
     }
 
-    /// Restores stored accounts on launch (relaunch without re-login), migrating
-    /// any legacy single session first. Shows the profile picker when the
-    /// household has opted into "ask on startup".
+    private struct NetworkFileResolverComposition {
+        let resolver: any MediaTransportNetworkFileResolving
+        let registry: MediaTransportResolverRegistry
+    }
+
+    private static func makeDefaultNetworkFileResolver(
+        accountStore: any AccountPersisting,
+        shareCatalogCoordinator: ShareCatalogCoordinator
+    ) -> NetworkFileResolverComposition {
+        let transportRegistry = MediaTransportResolverRegistry(
+            adapter: makeSMBAdapter(accountStore: accountStore)
+        )
+        let resolver = MediaTransportNetworkFileResolver(
+            registry: transportRegistry,
+            playbackLeaseProvider: { locator in
+                try await shareCatalogCoordinator.acquirePlayback(
+                    accountKey: locator.accountID
+                )
+            }
+        ) { locator in
+            guard locator.sourceID == locator.accountID,
+                  let account = accountStore.loadAccounts().first(where: {
+                      $0.id == locator.accountID
+                  }),
+                  account.server.provider == .mediaShare,
+                  account.credentialRevision == locator.credentialRevision else {
+                throw MediaTransportError.authentication(reason: "inactive network-file identity")
+            }
+            let baseURL = account.server.baseURL
+            guard baseURL.scheme?.lowercased() == "smb",
+                  let host = baseURL.host else {
+                throw MediaTransportError.invalidInput(reason: "invalid SMB account endpoint")
+            }
+            let endpoint = try MediaTransportEndpointIdentity(
+                transportIdentifier: MediaShareTransportKind.smb.rawValue,
+                host: host,
+                port: baseURL.port,
+                rootPath: baseURL.path
+            )
+            return MediaTransportSessionKey(
+                accountID: account.id,
+                credentialRevision: account.credentialRevision,
+                endpoint: endpoint,
+                trustRevision: UUID(
+                    uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+                ),
+                role: .playback
+            )
+        }
+        return NetworkFileResolverComposition(
+            resolver: resolver,
+            registry: transportRegistry
+        )
+    }
+
+    private static func makeSMBAdapter(
+        accountStore: any AccountPersisting
+    ) -> SMBMediaTransportAdapter {
+        SMBMediaTransportAdapter { accountID, revision in
+            let envelope = try accountStore.mediaShareCredential(
+                for: accountID,
+                revision: revision
+            )
+            guard envelope.transport == .smb else {
+                throw MediaTransportError.unsupportedCapability("non-SMB credential")
+            }
+            let credential: SMBMediaTransportCredential
+            switch envelope.authentication {
+            case .anonymous:
+                credential = .anonymous
+            case let .password(username, password):
+                credential = .password(username: username, password: password)
+            case .bearer, .generatedKey, .noCredentials:
+                throw MediaTransportError.unsupportedCapability("SMB authentication")
+            }
+            return SMBMediaTransportConfiguration(credential: credential)
+        }
+    }
+
+    /// Restores stored accounts on launch (relaunch without re-login). Shows the
+    /// profile picker when the household has opted into "ask on startup".
     public func bootstrap() {
-        accountStore.migrateLegacySessionIfNeeded()
+        do {
+            try accountStore.recoverCredentialMutations()
+        } catch {
+            PlozzLog.auth.error("Credential recovery failed; incomplete shares remain hidden")
+        }
         reloadAccounts()
         PlozzLog.boot("bootstrap accounts=\(accounts.count) activeIDs=\(activeAccountIDs.count)")
         // The "Ask which profile on startup" toggle is the single source of
@@ -1162,7 +1541,7 @@ public final class AppState {
     public var primaryProvider: (any MediaProvider)? {
         guard let account = primaryActiveAccount,
               let token = resolvedToken(for: account.id) else { return nil }
-        return try? registry.provider(for: account.session(token: token))
+        return try? registry.provider(for: providerResolutionContext(for: account, token: token))
     }
 
     /// The active account that drives the current single-provider UI.
@@ -1178,7 +1557,9 @@ public final class AppState {
         accounts.compactMap { account in
             guard activeAccountIDs.contains(account.id),
                   let token = resolvedToken(for: account.id),
-                  let provider = try? registry.provider(for: account.session(token: token))
+                  let provider = try? registry.provider(
+                      for: providerResolutionContext(for: account, token: token)
+                  )
             else { return nil }
             return ResolvedAccount(account: account, provider: provider)
         }
@@ -1191,7 +1572,9 @@ public final class AppState {
         ids.compactMap { id in
             guard let account = accounts.first(where: { $0.id == id }),
                   let token = resolvedToken(for: id),
-                  let provider = try? registry.provider(for: account.session(token: token))
+                  let provider = try? registry.provider(
+                      for: providerResolutionContext(for: account, token: token)
+                  )
             else { return nil }
             return ResolvedAccount(account: account, provider: provider)
         }
@@ -1205,7 +1588,9 @@ public final class AppState {
         if !active.isEmpty { return active }
         guard let account = primaryActiveAccount,
               let token = resolvedToken(for: account.id),
-              let provider = try? registry.provider(for: account.session(token: token))
+              let provider = try? registry.provider(
+                  for: providerResolutionContext(for: account, token: token)
+              )
         else { return [] }
         return [ResolvedAccount(account: account, provider: provider)]
     }
@@ -1217,7 +1602,48 @@ public final class AppState {
         guard let account = accounts.first(where: { $0.id == id }),
               let token = resolvedToken(for: account.id)
         else { return nil }
-        return try? registry.provider(for: account.session(token: token))
+        return try? registry.provider(for: providerResolutionContext(for: account, token: token))
+    }
+
+    private func providerResolutionContext(
+        for account: Account,
+        token: String
+    ) -> ProviderResolutionContext {
+        let localMediaContext = account.server.provider == .mediaShare
+            ? LocalMediaContext(
+                accountID: account.id,
+                profileID: profilesModel.activeProfileID,
+                profileNamespace: profilesModel.activeNamespace
+            )
+            : nil
+        return ProviderResolutionContext(
+            session: account.session(token: token),
+            accountID: account.id,
+            credentialRevision: effectiveCredentialRevision(for: account),
+            localMediaContext: localMediaContext
+        )
+    }
+
+    private func effectiveCredentialRevision(for account: Account) -> CredentialRevision {
+        guard account.server.provider == .plex,
+              plexTokenOverrides[account.id] != nil else {
+            return account.credentialRevision
+        }
+        if let revision = plexOverrideCredentialRevisions[account.id] {
+            return revision
+        }
+        let revision = CredentialRevision()
+        plexOverrideCredentialRevisions[account.id] = revision
+        return revision
+    }
+
+    private func setPlexTokenOverride(_ token: String?, for accountID: String) {
+        if plexTokenOverrides[accountID] != token {
+            plexOverrideCredentialRevisions[accountID] = token == nil
+                ? nil
+                : CredentialRevision()
+        }
+        plexTokenOverrides[accountID] = token
     }
 
     // MARK: Plex Home users ("Who's watching?")
@@ -1332,8 +1758,9 @@ public final class AppState {
                     }
                     // Stale override for a DIFFERENT user — drop before prompting.
                     if plexTokenOverrides[account.id] != nil {
-                        plexTokenOverrides[account.id] = nil
+                        setPlexTokenOverride(nil, for: account.id)
                         plexResolvedHomeUser[account.id] = nil
+                        registry.invalidate(accountID: account.id)
                         plexIdentityGeneration += 1
                         PlozzLog.boot("genBump=\(self.plexIdentityGeneration) site=ensure.staleOverride acct=\(account.id)")
                     }
@@ -1357,8 +1784,9 @@ public final class AppState {
                     // once when the switch lands; that token is then cached so it
                     // never happens again.
                     if let cached = plexHomeUserTokenCache.token(account: account.id, homeUser: binding.homeUserID) {
-                        plexTokenOverrides[account.id] = cached
+                        setPlexTokenOverride(cached, for: account.id)
                         plexResolvedHomeUser[account.id] = binding.homeUserID
+                        registry.invalidate(accountID: account.id)
                         PlozzLog.boot("ensure.cachedOverride acct=\(account.id) home=\(binding.homeUserID) — instant paint")
                     } else {
                         PlozzLog.boot("ensure.unprotectedSwitch acct=\(account.id) home=\(binding.homeUserID) — cache miss, async")
@@ -1371,8 +1799,9 @@ public final class AppState {
                 }
             } else {
                 if plexTokenOverrides[account.id] != nil {
-                    plexTokenOverrides[account.id] = nil
+                    setPlexTokenOverride(nil, for: account.id)
                     plexResolvedHomeUser[account.id] = nil
+                    registry.invalidate(accountID: account.id)
                     plexIdentityGeneration += 1
                     PlozzLog.boot("genBump=\(self.plexIdentityGeneration) site=ensure.dropOverride acct=\(account.id)")
                 }
@@ -1399,8 +1828,13 @@ public final class AppState {
         pendingPlexPINRequest = nil
         plexPINError = nil
         if !plexTokenOverrides.isEmpty {
+            let accountIDs = Array(plexTokenOverrides.keys)
             plexTokenOverrides.removeAll()
+            plexOverrideCredentialRevisions.removeAll()
             plexResolvedHomeUser.removeAll()
+            for accountID in accountIDs {
+                registry.invalidate(accountID: accountID)
+            }
             plexIdentityGeneration += 1
             PlozzLog.boot("genBump=\(self.plexIdentityGeneration) site=clearPlexOverrides")
         }
@@ -1446,7 +1880,7 @@ public final class AppState {
                 if pin != nil { ensurePlexIdentityForActiveProfile() }
                 return
             }
-            plexTokenOverrides[accountID] = resolvedToken
+            setPlexTokenOverride(resolvedToken, for: accountID)
             plexResolvedHomeUser[accountID] = homeUserID
             // Cache unprotected (no-PIN) switches so future launches install this
             // identity synchronously. PIN-protected switches are never persisted.
@@ -1460,6 +1894,7 @@ public final class AppState {
             // refresh that returns the same token (the common case on a cache hit)
             // must NOT rebuild, or it reintroduces the startup double-load.
             if previousToken != resolvedToken {
+                registry.invalidate(accountID: accountID)
                 plexIdentityGeneration += 1
                 PlozzLog.boot("genBump=\(self.plexIdentityGeneration) site=performPlexSwitch acct=\(accountID) home=\(homeUserID)")
             } else {
@@ -1520,12 +1955,29 @@ public final class AppState {
     /// otherwise it enters the app directly.
     public func didAuthenticate(_ session: UserSession) {
         let isFirstRun = accounts.isEmpty && !profilesModel.firstRunProfileSetupComplete
-        let account = Account(from: session)
+        // Media shares are identified by their share path (host/port/share), not a
+        // random UUID, so re-adding the same share — e.g. to fix its password —
+        // updates the existing account in place (new credential revision, old one
+        // retired) instead of forking a duplicate account. Other providers keep a
+        // freshly-minted UUID identity.
+        let account = session.server.provider == .mediaShare
+            ? Account(id: session.server.id, from: session)
+            : Account(from: session)
+        let previousAccount = accounts.first { $0.id == account.id }
         do {
             try accountStore.add(account, token: session.accessToken)
         } catch {
             apply(.authenticationFailed(.unknown("")))
             return
+        }
+        // Tear down the OLD credential revision's transport sessions only when the
+        // store actually moved to a new revision (a real password change). An
+        // identical re-add is a no-op that keeps the existing revision, so read the
+        // persisted revision back rather than trusting the freshly-minted one.
+        if let previousAccount,
+           let persisted = accountStore.loadAccounts().first(where: { $0.id == account.id }),
+           previousAccount.credentialRevision != persisted.credentialRevision {
+            retireNetworkFileRevision(for: previousAccount)
         }
         reloadAccounts()
         // Flow finished — next add-account starts at the chooser.
@@ -1546,8 +1998,13 @@ public final class AppState {
         var addedIDs: [String] = []
         for session in sessions {
             let account = Account(from: session)
+            let previousAccount = accounts.first { $0.id == account.id }
             do {
                 try accountStore.add(account, token: session.accessToken)
+                if let previousAccount,
+                   previousAccount.credentialRevision != account.credentialRevision {
+                    retireNetworkFileRevision(for: previousAccount)
+                }
                 addedIDs.append(account.id)
             } catch {
                 continue // Skip a failed add; keep the rest of the batch.
@@ -1773,9 +2230,8 @@ public final class AppState {
         }
         let trimmedName = displayName.trimmingCharacters(in: .whitespaces)
         let name = trimmedName.isEmpty ? "\(host)/\(share)" : trimmedName
-        let portKey = port.map { ":\($0)" } ?? ""
         let server = MediaServer(
-            id: "share:\(host)\(portKey)/\(share)",
+            id: Self.mediaShareServerID(host: host, port: port, share: share, username: username),
             name: name,
             baseURL: baseURL,
             provider: .mediaShare
@@ -1792,6 +2248,33 @@ public final class AppState {
         )
         apply(.serverSelected(server))
         didAuthenticate(session)
+    }
+
+    /// The stable identity for a media share, used as BOTH the `MediaServer.id`
+    /// and (via `didAuthenticate`) the `Account.id`, so re-adding the same share
+    /// — e.g. to update its password — updates the existing account in place
+    /// instead of creating a duplicate.
+    ///
+    /// Identity = host + port + share + user, all case-folded, because SMB treats
+    /// host, share, and username as case-insensitive. Folding to lowercase means
+    /// `//NAS/Media` and `//nas/media`, and `COPILOT2` vs `Copilot2`, resolve to
+    /// the same account (no accidental fork). The username IS part of the identity
+    /// so genuinely different users on the SAME share (e.g. `brandon` and `sister`,
+    /// who may see different files) can both be added as separate accounts. An
+    /// empty username is a guest/anonymous share and folds to a stable `guest`
+    /// identity. Only the identity is normalized; the display name and the
+    /// connection `baseURL` keep the user's original casing (SMB ignores case on
+    /// the wire).
+    static func mediaShareServerID(
+        host: String,
+        port: Int?,
+        share: String,
+        username: String
+    ) -> String {
+        let portKey = port.map { ":\($0)" } ?? ""
+        let normalizedUser = username.trimmingCharacters(in: .whitespaces).lowercased()
+        let user = normalizedUser.isEmpty ? "guest" : normalizedUser
+        return "share:\(host.lowercased())\(portKey)/\(share.lowercased())#\(user)"
     }
 
     /// Begins adding another account from inside the signed-in app.
@@ -1821,11 +2304,32 @@ public final class AppState {
 
     /// Removes one account; drops to onboarding if it was the last.
     public func removeAccount(id: String) {
-        try? accountStore.remove(id: id)
-        plexTokenOverrides[id] = nil
+        let removedAccount = accounts.first { $0.id == id }
+        let shareAccountKey = removedAccount?.server.provider == .mediaShare
+            ? removedAccount?.id
+            : nil
+        do {
+            try accountStore.remove(id: id)
+        } catch {
+            PlozzLog.auth.error("Account removal failed; account remains signed in")
+        }
+        reloadAccounts()
+        guard !accounts.contains(where: { $0.id == id }) else {
+            apply(.accountsChanged(accounts))
+            return
+        }
+        if let removedAccount {
+            retireNetworkFileRevision(for: removedAccount)
+        }
+        if let shareAccountKey {
+            shareScanStatusModel.removeShare(shareID: shareAccountKey)
+            Task {
+                await self.shareCatalogCoordinator.invalidate(accountKey: shareAccountKey)
+            }
+        }
+        setPlexTokenOverride(nil, for: id)
         plexResolvedHomeUser[id] = nil
         plexHomeUserTokenCache.removeAll(account: id)
-        reloadAccounts()
         apply(.accountsChanged(accounts))
     }
 
@@ -1838,11 +2342,37 @@ public final class AppState {
 
     /// Removes every account (full reset).
     public func signOutAll() {
-        try? accountStore.clearAll()
-        plexTokenOverrides.removeAll()
-        plexResolvedHomeUser.removeAll()
-        plexHomeUserTokenCache.removeAll()
+        let removedAccounts = accounts
+        let shareAccountKeys = removedAccounts
+            .filter { $0.server.provider == .mediaShare }
+            .map(\.id)
+        do {
+            try accountStore.clearAll()
+        } catch {
+            PlozzLog.auth.error("Sign out all was incomplete; retained accounts remain signed in")
+        }
         reloadAccounts()
+        let retainedAccountIDs = Set(accounts.map(\.id))
+        let confirmedRemovedAccounts = removedAccounts.filter {
+            !retainedAccountIDs.contains($0.id)
+        }
+        let confirmedShareAccountKeys = shareAccountKeys.filter {
+            !retainedAccountIDs.contains($0)
+        }
+        confirmedRemovedAccounts.forEach(retireNetworkFileRevision)
+        confirmedShareAccountKeys.forEach {
+            shareScanStatusModel.removeShare(shareID: $0)
+        }
+        for accountKey in confirmedShareAccountKeys {
+            Task {
+                await self.shareCatalogCoordinator.invalidate(accountKey: accountKey)
+            }
+        }
+        for account in confirmedRemovedAccounts {
+            setPlexTokenOverride(nil, for: account.id)
+            plexResolvedHomeUser[account.id] = nil
+            plexHomeUserTokenCache.removeAll(account: account.id)
+        }
         apply(.accountsChanged(accounts))
     }
 
@@ -1851,8 +2381,38 @@ public final class AppState {
     /// first-run flag, and the recent-servers list — so the next server add
     /// reproduces a genuine first run. Surfaced from a DEBUG-only Settings row.
     public func resetToFirstRunForDebugging() {
-        try? accountStore.clearAll()
+        let removedAccounts = accounts
+        let shareAccountKeys = removedAccounts
+            .filter { $0.server.provider == .mediaShare }
+            .map(\.id)
+        do {
+            try accountStore.clearAll()
+        } catch {
+            PlozzLog.auth.error("First-run reset could not remove every account")
+        }
+        reloadAccounts()
+        let retainedAccountIDs = Set(accounts.map(\.id))
+        let confirmedRemovedAccounts = removedAccounts.filter {
+            !retainedAccountIDs.contains($0.id)
+        }
+        let confirmedShareAccountKeys = shareAccountKeys.filter {
+            !retainedAccountIDs.contains($0)
+        }
+        confirmedRemovedAccounts.forEach(retireNetworkFileRevision)
+        confirmedShareAccountKeys.forEach {
+            shareScanStatusModel.removeShare(shareID: $0)
+        }
+        for accountKey in confirmedShareAccountKeys {
+            Task {
+                await self.shareCatalogCoordinator.invalidate(accountKey: accountKey)
+            }
+        }
+        guard accounts.isEmpty else {
+            apply(.accountsChanged(accounts))
+            return
+        }
         plexTokenOverrides.removeAll()
+        plexOverrideCredentialRevisions.removeAll()
         plexResolvedHomeUser.removeAll()
         plexHomeUserTokenCache.removeAll()
         profilesModel.resetToPristineDefaultForDebugging()
@@ -1863,7 +2423,6 @@ public final class AppState {
         pendingOnboardingContinuation = nil
         pendingPlexUserApplyToAccountIDs = []
         isChoosingProfile = false
-        reloadAccounts()
         rebuildSettingsModels()
         apply(.accountsChanged(accounts))
     }
@@ -1996,6 +2555,7 @@ public final class AppState {
     /// active, selection falls back to the first profile and re-scopes.
     public func removeProfile(id: String) {
         let wasActive = id == profilesModel.activeProfileID
+        watchReconcilers[id] = nil
         profilesModel.remove(id)
         if wasActive {
             rebuildSettingsModels()
@@ -2054,6 +2614,17 @@ public final class AppState {
     }
 
     // MARK: Internals
+
+    private func retireNetworkFileRevision(for account: Account) {
+        guard account.server.provider == .mediaShare,
+              let networkFileResolverRegistry else { return }
+        Task {
+            await networkFileResolverRegistry.retire(
+                accountID: account.id,
+                credentialRevision: account.credentialRevision
+            )
+        }
+    }
 
     private func reloadAccounts() {
         registry.invalidateCache()
@@ -2115,14 +2686,21 @@ public final class AppState {
     /// is async and best-effort.
     private func updateTraktForActiveProfile() {
         let ns = profilesModel.activeNamespace
-        resetWatchReconciler()
+        trackerProfileGeneration &+= 1
+        let generation = trackerProfileGeneration
         resetIdentityIndex()
         Task {
+            guard generation == trackerProfileGeneration else { return }
             await traktService.setActiveProfile(namespace: ns)
+            guard generation == trackerProfileGeneration else { return }
             await simklService.setActiveProfile(namespace: ns)
+            guard generation == trackerProfileGeneration else { return }
             await seerService.setActiveProfile(namespace: ns)
+            guard generation == trackerProfileGeneration else { return }
             await anilistService.setActiveProfile(namespace: ns)
+            guard generation == trackerProfileGeneration else { return }
             await malService.setActiveProfile(namespace: ns)
+            guard generation == trackerProfileGeneration else { return }
             await lastfmService.setActiveProfile(namespace: ns)
         }
     }

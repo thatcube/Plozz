@@ -36,7 +36,10 @@ actor ShareEnricher {
     /// longer resolves to the "Abridged" parody) and prefer the English name/overview
     /// on the title-search path too (fixes Japanese descriptions for Death Note,
     /// "…Slime", etc.). Re-enrich to correct them.
-    static let version = 9
+    /// v10: episode-title hints skip synthetic "S1·E01" placeholders, so a show with
+    /// bare-numbered early seasons (Outlander) sends its real later-season titles and
+    /// disambiguates to the right show instead of a same-named foreign series.
+    static let version = 10
 
     private let store: ShareCatalogStore
     private let resolver: ShareMetadataResolving

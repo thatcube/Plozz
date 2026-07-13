@@ -502,4 +502,31 @@ final class ShareMediaParserTests: XCTestCase {
             "love-on-the-spectrum"
         )
     }
+
+    func testStrayVariantFilenameUnderSeasonFolderFoldsIntoShow() {
+        // Regression (Your Honor): one episode's filename carries a "US" suffix, but
+        // it lives in a redundant release folder UNDER "Season 1" (not a spinoff
+        // subfolder directly under the show). It must fold into the parent, not fork
+        // a "Your Honor US" card.
+        let normal = episode(
+            "TV Shows/Your Honor/Season 1/Your Honor (2020) Season 01 S01 (2160p)/Your Honor S01E01 Part One.mkv"
+        )
+        let stray = episode(
+            "TV Shows/Your Honor/Season 1/Your Honor (2020) Season 01 S01 (2160p)/Your Honor US.S01E10 Part Ten.mkv"
+        )
+        XCTAssertEqual(normal?.series, "Your Honor")
+        XCTAssertEqual(
+            ShareCatalogID.seriesKey(fromTitle: normal?.series ?? "a"),
+            ShareCatalogID.seriesKey(fromTitle: stray?.series ?? "b")
+        )
+    }
+
+    func testGenuineSpinoffDirectlyUnderShowStillSplits() {
+        // Guard the fix doesn't over-fold: a real spinoff DIRECTLY under the show
+        // folder (no season folder between) still splits.
+        let ep = episode(
+            "TV Shows/The Witcher/Blood Origin/The.Witcher.Blood.Origin.S01E01.mkv"
+        )
+        XCTAssertEqual(ep?.series, "The Witcher Blood Origin")
+    }
 }

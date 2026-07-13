@@ -351,4 +351,28 @@ final class ShareCatalogStoreTests: XCTestCase {
         // A genuine subtitle extension is allowed ("avatar" → "avatar the last airbender").
         XCTAssertFalse(ShareCatalogStore.addsVariantWord(base: "avatar", extended: "avatar the last airbender"))
     }
+
+    func testEpisodeHintsSkipSyntheticPlaceholders() async {
+        // A show with bare-numbered early seasons stores "S1·E01" placeholder titles;
+        // those must be excluded from disambiguation hints so the real later-season
+        // titles are used (the Outlander bug).
+        let store = ShareCatalogStore(accountKey: "a", directory: tempDir())
+        func ep(_ path: String, _ season: Int, _ episode: Int, title: String) -> CatalogAsset {
+            CatalogAsset(relPath: path, basename: (path as NSString).lastPathComponent, size: 1,
+                         modifiedAt: Date(), kind: .episode, library: .tv,
+                         title: title, year: nil, seriesTitle: "Outlander",
+                         seriesKey: ShareCatalogID.seriesKey(fromTitle: "Outlander"),
+                         season: season, episode: episode)
+        }
+        await store.upsert([
+            ep("TV/Outlander/S01/o.s01e01.mkv", 1, 1, title: "S1·E01"),
+            ep("TV/Outlander/S01/o.s01e02.mkv", 1, 2, title: "S1·E02"),
+            ep("TV/Outlander/S02/o.s02e01.mkv", 2, 1, title: "Through a Glass, Darkly"),
+            ep("TV/Outlander/S02/o.s02e02.mkv", 2, 2, title: "Not in Scotland Anymore"),
+        ], scanID: 1)
+        let key = ShareCatalogID.seriesKey(fromTitle: "Outlander")
+        let hints = await store.episodeTitleHints(seriesKey: key)
+        XCTAssertEqual(hints.map(\.title), ["Through a Glass, Darkly", "Not in Scotland Anymore"])
+        XCTAssertFalse(hints.contains { $0.title.hasPrefix("S1·E") }, "placeholders excluded")
+    }
 }

@@ -19,7 +19,7 @@ enum ShareMediaParser {
     /// v10: normalize series titles (strip year/season/edition/quality junk),
     /// prefer the clean filename title over a junky folder, and capture the series
     /// year — collapses split/variant folders and fixes same-name matches.
-    static let classifierVersion = 13
+    static let classifierVersion = 14
 
     /// File extensions we treat as playable video.
     static let videoExtensions: Set<String> = [
@@ -337,14 +337,20 @@ enum ShareMediaParser {
         return String(mapped).split(separator: " ", omittingEmptySubsequences: true).joined(separator: " ")
     }
 
-    /// Whether a non-season, non-library-root folder sits STRICTLY BELOW the show
-    /// folder in the tree — the structural mark of a nested sub-show container
-    /// (`The Witcher/Blood Origin/…`) as opposed to a plain `Show/Season N/…` layout.
+    /// Whether a genuine nested sub-show container sits DIRECTLY below the show
+    /// folder — the structural mark of a spinoff (`The Witcher/Blood Origin/…`) as
+    /// opposed to a season/release layout (`Show/Season 1/Show (2020) S01 (…)/…`).
+    /// Requiring the IMMEDIATE child (not any descendant) to be the non-season,
+    /// non-library folder is what separates a real spinoff — which sits right under
+    /// the show — from a redundant release folder nested under a `Season N` folder
+    /// (whose stray filename variant like "Your Honor US.S01E10" must NOT fork a
+    /// separate series).
     static func nestedSubShowPresent(ancestors: [String], showFolder: String?) -> Bool {
         guard let showFolder, let idx = ancestors.firstIndex(of: showFolder), idx + 1 < ancestors.count else {
             return false
         }
-        return ancestors[(idx + 1)...].contains { !isSeasonFolder($0) && !isLibraryRootName($0) }
+        let child = ancestors[idx + 1]
+        return !isSeasonFolder(child) && !isLibraryRootName(child)
     }
 
     /// Whether a folder component names a known library root (series OR movie),

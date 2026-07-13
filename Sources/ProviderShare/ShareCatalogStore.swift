@@ -1351,6 +1351,12 @@ actor ShareCatalogStore {
     /// series — the earliest seasons/episodes with a real title — used to
     /// disambiguate a same-name metadata collision by content. Skips episodes with
     /// no parsed title (nothing to match on).
+    /// On-disk episode-title fingerprints for content-based series disambiguation.
+    /// EXCLUDES the synthetic `S<n>·E<nn>` placeholder titles that bare-numbered
+    /// files get (they carry no real title) — otherwise a show whose early seasons
+    /// are bare-numbered (Outlander) would send only useless placeholders and match
+    /// nothing, falling through to a wrong same-named show. Real titles from any
+    /// season are used instead.
     func episodeTitleHints(seriesKey: String, limit: Int = 12) -> [(season: Int, episode: Int, title: String)] {
         ensureOpen()
         guard db != nil, limit > 0 else { return [] }
@@ -1359,6 +1365,7 @@ actor ShareCatalogStore {
         SELECT COALESCE(season,1) AS s, episode, title FROM assets
         WHERE series_key=? AND kind='episode' AND episode IS NOT NULL
           AND title IS NOT NULL AND title <> ''
+          AND title NOT LIKE 'S%·E%'
         ORDER BY s, episode
         LIMIT ?;
         """, bind: {

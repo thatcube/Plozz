@@ -707,6 +707,10 @@ public struct SettingsView: View {
                     }
                     HStack(spacing: 6) {
                         ProviderIcon(provider: group.providerKind, size: 24, mediaShareTransport: group.transportKind)
+                            // Render larger without growing the row: scaleEffect
+                            // enlarges the drawing but keeps the 24pt layout
+                            // footprint, so the line height is unchanged.
+                            .scaleEffect(1.3)
                         Text(group.serverName)
                             .font(.footnote.weight(.medium))
                             .settingsRowSecondary()

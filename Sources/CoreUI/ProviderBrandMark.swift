@@ -74,7 +74,9 @@ public struct ProviderBrandMark: View {
                 glyph(systemSymbolName)
                     // The band chop pulls the drive's visual weight downward;
                     // lift the badged mark a touch so it sits optically centered
-                    // in its container. Visual only — layout footprint unchanged.
+                    // in its container, and scale it down slightly so it doesn't
+                    // crowd the frame. Visual only — layout footprint unchanged.
+                    .scaleEffect(badgeLabel != nil ? 0.95 : 1)
                     .offset(y: badgeLabel != nil ? -size * 0.08 : 0)
             } else {
                 Image(assetName)

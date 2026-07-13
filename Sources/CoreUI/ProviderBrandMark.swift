@@ -84,11 +84,11 @@ public struct ProviderBrandMark: View {
         .frame(width: size, height: size)
     }
 
-    /// The drive glyph, with the transport label knocked OUT of it (a text-shaped
-    /// gap punched through the glyph) and then redrawn in the glyph's own color,
-    /// centered. Same color as the icon, no background/outline, fits the icon
-    /// width, and works for any transport label. Falls back to the plain glyph
-    /// when there's no badge.
+    /// The drive glyph with the bottom band sliced off along a clean horizontal
+    /// line, and the transport label drawn (in the glyph's own color) into the
+    /// cleared band. The cut is a fixed fraction of the icon, so EVERY label gets
+    /// the identical clean cutoff regardless of what it says. Falls back to the
+    /// plain glyph when there's no badge.
     @ViewBuilder
     private func glyph(_ symbol: String) -> some View {
         let base = Image(systemName: symbol)
@@ -98,59 +98,42 @@ public struct ProviderBrandMark: View {
             .foregroundStyle(tint)
 
         if let badgeLabel {
+            // Fraction of the icon height chopped off the bottom. Constant, so the
+            // cutoff line sits in the same place for SMB, WebDAV, NFS, … — the
+            // label never shifts it.
+            let chop = size * 0.44
             ZStack(alignment: .bottom) {
                 base
-                    // Punch a text-shaped gap (slightly dilated for a hairline of
-                    // negative space) out of the glyph so the same-color label
-                    // reads against it. Bottom-aligned so it occupies only the
-                    // lower band and the top of the drive glyph stays visible.
+                    // Slice the lower band cleanly off the glyph (a straight
+                    // horizontal cut) so the top of the drive stays intact and the
+                    // bottom becomes a consistent, empty band for the label.
                     .overlay(alignment: .bottom) {
-                        badgeText(badgeLabel, dilated: true).blendMode(.destinationOut)
+                        Rectangle()
+                            .frame(height: chop)
+                            .blendMode(.destinationOut)
                     }
                     .compositingGroup()
-                // Redraw the crisp label in the glyph color, sitting in the gap.
-                badgeText(badgeLabel, dilated: false)
+                // The label sits in the cleared band, same color as the glyph.
+                badgeText(badgeLabel)
                     .foregroundStyle(tint)
+                    .frame(height: chop, alignment: .center)
             }
         } else {
             base
         }
     }
 
-    /// The badge text laid out identically whether used as the knockout mask
-    /// (`dilated`, an 8-way offset silhouette that widens the erased gap) or the
-    /// crisp foreground. Bottom-aligned into the lower ~25% of the icon and
-    /// constrained to the icon width so any label length fits.
+    /// The transport label, width-constrained to the icon so any label length
+    /// fits, and lifted slightly off the very bottom edge. Rendered into the
+    /// cleared band by `glyph`.
     @ViewBuilder
-    private func badgeText(_ label: String, dilated: Bool) -> some View {
-        let font = Font.system(size: size * 0.26, weight: .black, design: .rounded)
-        let content = Text(label)
-            .font(font)
+    private func badgeText(_ label: String) -> some View {
+        Text(label)
+            .font(.system(size: size * 0.24, weight: .black, design: .rounded))
             .lineLimit(1)
-            .minimumScaleFactor(0.2)
+            .minimumScaleFactor(0.3)
             .multilineTextAlignment(.center)
-            .frame(width: size * 0.9)
-            // Sit in the bottom band, lifted a touch off the very edge.
-            .padding(.bottom, size * (showsBackground ? 0.12 : 0.04))
-
-        if dilated {
-            let d = max(1, size * 0.045)
-            let offsets: [CGSize] = [
-                CGSize(width: -d, height: 0), CGSize(width: d, height: 0),
-                CGSize(width: 0, height: -d), CGSize(width: 0, height: d),
-                CGSize(width: -d, height: -d), CGSize(width: d, height: d),
-                CGSize(width: -d, height: d), CGSize(width: d, height: -d),
-            ]
-            ZStack {
-                ForEach(0..<offsets.count, id: \.self) { i in
-                    content.offset(offsets[i])
-                }
-                content
-            }
-            .foregroundStyle(.black) // coverage only — color is irrelevant for destinationOut
-        } else {
-            content
-        }
+            .frame(width: size * 0.92)
     }
 
     /// Brand accent color used to tint each provider's logo + chip.

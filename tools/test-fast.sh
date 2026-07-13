@@ -1,132 +1,113 @@
 #!/usr/bin/env bash
 # test-fast.sh — change-scoped inner-loop test runner for Plozz.
 #
-# WHY: the full suite (`tools/run-tests.sh` with no args) takes ~10 minutes,
-# almost all of it tvOS-simulator orchestration + compile, NOT test execution
-# (all 1088 tests run in <1s of CPU). Running the whole sweep on every change is
-# ~100x slower than running only the suite(s) that cover what you touched. This
-# script maps the files you changed (git diff) to the matching test target(s)
-# and runs ONLY those, via tools/run-tests.sh. Reserve the full sweep for
-# pre-merge (`tools/run-tests.sh`).
+# WHY: the full suite (`tools/run-tests.sh` with no args) is bounded by compile +
+# tvOS-simulator orchestration, NOT test execution (all tests run in <1s of CPU).
+# Running the whole matrix on every change is pointless when you only touched one
+# module. This maps the files you changed (git diff) to the covering test
+# target(s) and runs ONLY those (via tools/run-tests.sh, which builds once).
+#
+# DATA-DRIVEN: the change→suite mapping is computed at runtime by
+# tools/test-impact.py from `swift package dump-package` — nothing is hardcoded,
+# so new targets (e.g. the WebDAV work's MediaTransportWebDAVTests) are picked up
+# automatically. Selection escalates to the FULL matrix on foundational/graph
+# changes and never silently skips (see tools/test-impact.py).
 #
 # Usage:
 #   tools/test-fast.sh                  # auto: diff vs origin/main, run covering suites
 #   tools/test-fast.sh --staged         # auto: only staged changes
-#   tools/test-fast.sh CoreModels FeatureAuth   # explicit module or suite names
 #   tools/test-fast.sh --base HEAD~3    # diff against a different base
+#   tools/test-fast.sh CoreModels FeatureAuth   # explicit module or suite names
 #   PLOZZ_SIM_ID=<udid> tools/test-fast.sh
 #
-# Notes:
-#   * No "move Plozz.xcodeproj aside / regenerate" dance is needed — run-tests.sh
-#     runs a per-module scheme on the simulator with the project in place.
-#   * Pure-logic suites (CoreModels, providers, networking, metadata) run in
-#     ~5-20s each. FeatureHomeTests was previously quarantined (a data race in the
-#     shared test double crashed the xctest host, forcing relaunches + a ~600s
-#     watchdog hang); that is now fixed, so it runs by default like any other
-#     fast suite (~3s exec).
+# Modes at a glance:
+#   * Impacted (this script)      — while developing: fast, only what you touched.
+#   * Full matrix                 — before merging to main / CI gate:
+#                                   `tools/run-tests.sh` (no args).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-# Suites currently too slow/broken for the inner loop. Auto-selection skips them
-# (with a warning); pass the name explicitly to force-run. Empty = nothing
-# quarantined (FeatureHomeTests un-quarantined once its data-race crash was fixed).
-QUARANTINE=()
+export GIT_CONFIG_PARAMETERS="${GIT_CONFIG_PARAMETERS-'safe.bareRepository=all'}"
 
-# Foundational modules: a change here can affect many suites. We run a broad set
-# of FAST suites (everything except quarantined) rather than the whole sweep.
-is_foundational() { case "$1" in CoreModels|CoreUI|CoreNetworking) return 0;; *) return 1;; esac; }
+IMPACT="tools/test-impact.py"
 
-ALL_FAST_SUITES=(
-  CoreModelsTests CoreNetworkingTests CoreUITests MetadataKitTests
-  FeatureDiscoveryTests ProviderJellyfinTests ProviderPlexTests
-  ProviderTrailersTests RatingsServiceTests TraktServiceTests
-  FeatureAuthTests FeatureHomeTests FeatureSearchTests FeatureProfilesTests
-  FeatureMusicTests FeaturePlaybackTests
-)
+# --- Parse args ---------------------------------------------------------------
+# Split into: explicit module/suite names, flags forwarded to test-impact.py
+# (--staged / --base REF), and a local --dry-run (print selection, don't run).
+EXPLICIT=()
+IMPACT_ARGS=()
+DRYRUN=0
+if [[ $# -gt 0 ]]; then
+  skip_next=0
+  for a in "$@"; do
+    if [[ $skip_next -eq 1 ]]; then skip_next=0; IMPACT_ARGS+=("$a"); continue; fi
+    case "$a" in
+      --dry-run|-n) DRYRUN=1;;
+      --base) skip_next=1; IMPACT_ARGS+=("$a");;   # flag + its value
+      --base=*|--staged) IMPACT_ARGS+=("$a");;
+      -h|--help) sed -n '2,40p' "$0"; exit 0;;
+      -*) IMPACT_ARGS+=("$a");;
+      *) EXPLICIT+=("$a");;
+    esac
+  done
+fi
 
-# Map a Sources/<Module> name to its test target. Modules with no test target
-# (FeatureSettings, AppShell, TopShelfKit) map to nothing.
-module_to_suite() {
-  case "$1" in
-    CoreModels)        echo CoreModelsTests;;
-    CoreNetworking)    echo CoreNetworkingTests;;
-    CoreUI)            echo CoreUITests;;
-    MetadataKit)       echo MetadataKitTests;;
-    FeatureDiscovery)  echo FeatureDiscoveryTests;;
-    ProviderJellyfin)  echo ProviderJellyfinTests;;
-    ProviderPlex)      echo ProviderPlexTests;;
-    ProviderTrailers)  echo ProviderTrailersTests;;
-    RatingsService)    echo RatingsServiceTests;;
-    TraktService)      echo TraktServiceTests;;
-    FeatureAuth)       echo FeatureAuthTests;;
-    FeatureHome)       echo FeatureHomeTests;;
-    FeatureSearch)     echo FeatureSearchTests;;
-    FeatureProfiles)   echo FeatureProfilesTests;;
-    FeatureMusic)      echo FeatureMusicTests;;
-    FeaturePlayback)   echo FeaturePlaybackTests;;
-    *)                 echo "";;   # FeatureSettings/AppShell/TopShelfKit: no suite
-  esac
+run_or_print() {  # run_or_print <suite>...
+  echo "Scoped suites: $*"
+  if [[ $DRYRUN -eq 1 ]]; then
+    echo "(--dry-run: not executing)"
+    exit 0
+  fi
+  exec tools/run-tests.sh "$@"
 }
 
-BASE="origin/main"
-MODE="diff"
-EXPLICIT=()
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --staged) MODE="staged"; shift;;
-    --base) BASE="$2"; shift 2;;
-    --base=*) BASE="${1#*=}"; shift;;
-    -h|--help) sed -n '2,30p' "$0"; exit 0;;
-    *) EXPLICIT+=("$1"); shift;;
-  esac
-done
-
-suites=()
-add_suite() { local s="$1"; [[ -z "$s" ]] && return; for e in "${suites[@]:-}"; do [[ "$e" == "$s" ]] && return; done; suites+=("$s"); }
-
+# --- Explicit module/suite names: resolve (data-driven) and run --------------
 if [[ ${#EXPLICIT[@]} -gt 0 ]]; then
-  # Accept either a module name (CoreModels) or a suite name (CoreModelsTests).
-  for a in "${EXPLICIT[@]}"; do
-    if [[ "$a" == *Tests ]]; then add_suite "$a"; else add_suite "$(module_to_suite "$a")"; fi
-  done
+  suites=()
+  while IFS= read -r s; do
+    [[ -n "$s" ]] && suites+=("$s")
+  done < <(python3 "$IMPACT" --resolve "${EXPLICIT[@]}" || true)
+  if [[ ${#suites[@]} -eq 0 ]]; then
+    echo "test-fast: none of (${EXPLICIT[*]}) map to a test target — nothing to run."
+    exit 0
+  fi
+  run_or_print "${suites[@]}"
+fi
+
+# --- Auto: compute the selection from the diff -------------------------------
+# test-impact.py prints its reasoning to stderr (shown to the user) and a machine
+# directive to stdout: ALL | (SELECT + suite list) | NONE.
+if [[ ${#IMPACT_ARGS[@]} -gt 0 ]]; then
+  OUT="$(python3 "$IMPACT" "${IMPACT_ARGS[@]}")"
 else
-  if [[ "$MODE" == "staged" ]]; then
-    changed=$(git diff --cached --name-only)
-  else
-    mergebase=$(git merge-base "$BASE" HEAD 2>/dev/null || echo "$BASE")
-    changed=$( { git diff --name-only "$mergebase"...HEAD; git diff --name-only; git diff --cached --name-only; } | sort -u )
-  fi
-  foundational=0
-  while IFS= read -r f; do
-    [[ -z "$f" ]] && continue
-    if [[ "$f" == Tests/*/* ]]; then
-      add_suite "$(echo "$f" | cut -d/ -f2)"
-    elif [[ "$f" == Sources/*/* ]]; then
-      mod=$(echo "$f" | cut -d/ -f2)
-      is_foundational "$mod" && foundational=1
-      add_suite "$(module_to_suite "$mod")"
+  OUT="$(python3 "$IMPACT")"
+fi
+DIRECTIVE="$(printf '%s\n' "$OUT" | head -1)"
+
+case "$DIRECTIVE" in
+  ALL)
+    echo "Impacted set is broad/foundational — running the FULL matrix."
+    if [[ $DRYRUN -eq 1 ]]; then echo "(--dry-run: not executing)"; exit 0; fi
+    exec tools/run-tests.sh
+    ;;
+  NONE)
+    echo "No covering test suite for the changes (docs/assets-only). Nothing to run."
+    exit 0
+    ;;
+  SELECT)
+    suites=()
+    while IFS= read -r s; do
+      [[ -n "$s" ]] && suites+=("$s")
+    done < <(printf '%s\n' "$OUT" | tail -n +2)
+    if [[ ${#suites[@]} -eq 0 ]]; then
+      echo "No covering test suite for the changes. Nothing to run."
+      exit 0
     fi
-  done <<< "$changed"
-  if [[ $foundational -eq 1 ]]; then
-    echo "Foundational module changed -> expanding to all fast suites."
-    suites=("${ALL_FAST_SUITES[@]}")
-  fi
-fi
-
-# Drop quarantined suites unless the user named them explicitly.
-if [[ ${#EXPLICIT[@]} -eq 0 ]]; then
-  filtered=()
-  for s in "${suites[@]:-}"; do
-    skip=0; for q in "${QUARANTINE[@]}"; do [[ "$s" == "$q" ]] && skip=1; done
-    if [[ $skip -eq 1 ]]; then echo "Skipping quarantined suite: $s (run it explicitly once fixed)"; else filtered+=("$s"); fi
-  done
-  suites=("${filtered[@]:-}")
-fi
-
-if [[ ${#suites[@]} -eq 0 || -z "${suites[0]:-}" ]]; then
-  echo "No covering test suite for the changes (docs/config/UI-only module without tests). Nothing to run."
-  exit 0
-fi
-
-echo "Scoped suites: ${suites[*]}"
-exec tools/run-tests.sh "${suites[@]}"
+    run_or_print "${suites[@]}"
+    ;;
+  *)
+    echo "test-fast: unexpected selector output — falling back to the full matrix."
+    if [[ $DRYRUN -eq 1 ]]; then echo "(--dry-run: not executing)"; exit 0; fi
+    exec tools/run-tests.sh
+    ;;
+esac

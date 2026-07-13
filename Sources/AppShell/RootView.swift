@@ -492,6 +492,14 @@ private struct OnboardingPageContent: View {
                         displayName: draft.displayName
                     )
                 },
+                onWebDAVShareConfigured: { config in
+                    appState.didConfigureWebDAVShare(
+                        baseURL: config.baseURL,
+                        auth: config.auth,
+                        trustPin: config.trustPin,
+                        displayName: config.displayName
+                    )
+                },
                 onCancel: { appState.cancelAuthentication() }
             )
 

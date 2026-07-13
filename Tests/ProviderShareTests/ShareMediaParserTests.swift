@@ -401,4 +401,30 @@ final class ShareMediaParserTests: XCTestCase {
             ShareCatalogID.seriesKey(fromTitle: "Breaking Bad")
         )
     }
+
+    // MARK: - Conservative stop tokens (real title words are never truncated)
+
+    func testAmbiguousWordsDoNotTruncateTitles() {
+        // "collection", "complete", "max", "web" etc. are NOT stop tokens, so real
+        // multiword titles survive intact (regression guard from review).
+        XCTAssertEqual(episode("TV/The Collection/The.Collection.S01E01.mkv")?.series, "The Collection")
+        XCTAssertEqual(episode("TV/Mad Max/Mad.Max.S01E01.mkv")?.series, "Mad Max")
+        XCTAssertEqual(episode("TV/The Complete Works/The.Complete.Works.S01E01.mkv")?.series, "The Complete Works")
+    }
+
+    func testTechnicalTagsStillTruncate() {
+        // Genuine release junk still cuts the title.
+        XCTAssertEqual(episode("TV/Deadloch.cc/Deadloch.S01E01.mkv")?.series, "Deadloch")
+        XCTAssertEqual(episode("TV/Show BluRay x265/Show.S01E01.mkv")?.series, "Show")
+    }
+
+    // MARK: - Embedded provider-id digits are not misread as the year
+
+    func testProviderTagDigitsNotParsedAsYear() {
+        XCTAssertEqual(ShareMediaParser.extractYear("Show (1990) [tmdb-2019]"), 1990)
+        XCTAssertEqual(ShareMediaParser.extractYear("One Piece (1999) [tvdb-81797]"), 1999)
+        let ep = episode("TV/Show (1990) [tmdb-2019]/Show.S01E01.mkv")
+        XCTAssertEqual(ep?.year, 1990)
+        XCTAssertEqual(ep?.providerTag, "tmdb-2019")
+    }
 }

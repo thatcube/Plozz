@@ -131,6 +131,13 @@ actor ShareCatalogStore {
         if !hasColumn(table: "enrichment", column: "attempts") {
             exec("ALTER TABLE enrichment ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0;")
         }
+        // Migration: the resolved canonical title (e.g. "Avatar: The Last Airbender"),
+        // applied over a generic folder-derived display title at READ time — durable
+        // across re-scans (which overwrite `assets.series_title`), unlike a direct
+        // assets mutation.
+        if !hasColumn(table: "enrichment", column: "title") {
+            exec("ALTER TABLE enrichment ADD COLUMN title TEXT;")
+        }
         // Migration: movie grouping key (added with within-share version dedup). NULL
         // for rows indexed before it existed; a classifier-version reparse backfills
         // it, and grouped queries `COALESCE(movie_key, rel_path)` so pre-reparse rows
@@ -499,6 +506,10 @@ actor ShareCatalogStore {
         var posterURL: URL?
         var backdropURL: URL?
         var logoURL: URL?
+        /// The resolved canonical show/movie title (e.g. "Avatar: The Last
+        /// Airbender"), overlaid over a generic folder-derived display title at read
+        /// time. Persisted in the `title` enrichment column so it survives re-scans.
+        var title: String?
 
         /// Whether this record carries anything worth showing/merging. An *unusable*
         /// result (no ids, overview, or artwork) is treated as a miss — usually a
@@ -617,7 +628,7 @@ actor ShareCatalogStore {
                 SELECT b.year FROM assets b
                 WHERE b.series_key = ?1 AND b.kind='episode' AND b.year IS NOT NULL
                 GROUP BY b.year ORDER BY COUNT(*) DESC, b.year ASC LIMIT 1
-            ) FROM assets WHERE series_key=?1 AND kind='episode';
+            ) FROM assets WHERE series_key=?1 AND kind='episode' LIMIT 1;
             """,
                   bind: { self.bindText($0, 1, key) }) { stmt in
                 guard sqlite3_column_type(stmt, 0) != SQLITE_NULL else { return }
@@ -707,14 +718,15 @@ actor ShareCatalogStore {
         var stmt: OpaquePointer?
         let sql = """
         INSERT INTO enrichment
-          (item_id, provider_ids_json, overview, genres_json, runtime, poster_url, backdrop_url, logo_url, enriched_at, enrich_version, attempts)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?)
+          (item_id, provider_ids_json, overview, genres_json, runtime, poster_url, backdrop_url, logo_url, enriched_at, enrich_version, attempts, title)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(item_id) DO UPDATE SET
           provider_ids_json=excluded.provider_ids_json, overview=excluded.overview,
           genres_json=excluded.genres_json, runtime=excluded.runtime,
           poster_url=excluded.poster_url, backdrop_url=excluded.backdrop_url,
           logo_url=excluded.logo_url, enriched_at=excluded.enriched_at,
-          enrich_version=excluded.enrich_version, attempts=excluded.attempts;
+          enrich_version=excluded.enrich_version, attempts=excluded.attempts,
+          title=excluded.title;
         """
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return false }
         bindText(stmt, 1, itemID)
@@ -728,6 +740,7 @@ actor ShareCatalogStore {
         sqlite3_bind_double(stmt, 9, now.timeIntervalSince1970)
         sqlite3_bind_int64(stmt, 10, Int64(version))
         sqlite3_bind_int64(stmt, 11, Int64(attempts))
+        bindOptText(stmt, 12, merged.title)
         let ok = sqlite3_step(stmt) == SQLITE_DONE
         sqlite3_finalize(stmt)
 
@@ -758,6 +771,7 @@ actor ShareCatalogStore {
         if let p = new.posterURL { out.posterURL = p }
         if let b = new.backdropURL { out.backdropURL = b }
         if let l = new.logoURL { out.logoURL = l }
+        if let t = new.title, !t.isEmpty { out.title = t }
         return out
     }
 
@@ -786,7 +800,7 @@ actor ShareCatalogStore {
         guard db != nil else { return nil }
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, """
-        SELECT provider_ids_json, overview, genres_json, runtime, poster_url, backdrop_url, logo_url
+        SELECT provider_ids_json, overview, genres_json, runtime, poster_url, backdrop_url, logo_url, title
         FROM enrichment WHERE item_id=?;
         """, -1, &stmt, nil) == SQLITE_OK else { return nil }
         defer { sqlite3_finalize(stmt) }
@@ -795,12 +809,13 @@ actor ShareCatalogStore {
         return enrichmentRecord(fromColumns: stmt, startingAt: 0)
     }
 
-    /// Decode the 7 enrichment columns (provider_ids_json, overview, genres_json,
-    /// runtime, poster_url, backdrop_url, logo_url) starting at `startingAt` into a
-    /// record. Shared by the standalone `enrichmentRow` lookup and the JOINed grid
-    /// queries (movies/series), so a page fetch reads enrichment in ONE query instead
-    /// of N+1 per-row lookups. Returns nil when every column is NULL (no enrichment
-    /// row matched the LEFT JOIN).
+    /// Decode the enrichment columns (provider_ids_json, overview, genres_json,
+    /// runtime, poster_url, backdrop_url, logo_url, title) starting at `startingAt`
+    /// into a record. Shared by the standalone `enrichmentRow` lookup and the JOINed
+    /// grid queries (movies/series), so a page fetch reads enrichment in ONE query
+    /// instead of N+1 per-row lookups. Returns nil when the core columns are all NULL
+    /// (no enrichment row matched the LEFT JOIN); `title` is a supplementary 8th
+    /// column not counted in that emptiness check.
     private func enrichmentRecord(fromColumns stmt: OpaquePointer?, startingAt base: Int32) -> EnrichmentRecord? {
         let allNull = (0..<7).allSatisfy { sqlite3_column_type(stmt, base + $0) == SQLITE_NULL }
         if allNull { return nil }
@@ -812,6 +827,7 @@ actor ShareCatalogStore {
         rec.posterURL = columnText(stmt, base + 4).flatMap(URL.init(string:))
         rec.backdropURL = columnText(stmt, base + 5).flatMap(URL.init(string:))
         rec.logoURL = columnText(stmt, base + 6).flatMap(URL.init(string:))
+        rec.title = columnText(stmt, base + 7)
         return rec
     }
 
@@ -871,6 +887,18 @@ actor ShareCatalogStore {
         if copy.backdropURL == nil { copy.backdropURL = rec.backdropURL }
         if copy.heroBackdropURL == nil { copy.heroBackdropURL = rec.backdropURL }
         if copy.logoURL == nil { copy.logoURL = rec.logoURL }
+        // Display-title upgrade (series/movies only, never episodes): overlay the
+        // resolved canonical name when it's IDENTICAL or MORE SPECIFIC than the
+        // folder-derived title (current is a word-prefix of resolved) — so a generic
+        // "Avatar" becomes "Avatar: The Last Airbender", but a spinoff that wrongly
+        // matched its parent is never renamed DOWN. Applied at READ time so it's
+        // durable across re-scans (which reset assets.series_title).
+        if item.kind == .series || item.kind == .movie,
+           let resolved = rec.title, !resolved.isEmpty, resolved != copy.title {
+            let a = MediaItemIdentity.normalizedTitle(copy.title)
+            let b = MediaItemIdentity.normalizedTitle(resolved)
+            if b == a || b.hasPrefix(a + " ") { copy.title = resolved }
+        }
         // Episodes get the series art as a fallback, not as their own poster.
         if item.kind == .episode {
             if copy.seriesPosterURL == nil { copy.seriesPosterURL = rec.posterURL }
@@ -1006,7 +1034,7 @@ actor ShareCatalogStore {
         query("""
         SELECT g.logical_id, g.title, g.year,
                e.provider_ids_json, e.overview, e.genres_json, e.runtime,
-               e.poster_url, e.backdrop_url, e.logo_url
+               e.poster_url, e.backdrop_url, e.logo_url, e.title
         FROM (
           SELECT
             CASE WHEN MIN(COALESCE(movie_group_key, movie_key)) IS NOT NULL
@@ -1047,7 +1075,7 @@ actor ShareCatalogStore {
         query("""
         SELECT a.series_key, MIN(a.series_title), MAX(a.year), MIN(a.sort_title) AS s,
                e.provider_ids_json, e.overview, e.genres_json, e.runtime,
-               e.poster_url, e.backdrop_url, e.logo_url
+               e.poster_url, e.backdrop_url, e.logo_url, e.title
         FROM assets a
         LEFT JOIN enrichment e ON e.item_id = 'series:' || a.series_key
         WHERE a.library=? AND a.kind='episode' AND a.series_key IS NOT NULL
@@ -1182,6 +1210,26 @@ actor ShareCatalogStore {
         // Airbender") is a stronger search than a short one.
         return alternates.sorted { $0.count > $1.count }
     }
+
+    /// The explicit TheTVDB id a series' folder/filenames declared via a
+    /// `[tvdb-####]` tag, or nil. Read from a sample rel_path — the enricher uses it
+    /// to resolve metadata authoritatively by id instead of an ambiguous title search.
+    func seriesEmbeddedTVDBID(seriesKey: String) -> String? {
+        ensureOpen()
+        guard db != nil else { return nil }
+        var relPath: String?
+        query("""
+        SELECT rel_path FROM assets
+        WHERE series_key=? AND kind='episode' AND rel_path IS NOT NULL AND rel_path <> ''
+        LIMIT 1;
+        """, bind: { self.bindText($0, 1, seriesKey) }) { stmt in
+            relPath = self.columnText(stmt, 0)
+        }
+        guard let relPath, let tag = ShareMediaParser.embeddedProviderTag(relPath: relPath),
+              tag.hasPrefix("tvdb-") else { return nil }
+        let id = String(tag.dropFirst("tvdb-".count))
+        return id.isEmpty ? nil : id
+    }
     func episodes(seriesKey: String, season: Int) -> [MediaItem] {        ensureOpen()
         guard db != nil else { return [] }
         var out: [MediaItem] = []
@@ -1213,7 +1261,7 @@ actor ShareCatalogStore {
                 SELECT b.year FROM assets b
                 WHERE b.series_key = ?1 AND b.kind='episode' AND b.year IS NOT NULL
                 GROUP BY b.year ORDER BY COUNT(*) DESC, b.year ASC LIMIT 1
-            ) FROM assets WHERE series_key=?1 AND kind='episode';
+            ) FROM assets WHERE series_key=?1 AND kind='episode' LIMIT 1;
             """,
                   bind: { self.bindText($0, 1, key) }) { stmt in
                 if sqlite3_column_type(stmt, 0) != SQLITE_NULL { title = self.columnText(stmt, 0) ?? key; found = true }

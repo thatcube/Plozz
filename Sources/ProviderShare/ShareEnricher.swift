@@ -23,7 +23,10 @@ actor ShareEnricher {
     /// v5: robust series keys (article/apostrophe folding) + a representative
     /// (most-common) series year instead of MAX, so re-enrich with the corrected
     /// grouping and years.
-    static let version = 5
+    /// v6: resolve directly by an explicit [tvdb-####] folder tag, upgrade a generic
+    /// folder title to the resolved canonical name, and feed that name+year into
+    /// artwork so the logo matches the right same-named show.
+    static let version = 6
 
     private let store: ShareCatalogStore
     private let resolver: ShareMetadataResolving
@@ -151,16 +154,18 @@ actor ShareEnricher {
     private func request(for pending: ShareCatalogStore.PendingEnrichment) async -> ShareEnrichRequest {
         var hints: [SeriesEpisodeHint] = []
         var alternates: [String] = []
+        var knownTVDBID: String?
         if !pending.isMovie, let key = ShareCatalogID.seriesKey(forSeriesID: pending.itemID) {
             hints = await store.episodeTitleHints(seriesKey: key).map {
                 SeriesEpisodeHint(season: $0.season, episode: $0.episode, title: $0.title)
             }
             alternates = await store.seriesSearchTitleAlternates(seriesKey: key, storedTitle: pending.title)
+            knownTVDBID = await store.seriesEmbeddedTVDBID(seriesKey: key)
         }
         return ShareEnrichRequest(
             itemID: pending.itemID, title: pending.title, year: pending.year,
             isMovie: pending.isMovie, isAnime: pending.isAnime, episodeHints: hints,
-            titleAlternates: alternates
+            titleAlternates: alternates, knownTVDBID: knownTVDBID
         )
     }
 }

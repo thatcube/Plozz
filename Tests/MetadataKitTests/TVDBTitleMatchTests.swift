@@ -39,4 +39,21 @@ final class TVDBTitleMatchTests: XCTestCase {
         XCTAssertFalse(TVDBClient.titlesMatch("", "Mole Hunt"))
         XCTAssertFalse(TVDBClient.titlesMatch("Mole Hunt", "   "))
     }
+
+    // MARK: - normalizedTitleKey (exact-title preference over relevance)
+
+    func testNormalizedTitleKeyFoldsPunctuationAndCase() {
+        // A spinoff's on-disk title and TheTVDB's canonical name must key equal so
+        // "The Witcher: Blood Origin" is preferred over the parent "The Witcher".
+        XCTAssertEqual(
+            TVDBClient.normalizedTitleKey("The Witcher Blood Origin"),
+            TVDBClient.normalizedTitleKey("The Witcher: Blood Origin")
+        )
+        // The parent keys DIFFERENTLY, so it is not treated as an exact match.
+        XCTAssertNotEqual(
+            TVDBClient.normalizedTitleKey("The Witcher Blood Origin"),
+            TVDBClient.normalizedTitleKey("The Witcher")
+        )
+        XCTAssertEqual(TVDBClient.normalizedTitleKey("Ávatar—2024"), "avatar 2024")
+    }
 }

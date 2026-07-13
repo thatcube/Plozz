@@ -10,9 +10,13 @@ public struct TVDBMetadata: Sendable, Equatable {
     public var posterURL: URL?
     public var genres: [String]
     public var year: Int?
+    /// The show's canonical name as TheTVDB records it ("Avatar: The Last
+    /// Airbender"), used to upgrade a generic folder-derived title ("Avatar").
+    public var title: String?
 
     public init(tvdbID: String? = nil, imdbID: String? = nil, tmdbID: String? = nil,
-                overview: String? = nil, posterURL: URL? = nil, genres: [String] = [], year: Int? = nil) {
+                overview: String? = nil, posterURL: URL? = nil, genres: [String] = [], year: Int? = nil,
+                title: String? = nil) {
         self.tvdbID = tvdbID
         self.imdbID = imdbID
         self.tmdbID = tmdbID
@@ -20,6 +24,7 @@ public struct TVDBMetadata: Sendable, Equatable {
         self.posterURL = posterURL
         self.genres = genres
         self.year = year
+        self.title = title
     }
 }
 
@@ -95,6 +100,42 @@ public actor TVDBClient {
             }
         }
         return nil
+    }
+
+    /// Resolve metadata DIRECTLY by a known TheTVDB id — the authoritative path when
+    /// the library folder carries an explicit `[tvdb-####]` tag, skipping the
+    /// ambiguous title search entirely (fixes e.g. the 1999 One Piece anime, tagged
+    /// `[tvdb-81797]`, resolving to a wrong same-named entry). Returns nil when
+    /// unconfigured or the id doesn't resolve.
+    public func resolve(byTVDBID id: String, isMovie: Bool) async -> TVDBMetadata? {
+        let trimmed = id.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard config.isConfigured, !trimmed.isEmpty, let token = await ensureToken() else { return nil }
+        let type = isMovie ? "movies" : "series"
+        guard let url = URL(string: "\(config.apiBaseURL.absoluteString)/\(type)/\(trimmed)/extended") else { return nil }
+        let (response, reachable) = await MetadataHTTP.getWithStatus(
+            SeriesExtendedResponse.self, url: url, headers: ["Authorization": "Bearer \(token)"]
+        )
+        guard let data = response?.data else {
+            if !reachable { self.token = nil }   // likely-expired token; re-login next time
+            return nil
+        }
+        var imdb: String?
+        var tmdb: String?
+        for r in data.remoteIds ?? [] {
+            guard let source = r.sourceName?.lowercased(), let v = r.id, !v.isEmpty else { continue }
+            if source.contains("imdb") { imdb = v }
+            else if source.contains("themoviedb") || source == "tmdb" { tmdb = v }
+        }
+        return TVDBMetadata(
+            tvdbID: data.id.map(String.init) ?? trimmed,
+            imdbID: imdb,
+            tmdbID: tmdb,
+            overview: data.overview?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty,
+            posterURL: data.image.flatMap(Self.imageURL),
+            genres: (data.genres ?? []).compactMap { $0.name?.nonEmpty },
+            year: data.year.flatMap { Int($0) },
+            title: data.name?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty
+        )
     }
 
     /// Resolve a wide **backdrop** (fanart) URL for a title, or `nil`. Uses a known
@@ -191,8 +232,28 @@ public actor TVDBClient {
            let matched = await disambiguateByEpisodes(results, hints: episodeHints, token: token) {
             return matched.asMetadata()
         }
+        // Prefer a result whose name EXACTLY matches the query over TheTVDB's raw
+        // relevance order. Without this, a spinoff query ("The Witcher: Blood
+        // Origin") whose year is unknown falls back to relevance and picks the more
+        // popular PARENT ("The Witcher"), inheriting its id/art. An exact
+        // (normalized) title hit is a far stronger signal than relevance rank.
+        let q = Self.normalizedTitleKey(query)
+        if !q.isEmpty, let exactTitle = results.first(where: { Self.normalizedTitleKey($0.name ?? "") == q }) {
+            return exactTitle.asMetadata()
+        }
         // Fallback: TheTVDB's own relevance order.
         return results.first?.asMetadata()
+    }
+
+    /// Lowercased, punctuation-folded, whitespace-collapsed title key for an
+    /// exact-match comparison ("The Witcher: Blood Origin" == "the witcher blood
+    /// origin"). Kept local so it matches the query and candidate names identically.
+    static func normalizedTitleKey(_ raw: String) -> String {
+        let folded = raw.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: nil)
+        let mapped = folded.unicodeScalars.map { scalar -> Character in
+            CharacterSet.alphanumerics.contains(scalar) ? Character(scalar) : " "
+        }
+        return String(mapped).split(separator: " ", omittingEmptySubsequences: true).joined(separator: " ")
     }
 
     // MARK: - Episode-title disambiguation
@@ -294,6 +355,24 @@ public actor TVDBClient {
         struct DataField: Decodable { let artworks: [Artwork]? }
     }
 
+    /// TheTVDB v4 `/series|movies/{id}/extended` payload — the rich record we read
+    /// when resolving directly by a known id (name/overview/year/poster/genres/ids).
+    private struct SeriesExtendedResponse: Decodable {
+        let data: SeriesExtended?
+    }
+
+    private struct SeriesExtended: Decodable {
+        let id: Int?
+        let name: String?
+        let overview: String?
+        let year: String?
+        let image: String?
+        let genres: [Genre]?
+        let remoteIds: [RemoteID]?
+        struct Genre: Decodable { let name: String? }
+        struct RemoteID: Decodable { let id: String?; let sourceName: String? }
+    }
+
     private struct Artwork: Decodable {
         let image: String?
         let width: Int?
@@ -345,7 +424,8 @@ public actor TVDBClient {
                 overview: overview?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty,
                 posterURL: image_url.flatMap { URL(string: $0) },
                 genres: genres ?? [],
-                year: year.flatMap { Int($0) }
+                year: year.flatMap { Int($0) },
+                title: name?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty
             )
         }
     }

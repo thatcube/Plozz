@@ -666,29 +666,30 @@ enum ShareMediaParser {
 
     // MARK: - Series title normalization
 
-    /// Tokens that TERMINATE a series title: everything from the first such token
-    /// on is a season marker, edition, source/quality/codec/audio tag, network, or
-    /// caption marker — not part of the show name. Scene releases always put the
-    /// real title first, then these, so cutting at the first one recovers the name.
-    /// (Matched only AFTER at least one title token is kept, so a legitimate
-    /// single-word title that happens to collide — e.g. "Max Headroom" — survives.)
+    /// Tokens that TERMINATE a series title: from the first such token on, the text
+    /// is a caption marker or a technical source/quality/codec/audio tag — not part
+    /// of the show name. DELIBERATELY CONSERVATIVE: only tokens that are essentially
+    /// never real title words are listed, so a legitimate title is never truncated
+    /// (e.g. "The Collection", "Mad Max", "Charlotte's Web" survive). Ambiguous
+    /// English words and streaming-network abbreviations (collection, complete, max,
+    /// web, dual, dolby, opus, hulu, stan, itv, …) are intentionally EXCLUDED —
+    /// season/year boundaries (handled separately) already cut the real junk before
+    /// them. `remix` is kept only because a real variant folder needed it.
+    /// (Matched only AFTER at least one title token is kept.)
     private static let seriesTitleStopTokens: Set<String> = [
-        // Editions / packaging
-        "remix", "uncut", "extended", "remastered", "unrated", "theatrical",
-        "complete", "collection", "proper", "repack", "internal", "limited", "hybrid",
-        // Caption / subtitle / language markers
-        "cc", "sdh", "subbed", "dubbed", "subs", "multi", "dual",
-        // Source / quality
-        "bluray", "brrip", "bdrip", "webrip", "web", "webdl", "hdtv", "dvdrip",
-        "dvdscr", "hdrip", "remux", "uhd", "imax",
+        // Caption / subtitle markers (rarely a title word)
+        "cc", "sdh",
+        // Variant marker seen in real folders (Arrested Development Remix)
+        "remix",
+        // Source / quality (not English words)
+        "bluray", "brrip", "bdrip", "webrip", "webdl", "hdtv", "dvdrip",
+        "dvdscr", "hdrip", "remux",
         // Codecs / bit depth
-        "x264", "x265", "h264", "h265", "hevc", "avc", "xvid", "divx", "10bit", "8bit",
+        "x264", "x265", "h264", "h265", "hevc", "xvid", "divx", "10bit", "8bit",
         // Dynamic range
-        "hdr", "hdr10", "sdr", "dv", "dovi", "dolby", "hlg",
-        // Audio
-        "aac", "ac3", "eac3", "dd", "ddp", "dts", "truehd", "atmos", "flac", "opus",
-        // Networks / sources
-        "amzn", "nf", "dsnp", "hmax", "max", "atvp", "hulu", "pcok", "stan", "itv",
+        "hdr", "hdr10", "sdr", "dv", "dovi", "hlg",
+        // Audio (not English words)
+        "aac", "ac3", "eac3", "ddp", "dts", "truehd", "atmos", "flac",
     ]
 
     /// Season-marker tokens that also terminate a title (`Season`, `Staffel`,
@@ -703,12 +704,17 @@ enum ShareMediaParser {
         lower.range(of: #"^(19|20)\d{2}$"#, options: .regularExpression) != nil
     }
 
-    /// The last 4-digit year in `raw` (before `clean` strips `(YYYY)` parens), or
-    /// nil. Excludes resolution-like numbers via the shared `yearPattern`.
+    /// The last 4-digit year in `raw`, or nil. Bracketed `[tmdb-2019]`/`{...}`
+    /// provider tags are stripped FIRST so an id's digits can't be misread as the
+    /// year ("Show (1990) [tmdb-2019]" → 1990, not 2019). Resolution-like numbers
+    /// are excluded via the shared `yearPattern`.
     static func extractYear(_ raw: String) -> Int? {
-        let ns = raw as NSString
+        let deTagged = raw
+            .replacingOccurrences(of: #"\[[^\]]*\]"#, with: " ", options: .regularExpression)
+            .replacingOccurrences(of: #"\{[^}]*\}"#, with: " ", options: .regularExpression)
+        let ns = deTagged as NSString
         let full = NSRange(location: 0, length: ns.length)
-        guard let match = yearPattern.matches(in: raw, range: full).last else { return nil }
+        guard let match = yearPattern.matches(in: deTagged, range: full).last else { return nil }
         return Int(ns.substring(with: match.range))
     }
 

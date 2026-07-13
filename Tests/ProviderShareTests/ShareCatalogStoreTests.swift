@@ -375,4 +375,27 @@ final class ShareCatalogStoreTests: XCTestCase {
         XCTAssertEqual(hints.map(\.title), ["Through a Glass, Darkly", "Not in Scotland Anymore"])
         XCTAssertFalse(hints.contains { $0.title.hasPrefix("S1·E") }, "placeholders excluded")
     }
+
+    func testSearchAlternatesExcludeShorterAbbreviations() async {
+        // A cryptic filename abbreviation ("TP" under a "The Punisher" folder) must
+        // NOT be offered as a search alternate — only a RICHER (more-word) filename
+        // title qualifies (the Punisher bug). A generic folder with a longer filename
+        // title ("Avatar" folder, "Avatar The Last Airbender" files) still yields one.
+        let store = ShareCatalogStore(accountKey: "a", directory: tempDir())
+        func ep(_ path: String, series: String, key: String, _ s: Int, _ e: Int) -> CatalogAsset {
+            CatalogAsset(relPath: path, basename: (path as NSString).lastPathComponent, size: 1,
+                         modifiedAt: Date(), kind: .episode, library: .tv,
+                         title: "t", year: nil, seriesTitle: series, seriesKey: key, season: s, episode: e)
+        }
+        let punisher = ShareCatalogID.seriesKey(fromTitle: "The Punisher")
+        let avatar = ShareCatalogID.seriesKey(fromTitle: "Avatar")
+        await store.upsert([
+            ep("TV/The Punisher/TP.S01E01.3AM.mkv", series: "The Punisher", key: punisher, 1, 1),
+            ep("TV/Avatar (2024)/Avatar.The.Last.Airbender.2024.S01E01.mkv", series: "Avatar", key: avatar, 1, 1),
+        ], scanID: 1)
+        let punisherAlts = await store.seriesSearchTitleAlternates(seriesKey: punisher, storedTitle: "The Punisher")
+        XCTAssertFalse(punisherAlts.contains { $0.caseInsensitiveCompare("TP") == .orderedSame }, "abbreviation excluded")
+        let avatarAlts = await store.seriesSearchTitleAlternates(seriesKey: avatar, storedTitle: "Avatar")
+        XCTAssertTrue(avatarAlts.contains("Avatar The Last Airbender"), "richer filename title kept")
+    }
 }

@@ -428,6 +428,31 @@ final class ShareMediaParserTests: XCTestCase {
         XCTAssertEqual(ep?.providerTag, "tmdb-2019")
     }
 
+    // MARK: - Release year AFTER the episode marker
+
+    func testYearAfterMarkerIsCapturedAsSeriesYear() {
+        // "The Eternaut S01E01 2025 2160p NF WEB-DL …" — the year trails the marker
+        // and must be captured as the series year (for disambiguation), and NOT
+        // become an episode title ("2025 NF").
+        let ep = episode("TV Shows/The Eternaut/Season 1/The Eternaut S01E01 2025 2160p NF WEB-DL HDR H 265.mkv")
+        XCTAssertEqual(ep?.series, "The Eternaut")
+        XCTAssertEqual(ep?.year, 2025)
+        XCTAssertNil(ep?.title, "a release string starting with a year is not an episode title")
+    }
+
+    func testYearBeforeMarkerStillPreferred() {
+        // A pre-marker year wins over any post-marker number.
+        let ep = episode("TV/Show (2019)/Show.2019.S01E01.The Pilot.mkv")
+        XCTAssertEqual(ep?.year, 2019)
+        XCTAssertEqual(ep?.title, "The Pilot")
+    }
+
+    func testRealEpisodeTitleAfterMarkerStillKept() {
+        // A genuine trailing title (no leading year) is still parsed.
+        let ep = episode("TV/Show/Show.S01E03.The Reveal.1080p.mkv")
+        XCTAssertEqual(ep?.title, "The Reveal")
+    }
+
     // MARK: - Nested sub-show folders (spinoff under a parent show folder)
 
     func testNestedSubShowFolderUsesSpecificFilenameTitle() {

@@ -256,7 +256,7 @@ public actor TVDBClient {
         // robust even when only one season was downloaded (season count alone
         // can't tell a 1-season namesake from S1 of a long-running show).
         if chosen == nil, !isMovie, pool.count > 1, !episodeHints.isEmpty,
-           let matched = await disambiguateByEpisodes(pool, hints: episodeHints, token: token) {
+           let matched = await disambiguateByEpisodes(pool, hints: episodeHints, query: query, token: token) {
             chosen = matched
         }
         // Prefer a result whose name EXACTLY matches the query over TheTVDB's raw
@@ -350,6 +350,7 @@ public actor TVDBClient {
     private func disambiguateByEpisodes(
         _ results: [SearchResult],
         hints: [SeriesEpisodeHint],
+        query: String,
         token: String
     ) async -> SearchResult? {
         var best: (result: SearchResult, score: Int)?
@@ -359,7 +360,18 @@ public actor TVDBClient {
         // must not decide a collision.
         let strongThreshold = max(2, (hints.count + 1) / 2)
 
-        for candidate in results.prefix(5) {
+        // Score exact-name matches FIRST, then the rest — a popular show can rank
+        // BELOW a foreign namesake in TheTVDB's relevance (Outlander vs the Brazilian
+        // "O Caçador", whose English name is also "Outlander"), so a fixed top-N by
+        // relevance alone could skip the real show. Bounded to keep the episode
+        // fetches modest.
+        let q = Self.normalizedTitleKey(query)
+        let ordered = results.sorted { a, b in
+            let ea = Self.normalizedTitleKey(a.name ?? "") == q
+            let eb = Self.normalizedTitleKey(b.name ?? "") == q
+            return ea && !eb
+        }
+        for candidate in ordered.prefix(8) {
             guard let id = candidate.tvdb_id else { continue }
             let names = await episodeNames(seriesID: id, token: token)
             guard !names.isEmpty else { continue }

@@ -19,7 +19,7 @@ enum ShareMediaParser {
     /// v10: normalize series titles (strip year/season/edition/quality junk),
     /// prefer the clean filename title over a junky folder, and capture the series
     /// year — collapses split/variant folders and fixes same-name matches.
-    static let classifierVersion = 14
+    static let classifierVersion = 15
 
     /// File extensions we treat as playable video.
     static let videoExtensions: Set<String> = [
@@ -501,8 +501,14 @@ enum ShareMediaParser {
             let after = afterStart < ns.length ? ns.substring(from: afterStart) : ""
             let title = episodeTitle(from: after)
 
+            // Release year: prefer a year BEFORE the marker; else a year immediately
+            // AFTER it ("Show S01E01 2025 2160p NF …" — a very common pattern), which
+            // would otherwise be lost and leave the series undated. Used for
+            // same-name disambiguation at enrichment.
+            let year = normalized.year ?? leadingYear(in: after)
+
             return Episode(series: series, season: season, episode: episode,
-                           title: title, year: normalized.year)
+                           title: title, year: year)
         }
         return nil
     }
@@ -609,13 +615,19 @@ enum ShareMediaParser {
     private static func episodeTitle(from raw: String) -> String? {
         let cleaned = clean(raw)
         guard !cleaned.isEmpty else { return nil }
+        // A title that LEADS with a 4-digit year is a release string, not an episode
+        // title ("S01E01 2025 2160p NF WEB-DL …") — bail so we don't invent an
+        // episode called "2025 NF".
+        if let first = cleaned.split(separator: " ").first, isYearToken(first.lowercased()) {
+            return nil
+        }
         // Release names put the real episode title first, then scene/quality tags
         // ("Pilot 720p WEB-DL x264", "The Body HDR 2160p WEB h265-EDITH"). Keep
         // words up to the first tag so we show "Pilot", not "Pilot 720p" — and so
         // a title-less "S01E06.HDR..." doesn't become an episode called "HDR".
         // Reuse the series stop-token set (quality/codec/HDR/audio/network/edition)
         // plus resolution tokens. Require at least one real (non-numeric) word.
-        let extraTags: Set<String> = ["1080p", "720p", "2160p", "480p", "4k"]
+        let extraTags: Set<String> = ["1080p", "720p", "2160p", "480p", "4k", "nf", "amzn", "dsnp", "hmax", "atvp"]
         var kept: [String] = []
         for word in cleaned.split(separator: " ").map(String.init) {
             // Match hyphen-insensitively so tight scene spellings like "WEB-DL"
@@ -631,6 +643,15 @@ enum ShareMediaParser {
         let meaningful = kept.filter { $0.count >= 2 && Int($0) == nil }
         guard !meaningful.isEmpty else { return nil }
         return kept.joined(separator: " ")
+    }
+
+    /// The 4-digit year at the very START of a release string (the token right after
+    /// an episode marker: "… S01E01 2025 2160p …"), or nil. Only the leading token
+    /// is considered so a later number can't be mistaken for the year.
+    static func leadingYear(in raw: String) -> Int? {
+        let cleaned = clean(raw)
+        guard let first = cleaned.split(separator: " ").first, isYearToken(first.lowercased()) else { return nil }
+        return Int(first)
     }
 
     // MARK: - Movie

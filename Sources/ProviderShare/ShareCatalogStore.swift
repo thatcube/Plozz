@@ -1403,13 +1403,19 @@ actor ShareCatalogStore {
         }
         let storedNorm = storedTitle.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: nil)
             .trimmingCharacters(in: .whitespaces)
+        // Only a RICHER filename title is a useful alternate: it must have more words
+        // than the stored folder title ("Avatar" → "Avatar The Last Airbender"). A
+        // shorter filename abbreviation ("TP" for a "The Punisher" folder) must NOT
+        // be searched — it fuzzy-matches unrelated shows ("The Syd + TP Show").
+        let storedWordCount = storedNorm.split(separator: " ").count
         var seen = Set<String>()
         var alternates: [String] = []
         for path in relPaths {
             guard let title = ShareMediaParser.filenameSeriesTitle(relPath: path) else { continue }
             let norm = title.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: nil)
                 .trimmingCharacters(in: .whitespaces)
-            guard !norm.isEmpty, norm != storedNorm, seen.insert(norm).inserted else { continue }
+            guard !norm.isEmpty, norm != storedNorm, seen.insert(norm).inserted,
+                  norm.split(separator: " ").count > storedWordCount else { continue }
             alternates.append(title)
         }
         // Most specific first: a longer filename title ("Avatar The Last

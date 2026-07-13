@@ -39,7 +39,14 @@ actor ShareEnricher {
     /// v10: episode-title hints skip synthetic "S1·E01" placeholders, so a show with
     /// bare-numbered early seasons (Outlander) sends its real later-season titles and
     /// disambiguates to the right show instead of a same-named foreign series.
-    static let version = 10
+    /// v11: a release year after the episode marker ("Show S01E01 2025 …") is now
+    /// captured as the series year, enabling year-based disambiguation (The Eternaut
+    /// 2025 vs a same-fuzzy-named older title). Re-enrich to use it.
+    /// v12: episode-title disambiguation scores exact-name matches first and more
+    /// candidates (a popular show ranking below a foreign namesake — Outlander vs
+    /// "O Caçador" — is now scored), and a cryptic filename abbreviation ("TP" under
+    /// a "The Punisher" folder) is no longer used as a search alternate.
+    static let version = 12
 
     private let store: ShareCatalogStore
     private let resolver: ShareMetadataResolving

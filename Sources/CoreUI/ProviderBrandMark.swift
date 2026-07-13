@@ -74,9 +74,7 @@ public struct ProviderBrandMark: View {
                 glyph(systemSymbolName)
                     // The band chop pulls the drive's visual weight downward;
                     // lift the badged mark a touch so it sits optically centered
-                    // in its container, and scale it down slightly so it doesn't
-                    // crowd the frame. Visual only — layout footprint unchanged.
-                    .scaleEffect(badgeLabel != nil ? 0.95 : 1)
+                    // in its container. Visual only — layout footprint unchanged.
                     .offset(y: badgeLabel != nil ? -size * 0.08 : 0)
             } else {
                 Image(assetName)
@@ -135,11 +133,11 @@ public struct ProviderBrandMark: View {
     @ViewBuilder
     private func badgeText(_ label: String) -> some View {
         Text(label)
-            .font(.system(size: size * 0.24, weight: .black, design: .rounded))
+            .font(.system(size: size * 0.22, weight: .black, design: .rounded))
             .lineLimit(1)
             .minimumScaleFactor(0.3)
             .multilineTextAlignment(.center)
-            .frame(width: size * 0.92)
+            .frame(width: size * 0.82)
     }
 
     /// Brand accent color used to tint each provider's logo + chip.

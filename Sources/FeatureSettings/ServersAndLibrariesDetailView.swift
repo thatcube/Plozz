@@ -140,6 +140,23 @@ func serverKey(for account: Account) -> String {
     // provider so two providers that happen to share a hostname aren't
     // collapsed into one group.
     let host = account.server.baseURL.host?.lowercased() ?? account.server.baseURL.absoluteString
+    // Media shares are the exception: a host can expose SEVERAL distinct shares
+    // — an SMB share and a WebDAV share on the same NAS, or two WebDAV shares on
+    // different ports/paths — and each is its own "server" the user adds and
+    // removes independently. Keying a share by host alone would collapse them
+    // into one Settings row (they'd still each show on Home, which doesn't group
+    // by host — exactly the "WebDAV missing from Settings" symptom). So key a
+    // share by its full root: transport scheme + host + port + path. The share's
+    // username is deliberately NOT part of the key, so two users of the SAME
+    // share (e.g. `brandon` and `sister`) still group under one server row, just
+    // like multiple profiles on one media server.
+    if account.server.provider == .mediaShare {
+        let url = account.server.baseURL
+        let scheme = (url.scheme ?? "").lowercased()
+        let port = url.port.map { ":\($0)" } ?? ""
+        let path = url.path.isEmpty ? "/" : url.path
+        return "\(account.server.provider.rawValue)|\(scheme)://\(host)\(port)\(path)"
+    }
     return "\(account.server.provider.rawValue)|\(host)"
 }
 #endif

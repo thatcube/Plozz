@@ -481,6 +481,10 @@ let package = Package(
             dependencies: ["ProviderShare", "CoreModels", "MediaTransportCore"]
         ),
         .testTarget(
+            name: "FeatureSettingsTests",
+            dependencies: ["FeatureSettings", "CoreModels"]
+        ),
+        .testTarget(
             name: "MediaTransportCoreTests",
             dependencies: ["MediaTransportCore", "CoreModels"],
             swiftSettings: [.unsafeFlags(["-strict-concurrency=complete"])]

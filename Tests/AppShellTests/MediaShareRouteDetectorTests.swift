@@ -4,14 +4,14 @@ import Foundation
 import XCTest
 
 final class MediaShareRouteDetectorTests: XCTestCase {
-    /// `webDAVAt` = URLs whose probe returns `.webDAV`; `httpAt` = URLs that
-    /// answer but are not WebDAV (`.notWebDAV`); everything else `.unreachable`.
+    /// `httpServersAt` = URLs where an HTTP server answers (any status, incl.
+    /// a 401 auth challenge) — these route to WebDAV. Everything else is
+    /// unreachable over HTTP and falls back to SMB.
     private func detect(
         _ address: String,
-        webDAVAt: Set<String> = [],
-        httpAt: Set<String> = []
+        httpServersAt: Set<String> = []
     ) async -> Result<MediaShareRoute, MediaShareRouteError> {
-        let probe = StubProbe(webDAVAt: webDAVAt, httpAt: httpAt)
+        let probe = StubProbe(httpServersAt: httpServersAt)
         return await MediaShareRouteDetector(probe: probe).detect(address: address)
     }
 
@@ -42,11 +42,13 @@ final class MediaShareRouteDetectorTests: XCTestCase {
     // MARK: - Probe-based detection (the real fix)
 
     func testBareHostWithNonStandardPortDetectsWebDAV() async {
-        // Brandon's case: http://192.168.68.71:8384/ typed WITHOUT a scheme and
-        // WITHOUT a path must still detect WebDAV via the probe.
+        // Brandon's case: an auth-gated Apache mod_dav server on a non-standard
+        // port, typed WITHOUT a scheme and WITHOUT a path. Its unauthenticated
+        // OPTIONS returns 401 (no DAV header) — still an HTTP server, so it must
+        // route to WebDAV.
         let route = try? await detect(
             "192.168.68.71:8384",
-            webDAVAt: ["http://192.168.68.71:8384"]
+            httpServersAt: ["http://192.168.68.71:8384"]
         ).get()
         XCTAssertEqual(route, .webDAV(baseURL: URL(string: "http://192.168.68.71:8384")!, insecureHTTP: true))
     }
@@ -54,32 +56,31 @@ final class MediaShareRouteDetectorTests: XCTestCase {
     func testBareHostPrefersHTTPSWebDAV() async {
         let route = try? await detect(
             "nas.local",
-            webDAVAt: ["https://nas.local", "http://nas.local"]
+            httpServersAt: ["https://nas.local", "http://nas.local"]
         ).get()
         XCTAssertEqual(route, .webDAV(baseURL: URL(string: "https://nas.local")!, insecureHTTP: false))
+    }
+
+    func testBareHostFallsBackToHTTPWhenNoHTTPS() async {
+        let route = try? await detect(
+            "nas.local",
+            httpServersAt: ["http://nas.local"]
+        ).get()
+        XCTAssertEqual(route, .webDAV(baseURL: URL(string: "http://nas.local")!, insecureHTTP: true))
     }
 
     func testBareHostWithPathDetectsWebDAV() async {
         let route = try? await detect(
             "nas.local/dav",
-            webDAVAt: ["https://nas.local/dav"]
+            httpServersAt: ["https://nas.local/dav"]
         ).get()
         XCTAssertEqual(route, .webDAV(baseURL: URL(string: "https://nas.local/dav")!, insecureHTTP: false))
     }
 
-    func testBareHostThatIsNotWebDAVFallsBackToSMB() async {
-        // A NAS whose port 80 serves a web admin page (answers, but no DAV
-        // header) must NOT be mistaken for WebDAV -> falls back to SMB.
-        let route = try? await detect(
-            "192.168.2.1",
-            httpAt: ["http://192.168.2.1", "https://192.168.2.1"]
-        ).get()
-        XCTAssertEqual(route, .smb(host: "192.168.2.1", port: nil))
-    }
-
-    func testBareHostUnreachableFallsBackToSMB() async {
-        let route = try? await detect("192.168.2.1").get()
-        XCTAssertEqual(route, .smb(host: "192.168.2.1", port: nil))
+    func testSMBOnlyHostFallsBackToSMB() async {
+        // Nothing answers over HTTP (SMB-only NAS) -> SMB.
+        let route = try? await detect("192.168.2.5").get()
+        XCTAssertEqual(route, .smb(host: "192.168.2.5", port: nil))
     }
 
     // MARK: - Invalid
@@ -100,13 +101,9 @@ final class MediaShareRouteDetectorTests: XCTestCase {
 }
 
 private struct StubProbe: WebDAVReachabilityProbing {
-    let webDAVAt: Set<String>
-    let httpAt: Set<String>
+    let httpServersAt: Set<String>
     func probe(url: URL) async -> WebDAVProbeResult {
-        let s = url.absoluteString
-        if webDAVAt.contains(s) { return .webDAV }
-        if httpAt.contains(s) { return .notWebDAV }
-        return .unreachable
+        httpServersAt.contains(url.absoluteString) ? .httpServer : .unreachable
     }
 }
 #endif

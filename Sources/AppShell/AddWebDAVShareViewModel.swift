@@ -54,13 +54,28 @@ final class AddWebDAVShareViewModel {
     private(set) var configuration: WebDAVShareConfiguration?
 
     private let probe: any WebDAVOnboardingProbing
-    /// The origin URL (scheme://host[:port]) without a path, resolved from
-    /// `address` once validated. Folder browsing builds paths against it.
-    private var originURL: URL?
-    /// The approved trust decision for this session.
+    /// The approved trust decision for the active attempt.
     private var trust: WebDAVOnboardingTrust = .system
     /// Approved leaf pin, if any (carried into the final configuration).
     private var approvedPin: Data?
+
+    /// An immutable snapshot of the inputs for one connection attempt. Captured
+    /// when the user taps Connect so that editing the address/credentials while
+    /// an async preflight/validate is in flight can never send the new
+    /// credential to the old origin (or vice versa).
+    private struct Attempt {
+        let base: URL
+        let origin: TransportOrigin
+        let originURL: URL
+        /// Percent-encoded path the user entered (browse starts here).
+        let enteredPath: String
+        let credential: WebDAVCredential
+        let shareAuth: AppState.WebDAVShareAuth
+    }
+    private var attempt: Attempt?
+    /// Bumped on every user-initiated step (connect / approve / navigate) so a
+    /// late-arriving response from a superseded request is ignored.
+    private var generation = 0
 
     init(probe: any WebDAVOnboardingProbing = WebDAVOnboardingProbe()) {
         self.probe = probe
@@ -125,28 +140,52 @@ final class AddWebDAVShareViewModel {
         }
     }
 
+    /// Snapshots the current inputs into an immutable attempt (or nil if the
+    /// address is invalid).
+    private func makeAttempt() -> Attempt? {
+        guard let (base, origin) = parseAddress(), let originURL = origin.originURL else { return nil }
+        let basePath = URLComponents(url: base, resolvingAgainstBaseURL: false)?.percentEncodedPath ?? ""
+        return Attempt(
+            base: base,
+            origin: origin,
+            originURL: originURL,
+            enteredPath: basePath.isEmpty ? "/" : basePath,
+            credential: credential,
+            shareAuth: shareAuth
+        )
+    }
+
+    private var isAnonymous: Bool {
+        if case .anonymous = authMode { return true }
+        return false
+    }
+
     // MARK: - Flow
 
     func connect() async {
         errorMessage = nil
-        guard let (base, origin) = parseAddress() else {
+        guard let attempt = makeAttempt() else {
             errorMessage = Self.message(for: .invalidURL)
             return
         }
         // A reusable credential requires HTTPS — fail closed before any request.
-        if !origin.isSecure, authMode != .anonymous {
+        if !attempt.origin.isSecure, !isAnonymous {
             errorMessage = Self.message(for: .notSecure)
             return
         }
-        originURL = origin.originURL
+        self.attempt = attempt
+        generation += 1
+        let gen = generation
 
         isWorking = true
-        defer { isWorking = false }
+        defer { if gen == generation { isWorking = false } }
 
         // HTTPS: preflight trust first so a self-signed cert is approved before
         // any credential is sent.
-        if origin.isSecure {
-            switch await probe.preflightTrust(url: base) {
+        if attempt.origin.isSecure {
+            let result = await probe.preflightTrust(url: attempt.base)
+            guard gen == generation else { return } // superseded
+            switch result {
             case .systemTrusted:
                 trust = .system
                 approvedPin = nil
@@ -162,27 +201,37 @@ final class AddWebDAVShareViewModel {
             approvedPin = nil
         }
 
-        await validateAndBrowse(base: base)
+        await validateAndBrowse(attempt: attempt, generation: gen)
     }
 
     /// User approved the captured certificate fingerprint (trust-on-first-use).
     func approveTrust() async {
-        guard case .confirmTrust(let sha256) = step, let base = originURL else { return }
+        guard case .confirmTrust(let sha256) = step, let attempt else { return }
         trust = .pinnedLeaf(sha256: sha256)
         approvedPin = sha256
+        generation += 1
+        let gen = generation
         isWorking = true
-        defer { isWorking = false }
-        await validateAndBrowse(base: base)
+        defer { if gen == generation { isWorking = false } }
+        await validateAndBrowse(attempt: attempt, generation: gen)
     }
 
     func rejectTrust() {
         trust = .system
         approvedPin = nil
+        generation += 1 // supersede any in-flight request
         step = .enterAddress
     }
 
-    private func validateAndBrowse(base: URL) async {
-        switch await probe.validate(url: base, credential: credential, trust: trust) {
+    private func validateAndBrowse(attempt: Attempt, generation gen: Int) async {
+        guard let validateURL = url(origin: attempt.originURL, encodedPath: attempt.enteredPath) else {
+            errorMessage = Self.message(for: .invalidURL)
+            step = .enterAddress
+            return
+        }
+        let result = await probe.validate(url: validateURL, credential: attempt.credential, trust: trust)
+        guard gen == generation else { return } // superseded
+        switch result {
         case .success:
             break
         case .failure(let error):
@@ -190,20 +239,32 @@ final class AddWebDAVShareViewModel {
             step = .enterAddress
             return
         }
-        currentPath = "/"
-        await loadFolders(at: "/")
-        if errorMessage == nil {
+        await loadFolders(attempt: attempt, path: attempt.enteredPath, generation: gen)
+        if errorMessage == nil, gen == generation {
             step = .browsing
         }
     }
 
-    /// Loads the child folders at `path` for the picker.
+    /// Navigates the folder picker to `path`. Supersedes any in-flight browse so
+    /// an out-of-order response can't overwrite a newer selection.
     func loadFolders(at path: String) async {
-        guard let origin = originURL else { return }
+        guard let attempt else { return }
+        generation += 1
+        await loadFolders(attempt: attempt, path: path, generation: generation)
+    }
+
+    private func loadFolders(attempt: Attempt, path: String, generation gen: Int) async {
         errorMessage = nil
         isWorking = true
-        defer { isWorking = false }
-        switch await probe.listFolders(url: origin, path: path, credential: credential, trust: trust) {
+        defer { if gen == generation { isWorking = false } }
+        let result = await probe.listFolders(
+            url: attempt.originURL,
+            path: path,
+            credential: attempt.credential,
+            trust: trust
+        )
+        guard gen == generation else { return } // superseded
+        switch result {
         case .success(let folders):
             self.folders = folders
             self.currentPath = path
@@ -212,15 +273,19 @@ final class AddWebDAVShareViewModel {
         }
     }
 
+    /// Builds a URL at `encodedPath` on `origin`. `encodedPath` is a
+    /// percent-encoded path (safe to assign to `percentEncodedPath`).
+    private func url(origin: URL, encodedPath: String) -> URL? {
+        guard var components = URLComponents(url: origin, resolvingAgainstBaseURL: false) else {
+            return nil
+        }
+        components.percentEncodedPath = encodedPath == "/" ? "" : encodedPath
+        return components.url
+    }
+
     /// Confirms the current folder as the share root, producing the final config.
     func useCurrentFolder() {
-        guard let origin = originURL,
-              var components = URLComponents(url: origin, resolvingAgainstBaseURL: false) else {
-            errorMessage = Self.message(for: .invalidURL)
-            return
-        }
-        components.percentEncodedPath = currentPath == "/" ? "" : currentPath
-        guard let baseURL = components.url else {
+        guard let attempt, let baseURL = url(origin: attempt.originURL, encodedPath: currentPath) else {
             errorMessage = Self.message(for: .invalidURL)
             return
         }
@@ -232,7 +297,7 @@ final class AddWebDAVShareViewModel {
         }
         let config = WebDAVShareConfiguration(
             baseURL: baseURL,
-            auth: shareAuth,
+            auth: attempt.shareAuth,
             trustPin: pin,
             displayName: displayName.trimmingCharacters(in: .whitespaces)
         )

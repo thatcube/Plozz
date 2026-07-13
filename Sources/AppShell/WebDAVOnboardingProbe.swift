@@ -158,8 +158,12 @@ struct WebDAVOnboardingProbe: WebDAVOnboardingProbing {
                     let trimmed = entry.resolvedPath.hasSuffix("/") && entry.resolvedPath.count > 1
                         ? String(entry.resolvedPath.dropLast())
                         : entry.resolvedPath
+                    // `resolvedPath` is percent-DECODED; carry the folder path
+                    // in percent-ENCODED form (what WebDAVRoot and the persisted
+                    // baseURL's percentEncodedPath both expect), with a decoded
+                    // display name.
                     let name = trimmed.split(separator: "/").last.map(String.init) ?? trimmed
-                    return WebDAVOnboardingFolder(path: trimmed, name: name)
+                    return WebDAVOnboardingFolder(path: Self.percentEncodedPath(fromDecoded: trimmed), name: name)
                 }
                 .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
             return .success(folders)
@@ -176,6 +180,27 @@ struct WebDAVOnboardingProbe: WebDAVOnboardingProbing {
             trustRevision: Self.onboardingTrustRevision,
             role: .metadata
         )
+    }
+
+    /// RFC 3986 unreserved characters; everything else in a path segment is
+    /// percent-encoded. Unreserved chars are equivalent encoded or not, so this
+    /// canonical re-encoding round-trips a decoded path back to a valid,
+    /// server-equivalent percent-encoded one.
+    private static let unreservedPathCharacters = CharacterSet(
+        charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
+    )
+
+    /// Re-encodes a percent-DECODED, normalized path (segments contain no `/`)
+    /// into a percent-ENCODED path safe to assign to `URLComponents
+    /// .percentEncodedPath` and to feed `WebDAVRoot(rawPath:)`.
+    static func percentEncodedPath(fromDecoded decoded: String) -> String {
+        let segments = decoded.split(separator: "/", omittingEmptySubsequences: true)
+        guard !segments.isEmpty else { return "/" }
+        let encoded = segments.map { segment -> String in
+            String(segment).addingPercentEncoding(withAllowedCharacters: unreservedPathCharacters)
+                ?? String(segment)
+        }
+        return "/" + encoded.joined(separator: "/")
     }
 
     private static func mapError(_ error: Error) -> WebDAVOnboardingError {

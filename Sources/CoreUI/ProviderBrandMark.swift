@@ -98,12 +98,15 @@ public struct ProviderBrandMark: View {
             .foregroundStyle(tint)
 
         if let badgeLabel {
-            ZStack {
+            ZStack(alignment: .bottom) {
                 base
                     // Punch a text-shaped gap (slightly dilated for a hairline of
                     // negative space) out of the glyph so the same-color label
-                    // reads against it.
-                    .overlay { badgeText(badgeLabel, dilated: true).blendMode(.destinationOut) }
+                    // reads against it. Bottom-aligned so it occupies only the
+                    // lower band and the top of the drive glyph stays visible.
+                    .overlay(alignment: .bottom) {
+                        badgeText(badgeLabel, dilated: true).blendMode(.destinationOut)
+                    }
                     .compositingGroup()
                 // Redraw the crisp label in the glyph color, sitting in the gap.
                 badgeText(badgeLabel, dilated: false)
@@ -116,20 +119,22 @@ public struct ProviderBrandMark: View {
 
     /// The badge text laid out identically whether used as the knockout mask
     /// (`dilated`, an 8-way offset silhouette that widens the erased gap) or the
-    /// crisp foreground. Centered and constrained to the icon width so any label
-    /// length fits.
+    /// crisp foreground. Bottom-aligned into the lower ~25% of the icon and
+    /// constrained to the icon width so any label length fits.
     @ViewBuilder
     private func badgeText(_ label: String, dilated: Bool) -> some View {
-        let font = Font.system(size: size * 0.30, weight: .black, design: .rounded)
+        let font = Font.system(size: size * 0.26, weight: .black, design: .rounded)
         let content = Text(label)
             .font(font)
             .lineLimit(1)
             .minimumScaleFactor(0.2)
             .multilineTextAlignment(.center)
             .frame(width: size * 0.9)
+            // Sit in the bottom band, lifted a touch off the very edge.
+            .padding(.bottom, size * (showsBackground ? 0.12 : 0.04))
 
         if dilated {
-            let d = max(1, size * 0.05)
+            let d = max(1, size * 0.045)
             let offsets: [CGSize] = [
                 CGSize(width: -d, height: 0), CGSize(width: d, height: 0),
                 CGSize(width: 0, height: -d), CGSize(width: 0, height: d),

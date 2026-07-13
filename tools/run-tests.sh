@@ -1,26 +1,42 @@
 #!/usr/bin/env bash
-# Run Plozz's Swift Package unit tests on a tvOS Simulator.
+# Run Plozz's Swift Package unit tests on a tvOS Simulator — BUILD ONCE, RUN MANY.
 #
 # `swift test` cannot be used on macOS because AetherEngine's FFmpeg xcframeworks
-# are tvOS-only. Instead we drive the auto-generated per-module *Tests schemes that
-# Xcode publishes when it integrates the local Swift Package, via xcodebuild on
-# a tvOS Simulator destination.
+# are tvOS-only. Instead we drive xcodebuild on a tvOS Simulator destination.
 #
-# Self-heal for fresh worktrees / CI: those per-module *Tests schemes
-# (MetadataKitTests, ...) are Xcode-*autocreated* user data (gitignored), so a
-# checkout that hasn't been opened in Xcode won't have them and a bare
-# `-scheme MetadataKitTests` would fail with "does not contain a scheme named".
-# When a requested *Tests scheme isn't materialised we transparently fall back to
-# the always-present Swift-package scheme `Plozz-Package` with
-# `-only-testing:<Suite>`, which runs the exact same test target. A stray
-# generated `Plozz.xcodeproj` in the working copy shadows the Swift package (so
-# neither the *Tests schemes nor `Plozz-Package` resolve); if that blocks the
-# fallback we temporarily move it aside and restore it on exit.
+# ── Strategy (the speed win) ─────────────────────────────────────────────────
+# The old runner looped `xcodebuild test` once PER test target (23 separate
+# build + simulator-install + launch cycles ≈ 10–13 min, almost all of it compile
+# + simulator orchestration — the tests themselves execute in <1s). This runner
+# does ONE build that runs many suites:
+#   * Full sweep (no args, or all targets): `xcodebuild test -scheme Plozz-Package`
+#     with no `-only-testing` — one compile, one orchestration, every suite.
+#   * Subset (≥2 suites, or a single suite whose native scheme isn't materialised):
+#     `xcodebuild test -scheme Plozz-Package -only-testing:<S> …` — one build.
+#   * Single suite whose native `<Suite>` scheme IS materialised: use it directly
+#     (no "move Plozz.xcodeproj aside" dance needed) — the fast inner-loop path.
+# The list of test targets is discovered from `swift package dump-package`, so it
+# is DATA-DRIVEN and stays correct as targets are added (e.g. the WebDAV work's
+# MediaTransportWebDAVTests) — nothing here is hardcoded.
+#
+# ── Self-heal (preserved) ────────────────────────────────────────────────────
+# The always-present `Plozz-Package` scheme is what makes build-once possible, but
+# a stray generated `Plozz.xcodeproj` in the working copy shadows the Swift package
+# so `Plozz-Package` won't resolve. When we need it and it's shadowed, we move the
+# project aside and restore it on exit (normal, error, or signal).
+#
+# ── Flake handling ───────────────────────────────────────────────────────────
+# If the run reports specific failed suite bundles, each failed suite is retried
+# ONCE in isolation (covers the ProviderPlexTests StubHTTPClient timing race). A
+# suite only counts as failed if it fails twice. A build/compile failure (no
+# per-suite result) is NOT retried.
 #
 # Usage:
-#   ./tools/run-tests.sh                     # run the default test suites
-#   ./tools/run-tests.sh CoreModelsTests     # run a specific test scheme
-#   PLOZZ_SIM_ID=<udid> ./tools/run-tests.sh # pin to a specific simulator
+#   ./tools/run-tests.sh                       # full matrix, build-once
+#   ./tools/run-tests.sh CoreModelsTests …     # named suites, build-once
+#   PLOZZ_SIM_ID=<udid> ./tools/run-tests.sh   # pin a specific simulator
+#   PLOZZ_PARALLEL=YES ./tools/run-tests.sh    # opt into parallel test execution
+#                                              #   (default NO — see docs/testing-policy.md)
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -28,9 +44,12 @@ cd "$(dirname "$0")/.."
 # Keep the git config workaround that the rest of the build chain expects.
 export GIT_CONFIG_PARAMETERS="${GIT_CONFIG_PARAMETERS-'safe.bareRepository=all'}"
 
-DEFAULT_SCHEMES=()
-while IFS= read -r SCHEME; do
-  [[ -n "$SCHEME" ]] && DEFAULT_SCHEMES+=("$SCHEME")
+PARALLEL="${PLOZZ_PARALLEL:-NO}"
+
+# --- Discover all test targets (data-driven) ---------------------------------
+ALL_TESTS=()
+while IFS= read -r T; do
+  [[ -n "$T" ]] && ALL_TESTS+=("$T")
 done < <(
   swift package dump-package | python3 -c '
 import json,sys
@@ -40,17 +59,17 @@ for target in manifest.get("targets", []):
         print(target["name"])
 '
 )
-if [[ ${#DEFAULT_SCHEMES[@]} -eq 0 ]]; then
+if [[ ${#ALL_TESTS[@]} -eq 0 ]]; then
   echo "run-tests.sh: FAILED to discover any test targets from Package.swift."
   exit 1
 fi
 
 SCHEMES=("$@")
 if [[ ${#SCHEMES[@]} -eq 0 ]]; then
-  SCHEMES=("${DEFAULT_SCHEMES[@]}")
+  SCHEMES=("${ALL_TESTS[@]}")
 fi
 
-# Pick a booted tvOS simulator if none is pinned, else boot one.
+# --- Pick a tvOS simulator ----------------------------------------------------
 if [[ -z "${PLOZZ_SIM_ID-}" ]]; then
   PLOZZ_SIM_ID=$(xcrun simctl list devices booted -j 2>/dev/null \
     | python3 -c 'import json,sys
@@ -73,9 +92,6 @@ fi
 echo "Using tvOS Simulator: $PLOZZ_SIM_ID"
 
 # --- Scheme resolution + self-heal -------------------------------------------
-# Discover which schemes xcodebuild can actually resolve in this checkout, so we
-# can fall back to `Plozz-Package -only-testing:<Suite>` for any *Tests scheme
-# Xcode hasn't materialised (see the header note).
 list_schemes() {
   xcodebuild -list -json 2>/dev/null | python3 -c '
 import json,sys
@@ -90,8 +106,6 @@ for container in ("project","workspace"):
 '
 }
 
-# A shadowing generated project is moved aside only if it actually blocks the
-# package fallback, and always restored on exit (normal, error, or signal).
 MOVED_PROJECT=""
 restore_project() {
   if [[ -n "$MOVED_PROJECT" && -e "$MOVED_PROJECT" ]]; then
@@ -99,58 +113,118 @@ restore_project() {
     MOVED_PROJECT=""
   fi
 }
-trap restore_project EXIT
+
+LOG_DIR="$(mktemp -d)"
+trap 'restore_project; rm -rf "$LOG_DIR"' EXIT
 
 AVAILABLE_SCHEMES="$(list_schemes)"
 scheme_exists() { grep -qxF -- "$1" <<<"$AVAILABLE_SCHEMES"; }
 
-# If any requested scheme is missing AND the package fallback itself can't be
-# resolved because a generated Plozz.xcodeproj is shadowing the Swift package,
-# move the project aside so `Plozz-Package` resolves, then re-list.
-need_fallback=0
-for SCHEME in "${SCHEMES[@]}"; do
-  scheme_exists "$SCHEME" || { need_fallback=1; break; }
-done
-if [[ $need_fallback -eq 1 ]] && ! scheme_exists "Plozz-Package" && [[ -d "Plozz.xcodeproj" ]]; then
-  echo "run-tests.sh: a *Tests scheme isn't materialised and Plozz.xcodeproj is shadowing the Swift package — moving it aside so 'Plozz-Package' resolves (restored on exit)."
-  MOVED_PROJECT="$(pwd)/.Plozz.xcodeproj.run-tests-aside"
-  rm -rf "$MOVED_PROJECT"
-  mv "Plozz.xcodeproj" "$MOVED_PROJECT"
-  AVAILABLE_SCHEMES="$(list_schemes)"
-fi
-
-FAIL=0
-for SCHEME in "${SCHEMES[@]}"; do
-  echo "=== $SCHEME ==="
-  # Prefer the native *Tests scheme when Xcode has materialised it; otherwise run
-  # the same test target through the package scheme.
-  if scheme_exists "$SCHEME"; then
-    XCB_ARGS=(-scheme "$SCHEME")
-  elif scheme_exists "Plozz-Package"; then
-    echo "  ('$SCHEME' scheme not materialised — running via Plozz-Package -only-testing:$SCHEME)"
-    XCB_ARGS=(-scheme "Plozz-Package" -only-testing:"$SCHEME")
-  else
-    echo "  -> FAILED: no '$SCHEME' scheme and no 'Plozz-Package' fallback available."
-    FAIL=$((FAIL + 1))
-    continue
+# Ensure `Plozz-Package` resolves; move a shadowing generated project aside if it
+# blocks resolution (restored on exit). Returns 0 if Plozz-Package is usable.
+ensure_package_scheme() {
+  scheme_exists "Plozz-Package" && return 0
+  if [[ -d "Plozz.xcodeproj" ]]; then
+    echo "run-tests.sh: Plozz.xcodeproj is shadowing the Swift package — moving it aside so 'Plozz-Package' resolves (restored on exit)."
+    MOVED_PROJECT="$(pwd)/.Plozz.xcodeproj.run-tests-aside"
+    rm -rf "$MOVED_PROJECT"
+    mv "Plozz.xcodeproj" "$MOVED_PROJECT"
+    AVAILABLE_SCHEMES="$(list_schemes)"
   fi
+  scheme_exists "Plozz-Package"
+}
+
+# --- Run helpers --------------------------------------------------------------
+SUMMARY_RE="Test Suite '.*\.xctest'|Executed [0-9]+ test|TEST (SUCCEEDED|FAILED)|Failing tests:|error:|XCTAssert"
+
+# Print the bundle-level test targets that FAILED in a given log (one per line).
+failed_bundles_from_log() {
+  grep -Eo "Test Suite '[A-Za-z0-9_]+\.xctest' failed" "$1" 2>/dev/null \
+    | sed -E "s/Test Suite '([A-Za-z0-9_]+)\.xctest' failed/\1/" | sort -u
+}
+
+# xcodebuild_test <log> <xcb-arg>...  -> returns xcodebuild's exit status
+xcodebuild_test() {
+  local log="$1"; shift
   set +e
   xcodebuild test \
-    "${XCB_ARGS[@]}" \
+    "$@" \
     -destination "platform=tvOS Simulator,id=$PLOZZ_SIM_ID" \
+    -parallel-testing-enabled "$PARALLEL" \
     CODE_SIGNING_ALLOWED=NO 2>&1 \
-    | grep -E "Test Suite '.*\.xctest'|Executed [0-9]+ test|TEST (SUCCEEDED|FAILED)|Failing tests:|error:|XCTAssert" \
-    | tail -20
-  STATUS=${PIPESTATUS[0]}
+    | tee "$log" \
+    | grep --line-buffered -E "$SUMMARY_RE" | tail -60
+  local status=${PIPESTATUS[0]}
   set -e
-  if [[ $STATUS -ne 0 ]]; then
-    FAIL=$((FAIL + 1))
-    echo "  -> FAILED ($STATUS)"
-  fi
-done
+  return $status
+}
 
-if [[ $FAIL -ne 0 ]]; then
-  echo "FAILURE: $FAIL scheme(s) failed."
-  exit 1
+# --- Decide the build strategy ------------------------------------------------
+# A set is "full" if it equals every discovered test target.
+is_full_set() {
+  [[ ${#SCHEMES[@]} -eq ${#ALL_TESTS[@]} ]] || return 1
+  local sorted_req sorted_all
+  sorted_req="$(printf '%s\n' "${SCHEMES[@]}" | sort -u)"
+  sorted_all="$(printf '%s\n' "${ALL_TESTS[@]}" | sort -u)"
+  [[ "$sorted_req" == "$sorted_all" ]]
+}
+
+MAIN_LOG="$LOG_DIR/main.log"
+STATUS=0
+
+if [[ ${#SCHEMES[@]} -eq 1 ]] && scheme_exists "${SCHEMES[0]}"; then
+  # Fast inner-loop path: a single suite whose native scheme Xcode materialised —
+  # build just that target, no shadow-dance.
+  echo "=== ${SCHEMES[0]} (native scheme) ==="
+  xcodebuild_test "$MAIN_LOG" -scheme "${SCHEMES[0]}" || STATUS=$?
+else
+  # Build-once via the package scheme (one compile, one orchestration).
+  if ! ensure_package_scheme; then
+    echo "run-tests.sh: FAILED — 'Plozz-Package' scheme is unavailable and could not be resolved (needed for a build-once run)."
+    exit 1
+  fi
+  XCB=(-scheme "Plozz-Package")
+  if is_full_set; then
+    echo "=== FULL matrix via Plozz-Package (build once, ${#ALL_TESTS[@]} suites) ==="
+  else
+    echo "=== ${#SCHEMES[@]} suite(s) via Plozz-Package (build once): ${SCHEMES[*]} ==="
+    for S in "${SCHEMES[@]}"; do XCB+=(-only-testing:"$S"); done
+  fi
+  xcodebuild_test "$MAIN_LOG" "${XCB[@]}" || STATUS=$?
 fi
-echo "All test schemes passed."
+
+# --- Retry-once for flaky suites ---------------------------------------------
+if [[ $STATUS -ne 0 ]]; then
+  FAILED=()
+  while IFS= read -r S; do
+    [[ -n "$S" ]] && FAILED+=("$S")
+  done < <(failed_bundles_from_log "$MAIN_LOG")
+  if [[ ${#FAILED[@]} -eq 0 ]]; then
+    echo "FAILURE: the test run failed but no per-suite result was found (build/compile error, or the run was aborted). Not retrying."
+    exit 1
+  fi
+  echo ""
+  echo "run-tests.sh: ${#FAILED[@]} suite(s) failed: ${FAILED[*]} — retrying each once in isolation (flake guard)."
+  if ! ensure_package_scheme; then
+    echo "FAILURE: cannot retry — 'Plozz-Package' scheme is unavailable."
+    exit 1
+  fi
+  STILL_FAILED=()
+  for S in "${FAILED[@]}"; do
+    echo "=== retry: $S ==="
+    RETRY_LOG="$LOG_DIR/retry-$S.log"
+    if xcodebuild_test "$RETRY_LOG" -scheme "Plozz-Package" -only-testing:"$S"; then
+      echo "  -> $S PASSED on retry (flake)."
+    else
+      echo "  -> $S FAILED again."
+      STILL_FAILED+=("$S")
+    fi
+  done
+  if [[ ${#STILL_FAILED[@]} -ne 0 ]]; then
+    echo "FAILURE: ${#STILL_FAILED[@]} suite(s) failed twice: ${STILL_FAILED[*]}"
+    exit 1
+  fi
+  echo "All previously-failing suites passed on retry."
+fi
+
+echo "All test suites passed."

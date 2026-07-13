@@ -28,9 +28,6 @@ jobs:
       - name: Install XcodeGen
         run: brew install xcodegen
 
-      - name: Run complete tvOS test matrix
-        run: tools/run-tests.sh
-
       - name: Generate Xcode project
         run: tools/generate-project.sh
 
@@ -45,5 +42,5 @@ jobs:
             ONLY_ACTIVE_ARCH=YES \
             CODE_SIGNING_ALLOWED=NO
 
-      - name: Run unit tests (tvOS Simulator)
+      - name: Run full test matrix (tvOS Simulator, build-once)
         run: tools/run-tests.sh

@@ -130,57 +130,59 @@ final class WebDAVClientIntegrationTests: XCTestCase {
         XCTAssertEqual(entries.map(\.resolvedPath), ["/dav/movies/Child.mkv"])
     }
 
-    // MARK: - Cleartext credential rejection before any request is sent
+    // MARK: - Credentials over cleartext HTTP are permitted (LAN media policy)
 
-    func testCleartextPasswordCredentialRejectedBeforeAnyRequestDispatched() async throws {
+    func testPasswordCredentialPermittedOverHTTP() async throws {
         let origin = TransportOrigin(url: URL(string: "http://nas.local:8080/")!)!
         let root = WebDAVRoot(origin: origin, normalizedPath: "/dav")
         let url = URL(string: "http://nas.local:8080/dav")!
         let registry = TransportSessionRegistry(testProtocolClasses: [StubURLProtocol.self])
         let client = WebDAVClient(registry: registry)
 
-        // Deliberately no stub queued — if a request were dispatched it
-        // would get the default 404 stub fallback, but we assert on the
-        // request log directly to prove zero requests ever left this call.
-        do {
-            _ = try await client.listChildren(
-                root: root,
-                path: "/dav",
-                depth: .one,
-                sessionKey: try makeKey(origin: origin),
-                credential: .password(username: "u", password: "p", policy: .automatic),
-                trustPolicy: .system
-            )
-            XCTFail("expected cleartextCredentialRejected to be thrown")
-        } catch let error as TransportError {
-            guard case .cleartextCredentialRejected = error else {
-                return XCTFail("expected cleartextCredentialRejected, got \(error)")
-            }
-        }
+        let xml = """
+        <D:multistatus xmlns:D="DAV:">
+          <D:response>
+            <D:href>/dav/Movie.mkv</D:href>
+            <D:propstat><D:prop/><D:status>HTTP/1.1 200 OK</D:status></D:propstat>
+          </D:response>
+        </D:multistatus>
+        """
+        StubURLProtocol.queue(StubResponse(statusCode: 207, body: Data(xml.utf8)), for: url)
 
-        XCTAssertEqual(StubURLProtocol.requests(for: url).count, 0, "no request may be dispatched before credential preflight passes")
+        let entries = try await client.listChildren(
+            root: root,
+            path: "/dav",
+            depth: .one,
+            sessionKey: try makeKey(origin: origin),
+            credential: .password(username: "u", password: "p", policy: .automatic),
+            trustPolicy: .system
+        )
+        XCTAssertEqual(entries.map(\.resolvedPath), ["/dav/Movie.mkv"])
+        XCTAssertEqual(StubURLProtocol.requests(for: url).count, 1, "the request is permitted over http")
     }
 
-    func testCleartextBearerCredentialRejectedBeforeAnyRequestDispatched() async throws {
+    func testBearerCredentialPermittedOverHTTP() async throws {
         let origin = TransportOrigin(url: URL(string: "http://nas.local:8080/")!)!
         let url = URL(string: "http://nas.local:8080/dav")!
         let registry = TransportSessionRegistry(testProtocolClasses: [StubURLProtocol.self])
         let client = WebDAVClient(registry: registry)
 
-        do {
-            _ = try await client.capabilities(
-                url: url,
-                sessionKey: try makeKey(origin: origin),
-                credential: .bearerToken("must-not-leak"),
-                trustPolicy: .system
-            )
-            XCTFail("expected cleartextCredentialRejected")
-        } catch let error as TransportError {
-            guard case .cleartextCredentialRejected = error else {
-                return XCTFail("expected cleartextCredentialRejected, got \(error)")
-            }
-        }
-        XCTAssertEqual(StubURLProtocol.requests(for: url).count, 0)
+        let observedAuth = LockedValue<String?>(nil)
+        StubURLProtocol.queue(
+            StubResponse(
+                statusCode: 200,
+                headers: ["DAV": "1"],
+                onRequest: { observedAuth.set($0.value(forHTTPHeaderField: "Authorization")) }
+            ),
+            for: url
+        )
+        _ = try await client.capabilities(
+            url: url,
+            sessionKey: try makeKey(origin: origin),
+            credential: .bearerToken("lan-token"),
+            trustPolicy: .system
+        )
+        XCTAssertEqual(observedAuth.get(), "Bearer lan-token")
     }
 
     // MARK: - Anonymous over HTTPS success path

@@ -19,17 +19,35 @@ final class AddWebDAVShareViewModelTests: XCTestCase {
         XCTAssertNotNil(vm.errorMessage)
     }
 
-    func testPasswordOverPlainHTTPIsRejectedBeforeAnyRequest() async {
+    func testPasswordOverPlainHTTPProceedsWithWarning() async {
+        // Credentials over http are now permitted (LAN media policy); the flow
+        // proceeds and surfaces a "sent unencrypted" warning.
         let probe = StubProbe()
+        probe.validateResult = .success(())
+        probe.foldersResult = .success([])
         let vm = AddWebDAVShareViewModel(probe: probe)
         vm.address = "http://nas.local/dav"
         vm.authMode = .usernamePassword
         vm.username = "u"; vm.password = "p"
+        XCTAssertNotNil(vm.insecureHTTPWarning, "an http credential shows the unencrypted warning")
         await vm.connect()
-        XCTAssertEqual(vm.step, .enterAddress)
-        XCTAssertNotNil(vm.errorMessage)
-        XCTAssertEqual(probe.preflightCount, 0)
-        XCTAssertEqual(probe.validateCount, 0, "no request may be made for a cleartext credential")
+        XCTAssertEqual(vm.step, .browsing)
+        XCTAssertEqual(probe.validateCount, 1)
+    }
+
+    func testHTTPSCredentialShowsNoInsecureWarning() {
+        let vm = AddWebDAVShareViewModel(probe: StubProbe())
+        vm.address = "https://nas.local/dav"
+        vm.authMode = .usernamePassword
+        vm.username = "u"; vm.password = "p"
+        XCTAssertNil(vm.insecureHTTPWarning, "https never shows the unencrypted warning")
+    }
+
+    func testAnonymousOverHTTPShowsNoWarning() {
+        let vm = AddWebDAVShareViewModel(probe: StubProbe())
+        vm.address = "http://nas.local/pub"
+        vm.authMode = .anonymous
+        XCTAssertNil(vm.insecureHTTPWarning, "anonymous has no credential to expose")
     }
 
     func testAnonymousOverPlainHTTPProceeds() async {

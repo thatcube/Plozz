@@ -11,8 +11,12 @@ import SwiftUI
 struct AddWebDAVShareView: View {
     let onBack: () -> Void
     let onConfigured: (WebDAVShareConfiguration) -> Void
+    /// When set (from the auto-detect handoff), the address is pre-filled and
+    /// the flow connects automatically so the user never re-types it.
+    var initialAddress: String? = nil
 
     @State private var viewModel = AddWebDAVShareViewModel()
+    @State private var didAutoConnect = false
     @FocusState private var focusedField: Field?
 
     private enum Field: Hashable {
@@ -55,7 +59,14 @@ struct AddWebDAVShareView: View {
         }
         .defaultFocus($focusedField, .address)
         .onExitCommand(perform: handleExit)
-        .onAppear { focusedField = .address }
+        .onAppear {
+            focusedField = .address
+            if let initialAddress, !didAutoConnect {
+                didAutoConnect = true
+                viewModel.address = initialAddress
+                Task { await viewModel.connect() }
+            }
+        }
         .onChange(of: viewModel.step) { _, _ in focusedField = defaultFocus() }
     }
 
@@ -121,6 +132,9 @@ struct AddWebDAVShareView: View {
                             .focused($focusedField, equals: .bearer)
                     }
                 }
+            }
+            if let warning = viewModel.insecureHTTPWarning {
+                InlineErrorMessage(LocalizedStringKey(warning), systemImage: "lock.open")
             }
             if let error = viewModel.errorMessage {
                 InlineErrorMessage(LocalizedStringKey(error), systemImage: "exclamationmark.triangle")

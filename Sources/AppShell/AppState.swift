@@ -2491,17 +2491,9 @@ public final class AppState {
             apply(.authenticationFailed(.unknown("A certificate pin requires HTTPS")))
             return
         }
-        // Anonymous/bearer over plain HTTP is allowed only for anonymous; a
-        // reusable secret (password/bearer) over cleartext is refused here to
-        // match the transport-layer CredentialPreflight (fail closed early).
-        if scheme != "https" {
-            switch auth {
-            case .anonymous: break
-            case .password, .bearer:
-                apply(.authenticationFailed(.unknown("A username, password, or token requires HTTPS")))
-                return
-            }
-        }
+        // Credentials over plain http are permitted for a LAN media share (the
+        // onboarding UI warns); only a TLS pin requires https. No cleartext
+        // rejection here.
 
         let path = components.percentEncodedPath
         let normalizedPath = path.isEmpty ? "/" : path

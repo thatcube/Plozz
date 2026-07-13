@@ -109,35 +109,21 @@ extension WebDAVCredential {
     }
 }
 
-/// Rejects any reusable credential against a cleartext origin **before** a
-/// request is ever built or sent.
-///
-/// Rule: anonymous access is fine over plain HTTP (there's nothing to steal),
-/// but a password or a static Bearer token must never be sent (or even
-/// prepared to be sent) over a non-HTTPS origin — including LAN/private
-/// endpoints, which are just as sniffable on a shared network as the public
-/// internet.
+/// Credential-vs-origin policy checked **before** a request is ever built.
+/// See ``CredentialPreflight/validate(credential:origin:)`` for the LAN policy
+/// (credentials are permitted over http; the UI warns; https is recommended).
 public enum CredentialPreflight {
-    /// Returns the rejection error if `credential` may not be used against
+    /// Returns a rejection error if `credential` may not be used against
     /// `origin`, or `nil` if it's permitted.
+    ///
+    /// Plozz is a home-LAN media client (its sibling SMB transport already
+    /// sends credentials over the unencrypted LAN), so credentials are
+    /// permitted over plain HTTP as well as HTTPS. The onboarding UI shows a
+    /// clear "sent unencrypted" warning for http origins so the choice is
+    /// informed, and HTTPS stays the recommended encrypted default. Kept as the
+    /// single policy seam so a future "require HTTPS" toggle is a one-spot change.
     public static func validate(credential: WebDAVCredential, origin: TransportOrigin) -> TransportError? {
-        switch credential {
-        case .anonymous:
-            return nil
-        case .password:
-            guard origin.isSecure else {
-                return .cleartextCredentialRejected(
-                    reason: "password credential requires HTTPS (origin \(origin.displayString) is not secure)"
-                )
-            }
-            return nil
-        case .bearerToken:
-            guard origin.isSecure else {
-                return .cleartextCredentialRejected(
-                    reason: "bearer token requires HTTPS (origin \(origin.displayString) is not secure)"
-                )
-            }
-            return nil
-        }
+        _ = (credential, origin)
+        return nil
     }
 }

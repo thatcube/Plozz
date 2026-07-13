@@ -205,8 +205,12 @@ final class TransportSessionDelegate: NSObject, URLSessionDataDelegate, @uncheck
         space: URLProtectionSpace,
         previousFailureCount: Int
     ) -> PasswordChallengeDecision {
-        guard challengeMatchesOrigin(space), origin.isSecure else {
-            return .reject(.invalidOrigin(reason: "authentication challenge did not match the secure session origin"))
+        // Same-origin is mandatory (never answer a credential to a different
+        // host, e.g. after a redirect). HTTPS is NOT required: Plozz permits
+        // credentials to a LAN media share over plain http (the onboarding UI
+        // warns); see CredentialPreflight.
+        guard challengeMatchesOrigin(space) else {
+            return .reject(.invalidOrigin(reason: "authentication challenge did not match the session origin"))
         }
         guard case .password(let username, let password, let policy) = credential else {
             return .performDefaultHandling

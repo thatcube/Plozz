@@ -13,25 +13,21 @@ final class CredentialPreflightTests: XCTestCase {
         XCTAssertNil(CredentialPreflight.validate(credential: .anonymous, origin: httpsOrigin))
     }
 
-    func testPasswordRejectedOverCleartextHTTP_automaticPolicy() {
+    func testPasswordAllowedOverHTTP_automaticPolicy() {
+        // Plozz permits credentials over plain HTTP for a LAN media share (the
+        // onboarding UI warns); HTTPS stays the recommended default.
         let credential = WebDAVCredential.password(username: "u", password: "p", policy: .automatic)
-        guard case .cleartextCredentialRejected = CredentialPreflight.validate(credential: credential, origin: httpOrigin) else {
-            return XCTFail("expected cleartextCredentialRejected for password over HTTP")
-        }
+        XCTAssertNil(CredentialPreflight.validate(credential: credential, origin: httpOrigin))
     }
 
-    func testPasswordRejectedOverCleartextHTTP_digestOnlyPolicy() {
+    func testPasswordAllowedOverHTTP_digestOnlyPolicy() {
         let credential = WebDAVCredential.password(username: "u", password: "p", policy: .digestOnly)
-        guard case .cleartextCredentialRejected = CredentialPreflight.validate(credential: credential, origin: httpOrigin) else {
-            return XCTFail("expected cleartextCredentialRejected for Digest-only password over HTTP")
-        }
+        XCTAssertNil(CredentialPreflight.validate(credential: credential, origin: httpOrigin))
     }
 
-    func testPasswordRejectedOverCleartextHTTP_basicAllowedPolicy() {
+    func testPasswordAllowedOverHTTP_basicAllowedPolicy() {
         let credential = WebDAVCredential.password(username: "u", password: "p", policy: .basicAllowed)
-        guard case .cleartextCredentialRejected = CredentialPreflight.validate(credential: credential, origin: httpOrigin) else {
-            return XCTFail("expected cleartextCredentialRejected for Basic-allowed password over HTTP")
-        }
+        XCTAssertNil(CredentialPreflight.validate(credential: credential, origin: httpOrigin))
     }
 
     func testPasswordAllowedOverHTTPS() {
@@ -39,11 +35,9 @@ final class CredentialPreflightTests: XCTestCase {
         XCTAssertNil(CredentialPreflight.validate(credential: credential, origin: httpsOrigin))
     }
 
-    func testBearerTokenRejectedOverCleartextHTTP() {
+    func testBearerTokenAllowedOverHTTP() {
         let credential = WebDAVCredential.bearerToken("secret-bearer-token")
-        guard case .cleartextCredentialRejected = CredentialPreflight.validate(credential: credential, origin: httpOrigin) else {
-            return XCTFail("expected cleartextCredentialRejected for Bearer over HTTP")
-        }
+        XCTAssertNil(CredentialPreflight.validate(credential: credential, origin: httpOrigin))
     }
 
     func testBearerTokenAllowedOverHTTPS() {

@@ -106,7 +106,9 @@ final class WebDAVShareOnboardingTests: XCTestCase {
 
     // MARK: - Fail-closed guards
 
-    func testPasswordOverPlainHTTPIsRejected() throws {
+    func testPasswordOverPlainHTTPIsAllowed() throws {
+        // Credentials over http are now permitted for a LAN media share (the UI
+        // warns); only a TLS pin still requires https.
         let harness = try makeState()
         harness.state.didConfigureWebDAVShare(
             baseURL: URL(string: "http://nas.example.com/dav")!,
@@ -114,9 +116,9 @@ final class WebDAVShareOnboardingTests: XCTestCase {
             trustPin: nil,
             displayName: "DAV"
         )
-        XCTAssertTrue(
-            harness.state.accounts.filter { $0.server.provider == .mediaShare }.isEmpty,
-            "a reusable credential over cleartext HTTP must be refused"
+        XCTAssertEqual(
+            harness.state.accounts.filter { $0.server.provider == .mediaShare }.count, 1,
+            "a credential over http is permitted (LAN media policy)"
         )
     }
 

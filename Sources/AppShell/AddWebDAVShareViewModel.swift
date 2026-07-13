@@ -92,6 +92,15 @@ final class AddWebDAVShareViewModel {
         }
     }
 
+    /// Non-nil only when the entered address is plain `http://` AND a credential
+    /// (not anonymous) is selected — so the user is told their credential will
+    /// be sent unencrypted. Never shown for `https://`.
+    var insecureHTTPWarning: String? {
+        guard !isAnonymous, let (_, origin) = parseAddress(), !origin.isSecure else { return nil }
+        return "This uses http://, so your username, password, or token is sent unencrypted. "
+            + "On a trusted home network that’s usually fine; use https:// to encrypt it."
+    }
+
     /// Parsed base URL + normalized origin, or nil if the address is invalid.
     /// Rejects userinfo/query/fragment up front (defense-in-depth; AppState
     /// re-checks at persistence).
@@ -168,11 +177,8 @@ final class AddWebDAVShareViewModel {
             errorMessage = Self.message(for: .invalidURL)
             return
         }
-        // A reusable credential requires HTTPS — fail closed before any request.
-        if !attempt.origin.isSecure, !isAnonymous {
-            errorMessage = Self.message(for: .notSecure)
-            return
-        }
+        // Credentials over plain http are allowed (LAN media share); the view
+        // shows `insecureHTTPWarning` so the user knows they're unencrypted.
         self.attempt = attempt
         generation += 1
         let gen = generation

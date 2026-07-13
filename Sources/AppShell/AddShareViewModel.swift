@@ -61,9 +61,22 @@ final class AddShareViewModel {
     /// Manual share-name fallback when enumeration fails or returns nothing.
     var manualShare = ""
 
+    /// Set when the typed manual address auto-detects as WebDAV instead of SMB.
+    /// The hosting coordinator observes this and switches to the WebDAV flow.
+    private(set) var detectedWebDAV: DetectedWebDAVRoute?
+    /// True while the manual address is being auto-detected (SMB vs WebDAV).
+    private(set) var detecting = false
+
+    struct DetectedWebDAVRoute: Equatable {
+        let url: URL
+        let insecureHTTP: Bool
+    }
+
     private let discovery = SMBServiceDiscovery()
+    private let routeDetector = MediaShareRouteDetector()
     private var scanTask: Task<Void, Never>?
     private var shareTask: Task<Void, Never>?
+    private var detectTask: Task<Void, Never>?
 
     var canConnectManualHost: Bool {
         !manualHost.trimmingCharacters(in: .whitespaces).isEmpty
@@ -111,12 +124,41 @@ final class AddShareViewModel {
     }
 
     func connectManualHost() {
-        let (parsedHost, parsedPort) = Self.parseHost(manualHost, portText: manualPortText)
-        guard !parsedHost.isEmpty else { return }
-        host = parsedHost
-        port = parsedPort
-        serverLabel = parsedHost
-        enterShareStep()
+        detectTask?.cancel()
+        detectedWebDAV = nil
+        let raw = manualHost.trimmingCharacters(in: .whitespaces)
+        guard !raw.isEmpty else { return }
+        // If the user typed an explicit port in the separate Port field, fold it
+        // into the address so the detector sees it.
+        let addressForDetection: String
+        if let explicitPort = Int(manualPortText.trimmingCharacters(in: .whitespaces)),
+           !raw.contains("/"), raw.filter({ $0 == ":" }).count == 0 {
+            addressForDetection = "\(raw):\(explicitPort)"
+        } else {
+            addressForDetection = raw
+        }
+
+        detecting = true
+        detectTask = Task { [routeDetector] in
+            let result = await routeDetector.detect(address: addressForDetection)
+            if Task.isCancelled { return }
+            self.detecting = false
+            switch result {
+            case .success(.webDAV(let url, let insecureHTTP)):
+                // Hand off to the WebDAV flow.
+                self.detectedWebDAV = DetectedWebDAVRoute(url: url, insecureHTTP: insecureHTTP)
+            case .success(.smb(let host, let port)):
+                self.host = host
+                self.port = port
+                self.serverLabel = host
+                self.enterShareStep()
+            case .failure:
+                // A host+path that answered nowhere: surface as unreachable so
+                // the user can correct the address.
+                self.shareLoad = .unreachable
+                self.step = .chooseShare
+            }
+        }
     }
 
     func backToServers() {

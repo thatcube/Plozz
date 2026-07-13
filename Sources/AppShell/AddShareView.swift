@@ -25,6 +25,9 @@ struct AddShareView: View {
     let isPageReady: Bool
     let onBack: () -> Void
     let onConfigured: (ShareDraft) -> Void
+    /// Called when the typed manual address auto-detects as WebDAV, so the host
+    /// can switch to the WebDAV flow (pre-seeded with the resolved URL).
+    var onWebDAVDetected: (URL) -> Void = { _ in }
 
     @State private var viewModel = AddShareViewModel()
     @State private var displayName = ""
@@ -71,6 +74,9 @@ struct AddShareView: View {
             if isPageReady { viewModel.startScan() }
         }
         .onChange(of: viewModel.step) { _, _ in focusedField = .back }
+        .onChange(of: viewModel.detectedWebDAV) { _, detected in
+            if let detected { onWebDAVDetected(detected.url) }
+        }
         .onChange(of: isPageReady) { _, ready in
             if ready {
                 viewModel.startScan()
@@ -89,7 +95,7 @@ struct AddShareView: View {
         Group {
             headerRow(
                 title: "Add a Media Share",
-                subtitle: "Pick an SMB server on your network, or enter its address.",
+                subtitle: "Pick a server found on your network, or enter its address.",
                 back: onBack,
                 trailing: {
                     Button { viewModel.startScan() } label: {
@@ -128,7 +134,7 @@ struct AddShareView: View {
 
             SharePanel(
                 title: "Enter address",
-                footer: "Enter the server's IP or hostname, e.g. 192.168.1.10 or mynas.local"
+                footer: "Enter your server’s address — an IP or name like 192.168.1.10 or mynas.local, or a full web address for a WebDAV server like nas.local/dav. Plozz detects the rest."
             ) {
                 VStack(alignment: .leading, spacing: 18) {
                     TextField("Server address", text: $viewModel.manualHost)
@@ -137,13 +143,17 @@ struct AddShareView: View {
                         .submitLabel(.next)
                         .focused($focusedField, equals: .host)
                         .onSubmit { focusedField = .port }
-                    TextField("Port (optional, default 445)", text: $viewModel.manualPortText)
+                    TextField("Port (optional)", text: $viewModel.manualPortText)
                         .submitLabel(.go)
                         .focused($focusedField, equals: .port)
                         .onSubmit { viewModel.connectManualHost() }
-                    Button("Connect") { viewModel.connectManualHost() }
-                        .disabled(!viewModel.canConnectManualHost)
-                        .focused($focusedField, equals: .connect)
+                    Button {
+                        viewModel.connectManualHost()
+                    } label: {
+                        if viewModel.detecting { ProgressView() } else { Text("Connect") }
+                    }
+                    .disabled(!viewModel.canConnectManualHost || viewModel.detecting)
+                    .focused($focusedField, equals: .connect)
                 }
             }
         }

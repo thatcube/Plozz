@@ -937,6 +937,21 @@ actor ShareCatalogStore {
         return current
     }
 
+    /// Non-canonical "variant" words that must never be introduced by a display-title
+    /// upgrade: a base show ("Sword Art Online") must not become a parody/recap
+    /// ("Sword Art Online: Abridged") even if a bad match slips through.
+    private static let variantWords: Set<String> = [
+        "abridged", "recap", "parody", "condensed", "compilation", "fandub", "gagdub", "reaction",
+    ]
+
+    /// Whether `extended` (a normalized word-prefix-extension of `base`) adds a
+    /// variant word not present in `base`.
+    static func addsVariantWord(base: String, extended: String) -> Bool {
+        let baseTokens = Set(base.split(separator: " ").map(String.init))
+        let addedTokens = Set(extended.split(separator: " ").map(String.init)).subtracting(baseTokens)
+        return !addedTokens.isDisjoint(with: variantWords)
+    }
+
     /// Whether two series titles are near-identical enough to be a typo/plural of
     /// one show (Levenshtein ≤ 2 on the normalized forms, no DIGIT difference, and
     /// long enough that a couple of edits isn't most of the title). Combined with a
@@ -1070,12 +1085,16 @@ actor ShareCatalogStore {
         // word-prefix of resolved), or a NEAR-IDENTICAL typo/plural of the current
         // ("Peaky Blinder" → "Peaky Blinders") — so a generic or misspelled folder
         // shows the real name, but a spinoff that wrongly matched its parent is never
-        // renamed DOWN. Applied at READ time so it's durable across re-scans.
+        // renamed DOWN. A more-specific upgrade must NOT add a non-canonical variant
+        // word (abridged/recap/…): "Sword Art Online" must never become "Sword Art
+        // Online: Abridged" even if a bad match slips through. Applied at READ time
+        // so it's durable across re-scans.
         if item.kind == .series || item.kind == .movie,
            let resolved = rec.title, !resolved.isEmpty, resolved != copy.title {
             let a = MediaItemIdentity.normalizedTitle(copy.title)
             let b = MediaItemIdentity.normalizedTitle(resolved)
-            if b == a || b.hasPrefix(a + " ") || Self.titlesNearlyIdentical(copy.title, resolved) {
+            let moreSpecific = b.hasPrefix(a + " ") && !Self.addsVariantWord(base: a, extended: b)
+            if b == a || moreSpecific || Self.titlesNearlyIdentical(copy.title, resolved) {
                 copy.title = resolved
             }
         }

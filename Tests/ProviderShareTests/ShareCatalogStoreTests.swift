@@ -344,4 +344,11 @@ final class ShareCatalogStoreTests: XCTestCase {
         // A cycle terminates (rather than looping forever) at a cycle member.
         XCTAssertTrue(["a", "b"].contains(ShareCatalogStore.resolveAlias("a", in: ["a": "b", "b": "a"])))
     }
+
+    func testAddsVariantWordBlocksParodyUpgrade() {
+        // "sword art online" must never upgrade to "sword art online abridged".
+        XCTAssertTrue(ShareCatalogStore.addsVariantWord(base: "sword art online", extended: "sword art online abridged"))
+        // A genuine subtitle extension is allowed ("avatar" → "avatar the last airbender").
+        XCTAssertFalse(ShareCatalogStore.addsVariantWord(base: "avatar", extended: "avatar the last airbender"))
+    }
 }

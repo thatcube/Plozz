@@ -56,4 +56,27 @@ final class TVDBTitleMatchTests: XCTestCase {
         )
         XCTAssertEqual(TVDBClient.normalizedTitleKey("Ávatar—2024"), "avatar 2024")
     }
+
+    // MARK: - Non-canonical variant rejection
+
+    func testAddsUnrequestedVariantRejectsAbridged() {
+        // A plain "Sword Art Online" folder must not match the "Abridged" parody.
+        XCTAssertTrue(TVDBClient.addsUnrequestedVariant(name: "Sword Art Online: Abridged", query: "Sword Art Online"))
+        XCTAssertTrue(TVDBClient.addsUnrequestedVariant(name: "Naruto Recap", query: "Naruto"))
+        // The real show is never rejected.
+        XCTAssertFalse(TVDBClient.addsUnrequestedVariant(name: "Sword Art Online", query: "Sword Art Online"))
+        // If the query itself asks for the variant, it's allowed.
+        XCTAssertFalse(TVDBClient.addsUnrequestedVariant(name: "Sword Art Online Abridged", query: "Sword Art Online Abridged"))
+        XCTAssertFalse(TVDBClient.addsUnrequestedVariant(name: nil, query: "Whatever"))
+    }
+
+    // MARK: - Non-Latin detection (drives the English-translation overlay)
+
+    func testIsNonLatinText() {
+        XCTAssertTrue(TVDBClient.isNonLatinText("「そのノートに名前を書かれた人間は死ぬ」"))   // Japanese
+        XCTAssertTrue(TVDBClient.isNonLatinText("Сериал"))                                    // Cyrillic
+        XCTAssertFalse(TVDBClient.isNonLatinText("A high-school student finds a notebook."))   // English
+        XCTAssertFalse(TVDBClient.isNonLatinText(nil))
+        XCTAssertFalse(TVDBClient.isNonLatinText(""))
+    }
 }

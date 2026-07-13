@@ -239,29 +239,94 @@ public actor TVDBClient {
         let results = response.data ?? []
         guard !results.isEmpty else { return nil }
 
+        // Drop non-canonical variants the query didn't ask for (a folder named
+        // "Sword Art Online" must never resolve to "Sword Art Online: Abridged", the
+        // parody). If every result is such a variant, the query genuinely wants one,
+        // so keep them.
+        let filtered = results.filter { !Self.addsUnrequestedVariant(name: $0.name, query: query) }
+        let pool = filtered.isEmpty ? results : filtered
+
+        var chosen: SearchResult?
         // An exact year match is the strongest disambiguator when a year is known.
-        if let year, let exact = results.first(where: { Int($0.year ?? "") == year }) {
-            return exact.asMetadata()
+        if let year, let exact = pool.first(where: { Int($0.year ?? "") == year }) {
+            chosen = exact
         }
         // Otherwise, when there's a same-name collision (>1 result) and we have
         // on-disk episode titles, pick the candidate whose episodes match ours —
         // robust even when only one season was downloaded (season count alone
         // can't tell a 1-season namesake from S1 of a long-running show).
-        if !isMovie, results.count > 1, !episodeHints.isEmpty,
-           let matched = await disambiguateByEpisodes(results, hints: episodeHints, token: token) {
-            return matched.asMetadata()
+        if chosen == nil, !isMovie, pool.count > 1, !episodeHints.isEmpty,
+           let matched = await disambiguateByEpisodes(pool, hints: episodeHints, token: token) {
+            chosen = matched
         }
         // Prefer a result whose name EXACTLY matches the query over TheTVDB's raw
         // relevance order. Without this, a spinoff query ("The Witcher: Blood
         // Origin") whose year is unknown falls back to relevance and picks the more
         // popular PARENT ("The Witcher"), inheriting its id/art. An exact
         // (normalized) title hit is a far stronger signal than relevance rank.
-        let q = Self.normalizedTitleKey(query)
-        if !q.isEmpty, let exactTitle = results.first(where: { Self.normalizedTitleKey($0.name ?? "") == q }) {
-            return exactTitle.asMetadata()
+        if chosen == nil {
+            let q = Self.normalizedTitleKey(query)
+            if !q.isEmpty { chosen = pool.first(where: { Self.normalizedTitleKey($0.name ?? "") == q }) }
         }
         // Fallback: TheTVDB's own relevance order.
-        return results.first?.asMetadata()
+        if chosen == nil { chosen = pool.first }
+        guard let chosen else { return nil }
+        // Prefer the English name/overview when the base record is another language
+        // (TheTVDB serves the primary-language text for many anime — Japanese for
+        // Death Note / One Piece / "…Slime").
+        return await preferEnglish(chosen.asMetadata(), isMovie: isMovie, token: token)
+    }
+
+    /// Non-canonical "variant" markers — a result adding one of these words the
+    /// query didn't contain is a parody/recap/compilation, not the real show.
+    private static let variantTokens: Set<String> = [
+        "abridged", "recap", "parody", "condensed", "compilation", "fandub", "gagdub", "reaction",
+    ]
+
+    /// Whether `name` adds a variant marker word (abridged/recap/…) that `query`
+    /// didn't ask for — the mark of a parody/recap entry that must not match a plain
+    /// show folder.
+    static func addsUnrequestedVariant(name: String?, query: String) -> Bool {
+        guard let name else { return false }
+        let nameTokens = Set(normalizedTitleKey(name).split(separator: " ").map(String.init))
+        let queryTokens = Set(normalizedTitleKey(query).split(separator: " ").map(String.init))
+        return !nameTokens.subtracting(queryTokens).isDisjoint(with: variantTokens)
+    }
+
+    /// Overlay the official English name/overview onto a metadata whose base text is
+    /// another language. Only fetches the `/translations/eng` record when the base
+    /// name or overview actually contains non-Latin script, so English shows cost no
+    /// extra request.
+    private func preferEnglish(_ meta: TVDBMetadata, isMovie: Bool, token: String) async -> TVDBMetadata {
+        guard let id = meta.tvdbID, !id.isEmpty else { return meta }
+        let overviewNeedsEnglish = Self.isNonLatinText(meta.overview)
+        let titleNeedsEnglish = Self.isNonLatinText(meta.title)
+        guard overviewNeedsEnglish || titleNeedsEnglish else { return meta }
+        let type = isMovie ? "movies" : "series"
+        guard let t = await translation(type: type, id: id, language: "eng", token: token) else { return meta }
+        var m = meta
+        if overviewNeedsEnglish, let o = t.overview?.nonEmpty { m.overview = o }
+        if titleNeedsEnglish, let n = t.name?.nonEmpty { m.title = n }
+        return m
+    }
+
+    /// Whether `s` contains characters from a non-Latin script (CJK, kana, hangul,
+    /// Cyrillic, Hebrew, Arabic) — the signal that TheTVDB served primary-language
+    /// (e.g. Japanese) text we should replace with the English translation.
+    static func isNonLatinText(_ s: String?) -> Bool {
+        guard let s, !s.isEmpty else { return false }
+        for scalar in s.unicodeScalars {
+            let v = scalar.value
+            if (0x3040...0x30FF).contains(v)      // hiragana / katakana
+                || (0x4E00...0x9FFF).contains(v)  // CJK unified
+                || (0x3400...0x4DBF).contains(v)  // CJK ext A
+                || (0xAC00...0xD7AF).contains(v)  // hangul
+                || (0x0400...0x04FF).contains(v)  // cyrillic
+                || (0x0590...0x05FF).contains(v)  // hebrew
+                || (0x0600...0x06FF).contains(v)  // arabic
+            { return true }
+        }
+        return false
     }
 
     /// Lowercased, punctuation-folded, whitespace-collapsed title key for an

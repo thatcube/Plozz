@@ -32,7 +32,11 @@ actor ShareEnricher {
     /// v8: id-corroborated series reconciliation — fold a typo'd folder ("Peaky
     /// Blinder") into its twin ("Peaky Blinders") when both resolve to the same
     /// strong external id. Re-enrich so the merge runs on existing catalogs.
-    static let version = 8
+    /// v9: reject non-canonical variant matches (a "Sword Art Online" folder no
+    /// longer resolves to the "Abridged" parody) and prefer the English name/overview
+    /// on the title-search path too (fixes Japanese descriptions for Death Note,
+    /// "…Slime", etc.). Re-enrich to correct them.
+    static let version = 9
 
     private let store: ShareCatalogStore
     private let resolver: ShareMetadataResolving

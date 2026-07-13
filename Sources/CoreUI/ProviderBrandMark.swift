@@ -137,7 +137,7 @@ public struct ProviderBrandMark: View {
             .lineLimit(1)
             .minimumScaleFactor(0.3)
             .multilineTextAlignment(.center)
-            .frame(width: size * 0.82)
+            .frame(width: size * 0.7)
     }
 
     /// Brand accent color used to tint each provider's logo + chip.

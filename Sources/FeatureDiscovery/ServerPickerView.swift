@@ -220,7 +220,11 @@ public struct ServerPickerView: View {
             // Logo top-aligned with the server name so it lines up with the
             // first line when a name/address wraps to two lines.
             HStack(alignment: .top, spacing: 20) {
-                ProviderBrandMark(provider: server.provider, size: 44)
+                ProviderBrandMark(
+                    provider: server.provider,
+                    size: 44,
+                    mediaShareTransport: MediaShareTransportKind(mediaShareScheme: server.baseURL.scheme)
+                )
                 VStack(alignment: .leading, spacing: 6) {
                     Text(server.name).font(.headline)
                     if let host = server.baseURL.host {

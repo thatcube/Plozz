@@ -15,13 +15,20 @@ public struct ProviderBrandMark: View {
     private let provider: ProviderKind
     private let size: CGFloat
     private let showsBackground: Bool
+    private let mediaShareTransport: MediaShareTransportKind?
     @Environment(\.settingsRowIsFocused) private var rowFocused
     @Environment(\.colorScheme) private var colorScheme
 
-    public init(provider: ProviderKind, size: CGFloat = 14, showsBackground: Bool = true) {
+    public init(
+        provider: ProviderKind,
+        size: CGFloat = 14,
+        showsBackground: Bool = true,
+        mediaShareTransport: MediaShareTransportKind? = nil
+    ) {
         self.provider = provider
         self.size = size
         self.showsBackground = showsBackground
+        self.mediaShareTransport = mediaShareTransport
     }
 
     private var tint: Color {
@@ -50,17 +57,21 @@ public struct ProviderBrandMark: View {
         provider == .mediaShare ? "externaldrive.connected.to.line.below.fill" : nil
     }
 
+    /// The transport badge string (SMB / WebDAV / …), only for a media share that
+    /// was given a transport. All file shares share ONE drive glyph and are told
+    /// apart by this knockout label; dedicated media servers never show one.
+    private var badgeLabel: String? {
+        guard provider == .mediaShare else { return nil }
+        return mediaShareTransport?.badgeLabel
+    }
+
     public var body: some View {
         ZStack {
             if showsBackground {
                 Circle().fill(tint.opacity(0.18))
             }
             if let systemSymbolName {
-                Image(systemName: systemSymbolName)
-                    .resizable()
-                    .scaledToFit()
-                    .padding(size * (showsBackground ? 0.28 : 0.18))
-                    .foregroundStyle(tint)
+                glyph(systemSymbolName)
             } else {
                 Image(assetName)
                     .renderingMode(.template)
@@ -71,6 +82,70 @@ public struct ProviderBrandMark: View {
             }
         }
         .frame(width: size, height: size)
+    }
+
+    /// The drive glyph, with the transport label knocked OUT of it (a text-shaped
+    /// gap punched through the glyph) and then redrawn in the glyph's own color,
+    /// centered. Same color as the icon, no background/outline, fits the icon
+    /// width, and works for any transport label. Falls back to the plain glyph
+    /// when there's no badge.
+    @ViewBuilder
+    private func glyph(_ symbol: String) -> some View {
+        let base = Image(systemName: symbol)
+            .resizable()
+            .scaledToFit()
+            .padding(size * (showsBackground ? 0.28 : 0.18))
+            .foregroundStyle(tint)
+
+        if let badgeLabel {
+            ZStack {
+                base
+                    // Punch a text-shaped gap (slightly dilated for a hairline of
+                    // negative space) out of the glyph so the same-color label
+                    // reads against it.
+                    .overlay { badgeText(badgeLabel, dilated: true).blendMode(.destinationOut) }
+                    .compositingGroup()
+                // Redraw the crisp label in the glyph color, sitting in the gap.
+                badgeText(badgeLabel, dilated: false)
+                    .foregroundStyle(tint)
+            }
+        } else {
+            base
+        }
+    }
+
+    /// The badge text laid out identically whether used as the knockout mask
+    /// (`dilated`, an 8-way offset silhouette that widens the erased gap) or the
+    /// crisp foreground. Centered and constrained to the icon width so any label
+    /// length fits.
+    @ViewBuilder
+    private func badgeText(_ label: String, dilated: Bool) -> some View {
+        let font = Font.system(size: size * 0.30, weight: .black, design: .rounded)
+        let content = Text(label)
+            .font(font)
+            .lineLimit(1)
+            .minimumScaleFactor(0.2)
+            .multilineTextAlignment(.center)
+            .frame(width: size * 0.9)
+
+        if dilated {
+            let d = max(1, size * 0.05)
+            let offsets: [CGSize] = [
+                CGSize(width: -d, height: 0), CGSize(width: d, height: 0),
+                CGSize(width: 0, height: -d), CGSize(width: 0, height: d),
+                CGSize(width: -d, height: -d), CGSize(width: d, height: d),
+                CGSize(width: -d, height: d), CGSize(width: d, height: -d),
+            ]
+            ZStack {
+                ForEach(0..<offsets.count, id: \.self) { i in
+                    content.offset(offsets[i])
+                }
+                content
+            }
+            .foregroundStyle(.black) // coverage only — color is irrelevant for destinationOut
+        } else {
+            content
+        }
     }
 
     /// Brand accent color used to tint each provider's logo + chip.

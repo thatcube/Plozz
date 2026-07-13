@@ -706,7 +706,7 @@ public struct SettingsView: View {
                             .settingsRowSecondary()
                     }
                     HStack(spacing: 6) {
-                        ProviderIcon(provider: group.providerKind, size: 24)
+                        ProviderIcon(provider: group.providerKind, size: 24, mediaShareTransport: group.transportKind)
                         Text(group.serverName)
                             .font(.footnote.weight(.medium))
                             .settingsRowSecondary()

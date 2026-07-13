@@ -30,6 +30,7 @@ struct SelectLibrariesView: View {
         let id: String
         let serverName: String
         let providerKind: ProviderKind
+        let transportKind: MediaShareTransportKind?
         let libraries: [AggregatedLibrary]
     }
 
@@ -46,6 +47,7 @@ struct SelectLibrariesView: View {
                 id: accountID,
                 serverName: first.serverName,
                 providerKind: first.providerKind,
+                transportKind: first.transportKind,
                 libraries: libs
             )
         }
@@ -122,7 +124,7 @@ struct SelectLibrariesView: View {
                         ForEach(groups(from: all)) { group in
                             VStack(alignment: .leading, spacing: 10) {
                                 HStack(spacing: 16) {
-                                    ProviderBrandMark(provider: group.providerKind, size: 48)
+                                    ProviderBrandMark(provider: group.providerKind, size: 48, mediaShareTransport: group.transportKind)
                                         .frame(width: 48)
                                     Text(group.serverName)
                                         .font(.headline.weight(.semibold))

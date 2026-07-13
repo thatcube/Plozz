@@ -139,7 +139,8 @@ struct CustomizeHomeDetailView: View {
                         HomeRowsGroupCard(
                             title: library.library.title,
                             subtitle: library.serverName,
-                            providerKind: library.providerKind
+                            providerKind: library.providerKind,
+                            transportKind: library.transportKind
                         ) {
                             SettingsCheckList(
                                 options: rowKinds(for: library).map { LibraryRowOption(libraryKey: library.key, kind: $0) },
@@ -365,6 +366,8 @@ private struct HomeRowsGroupCard<Content: View>: View {
     var subtitle: String? = nil
     /// When set, the header shows this provider's brand logo (library cards).
     var providerKind: ProviderKind? = nil
+    /// For a media-share library, the transport shown as a badge on its drive icon.
+    var transportKind: MediaShareTransportKind? = nil
     /// Fallback header glyph when there's no provider logo (the Shared / empty cards).
     var systemIcon: String? = nil
     @ViewBuilder var content: () -> Content
@@ -374,7 +377,7 @@ private struct HomeRowsGroupCard<Content: View>: View {
             HStack(spacing: 16) {
                 Group {
                     if let providerKind {
-                        ProviderBrandMark(provider: providerKind, size: 56, showsBackground: false)
+                        ProviderBrandMark(provider: providerKind, size: 56, showsBackground: false, mediaShareTransport: transportKind)
                     } else if let systemIcon {
                         Image(systemName: systemIcon)
                             .font(.system(size: 34, weight: .semibold))

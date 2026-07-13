@@ -229,60 +229,17 @@ struct ProviderBadge: View {
 struct ProviderIcon: View {
     let provider: ProviderKind
     var size: CGFloat = 14
+    var mediaShareTransport: MediaShareTransportKind? = nil
 
     var body: some View {
         // Delegates to the shared CoreUI mark so provider logos, brand tints,
-        // and focus behavior have one implementation across the app.
-        ProviderBrandMark(provider: provider, size: size)
+        // the media-share drive glyph, and its transport badge have one
+        // implementation across the app.
+        ProviderBrandMark(provider: provider, size: size, mediaShareTransport: mediaShareTransport)
     }
 
     static func tint(_ provider: ProviderKind) -> Color {
         ProviderBrandMark.brandTint(provider)
-    }
-}
-
-/// A server's list icon: the provider mark, plus — for a file share — a small
-/// transport badge (SMB / WebDAV / NFS / …) pinned to the icon's bottom-right.
-/// All file shares keep the same drive glyph and are told apart by the badge;
-/// dedicated media servers show their branded logo with no badge. Scales to any
-/// future transport for free (the label comes from `MediaShareTransportKind`).
-struct ServerRowIcon: View {
-    let providerKind: ProviderKind
-    var transportKind: MediaShareTransportKind? = nil
-    var size: CGFloat = 48
-
-    var body: some View {
-        ProviderIcon(provider: providerKind, size: size)
-            .overlay(alignment: .bottomTrailing) {
-                if let transportKind {
-                    TransportBadge(label: transportKind.badgeLabel)
-                        // Nudge past the corner so it reads as an applied badge
-                        // rather than part of the glyph.
-                        .offset(x: size * 0.10, y: size * 0.12)
-                }
-            }
-    }
-}
-
-/// The small rounded transport label overlaid on a share's drive icon. A
-/// translucent hairline border + dark fill keeps the text legible on any brand
-/// tint while reading as a distinct chip floating over the icon.
-private struct TransportBadge: View {
-    let label: String
-
-    var body: some View {
-        Text(label)
-            .font(.system(size: 12, weight: .heavy))
-            .foregroundStyle(.white)
-            .lineLimit(1)
-            .fixedSize()
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(Capsule(style: .continuous).fill(Color.black.opacity(0.78)))
-            .overlay(
-                Capsule(style: .continuous)
-                    .strokeBorder(Color.white.opacity(0.55), lineWidth: 1)
-            )
     }
 }
 

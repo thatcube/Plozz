@@ -14,6 +14,10 @@ public struct AggregatedLibrary: Codable, Hashable, Identifiable, Sendable {
     public var serverName: String
     /// The backend the library came from.
     public var providerKind: ProviderKind
+    /// For a media-share library, its file-share transport (SMB/WebDAV/…), so any
+    /// surface that renders the share's drive icon can show the transport badge.
+    /// `nil` for a dedicated media server (which shows its branded logo instead).
+    public var transportKind: MediaShareTransportKind?
     /// The underlying provider-agnostic library.
     public var library: MediaLibrary
 
@@ -22,12 +26,14 @@ public struct AggregatedLibrary: Codable, Hashable, Identifiable, Sendable {
         accountName: String,
         serverName: String,
         providerKind: ProviderKind,
+        transportKind: MediaShareTransportKind? = nil,
         library: MediaLibrary
     ) {
         self.accountID = accountID
         self.accountName = accountName
         self.serverName = serverName
         self.providerKind = providerKind
+        self.transportKind = transportKind
         self.library = library
     }
 

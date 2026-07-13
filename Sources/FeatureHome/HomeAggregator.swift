@@ -561,6 +561,7 @@ public struct HomeAggregator: Sendable {
             accountName: resolved.account.userName,
             serverName: resolved.account.server.name,
             providerKind: resolved.account.server.provider,
+            transportKind: MediaShareTransportKind(mediaShareScheme: resolved.account.server.baseURL.scheme),
             library: library.taggingSource(resolved.account.id)
         )
     }

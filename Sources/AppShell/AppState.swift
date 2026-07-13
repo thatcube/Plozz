@@ -1955,7 +1955,14 @@ public final class AppState {
     /// otherwise it enters the app directly.
     public func didAuthenticate(_ session: UserSession) {
         let isFirstRun = accounts.isEmpty && !profilesModel.firstRunProfileSetupComplete
-        let account = Account(from: session)
+        // Media shares are identified by their share path (host/port/share), not a
+        // random UUID, so re-adding the same share — e.g. to fix its password —
+        // updates the existing account in place (new credential revision, old one
+        // retired) instead of forking a duplicate account. Other providers keep a
+        // freshly-minted UUID identity.
+        let account = session.server.provider == .mediaShare
+            ? Account(id: session.server.id, from: session)
+            : Account(from: session)
         let previousAccount = accounts.first { $0.id == account.id }
         do {
             try accountStore.add(account, token: session.accessToken)
@@ -1963,8 +1970,13 @@ public final class AppState {
             apply(.authenticationFailed(.unknown("")))
             return
         }
+        // Tear down the OLD credential revision's transport sessions only when the
+        // store actually moved to a new revision (a real password change). An
+        // identical re-add is a no-op that keeps the existing revision, so read the
+        // persisted revision back rather than trusting the freshly-minted one.
         if let previousAccount,
-           previousAccount.credentialRevision != account.credentialRevision {
+           let persisted = accountStore.loadAccounts().first(where: { $0.id == account.id }),
+           previousAccount.credentialRevision != persisted.credentialRevision {
             retireNetworkFileRevision(for: previousAccount)
         }
         reloadAccounts()
@@ -2218,9 +2230,8 @@ public final class AppState {
         }
         let trimmedName = displayName.trimmingCharacters(in: .whitespaces)
         let name = trimmedName.isEmpty ? "\(host)/\(share)" : trimmedName
-        let portKey = port.map { ":\($0)" } ?? ""
         let server = MediaServer(
-            id: "share:\(host)\(portKey)/\(share)",
+            id: Self.mediaShareServerID(host: host, port: port, share: share),
             name: name,
             baseURL: baseURL,
             provider: .mediaShare
@@ -2237,6 +2248,21 @@ public final class AppState {
         )
         apply(.serverSelected(server))
         didAuthenticate(session)
+    }
+
+    /// The stable identity for a media share, used as BOTH the `MediaServer.id`
+    /// and (via `didAuthenticate`) the `Account.id`, so re-adding the same share
+    /// — e.g. to update its password — updates the existing account in place
+    /// instead of creating a duplicate.
+    ///
+    /// Host and share name are folded to lowercase because SMB treats both as
+    /// case-insensitive: `//NAS/Media` and `//nas/media` are the same share, and
+    /// `COPILOT2` vs `Copilot2` must not fork the account. The user's original
+    /// casing is preserved in the display name and the connection `baseURL`
+    /// (SMB ignores case on the wire), only the identity is normalized.
+    static func mediaShareServerID(host: String, port: Int?, share: String) -> String {
+        let portKey = port.map { ":\($0)" } ?? ""
+        return "share:\(host.lowercased())\(portKey)/\(share.lowercased())"
     }
 
     /// Begins adding another account from inside the signed-in app.

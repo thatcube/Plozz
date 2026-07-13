@@ -22,17 +22,31 @@ enum MediaShareTransportDispatch {
     /// share from its persisted `MediaServer`. The `transportIdentifier` is the
     /// URL scheme, which is exactly what the resolver registry routes on and
     /// what each adapter registers under.
+    ///
+    /// Path encoding is transport-specific: HTTP-family transports (WebDAV)
+    /// address resources by the **percent-encoded** URL path — using the
+    /// decoded `URL.path` would double-decode a folder whose name literally
+    /// contains a `%XX` sequence and would drop a trailing slash the WebDAV
+    /// module relies on. Filesystem transports (SMB) use **literal, decoded**
+    /// share/path names, so they keep `URL.path`.
     static func endpoint(for server: MediaServer) throws -> MediaTransportEndpointIdentity {
-        guard let scheme = server.baseURL.scheme?.lowercased(),
-              let host = server.baseURL.host, !host.isEmpty else {
+        guard let components = URLComponents(url: server.baseURL, resolvingAgainstBaseURL: false),
+              let scheme = components.scheme?.lowercased(),
+              let host = components.host, !host.isEmpty else {
             throw MediaTransportError.invalidInput(reason: "invalid media-share endpoint")
         }
-        let path = server.baseURL.path
+        let rawPath: String
+        switch scheme {
+        case "http", "https":
+            rawPath = components.percentEncodedPath
+        default:
+            rawPath = components.path
+        }
         return try MediaTransportEndpointIdentity(
             transportIdentifier: scheme,
             host: host,
-            port: server.baseURL.port,
-            rootPath: path.isEmpty ? "/" : path
+            port: components.port,
+            rootPath: rawPath.isEmpty ? "/" : rawPath
         )
     }
 }

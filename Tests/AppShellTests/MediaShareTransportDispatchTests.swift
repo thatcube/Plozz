@@ -41,8 +41,21 @@ final class MediaShareTransportDispatchTests: XCTestCase {
         XCTAssertEqual(endpoint.rootPath, "/dav")
     }
 
-    func testEndpointDefaultsEmptyPathToRoot() throws {
-        let endpoint = try MediaShareTransportDispatch.endpoint(for: server("https://nas.example.com"))
-        XCTAssertEqual(endpoint.rootPath, "/")
+    func testEndpointPreservesPercentEncodedWebDAVPath() throws {
+        // A folder literally named `a%20b` is stored URL-encoded as `a%2520b`.
+        // Using the decoded URL.path would double-decode it to `a b` and browse
+        // the wrong directory; the endpoint must carry the percent-encoded form.
+        let endpoint = try MediaShareTransportDispatch.endpoint(
+            for: server("https://nas.example.com/dav/a%2520b")
+        )
+        XCTAssertEqual(endpoint.rootPath, "/dav/a%2520b")
+    }
+
+    func testEndpointKeepsSMBPathDecodedLiteral() throws {
+        // SMB share names are literal; a space stays a space (not %20).
+        let endpoint = try MediaShareTransportDispatch.endpoint(
+            for: server("smb://nas.local/My%20Share")
+        )
+        XCTAssertEqual(endpoint.rootPath, "/My Share")
     }
 }

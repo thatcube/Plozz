@@ -2448,9 +2448,19 @@ public final class AppState {
         path: String,
         principal: String
     ) -> String {
-        let portKey = port.map { ":\($0)" } ?? ""
-        let normalizedPath = path.isEmpty ? "/" : path
-        return "share:\(scheme.lowercased())://\(host.lowercased())\(portKey)\(normalizedPath)#\(principal)"
+        let normalizedScheme = scheme.lowercased()
+        // Canonicalize the port: an explicit default port (443/https, 80/http)
+        // is the same origin as an implicit one, so drop it to dedup
+        // `https://h/dav` and `https://h:443/dav` to one account.
+        let defaultPort = normalizedScheme == "https" ? 443 : 80
+        let portKey = (port == nil || port == defaultPort) ? "" : ":\(port!)"
+        // Canonicalize a trailing slash (`/dav` == `/dav/`) so the same
+        // collection isn't added twice; the transport endpoint drops it too.
+        var normalizedPath = path.isEmpty ? "/" : path
+        if normalizedPath.count > 1, normalizedPath.hasSuffix("/") {
+            normalizedPath.removeLast()
+        }
+        return "share:\(normalizedScheme)://\(host.lowercased())\(portKey)\(normalizedPath)#\(principal)"
     }
 
     /// Adds (or updates in place) a WebDAV media share. Persists through the

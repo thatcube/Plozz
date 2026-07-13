@@ -32,6 +32,27 @@ final class WebDAVShareOnboardingTests: XCTestCase {
         XCTAssertNotEqual(https, lowerPath)
     }
 
+    func testWebDAVShareIDCanonicalizesDefaultPortAndTrailingSlash() {
+        // Explicit default port == implicit; trailing slash == no trailing slash.
+        let implicit = AppState.webDAVShareID(
+            scheme: "https", host: "nas.example.com", port: nil, path: "/dav", principal: "anon"
+        )
+        let explicit443 = AppState.webDAVShareID(
+            scheme: "https", host: "nas.example.com", port: 443, path: "/dav", principal: "anon"
+        )
+        let trailingSlash = AppState.webDAVShareID(
+            scheme: "https", host: "nas.example.com", port: nil, path: "/dav/", principal: "anon"
+        )
+        XCTAssertEqual(implicit, explicit443, "an explicit default port must dedup with the implicit one")
+        XCTAssertEqual(implicit, trailingSlash, "a trailing slash must not fork the account")
+
+        // A non-default port is still distinguished.
+        let explicit8443 = AppState.webDAVShareID(
+            scheme: "https", host: "nas.example.com", port: 8443, path: "/dav", principal: "anon"
+        )
+        XCTAssertNotEqual(implicit, explicit8443)
+    }
+
     // MARK: - Persistence through the envelope path
 
     func testConfiguringBearerWebDAVShareStoresEnvelopeAndDedupes() throws {

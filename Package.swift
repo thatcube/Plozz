@@ -429,6 +429,23 @@ let package = Package(
             swiftSettings: [.unsafeFlags(["-strict-concurrency=complete"])]
         ),
 
+        // MARK: FTP/FTPS transport
+        //
+        // A minimal FTP protocol engine over Network.framework (NWConnection),
+        // composed into the protocol-neutral MediaTransportCore adapter shape —
+        // mirroring MediaTransportSMB/WebDAV. Supports plain FTP + implicit FTPS
+        // (TLS from connect); explicit FTPS (AUTH TLS/StartTLS) is unavailable on
+        // tvOS (Network.framework has no StartTLS) and is rejected at connect.
+        // Random-access playback reads use REST (restart offset) + RETR.
+        .target(
+            name: "MediaTransportFTP",
+            dependencies: [
+                "CoreModels",
+                "MediaTransportCore",
+            ],
+            swiftSettings: [.unsafeFlags(["-strict-concurrency=complete"])]
+        ),
+
         // MARK: AetherEngine integration (native HLS-fMP4 remux engine)
         //
         // Wraps AetherEngine (the upstream media-player library) behind Plozz's
@@ -464,6 +481,7 @@ let package = Package(
                 "MediaTransportWebDAV",
                 "MediaTransportSFTP",
                 "MediaTransportNFS",
+                "MediaTransportFTP",
                 "MetadataKit",
                 "ProviderJellyfin",
                 "ProviderPlex",
@@ -622,6 +640,15 @@ let package = Package(
                 "MediaTransportCore",
                 "MediaTransportNFS",
                 "TransportNFS",
+            ],
+            swiftSettings: [.unsafeFlags(["-strict-concurrency=complete"])]
+        ),
+        .testTarget(
+            name: "MediaTransportFTPTests",
+            dependencies: [
+                "CoreModels",
+                "MediaTransportCore",
+                "MediaTransportFTP",
             ],
             swiftSettings: [.unsafeFlags(["-strict-concurrency=complete"])]
         ),

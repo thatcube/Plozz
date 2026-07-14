@@ -147,6 +147,7 @@ public struct MediaShareCredentialEnvelope: Equatable, Sendable {
         case (.smb, .anonymous), (.smb, .password),
              (.webDAV, .anonymous), (.webDAV, .password), (.webDAV, .bearer),
              (.sftp, .password), (.sftp, .generatedKey),
+             (.ftp, .anonymous), (.ftp, .password),
              (.nfs, .noCredentials):
             authenticationAllowed = true
         default:
@@ -175,7 +176,7 @@ public struct MediaShareCredentialEnvelope: Equatable, Sendable {
             break
         }
 
-        if trust.tlsLeafCertificateSHA256 != nil, transport != .webDAV {
+        if trust.tlsLeafCertificateSHA256 != nil, transport != .webDAV, transport != .ftp {
             throw MediaCredentialError.incompatibleTrust
         }
         if trust.sshHostKeySHA256 != nil, transport != .sftp {

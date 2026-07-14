@@ -152,10 +152,10 @@ final class AddShareViewModel {
                 self.port = port
                 self.serverLabel = host
                 self.enterShareStep()
-            case .success(.sftp), .success(.nfs):
-                // SFTP/NFS detection is proven here (the claimants route their
-                // schemes through the registry), but their credential-entry /
-                // host-key approval / export-path flows are owned by the unified
+            case .success(.sftp), .success(.nfs), .success(.ftp):
+                // SFTP/NFS/FTP detection is proven here (their claimants route
+                // their schemes through the registry), but their credential-entry
+                // / host-key approval / export-path flows are owned by the unified
                 // add-share ("Discovery UX") work, not this legacy per-transport
                 // screen. Surface as not-yet-reachable rather than pretending
                 // it's an SMB share.

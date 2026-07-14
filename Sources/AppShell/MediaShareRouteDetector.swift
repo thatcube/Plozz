@@ -26,6 +26,9 @@ enum MediaShareRoute: Equatable, Sendable {
     /// empty when only a bare host or `host:2049` was entered — onboarding then
     /// asks for the full export path (there is no NFS export browser yet).
     case nfs(host: String, port: Int?, exportPath: String)
+    /// A fully-resolved FTP base URL (`ftp://` plaintext or `ftps://` implicit
+    /// TLS). `insecure` is true for plaintext `ftp`.
+    case ftp(baseURL: URL, insecure: Bool)
 }
 
 enum MediaShareRouteError: Error, Equatable, Sendable {
@@ -111,11 +114,15 @@ struct MediaShareRouteDetector: Sendable {
         self.fallback = fallback
     }
 
-    /// Convenience for the shipping set (SMB + NFS + WebDAV), assuming SMB for a
-    /// bare NAS host that answers no HTTP. `probe` is injectable for tests.
+    /// Convenience for the shipping set (SMB + SFTP + NFS + WebDAV + FTP),
+    /// assuming SMB for a bare NAS host that answers no HTTP. `FTPClaimant` is
+    /// active so a typed `ftp://`/`ftps://` address (or port 21) is detected; the
+    /// resulting `.ftp` route is consumed by the unified add-share flow
+    /// (Discovery-UX), which owns FTP credential entry + the plaintext warning.
+    /// `probe` is injectable for tests.
     init(probe: any WebDAVReachabilityProbing = WebDAVReachabilityProbe()) {
         self.init(
-            claimants: [SMBClaimant(), SFTPClaimant(), NFSClaimant(), WebDAVClaimant(probe: probe)],
+            claimants: [SMBClaimant(), SFTPClaimant(), NFSClaimant(), WebDAVClaimant(probe: probe), FTPClaimant()],
             fallback: { .smb(host: $0.host, port: $0.port) }
         )
     }
@@ -284,6 +291,30 @@ struct WebDAVClaimant: TransportClaimant {
         }
         return nil
     }
+}
+
+/// FTP claims explicit `ftp://`/`ftps://`, and the well-known control port 21.
+/// It has NO network probe — an un-schemed address without port 21 is left to
+/// the other transports (WebDAV's HTTP probe / SMB's terminal fallback), so
+/// adding FTP never changes how a bare NAS host is detected.
+struct FTPClaimant: TransportClaimant {
+    var transportName: String { "FTP" }
+
+    func decisiveRoute(for address: ParsedShareAddress) -> MediaShareRoute? {
+        if let scheme = address.scheme, scheme == "ftp" || scheme == "ftps" {
+            // Honor exactly what the user typed.
+            guard let url = URL(string: address.raw) else { return nil }
+            return .ftp(baseURL: url, insecure: scheme == "ftp")
+        }
+        if address.scheme == nil, address.port == 21 {
+            let hostPort = authority(of: address)
+            guard let url = URL(string: "ftp://\(hostPort)\(address.path)") else { return nil }
+            return .ftp(baseURL: url, insecure: true)
+        }
+        return nil
+    }
+
+    func probe(_ address: ParsedShareAddress) async -> MediaShareRoute? { nil }
 }
 
 // MARK: - Real HTTP probe

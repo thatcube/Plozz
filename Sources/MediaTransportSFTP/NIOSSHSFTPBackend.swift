@@ -20,6 +20,7 @@ final class NIOSSHSFTPBackend: SFTPTransportBackend, @unchecked Sendable {
         let channel: Channel
         let sftpChannel: Channel
         let handler: SFTPClientHandler
+        let validator: SFTPHostKeyValidator
     }
 
     private let lock = NSLock()
@@ -28,7 +29,21 @@ final class NIOSSHSFTPBackend: SFTPTransportBackend, @unchecked Sendable {
     private var nextRequestID: UInt32 = 0
 
     private static let connectTimeout: TimeAmount = .seconds(20)
-    private static let operationTimeout: Duration = .seconds(30)
+    /// Bounds the whole post-TCP SSH negotiation (banner/kex/auth) + subsystem +
+    /// INIT/VERSION handshake, closing the connection if it stalls. TCP alone is
+    /// covered by `connectTimeout`; without this a server that completes TCP but
+    /// stalls the SSH handshake (or silently drops after auth) would hang connect.
+    private static let handshakeTimeout: TimeAmount = .seconds(20)
+    /// Per-request deadline enforced on the event loop (a stuck reply fails the
+    /// pending promise and tears the connection down — see `send`).
+    private static let operationTimeout: TimeAmount = .seconds(30)
+
+    var capturedHostKeyFingerprint: [UInt8]? {
+        lock.lock()
+        defer { lock.unlock() }
+        return connection?.validator.capturedFingerprint
+    }
+
 
     func connect(
         host: String,
@@ -46,6 +61,11 @@ final class NIOSSHSFTPBackend: SFTPTransportBackend, @unchecked Sendable {
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
         let authDelegate = SFTPUserAuthenticationDelegate(credential: credential)
         let serverAuthDelegate = SFTPHostKeyValidator(policy: hostKeyPolicy)
+        // Bounds the whole SSH+SFTP handshake by closing the connection if it
+        // stalls. Added to the PARENT pipeline so it can fire even while
+        // `createChannel` is still queued waiting for the SSH connection to
+        // activate. Cancelled once the handshake completes.
+        let deadlineHandler = SSHConnectDeadlineHandler(timeout: Self.handshakeTimeout)
 
         do {
             let bootstrap = ClientBootstrap(group: group)
@@ -62,7 +82,9 @@ final class NIOSSHSFTPBackend: SFTPTransportBackend, @unchecked Sendable {
                             allocator: channel.allocator,
                             inboundChildChannelInitializer: nil
                         )
-                        try channel.pipeline.syncOperations.addHandler(handler)
+                        let sync = channel.pipeline.syncOperations
+                        try sync.addHandler(handler)
+                        try sync.addHandler(deadlineHandler)
                     }
                 }
 
@@ -91,10 +113,11 @@ final class NIOSSHSFTPBackend: SFTPTransportBackend, @unchecked Sendable {
                     return promise.futureResult
                 }.get()
 
-            // Wait for the `sftp` subsystem request + INIT/VERSION handshake.
-            try await withThrowingTimeout(Self.operationTimeout) {
-                try await sftpHandler.readyFuture.get()
-            }
+            // Wait for the `sftp` subsystem request + INIT/VERSION handshake. The
+            // deadline handler bounds this (and everything before it); if it fires
+            // it closes the channel, which fails readyFuture.
+            try await sftpHandler.readyFuture.get()
+            deadlineHandler.cancel()
 
             lock.lock()
             if isClosed {
@@ -104,9 +127,16 @@ final class NIOSSHSFTPBackend: SFTPTransportBackend, @unchecked Sendable {
                 try? await group.shutdownGracefully()
                 throw MediaTransportError.cancelled
             }
-            connection = Connection(group: group, channel: channel, sftpChannel: sftpChannel, handler: sftpHandler)
+            connection = Connection(
+                group: group,
+                channel: channel,
+                sftpChannel: sftpChannel,
+                handler: sftpHandler,
+                validator: serverAuthDelegate
+            )
             lock.unlock()
         } catch {
+            deadlineHandler.cancel()
             try? await group.shutdownGracefully()
             throw mapSFTPError(error)
         }
@@ -233,6 +263,23 @@ final class NIOSSHSFTPBackend: SFTPTransportBackend, @unchecked Sendable {
         }
     }
 
+    func fstat(handle: SFTPFileHandle) async throws -> SFTPBackendEntry {
+        let rawHandle = ByteBuffer(bytes: handle.rawValue)
+        let body = try await request { id, allocator in
+            SFTP.encodeFStat(id: id, handle: rawHandle, allocator: allocator)
+        }
+        switch body {
+        case let .attrs(attributes):
+            // Name is irrelevant here — this is used only to revalidate size/kind/
+            // mtime of an already-open handle against the scanned representation.
+            return backendEntry(name: "", attributes: attributes)
+        case let .status(code, _):
+            throw SFTPStatusError(code: code)
+        default:
+            throw MediaTransportError.protocolViolation(reason: "unexpected SFTP FSTAT response")
+        }
+    }
+
     func read(handle: SFTPFileHandle, offset: Int64, length: Int) async throws -> Data {
         guard offset >= 0, length > 0 else {
             throw MediaTransportError.invalidInput(reason: "invalid SFTP read")
@@ -308,19 +355,27 @@ final class NIOSSHSFTPBackend: SFTPTransportBackend, @unchecked Sendable {
         let eventLoop = channel.eventLoop
         let framed = make(id, channel.allocator)
         let promise = eventLoop.makePromise(of: SFTP.ResponseBody.self)
+        let timeout = Self.operationTimeout
 
         // Register the pending promise on the loop first, then write. Both are
         // enqueued onto the same event loop in FIFO order, so the reply can never
-        // beat the registration.
-        eventLoop.execute { handler.register(id: id, promise: promise) }
+        // beat the registration. The deadline is scheduled on the loop so a
+        // silently-stuck reply forcibly fails the promise (and tears the
+        // connection down) instead of hanging — `EventLoopFuture.get()` does not
+        // honor task cancellation, so an async timeout wrapper cannot bound it.
+        eventLoop.execute {
+            handler.register(id: id, promise: promise)
+            let scheduled = eventLoop.scheduleTask(in: timeout) {
+                handler.timeoutRequest(id: id)
+            }
+            promise.futureResult.whenComplete { _ in scheduled.cancel() }
+        }
         channel.writeAndFlush(SSHChannelData(type: .channel, data: .byteBuffer(framed)))
             .whenFailure { error in
                 eventLoop.execute { handler.failRequest(id: id, error: error) }
             }
 
-        return try await withThrowingTimeout(Self.operationTimeout) {
-            try await promise.futureResult.get()
-        }
+        return try await promise.futureResult.get()
     }
 
     private func closeRawHandle(_ handle: ByteBuffer) async {
@@ -331,16 +386,21 @@ final class NIOSSHSFTPBackend: SFTPTransportBackend, @unchecked Sendable {
         let eventLoop = channel.eventLoop
         let framed = SFTP.encodeClose(id: id, handle: handle, allocator: channel.allocator)
         let promise = eventLoop.makePromise(of: SFTP.ResponseBody.self)
+        let timeout = Self.operationTimeout
 
-        eventLoop.execute { handler.register(id: id, promise: promise) }
+        eventLoop.execute {
+            handler.register(id: id, promise: promise)
+            let scheduled = eventLoop.scheduleTask(in: timeout) {
+                handler.timeoutRequest(id: id)
+            }
+            promise.futureResult.whenComplete { _ in scheduled.cancel() }
+        }
         channel.writeAndFlush(SSHChannelData(type: .channel, data: .byteBuffer(framed)))
             .whenFailure { error in
                 eventLoop.execute { handler.failRequest(id: id, error: error) }
             }
-        // Best-effort: we don't care about the CLOSE status, but bound the wait.
-        _ = try? await withThrowingTimeout(Self.operationTimeout) {
-            try await promise.futureResult.get()
-        }
+        // Best-effort: we don't care about the CLOSE status.
+        _ = try? await promise.futureResult.get()
     }
 
     private func currentConnection() throws -> Connection {
@@ -413,6 +473,16 @@ final class SFTPClientHandler: ChannelInboundHandler, @unchecked Sendable {
 
     func failRequest(id: UInt32, error: Error) {
         pending.removeValue(forKey: id)?.fail(error)
+    }
+
+    /// Deadline expiry for a single request: fail it with `.timeout` and tear the
+    /// connection down (which fails every other pending request via
+    /// `channelInactive`), so a silently-stuck server can't wedge the session.
+    /// Runs on the event loop.
+    func timeoutRequest(id: UInt32) {
+        guard pending[id] != nil else { return }
+        failRequest(id: id, error: MediaTransportError.timeout)
+        context?.close(promise: nil)
     }
 
     func failAll(error: Error) {
@@ -645,22 +715,56 @@ private func constantTimeEqual(_ lhs: [UInt8], _ rhs: [UInt8]) -> Bool {
     return difference == 0
 }
 
-/// Runs `operation`, throwing ``MediaTransportError/timeout`` if it does not
-/// finish within `timeout`.
-private func withThrowingTimeout<Value: Sendable>(
-    _ timeout: Duration,
-    _ operation: @escaping @Sendable () async throws -> Value
-) async throws -> Value {
-    try await withThrowingTaskGroup(of: Value.self) { group in
-        group.addTask { try await operation() }
-        group.addTask {
-            try await Task.sleep(for: timeout)
-            throw MediaTransportError.timeout
+/// Bounds the SSH+SFTP handshake by closing the connection if it hasn't been
+/// cancelled within `timeout`. It lives in the PARENT channel's pipeline so it
+/// can fire even while `createChannel` is still queued waiting for the SSH
+/// connection to activate (e.g. a server that completes TCP but stalls kex/auth).
+/// `cancel()` is called once the handshake finishes. All state is confined to the
+/// channel's event loop via the handler's own context.
+final class SSHConnectDeadlineHandler: ChannelInboundHandler, @unchecked Sendable {
+    typealias InboundIn = Any
+
+    private let timeout: TimeAmount
+    private var scheduled: Scheduled<Void>?
+    private var context: ChannelHandlerContext?
+    private var cancelled = false
+
+    init(timeout: TimeAmount) {
+        self.timeout = timeout
+    }
+
+    func handlerAdded(context: ChannelHandlerContext) {
+        self.context = context
+        arm(context: context)
+    }
+
+    func channelActive(context: ChannelHandlerContext) {
+        arm(context: context)
+        context.fireChannelActive()
+    }
+
+    func handlerRemoved(context: ChannelHandlerContext) {
+        scheduled?.cancel()
+        scheduled = nil
+        self.context = nil
+    }
+
+    private func arm(context: ChannelHandlerContext) {
+        guard scheduled == nil, !cancelled else { return }
+        scheduled = context.eventLoop.scheduleTask(in: timeout) { [weak self] in
+            self?.context?.close(promise: nil)
         }
-        guard let result = try await group.next() else {
-            throw MediaTransportError.timeout
+    }
+
+    /// Cancels the deadline (handshake succeeded). Hops to the event loop since it
+    /// is invoked from the connecting async context.
+    func cancel() {
+        guard let context else { return }
+        context.eventLoop.execute { [weak self] in
+            self?.cancelled = true
+            self?.scheduled?.cancel()
+            self?.scheduled = nil
         }
-        group.cancelAll()
-        return result
     }
 }
+

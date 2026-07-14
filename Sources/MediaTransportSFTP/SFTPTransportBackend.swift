@@ -92,6 +92,10 @@ protocol SFTPTransportBackend: Sendable {
     /// entry (from `FSTAT`) so the caller can revalidate the representation.
     func openFile(path: String) async throws -> (handle: SFTPFileHandle, entry: SFTPBackendEntry)
 
+    /// Re-stats an already-open handle (`FSTAT`) so a reader can detect a file
+    /// that changed underneath it (size/mtime drift) before serving bytes.
+    func fstat(handle: SFTPFileHandle) async throws -> SFTPBackendEntry
+
     /// Reads up to `length` bytes at `offset`. Implementations loop internally so
     /// a request larger than the server's per-`READ` limit still returns a
     /// contiguous chunk; a read at or past EOF returns empty data.
@@ -100,4 +104,10 @@ protocol SFTPTransportBackend: Sendable {
     func closeFile(handle: SFTPFileHandle) async
 
     func shutdown() async
+
+    /// The SSH host-key fingerprint observed during a `.captureTrustOnFirstUse`
+    /// connect (nil for a pinned connect, or before connecting). Lets the future
+    /// unified add-share UI surface a first-seen key for approval; the shipping
+    /// adapter always connects `.pinned`, so this is inert there.
+    var capturedHostKeyFingerprint: [UInt8]? { get }
 }

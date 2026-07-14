@@ -228,6 +228,17 @@ final class SFTPMediaTransportFileSystem: MediaTransportFileSystem, @unchecked S
         let normalizedPath = try SFTPPathPolicy.normalizedRelative(locator.relativePath)
         let path = absolutePath(forRelative: normalizedPath)
 
+        // Containment: `OPEN`/`STAT` follow symlinks (leaf and intermediate), so a
+        // path lexically under the root could still resolve to a file outside it.
+        // Canonicalize with `REALPATH` and require the result to stay within the
+        // configured root before opening — fail closed on any escape.
+        try await withMappedSFTPError {
+            let resolved = try SFTPPathPolicy.normalizedAbsoluteRoot(await backend.realPath(path))
+            guard SFTPPathPolicy.isWithinRoot(resolved, root: rootPath) else {
+                throw MediaTransportError.permissionDenied
+            }
+        }
+
         let opened = try await withMappedSFTPError {
             try await backend.openFile(path: path)
         }
@@ -237,7 +248,12 @@ final class SFTPMediaTransportFileSystem: MediaTransportFileSystem, @unchecked S
                 throw MediaTransportError.sourceChanged(reason: "missing SFTP file size")
             }
             try await proveSeekability(handle: opened.handle, size: size)
-            let source = SFTPByteSource(byteSize: size, backend: backend, handle: opened.handle)
+            let source = SFTPByteSource(
+                byteSize: size,
+                backend: backend,
+                handle: opened.handle,
+                representation: locator.representation
+            )
             return MediaTransportSourceLease(source: source)
         } catch {
             await backend.closeFile(handle: opened.handle)
@@ -335,5 +351,13 @@ enum SFTPPathPolicy {
             components.append(component)
         }
         return components.isEmpty ? "/" : "/" + components.joined(separator: "/")
+    }
+
+    /// True when `absolutePath` (already `REALPATH`-canonicalized + normalized) is
+    /// the configured root or lies strictly beneath it. Guards against a symlink
+    /// resolving out of the share.
+    static func isWithinRoot(_ absolutePath: String, root: String) -> Bool {
+        if root == "/" { return absolutePath.hasPrefix("/") }
+        return absolutePath == root || absolutePath.hasPrefix(root + "/")
     }
 }

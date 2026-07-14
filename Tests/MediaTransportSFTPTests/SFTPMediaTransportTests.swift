@@ -112,6 +112,63 @@ final class SFTPMediaTransportTests: XCTestCase {
         XCTAssertEqual(backend.closedHandles, 1)
     }
 
+    func testByteSourceFailsClosedWhenFileChangesDuringPlayback() async throws {
+        let revision = CredentialRevision()
+        let backend = FakeSFTPBackend()
+        let modifiedAt = Date(timeIntervalSince1970: 100)
+        backend.entriesByPath["/media/movie.mkv"] =
+            entry(name: "movie.mkv", kind: .file, size: 10, modifiedAt: modifiedAt)
+        backend.dataByPath["/media/movie.mkv"] = Data(0..<10)
+        let session = try await connect(backend: backend, revision: revision)
+
+        let locator = try makeLocator(revision: revision, size: 10, modifiedAt: modifiedAt)
+        let lease = try await session.fileSystem.openSource(for: locator)
+        let cursor = try XCTUnwrap(lease.makeCursor())
+
+        // First read succeeds against the matching representation.
+        _ = try await cursor.read(at: 0, length: 4)
+
+        // The file is rewritten underneath the open handle (new mtime). The next
+        // read must fail closed rather than mixing versions.
+        backend.entriesByPath["/media/movie.mkv"] =
+            entry(name: "movie.mkv", kind: .file, size: 10, modifiedAt: Date(timeIntervalSince1970: 200))
+
+        await XCTAssertThrowsErrorAsync(try await cursor.read(at: 4, length: 4)) { error in
+            XCTAssertEqual(error as? MediaTransportError, .sourceChanged(reason: "SFTP representation changed"))
+        }
+        cursor.close()
+        await lease.waitForFinalShutdown()
+    }
+
+    func testOpenSourceRejectsSymlinkEscapingRoot() async throws {
+        let revision = CredentialRevision()
+        let backend = FakeSFTPBackend()
+        let modifiedAt = Date(timeIntervalSince1970: 100)
+        backend.entriesByPath["/media/link.mkv"] =
+            entry(name: "link.mkv", kind: .file, size: 10, modifiedAt: modifiedAt)
+        backend.dataByPath["/media/link.mkv"] = Data(0..<10)
+        // The path resolves (via symlink) to a file OUTSIDE the configured root.
+        backend.realPathMapping["/media/link.mkv"] = "/etc/secret"
+        let session = try await connect(backend: backend, revision: revision)
+
+        let representation = try RemoteFileRepresentation(
+            size: 10,
+            identity: RemoteFileIdentity(kind: .modificationTime, modifiedAt: modifiedAt),
+            consistency: .changeDetecting
+        )
+        let locator = try NetworkFileLocator(
+            accountID: "account",
+            sourceID: "source",
+            credentialRevision: revision,
+            relativePath: "link.mkv",
+            representation: representation
+        )
+        await XCTAssertThrowsErrorAsync(try await session.fileSystem.openSource(for: locator)) { error in
+            XCTAssertEqual(error as? MediaTransportError, .permissionDenied)
+        }
+        XCTAssertEqual(backend.openedFiles, 0, "an escaping symlink is rejected before opening a handle")
+    }
+
     func testOpenSourceRejectsSizeDrift() async throws {
         let revision = CredentialRevision()
         let backend = FakeSFTPBackend()
@@ -404,6 +461,15 @@ final class FakeSFTPBackend: SFTPTransportBackend, @unchecked Sendable {
         }
     }
 
+    func fstat(handle: SFTPFileHandle) async throws -> SFTPBackendEntry {
+        try lock.withLock {
+            guard let path = handleToPath[handle.rawValue], let entry = entriesByPath[path] else {
+                throw SFTPStatusError(code: .noSuchFile)
+            }
+            return entry
+        }
+    }
+
     func read(handle: SFTPFileHandle, offset: Int64, length: Int) async throws -> Data {
         try lock.withLock {
             reads.append(RecordedRead(offset: offset, length: length))
@@ -427,6 +493,11 @@ final class FakeSFTPBackend: SFTPTransportBackend, @unchecked Sendable {
 
     func shutdown() async {
         lock.withLock { shutdownCount += 1 }
+    }
+
+    var stubCapturedFingerprint: [UInt8]?
+    var capturedHostKeyFingerprint: [UInt8]? {
+        lock.withLock { stubCapturedFingerprint }
     }
 }
 

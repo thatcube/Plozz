@@ -6,6 +6,8 @@ import FeatureAuth
 import ProviderShare
 import MediaTransportHTTP
 import MediaTransportSFTP
+import MediaTransportFTP
+import MediaTransportNFS
 
 /// The finished configuration for an NFS export, handed back to
 /// `AppState.didConfigureNFSShare`. NFS is credential-free; the export path is the
@@ -153,6 +155,8 @@ final class UnifiedAddShareModel {
     private let serviceProbe: any MediaShareServiceProbing
     private let webDAVProbe: any WebDAVOnboardingProbing
     private let sftpProbe: any SFTPOnboardingProbing
+    private let ftpProbe: any FTPOnboardingProbing
+    private let nfsProbe: any NFSOnboardingProbing
     private var scanTask: Task<Void, Never>?
     private var workTask: Task<Void, Never>?
     private var sweptHosts = Set<String>()
@@ -172,11 +176,15 @@ final class UnifiedAddShareModel {
     init(
         webDAVProbe: any WebDAVOnboardingProbing = WebDAVOnboardingProbe(),
         serviceProbe: any MediaShareServiceProbing = ProtocolServiceProbe(),
-        sftpProbe: any SFTPOnboardingProbing = SFTPOnboardingProbe()
+        sftpProbe: any SFTPOnboardingProbing = SFTPOnboardingProbe(),
+        ftpProbe: any FTPOnboardingProbing = FTPOnboardingProbe(),
+        nfsProbe: any NFSOnboardingProbing = NFSOnboardingProbe()
     ) {
         self.webDAVProbe = webDAVProbe
         self.serviceProbe = serviceProbe
         self.sftpProbe = sftpProbe
+        self.ftpProbe = ftpProbe
+        self.nfsProbe = nfsProbe
         self.discovery = BonjourServiceDiscovery(mapping: Self.mapping)
     }
 
@@ -323,22 +331,13 @@ final class UnifiedAddShareModel {
         approvedHostKeyPin = nil
     }
 
-    /// Whether the selected transport confirms a single typed root path at the
-    /// pick-location step (NFS/FTP) rather than browsing a live list (SMB shares,
-    /// WebDAV/SFTP folders).
-    var isPathEntryTransport: Bool {
-        switch selectedTransport {
-        case .nfs, .ftp: return true
-        case .smb, .webDAV, .sftp: return false
-        }
-    }
-
     /// Whether the selected transport drills into nested folders at the
-    /// pick-location step (WebDAV, SFTP), as opposed to a flat share list (SMB).
+    /// pick-location step (WebDAV, SFTP, FTP), as opposed to a flat list (SMB
+    /// shares, NFS exports).
     var isDrillableTransport: Bool {
         switch selectedTransport {
-        case .webDAV, .sftp: return true
-        case .smb, .nfs, .ftp: return false
+        case .webDAV, .sftp, .ftp: return true
+        case .smb, .nfs: return false
         }
     }
 
@@ -453,8 +452,10 @@ final class UnifiedAddShareModel {
             enterSMBLocation()
         case .webDAV:
             beginWebDAV(rawAddress: address, host: host, port: port)
-        case .nfs, .ftp:
-            enterFilesystemLocation()
+        case .nfs:
+            beginNFSBrowse()
+        case .ftp:
+            beginFTPBrowse()
         case .sftp:
             beginSFTP(host: host, port: port ?? descriptor.defaultPort)
         }
@@ -518,15 +519,6 @@ final class UnifiedAddShareModel {
         return path.isEmpty ? "/" : path
     }
 
-    /// NFS/FTP have no pre-connect handshake in onboarding: confirm the typed root
-    /// so the user can name it and save. (SFTP arrives here only after its host
-    /// key is captured + approved.)
-    private func enterFilesystemLocation() {
-        confirmedPath = filesystemPath(from: address)
-        locationLoad = .loaded
-        step = .pickLocation
-    }
-
     /// SFTP first-connect: capture the server's host key (and confirm the
     /// credentials authenticate) in one `.captureTrustOnFirstUse` connect, then
     /// route to the verify step for explicit approval before pinning + saving.
@@ -576,6 +568,97 @@ final class UnifiedAddShareModel {
             username: user,
             password: pass,
             hostKeySHA256: pin,
+            path: path
+        )
+        if Task.isCancelled { return }
+        switch result {
+        case .success(let dirs):
+            currentPath = path
+            confirmedPath = path
+            locations = dirs.map { LocationItem(name: $0.name, path: $0.path, isBrowsable: true) }
+            locationLoad = .loaded
+        case .authenticationFailed:
+            locationLoad = .badCredentials
+        case .unreachable:
+            locationLoad = .unreachable
+        case .failed(let message):
+            locationLoad = .failed(message)
+        case .cancelled:
+            break
+        }
+    }
+
+    /// NFS first-connect: try to list the server's advertised exports so the user
+    /// can pick a real export path. Falls back to a manual export-path field when
+    /// the server blocks `showmount`/EXPORT (common) — surfaced via a failed load.
+    private func beginNFSBrowse() {
+        step = .pickLocation
+        workTask?.cancel()
+        workTask = Task { await self.loadNFSExports() }
+    }
+
+    func loadNFSExports() async {
+        locationLoad = .loading
+        locations = []
+        let host = resolvedHost
+        let port = resolvedPort
+        let result = await nfsProbe.listExports(host: host, port: port)
+        if Task.isCancelled { return }
+        switch result {
+        case .success(let exports):
+            if exports.isEmpty {
+                locationLoad = .failed("This server didn’t advertise any exports. Enter the export path, e.g. /volume1/Media.")
+            } else {
+                locations = exports.map { LocationItem(name: $0.name, path: $0.path, isBrowsable: false) }
+                locationLoad = .loaded
+            }
+        case .unreachable:
+            locationLoad = .unreachable
+        case .permissionDenied:
+            locationLoad = .failed("This server didn’t allow listing exports. Enter the export path, e.g. /volume1/Media.")
+        case .failed(let message):
+            locationLoad = .failed(message)
+        }
+    }
+
+    /// Save a chosen NFS export (from the advertised list) as the share root.
+    func chooseNFSExport(_ path: String) {
+        confirmedPath = path.hasPrefix("/") ? path : "/" + path
+        chooseFilesystemRoot()
+    }
+
+    /// Save a manually-typed NFS export path (fallback when EXPORT is blocked).
+    func chooseNFSManualExport() {
+        let trimmed = manualShare.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        confirmedPath = trimmed.hasPrefix("/") ? trimmed : "/" + trimmed
+        chooseFilesystemRoot()
+    }
+
+    /// FTP first-connect: open a folder browser rooted at the typed path (or `/`)
+    /// so the user can drill into a subfolder to scope the scan.
+    private func beginFTPBrowse() {
+        step = .pickLocation
+        let start = filesystemPath(from: address)
+        workTask?.cancel()
+        workTask = Task { await self.loadFTPFolders(path: start) }
+    }
+
+    /// Lists the child directories of the current FTP path. Reconnects per call
+    /// (onboarding is low-frequency), mirroring the WebDAV/SFTP browsers.
+    func loadFTPFolders(path: String) async {
+        locationLoad = .loading
+        let host = resolvedHost
+        let scheme = ftpScheme(from: address, port: resolvedPort)
+        let user = username.trimmingCharacters(in: .whitespaces)
+        let pass = password
+        let result = await ftpProbe.listDirectories(
+            host: host,
+            port: resolvedPort,
+            isImplicitTLS: scheme == "ftps",
+            username: user,
+            password: pass,
+            trustPinSHA256: nil,
             path: path
         )
         if Task.isCancelled { return }

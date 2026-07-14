@@ -412,6 +412,37 @@ final class NFSClientIntegrationTests: XCTestCase {
         return Wire.acceptedReply(xid: call.xid, results: results.data)
     }
 
+    func testListExportsDecodesDirpathsAndIgnoresGroups() async throws {
+        let factory = ScriptedRPCFactory { port, call in
+            switch port {
+            case NFSWellKnownPort.portmap:
+                var results = XDREncoder()
+                results.encode(UInt32(Self.mountdPort))
+                return Wire.acceptedReply(xid: call.xid, results: results.data)
+            case Self.mountdPort where call.procedure == MountProcedure.export:
+                // exports = *exportnode; each link prefixed by a value-follows bool.
+                var r = XDREncoder()
+                r.encode(true); r.encodeString("/volume1/Media")
+                r.encode(true); r.encodeString("*")            // one access group
+                r.encode(false)                                // end groups
+                r.encode(true); r.encodeString("/volume1/Backups")
+                r.encode(false)                                // no groups
+                r.encode(false)                                // end exports
+                return Wire.acceptedReply(xid: call.xid, results: r.data)
+            default:
+                return Wire.acceptedReply(xid: call.xid, results: Data())
+            }
+        }
+        let client = NFSClient(
+            host: "nas.local",
+            credential: .default,
+            timeout: .seconds(5),
+            connectionFactory: factory
+        )
+        let exports = try await client.listExports()
+        XCTAssertEqual(exports, ["/volume1/Media", "/volume1/Backups"])
+    }
+
     func testMountResolvesRootAndReadsFile() async throws {
         let client = NFSClient(
             host: "nas.local",

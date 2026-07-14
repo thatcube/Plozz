@@ -512,7 +512,7 @@ let package = Package(
         ),
         .testTarget(
             name: "AppShellTests",
-            dependencies: ["AppShell", "CoreModels", "MediaTransportSFTP"]
+            dependencies: ["AppShell", "CoreModels", "MediaTransportSFTP", "MediaTransportFTP", "MediaTransportNFS"]
         ),
         .testTarget(
             name: "CoreUITests",

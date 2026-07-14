@@ -82,6 +82,58 @@ public struct NFSClient: Sendable {
         )
     }
 
+    // MARK: - EXPORT (showmount -e)
+
+    /// MOUNT EXPORT (procedure 5): the server's advertised export list, so
+    /// onboarding can offer real export paths instead of making the user guess
+    /// one. Returns the export dirpaths; the per-export access-group lists are
+    /// decoded (to stay in sync with the wire) but discarded.
+    ///
+    /// Both list loops are bounded because the reply is server-controlled: a
+    /// malformed or hostile mountd must not be able to make this allocate or spin
+    /// without limit.
+    public func listExports() async throws -> [String] {
+        guard let mountPort = try await resolvePort(
+            program: NFSProgram.mount,
+            version: NFSProgram.mountVersion
+        ) else {
+            throw NFSError.mountFailed(.notSupported)
+        }
+        let connection = try await connectionFactory.connect(host: host, port: mountPort, timeout: timeout)
+        defer { Task { await connection.close() } }
+        let client = RPCClient(connection: connection)
+
+        // EXPORT takes no arguments and, unlike MNT, returns the export list
+        // directly (no leading mountstat3).
+        var decoder = try await client.call(
+            program: NFSProgram.mount,
+            version: NFSProgram.mountVersion,
+            procedure: MountProcedure.export,
+            credential: .none,
+            arguments: Data()
+        )
+
+        // exports  = *exportnode           (each link prefixed by a "value follows" bool)
+        // exportnode { dirpath; groups; }
+        // groups   = *name                 (same linked-list encoding)
+        var exports: [String] = []
+        var nodeCount = 0
+        while try decoder.decodeBool() {
+            let dirpath = try decoder.decodeString(maxLength: 4096)
+            var groupCount = 0
+            while try decoder.decodeBool() {
+                _ = try decoder.decodeString(maxLength: 4096)
+                groupCount += 1
+                if groupCount > 4096 { break }
+            }
+            let trimmed = dirpath.trimmingCharacters(in: .whitespaces)
+            if !trimmed.isEmpty { exports.append(trimmed) }
+            nodeCount += 1
+            if nodeCount > 4096 { break }
+        }
+        return exports
+    }
+
     // MARK: - portmap
 
     /// GETPORT for a program over TCP. Returns nil when unregistered (port 0).

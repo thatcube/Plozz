@@ -3,6 +3,8 @@ import Foundation
 import CoreModels
 import ProviderShare
 import MediaTransportSFTP
+import MediaTransportFTP
+import MediaTransportNFS
 @testable import AppShell
 
 @MainActor
@@ -68,32 +70,68 @@ final class UnifiedAddShareModelTests: XCTestCase {
 
     // MARK: - NFS / SFTP / FTP unified onboarding
 
-    func testNFSConnectConfirmsPathAndSaves() {
-        let model = UnifiedAddShareModel()
+    func testNFSListsExportsAndSavesSelectedExport() async {
+        let listing = NFSDirectoryListing.success([
+            NFSDirectoryItem(name: "/volume1/Media", path: "/volume1/Media"),
+            NFSDirectoryItem(name: "/volume1/Backups", path: "/volume1/Backups"),
+        ])
+        let model = UnifiedAddShareModel(nfsProbe: StubNFSProbe(exports: listing))
         var result: MediaShareOnboardingResult?
         model.onMediaShareConfigured = { result = $0 }
 
         model.openManualConnect()
         model.applyTransport(.nfs)
-        model.address = "192.168.1.5/export/media"
+        model.address = "192.168.1.5"
         model.connect()
 
         XCTAssertEqual(model.step, .pickLocation)
-        XCTAssertEqual(model.confirmedPath, "/export/media")
+        for _ in 0..<50 {
+            if model.locationLoad == .loaded { break }
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+        XCTAssertEqual(model.locations.map(\.path), ["/volume1/Media", "/volume1/Backups"])
 
         model.displayName = "Movies"
-        model.chooseFilesystemRoot()
+        model.chooseNFSExport("/volume1/Media")
 
         guard case let .nfs(config) = result else {
             return XCTFail("expected NFS result, got \(String(describing: result))")
         }
         XCTAssertEqual(config.host, "192.168.1.5")
-        XCTAssertEqual(config.exportPath, "/export/media")
+        XCTAssertEqual(config.exportPath, "/volume1/Media")
         XCTAssertEqual(config.displayName, "Movies")
     }
 
-    func testFTPAnonymousBuildsPlainFTPURL() {
-        let model = UnifiedAddShareModel()
+    func testNFSFallsBackToManualExportWhenListingBlocked() async {
+        let model = UnifiedAddShareModel(nfsProbe: StubNFSProbe(exports: .permissionDenied))
+        var result: MediaShareOnboardingResult?
+        model.onMediaShareConfigured = { result = $0 }
+
+        model.openManualConnect()
+        model.applyTransport(.nfs)
+        model.address = "192.168.1.5"
+        model.connect()
+
+        for _ in 0..<50 {
+            if case .failed = model.locationLoad { break }
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+        guard case .failed = model.locationLoad else {
+            return XCTFail("expected failed load, got \(model.locationLoad)")
+        }
+
+        // Manual fallback: type the export path, normalized to a leading slash.
+        model.manualShare = "volume1/Media"
+        model.chooseNFSManualExport()
+
+        guard case let .nfs(config) = result else {
+            return XCTFail("expected NFS result, got \(String(describing: result))")
+        }
+        XCTAssertEqual(config.exportPath, "/volume1/Media")
+    }
+
+    func testFTPAnonymousBuildsPlainFTPURL() async {
+        let model = UnifiedAddShareModel(ftpProbe: StubFTPProbe())
         var result: MediaShareOnboardingResult?
         model.onMediaShareConfigured = { result = $0 }
 
@@ -103,6 +141,10 @@ final class UnifiedAddShareModelTests: XCTestCase {
         model.connect()
 
         XCTAssertEqual(model.step, .pickLocation)
+        for _ in 0..<50 {
+            if model.confirmedPath == "/pub" { break }
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
         model.chooseFilesystemRoot()
 
         guard case let .ftp(config) = result else {
@@ -113,8 +155,8 @@ final class UnifiedAddShareModelTests: XCTestCase {
         XCTAssertNil(config.trustPin)
     }
 
-    func testFTPSPort990BuildsImplicitTLSURLWithPassword() {
-        let model = UnifiedAddShareModel()
+    func testFTPSPort990BuildsImplicitTLSURLWithPassword() async {
+        let model = UnifiedAddShareModel(ftpProbe: StubFTPProbe())
         var result: MediaShareOnboardingResult?
         model.onMediaShareConfigured = { result = $0 }
 
@@ -125,6 +167,10 @@ final class UnifiedAddShareModelTests: XCTestCase {
         model.username = "bob"
         model.password = "secret"
         model.connect()
+        for _ in 0..<50 {
+            if model.locationLoad == .loaded { break }
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
         model.chooseFilesystemRoot()
 
         guard case let .ftp(config) = result else {
@@ -132,6 +178,36 @@ final class UnifiedAddShareModelTests: XCTestCase {
         }
         XCTAssertEqual(config.baseURL.scheme, "ftps")
         XCTAssertEqual(config.auth, .password(username: "bob", password: "secret"))
+    }
+
+    func testFTPFolderBrowsingDrillsIntoSubfolderAndSaves() async {
+        let listing = FTPDirectoryListing.success([
+            FTPDirectoryItem(name: "Movies", path: "/Movies"),
+            FTPDirectoryItem(name: "TV", path: "/TV"),
+        ])
+        let model = UnifiedAddShareModel(ftpProbe: StubFTPProbe(listing: listing))
+        var result: MediaShareOnboardingResult?
+        model.onMediaShareConfigured = { result = $0 }
+
+        model.openManualConnect()
+        model.applyTransport(.ftp)
+        model.address = "192.168.1.5"
+        model.connect()
+
+        for _ in 0..<50 {
+            if model.locationLoad == .loaded { break }
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+        XCTAssertEqual(model.locations.map(\.name), ["Movies", "TV"])
+
+        await model.loadFTPFolders(path: "/Movies")
+        XCTAssertEqual(model.currentPath, "/Movies")
+        model.chooseFilesystemRoot()
+
+        guard case let .ftp(config) = result else {
+            return XCTFail("expected FTP result, got \(String(describing: result))")
+        }
+        XCTAssertEqual(config.baseURL.absoluteString, "ftp://192.168.1.5/Movies")
     }
 
     func testSFTPCapturesHostKeyThenVerifiesThenSaves() async {
@@ -282,6 +358,37 @@ final class UnifiedAddShareModelTests: XCTestCase {
             path: String
         ) async -> SFTPDirectoryListing {
             listing
+        }
+    }
+
+    private struct StubFTPProbe: FTPOnboardingProbing {
+        var listing: FTPDirectoryListing = .success([])
+        func listDirectories(
+            host: String,
+            port: Int?,
+            isImplicitTLS: Bool,
+            username: String,
+            password: String,
+            trustPinSHA256: Data?,
+            path: String
+        ) async -> FTPDirectoryListing {
+            listing
+        }
+    }
+
+    private struct StubNFSProbe: NFSOnboardingProbing {
+        var exports: NFSDirectoryListing = .success([])
+        var directories: NFSDirectoryListing = .success([])
+        func listExports(host: String, port: Int?) async -> NFSDirectoryListing {
+            exports
+        }
+        func listDirectories(
+            host: String,
+            port: Int?,
+            exportPath: String,
+            relativePath: String
+        ) async -> NFSDirectoryListing {
+            directories
         }
     }
 }

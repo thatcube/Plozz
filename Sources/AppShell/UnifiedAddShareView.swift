@@ -391,17 +391,36 @@ struct UnifiedAddShareView: View {
     @ViewBuilder
     private var browsableLocations: some View {
         let isDrillable = viewModel.isDrillableTransport
-        if isDrillable && viewModel.currentPath != "/" {
-            Button {
-                loadFolders(path: parentPath(of: viewModel.currentPath))
-            } label: { Label("Up one level", systemImage: "arrow.up.left") }
-            .buttonStyle(.bordered)
+        if isDrillable {
+            if viewModel.currentPath != "/" {
+                Button {
+                    loadFolders(path: parentPath(of: viewModel.currentPath))
+                } label: { Label("Up one level", systemImage: "arrow.up.left") }
+                .buttonStyle(.bordered)
+            }
+            // Primary action pinned ABOVE the (bounded, scrollable) list, so
+            // confirming the folder you're looking inside never requires scrolling
+            // past its contents — the list below is just a preview / a way to
+            // drill deeper.
+            Panel(title: "Scan this folder") {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text(viewModel.currentPath)
+                        .font(.system(.body, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1).truncationMode(.middle)
+                    TextField("Display name (optional)", text: $viewModel.displayName)
+                        .autocorrectionDisabled().focused($focus, equals: .displayName)
+                    Button("Use This Folder") { useCurrentFolder() }
+                        .buttonStyle(.borderedProminent)
+                        .focused($focus, equals: .useFolder)
+                }
+            }
         }
-        Panel(title: "Locations") {
+        Panel(title: isDrillable ? "Or open a subfolder" : "Locations") {
             if viewModel.locations.isEmpty {
                 placeholder(isDrillable ? "No subfolders here." : "Nothing here.")
             } else {
-                FadingScrollView(maxHeight: 620) {
+                FadingScrollView(maxHeight: 560) {
                     VStack(spacing: 12) {
                         ForEach(viewModel.locations) { item in
                             Button { selectLocation(item) } label: {
@@ -421,14 +440,11 @@ struct UnifiedAddShareView: View {
                 }
             }
         }
-        Panel(title: "Display name (optional)") {
-            TextField("Display name", text: $viewModel.displayName)
-                .autocorrectionDisabled().focused($focus, equals: .displayName)
-        }
-        if isDrillable {
-            Button("Use This Folder") { useCurrentFolder() }
-                .buttonStyle(.borderedProminent)
-                .focused($focus, equals: .useFolder)
+        if !isDrillable {
+            Panel(title: "Display name (optional)") {
+                TextField("Display name", text: $viewModel.displayName)
+                    .autocorrectionDisabled().focused($focus, equals: .displayName)
+            }
         }
     }
 

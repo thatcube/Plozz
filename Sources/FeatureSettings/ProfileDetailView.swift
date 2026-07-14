@@ -85,6 +85,16 @@ struct ProfileDetailView: View {
     private var profilesListPanel: some View {
         SettingsPanel {
             VStack(alignment: .leading, spacing: 12) {
+                // Whether the "Who's watching?" picker appears at launch. Only
+                // meaningful with 2+ profiles; pinned to the top of the panel.
+                if context.profiles.count > 1 {
+                    Toggle("Ask who's watching on startup", isOn: Binding(
+                        get: { context.askProfileOnStartup },
+                        set: { context.onSetAskProfileOnStartup($0) }
+                    ))
+                    .toggleStyle(SettingsSwitchToggleStyle())
+                    Divider()
+                }
                 ForEach(context.profiles) { profile in
                     profileRow(profile)
                 }
@@ -94,31 +104,19 @@ struct ProfileDetailView: View {
                     Label("Add Profile", systemImage: "plus.circle")
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                // Whether the "Who's watching?" picker appears at launch. Only
-                // meaningful with 2+ profiles, so it rides at the bottom of the
-                // list rather than in its own section.
-                if context.profiles.count > 1 {
-                    Divider()
-                    Toggle("Ask who's watching on startup", isOn: Binding(
-                        get: { context.askProfileOnStartup },
-                        set: { context.onSetAskProfileOnStartup($0) }
-                    ))
-                    .toggleStyle(SettingsSwitchToggleStyle())
-                }
             }
             .focusSection()
         }
     }
 
     private func profileRow(_ profile: Profile) -> some View {
-        HStack(spacing: 16) {
+        HStack(alignment: .top, spacing: 16) {
             ProfileAvatarView(profile: profile, size: 40)
+                .padding(.top, 4)
             VStack(alignment: .leading, spacing: 4) {
                 Text(profile.name).font(.headline)
                 if profile.id == context.activeProfile.id {
-                    Text("Active")
-                        .font(.caption)
-                        .foregroundStyle(.green)
+                    StatusChip("Active")
                 }
             }
             Spacer()
@@ -128,6 +126,7 @@ struct ProfileDetailView: View {
                 Image(systemName: "pencil")
             }
             .accessibilityLabel("Edit \(profile.name)")
+            .padding(.top, 6)
         }
         .padding(.vertical, 2)
     }

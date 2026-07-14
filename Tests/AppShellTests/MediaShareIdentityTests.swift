@@ -22,6 +22,60 @@ final class MediaShareIdentityTests: XCTestCase {
         XCTAssertEqual(a, "share:nas/media#copilot2")
     }
 
+    // MARK: - Filesystem identity (NFS/SFTP/FTP)
+
+    func testFilesystemIDFoldsHostButKeepsCaseSensitivePathAndPrincipal() {
+        let a = AppState.mediaShareFilesystemID(
+            scheme: "sftp", host: "NAS", port: 22, path: "/Media", principal: "Admin"
+        )
+        XCTAssertEqual(a, "share:sftp://nas:22/Media#Admin")
+    }
+
+    func testFilesystemIDDistinguishesDifferentCasePrincipals() {
+        // Regression: distinct POSIX users (Admin vs admin) must be distinct
+        // accounts, or adding one overwrites the other's pinned host key.
+        let upper = AppState.mediaShareFilesystemID(
+            scheme: "sftp", host: "nas", port: 22, path: "/media", principal: "Admin"
+        )
+        let lower = AppState.mediaShareFilesystemID(
+            scheme: "sftp", host: "nas", port: 22, path: "/media", principal: "admin"
+        )
+        XCTAssertNotEqual(upper, lower)
+    }
+
+    func testFilesystemIDTrimsTrailingSlash() {
+        XCTAssertEqual(
+            AppState.mediaShareFilesystemID(
+                scheme: "nfs", host: "nas", port: nil, path: "/export/media/", principal: "anon"
+            ),
+            "share:nfs://nas/export/media#anon"
+        )
+    }
+
+    // MARK: - Default share name
+
+    func testDefaultShareNameUsesLastComponentAndTransport() {
+        XCTAssertEqual(
+            AppState.defaultShareName(path: "/mnt/user/Media", host: "192.168.1.5", transport: .sftp),
+            "Media (SFTP)"
+        )
+        XCTAssertEqual(
+            AppState.defaultShareName(path: "/appledemo", host: "nas", transport: .webDAV),
+            "appledemo (WebDAV)"
+        )
+        XCTAssertEqual(
+            AppState.defaultShareName(path: "Media", host: "nas", transport: .smb),
+            "Media (SMB)"
+        )
+    }
+
+    func testDefaultShareNameFallsBackToHostAtRoot() {
+        XCTAssertEqual(
+            AppState.defaultShareName(path: "/", host: "192.168.1.5", transport: .nfs),
+            "192.168.1.5 (NFS)"
+        )
+    }
+
     func testServerIDIncludesPortWhenPresent() {
         XCTAssertEqual(
             AppState.mediaShareServerID(host: "host", port: 4455, share: "Movies", username: "u"),

@@ -62,20 +62,24 @@ struct ServersAndLibrariesDetailView: View {
     /// reads as "tap to open a level deeper," not just status.
     private func serverSummaryRow(_ group: ServerAccountGroup) -> some View {
         NavigationLink(value: SettingsRoute.server(key: group.serverKey)) {
-            HStack(spacing: 16) {
+            HStack(alignment: .top, spacing: 16) {
                 ProviderIcon(provider: group.providerKind, size: 48, mediaShareTransport: group.transportKind)
                     .frame(width: 36)
+                    .padding(.top, 4)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(group.serverName).font(.headline)
-                    Text(summary(for: group))
-                        .font(.subheadline)
-                        .settingsRowSecondary()
-                        .lineLimit(1)
+                    if let summary = summary(for: group) {
+                        Text(summary)
+                            .font(.subheadline)
+                            .settingsRowSecondary()
+                            .lineLimit(1)
+                    }
                 }
                 Spacer()
                 Image(systemName: "chevron.right")
                     .font(.caption.weight(.semibold))
                     .settingsRowSecondary()
+                    .padding(.top, 14)
             }
             .padding(.vertical, 14)
             .padding(.horizontal, 14)
@@ -85,12 +89,20 @@ struct ServersAndLibrariesDetailView: View {
     }
 
     /// Global sign-in summary — who's signed in to this server, household-wide.
-    private func summary(for group: ServerAccountGroup) -> String {
+    /// `nil` when there's nothing worth a second line (a credential-free NFS
+    /// connection), so the row shows just the server name.
+    private func summary(for group: ServerAccountGroup) -> String? {
         let accountCount = group.accounts.count
         if accountCount == 0 {
             return "No one signed in"
         } else if accountCount == 1, let only = group.accounts.first {
-            return "Signed in as \(only.userName)"
+            let userName = only.userName.trimmingCharacters(in: .whitespaces)
+            if userName.isEmpty {
+                // NFS is credential-free (AUTH_UNIX, no login) — no subtitle. An
+                // empty user on any other share is an anonymous/guest connection.
+                return group.transportKind == .nfs ? nil : "Guest access"
+            }
+            return "Signed in as \(userName)"
         } else {
             return "\(accountCount) sign-ins"
         }

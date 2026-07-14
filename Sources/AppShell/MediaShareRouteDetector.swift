@@ -17,6 +17,18 @@ enum MediaShareRoute: Equatable, Sendable {
     /// A fully-resolved WebDAV base URL (scheme already decided: https tried
     /// before http). `insecureHTTP` is true when it resolved to plain http.
     case webDAV(baseURL: URL, insecureHTTP: Bool)
+    /// An SFTP endpoint. The credential-entry + host-key trust-on-first-use
+    /// approval flow is owned by the unified add-share ("Discovery UX") work;
+    /// detection only needs to recognize the endpoint here.
+    case sftp(host: String, port: Int?)
+    /// An NFS export: host + optional port + the export/mount path the user
+    /// typed (`nfs://host/volume1/media` → `/volume1/media`). The path may be
+    /// empty when only a bare host or `host:2049` was entered — onboarding then
+    /// asks for the full export path (there is no NFS export browser yet).
+    case nfs(host: String, port: Int?, exportPath: String)
+    /// A fully-resolved FTP base URL (`ftp://` plaintext or `ftps://` implicit
+    /// TLS). `insecure` is true for plaintext `ftp`.
+    case ftp(baseURL: URL, insecure: Bool)
 }
 
 enum MediaShareRouteError: Error, Equatable, Sendable {
@@ -102,11 +114,15 @@ struct MediaShareRouteDetector: Sendable {
         self.fallback = fallback
     }
 
-    /// Convenience for the shipping set (SMB + WebDAV), assuming SMB for a bare
-    /// NAS host that answers no HTTP. `probe` is injectable for tests.
+    /// Convenience for the shipping set (SMB + SFTP + NFS + WebDAV + FTP),
+    /// assuming SMB for a bare NAS host that answers no HTTP. `FTPClaimant` is
+    /// active so a typed `ftp://`/`ftps://` address (or port 21) is detected; the
+    /// resulting `.ftp` route is consumed by the unified add-share flow
+    /// (Discovery-UX), which owns FTP credential entry + the plaintext warning.
+    /// `probe` is injectable for tests.
     init(probe: any WebDAVReachabilityProbing = WebDAVReachabilityProbe()) {
         self.init(
-            claimants: [SMBClaimant(), WebDAVClaimant(probe: probe)],
+            claimants: [SMBClaimant(), SFTPClaimant(), NFSClaimant(), WebDAVClaimant(probe: probe), FTPClaimant()],
             fallback: { .smb(host: $0.host, port: $0.port) }
         )
     }
@@ -205,6 +221,45 @@ struct SMBClaimant: TransportClaimant {
     func probe(_ address: ParsedShareAddress) async -> MediaShareRoute? { nil }
 }
 
+/// SFTP claims explicit `sftp://` and the well-known SSH port `22`. Like SMB it
+/// has no network probe — a decisive scheme/port is enough, and an un-schemed
+/// host on a non-decisive port is never guessed as SFTP (that would require
+/// credentials to even attempt).
+struct SFTPClaimant: TransportClaimant {
+    var transportName: String { "SFTP" }
+
+    func decisiveRoute(for address: ParsedShareAddress) -> MediaShareRoute? {
+        if address.scheme == "sftp" {
+            return .sftp(host: address.host, port: address.port)
+        }
+        if address.scheme == nil, address.port == 22 {
+            return .sftp(host: address.host, port: address.port)
+        }
+        return nil
+    }
+
+    func probe(_ address: ParsedShareAddress) async -> MediaShareRoute? { nil }
+}
+
+/// NFS claims `nfs://` and the well-known nfsd port `2049`. Like SMB it never
+/// speaks HTTP, so it has no network probe — an un-schemed bare host is left to
+/// SMB's terminal fallback. The typed path is carried through as the export.
+struct NFSClaimant: TransportClaimant {
+    var transportName: String { "NFS" }
+
+    func decisiveRoute(for address: ParsedShareAddress) -> MediaShareRoute? {
+        if address.scheme == "nfs" {
+            return .nfs(host: address.host, port: address.port, exportPath: address.path)
+        }
+        if address.scheme == nil, address.port == 2049 {
+            return .nfs(host: address.host, port: address.port, exportPath: address.path)
+        }
+        return nil
+    }
+
+    func probe(_ address: ParsedShareAddress) async -> MediaShareRoute? { nil }
+}
+
 /// WebDAV claims explicit `http(s)://`, and otherwise probes over HTTP (https
 /// before http). It has NO decisive port: `80`/`443`/etc. are ambiguous (a NAS
 /// web-admin page lives there too), so an un-schemed address is always probed.
@@ -236,6 +291,30 @@ struct WebDAVClaimant: TransportClaimant {
         }
         return nil
     }
+}
+
+/// FTP claims explicit `ftp://`/`ftps://`, and the well-known control port 21.
+/// It has NO network probe — an un-schemed address without port 21 is left to
+/// the other transports (WebDAV's HTTP probe / SMB's terminal fallback), so
+/// adding FTP never changes how a bare NAS host is detected.
+struct FTPClaimant: TransportClaimant {
+    var transportName: String { "FTP" }
+
+    func decisiveRoute(for address: ParsedShareAddress) -> MediaShareRoute? {
+        if let scheme = address.scheme, scheme == "ftp" || scheme == "ftps" {
+            // Honor exactly what the user typed.
+            guard let url = URL(string: address.raw) else { return nil }
+            return .ftp(baseURL: url, insecure: scheme == "ftp")
+        }
+        if address.scheme == nil, address.port == 21 {
+            let hostPort = authority(of: address)
+            guard let url = URL(string: "ftp://\(hostPort)\(address.path)") else { return nil }
+            return .ftp(baseURL: url, insecure: true)
+        }
+        return nil
+    }
+
+    func probe(_ address: ParsedShareAddress) async -> MediaShareRoute? { nil }
 }
 
 // MARK: - Real HTTP probe

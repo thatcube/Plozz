@@ -3,37 +3,27 @@ import CoreUI
 import Foundation
 import SwiftUI
 
-/// The single "Local media" entry point. There is NO SMB-vs-WebDAV pick: the
-/// user sees servers discovered on the network (SMB today) and one address
-/// field. Typing an address auto-detects the transport (`MediaShareRouteDetector`)
-/// and routes SMB → the share picker or WebDAV → its credential/folder flow, so
-/// the user never chooses or names a protocol.
+/// The single "Local media" entry point. Hosts the ONE unified add-a-media-share
+/// flow (`UnifiedAddShareView`) for every transport — SMB, WebDAV (real), and
+/// NFS/SFTP (dummy-wired, "coming soon") — so onboarding never fragments into a
+/// screen per transport. Discovery is box-centric and multi-transport; the user
+/// picks a device or types an address, then one Connect form collects protocol,
+/// port, and credentials before browsing to a share/folder.
 struct AddMediaShareView: View {
     let isPageReady: Bool
     let onBack: () -> Void
     let onSMBConfigured: (ShareDraft) -> Void
     let onWebDAVConfigured: (WebDAVShareConfiguration) -> Void
-
-    /// Non-nil when the typed address detected as WebDAV — hosts the WebDAV flow
-    /// pre-seeded with the resolved URL. Otherwise the SMB discovery + address
-    /// screen is shown.
-    @State private var webDAVAddress: String?
+    var onMediaShareConfigured: (MediaShareOnboardingResult) -> Void = { _ in }
 
     var body: some View {
-        if let webDAVAddress {
-            AddWebDAVShareView(
-                onBack: { self.webDAVAddress = nil },
-                onConfigured: onWebDAVConfigured,
-                initialAddress: webDAVAddress
-            )
-        } else {
-            AddShareView(
-                isPageReady: isPageReady,
-                onBack: onBack,
-                onConfigured: onSMBConfigured,
-                onWebDAVDetected: { url in webDAVAddress = url.absoluteString }
-            )
-        }
+        UnifiedAddShareView(
+            isPageReady: isPageReady,
+            onBack: onBack,
+            onSMBConfigured: onSMBConfigured,
+            onWebDAVConfigured: onWebDAVConfigured,
+            onMediaShareConfigured: onMediaShareConfigured
+        )
     }
 }
 #endif

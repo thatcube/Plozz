@@ -7,9 +7,12 @@ import FeatureDiscovery
 import FeatureMusic
 import FeatureProfiles
 import MediaTransportCore
+import MediaTransportFTP
 import MediaTransportHTTP
 import MediaTransportSMB
 import MediaTransportWebDAV
+import MediaTransportSFTP
+import MediaTransportNFS
 import ProviderJellyfin
 import ProviderPlex
 import ProviderShare
@@ -1501,7 +1504,18 @@ public final class AppState {
             makeSMBAdapter(accountStore: accountStore),
             makeWebDAVAdapter(scheme: .http, accountStore: accountStore),
             makeWebDAVAdapter(scheme: .https, accountStore: accountStore),
+            makeSFTPAdapter(accountStore: accountStore),
+            makeNFSAdapter(),
+            makeFTPAdapter(scheme: .ftp, accountStore: accountStore),
+            makeFTPAdapter(scheme: .ftps, accountStore: accountStore),
         ]
+    }
+
+    /// The NFS adapter is credential-free (`AUTH_UNIX`, no password — the vault
+    /// stores `.noCredentials`), so unlike SMB/WebDAV it needs no per-account
+    /// credential provider. It is registered under the `nfs` scheme.
+    private static func makeNFSAdapter() -> NFSMediaTransportAdapter {
+        NFSMediaTransportAdapter()
     }
 
     private static func makeSMBAdapter(
@@ -1576,6 +1590,114 @@ public final class AppState {
             trustPolicy = .system
         }
         return WebDAVMediaTransportConfiguration(credential: credential, trustPolicy: trustPolicy)
+    }
+
+    /// Builds the SFTP adapter. Loads the envelope inside the provider so a
+    /// missing/incompatible credential surfaces as a `MediaTransportError` (never
+    /// a raw vault error, which `ShareTransportBrowser` would retry-loop on), and
+    /// maps the vault's mandatory `.sftp` host-key pin into the transport's
+    /// trust policy.
+    private static func makeSFTPAdapter(
+        accountStore: any AccountPersisting
+    ) -> SFTPMediaTransportAdapter {
+        SFTPMediaTransportAdapter { accountID, revision in
+            let envelope: MediaShareCredentialEnvelope
+            do {
+                envelope = try accountStore.mediaShareCredential(for: accountID, revision: revision)
+            } catch {
+                throw MediaTransportError.authentication(reason: "SFTP credential unavailable")
+            }
+            guard envelope.transport == .sftp else {
+                throw MediaTransportError.unsupportedCapability("non-SFTP credential")
+            }
+            return try Self.sftpConfiguration(from: envelope)
+        }
+    }
+
+    /// Maps a stored credential envelope to the transport-layer SFTP
+    /// configuration (credential + SSH host-key pin). The vault guarantees every
+    /// `.sftp` envelope carries a host-key SHA-256 pin, so its absence is a hard
+    /// error rather than a silent fall-through to unpinned trust.
+    nonisolated static func sftpConfiguration(
+        from envelope: MediaShareCredentialEnvelope
+    ) throws -> SFTPMediaTransportConfiguration {
+        let credential: SFTPMediaTransportCredential
+        switch envelope.authentication {
+        case let .password(username, password):
+            credential = .password(username: username, password: password)
+        case .generatedKey:
+            // The generated private key is resolved from the vault by key id and
+            // wired up by the credential/keygen ("Discovery UX") work; this
+            // headless transport ships password auth. Fail closed until then.
+            throw MediaTransportError.unsupportedCapability("SFTP key authentication")
+        case .anonymous, .bearer, .noCredentials:
+            throw MediaTransportError.unsupportedCapability("SFTP authentication")
+        }
+
+        guard let pin = envelope.trust.sshHostKeySHA256 else {
+            throw MediaTransportError.trust(reason: "SFTP host key pin missing")
+        }
+        return SFTPMediaTransportConfiguration(
+            credential: credential,
+            hostKeyPolicy: .pinned(sha256: Array(pin.bytes))
+        )
+    }
+
+    /// Builds an FTP adapter for one scheme (`ftp` plaintext / `ftps` implicit
+    /// TLS). The resolver registry routes on the account's real scheme, so both
+    /// are registered — mirroring the WebDAV http/https pair.
+    private static func makeFTPAdapter(
+        scheme: FTPScheme,
+        accountStore: any AccountPersisting
+    ) -> FTPMediaTransportAdapter {
+        FTPMediaTransportAdapter(scheme: scheme) { accountID, revision in
+            // Load the envelope inside the provider so a missing/incompatible
+            // credential surfaces as a MediaTransportError (never a raw vault
+            // error, which ShareTransportBrowser would treat as transient and
+            // retry-loop on).
+            let envelope: MediaShareCredentialEnvelope
+            do {
+                envelope = try accountStore.mediaShareCredential(for: accountID, revision: revision)
+            } catch {
+                throw MediaTransportError.authentication(reason: "FTP credential unavailable")
+            }
+            guard envelope.transport == .ftp else {
+                throw MediaTransportError.unsupportedCapability("non-FTP credential")
+            }
+            return try Self.ftpConfiguration(from: envelope, scheme: scheme)
+        }
+    }
+
+    /// Maps a stored credential envelope to the transport-layer FTP
+    /// configuration. Security is derived from the scheme: `ftps` → implicit
+    /// TLS, `ftp` → plaintext. (Explicit `AUTH TLS` has no distinct scheme and
+    /// is unsupported on tvOS, so it is never produced here.)
+    nonisolated static func ftpConfiguration(
+        from envelope: MediaShareCredentialEnvelope,
+        scheme: FTPScheme
+    ) throws -> FTPMediaTransportConfiguration {
+        let credential: FTPCredential
+        switch envelope.authentication {
+        case .anonymous:
+            credential = .anonymous
+        case let .password(username, password):
+            credential = .password(username: username, password: password)
+        case .bearer, .generatedKey, .noCredentials:
+            throw MediaTransportError.unsupportedCapability("FTP authentication")
+        }
+
+        let security: FTPSecurity = scheme == .ftps ? .implicitTLS : .plaintext
+        let trustPolicy: FTPTrustPolicy
+        if let pin = envelope.trust.tlsLeafCertificateSHA256 {
+            trustPolicy = .pinnedLeaf(sha256: Array(pin.bytes), revision: envelope.trust.revision)
+        } else {
+            trustPolicy = .system
+        }
+        return FTPMediaTransportConfiguration(
+            credential: credential,
+            security: security,
+            trustPolicy: trustPolicy
+        )
     }
 
     /// Registers every media-share transport adapter, keyed by the scheme its
@@ -2368,7 +2490,7 @@ public final class AppState {
             return
         }
         let trimmedName = displayName.trimmingCharacters(in: .whitespaces)
-        let name = trimmedName.isEmpty ? "\(host)/\(share)" : trimmedName
+        let name = trimmedName.isEmpty ? Self.defaultShareName(path: share, host: host, transport: .smb) : trimmedName
         let server = MediaServer(
             id: Self.mediaShareServerID(host: host, port: port, share: share, username: username),
             name: name,
@@ -2540,7 +2662,7 @@ public final class AppState {
             principal: auth.principal
         )
         let trimmedName = displayName.trimmingCharacters(in: .whitespaces)
-        let name = trimmedName.isEmpty ? "\(host)\(normalizedPath)" : trimmedName
+        let name = trimmedName.isEmpty ? Self.defaultShareName(path: normalizedPath, host: host, transport: .webDAV) : trimmedName
         let server = MediaServer(
             id: serverID,
             name: name,
@@ -2564,6 +2686,306 @@ public final class AppState {
             try accountStore.addMediaShare(account, credential: envelope, generatedPrivateKey: nil)
         } catch {
             apply(.authenticationFailed(.unknown("Couldn’t save this WebDAV share")))
+            return
+        }
+        finalizeAddedAccount(
+            session: session,
+            account: account,
+            previousAccount: previousAccount,
+            isFirstRun: isFirstRun
+        )
+    }
+
+    // MARK: - NFS / SFTP / FTP media shares (unified onboarding)
+
+    /// The default share name when the user leaves the nickname blank: the last
+    /// meaningful path component (the folder/share they picked) with the transport
+    /// label appended, e.g. "Media (SFTP)" or "appledemo (WebDAV)". Far more
+    /// readable than the raw `host/path`, and the transport suffix disambiguates
+    /// the same folder added over two protocols. Falls back to the host when the
+    /// path is the root.
+    static func defaultShareName(
+        path: String,
+        host: String,
+        transport: MediaShareTransportKind
+    ) -> String {
+        let lastComponent = path
+            .split(separator: "/", omittingEmptySubsequences: true)
+            .last
+            .map(String.init)
+        let base = (lastComponent?.isEmpty == false) ? lastComponent! : host
+        return "\(base) (\(transport.badgeLabel))"
+    }
+
+    /// Stable identity for a filesystem media share whose paths are case-sensitive
+    /// (NFS/SFTP/FTP run over POSIX servers, unlike SMB). Scheme, host (folded —
+    /// DNS is case-insensitive), explicit port, exact-case path, and principal all
+    /// participate so `sftp://h/a` and `sftp://h/b`, or two different users on one
+    /// server, are distinct accounts, while re-adding the same share updates it in
+    /// place. No default-port folding: NFS/SFTP/FTP have no http-style implicit
+    /// default that changes the origin.
+    static func mediaShareFilesystemID(
+        scheme: String,
+        host: String,
+        port: Int?,
+        path: String,
+        principal: String
+    ) -> String {
+        let normalizedScheme = scheme.lowercased()
+        let portKey = port.map { ":\($0)" } ?? ""
+        var normalizedPath = path.isEmpty ? "/" : path
+        if normalizedPath.count > 1, normalizedPath.hasSuffix("/") {
+            normalizedPath.removeLast()
+        }
+        return "share:\(normalizedScheme)://\(host.lowercased())\(portKey)\(normalizedPath)#\(principal)"
+    }
+
+    /// Adds (or updates in place) an NFS export as a media share. NFS is
+    /// credential-free (`AUTH_UNIX`, no password), so the vault stores
+    /// `.noCredentials`; the export path is the share root.
+    public func didConfigureNFSShare(
+        host: String,
+        port: Int?,
+        exportPath: String,
+        displayName: String
+    ) {
+        let trimmedHost = host.trimmingCharacters(in: .whitespaces)
+        guard !trimmedHost.isEmpty else {
+            apply(.authenticationFailed(.unknown("Invalid NFS address")))
+            return
+        }
+        var comps = URLComponents()
+        comps.scheme = "nfs"
+        comps.host = ShareProvider.bracketedHostIfIPv6(trimmedHost)
+        comps.port = port
+        let normalizedPath = Self.normalizedFilesystemPath(exportPath)
+        comps.path = normalizedPath
+        guard let baseURL = comps.url else {
+            apply(.authenticationFailed(.unknown("Invalid NFS address")))
+            return
+        }
+        let envelope: MediaShareCredentialEnvelope
+        do {
+            envelope = try MediaShareCredentialEnvelope(
+                transport: .nfs,
+                authentication: .noCredentials
+            )
+        } catch {
+            apply(.authenticationFailed(.unknown("Invalid NFS share")))
+            return
+        }
+        let serverID = Self.mediaShareFilesystemID(
+            scheme: "nfs",
+            host: trimmedHost,
+            port: port,
+            path: normalizedPath,
+            principal: "anon"
+        )
+        persistMediaShare(
+            serverID: serverID,
+            baseURL: baseURL,
+            envelope: envelope,
+            userID: "anon",
+            userName: "",
+            defaultName: Self.defaultShareName(path: normalizedPath, host: trimmedHost, transport: .nfs),
+            displayName: displayName,
+            invalidMessage: "Couldn’t save this NFS share"
+        )
+    }
+
+    /// Adds (or updates in place) an SFTP media share. Password auth (SSH requires
+    /// a username); the vault mandates a host-key pin, captured during onboarding
+    /// and passed here.
+    public func didConfigureSFTPShare(
+        host: String,
+        port: Int?,
+        path: String,
+        username: String,
+        password: String,
+        hostKeyPin: SHA256Fingerprint,
+        displayName: String
+    ) {
+        let trimmedHost = host.trimmingCharacters(in: .whitespaces)
+        let trimmedUser = username.trimmingCharacters(in: .whitespaces)
+        guard !trimmedHost.isEmpty, !trimmedUser.isEmpty else {
+            apply(.authenticationFailed(.unknown("SFTP needs a host and username")))
+            return
+        }
+        var comps = URLComponents()
+        comps.scheme = "sftp"
+        comps.host = ShareProvider.bracketedHostIfIPv6(trimmedHost)
+        comps.port = port
+        let normalizedPath = Self.normalizedFilesystemPath(path)
+        comps.path = normalizedPath
+        guard let baseURL = comps.url else {
+            apply(.authenticationFailed(.unknown("Invalid SFTP address")))
+            return
+        }
+        let envelope: MediaShareCredentialEnvelope
+        do {
+            let trust = MediaShareTrustMaterial(sshHostKeySHA256: hostKeyPin)
+            envelope = try MediaShareCredentialEnvelope(
+                transport: .sftp,
+                authentication: .password(username: trimmedUser, password: password),
+                trust: trust
+            )
+        } catch {
+            apply(.authenticationFailed(.unknown("Invalid SFTP credentials")))
+            return
+        }
+        let serverID = Self.mediaShareFilesystemID(
+            scheme: "sftp",
+            host: trimmedHost,
+            port: port,
+            path: normalizedPath,
+            principal: trimmedUser
+        )
+        persistMediaShare(
+            serverID: serverID,
+            baseURL: baseURL,
+            envelope: envelope,
+            userID: trimmedUser,
+            userName: trimmedUser,
+            defaultName: Self.defaultShareName(path: normalizedPath, host: trimmedHost, transport: .sftp),
+            displayName: displayName,
+            invalidMessage: "Couldn’t save this SFTP share"
+        )
+    }
+
+    /// How an FTP share authenticates, as the onboarding UI collects it. FTP is
+    /// plaintext by nature (or implicit TLS via the `ftps` scheme); a TLS leaf pin
+    /// is only meaningful over `ftps`.
+    public enum FTPShareAuth: Equatable, Sendable {
+        case anonymous
+        case password(username: String, password: String)
+
+        fileprivate var principal: String {
+            switch self {
+            case .anonymous: return "anon"
+            case .password(let username, _):
+                // POSIX usernames are case-sensitive, so distinct server users
+                // (`Admin` vs `admin`) must stay distinct accounts — preserve
+                // case, matching the WebDAV principal convention.
+                let trimmed = username.trimmingCharacters(in: .whitespaces)
+                return trimmed.isEmpty ? "anon" : trimmed
+            }
+        }
+
+        fileprivate var accountUserName: String {
+            switch self {
+            case .anonymous: return ""
+            case .password(let username, _): return username.trimmingCharacters(in: .whitespaces)
+            }
+        }
+    }
+
+    /// Adds (or updates in place) an FTP/FTPS media share. `baseURL` carries the
+    /// real scheme (`ftp` plaintext / `ftps` implicit TLS); a TLS pin requires
+    /// `ftps`.
+    public func didConfigureFTPShare(
+        baseURL: URL,
+        auth: FTPShareAuth,
+        trustPin: SHA256Fingerprint? = nil,
+        displayName: String
+    ) {
+        guard let components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false),
+              let scheme = components.scheme?.lowercased(),
+              scheme == "ftp" || scheme == "ftps",
+              let host = components.host, !host.isEmpty,
+              components.user == nil, components.password == nil,
+              components.query == nil, components.fragment == nil else {
+            apply(.authenticationFailed(.unknown("Invalid FTP address")))
+            return
+        }
+        if trustPin != nil, scheme != "ftps" {
+            apply(.authenticationFailed(.unknown("A certificate pin requires FTPS")))
+            return
+        }
+        let envelope: MediaShareCredentialEnvelope
+        do {
+            let authentication: MediaShareAuthentication
+            switch auth {
+            case .anonymous:
+                authentication = .anonymous
+            case let .password(username, password):
+                authentication = .password(
+                    username: username.trimmingCharacters(in: .whitespaces),
+                    password: password
+                )
+            }
+            let trust = MediaShareTrustMaterial(tlsLeafCertificateSHA256: trustPin)
+            envelope = try MediaShareCredentialEnvelope(
+                transport: .ftp,
+                authentication: authentication,
+                trust: trust
+            )
+        } catch {
+            apply(.authenticationFailed(.unknown("Invalid FTP credentials")))
+            return
+        }
+        let normalizedPath = Self.normalizedFilesystemPath(components.path)
+        let serverID = Self.mediaShareFilesystemID(
+            scheme: scheme,
+            host: host,
+            port: components.port,
+            path: normalizedPath,
+            principal: auth.principal
+        )
+        persistMediaShare(
+            serverID: serverID,
+            baseURL: baseURL,
+            envelope: envelope,
+            userID: auth.accountUserName.isEmpty ? "anon" : auth.accountUserName,
+            userName: auth.accountUserName,
+            defaultName: Self.defaultShareName(path: normalizedPath, host: host, transport: .ftp),
+            displayName: displayName,
+            invalidMessage: "Couldn’t save this FTP share"
+        )
+    }
+
+    private static func normalizedFilesystemPath(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespaces)
+        if trimmed.isEmpty { return "/" }
+        return trimmed.hasPrefix("/") ? trimmed : "/" + trimmed
+    }
+
+    /// Shared persistence tail for the credential-envelope transports (NFS/SFTP/
+    /// FTP): build the `MediaServer`/`Account`, store the envelope in the vault,
+    /// and run the common onboarding finalize — mirroring `didConfigureWebDAVShare`
+    /// without repeating it per transport.
+    private func persistMediaShare(
+        serverID: String,
+        baseURL: URL,
+        envelope: MediaShareCredentialEnvelope,
+        userID: String,
+        userName: String,
+        defaultName: String,
+        displayName: String,
+        invalidMessage: String
+    ) {
+        let trimmedName = displayName.trimmingCharacters(in: .whitespaces)
+        let name = trimmedName.isEmpty ? defaultName : trimmedName
+        let server = MediaServer(
+            id: serverID,
+            name: name,
+            baseURL: baseURL,
+            provider: .mediaShare
+        )
+        let isFirstRun = accounts.isEmpty && !profilesModel.firstRunProfileSetupComplete
+        let session = UserSession(
+            server: server,
+            userID: userID,
+            userName: userName,
+            deviceID: accountStore.deviceID(),
+            accessToken: ""
+        )
+        let account = Account(id: server.id, from: session)
+        let previousAccount = accounts.first { $0.id == account.id }
+        apply(.serverSelected(server))
+        do {
+            try accountStore.addMediaShare(account, credential: envelope, generatedPrivateKey: nil)
+        } catch {
+            apply(.authenticationFailed(.unknown(invalidMessage)))
             return
         }
         finalizeAddedAccount(

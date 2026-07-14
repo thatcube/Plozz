@@ -47,6 +47,9 @@ let package = Package(
         .library(name: "MediaTransportHTTP", targets: ["MediaTransportHTTP"]),
         .library(name: "MediaTransportSMB", targets: ["MediaTransportSMB"]),
         .library(name: "MediaTransportWebDAV", targets: ["MediaTransportWebDAV"]),
+        .library(name: "MediaTransportSFTP", targets: ["MediaTransportSFTP"]),
+        .library(name: "TransportNFS", targets: ["TransportNFS"]),
+        .library(name: "MediaTransportNFS", targets: ["MediaTransportNFS"]),
         .library(name: "AppShell", targets: ["AppShell"])
     ],
     dependencies: [
@@ -114,6 +117,30 @@ let package = Package(
         //   .package(url: "https://github.com/kishikawakatsumi/SMBClient", from: "0.3.1"),
         // once that lands.
         .package(url: "https://github.com/thatcube/SMBClient.git", revision: "d8baadc1a4f1287ebf1e8b4702ca38bd6e237fef"),
+
+        // swift-nio-ssh — Apple's pure-Swift SSH protocol implementation
+        // (Apache-2.0), used ONLY by the isolated **MediaTransportSFTP** adapter.
+        // It declares tvOS support directly and rides Apple's own swift-nio +
+        // swift-crypto (no third-party fork), so the security-critical SSH/host-key
+        // layer stays on a maintained upstream. It provides the SSH transport only
+        // — MediaTransportSFTP layers a thin, read-only SFTP v3 subsystem client on
+        // top (INIT/REALPATH/OPENDIR/OPEN/FSTAT/READ/CLOSE) behind the neutral
+        // MediaTransportCore contracts, mirroring MediaTransportSMB's shape. This is
+        // the deliberate alternative to Citadel, whose main rides a stale personal
+        // fork-of-a-fork of swift-nio-ssh for that same credential/host-key path.
+        .package(url: "https://github.com/apple/swift-nio-ssh.git", from: "0.11.0"),
+
+        // swift-nio — declared directly so MediaTransportSFTP can import the NIO
+        // core products (NIOCore/NIOPosix/NIOFoundationCompat/NIOConcurrencyHelpers)
+        // it needs to drive swift-nio-ssh's channels. Already resolved transitively
+        // via swift-nio-ssh; SwiftPM unifies the version.
+        .package(url: "https://github.com/apple/swift-nio.git", from: "2.81.0"),
+
+        // swift-crypto — declared directly for MediaTransportSFTP's SSH host-key
+        // SHA-256 fingerprinting (and, in tests, ed25519 key material for the
+        // pin). Apple-maintained, tvOS-supported, already resolved transitively
+        // via swift-nio-ssh; SwiftPM unifies the version.
+        .package(url: "https://github.com/apple/swift-crypto.git", "3.0.0" ..< "5.0.0"),
     ],
     targets: [
         // MARK: Core
@@ -347,6 +374,78 @@ let package = Package(
             swiftSettings: [.unsafeFlags(["-strict-concurrency=complete"])]
         ),
 
+        // MARK: SFTP transport
+        //
+        // Layers a thin, read-only SFTP v3 subsystem client on top of Apple's
+        // swift-nio-ssh (SSH transport only) and composes it into a
+        // MediaTransportCore adapter, mirroring MediaTransportSMB's shape (a
+        // stub-testable backend seam, cursor-safe random-access byte source). No
+        // SSH/crypto logic of its own — swift-nio-ssh owns key exchange, ciphers,
+        // and host-key verification; this module only frames the SFTP messages we
+        // need and wires them to the protocol-neutral filesystem/byte-source
+        // contracts.
+        .target(
+            name: "MediaTransportSFTP",
+            dependencies: [
+                "CoreModels",
+                "MediaTransportCore",
+                .product(name: "NIOSSH", package: "swift-nio-ssh"),
+                .product(name: "NIOCore", package: "swift-nio"),
+                .product(name: "NIOPosix", package: "swift-nio"),
+                .product(name: "NIOConcurrencyHelpers", package: "swift-nio"),
+                .product(name: "NIOFoundationCompat", package: "swift-nio"),
+                .product(name: "Crypto", package: "swift-crypto"),
+            ],
+            swiftSettings: [.unsafeFlags(["-strict-concurrency=complete"])]
+        ),
+
+        // MARK: NFS transport
+        //
+        // `TransportNFS` is a self-contained, dependency-free pure-Swift NFSv3
+        // client (XDR + ONC-RPC + portmap + MOUNT + read-only NFSv3 procedures)
+        // over NWConnection — the NFS analogue of `SMBClient`, but written
+        // in-house because no shippable Swift NFS library exists (libnfs is LGPL,
+        // a compliance risk for a closed-source App Store app). Foundation +
+        // Network only; no CoreModels/MediaTransportCore dependency so the whole
+        // protocol layer is unit-testable in isolation.
+        .target(
+            name: "TransportNFS",
+            swiftSettings: [.unsafeFlags(["-strict-concurrency=complete"])]
+        ),
+
+        // MARK: MediaTransportNFS adapter
+        //
+        // Composes the TransportNFS client into a MediaTransportCore adapter,
+        // mirroring MediaTransportSMB/MediaTransportWebDAV exactly. The NFS
+        // backend sits behind a protocol seam so the adapter/session/filesystem/
+        // byte-source can be proven hermetically with a stubbed backend.
+        .target(
+            name: "MediaTransportNFS",
+            dependencies: [
+                "CoreModels",
+                "MediaTransportCore",
+                "TransportNFS",
+            ],
+            swiftSettings: [.unsafeFlags(["-strict-concurrency=complete"])]
+        ),
+
+        // MARK: FTP/FTPS transport
+        //
+        // A minimal FTP protocol engine over Network.framework (NWConnection),
+        // composed into the protocol-neutral MediaTransportCore adapter shape —
+        // mirroring MediaTransportSMB/WebDAV. Supports plain FTP + implicit FTPS
+        // (TLS from connect); explicit FTPS (AUTH TLS/StartTLS) is unavailable on
+        // tvOS (Network.framework has no StartTLS) and is rejected at connect.
+        // Random-access playback reads use REST (restart offset) + RETR.
+        .target(
+            name: "MediaTransportFTP",
+            dependencies: [
+                "CoreModels",
+                "MediaTransportCore",
+            ],
+            swiftSettings: [.unsafeFlags(["-strict-concurrency=complete"])]
+        ),
+
         // MARK: AetherEngine integration (native HLS-fMP4 remux engine)
         //
         // Wraps AetherEngine (the upstream media-player library) behind Plozz's
@@ -380,6 +479,9 @@ let package = Package(
                 "MediaTransportHTTP",
                 "MediaTransportSMB",
                 "MediaTransportWebDAV",
+                "MediaTransportSFTP",
+                "MediaTransportNFS",
+                "MediaTransportFTP",
                 "MetadataKit",
                 "ProviderJellyfin",
                 "ProviderPlex",
@@ -410,7 +512,7 @@ let package = Package(
         ),
         .testTarget(
             name: "AppShellTests",
-            dependencies: ["AppShell", "CoreModels"]
+            dependencies: ["AppShell", "CoreModels", "MediaTransportSFTP", "MediaTransportFTP", "MediaTransportNFS"]
         ),
         .testTarget(
             name: "CoreUITests",
@@ -510,6 +612,43 @@ let package = Package(
                 "MediaTransportCore",
                 "MediaTransportHTTP",
                 "MediaTransportWebDAV",
+            ],
+            swiftSettings: [.unsafeFlags(["-strict-concurrency=complete"])]
+        ),
+        .testTarget(
+            name: "MediaTransportSFTPTests",
+            dependencies: [
+                "CoreModels",
+                "MediaTransportCore",
+                "MediaTransportSFTP",
+                .product(name: "NIOSSH", package: "swift-nio-ssh"),
+                .product(name: "NIOCore", package: "swift-nio"),
+                .product(name: "NIOEmbedded", package: "swift-nio"),
+                .product(name: "Crypto", package: "swift-crypto"),
+            ],
+            swiftSettings: [.unsafeFlags(["-strict-concurrency=complete"])]
+        ),
+        .testTarget(
+            name: "TransportNFSTests",
+            dependencies: ["TransportNFS"],
+            swiftSettings: [.unsafeFlags(["-strict-concurrency=complete"])]
+        ),
+        .testTarget(
+            name: "MediaTransportNFSTests",
+            dependencies: [
+                "CoreModels",
+                "MediaTransportCore",
+                "MediaTransportNFS",
+                "TransportNFS",
+            ],
+            swiftSettings: [.unsafeFlags(["-strict-concurrency=complete"])]
+        ),
+        .testTarget(
+            name: "MediaTransportFTPTests",
+            dependencies: [
+                "CoreModels",
+                "MediaTransportCore",
+                "MediaTransportFTP",
             ],
             swiftSettings: [.unsafeFlags(["-strict-concurrency=complete"])]
         ),

@@ -81,13 +81,15 @@ final class ServerGroupingTests: XCTestCase {
         XCTAssertEqual(MediaShareTransportKind(mediaShareScheme: "https"), .webDAV)
         XCTAssertEqual(MediaShareTransportKind(mediaShareScheme: "nfs"), .nfs)
         XCTAssertEqual(MediaShareTransportKind(mediaShareScheme: "sftp"), .sftp)
-        XCTAssertNil(MediaShareTransportKind(mediaShareScheme: "ftp"))
+        XCTAssertEqual(MediaShareTransportKind(mediaShareScheme: "ftp"), .ftp)
+        XCTAssertEqual(MediaShareTransportKind(mediaShareScheme: "ftps"), .ftp)
         XCTAssertNil(MediaShareTransportKind(mediaShareScheme: nil))
 
         XCTAssertEqual(MediaShareTransportKind.smb.badgeLabel, "SMB")
         XCTAssertEqual(MediaShareTransportKind.webDAV.badgeLabel, "WebDAV")
         XCTAssertEqual(MediaShareTransportKind.nfs.badgeLabel, "NFS")
         XCTAssertEqual(MediaShareTransportKind.sftp.badgeLabel, "SFTP")
+        XCTAssertEqual(MediaShareTransportKind.ftp.badgeLabel, "FTP")
     }
 }
 #endif

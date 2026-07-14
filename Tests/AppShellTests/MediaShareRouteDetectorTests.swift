@@ -34,8 +34,15 @@ final class MediaShareRouteDetectorTests: XCTestCase {
 
     func testUnknownSchemeIsInvalid() async {
         // A scheme no claimant owns must not be silently probed/guessed.
-        let result = await detect("ftp://nas.local/pub")
+        let result = await detect("gopher://nas.local/pub")
         XCTAssertEqual(result, .failure(.invalidAddress))
+    }
+
+    func testExplicitFTPSchemeRoutesToFTP() async {
+        let route = try? await detect("ftp://nas.local/pub").get()
+        XCTAssertEqual(route, .ftp(baseURL: URL(string: "ftp://nas.local/pub")!, insecure: true))
+        let secure = try? await detect("ftps://nas.local/pub").get()
+        XCTAssertEqual(secure, .ftp(baseURL: URL(string: "ftps://nas.local/pub")!, insecure: false))
     }
 
     func testUppercaseSchemesAreHonored() async {
@@ -52,8 +59,14 @@ final class MediaShareRouteDetectorTests: XCTestCase {
     }
 
     func testForeignSchemeWith445IsInvalidNotSMB() async {
-        let result = await detect("ftp://nas.local:445")
+        let result = await detect("gopher://nas.local:445")
         XCTAssertEqual(result, .failure(.invalidAddress))
+    }
+
+    func testFTPWellKnownPort21RoutesToFTP() async {
+        // Port 21 with no scheme is decisive for FTP.
+        let route = try? await detect("nas.local:21").get()
+        XCTAssertEqual(route, .ftp(baseURL: URL(string: "ftp://nas.local:21")!, insecure: true))
     }
 
     func testSchemeWithEmptyHostIsInvalid() async {
@@ -68,6 +81,29 @@ final class MediaShareRouteDetectorTests: XCTestCase {
     func testExplicit445PortRoutesToSMB() async {
         let route = try? await detect("nas.local:445").get()
         XCTAssertEqual(route, .smb(host: "nas.local", port: 445))
+    }
+
+    // MARK: - NFS
+
+    func testExplicitNFSSchemeRoutesToNFS() async {
+        let route = try? await detect("nfs://nas.local/volume1/media").get()
+        XCTAssertEqual(route, .nfs(host: "nas.local", port: nil, exportPath: "/volume1/media"))
+    }
+
+    func testExplicitNFSSchemeWithPortRoutesToNFS() async {
+        let route = try? await detect("nfs://nas.local:2049/export").get()
+        XCTAssertEqual(route, .nfs(host: "nas.local", port: 2049, exportPath: "/export"))
+    }
+
+    func testBarePort2049RoutesToNFS() async {
+        let route = try? await detect("nas.local:2049").get()
+        XCTAssertEqual(route, .nfs(host: "nas.local", port: 2049, exportPath: ""))
+    }
+
+    func testNFSSchemeWinsOverProbeWithoutNetwork() async {
+        // A typed nfs:// address must never trigger a WebDAV network probe.
+        let route = try? await detect("nfs://nas.local/media", httpServersAt: ["https://nas.local/media"]).get()
+        XCTAssertEqual(route, .nfs(host: "nas.local", port: nil, exportPath: "/media"))
     }
 
     // MARK: - Probe-based detection (the real fix)

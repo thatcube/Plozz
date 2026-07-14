@@ -500,6 +500,34 @@ private struct OnboardingPageContent: View {
                         displayName: config.displayName
                     )
                 },
+                onMediaShareConfigured: { result in
+                    switch result {
+                    case let .nfs(config):
+                        appState.didConfigureNFSShare(
+                            host: config.host,
+                            port: config.port,
+                            exportPath: config.exportPath,
+                            displayName: config.displayName
+                        )
+                    case let .sftp(config):
+                        appState.didConfigureSFTPShare(
+                            host: config.host,
+                            port: config.port,
+                            path: config.path,
+                            username: config.username,
+                            password: config.password,
+                            hostKeyPin: config.hostKeyPin,
+                            displayName: config.displayName
+                        )
+                    case let .ftp(config):
+                        appState.didConfigureFTPShare(
+                            baseURL: config.baseURL,
+                            auth: config.auth,
+                            trustPin: config.trustPin,
+                            displayName: config.displayName
+                        )
+                    }
+                },
                 onCancel: { appState.cancelAuthentication() }
             )
 

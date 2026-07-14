@@ -95,6 +95,31 @@ public struct MediaTransportSessionKey: Hashable, Sendable, CustomStringConverti
 public protocol MediaTransportConnection: AnyObject, Sendable {
     var key: MediaTransportSessionKey { get }
     func shutdown() async
+
+    /// The session's best knowledge of whether its underlying connection is
+    /// still usable — ideally WITHOUT a network round-trip.
+    ///
+    /// The resolver registry caches one session per key and reuses it while it
+    /// sits idle (no active leases). For stateful-connection transports
+    /// (SMB / SFTP / NFS) a server or NAT idle-timeout can silently drop that
+    /// connection during a long pause (e.g. a paused movie); the next lease
+    /// would otherwise hand back a DEAD session that never reconnects and whose
+    /// socket/event-loop leaks until `retire`. Such transports override this to
+    /// report their observed connection state — ideally a cheap cached liveness
+    /// flag updated by their connection-closed handler — so the registry can
+    /// evict + reconnect on the next lease.
+    ///
+    /// Stateless transports (WebDAV/HTTP) reconnect per request and keep the
+    /// default `true`. The registry only calls this on an IDLE session (no
+    /// active leases), so an in-use session is never torn down under its
+    /// consumer.
+    func isHealthy() async -> Bool
+}
+
+public extension MediaTransportConnection {
+    /// Default: assume healthy. Stateless transports keep this; stateful ones
+    /// override to report a dropped connection so the registry evicts + reconnects.
+    func isHealthy() async -> Bool { true }
 }
 
 public protocol MediaTransportSession: MediaTransportConnection {

@@ -23,6 +23,7 @@ public enum MediaShareTransportKind: String, Codable, CaseIterable, Hashable, Se
     case webDAV
     case nfs
     case sftp
+    case ftp
 
     /// Maps a media-share base-URL scheme to its transport kind. `nil` for a
     /// scheme that isn't a known file-share transport. Single source of truth so
@@ -33,6 +34,7 @@ public enum MediaShareTransportKind: String, Codable, CaseIterable, Hashable, Se
         case "http", "https": self = .webDAV
         case "nfs": self = .nfs
         case "sftp": self = .sftp
+        case "ftp", "ftps": self = .ftp
         default: return nil
         }
     }
@@ -46,6 +48,7 @@ public enum MediaShareTransportKind: String, Codable, CaseIterable, Hashable, Se
         case .webDAV: return "WebDAV"
         case .nfs: return "NFS"
         case .sftp: return "SFTP"
+        case .ftp: return "FTP"
         }
     }
 }
@@ -111,12 +114,37 @@ public struct SFTPTransportOptions: Hashable, Sendable {
     }
 }
 
+public struct FTPTransportOptions: Hashable, Sendable {
+    /// How the FTP control + data channels are secured. FTP has no first-class
+    /// URL-scheme distinction for explicit vs implicit TLS, so the security
+    /// policy is carried here rather than inferred from the scheme alone.
+    public enum Security: String, Hashable, Sendable {
+        /// FTPS explicit: plaintext connect on the FTP port, then upgrade with
+        /// `AUTH TLS` (`PBSZ 0` + `PROT P`). The modern default (RFC 4217).
+        case explicitTLS
+        /// FTPS implicit: TLS from the first byte on the implicit-FTPS port
+        /// (conventionally 990). Legacy but still deployed.
+        case implicitTLS
+        /// Plain FTP with no transport encryption. Credentials travel in the
+        /// clear — surfaced to the user with an insecure-credential warning,
+        /// mirroring WebDAV's `anonymousHTTP`.
+        case plaintext
+    }
+
+    public let security: Security
+
+    public init(security: Security = .explicitTLS) {
+        self.security = security
+    }
+}
+
 /// Typed, non-secret connection policy for a media-share endpoint.
 public enum MediaShareTransportOptions: Hashable, Sendable {
     case smb(SMBTransportOptions)
     case webDAV(WebDAVTransportOptions)
     case nfs(NFSTransportOptions)
     case sftp(SFTPTransportOptions)
+    case ftp(FTPTransportOptions)
 
     public var transportKind: MediaShareTransportKind {
         switch self {
@@ -124,6 +152,7 @@ public enum MediaShareTransportOptions: Hashable, Sendable {
         case .webDAV: return .webDAV
         case .nfs: return .nfs
         case .sftp: return .sftp
+        case .ftp: return .ftp
         }
     }
 }

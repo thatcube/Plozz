@@ -11,6 +11,7 @@ import MediaTransportHTTP
 import MediaTransportSMB
 import MediaTransportWebDAV
 import MediaTransportSFTP
+import MediaTransportNFS
 import ProviderJellyfin
 import ProviderPlex
 import ProviderShare
@@ -1503,7 +1504,15 @@ public final class AppState {
             makeWebDAVAdapter(scheme: .http, accountStore: accountStore),
             makeWebDAVAdapter(scheme: .https, accountStore: accountStore),
             makeSFTPAdapter(accountStore: accountStore),
+            makeNFSAdapter(),
         ]
+    }
+
+    /// The NFS adapter is credential-free (`AUTH_UNIX`, no password — the vault
+    /// stores `.noCredentials`), so unlike SMB/WebDAV it needs no per-account
+    /// credential provider. It is registered under the `nfs` scheme.
+    private static func makeNFSAdapter() -> NFSMediaTransportAdapter {
+        NFSMediaTransportAdapter()
     }
 
     private static func makeSMBAdapter(

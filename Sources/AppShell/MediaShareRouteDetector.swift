@@ -21,6 +21,11 @@ enum MediaShareRoute: Equatable, Sendable {
     /// approval flow is owned by the unified add-share ("Discovery UX") work;
     /// detection only needs to recognize the endpoint here.
     case sftp(host: String, port: Int?)
+    /// An NFS export: host + optional port + the export/mount path the user
+    /// typed (`nfs://host/volume1/media` → `/volume1/media`). The path may be
+    /// empty when only a bare host or `host:2049` was entered — onboarding then
+    /// asks for the full export path (there is no NFS export browser yet).
+    case nfs(host: String, port: Int?, exportPath: String)
 }
 
 enum MediaShareRouteError: Error, Equatable, Sendable {
@@ -106,11 +111,11 @@ struct MediaShareRouteDetector: Sendable {
         self.fallback = fallback
     }
 
-    /// Convenience for the shipping set (SMB + WebDAV), assuming SMB for a bare
-    /// NAS host that answers no HTTP. `probe` is injectable for tests.
+    /// Convenience for the shipping set (SMB + NFS + WebDAV), assuming SMB for a
+    /// bare NAS host that answers no HTTP. `probe` is injectable for tests.
     init(probe: any WebDAVReachabilityProbing = WebDAVReachabilityProbe()) {
         self.init(
-            claimants: [SMBClaimant(), SFTPClaimant(), WebDAVClaimant(probe: probe)],
+            claimants: [SMBClaimant(), SFTPClaimant(), NFSClaimant(), WebDAVClaimant(probe: probe)],
             fallback: { .smb(host: $0.host, port: $0.port) }
         )
     }
@@ -228,6 +233,29 @@ struct SFTPClaimant: TransportClaimant {
 
     func probe(_ address: ParsedShareAddress) async -> MediaShareRoute? { nil }
 }
+
+/// NFS claims `nfs://` and the well-known nfsd port `2049`. Like SMB it never
+/// speaks HTTP, so it has no network probe — an un-schemed bare host is left to
+/// SMB's terminal fallback. The typed path is carried through as the export.
+struct NFSClaimant: TransportClaimant {
+    var transportName: String { "NFS" }
+
+    func decisiveRoute(for address: ParsedShareAddress) -> MediaShareRoute? {
+        if address.scheme == "nfs" {
+            return .nfs(host: address.host, port: address.port, exportPath: address.path)
+        }
+        if address.scheme == nil, address.port == 2049 {
+            return .nfs(host: address.host, port: address.port, exportPath: address.path)
+        }
+        return nil
+    }
+
+    func probe(_ address: ParsedShareAddress) async -> MediaShareRoute? { nil }
+}
+
+/// WebDAV claims explicit `http(s)://`, and otherwise probes over HTTP (https
+/// before http). It has NO decisive port: `80`/`443`/etc. are ambiguous (a NAS
+/// web-admin page lives there too), so an un-schemed address is always probed.
 struct WebDAVClaimant: TransportClaimant {
     let probe: any WebDAVReachabilityProbing
 

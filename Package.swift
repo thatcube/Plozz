@@ -48,6 +48,8 @@ let package = Package(
         .library(name: "MediaTransportSMB", targets: ["MediaTransportSMB"]),
         .library(name: "MediaTransportWebDAV", targets: ["MediaTransportWebDAV"]),
         .library(name: "MediaTransportSFTP", targets: ["MediaTransportSFTP"]),
+        .library(name: "TransportNFS", targets: ["TransportNFS"]),
+        .library(name: "MediaTransportNFS", targets: ["MediaTransportNFS"]),
         .library(name: "AppShell", targets: ["AppShell"])
     ],
     dependencies: [
@@ -397,6 +399,36 @@ let package = Package(
             swiftSettings: [.unsafeFlags(["-strict-concurrency=complete"])]
         ),
 
+        // MARK: NFS transport
+        //
+        // `TransportNFS` is a self-contained, dependency-free pure-Swift NFSv3
+        // client (XDR + ONC-RPC + portmap + MOUNT + read-only NFSv3 procedures)
+        // over NWConnection — the NFS analogue of `SMBClient`, but written
+        // in-house because no shippable Swift NFS library exists (libnfs is LGPL,
+        // a compliance risk for a closed-source App Store app). Foundation +
+        // Network only; no CoreModels/MediaTransportCore dependency so the whole
+        // protocol layer is unit-testable in isolation.
+        .target(
+            name: "TransportNFS",
+            swiftSettings: [.unsafeFlags(["-strict-concurrency=complete"])]
+        ),
+
+        // MARK: MediaTransportNFS adapter
+        //
+        // Composes the TransportNFS client into a MediaTransportCore adapter,
+        // mirroring MediaTransportSMB/MediaTransportWebDAV exactly. The NFS
+        // backend sits behind a protocol seam so the adapter/session/filesystem/
+        // byte-source can be proven hermetically with a stubbed backend.
+        .target(
+            name: "MediaTransportNFS",
+            dependencies: [
+                "CoreModels",
+                "MediaTransportCore",
+                "TransportNFS",
+            ],
+            swiftSettings: [.unsafeFlags(["-strict-concurrency=complete"])]
+        ),
+
         // MARK: AetherEngine integration (native HLS-fMP4 remux engine)
         //
         // Wraps AetherEngine (the upstream media-player library) behind Plozz's
@@ -431,6 +463,7 @@ let package = Package(
                 "MediaTransportSMB",
                 "MediaTransportWebDAV",
                 "MediaTransportSFTP",
+                "MediaTransportNFS",
                 "MetadataKit",
                 "ProviderJellyfin",
                 "ProviderPlex",
@@ -574,6 +607,21 @@ let package = Package(
                 .product(name: "NIOCore", package: "swift-nio"),
                 .product(name: "NIOEmbedded", package: "swift-nio"),
                 .product(name: "Crypto", package: "swift-crypto"),
+            ],
+            swiftSettings: [.unsafeFlags(["-strict-concurrency=complete"])]
+        ),
+        .testTarget(
+            name: "TransportNFSTests",
+            dependencies: ["TransportNFS"],
+            swiftSettings: [.unsafeFlags(["-strict-concurrency=complete"])]
+        ),
+        .testTarget(
+            name: "MediaTransportNFSTests",
+            dependencies: [
+                "CoreModels",
+                "MediaTransportCore",
+                "MediaTransportNFS",
+                "TransportNFS",
             ],
             swiftSettings: [.unsafeFlags(["-strict-concurrency=complete"])]
         ),

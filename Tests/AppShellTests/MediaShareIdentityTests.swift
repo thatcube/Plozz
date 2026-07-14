@@ -52,6 +52,30 @@ final class MediaShareIdentityTests: XCTestCase {
         )
     }
 
+    // MARK: - Default share name
+
+    func testDefaultShareNameUsesLastComponentAndTransport() {
+        XCTAssertEqual(
+            AppState.defaultShareName(path: "/mnt/user/Media", host: "192.168.1.5", transport: .sftp),
+            "Media (SFTP)"
+        )
+        XCTAssertEqual(
+            AppState.defaultShareName(path: "/appledemo", host: "nas", transport: .webDAV),
+            "appledemo (WebDAV)"
+        )
+        XCTAssertEqual(
+            AppState.defaultShareName(path: "Media", host: "nas", transport: .smb),
+            "Media (SMB)"
+        )
+    }
+
+    func testDefaultShareNameFallsBackToHostAtRoot() {
+        XCTAssertEqual(
+            AppState.defaultShareName(path: "/", host: "192.168.1.5", transport: .nfs),
+            "192.168.1.5 (NFS)"
+        )
+    }
+
     func testServerIDIncludesPortWhenPresent() {
         XCTAssertEqual(
             AppState.mediaShareServerID(host: "host", port: 4455, share: "Movies", username: "u"),

@@ -2490,7 +2490,7 @@ public final class AppState {
             return
         }
         let trimmedName = displayName.trimmingCharacters(in: .whitespaces)
-        let name = trimmedName.isEmpty ? "\(host)/\(share)" : trimmedName
+        let name = trimmedName.isEmpty ? Self.defaultShareName(path: share, host: host, transport: .smb) : trimmedName
         let server = MediaServer(
             id: Self.mediaShareServerID(host: host, port: port, share: share, username: username),
             name: name,
@@ -2662,7 +2662,7 @@ public final class AppState {
             principal: auth.principal
         )
         let trimmedName = displayName.trimmingCharacters(in: .whitespaces)
-        let name = trimmedName.isEmpty ? "\(host)\(normalizedPath)" : trimmedName
+        let name = trimmedName.isEmpty ? Self.defaultShareName(path: normalizedPath, host: host, transport: .webDAV) : trimmedName
         let server = MediaServer(
             id: serverID,
             name: name,
@@ -2697,6 +2697,25 @@ public final class AppState {
     }
 
     // MARK: - NFS / SFTP / FTP media shares (unified onboarding)
+
+    /// The default share name when the user leaves the nickname blank: the last
+    /// meaningful path component (the folder/share they picked) with the transport
+    /// label appended, e.g. "Media (SFTP)" or "appledemo (WebDAV)". Far more
+    /// readable than the raw `host/path`, and the transport suffix disambiguates
+    /// the same folder added over two protocols. Falls back to the host when the
+    /// path is the root.
+    static func defaultShareName(
+        path: String,
+        host: String,
+        transport: MediaShareTransportKind
+    ) -> String {
+        let lastComponent = path
+            .split(separator: "/", omittingEmptySubsequences: true)
+            .last
+            .map(String.init)
+        let base = (lastComponent?.isEmpty == false) ? lastComponent! : host
+        return "\(base) (\(transport.badgeLabel))"
+    }
 
     /// Stable identity for a filesystem media share whose paths are case-sensitive
     /// (NFS/SFTP/FTP run over POSIX servers, unlike SMB). Scheme, host (folded —
@@ -2768,7 +2787,7 @@ public final class AppState {
             envelope: envelope,
             userID: "anon",
             userName: "",
-            defaultName: "\(trimmedHost)\(normalizedPath)",
+            defaultName: Self.defaultShareName(path: normalizedPath, host: trimmedHost, transport: .nfs),
             displayName: displayName,
             invalidMessage: "Couldn’t save this NFS share"
         )
@@ -2827,7 +2846,7 @@ public final class AppState {
             envelope: envelope,
             userID: trimmedUser,
             userName: trimmedUser,
-            defaultName: "\(trimmedHost)\(normalizedPath)",
+            defaultName: Self.defaultShareName(path: normalizedPath, host: trimmedHost, transport: .sftp),
             displayName: displayName,
             invalidMessage: "Couldn’t save this SFTP share"
         )
@@ -2918,7 +2937,7 @@ public final class AppState {
             envelope: envelope,
             userID: auth.accountUserName.isEmpty ? "anon" : auth.accountUserName,
             userName: auth.accountUserName,
-            defaultName: "\(host)\(normalizedPath)",
+            defaultName: Self.defaultShareName(path: normalizedPath, host: host, transport: .ftp),
             displayName: displayName,
             invalidMessage: "Couldn’t save this FTP share"
         )

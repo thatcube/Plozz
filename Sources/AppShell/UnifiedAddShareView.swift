@@ -176,11 +176,11 @@ struct UnifiedAddShareView: View {
                 showsTitle: false,
                 back: { viewModel.backToDevices() }
             ) { EmptyView() }
+            .focusSection()
 
-            Panel(title: "Connection") {
-                VStack(alignment: .leading, spacing: 20) {
-                    HStack(spacing: 16) {
-                        Text("Protocol").foregroundStyle(.secondary).frame(width: 160, alignment: .leading)
+            Panel(title: "") {
+                VStack(alignment: .leading, spacing: 18) {
+                    LabeledFormRow("Protocol") {
                         Menu {
                             ForEach(MediaShareTransportCatalog.preferenceOrder, id: \.self) { kind in
                                 Button {
@@ -203,32 +203,32 @@ struct UnifiedAddShareView: View {
                         }
                         .focused($focus, equals: .proto)
                     }
-                    HStack(alignment: .top, spacing: 16) {
-                        Text("Address").foregroundStyle(.secondary).frame(width: 160, alignment: .leading)
-                            .padding(.top, 8)
-                        VStack(alignment: .leading, spacing: 16) {
-                            HStack(alignment: .top, spacing: 16) {
-                                TextField("e.g. 192.168.1.100 or mynas.local", text: $viewModel.address)
-                                    .textContentType(.URL).autocorrectionDisabled().keyboardType(.URL)
-                                    .focused($focus, equals: .address)
-                                TextField("Port", text: $viewModel.portText)
-                                    .keyboardType(.numberPad)
-                                    .frame(width: 200)
-                                    .focused($focus, equals: .port)
-                            }
-                            portChips
+                    LabeledFormRow("Address") {
+                        HStack(alignment: .center, spacing: 16) {
+                            TextField("e.g. 192.168.1.100 or mynas.local", text: $viewModel.address)
+                                .textContentType(.URL).autocorrectionDisabled().keyboardType(.URL)
+                                .focused($focus, equals: .address)
+                            TextField("Port", text: $viewModel.portText)
+                                .keyboardType(.numberPad)
+                                .frame(width: 200)
+                                .focused($focus, equals: .port)
                         }
                     }
+                    portChips
                 }
             }
+            .focusSection()
 
             credentialPanel
 
-            Panel(title: "Share nickname (optional)") {
-                TextField("e.g. Living Room NAS", text: $viewModel.displayName)
-                    .autocorrectionDisabled()
-                    .focused($focus, equals: .displayName)
+            Panel(title: "") {
+                LabeledFormRow("Nickname") {
+                    TextField("e.g. Living Room NAS", text: $viewModel.displayName)
+                        .autocorrectionDisabled()
+                        .focused($focus, equals: .displayName)
+                }
             }
+            .focusSection()
 
             if let error = viewModel.connectError {
                 InlineErrorMessage(LocalizedStringKey(error), systemImage: "exclamationmark.triangle")
@@ -236,11 +236,67 @@ struct UnifiedAddShareView: View {
             Button {
                 viewModel.connect()
             } label: {
-                if viewModel.detecting { ProgressView() } else { Text("Connect") }
+                if viewModel.detecting {
+                    ProgressView().frame(maxWidth: .infinity)
+                } else {
+                    Text("Connect").frame(maxWidth: .infinity)
+                }
             }
             .buttonStyle(.borderedProminent)
             .disabled(!viewModel.canConnect || viewModel.detecting)
             .focused($focus, equals: .connect)
+            .focusSection()
+            .padding(.top, 8)
+        }
+    }
+
+    /// The Sign-in card — its own section because it's the dynamic part of the
+    /// form (NFS shows nothing, WebDAV adds a username/token method toggle, the
+    /// rest are username/password). The method toggle spans the full card width;
+    /// the credential fields use the same left-label rows as the rest of the form.
+    @ViewBuilder
+    private var credentialPanel: some View {
+        let kind = viewModel.selectedTransport
+        if let descriptor = viewModel.descriptor(kind), !descriptor.authModes.isEmpty {
+            Panel(title: "") {
+                VStack(alignment: .leading, spacing: 18) {
+                    if descriptor.authModes.contains(.token) {
+                        Picker("Method", selection: $viewModel.authMode) {
+                            Text("Username & password").tag(UnifiedAddShareModel.AuthMode.usernamePassword)
+                            Text("Token").tag(UnifiedAddShareModel.AuthMode.token)
+                        }
+                        .pickerStyle(.segmented)
+                        .focused($focus, equals: .authToggle)
+                    }
+                    if viewModel.authMode == .token {
+                        LabeledFormRow("Token") {
+                            SecureField("Token", text: $viewModel.token)
+                                .autocorrectionDisabled()
+                                .focused($focus, equals: .token)
+                        }
+                    } else {
+                        LabeledFormRow("Username") {
+                            TextField(descriptor.allowsBlankGuest ? "optional — blank for guest" : "required", text: $viewModel.username)
+                                .textContentType(.username)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                                .focused($focus, equals: .username)
+                        }
+                        LabeledFormRow("Password") {
+                            SecureField(descriptor.allowsBlankGuest ? "optional" : "required", text: $viewModel.password)
+                                .textContentType(.password)
+                                .focused($focus, equals: .password)
+                        }
+                    }
+                    if let warning = viewModel.plaintextWarning {
+                        Label(warning, systemImage: "info.circle")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+            .focusSection()
         }
     }
 
@@ -259,55 +315,6 @@ struct UnifiedAddShareView: View {
                     }
                         .buttonStyle(.bordered)
                         .focused($focus, equals: .portChip(p))
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var credentialPanel: some View {
-        let kind = viewModel.selectedTransport
-        if let descriptor = viewModel.descriptor(kind) {
-            if descriptor.authModes.isEmpty {
-                EmptyView() // NFS: no sign-in
-            } else {
-                Panel(title: "Sign in") {
-                    VStack(alignment: .leading, spacing: 18) {
-                        if descriptor.authModes.contains(.token) {
-                            Picker("Method", selection: $viewModel.authMode) {
-                                Text("Username & password").tag(UnifiedAddShareModel.AuthMode.usernamePassword)
-                                Text("Token").tag(UnifiedAddShareModel.AuthMode.token)
-                            }
-                            .pickerStyle(.segmented)
-                            .focused($focus, equals: .authToggle)
-                        }
-                        if viewModel.authMode == .token {
-                            SecureField("Token", text: $viewModel.token)
-                                .autocorrectionDisabled()
-                                .focused($focus, equals: .token)
-                        } else {
-                            TextField(descriptor.allowsBlankGuest ? "Username (optional)" : "Username", text: $viewModel.username)
-                                .textContentType(.username)
-                                .textInputAutocapitalization(.never)
-                                .autocorrectionDisabled()
-                                .focused($focus, equals: .username)
-                            SecureField(descriptor.allowsBlankGuest ? "Password (optional)" : "Password", text: $viewModel.password)
-                                .textContentType(.password)
-                                .focused($focus, equals: .password)
-                        }
-                        if let warning = viewModel.plaintextWarning {
-                            Label(
-                                warning,
-                                systemImage: "info.circle"
-                            )
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                                .fixedSize(
-                                    horizontal: false,
-                                    vertical: true
-                                )
-                        }
-                    }
                 }
             }
         }
@@ -597,11 +604,13 @@ private struct Panel<Content: View, Accessory: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            HStack {
-                Text(title).font(.subheadline.weight(.semibold)).textCase(.uppercase)
-                    .tracking(1.0).foregroundStyle(.secondary)
-                Spacer()
-                accessory()
+            if !title.isEmpty {
+                HStack {
+                    Text(title).font(.subheadline.weight(.semibold)).textCase(.uppercase)
+                        .tracking(1.0).foregroundStyle(.secondary)
+                    Spacer()
+                    accessory()
+                }
             }
             content()
         }
@@ -609,6 +618,30 @@ private struct Panel<Content: View, Accessory: View>: View {
         .padding(28)
         .background(RoundedRectangle(cornerRadius: 24, style: .continuous).fill(.ultraThinMaterial))
         .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).strokeBorder(Color.primary.opacity(0.08), lineWidth: 1))
+    }
+}
+
+/// A compact form row: a fixed-width label on the left and its control filling the
+/// rest of the width. Keeps the connect form short (label + control share a line)
+/// while the control still stretches to the container's right edge, so tvOS
+/// up-focus from the first control can still reach the header's Back button.
+private struct LabeledFormRow<Control: View>: View {
+    let label: String
+    let control: () -> Control
+
+    init(_ label: String, @ViewBuilder control: @escaping () -> Control) {
+        self.label = label
+        self.control = control
+    }
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 20) {
+            Text(label)
+                .foregroundStyle(.secondary)
+                .frame(width: 150, alignment: .leading)
+            control()
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 }
 #endif

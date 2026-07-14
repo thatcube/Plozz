@@ -62,9 +62,10 @@ struct ServersAndLibrariesDetailView: View {
     /// reads as "tap to open a level deeper," not just status.
     private func serverSummaryRow(_ group: ServerAccountGroup) -> some View {
         NavigationLink(value: SettingsRoute.server(key: group.serverKey)) {
-            HStack(spacing: 16) {
+            HStack(alignment: .top, spacing: 16) {
                 ProviderIcon(provider: group.providerKind, size: 48, mediaShareTransport: group.transportKind)
                     .frame(width: 36)
+                    .padding(.top, 4)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(group.serverName).font(.headline)
                     Text(summary(for: group))
@@ -76,6 +77,7 @@ struct ServersAndLibrariesDetailView: View {
                 Image(systemName: "chevron.right")
                     .font(.caption.weight(.semibold))
                     .settingsRowSecondary()
+                    .padding(.top, 14)
             }
             .padding(.vertical, 14)
             .padding(.horizontal, 14)

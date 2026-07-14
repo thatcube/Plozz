@@ -277,7 +277,9 @@ struct UnifiedAddShareView: View {
                                 .focused($focus, equals: .token)
                         } else {
                             TextField(descriptor.allowsBlankGuest ? "Username (optional)" : "Username", text: $viewModel.username)
-                                .textContentType(.username).autocorrectionDisabled()
+                                .textContentType(.username)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
                                 .focused($focus, equals: .username)
                             SecureField(descriptor.allowsBlankGuest ? "Password (optional)" : "Password", text: $viewModel.password)
                                 .textContentType(.password)

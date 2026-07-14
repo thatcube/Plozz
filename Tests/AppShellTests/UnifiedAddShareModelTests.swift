@@ -140,11 +140,12 @@ final class UnifiedAddShareModelTests: XCTestCase {
         model.address = "ftp://192.168.1.5/pub"
         model.connect()
 
-        XCTAssertEqual(model.step, .pickLocation)
         for _ in 0..<50 {
-            if model.confirmedPath == "/pub" { break }
+            if model.step == .pickLocation { break }
             try? await Task.sleep(nanoseconds: 5_000_000)
         }
+        XCTAssertEqual(model.step, .pickLocation)
+        XCTAssertEqual(model.confirmedPath, "/pub")
         model.chooseFilesystemRoot()
 
         guard case let .ftp(config) = result else {
@@ -153,6 +154,28 @@ final class UnifiedAddShareModelTests: XCTestCase {
         XCTAssertEqual(config.baseURL.absoluteString, "ftp://192.168.1.5/pub")
         XCTAssertEqual(config.auth, .anonymous)
         XCTAssertNil(config.trustPin)
+    }
+
+    func testFTPBadCredentialsStayOnConnectWithError() async {
+        let model = UnifiedAddShareModel(ftpProbe: StubFTPProbe(listing: .authenticationFailed))
+        var result: MediaShareOnboardingResult?
+        model.onMediaShareConfigured = { result = $0 }
+
+        model.openManualConnect()
+        model.applyTransport(.ftp)
+        model.address = "192.168.1.5"
+        model.username = "bob"
+        model.password = "wrong"
+        model.connect()
+
+        for _ in 0..<50 {
+            if model.connectError != nil { break }
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+        // Must stay on the Connect page with a credential error, not advance.
+        XCTAssertEqual(model.step, .connect)
+        XCTAssertEqual(model.connectError, "That username or password was rejected.")
+        XCTAssertNil(result)
     }
 
     func testFTPSPort990BuildsImplicitTLSURLWithPassword() async {

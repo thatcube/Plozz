@@ -635,17 +635,53 @@ final class UnifiedAddShareModel {
         chooseFilesystemRoot()
     }
 
-    /// FTP first-connect: open a folder browser rooted at the typed path (or `/`)
-    /// so the user can drill into a subfolder to scope the scan.
+    /// FTP first-connect: attempt the initial listing WHILE STILL ON THE CONNECT
+    /// PAGE (with a spinner). Only advance to the folder browser on success; a
+    /// rejected login stays on Connect with a clear credential error, instead of
+    /// jumping ahead and reporting "needs a username and password" on the next
+    /// screen (which looks like the credentials were never entered).
     private func beginFTPBrowse() {
-        step = .pickLocation
-        let start = filesystemPath(from: address)
         workTask?.cancel()
-        workTask = Task { await self.loadFTPFolders(path: start) }
+        detecting = true
+        let start = filesystemPath(from: address)
+        let host = resolvedHost
+        let scheme = ftpScheme(from: address, port: resolvedPort)
+        let user = username.trimmingCharacters(in: .whitespaces)
+        let pass = password
+        workTask = Task { [ftpProbe] in
+            defer { self.detecting = false }
+            let result = await ftpProbe.listDirectories(
+                host: host,
+                port: self.resolvedPort,
+                isImplicitTLS: scheme == "ftps",
+                username: user,
+                password: pass,
+                trustPinSHA256: nil,
+                path: start
+            )
+            if Task.isCancelled { return }
+            switch result {
+            case .success(let dirs):
+                self.currentPath = start
+                self.confirmedPath = start
+                self.locations = dirs.map { LocationItem(name: $0.name, path: $0.path, isBrowsable: true) }
+                self.locationLoad = .loaded
+                self.step = .pickLocation
+            case .authenticationFailed:
+                self.connectError = "That username or password was rejected."
+            case .unreachable:
+                self.connectError = "Couldn’t reach that server. Check the address and network."
+            case .failed(let message):
+                self.connectError = message
+            case .cancelled:
+                break
+            }
+        }
     }
 
     /// Lists the child directories of the current FTP path. Reconnects per call
-    /// (onboarding is low-frequency), mirroring the WebDAV/SFTP browsers.
+    /// (onboarding is low-frequency), mirroring the WebDAV/SFTP browsers. Used for
+    /// drilling AFTER the first connect already validated credentials.
     func loadFTPFolders(path: String) async {
         locationLoad = .loading
         let host = resolvedHost

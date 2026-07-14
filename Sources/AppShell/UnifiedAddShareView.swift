@@ -177,50 +177,58 @@ struct UnifiedAddShareView: View {
                 back: { viewModel.backToDevices() }
             ) { EmptyView() }
 
-            Panel(title: "Protocol") {
-                Menu {
-                    ForEach(MediaShareTransportCatalog.preferenceOrder, id: \.self) { kind in
-                        Button {
-                            viewModel.applyTransport(kind)
-                        } label: {
-                            if kind == viewModel.selectedTransport {
-                                Label(protocolLabel(kind), systemImage: "checkmark")
-                            } else {
-                                Text(protocolLabel(kind))
+            Panel(title: "Connection") {
+                VStack(alignment: .leading, spacing: 20) {
+                    HStack(spacing: 16) {
+                        Text("Protocol").foregroundStyle(.secondary).frame(width: 160, alignment: .leading)
+                        Menu {
+                            ForEach(MediaShareTransportCatalog.preferenceOrder, id: \.self) { kind in
+                                Button {
+                                    viewModel.applyTransport(kind)
+                                } label: {
+                                    if kind == viewModel.selectedTransport {
+                                        Label(protocolLabel(kind), systemImage: "checkmark")
+                                    } else {
+                                        Text(protocolLabel(kind))
+                                    }
+                                }
                             }
+                        } label: {
+                            HStack {
+                                Text(protocolLabel(viewModel.selectedTransport))
+                                Spacer()
+                                Image(systemName: "chevron.up.chevron.down").font(.footnote).foregroundStyle(.secondary)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         }
+                        .focused($focus, equals: .proto)
                     }
-                } label: {
-                    HStack {
-                        Text(protocolLabel(viewModel.selectedTransport))
-                        Spacer()
-                        Image(systemName: "chevron.up.chevron.down").font(.footnote).foregroundStyle(.secondary)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .focused($focus, equals: .proto)
-            }
-
-            Panel(title: "Address") {
-                VStack(alignment: .leading, spacing: 16) {
                     HStack(alignment: .top, spacing: 16) {
-                        VStack(alignment: .leading, spacing: 6) {
-                            TextField("e.g. 192.168.1.100 or mynas.local", text: $viewModel.address)
-                                .textContentType(.URL).autocorrectionDisabled().keyboardType(.URL)
-                                .focused($focus, equals: .address)
-                        }
-                        VStack(alignment: .leading, spacing: 6) {
-                            TextField("Port", text: $viewModel.portText)
-                                .keyboardType(.numberPad)
-                                .frame(width: 200)
-                                .focused($focus, equals: .port)
+                        Text("Address").foregroundStyle(.secondary).frame(width: 160, alignment: .leading)
+                            .padding(.top, 8)
+                        VStack(alignment: .leading, spacing: 16) {
+                            HStack(alignment: .top, spacing: 16) {
+                                TextField("e.g. 192.168.1.100 or mynas.local", text: $viewModel.address)
+                                    .textContentType(.URL).autocorrectionDisabled().keyboardType(.URL)
+                                    .focused($focus, equals: .address)
+                                TextField("Port", text: $viewModel.portText)
+                                    .keyboardType(.numberPad)
+                                    .frame(width: 200)
+                                    .focused($focus, equals: .port)
+                            }
+                            portChips
                         }
                     }
-                    portChips
                 }
             }
 
             credentialPanel
+
+            Panel(title: "Share nickname (optional)") {
+                TextField("e.g. Living Room NAS", text: $viewModel.displayName)
+                    .autocorrectionDisabled()
+                    .focused($focus, equals: .displayName)
+            }
 
             if let error = viewModel.connectError {
                 InlineErrorMessage(LocalizedStringKey(error), systemImage: "exclamationmark.triangle")
@@ -400,16 +408,15 @@ struct UnifiedAddShareView: View {
             }
             // Primary action pinned ABOVE the (bounded, scrollable) list, so
             // confirming the folder you're looking inside never requires scrolling
-            // past its contents — the list below is just a preview / a way to
-            // drill deeper.
-            Panel(title: "Scan this folder") {
+            // past its contents. The path gets its own full-width line and wraps
+            // rather than truncating — a deep path stays fully readable.
+            Panel(title: "Folder") {
                 VStack(alignment: .leading, spacing: 16) {
                     Text(viewModel.currentPath)
                         .font(.system(.body, design: .monospaced))
                         .foregroundStyle(.secondary)
-                        .lineLimit(1).truncationMode(.middle)
-                    TextField("Display name (optional)", text: $viewModel.displayName)
-                        .autocorrectionDisabled().focused($focus, equals: .displayName)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     Button("Use This Folder") { useCurrentFolder() }
                         .buttonStyle(.borderedProminent)
                         .focused($focus, equals: .useFolder)
@@ -420,7 +427,7 @@ struct UnifiedAddShareView: View {
             if viewModel.locations.isEmpty {
                 placeholder(isDrillable ? "No subfolders here." : "Nothing here.")
             } else {
-                FadingScrollView(maxHeight: 560) {
+                FadingScrollView(maxHeight: 620) {
                     VStack(spacing: 12) {
                         ForEach(viewModel.locations) { item in
                             Button { selectLocation(item) } label: {
@@ -438,12 +445,6 @@ struct UnifiedAddShareView: View {
                         }
                     }
                 }
-            }
-        }
-        if !isDrillable {
-            Panel(title: "Display name (optional)") {
-                TextField("Display name", text: $viewModel.displayName)
-                    .autocorrectionDisabled().focused($focus, equals: .displayName)
             }
         }
     }
@@ -475,10 +476,6 @@ struct UnifiedAddShareView: View {
                     VStack(alignment: .leading, spacing: 16) {
                         TextField("/volume1/Media", text: $viewModel.manualShare)
                             .autocorrectionDisabled().focused($focus, equals: .manualShare)
-                        Panel(title: "Display name (optional)") {
-                            TextField("Display name", text: $viewModel.displayName)
-                                .autocorrectionDisabled().focused($focus, equals: .displayName)
-                        }
                         Button("Add Share") { viewModel.chooseNFSManualExport() }
                             .buttonStyle(.borderedProminent)
                             .disabled(viewModel.manualShare.trimmingCharacters(in: .whitespaces).isEmpty)

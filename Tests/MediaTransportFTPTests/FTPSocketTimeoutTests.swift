@@ -51,6 +51,45 @@ final class FTPSocketTimeoutTests: XCTestCase {
         }
     }
 
+    func testReceiveCancellationReturnsPromptlyAndTearsDown() async throws {
+        let accepted = SilentAcceptBox()
+        let listener = try NWListener(using: NWParameters(tls: nil, tcp: NWProtocolTCP.Options()))
+        listener.newConnectionHandler = { connection in
+            accepted.hold(connection)
+            connection.start(queue: .global())
+        }
+        listener.start(queue: .global())
+        defer {
+            listener.cancel()
+            accepted.cancelAll()
+        }
+
+        let port = try await waitForPort(listener)
+        let socket = FTPSocket(
+            host: "127.0.0.1",
+            port: Int(port),
+            parameters: NWParameters(tls: nil, tcp: NWProtocolTCP.Options())
+        )
+        try await socket.start(timeout: 5)
+
+        // A cancelled read must return well before its (long) deadline — proving
+        // it doesn't hold the caller/actor gate hostage until the timeout.
+        let started = Date()
+        let task = Task {
+            _ = try await socket.receive(maximumLength: 64, timeout: 60)
+        }
+        try await Task.sleep(nanoseconds: 200_000_000)
+        task.cancel()
+        do {
+            _ = try await task.value
+            XCTFail("expected cancellation")
+        } catch {
+            // Cancelled (or torn-down) — either way it must not wait the 60s bound.
+        }
+        let elapsed = Date().timeIntervalSince(started)
+        XCTAssertLessThan(elapsed, 5, "cancelled receive must return promptly, not wait the deadline")
+    }
+
     // MARK: - Helpers
 
     private func waitForPort(_ listener: NWListener) async throws -> UInt16 {

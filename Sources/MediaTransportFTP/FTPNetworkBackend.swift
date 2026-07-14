@@ -180,6 +180,7 @@ actor FTPNetworkBackend: FTPBackend {
     // MARK: - Browse
 
     func list(path: String) async throws -> [FTPBackendEntry] {
+        try Task.checkCancellation()
         await acquire()
         defer { release() }
         guard let control else { throw MediaTransportError.transport(code: -1) }
@@ -246,6 +247,7 @@ actor FTPNetworkBackend: FTPBackend {
     }
 
     func readSmallFile(path: String, maximumBytes: Int) async throws -> Data {
+        try Task.checkCancellation()
         await acquire()
         defer { release() }
         guard let control else { throw MediaTransportError.transport(code: -1) }
@@ -290,6 +292,7 @@ actor FTPNetworkBackend: FTPBackend {
         length: Int,
         expected: RemoteFileRepresentation
     ) async throws -> Data {
+        try Task.checkCancellation()
         await acquire()
         defer { release() }
 

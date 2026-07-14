@@ -77,56 +77,116 @@ final class FTPSocket: @unchecked Sendable {
     }
 
     /// Runs an `NWConnection` completion-handler operation with a hard deadline.
-    /// The operation resolves via `done`; if the deadline fires first, the
-    /// connection is torn down and `.timeout` is thrown. A once-only resume box
-    /// guarantees exactly one resumption (no leaked continuation on the timeout
-    /// path — the trap the SFTP review flagged), and the deadline work item is
-    /// cancelled when the operation wins.
+    /// The operation resolves via `done`; whichever of the operation, the
+    /// deadline, or **task cancellation** fires first wins. On timeout or
+    /// cancellation the connection is torn down (`cancel()`) so a pending
+    /// `NWConnection` send/receive can't keep the caller — or, critically, the
+    /// owning backend actor's serialization gate — blocked (the head-of-line
+    /// trap the SFTP review flagged). A once-only ``ResumeBox`` guarantees
+    /// exactly one resumption even across the install-vs-resolve race, and the
+    /// deadline work item is cancelled when the operation wins.
     private func withDeadline<T: Sendable>(
         timeout: TimeInterval,
         _ body: @escaping @Sendable (@escaping @Sendable (Result<T, Error>) -> Void) -> Void
     ) async throws -> T {
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<T, Error>) in
-            let box = ResumeBox(continuation)
-            let deadline = DispatchWorkItem { [weak self] in
-                if box.resume(.failure(MediaTransportError.timeout)) {
-                    self?.cancel()
+        let box = ResumeBox<T>()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<T, Error>) in
+                box.install(continuation)
+                let deadline = DispatchWorkItem { [weak self] in
+                    if box.resume(.failure(MediaTransportError.timeout)) {
+                        self?.cancel()
+                    }
+                }
+                queue.asyncAfter(deadline: .now() + timeout, execute: deadline)
+                // DispatchWorkItem.cancel() is thread-safe; wrap it so it can be
+                // captured by the @Sendable completion callback under strict
+                // concurrency without weakening the deadline's own captures.
+                let deadlineBox = UncheckedSendableBox(deadline)
+                body { result in
+                    if box.resume(result) {
+                        deadlineBox.value.cancel()
+                    }
                 }
             }
-            queue.asyncAfter(deadline: .now() + timeout, execute: deadline)
-            // DispatchWorkItem.cancel() is thread-safe; wrap it so it can be
-            // captured by the @Sendable completion callback under strict
-            // concurrency without weakening the deadline's own captures.
-            let deadlineBox = UncheckedSendableBox(deadline)
-            body { result in
-                if box.resume(result) {
-                    deadlineBox.value.cancel()
-                }
+        } onCancel: {
+            // A cancelled read must release immediately, not wait out the
+            // deadline — resume with .cancelled and tear the connection down so
+            // the pending NWConnection op fails and the actor gate frees.
+            if box.resume(.failure(MediaTransportError.cancelled)) {
+                cancel()
             }
         }
     }
 }
 
 /// Guards a `CheckedContinuation` so it resumes exactly once, from whichever of
-/// the operation callback or the deadline fires first. `resume` returns `true`
-/// only for the caller that actually resolved it.
-private final class ResumeBox<T>: @unchecked Sendable {    private let lock = NSLock()
-    private var continuation: CheckedContinuation<T, Error>?
-
-    init(_ continuation: CheckedContinuation<T, Error>) {
-        self.continuation = continuation
+/// the operation callback, the deadline, or task cancellation fires first —
+/// including the race where cancellation resolves *before* the continuation is
+/// installed. `resume` returns `true` only for the caller that actually won, so
+/// the winner alone performs side effects (connection teardown).
+private final class ResumeBox<T>: @unchecked Sendable {
+    private enum State {
+        case waiting
+        case installed(CheckedContinuation<T, Error>)
+        case buffered(Result<T, Error>)
+        case done
     }
 
-    func resume(_ result: Result<T, Error>) -> Bool {
-        let continuation = lock.withLock { () -> CheckedContinuation<T, Error>? in
-            let c = self.continuation
-            self.continuation = nil
-            return c
+    private let lock = NSLock()
+    private var state: State = .waiting
+
+    /// Attaches the continuation. If a result already arrived (cancellation or
+    /// deadline won before `withCheckedThrowingContinuation`'s body ran), it is
+    /// delivered immediately.
+    func install(_ continuation: CheckedContinuation<T, Error>) {
+        let buffered: Result<T, Error>? = lock.withLock {
+            switch state {
+            case .waiting:
+                state = .installed(continuation)
+                return nil
+            case .buffered(let result):
+                state = .done
+                return result
+            case .installed, .done:
+                return nil
+            }
         }
-        guard let continuation else { return false }
-        continuation.resume(with: result)
-        return true
+        if let buffered { continuation.resume(with: buffered) }
     }
+
+    /// Returns `true` iff this call is the winning resolution.
+    func resume(_ result: Result<T, Error>) -> Bool {
+        let outcome: ResumeOutcome<T> = lock.withLock {
+            switch state {
+            case .installed(let continuation):
+                state = .done
+                return .resume(continuation)
+            case .waiting:
+                // Resolved before the continuation installed — buffer it. We
+                // still won, so the caller runs its side effect (teardown).
+                state = .buffered(result)
+                return .buffered
+            case .buffered, .done:
+                return .lost
+            }
+        }
+        switch outcome {
+        case .resume(let continuation):
+            continuation.resume(with: result)
+            return true
+        case .buffered:
+            return true
+        case .lost:
+            return false
+        }
+    }
+}
+
+private enum ResumeOutcome<T> {
+    case resume(CheckedContinuation<T, Error>)
+    case buffered
+    case lost
 }
 
 /// Minimal wrapper letting a thread-safe-but-non-`Sendable` value (here a

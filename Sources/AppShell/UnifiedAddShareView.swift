@@ -388,8 +388,8 @@ struct UnifiedAddShareView: View {
         }
     }
 
-    /// The confirm-and-name panel for NFS/SFTP/FTP: the typed root path is shown
-    /// for review (no live folder list), then named and saved.
+    /// The confirm-and-name panel for NFS/FTP: the typed root path is shown for
+    /// review (no live folder list), then named and saved.
     @ViewBuilder
     private var pathEntryConfirm: some View {
         Panel(title: "Folder") {
@@ -413,16 +413,21 @@ struct UnifiedAddShareView: View {
 
     @ViewBuilder
     private var browsableLocations: some View {
-        let isWebDAV = viewModel.selectedTransport == .webDAV
-        if isWebDAV && viewModel.currentPath != "/" {
+        let isDrillable = viewModel.isDrillableTransport
+        if isDrillable && viewModel.currentPath != "/" {
             Button {
-                Task { await viewModel.loadWebDAVFolders(path: parentPath(of: viewModel.currentPath)) }
+                loadFolders(path: parentPath(of: viewModel.currentPath))
             } label: { Label("Up one level", systemImage: "arrow.up.left") }
             .buttonStyle(.bordered)
         }
+        if isDrillable {
+            Text("Pick the folder to scan — drill in, then Use This Folder. Scanning a smaller folder (e.g. your Movies directory) fills in posters faster than the whole drive.")
+                .font(.footnote).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
         Panel(title: "Locations") {
             if viewModel.locations.isEmpty {
-                placeholder("Nothing here.")
+                placeholder(isDrillable ? "No subfolders here." : "Nothing here.")
             } else {
                 VStack(spacing: 12) {
                     ForEach(viewModel.locations) { item in
@@ -442,19 +447,31 @@ struct UnifiedAddShareView: View {
                 }
             }
         }
-        if isWebDAV {
-            Panel(title: "Display name (optional)") {
-                TextField("Display name", text: $viewModel.displayName)
-                    .autocorrectionDisabled().focused($focus, equals: .displayName)
-            }
-            Button("Use This Folder") { viewModel.chooseWebDAVFolder(viewModel.currentPath) }
+        Panel(title: "Display name (optional)") {
+            TextField("Display name", text: $viewModel.displayName)
+                .autocorrectionDisabled().focused($focus, equals: .displayName)
+        }
+        if isDrillable {
+            Button("Use This Folder") { useCurrentFolder() }
                 .buttonStyle(.borderedProminent)
                 .focused($focus, equals: .useFolder)
+        }
+    }
+
+    private func loadFolders(path: String) {
+        switch viewModel.selectedTransport {
+        case .sftp:
+            Task { await viewModel.loadSFTPFolders(path: path) }
+        default:
+            Task { await viewModel.loadWebDAVFolders(path: path) }
+        }
+    }
+
+    private func useCurrentFolder() {
+        if viewModel.selectedTransport == .sftp {
+            viewModel.chooseFilesystemRoot()
         } else {
-            Panel(title: "Display name (optional)") {
-                TextField("Display name", text: $viewModel.displayName)
-                    .autocorrectionDisabled().focused($focus, equals: .displayName)
-            }
+            viewModel.chooseWebDAVFolder(viewModel.currentPath)
         }
     }
 
@@ -472,16 +489,19 @@ struct UnifiedAddShareView: View {
 
     private func selectLocation(_ item: UnifiedAddShareModel.LocationItem) {
         if item.isBrowsable {
-            Task { await viewModel.loadWebDAVFolders(path: item.path) }
+            loadFolders(path: item.path)
         } else {
             viewModel.chooseSMBShare(item.path)
         }
     }
 
     private func retryLocation() {
-        if viewModel.selectedTransport == .webDAV {
+        switch viewModel.selectedTransport {
+        case .webDAV:
             Task { await viewModel.loadWebDAVFolders(path: viewModel.currentPath) }
-        } else {
+        case .sftp:
+            Task { await viewModel.loadSFTPFolders(path: viewModel.currentPath) }
+        default:
             viewModel.loadSMBShares()
         }
     }

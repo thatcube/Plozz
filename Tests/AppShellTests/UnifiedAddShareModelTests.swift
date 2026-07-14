@@ -158,6 +158,10 @@ final class UnifiedAddShareModelTests: XCTestCase {
 
         model.approveTrust()
         XCTAssertEqual(model.step, .pickLocation)
+        for _ in 0..<50 {
+            if model.confirmedPath == "/media" { break }
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
         XCTAssertEqual(model.confirmedPath, "/media")
 
         model.chooseFilesystemRoot()
@@ -169,6 +173,48 @@ final class UnifiedAddShareModelTests: XCTestCase {
         XCTAssertEqual(config.username, "brandon")
         XCTAssertEqual(config.password, "hunter2")
         XCTAssertEqual(config.hostKeyPin.bytes, pin)
+    }
+
+    func testSFTPFolderBrowsingDrillsIntoSubfolderAndSaves() async {
+        let pin = Data(repeating: 0x33, count: 32)
+        let listing = SFTPDirectoryListing.success([
+            SFTPDirectoryItem(name: "Movies", path: "/Movies"),
+            SFTPDirectoryItem(name: "TV", path: "/TV"),
+        ])
+        let model = UnifiedAddShareModel(
+            sftpProbe: StubSFTPProbe(result: .success(hostKeySHA256: pin), listing: listing)
+        )
+        var result: MediaShareOnboardingResult?
+        model.onMediaShareConfigured = { result = $0 }
+
+        model.openManualConnect()
+        model.applyTransport(.sftp)
+        model.address = "192.168.1.5"
+        model.username = "brandon"
+        model.password = "hunter2"
+        model.connect()
+
+        for _ in 0..<50 {
+            if case .verifyTrust = model.step { break }
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+        model.approveTrust()
+        for _ in 0..<50 {
+            if model.locationLoad == .loaded { break }
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+        XCTAssertEqual(model.locations.map(\.name), ["Movies", "TV"])
+        XCTAssertTrue(model.locations.allSatisfy(\.isBrowsable))
+
+        // Drill into Movies, then use it as the share root.
+        await model.loadSFTPFolders(path: "/Movies")
+        XCTAssertEqual(model.currentPath, "/Movies")
+        model.chooseFilesystemRoot()
+
+        guard case let .sftp(config) = result else {
+            return XCTFail("expected SFTP result, got \(String(describing: result))")
+        }
+        XCTAssertEqual(config.path, "/Movies")
     }
 
     func testSFTPAuthFailureSurfacesErrorAndStaysOnConnect() async {
@@ -218,6 +264,7 @@ final class UnifiedAddShareModelTests: XCTestCase {
 
     private struct StubSFTPProbe: SFTPOnboardingProbing {
         let result: SFTPOnboardingProbeResult
+        var listing: SFTPDirectoryListing = .success([])
         func captureHostKey(
             host: String,
             port: Int,
@@ -225,6 +272,16 @@ final class UnifiedAddShareModelTests: XCTestCase {
             password: String
         ) async -> SFTPOnboardingProbeResult {
             result
+        }
+        func listDirectories(
+            host: String,
+            port: Int,
+            username: String,
+            password: String,
+            hostKeySHA256: Data,
+            path: String
+        ) async -> SFTPDirectoryListing {
+            listing
         }
     }
 }

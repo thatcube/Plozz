@@ -324,12 +324,21 @@ final class UnifiedAddShareModel {
     }
 
     /// Whether the selected transport confirms a single typed root path at the
-    /// pick-location step (NFS/SFTP/FTP) rather than browsing a live list
-    /// (SMB shares / WebDAV folders).
+    /// pick-location step (NFS/FTP) rather than browsing a live list (SMB shares,
+    /// WebDAV/SFTP folders).
     var isPathEntryTransport: Bool {
         switch selectedTransport {
-        case .nfs, .sftp, .ftp: return true
-        case .smb, .webDAV: return false
+        case .nfs, .ftp: return true
+        case .smb, .webDAV, .sftp: return false
+        }
+    }
+
+    /// Whether the selected transport drills into nested folders at the
+    /// pick-location step (WebDAV, SFTP), as opposed to a flat share list (SMB).
+    var isDrillableTransport: Bool {
+        switch selectedTransport {
+        case .webDAV, .sftp: return true
+        case .smb, .nfs, .ftp: return false
         }
     }
 
@@ -548,6 +557,42 @@ final class UnifiedAddShareModel {
             case .cancelled:
                 break
             }
+        }
+    }
+
+    /// Lists the child directories of the current SFTP path so the user can drill
+    /// into a subfolder before saving. Reuses the captured + approved host key and
+    /// the form credentials; reconnects per call (onboarding is low-frequency).
+    func loadSFTPFolders(path: String) async {
+        guard let pin = approvedHostKeyPin else { return }
+        locationLoad = .loading
+        let host = resolvedHost
+        let port = resolvedPort ?? (descriptor(.sftp)?.defaultPort ?? 22)
+        let user = username.trimmingCharacters(in: .whitespaces)
+        let pass = password
+        let result = await sftpProbe.listDirectories(
+            host: host,
+            port: port,
+            username: user,
+            password: pass,
+            hostKeySHA256: pin,
+            path: path
+        )
+        if Task.isCancelled { return }
+        switch result {
+        case .success(let dirs):
+            currentPath = path
+            confirmedPath = path
+            locations = dirs.map { LocationItem(name: $0.name, path: $0.path, isBrowsable: true) }
+            locationLoad = .loaded
+        case .authenticationFailed:
+            locationLoad = .badCredentials
+        case .unreachable:
+            locationLoad = .unreachable
+        case .failed(let message):
+            locationLoad = .failed(message)
+        case .cancelled:
+            break
         }
     }
 
@@ -793,12 +838,16 @@ final class UnifiedAddShareModel {
     func approveTrust() {
         guard case .verifyTrust(let sha256) = step else { return }
         // SFTP: the fingerprint is an SSH host key already captured by the connect
-        // probe. Approving pins it and proceeds to confirm the share root; no
-        // second network round-trip (the credentials were already validated).
+        // probe. Approving pins it and opens a folder browser rooted at the typed
+        // path (or `/`), so the user can drill into a subfolder to use as the share
+        // root. The credentials were already validated during capture.
         if let hostKey = pendingSFTPHostKey {
             pendingSFTPHostKey = nil
             approvedHostKeyPin = hostKey
-            enterFilesystemLocation()
+            step = .pickLocation
+            let start = filesystemPath(from: address)
+            workTask?.cancel()
+            workTask = Task { await self.loadSFTPFolders(path: start) }
             return
         }
         // WebDAV: the fingerprint is a TLS leaf cert; pin it and browse.

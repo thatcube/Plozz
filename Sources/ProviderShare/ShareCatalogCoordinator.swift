@@ -259,20 +259,24 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
                 return
             }
             ShareBackgroundActivity.scanStarted()
+            BrowseDiagnostics.event("scan+ \(accountKey) force=\(force)")
             if force {
                 await scanner.scan()
             } else {
                 await scanner.scanIfStale()
             }
             ShareBackgroundActivity.scanFinished()
+            BrowseDiagnostics.event("scan- \(accountKey)")
             resource.markDrained()
             await scannerLease.finishAndWait()
             // Enrich whatever the scan (and prior scans) indexed. Cheap no-op when
             // nothing is pending.
             if !Task.isCancelled {
                 ShareBackgroundActivity.enrichStarted()
+                BrowseDiagnostics.event("enrich+ \(accountKey)")
                 await enricher.enrichPending()
                 ShareBackgroundActivity.enrichFinished()
+                BrowseDiagnostics.event("enrich- \(accountKey)")
             }
             await self?.clearScanTask(accountKey, taskID: taskID)
         }

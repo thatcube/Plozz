@@ -41,6 +41,26 @@ public enum BrowseDiagnostics {
         try? FileHandle.standardOutput.write(contentsOf: Data(("PLZXMEM " + line + "\n").utf8))
     }
 
+    private static let eventClockFmt: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm:ss.SSS"
+        return f
+    }()
+
+    /// Emits a timestamped, self-describing `event` line so the log records the
+    /// full timeline WITHOUT the tester narrating: screen changes ("screen
+    /// Home"), scan lifecycle ("scan+ id=… active=…"), etc. The current live
+    /// scan/lister counts are appended so any event can be read in context.
+    /// No-op when disabled.
+    public static func event(_ what: String) {
+        guard isEnabled else { return }
+        let s = ShareBackgroundActivity.snapshot()
+        emit(String(
+            format: "event %@ %@ | scans=%d listers=%d enrich=%d",
+            eventClockFmt.string(from: Date()), what, s.scans, s.activeListers, s.enrichPasses
+        ))
+    }
+
     /// Runs a fixed-interval sampler until the returned task is cancelled (call
     /// `.cancel()` in the browse view's `onDisappear`). No-op — returns `nil` —
     /// when disabled, so callers add nothing when the flag is off.

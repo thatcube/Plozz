@@ -395,6 +395,9 @@ struct MainTabView: View {
             }
         }
         .plozzTabStyle(navigationStyle)
+        .onChange(of: selectedTabRaw, initial: true) { _, tab in
+            BrowseDiagnostics.event("screen tab=\(tab)")
+        }
         // Host the full-screen Now Playing player here, on the root TabView, so it
         // presents reliably on the first trigger under both tab styles. Hosting it
         // inside the Music tab's navigation stack made it present a beat late under

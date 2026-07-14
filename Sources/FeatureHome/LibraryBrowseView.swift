@@ -150,11 +150,15 @@ public struct LibraryBrowseView: View {
             // Opt-in (PLZXMEM=1) memory/background-activity sampler. Fully inert
             // when disabled — returns before starting any timer or keep-alive loop.
             guard BrowseDiagnostics.isEnabled else { return }
+            BrowseDiagnostics.event("screen browse+")
             let sampler = BrowseDiagnostics.startSampler(label: "browse") {
                 let s = ArtworkImageCache.shared.currentStats()
                 return (count: s.count, costMB: s.costMB)
             }
-            defer { sampler?.cancel() }
+            defer {
+                sampler?.cancel()
+                BrowseDiagnostics.event("screen browse-")
+            }
             // Keep alive for the lifetime of this view; cancelled on disappear.
             while !Task.isCancelled { try? await Task.sleep(nanoseconds: 1_000_000_000) }
         }

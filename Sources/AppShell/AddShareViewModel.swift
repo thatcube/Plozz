@@ -152,6 +152,13 @@ final class AddShareViewModel {
                 self.port = port
                 self.serverLabel = host
                 self.enterShareStep()
+            case .success(.ftp):
+                // FTP detection is implemented + tested but not activated in the
+                // shipping detector yet (it needs a dedicated onboarding form —
+                // see MediaShareRouteDetector). Handle defensively so the switch
+                // stays exhaustive; not reached in production.
+                self.shareLoad = .unreachable
+                self.step = .chooseShare
             case .failure:
                 // A host+path that answered nowhere: surface as unreachable so
                 // the user can correct the address.

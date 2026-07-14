@@ -7,6 +7,7 @@ import FeatureDiscovery
 import FeatureMusic
 import FeatureProfiles
 import MediaTransportCore
+import MediaTransportFTP
 import MediaTransportHTTP
 import MediaTransportSMB
 import MediaTransportWebDAV
@@ -1501,6 +1502,8 @@ public final class AppState {
             makeSMBAdapter(accountStore: accountStore),
             makeWebDAVAdapter(scheme: .http, accountStore: accountStore),
             makeWebDAVAdapter(scheme: .https, accountStore: accountStore),
+            makeFTPAdapter(scheme: .ftp, accountStore: accountStore),
+            makeFTPAdapter(scheme: .ftps, accountStore: accountStore),
         ]
     }
 
@@ -1576,6 +1579,63 @@ public final class AppState {
             trustPolicy = .system
         }
         return WebDAVMediaTransportConfiguration(credential: credential, trustPolicy: trustPolicy)
+    }
+
+    /// Builds an FTP adapter for one scheme (`ftp` plaintext / `ftps` implicit
+    /// TLS). The resolver registry routes on the account's real scheme, so both
+    /// are registered — mirroring the WebDAV http/https pair.
+    private static func makeFTPAdapter(
+        scheme: FTPScheme,
+        accountStore: any AccountPersisting
+    ) -> FTPMediaTransportAdapter {
+        FTPMediaTransportAdapter(scheme: scheme) { accountID, revision in
+            // Load the envelope inside the provider so a missing/incompatible
+            // credential surfaces as a MediaTransportError (never a raw vault
+            // error, which ShareTransportBrowser would treat as transient and
+            // retry-loop on).
+            let envelope: MediaShareCredentialEnvelope
+            do {
+                envelope = try accountStore.mediaShareCredential(for: accountID, revision: revision)
+            } catch {
+                throw MediaTransportError.authentication(reason: "FTP credential unavailable")
+            }
+            guard envelope.transport == .ftp else {
+                throw MediaTransportError.unsupportedCapability("non-FTP credential")
+            }
+            return try Self.ftpConfiguration(from: envelope, scheme: scheme)
+        }
+    }
+
+    /// Maps a stored credential envelope to the transport-layer FTP
+    /// configuration. Security is derived from the scheme: `ftps` → implicit
+    /// TLS, `ftp` → plaintext. (Explicit `AUTH TLS` has no distinct scheme and
+    /// is unsupported on tvOS, so it is never produced here.)
+    nonisolated static func ftpConfiguration(
+        from envelope: MediaShareCredentialEnvelope,
+        scheme: FTPScheme
+    ) throws -> FTPMediaTransportConfiguration {
+        let credential: FTPCredential
+        switch envelope.authentication {
+        case .anonymous:
+            credential = .anonymous
+        case let .password(username, password):
+            credential = .password(username: username, password: password)
+        case .bearer, .generatedKey, .noCredentials:
+            throw MediaTransportError.unsupportedCapability("FTP authentication")
+        }
+
+        let security: FTPSecurity = scheme == .ftps ? .implicitTLS : .plaintext
+        let trustPolicy: FTPTrustPolicy
+        if let pin = envelope.trust.tlsLeafCertificateSHA256 {
+            trustPolicy = .pinnedLeaf(sha256: Array(pin.bytes), revision: envelope.trust.revision)
+        } else {
+            trustPolicy = .system
+        }
+        return FTPMediaTransportConfiguration(
+            credential: credential,
+            security: security,
+            trustPolicy: trustPolicy
+        )
     }
 
     /// Registers every media-share transport adapter, keyed by the scheme its

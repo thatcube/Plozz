@@ -40,6 +40,8 @@ enum MediaShareTransportDispatch {
         case "http", "https":
             rawPath = components.percentEncodedPath
         default:
+            // Filesystem transports (SMB, FTP/FTPS) address by literal, decoded
+            // path names, so they keep `URL.path`.
             rawPath = components.path
         }
         return try MediaTransportEndpointIdentity(

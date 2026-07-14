@@ -17,6 +17,9 @@ enum MediaShareRoute: Equatable, Sendable {
     /// A fully-resolved WebDAV base URL (scheme already decided: https tried
     /// before http). `insecureHTTP` is true when it resolved to plain http.
     case webDAV(baseURL: URL, insecureHTTP: Bool)
+    /// A fully-resolved FTP base URL (`ftp://` plaintext or `ftps://` implicit
+    /// TLS). `insecure` is true for plaintext `ftp`.
+    case ftp(baseURL: URL, insecure: Bool)
 }
 
 enum MediaShareRouteError: Error, Equatable, Sendable {
@@ -104,6 +107,12 @@ struct MediaShareRouteDetector: Sendable {
 
     /// Convenience for the shipping set (SMB + WebDAV), assuming SMB for a bare
     /// NAS host that answers no HTTP. `probe` is injectable for tests.
+    /// The shipping detector's claimant set. FTP detection (`FTPClaimant`) is
+    /// implemented + unit-tested but intentionally NOT activated here yet: it
+    /// emits a `.ftp` route that needs a dedicated onboarding form (a WebDAV-
+    /// wizard-scale flow) to complete. Registering it is a one-line change once
+    /// that form lands — the adapter/dispatch wiring already makes any persisted
+    /// `ftp://`/`ftps://` account fully functional.
     init(probe: any WebDAVReachabilityProbing = WebDAVReachabilityProbe()) {
         self.init(
             claimants: [SMBClaimant(), WebDAVClaimant(probe: probe)],
@@ -236,6 +245,30 @@ struct WebDAVClaimant: TransportClaimant {
         }
         return nil
     }
+}
+
+/// FTP claims explicit `ftp://`/`ftps://`, and the well-known control port 21.
+/// It has NO network probe — an un-schemed address without port 21 is left to
+/// the other transports (WebDAV's HTTP probe / SMB's terminal fallback), so
+/// adding FTP never changes how a bare NAS host is detected.
+struct FTPClaimant: TransportClaimant {
+    var transportName: String { "FTP" }
+
+    func decisiveRoute(for address: ParsedShareAddress) -> MediaShareRoute? {
+        if let scheme = address.scheme, scheme == "ftp" || scheme == "ftps" {
+            // Honor exactly what the user typed.
+            guard let url = URL(string: address.raw) else { return nil }
+            return .ftp(baseURL: url, insecure: scheme == "ftp")
+        }
+        if address.scheme == nil, address.port == 21 {
+            let hostPort = authority(of: address)
+            guard let url = URL(string: "ftp://\(hostPort)\(address.path)") else { return nil }
+            return .ftp(baseURL: url, insecure: true)
+        }
+        return nil
+    }
+
+    func probe(_ address: ParsedShareAddress) async -> MediaShareRoute? { nil }
 }
 
 // MARK: - Real HTTP probe

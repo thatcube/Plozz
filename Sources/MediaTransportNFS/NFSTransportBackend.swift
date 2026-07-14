@@ -18,15 +18,20 @@ struct NFSBackendEntry: Sendable, Equatable {
 /// byte-source can be proven without a socket.
 protocol NFSTransportBackend: Sendable {
     /// Resolves the mount (portmap → mountd → root handle) and opens the NFS
-    /// channel.
-    func connect(host: String, exportPath: String) async throws
+    /// channel. `nfsPort` overrides the nfsd port (explicit `nfs://host:port`).
+    func connect(host: String, exportPath: String, nfsPort: UInt16?) async throws
     /// Proves the mounted root is a browsable directory.
     func validate() async throws
     func list(relativePath: String) async throws -> [NFSBackendEntry]
     func stat(relativePath: String) async throws -> NFSBackendEntry
     func readSmallFile(relativePath: String, maximumBytes: Int) async throws -> Data
-    /// Opens a random-access byte source on a dedicated connection.
-    func openSource(relativePath: String, byteSize: Int64) async throws -> any MediaTransportByteSource
+    /// Opens a random-access byte source on a dedicated connection. The
+    /// representation carries the expected size + mtime the source revalidates
+    /// on every read.
+    func openSource(
+        relativePath: String,
+        representation: RemoteFileRepresentation
+    ) async throws -> any MediaTransportByteSource
     func shutdown() async
 }
 
@@ -35,11 +40,11 @@ protocol NFSTransportBackend: Sendable {
 actor NFSClientBackend: NFSTransportBackend {
     private var session: NFSMountSession?
 
-    func connect(host: String, exportPath: String) async throws {
+    func connect(host: String, exportPath: String, nfsPort: UInt16?) async throws {
         guard session == nil else {
             throw MediaTransportError.invalidInput(reason: "NFS backend already connected")
         }
-        let client = NFSClient(host: host)
+        let client = NFSClient(host: host, nfsPort: nfsPort)
         session = try await client.mount(exportPath: exportPath)
     }
 
@@ -91,17 +96,40 @@ actor NFSClientBackend: NFSTransportBackend {
         guard attributes.size <= UInt64(maximumBytes) else {
             throw MediaTransportError.invalidInput(reason: "small-file bound exceeded")
         }
+        // A 0-byte file (empty .nfo/subtitle/playlist) is valid — return empty
+        // rather than issuing a zero-length READ, matching the SMB/WebDAV contract.
+        guard attributes.size > 0 else { return Data() }
         return try await session.read(handle: handle, offset: 0, length: Int(attributes.size))
     }
 
-    func openSource(relativePath: String, byteSize: Int64) async throws -> any MediaTransportByteSource {
+    func openSource(
+        relativePath: String,
+        representation: RemoteFileRepresentation
+    ) async throws -> any MediaTransportByteSource {
         let session = try requireSession()
         let (handle, attributes) = try await session.resolve(relativePath: relativePath)
         guard attributes.isRegularFile else {
             throw MediaTransportError.invalidInput(reason: "NFS source target is not a file")
         }
-        let reader = try await session.openReader(handle: handle, byteSize: byteSize)
-        return NFSByteSource(reader: reader, byteSize: byteSize)
+        // NFS change detection is mtime-based (see ShareProvider.networkFileLocator);
+        // the reader revalidates size + mtime on every read.
+        guard representation.identity.kind == .modificationTime,
+              let expectedModifiedAt = representation.identity.modifiedAt else {
+            throw MediaTransportError.unsupportedRange(
+                reason: "NFS playback requires a modification-time representation"
+            )
+        }
+        let byteSize = representation.size
+        // Each cursor opens its OWN reader (own connection) via this factory, so
+        // cancelling one cursor never disturbs a sibling.
+        let readerFactory: @Sendable () async throws -> NFSFileReader = {
+            try await session.openReader(
+                handle: handle,
+                byteSize: byteSize,
+                expectedModifiedAt: expectedModifiedAt
+            )
+        }
+        return NFSByteSource(byteSize: byteSize, readerFactory: readerFactory)
     }
 
     func shutdown() async {
@@ -160,6 +188,12 @@ func mapNFSError(_ error: Error) -> MediaTransportError {
         return authError
             ? .authentication(reason: "NFS RPC credentials rejected")
             : .transport(code: -2)
+    case .rpcUnsupported:
+        // Permanent: the server accepted the call and rejected it on grounds
+        // retrying can't fix (program/proc unavailable, version/args mismatch).
+        return .unsupportedCapability("NFS RPC procedure")
+    case .representationChanged:
+        return .sourceChanged(reason: "NFS file changed since scan")
     case .invalidArgument:
         return .invalidInput(reason: "invalid NFS argument")
     case .status(let status):

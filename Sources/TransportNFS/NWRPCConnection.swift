@@ -29,9 +29,16 @@ final class NWRPCConnection: RPCConnection, @unchecked Sendable {
     private let queue = DispatchQueue(label: "com.plozz.nfs.rpc")
     private let timeout: Duration
 
-    /// Guards `pending` so a late callback after a timeout can't double-resume.
+    /// Guards `pending` so a late callback after a timeout can't double-resume,
+    /// and serializes `exchange`es (see `exchangeBusy`).
     private let lock = NSLock()
     private var isClosed = false
+    /// Serializes RPC exchanges so at most one request/reply is in flight per
+    /// connection — ONC-RPC over a stream is single-outstanding, and two
+    /// concurrent exchanges would interleave `send`/`receive` and desync the
+    /// record stream. Callers that need parallelism use separate connections.
+    private var exchangeBusy = false
+    private var exchangeWaiters: [CheckedContinuation<Void, Never>] = []
 
     init(host: String, port: UInt16, timeout: Duration) {
         let endpointHost = NWEndpoint.Host(host)
@@ -68,7 +75,9 @@ final class NWRPCConnection: RPCConnection, @unchecked Sendable {
     }
 
     func exchange(_ message: Data) async throws -> Data {
-        try await withDeadline(timeout) {
+        await acquireExchange()
+        defer { releaseExchange() }
+        return try await withDeadline(timeout) {
             try await self.send(RPCRecordMarking.frame(message))
             return try await self.receiveRecord()
         } onTimeout: {
@@ -78,6 +87,34 @@ final class NWRPCConnection: RPCConnection, @unchecked Sendable {
 
     func close() async {
         forceClose()
+    }
+
+    // MARK: - Exchange serialization
+
+    private func acquireExchange() async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            lock.lock()
+            if exchangeBusy {
+                exchangeWaiters.append(continuation)
+                lock.unlock()
+            } else {
+                exchangeBusy = true
+                lock.unlock()
+                continuation.resume()
+            }
+        }
+    }
+
+    private func releaseExchange() {
+        lock.lock()
+        if exchangeWaiters.isEmpty {
+            exchangeBusy = false
+            lock.unlock()
+        } else {
+            let next = exchangeWaiters.removeFirst()
+            lock.unlock()
+            next.resume()
+        }
     }
 
     // MARK: - Send / receive primitives
@@ -108,11 +145,16 @@ final class NWRPCConnection: RPCConnection, @unchecked Sendable {
             guard length >= 0, length <= 64 * 1024 * 1024 else {
                 throw NFSError.malformedResponse
             }
+            // Bound the cumulative message BEFORE allocating the next fragment,
+            // so a stream of large fragments (incl. the final one) can't blow
+            // past the cap.
+            guard message.count + length <= 128 * 1024 * 1024 else {
+                throw NFSError.malformedResponse
+            }
             if length > 0 {
                 message.append(try await receiveExactly(length))
             }
             if isLast { break }
-            guard message.count <= 128 * 1024 * 1024 else { throw NFSError.malformedResponse }
         }
         return message
     }
@@ -186,27 +228,58 @@ private final class ContinuationBox<T>: @unchecked Sendable {
     }
 }
 
-/// Runs `operation` with a wall-clock deadline. On expiry it throws
-/// ``NFSError.timeout`` and invokes `onTimeout` to tear down the underlying
-/// socket so the abandoned in-flight call can't leak.
+/// Single-winner election shared between an operation, its timeout, and external
+/// cancellation, so the socket-teardown side effect (`onTimeout`) runs at most
+/// once and never after the operation already succeeded.
+private final class DeadlineFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var resolved = false
+
+    /// Returns true exactly once, for the first caller to claim.
+    func claim() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        if resolved { return false }
+        resolved = true
+        return true
+    }
+}
+
+/// Runs `operation` with a wall-clock deadline. On expiry OR external
+/// cancellation it tears down the underlying socket (`onTimeout`) so the
+/// abandoned in-flight continuation resumes (rather than hanging), and it never
+/// tears down a connection whose operation already completed successfully.
 func withDeadline<T: Sendable>(
     _ timeout: Duration,
     operation: @escaping @Sendable () async throws -> T,
     onTimeout: @escaping @Sendable () -> Void
 ) async throws -> T {
-    try await withThrowingTaskGroup(of: T.self) { group in
-        group.addTask {
-            try await operation()
+    let flag = DeadlineFlag()
+    return try await withTaskCancellationHandler {
+        try await withThrowingTaskGroup(of: T.self) { group in
+            group.addTask {
+                let result = try await operation()
+                // Operation won: block any later timeout/cancel from closing the
+                // socket out from under a successful exchange.
+                _ = flag.claim()
+                return result
+            }
+            group.addTask {
+                try await Task.sleep(for: timeout)
+                if flag.claim() { onTimeout() }
+                throw NFSError.timeout
+            }
+            defer { group.cancelAll() }
+            guard let result = try await group.next() else {
+                throw NFSError.cancelled
+            }
+            return result
         }
-        group.addTask {
-            try await Task.sleep(for: timeout)
-            onTimeout()
-            throw NFSError.timeout
-        }
-        defer { group.cancelAll() }
-        guard let result = try await group.next() else {
-            throw NFSError.cancelled
-        }
-        return result
+    } onCancel: {
+        // External cancellation: the NWConnection continuation ignores task
+        // cancellation, so force the socket closed to make its callback fire and
+        // unstick the awaiting operation (otherwise the task group would hang
+        // waiting for a child that never resumes).
+        if flag.claim() { onTimeout() }
     }
 }

@@ -18,11 +18,13 @@ final class FakeNFSBackend: NFSTransportBackend, @unchecked Sendable {
     private(set) var didShutdown = false
     private(set) var connectedHost: String?
     private(set) var connectedExport: String?
+    private(set) var connectedPort: UInt16?
 
-    func connect(host: String, exportPath: String) async throws {
+    func connect(host: String, exportPath: String, nfsPort: UInt16?) async throws {
         if let connectError { throw connectError }
         connectedHost = host
         connectedExport = exportPath
+        connectedPort = nfsPort
     }
 
     func validate() async throws {
@@ -43,8 +45,11 @@ final class FakeNFSBackend: NFSTransportBackend, @unchecked Sendable {
         smallFileData
     }
 
-    func openSource(relativePath: String, byteSize: Int64) async throws -> any MediaTransportByteSource {
-        FakeByteSource(bytes: sourceBytes, byteSize: byteSize)
+    func openSource(
+        relativePath: String,
+        representation: RemoteFileRepresentation
+    ) async throws -> any MediaTransportByteSource {
+        FakeByteSource(bytes: sourceBytes, byteSize: representation.size)
     }
 
     func shutdown() async {

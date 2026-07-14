@@ -252,7 +252,7 @@ final class NFSProcedureTests: XCTestCase {
             return Wire.acceptedReply(xid: call.xid, results: results.data)
         }
         let attributes = try await NFSProcedures.getAttributes(
-            client: client, credential: .default, handle: NFSFileHandle(bytes: Data([1]))
+            client: client, credential: .unix(.default), handle: NFSFileHandle(bytes: Data([1]))
         )
         XCTAssertEqual(attributes.type, .regular)
         XCTAssertEqual(attributes.size, 4096)
@@ -268,7 +268,7 @@ final class NFSProcedureTests: XCTestCase {
         }
         do {
             _ = try await NFSProcedures.getAttributes(
-                client: client, credential: .default, handle: NFSFileHandle(bytes: Data([1]))
+                client: client, credential: .unix(.default), handle: NFSFileHandle(bytes: Data([1]))
             )
             XCTFail("expected status error")
         } catch {
@@ -287,7 +287,7 @@ final class NFSProcedureTests: XCTestCase {
             return Wire.acceptedReply(xid: call.xid, results: results.data)
         }
         let result = try await NFSProcedures.lookup(
-            client: client, credential: .default, directory: NFSFileHandle(bytes: Data([0])), name: "Movies"
+            client: client, credential: .unix(.default), directory: NFSFileHandle(bytes: Data([0])), name: "Movies"
         )
         XCTAssertEqual(result.handle.bytes, Data([9, 9, 9]))
         XCTAssertEqual(result.attributes?.type, .directory)
@@ -306,7 +306,7 @@ final class NFSProcedureTests: XCTestCase {
             return Wire.acceptedReply(xid: call.xid, results: results.data)
         }
         let result = try await NFSProcedures.read(
-            client: client, credential: .default,
+            client: client, credential: .unix(.default),
             handle: NFSFileHandle(bytes: Data([1])), offset: 0, count: 512
         )
         XCTAssertEqual(result.data, payload)
@@ -328,7 +328,7 @@ final class NFSProcedureTests: XCTestCase {
             return Wire.acceptedReply(xid: call.xid, results: results.data)
         }
         let entries = try await NFSProcedures.readDirectory(
-            client: client, credential: .default,
+            client: client, credential: .unix(.default),
             directory: NFSFileHandle(bytes: Data([0])), maxCount: 65_536
         )
         XCTAssertEqual(entries.count, 1)
@@ -383,8 +383,16 @@ final class NFSClientIntegrationTests: XCTestCase {
             results.encode(UInt32(1 << 20))  // rtmax
             results.encode(UInt32(1 << 17))  // rtpref
         case NFSProcedure.getAttr:
+            // Branch on the requested handle so root reads as a directory and
+            // the file handle reads as the regular file (per-read revalidation).
+            var args = call.arguments
+            let fh = (try? args.decodeOpaque()) ?? Data()
             results.encode(UInt32(0))
-            results.data.append(Wire.fattr3(type: 2, size: 0, fileID: 1, mtimeSeconds: 10))
+            if fh == Data(fileHandle) {
+                results.data.append(Wire.fattr3(type: 1, size: 2048, fileID: 2, mtimeSeconds: 99))
+            } else {
+                results.data.append(Wire.fattr3(type: 2, size: 0, fileID: 1, mtimeSeconds: 10))
+            }
         case NFSProcedure.lookup:
             results.encode(UInt32(0))
             results.data.append(Wire.fileHandle(fileHandle))
@@ -420,10 +428,70 @@ final class NFSClientIntegrationTests: XCTestCase {
         XCTAssertEqual(handle.bytes, Data(Self.fileHandle))
         XCTAssertEqual(attributes.size, 2048)
 
-        let reader = try await session.openReader(handle: handle, byteSize: 2048)
+        let reader = try await session.openReader(
+            handle: handle,
+            byteSize: 2048,
+            expectedModifiedAt: Date(timeIntervalSince1970: 99)
+        )
         let data = try await reader.read(offset: 0, length: 2048)
         XCTAssertEqual(data.count, 2048)
         await reader.close()
         await session.shutdown()
+    }
+}
+
+/// Hardening: READ range validation and per-read change detection.
+final class NFSHardeningTests: XCTestCase {
+    func testReadRejectsOversizedReply() async {
+        // Server returns 1000 bytes for a 100-byte request — must be rejected,
+        // not allocated.
+        let connection = StubRPCConnection { message in
+            let call = ParsedRPCCall(message: message)
+            var results = XDREncoder()
+            results.encode(UInt32(0))            // status
+            results.encode(false)                // file attrs absent
+            results.encode(UInt32(1000))         // declared count
+            results.encode(false)                // eof
+            results.encodeOpaque(Data(count: 1000))
+            return Wire.acceptedReply(xid: call.xid, results: results.data)
+        }
+        do {
+            _ = try await NFSProcedures.read(
+                client: RPCClient(connection: connection),
+                credential: .unix(.default),
+                handle: NFSFileHandle(bytes: Data([1])),
+                offset: 0,
+                count: 100
+            )
+            XCTFail("expected oversized reply rejection")
+        } catch {
+            XCTAssertEqual(error as? NFSError, .malformedResponse)
+        }
+    }
+
+    func testReaderDetectsChangedModificationTime() async {
+        // Every call is a GETATTR whose mtime (777) differs from the expected
+        // (99), so the reader must fail closed before issuing a READ.
+        let connection = StubRPCConnection { message in
+            let call = ParsedRPCCall(message: message)
+            var results = XDREncoder()
+            results.encode(UInt32(0))
+            results.data.append(Wire.fattr3(type: 1, size: 2048, fileID: 2, mtimeSeconds: 777))
+            return Wire.acceptedReply(xid: call.xid, results: results.data)
+        }
+        let reader = NFSFileReader(
+            connection: connection,
+            handle: NFSFileHandle(bytes: Data([0xCC])),
+            credential: .unix(.default),
+            byteSize: 2048,
+            expectedModifiedAt: Date(timeIntervalSince1970: 99),
+            readSize: 512 * 1024
+        )
+        do {
+            _ = try await reader.read(offset: 0, length: 100)
+            XCTFail("expected representationChanged")
+        } catch {
+            XCTAssertEqual(error as? NFSError, .representationChanged)
+        }
     }
 }

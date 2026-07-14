@@ -10,16 +10,18 @@ import Foundation
 public struct NFSClient: Sendable {
     private let host: String
     private let credential: AuthUnixCredential
+    private let nfsPortOverride: UInt16?
     private let timeout: Duration
     private let connectionFactory: any RPCConnectionFactory
 
-    /// Public entry point. Uses the default `NWConnection`-backed transport and a
-    /// plain (non-root) `AUTH_UNIX` identity — the right fit for the `insecure`
-    /// exports a sandboxed tvOS client can reach.
-    public init(host: String, timeout: Duration = .seconds(20)) {
+    /// Public entry point. `nfsPort` overrides the nfsd port (from an explicit
+    /// `nfs://host:port`); nil resolves it via portmap (falling back to 2049).
+    /// Uses the default `NWConnection` transport and a plain `AUTH_UNIX` identity.
+    public init(host: String, nfsPort: UInt16? = nil, timeout: Duration = .seconds(20)) {
         self.init(
             host: host,
             credential: .default,
+            nfsPortOverride: nfsPort,
             timeout: timeout,
             connectionFactory: NWRPCConnectionFactory()
         )
@@ -30,17 +32,20 @@ public struct NFSClient: Sendable {
     init(
         host: String,
         credential: AuthUnixCredential,
+        nfsPortOverride: UInt16? = nil,
         timeout: Duration,
         connectionFactory: any RPCConnectionFactory
     ) {
         self.host = host
         self.credential = credential
+        self.nfsPortOverride = nfsPortOverride
         self.timeout = timeout
         self.connectionFactory = connectionFactory
     }
 
     /// Mounts `exportPath` (e.g. `/volume1/media`) and returns a session bound to
-    /// the resolved root file handle and a dedicated NFS connection.
+    /// the resolved root file handle, a dedicated NFS connection, and the
+    /// credential flavor the export advertised.
     public func mount(exportPath: String) async throws -> NFSMountSession {
         // 1. portmap → mountd port (mountd is dynamic in NFSv3, so it MUST be
         //    resolved via portmap; there is no well-known fallback).
@@ -51,28 +56,30 @@ public struct NFSClient: Sendable {
             throw NFSError.mountFailed(.notSupported)
         }
 
-        // 2. MOUNT MNT → root file handle.
-        let rootHandle = try await performMount(exportPath: exportPath, mountPort: mountPort)
+        // 2. MOUNT MNT → root file handle + the credential the export accepts.
+        let mounted = try await performMount(exportPath: exportPath, mountPort: mountPort)
 
-        // 3. Resolve nfsd port (usually 2049) and open the NFS channel.
-        let nfsPort = try await resolvePort(program: NFSProgram.nfs, version: NFSProgram.nfsVersion)
-            ?? NFSWellKnownPort.nfs
+        // 3. Resolve nfsd port (explicit override, else portmap, else 2049).
+        let nfsPort: UInt16
+        if let nfsPortOverride {
+            nfsPort = nfsPortOverride
+        } else {
+            nfsPort = try await resolvePort(program: NFSProgram.nfs, version: NFSProgram.nfsVersion)
+                ?? NFSWellKnownPort.nfs
+        }
         let nfsConnection = try await connectionFactory.connect(host: host, port: nfsPort, timeout: timeout)
 
-        let session = NFSMountSession(
+        return NFSMountSession(
             host: host,
             exportPath: exportPath,
             mountPort: mountPort,
             nfsPort: nfsPort,
-            rootHandle: rootHandle,
-            credential: credential,
+            rootHandle: mounted.handle,
+            credential: mounted.credential,
             timeout: timeout,
             connectionFactory: connectionFactory,
             nfsConnection: nfsConnection
         )
-        // Best-effort rsize negotiation; failures fall back to the default.
-        await session.negotiateReadSize()
-        return session
     }
 
     // MARK: - portmap
@@ -107,7 +114,10 @@ public struct NFSClient: Sendable {
 
     // MARK: - MOUNT
 
-    private func performMount(exportPath: String, mountPort: UInt16) async throws -> NFSFileHandle {
+    private func performMount(
+        exportPath: String,
+        mountPort: UInt16
+    ) async throws -> (handle: NFSFileHandle, credential: RPCCredential) {
         let connection = try await connectionFactory.connect(host: host, port: mountPort, timeout: timeout)
         defer { Task { await connection.close() } }
         let client = RPCClient(connection: connection)
@@ -127,9 +137,22 @@ public struct NFSClient: Sendable {
             throw NFSError.mountFailed(status)
         }
         let handle = try decoder.decodeFileHandle()
-        // auth_flavors list follows; we don't need it, but decode to validate.
+
+        // auth_flavors<>: pick the credential the export actually advertises so
+        // an AUTH_NONE-only export doesn't fail every subsequent AUTH_UNIX call.
         let flavorCount = try decoder.decodeUInt32()
-        for _ in 0..<min(flavorCount, 16) { _ = try decoder.decodeUInt32() }
-        return handle
+        var flavors: [UInt32] = []
+        for _ in 0..<min(flavorCount, 16) {
+            flavors.append(try decoder.decodeUInt32())
+        }
+        let selected: RPCCredential
+        if flavors.isEmpty || flavors.contains(RPCConstants.authUnix) {
+            selected = .unix(credential)          // the near-universal default
+        } else if flavors.contains(RPCConstants.authNone) {
+            selected = .none
+        } else {
+            selected = .unix(credential)          // best effort (e.g. GSS-only lists)
+        }
+        return (handle, selected)
     }
 }

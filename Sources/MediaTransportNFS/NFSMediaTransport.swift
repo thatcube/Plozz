@@ -34,7 +34,11 @@ public struct NFSMediaTransportAdapter: MediaTransportAdapter, Sendable {
 
         let backend = backendFactory()
         do {
-            try await backend.connect(host: target.host, exportPath: target.exportPath)
+            try await backend.connect(
+                host: target.host,
+                exportPath: target.exportPath,
+                nfsPort: target.nfsPort
+            )
         } catch {
             await backend.shutdown()
             throw mapNFSError(error)
@@ -56,6 +60,9 @@ public struct NFSMediaTransportAdapter: MediaTransportAdapter, Sendable {
 private struct NFSConnectionTarget: Sendable {
     let host: String
     let exportPath: String
+    /// Explicit nfsd port from `nfs://host:port`, if any (nil → resolve via
+    /// portmap, falling back to 2049).
+    let nfsPort: UInt16?
 
     init(endpoint: MediaTransportEndpointIdentity) throws {
         guard !endpoint.host.isEmpty else {
@@ -66,6 +73,7 @@ private struct NFSConnectionTarget: Sendable {
         }
         host = endpoint.host
         exportPath = endpoint.rootPath
+        nfsPort = endpoint.port.flatMap { UInt16(exactly: $0) }
     }
 }
 
@@ -191,7 +199,7 @@ final class NFSMediaTransportFileSystem: MediaTransportFileSystem, @unchecked Se
             try Self.validateNFSRepresentation(current, against: locator.representation)
             let source = try await backend.openSource(
                 relativePath: normalizedPath,
-                byteSize: locator.representation.size
+                representation: locator.representation
             )
             return MediaTransportSourceLease(source: source)
         } catch {

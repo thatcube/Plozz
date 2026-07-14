@@ -45,9 +45,11 @@ struct AuthUnixCredential: Sendable, Equatable {
     var gid: UInt32
     var auxiliaryGIDs: [UInt32]
 
-    /// Default identity: root-equivalent uid/gid 0 is a poor fit for `insecure`
-    /// exports (root is usually squashed), so default to a plain non-root
-    /// identity. Callers can override.
+    /// Default identity. tvOS has no meaningful Unix uid, so this presents
+    /// uid/gid 0: on the common `root_squash` export the server maps it to the
+    /// anonymous user (reading world-readable media, which is the norm for a
+    /// media share), and on `no_root_squash` it grants full read access. Callers
+    /// can override for exports that key access off a specific uid.
     static let `default` = AuthUnixCredential(
         stamp: 0,
         machineName: "plozz",
@@ -160,10 +162,11 @@ struct RPCClient: Sendable {
         _ = try decoder.decodeOpaque()          // verf body
         let acceptStat = try decoder.decodeUInt32()
         guard acceptStat == RPCConstants.success else {
-            // PROG_MISMATCH etc. — treat as a hard protocol failure. An auth
-            // problem here is unusual (that arrives via messageDenied), so map
-            // everything to a denied/transport fault the mapper can classify.
-            throw NFSError.rpcDenied(authError: false)
+            // PROG_UNAVAIL / PROG_MISMATCH / PROC_UNAVAIL / GARBAGE_ARGS /
+            // SYSTEM_ERR are all PERMANENT — the server accepted the call and
+            // rejected it on grounds retrying can't fix. Surface as terminal so
+            // the browser doesn't reconnect-and-retry-loop.
+            throw NFSError.rpcUnsupported
         }
         return decoder
     }

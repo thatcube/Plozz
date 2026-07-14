@@ -4,7 +4,8 @@ import Foundation
 /// over an ``RPCClient``. Keeping them stateless lets both the metadata session
 /// and each byte-source reader (which own separate connections) share one
 /// implementation, and lets tests exercise each procedure against a stubbed
-/// connection.
+/// connection. The `credential` is an already-selected ``RPCCredential`` (the
+/// mount negotiates AUTH_UNIX vs AUTH_NONE from the export's advertised flavors).
 enum NFSProcedures {
     /// Caps on a directory listing so a hostile/looping server can't exhaust
     /// memory or spin forever.
@@ -13,7 +14,7 @@ enum NFSProcedures {
 
     static func getAttributes(
         client: RPCClient,
-        credential: AuthUnixCredential,
+        credential: RPCCredential,
         handle: NFSFileHandle
     ) async throws -> NFSFileAttributes {
         var encoder = XDREncoder()
@@ -22,7 +23,7 @@ enum NFSProcedures {
             program: NFSProgram.nfs,
             version: NFSProgram.nfsVersion,
             procedure: NFSProcedure.getAttr,
-            credential: .unix(credential),
+            credential: credential,
             arguments: encoder.data
         )
         try throwIfNotOK(&decoder)
@@ -31,7 +32,7 @@ enum NFSProcedures {
 
     static func lookup(
         client: RPCClient,
-        credential: AuthUnixCredential,
+        credential: RPCCredential,
         directory: NFSFileHandle,
         name: String
     ) async throws -> (handle: NFSFileHandle, attributes: NFSFileAttributes?) {
@@ -42,7 +43,7 @@ enum NFSProcedures {
             program: NFSProgram.nfs,
             version: NFSProgram.nfsVersion,
             procedure: NFSProcedure.lookup,
-            credential: .unix(credential),
+            credential: credential,
             arguments: encoder.data
         )
         try throwIfNotOK(&decoder)
@@ -53,7 +54,7 @@ enum NFSProcedures {
 
     static func read(
         client: RPCClient,
-        credential: AuthUnixCredential,
+        credential: RPCCredential,
         handle: NFSFileHandle,
         offset: UInt64,
         count: UInt32
@@ -66,14 +67,21 @@ enum NFSProcedures {
             program: NFSProgram.nfs,
             version: NFSProgram.nfsVersion,
             procedure: NFSProcedure.read,
-            credential: .unix(credential),
+            credential: credential,
             arguments: encoder.data
         )
         try throwIfNotOK(&decoder)
-        _ = try decoder.decodePostOpAttributes()  // file_attributes
-        _ = try decoder.decodeUInt32()             // count (redundant with data length)
+        _ = try decoder.decodePostOpAttributes()   // file_attributes
+        let declaredCount = try decoder.decodeUInt32()
         let eof = try decoder.decodeBool()
-        let data = try decoder.decodeOpaque(maxLength: 64 * 1024 * 1024)
+        // Bound the returned data to what we requested — a server must not hand
+        // back more than `count` bytes, and the declared count must match the
+        // opaque length. Caps allocation and enforces the byte-source range
+        // contract.
+        let data = try decoder.decodeOpaque(maxLength: Int(count))
+        guard data.count == Int(declaredCount), data.count <= Int(count) else {
+            throw NFSError.malformedResponse
+        }
         return NFSReadResult(data: data, eof: eof)
     }
 
@@ -81,7 +89,7 @@ enum NFSProcedures {
     /// EOF. Skips `.`/`..`.
     static func readDirectory(
         client: RPCClient,
-        credential: AuthUnixCredential,
+        credential: RPCCredential,
         directory: NFSFileHandle,
         maxCount: UInt32
     ) async throws -> [NFSDirectoryEntry] {
@@ -102,7 +110,7 @@ enum NFSProcedures {
                 program: NFSProgram.nfs,
                 version: NFSProgram.nfsVersion,
                 procedure: NFSProcedure.readDirPlus,
-                credential: .unix(credential),
+                credential: credential,
                 arguments: encoder.data
             )
             try throwIfNotOK(&decoder)
@@ -137,40 +145,12 @@ enum NFSProcedures {
             }
             let eof = try decoder.decodeBool()
             if eof { break }
-            // No progress guard: a server that returns neither entries nor EOF
+            // No-progress guard: a server that returns neither entries nor EOF
             // would otherwise loop forever.
             guard sawEntry, lastCookie != cookie else { break }
             cookie = lastCookie
         }
         return entries
-    }
-
-    /// FSINFO → preferred read size (`rtpref`), used to size READ chunks. Best
-    /// effort; returns nil on any failure so the caller keeps its default.
-    static func readPreferredSize(
-        client: RPCClient,
-        credential: AuthUnixCredential,
-        handle: NFSFileHandle
-    ) async -> UInt32? {
-        var encoder = XDREncoder()
-        encoder.encodeOpaque(handle.bytes)
-        do {
-            var decoder = try await client.call(
-                program: NFSProgram.nfs,
-                version: NFSProgram.nfsVersion,
-                procedure: NFSProcedure.fsInfo,
-                credential: .unix(credential),
-                arguments: encoder.data
-            )
-            let status = NFSStatus(rawValue: try decoder.decodeUInt32())
-            guard status == .ok else { return nil }
-            _ = try decoder.decodePostOpAttributes()  // obj_attributes
-            _ = try decoder.decodeUInt32()             // rtmax
-            let rtpref = try decoder.decodeUInt32()    // rtpref
-            return rtpref > 0 ? rtpref : nil
-        } catch {
-            return nil
-        }
     }
 
     /// Reads the leading `nfsstat3` of a result and throws when it isn't OK.

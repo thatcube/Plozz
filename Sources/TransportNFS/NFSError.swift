@@ -15,10 +15,17 @@ public enum NFSError: Error, Equatable, Sendable {
     /// The RPC layer rejected the call (auth error, program/version mismatch).
     /// `authError` distinguishes a credential problem from a transport fault.
     case rpcDenied(authError: Bool)
+    /// The server accepted the call but returned a permanent accept_stat failure
+    /// (program/procedure unavailable, version mismatch, garbage args). These
+    /// are terminal, NOT transient — retrying can never succeed.
+    case rpcUnsupported
     /// A portmap/MOUNT/NFS program returned a protocol-level status code.
     case status(NFSStatus)
     /// The requested export could not be mounted (MOUNT returned an error).
     case mountFailed(NFSStatus)
+    /// The file changed underneath an open source (size/mtime moved), detected
+    /// by per-read revalidation — playback must fail closed.
+    case representationChanged
     /// A response field violated a size/shape invariant the client enforces.
     case invalidArgument
 }

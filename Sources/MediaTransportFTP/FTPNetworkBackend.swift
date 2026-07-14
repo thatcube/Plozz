@@ -269,6 +269,21 @@ actor FTPNetworkBackend: FTPBackend {
 
     // MARK: - Ranged playback read
 
+    /// Drift detection over FTP (deliberate, documented policy):
+    ///
+    /// The filesystem-transport family fails closed if a file changes underneath
+    /// in-flight playback. FTP has no ETag and — unlike SMB's per-read fstat — no
+    /// cheap per-read stat: `SIZE`/`MDTM` are separate control commands that
+    /// cannot be issued while a `RETR` transfer occupies the control channel. So
+    /// FTP re-validates `SIZE`+`MDTM` and fails closed with `.sourceChanged` at
+    /// two boundaries — at `openSource` (see the filesystem) and again on **every
+    /// seek** (a discontiguous read restarts the transfer, so `validateSize` runs
+    /// before each new `REST`+`RETR`). It does **not** re-validate mid-contiguous
+    /// stream, because doing so would require aborting the active transfer. Net:
+    /// drift is caught at open and at each seek; a change during an uninterrupted
+    /// linear read is not detected (and would surface as an early EOF / short
+    /// read, never as mixed-version bytes). This is a conscious limitation of the
+    /// protocol, kept explicit so the family's fail-closed story stays coherent.
     func read(
         path: String,
         at offset: Int64,

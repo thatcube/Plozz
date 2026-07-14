@@ -13,9 +13,6 @@ struct AddMediaShareView: View {
     let onBack: () -> Void
     let onSMBConfigured: (ShareDraft) -> Void
     let onWebDAVConfigured: (WebDAVShareConfiguration) -> Void
-    /// NFS is credential-free, so a detected NFS export is configured directly
-    /// (host, optional port, export path) with no intermediate credential step.
-    let onNFSConfigured: (String, Int?, String) -> Void
 
     /// Non-nil when the typed address detected as WebDAV — hosts the WebDAV flow
     /// pre-seeded with the resolved URL. Otherwise the SMB discovery + address
@@ -34,8 +31,7 @@ struct AddMediaShareView: View {
                 isPageReady: isPageReady,
                 onBack: onBack,
                 onConfigured: onSMBConfigured,
-                onWebDAVDetected: { url in webDAVAddress = url.absoluteString },
-                onNFSDetected: onNFSConfigured
+                onWebDAVDetected: { url in webDAVAddress = url.absoluteString }
             )
         }
     }

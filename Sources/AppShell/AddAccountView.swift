@@ -18,7 +18,6 @@ struct AddAccountView: View {
     let onPlexAuthenticatedMany: ([UserSession]) -> Void
     let onShareConfigured: (ShareDraft) -> Void
     let onWebDAVShareConfigured: (WebDAVShareConfiguration) -> Void
-    let onNFSShareConfigured: (String, Int?, String) -> Void
     let onCancel: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -39,7 +38,6 @@ struct AddAccountView: View {
         onPlexAuthenticatedMany: @escaping ([UserSession]) -> Void = { _ in },
         onShareConfigured: @escaping (ShareDraft) -> Void = { _ in },
         onWebDAVShareConfigured: @escaping (WebDAVShareConfiguration) -> Void = { _ in },
-        onNFSShareConfigured: @escaping (String, Int?, String) -> Void = { _, _, _ in },
         onCancel: @escaping () -> Void
     ) {
         self.deviceID = deviceID
@@ -50,7 +48,6 @@ struct AddAccountView: View {
         self.onPlexAuthenticatedMany = onPlexAuthenticatedMany
         self.onShareConfigured = onShareConfigured
         self.onWebDAVShareConfigured = onWebDAVShareConfigured
-        self.onNFSShareConfigured = onNFSShareConfigured
         self.onCancel = onCancel
         // Seed the flow's starting screen. Cancelling Quick Connect returns here
         // with the provider preserved so we land on its server list, not the
@@ -103,8 +100,7 @@ struct AddAccountView: View {
                 isPageReady: pageIsReady,
                 onBack: navigateBackToChooser,
                 onSMBConfigured: onShareConfigured,
-                onWebDAVConfigured: onWebDAVShareConfigured,
-                onNFSConfigured: onNFSShareConfigured
+                onWebDAVConfigured: onWebDAVShareConfigured
             )
         }
     }

@@ -28,9 +28,6 @@ struct AddShareView: View {
     /// Called when the typed manual address auto-detects as WebDAV, so the host
     /// can switch to the WebDAV flow (pre-seeded with the resolved URL).
     var onWebDAVDetected: (URL) -> Void = { _ in }
-    /// Called when the typed manual address auto-detects as NFS (host, optional
-    /// port, export path), so the host can configure the credential-free share.
-    var onNFSDetected: (String, Int?, String) -> Void = { _, _, _ in }
 
     @State private var viewModel = AddShareViewModel()
     @State private var displayName = ""
@@ -79,9 +76,6 @@ struct AddShareView: View {
         .onChange(of: viewModel.step) { _, _ in focusedField = .back }
         .onChange(of: viewModel.detectedWebDAV) { _, detected in
             if let detected { onWebDAVDetected(detected.url) }
-        }
-        .onChange(of: viewModel.detectedNFS) { _, detected in
-            if let detected { onNFSDetected(detected.host, detected.port, detected.exportPath) }
         }
         .onChange(of: isPageReady) { _, ready in
             if ready {

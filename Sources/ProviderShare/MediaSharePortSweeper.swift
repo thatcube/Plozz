@@ -11,9 +11,18 @@ public struct DiscoveredMediaShareBox: Sendable, Hashable, Identifiable {
     public struct Door: Sendable, Hashable {
         public let transport: MediaShareTransportKind
         public let port: Int?
-        public init(transport: MediaShareTransportKind, port: Int?) {
+        /// URL scheme when the transport has one (`http`/`https` for WebDAV).
+        /// nil for non-URL transports.
+        public let scheme: String?
+
+        public init(
+            transport: MediaShareTransportKind,
+            port: Int?,
+            scheme: String? = nil
+        ) {
             self.transport = transport
             self.port = port
+            self.scheme = scheme
         }
     }
 
@@ -58,7 +67,11 @@ public struct MediaShareBoxGrouping {
         var byHost: [String: DiscoveredMediaShareBox] = [:]
         for service in services {
             let key = service.host.lowercased()
-            let door = DiscoveredMediaShareBox.Door(transport: service.transport, port: service.port)
+            let door = DiscoveredMediaShareBox.Door(
+                transport: service.transport,
+                port: service.port,
+                scheme: service.scheme
+            )
             if var box = byHost[key] {
                 box.addDoor(door)
                 byHost[key] = box
@@ -98,6 +111,14 @@ public struct TransportSweepTarget: Sendable, Hashable {
     public init(port: Int, probe: MediaShareServiceProbeKind) {
         self.port = port
         self.probe = probe
+    }
+
+    public var scheme: String? {
+        switch probe {
+        case .webDAVHTTP: return "http"
+        case .webDAVHTTPS: return "https"
+        case .sshBanner, .ftpBanner: return nil
+        }
     }
 }
 
@@ -161,7 +182,8 @@ public struct MediaSharePortSweeper: Sendable {
                         }
                         return DiscoveredMediaShareBox.Door(
                             transport: spec.transport,
-                            port: target.port == spec.defaultPort ? nil : target.port
+                            port: target.port == spec.defaultPort ? nil : target.port,
+                            scheme: target.scheme
                         )
                     }
                 }

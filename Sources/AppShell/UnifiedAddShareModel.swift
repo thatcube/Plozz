@@ -90,6 +90,10 @@ final class UnifiedAddShareModel {
     // Resolved connection for the active attempt.
     private var resolvedHost = ""
     private var resolvedPort: Int?
+    /// Known WebDAV scheme from Bonjour, the protocol-confirming sweep, an
+    /// explicit manual URL, or scheme probing.
+    private(set) var webDAVScheme: String?
+    private var webDAVSchemePort: Int?
     private var trust: WebDAVOnboardingTrust = .system
     private var approvedPin: Data?
 
@@ -99,6 +103,7 @@ final class UnifiedAddShareModel {
 
     private let discovery: BonjourServiceDiscovery
     private let sweeper = MediaSharePortSweeper()
+    private let serviceProbe: any MediaShareServiceProbing
     private let webDAVProbe: any WebDAVOnboardingProbing
     private var scanTask: Task<Void, Never>?
     private var workTask: Task<Void, Never>?
@@ -107,8 +112,12 @@ final class UnifiedAddShareModel {
     /// specific configured port like WebDAV :8384 is never lost to de-duplication.
     private var fullDoorsByHost: [String: [DiscoveredMediaShareBox.Door]] = [:]
 
-    init(webDAVProbe: any WebDAVOnboardingProbing = WebDAVOnboardingProbe()) {
+    init(
+        webDAVProbe: any WebDAVOnboardingProbing = WebDAVOnboardingProbe(),
+        serviceProbe: any MediaShareServiceProbing = ProtocolServiceProbe()
+    ) {
         self.webDAVProbe = webDAVProbe
+        self.serviceProbe = serviceProbe
         self.discovery = BonjourServiceDiscovery(mapping: Self.mapping)
     }
 
@@ -116,8 +125,19 @@ final class UnifiedAddShareModel {
 
     private static let mapping = BonjourTransportMapping(
         MediaShareTransportCatalog.all.flatMap { descriptor in
-            descriptor.bonjourServiceTypes.map {
-                (serviceType: $0, transport: descriptor.kind, defaultPort: Optional(descriptor.defaultPort))
+            descriptor.bonjourServiceTypes.map { serviceType in
+                let scheme: String?
+                switch serviceType {
+                case "_webdav._tcp": scheme = "http"
+                case "_webdavs._tcp": scheme = "https"
+                default: scheme = nil
+                }
+                return (
+                    serviceType: serviceType,
+                    transport: descriptor.kind,
+                    defaultPort: Optional(descriptor.defaultPort),
+                    scheme: scheme
+                )
             }
         }
     )
@@ -148,7 +168,11 @@ final class UnifiedAddShareModel {
                 services.append(service)
                 // Record the advertised door (Bonjour carries the REAL port).
                 self.recordDoors(host: service.host, [
-                    DiscoveredMediaShareBox.Door(transport: service.transport, port: service.port)
+                    DiscoveredMediaShareBox.Door(
+                        transport: service.transport,
+                        port: service.port,
+                        scheme: service.scheme
+                    )
                 ])
                 self.boxes = MediaShareBoxGrouping.group(services).map { box in
                     box.mergingDoors(
@@ -232,6 +256,8 @@ final class UnifiedAddShareModel {
         portText = ""
         authMode = .usernamePassword
         locations = []; locationLoad = .idle; currentPath = "/"
+        webDAVScheme = nil
+        webDAVSchemePort = nil
         trust = .system; approvedPin = nil
     }
 
@@ -242,10 +268,15 @@ final class UnifiedAddShareModel {
     func applyTransport(_ kind: MediaShareTransportKind, doors: [DiscoveredMediaShareBox.Door]? = nil) {
         selectedTransport = kind
         guard let descriptor = descriptor(kind) else { portText = ""; return }
-        if let port = bestDetectedPort(for: kind, descriptor: descriptor) {
+        if let door = bestDetectedDoor(for: kind, descriptor: descriptor) {
+            let port = door.port ?? descriptor.defaultPort
             portText = String(port)
+            webDAVScheme = kind == .webDAV ? door.scheme : nil
+            webDAVSchemePort = kind == .webDAV ? port : nil
         } else {
             portText = String(descriptor.defaultPort)
+            webDAVScheme = nil
+            webDAVSchemePort = nil
         }
         // Token mode only exists for WebDAV; reset otherwise.
         if !descriptor.authModes.contains(.token) { authMode = .usernamePassword }
@@ -255,14 +286,20 @@ final class UnifiedAddShareModel {
     /// specific (non-default) port the device answered on — that's the meaningful
     /// find — and take the highest one if several. Returns nil when the only
     /// detection is on the default port (then the default is used implicitly).
-    private func bestDetectedPort(for kind: MediaShareTransportKind, descriptor: TransportOnboardingDescriptor) -> Int? {
-        let ports = detectedDoors
-            .filter { $0.transport == kind }
-            .map { $0.port ?? descriptor.defaultPort }
-        guard !ports.isEmpty else { return nil }
-        let nonDefault = ports.filter { $0 != descriptor.defaultPort }
-        if let specific = nonDefault.max() { return specific }
-        return descriptor.defaultPort
+    private func bestDetectedDoor(
+        for kind: MediaShareTransportKind,
+        descriptor: TransportOnboardingDescriptor
+    ) -> DiscoveredMediaShareBox.Door? {
+        let doors = detectedDoors.filter { $0.transport == kind }
+        guard !doors.isEmpty else { return nil }
+        return doors.max {
+            let lhs = $0.port ?? descriptor.defaultPort
+            let rhs = $1.port ?? descriptor.defaultPort
+            let lhsSpecific = lhs != descriptor.defaultPort
+            let rhsSpecific = rhs != descriptor.defaultPort
+            if lhsSpecific != rhsSpecific { return !lhsSpecific }
+            return lhs < rhs
+        }
     }
 
     /// All distinct ports detected for a transport (drives the port chips).
@@ -293,8 +330,11 @@ final class UnifiedAddShareModel {
         case .always:
             return "This transport sends your username and password unencrypted. On a trusted home network that’s usually fine."
         case .whenInsecureScheme:
-            let lower = address.lowercased()
-            let insecure = lower.hasPrefix("http://") || (!lower.hasPrefix("https://") && portIs(80))
+            let explicit = explicitScheme(from: address)
+            let scheme = explicit
+                ?? ((webDAVSchemePort == currentPort) ? webDAVScheme : nil)
+                ?? (portIs(80) ? "http" : nil)
+            let insecure = scheme == "http"
             let hasCredential = authMode == .token ? !token.isEmpty : !username.isEmpty
             return (insecure && hasCredential)
                 ? "This uses http://, so your credential is sent unencrypted. Use https:// to encrypt it."
@@ -303,6 +343,10 @@ final class UnifiedAddShareModel {
     }
 
     private func portIs(_ p: Int) -> Bool { Int(portText.trimmingCharacters(in: .whitespaces)) == p }
+    private var currentPort: Int? {
+        inlinePort(from: address)
+            ?? Int(portText.trimmingCharacters(in: .whitespaces))
+    }
 
     // MARK: - Connect
 
@@ -326,7 +370,7 @@ final class UnifiedAddShareModel {
         case .smb:
             enterSMBLocation()
         case .webDAV:
-            beginWebDAV(host: host, port: port)
+            beginWebDAV(rawAddress: address, host: host, port: port)
         default:
             step = .comingSoon(kind)
         }
@@ -349,6 +393,26 @@ final class UnifiedAddShareModel {
         if let slash = s.firstIndex(of: "/") { s = String(s[..<slash]) }
         guard s.filter({ $0 == ":" }).count == 1, let colon = s.firstIndex(of: ":") else { return nil }
         return Int(s[s.index(after: colon)...])
+    }
+
+    private func explicitScheme(from raw: String) -> String? {
+        let lower = raw.trimmingCharacters(in: .whitespaces).lowercased()
+        if lower.hasPrefix("http://") { return "http" }
+        if lower.hasPrefix("https://") { return "https" }
+        return nil
+    }
+
+    private func enteredPath(from raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespaces)
+        let candidate = trimmed.contains("://") ? trimmed : "https://\(trimmed)"
+        guard let components = URLComponents(
+            string: candidate
+        ) else {
+            return "/"
+        }
+        return components.percentEncodedPath.isEmpty
+            ? "/"
+            : components.percentEncodedPath
     }
 
     private func enterSMBLocation() {
@@ -382,20 +446,124 @@ final class UnifiedAddShareModel {
 
     // MARK: - WebDAV (real backend)
 
-    private func beginWebDAV(host: String, port: Int?) {
-        // Build a base URL. Prefer the exact typed address if it had a scheme;
-        // otherwise assume https unless the port is the http default.
-        let scheme = (port == 80) ? "http" : "https"
+    private func beginWebDAV(
+        rawAddress: String,
+        host: String,
+        port: Int?
+    ) {
+        let path = enteredPath(from: rawAddress)
+        if let scheme = explicitScheme(from: rawAddress) {
+            webDAVScheme = scheme
+            webDAVSchemePort = port
+            guard let url = makeWebDAVURL(
+                scheme: scheme,
+                host: host,
+                port: port,
+                path: path
+            ) else {
+                connectError = "That doesn’t look like a valid address."
+                return
+            }
+            beginWebDAV(url: url)
+            return
+        }
+
+        if webDAVSchemePort == port, let scheme = webDAVScheme {
+            guard let url = makeWebDAVURL(
+                scheme: scheme,
+                host: host,
+                port: port,
+                path: path
+            ) else {
+                connectError = "That doesn’t look like a valid address."
+                return
+            }
+            beginWebDAV(url: url)
+            return
+        }
+
+        detectWebDAVScheme(host: host, port: port, path: path)
+    }
+
+    private func makeWebDAVURL(
+        scheme: String,
+        host: String,
+        port: Int?,
+        path: String
+    ) -> URL? {
         var comps = URLComponents()
         comps.scheme = scheme
         comps.host = host.contains(":") ? "[\(host)]" : host
         if let port, port != (scheme == "https" ? 443 : 80) { comps.port = port }
-        comps.path = ""
-        guard let url = comps.url else {
-            connectError = "That doesn’t look like a valid address."
+        comps.percentEncodedPath = path == "/" ? "" : path
+        return comps.url
+    }
+
+    /// Manual WebDAV entry without a scheme: confirm HTTPS first, then HTTP.
+    /// The probe is credential-free. If an insecure HTTP endpoint is found while
+    /// credentials are already filled, stop on the form so the warning is visible
+    /// before any credential is sent.
+    private func detectWebDAVScheme(
+        host: String,
+        port: Int?,
+        path: String
+    ) {
+        guard let port else {
+            connectError = "Enter a port for this WebDAV server."
             return
         }
-        beginWebDAV(url: url)
+        detecting = true
+        workTask = Task { [serviceProbe] in
+            defer { self.detecting = false }
+            let candidates: [(String, MediaShareServiceProbeKind)] = [
+                ("https", .webDAVHTTPS),
+                ("http", .webDAVHTTP),
+            ]
+            for (scheme, probeKind) in candidates {
+                let confirmed = await serviceProbe.confirms(
+                    host: host,
+                    target: TransportSweepTarget(
+                        port: port,
+                        probe: probeKind
+                    ),
+                    timeout: 2.5
+                )
+                if Task.isCancelled { return }
+                guard confirmed else { continue }
+
+                self.webDAVScheme = scheme
+                self.webDAVSchemePort = port
+                if scheme == "http", self.hasEnteredCredential {
+                    self.connectError =
+                        "This WebDAV server uses HTTP. Review the security warning, then Connect again."
+                    return
+                }
+                guard let url = self.makeWebDAVURL(
+                    scheme: scheme,
+                    host: host,
+                    port: port,
+                    path: path
+                ) else {
+                    self.connectError =
+                        "That doesn’t look like a valid address."
+                    return
+                }
+                self.beginWebDAV(url: url)
+                return
+            }
+            self.connectError =
+                "Couldn’t determine whether this WebDAV server uses HTTP or HTTPS."
+        }
+    }
+
+    private var hasEnteredCredential: Bool {
+        switch authMode {
+        case .token:
+            return !token.trimmingCharacters(in: .whitespaces).isEmpty
+        case .usernamePassword:
+            return !username.trimmingCharacters(in: .whitespaces).isEmpty
+                || !password.isEmpty
+        }
     }
 
     private func beginWebDAV(url: URL) {

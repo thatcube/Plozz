@@ -207,7 +207,7 @@ struct UnifiedAddShareView: View {
                 VStack(alignment: .leading, spacing: 16) {
                     HStack(alignment: .top, spacing: 16) {
                         VStack(alignment: .leading, spacing: 6) {
-                            TextField("e.g. 192.168.68.71 or mynas.local", text: $viewModel.address)
+                            TextField("e.g. 192.168.1.100 or mynas.local", text: $viewModel.address)
                                 .textContentType(.URL).autocorrectionDisabled().keyboardType(.URL)
                                 .focused($focus, equals: .address)
                         }

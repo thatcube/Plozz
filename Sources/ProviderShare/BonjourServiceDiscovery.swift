@@ -15,19 +15,29 @@ public struct DiscoveredNetworkService: Sendable, Hashable, Identifiable {
     public let host: String
     /// Advertised port, if any (`nil` = use the transport's default).
     public let port: Int?
+    /// URL scheme advertised by the service type (`_webdav` → `http`,
+    /// `_webdavs` → `https`). nil for non-URL transports.
+    public let scheme: String?
 
-    public init(transport: MediaShareTransportKind, name: String, host: String, port: Int?) {
+    public init(
+        transport: MediaShareTransportKind,
+        name: String,
+        host: String,
+        port: Int?,
+        scheme: String? = nil
+    ) {
         self.transport = transport
         self.name = name
         self.host = host
         self.port = port
+        self.scheme = scheme
     }
 
     /// De-dup on transport + connect target, so one box's IPv4/IPv6 records for
     /// a given transport collapse to a single row.
     public var id: String {
         let portKey = port.map { ":\($0)" } ?? ""
-        return "\(transport.rawValue)@\(host.lowercased())\(portKey)"
+        return "\(transport.rawValue)@\(host.lowercased())\(portKey)#\(scheme ?? "")"
     }
 }
 
@@ -39,13 +49,23 @@ public struct BonjourTransportMapping: Sendable {
     private struct Entry: Sendable {
         let transport: MediaShareTransportKind
         let defaultPort: Int?
+        let scheme: String?
     }
     private let byServiceType: [String: Entry]
 
-    public init(_ pairs: [(serviceType: String, transport: MediaShareTransportKind, defaultPort: Int?)]) {
+    public init(_ pairs: [(
+        serviceType: String,
+        transport: MediaShareTransportKind,
+        defaultPort: Int?,
+        scheme: String?
+    )]) {
         var map: [String: Entry] = [:]
         for pair in pairs {
-            map[pair.serviceType] = Entry(transport: pair.transport, defaultPort: pair.defaultPort)
+            map[pair.serviceType] = Entry(
+                transport: pair.transport,
+                defaultPort: pair.defaultPort,
+                scheme: pair.scheme
+            )
         }
         self.byServiceType = map
     }
@@ -56,6 +76,9 @@ public struct BonjourTransportMapping: Sendable {
     }
     public func defaultPort(for transport: MediaShareTransportKind) -> Int? {
         byServiceType.values.first { $0.transport == transport }?.defaultPort
+    }
+    public func scheme(for serviceType: String) -> String? {
+        byServiceType[serviceType]?.scheme
     }
 }
 
@@ -97,7 +120,8 @@ public final class BonjourServiceDiscovery: @unchecked Sendable {
                             endpoint: result.endpoint,
                             serviceName: name,
                             transport: transport,
-                            defaultPort: self.mapping.defaultPort(for: transport)
+                            defaultPort: self.mapping.defaultPort(for: transport),
+                            scheme: self.mapping.scheme(for: serviceType)
                         )
                     }
                 }
@@ -137,7 +161,13 @@ public final class BonjourServiceDiscovery: @unchecked Sendable {
             self.continuation = continuation
         }
 
-        func resolve(endpoint: NWEndpoint, serviceName: String, transport: MediaShareTransportKind, defaultPort: Int?) {
+        func resolve(
+            endpoint: NWEndpoint,
+            serviceName: String,
+            transport: MediaShareTransportKind,
+            defaultPort: Int?,
+            scheme: String?
+        ) {
             let connection = NWConnection(to: endpoint, using: .tcp)
             let key = ObjectIdentifier(connection)
             lock.lock()
@@ -150,7 +180,14 @@ public final class BonjourServiceDiscovery: @unchecked Sendable {
                 switch state {
                 case .ready:
                     if let (host, port) = Self.hostPort(from: connection.currentPath?.remoteEndpoint) {
-                        self.emit(transport: transport, name: serviceName, host: host, port: port, defaultPort: defaultPort)
+                        self.emit(
+                            transport: transport,
+                            name: serviceName,
+                            host: host,
+                            port: port,
+                            defaultPort: defaultPort,
+                            scheme: scheme
+                        )
                     }
                     self.tearDown(key)
                 case .failed, .cancelled:
@@ -162,19 +199,33 @@ public final class BonjourServiceDiscovery: @unchecked Sendable {
             connection.start(queue: DispatchQueue(label: "com.plozz.bonjour.resolve"))
         }
 
-        private func emit(transport: MediaShareTransportKind, name: String, host: String, port: Int?, defaultPort: Int?) {
+        private func emit(
+            transport: MediaShareTransportKind,
+            name: String,
+            host: String,
+            port: Int?,
+            defaultPort: Int?,
+            scheme: String?
+        ) {
             lock.lock()
             defer { lock.unlock() }
             guard let continuation else { return }
-            // De-dup per transport + host so IPv4/IPv6 or repeat announcements for
-            // one box collapse to one row per transport.
-            let dedupeKey = "\(transport.rawValue)@\(host.lowercased())"
+            // Collapse repeated records without throwing away distinct HTTP /
+            // HTTPS WebDAV endpoints or distinct advertised ports.
+            let dedupeKey =
+                "\(transport.rawValue)@\(host.lowercased()):\(port ?? 0)#\(scheme ?? "")"
             guard seen.insert(dedupeKey).inserted else { return }
             let cleanName = name.isEmpty ? host : name
             let cleanPort = (port == defaultPort || port == nil) ? nil : port
             PlozzLog.boot("bonjour-discovery: \(transport.rawValue) \(cleanName) @ \(host)\(cleanPort.map { ":\($0)" } ?? "")")
             continuation.yield(
-                DiscoveredNetworkService(transport: transport, name: cleanName, host: host, port: cleanPort)
+                DiscoveredNetworkService(
+                    transport: transport,
+                    name: cleanName,
+                    host: host,
+                    port: cleanPort,
+                    scheme: scheme
+                )
             )
         }
 

@@ -64,12 +64,21 @@ final class AddShareViewModel {
     /// Set when the typed manual address auto-detects as WebDAV instead of SMB.
     /// The hosting coordinator observes this and switches to the WebDAV flow.
     private(set) var detectedWebDAV: DetectedWebDAVRoute?
+    /// Set when the typed manual address auto-detects as NFS. The hosting
+    /// coordinator observes this and configures the credential-free NFS share.
+    private(set) var detectedNFS: DetectedNFSRoute?
     /// True while the manual address is being auto-detected (SMB vs WebDAV).
     private(set) var detecting = false
 
     struct DetectedWebDAVRoute: Equatable {
         let url: URL
         let insecureHTTP: Bool
+    }
+
+    struct DetectedNFSRoute: Equatable {
+        let host: String
+        let port: Int?
+        let exportPath: String
     }
 
     private let discovery = SMBServiceDiscovery()
@@ -126,6 +135,7 @@ final class AddShareViewModel {
     func connectManualHost() {
         detectTask?.cancel()
         detectedWebDAV = nil
+        detectedNFS = nil
         let raw = manualHost.trimmingCharacters(in: .whitespaces)
         guard !raw.isEmpty else { return }
         // If the user typed an explicit port in the separate Port field, fold it
@@ -152,6 +162,17 @@ final class AddShareViewModel {
                 self.port = port
                 self.serverLabel = host
                 self.enterShareStep()
+            case .success(.nfs(let host, let port, let exportPath)):
+                // NFS is credential-free and has no export browser yet, so the
+                // user must type the full export path. With a path we hand off to
+                // the (creds-free) NFS configuration; without one we prompt.
+                let trimmedExport = exportPath.trimmingCharacters(in: CharacterSet(charactersIn: "/ "))
+                if trimmedExport.isEmpty {
+                    self.shareLoad = .failed("Enter the full NFS path, e.g. nfs://host/volume1/media")
+                    self.step = .chooseShare
+                } else {
+                    self.detectedNFS = DetectedNFSRoute(host: host, port: port, exportPath: exportPath)
+                }
             case .failure:
                 // A host+path that answered nowhere: surface as unreachable so
                 // the user can correct the address.

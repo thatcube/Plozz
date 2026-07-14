@@ -70,6 +70,29 @@ final class MediaShareRouteDetectorTests: XCTestCase {
         XCTAssertEqual(route, .smb(host: "nas.local", port: 445))
     }
 
+    // MARK: - NFS
+
+    func testExplicitNFSSchemeRoutesToNFS() async {
+        let route = try? await detect("nfs://nas.local/volume1/media").get()
+        XCTAssertEqual(route, .nfs(host: "nas.local", port: nil, exportPath: "/volume1/media"))
+    }
+
+    func testExplicitNFSSchemeWithPortRoutesToNFS() async {
+        let route = try? await detect("nfs://nas.local:2049/export").get()
+        XCTAssertEqual(route, .nfs(host: "nas.local", port: 2049, exportPath: "/export"))
+    }
+
+    func testBarePort2049RoutesToNFS() async {
+        let route = try? await detect("nas.local:2049").get()
+        XCTAssertEqual(route, .nfs(host: "nas.local", port: 2049, exportPath: ""))
+    }
+
+    func testNFSSchemeWinsOverProbeWithoutNetwork() async {
+        // A typed nfs:// address must never trigger a WebDAV network probe.
+        let route = try? await detect("nfs://nas.local/media", httpServersAt: ["https://nas.local/media"]).get()
+        XCTAssertEqual(route, .nfs(host: "nas.local", port: nil, exportPath: "/media"))
+    }
+
     // MARK: - Probe-based detection (the real fix)
 
     func testBareHostWithNonStandardPortDetectsWebDAV() async {

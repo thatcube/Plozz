@@ -10,6 +10,7 @@ import MediaTransportCore
 import MediaTransportHTTP
 import MediaTransportSMB
 import MediaTransportWebDAV
+import MediaTransportNFS
 import ProviderJellyfin
 import ProviderPlex
 import ProviderShare
@@ -1501,7 +1502,15 @@ public final class AppState {
             makeSMBAdapter(accountStore: accountStore),
             makeWebDAVAdapter(scheme: .http, accountStore: accountStore),
             makeWebDAVAdapter(scheme: .https, accountStore: accountStore),
+            makeNFSAdapter(),
         ]
+    }
+
+    /// The NFS adapter is credential-free (`AUTH_UNIX`, no password — the vault
+    /// stores `.noCredentials`), so unlike SMB/WebDAV it needs no per-account
+    /// credential provider. It is registered under the `nfs` scheme.
+    private static func makeNFSAdapter() -> NFSMediaTransportAdapter {
+        NFSMediaTransportAdapter()
     }
 
     private static func makeSMBAdapter(
@@ -2564,6 +2573,92 @@ public final class AppState {
             try accountStore.addMediaShare(account, credential: envelope, generatedPrivateKey: nil)
         } catch {
             apply(.authenticationFailed(.unknown("Couldn’t save this WebDAV share")))
+            return
+        }
+        finalizeAddedAccount(
+            session: session,
+            account: account,
+            previousAccount: previousAccount,
+            isFirstRun: isFirstRun
+        )
+    }
+
+    /// Stable identity for an NFS share. NFS export paths are case-sensitive and
+    /// there is a single credential-free principal per host+export, so the host
+    /// is folded (DNS is case-insensitive), the port is explicit, and the export
+    /// path keeps its case. Re-adding the same export updates in place.
+    static func nfsShareID(host: String, port: Int?, exportPath: String) -> String {
+        let portKey = (port == nil || port == 2049) ? "" : ":\(port!)"
+        var normalizedPath = exportPath.isEmpty ? "/" : exportPath
+        if normalizedPath.count > 1, normalizedPath.hasSuffix("/") {
+            normalizedPath.removeLast()
+        }
+        return "share:nfs://\(host.lowercased())\(portKey)\(normalizedPath)#anon"
+    }
+
+    /// Adds (or updates in place) an NFS media share. NFS is credential-free
+    /// (`AUTH_UNIX`), so it persists through the envelope path with
+    /// `.noCredentials` — the account record stays secret-free and the vault
+    /// validates the `(.nfs, .noCredentials)` pairing. Mirrors
+    /// `didConfigureWebDAVShare`; the share is validated lazily on first scan.
+    public func didConfigureNFSShare(
+        host: String,
+        port: Int?,
+        exportPath: String,
+        displayName: String
+    ) {
+        let trimmedExport = exportPath.trimmingCharacters(in: .whitespaces)
+        let normalizedExport = trimmedExport.hasPrefix("/") ? trimmedExport : "/" + trimmedExport
+        guard trimmedExport.count > 1 else {
+            apply(.authenticationFailed(.unknown("Enter the NFS export path, e.g. nfs://host/volume1/media")))
+            return
+        }
+        var comps = URLComponents()
+        comps.scheme = "nfs"
+        comps.host = ShareProvider.bracketedHostIfIPv6(host)
+        comps.port = (port == 2049) ? nil : port
+        comps.path = normalizedExport
+        guard let baseURL = comps.url else {
+            apply(.authenticationFailed(.unknown("Invalid NFS address")))
+            return
+        }
+
+        let envelope: MediaShareCredentialEnvelope
+        do {
+            envelope = try MediaShareCredentialEnvelope(
+                transport: .nfs,
+                authentication: .noCredentials,
+                trust: MediaShareTrustMaterial()
+            )
+        } catch {
+            apply(.authenticationFailed(.unknown("Couldn’t configure this NFS share")))
+            return
+        }
+
+        let serverID = Self.nfsShareID(host: host, port: port, exportPath: normalizedExport)
+        let trimmedName = displayName.trimmingCharacters(in: .whitespaces)
+        let name = trimmedName.isEmpty ? "\(host)\(normalizedExport)" : trimmedName
+        let server = MediaServer(
+            id: serverID,
+            name: name,
+            baseURL: baseURL,
+            provider: .mediaShare
+        )
+        let isFirstRun = accounts.isEmpty && !profilesModel.firstRunProfileSetupComplete
+        let session = UserSession(
+            server: server,
+            userID: "anon",
+            userName: "",
+            deviceID: accountStore.deviceID(),
+            accessToken: ""
+        )
+        let account = Account(id: server.id, from: session)
+        let previousAccount = accounts.first { $0.id == account.id }
+        apply(.serverSelected(server))
+        do {
+            try accountStore.addMediaShare(account, credential: envelope, generatedPrivateKey: nil)
+        } catch {
+            apply(.authenticationFailed(.unknown("Couldn’t save this NFS share")))
             return
         }
         finalizeAddedAccount(

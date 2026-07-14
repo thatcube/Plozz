@@ -500,6 +500,14 @@ private struct OnboardingPageContent: View {
                         displayName: config.displayName
                     )
                 },
+                onNFSShareConfigured: { host, port, exportPath in
+                    appState.didConfigureNFSShare(
+                        host: host,
+                        port: port,
+                        exportPath: exportPath,
+                        displayName: ""
+                    )
+                },
                 onCancel: { appState.cancelAuthentication() }
             )
 

@@ -397,11 +397,6 @@ struct UnifiedAddShareView: View {
             } label: { Label("Up one level", systemImage: "arrow.up.left") }
             .buttonStyle(.bordered)
         }
-        if isDrillable {
-            Text("Pick the folder to scan — drill in, then Use This Folder. Scanning a smaller folder (e.g. your Movies directory) fills in posters faster than the whole drive.")
-                .font(.footnote).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
         Panel(title: "Locations") {
             if viewModel.locations.isEmpty {
                 placeholder(isDrillable ? "No subfolders here." : "Nothing here.")

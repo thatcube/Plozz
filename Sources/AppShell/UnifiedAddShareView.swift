@@ -284,7 +284,10 @@ struct UnifiedAddShareView: View {
                                 .focused($focus, equals: .password)
                         }
                         if let warning = viewModel.plaintextWarning {
-                            Text(warning)
+                            Label(
+                                warning,
+                                systemImage: "info.circle"
+                            )
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
                                 .fixedSize(

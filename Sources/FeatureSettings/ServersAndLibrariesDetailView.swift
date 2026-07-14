@@ -92,7 +92,13 @@ struct ServersAndLibrariesDetailView: View {
         if accountCount == 0 {
             return "No one signed in"
         } else if accountCount == 1, let only = group.accounts.first {
-            return "Signed in as \(only.userName)"
+            let userName = only.userName.trimmingCharacters(in: .whitespaces)
+            if userName.isEmpty {
+                // NFS is credential-free (AUTH_UNIX, no login); an empty user on
+                // any other share means an anonymous/guest connection.
+                return group.transportKind == .nfs ? "No sign-in needed" : "Guest access"
+            }
+            return "Signed in as \(userName)"
         } else {
             return "\(accountCount) sign-ins"
         }

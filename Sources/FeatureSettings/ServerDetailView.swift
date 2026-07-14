@@ -73,10 +73,15 @@ struct ServerDetailView: View {
         }
         .scrollClipDisabled()
         .alert(item: $pendingSignOut) { pending in
-            Alert(
-                title: Text("Sign out \(pending.account.userName)?"),
+            let transport = MediaShareTransportKind(mediaShareScheme: pending.account.server.baseURL.scheme)
+            let isCredentialFree = transport == .nfs
+            let trimmedUser = pending.account.userName.trimmingCharacters(in: .whitespaces)
+            return Alert(
+                title: Text(isCredentialFree
+                    ? "Remove \(pending.serverName)?"
+                    : (trimmedUser.isEmpty ? "Remove \(pending.serverName)?" : "Sign out \(trimmedUser)?")),
                 message: Text(signOutMessage(for: pending)),
-                primaryButton: .destructive(Text("Sign Out")) {
+                primaryButton: .destructive(Text(isCredentialFree ? "Remove" : "Sign Out")) {
                     context.onRemoveAccount(pending.account)
                 },
                 secondaryButton: .cancel()
@@ -86,10 +91,19 @@ struct ServerDetailView: View {
 
     private func signOutMessage(for pending: PendingSignOut) -> String {
         let provider = pending.account.server.provider
-        let scope = provider == .plex
-            ? "This removes the Plex sign-in for \(pending.account.userName) on this Apple TV."
-            : "This removes \(pending.account.userName)'s sign-in to \(pending.serverName) on this Apple TV."
-        if pending.isLastAccount {
+        let transport = MediaShareTransportKind(mediaShareScheme: pending.account.server.baseURL.scheme)
+        let trimmedUser = pending.account.userName.trimmingCharacters(in: .whitespaces)
+        let scope: String
+        if transport == .nfs {
+            scope = "This removes the connection to \(pending.serverName) on this Apple TV."
+        } else if provider == .plex {
+            scope = "This removes the Plex sign-in for \(trimmedUser) on this Apple TV."
+        } else if trimmedUser.isEmpty {
+            scope = "This removes the guest connection to \(pending.serverName) on this Apple TV."
+        } else {
+            scope = "This removes \(trimmedUser)'s sign-in to \(pending.serverName) on this Apple TV."
+        }
+        if pending.isLastAccount, transport != .nfs {
             return scope + " No one else in your household is signed in, so \(pending.serverName) will be removed from your servers until someone signs in again."
         }
         return scope
@@ -100,13 +114,16 @@ struct ServerDetailView: View {
     }
 
     /// Provider-appropriate explanation of how sign-in works for this server.
-    private func accountsFooter(for provider: ProviderKind) -> String {
+    private func accountsFooter(for provider: ProviderKind, transport: MediaShareTransportKind?) -> String {
         switch provider {
         case .plex:
             return "Plex shares one sign-in across the household. Each profile picks its own Plex user and libraries under Profile › Your Libraries."
         case .jellyfin:
             return "Jellyfin signs in per profile, each with its own credentials. Choose what shows on your Home under Profile › Your Libraries."
         case .mediaShare:
+            if transport == .nfs {
+                return "This NFS export connects without a sign-in — anyone on this Apple TV can browse it. Choose what shows on your Home under Profile › Your Libraries."
+            }
             return "A media share connects with the credentials you entered (or as a guest). Choose what shows on your Home under Profile › Your Libraries."
         }
     }
@@ -152,15 +169,18 @@ struct ServerDetailView: View {
     // MARK: - Accounts
 
     private func accountsPanel(_ group: ServerAccountGroup) -> some View {
-        SettingsPanel(
-            footer: accountsFooter(for: group.providerKind)
+        let isCredentialFree = group.transportKind == .nfs
+        return SettingsPanel(
+            footer: accountsFooter(for: group.providerKind, transport: group.transportKind)
         ) {
             VStack(alignment: .leading, spacing: 16) {
-                Text("Signed in as")
+                Text(isCredentialFree ? "Connection" : "Signed in as")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
                 if group.accounts.isEmpty {
-                    Text("No one in this household is signed in to this server yet.")
+                    Text(isCredentialFree
+                         ? "This share isn’t connected yet."
+                         : "No one in this household is signed in to this server yet.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 } else {
@@ -176,10 +196,15 @@ struct ServerDetailView: View {
         let group = currentGroup
         let isLast = (group?.accounts.count ?? 1) <= 1
         let serverName = group?.serverName ?? account.server.name
+        let isCredentialFree = group?.transportKind == .nfs
+        let trimmedUser = account.userName.trimmingCharacters(in: .whitespaces)
+        let displayName = trimmedUser.isEmpty
+            ? (isCredentialFree ? "No sign-in required" : "Guest")
+            : trimmedUser
         return HStack(spacing: 16) {
-            AccountAvatar(name: account.userName, imageURL: resolvedAvatarURL(for: account), size: 40)
+            AccountAvatar(name: trimmedUser.isEmpty ? "?" : trimmedUser, imageURL: resolvedAvatarURL(for: account), size: 40)
             VStack(alignment: .leading, spacing: 4) {
-                Text(account.userName).font(.headline)
+                Text(displayName).font(.headline)
                 Text(account.server.baseURL.host ?? account.server.baseURL.absoluteString)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -201,14 +226,23 @@ struct ServerDetailView: View {
                     isLastAccount: isLast
                 )
             } label: {
-                Label(isLast ? "Sign Out & Remove Server" : "Sign Out",
-                      systemImage: "rectangle.portrait.and.arrow.right")
+                Label(removeButtonTitle(isCredentialFree: isCredentialFree, isLast: isLast),
+                      systemImage: isCredentialFree ? "trash" : "rectangle.portrait.and.arrow.right")
                     .labelStyle(.titleAndIcon)
                     .font(.callout.weight(.semibold))
             }
-            .accessibilityLabel("Sign out \(account.userName) from \(serverName)")
+            .accessibilityLabel(isCredentialFree
+                ? "Remove \(serverName)"
+                : "Sign out \(displayName) from \(serverName)")
         }
         .padding(.vertical, 2)
+    }
+
+    /// The destructive-button title. A credential-free share (NFS) isn't a
+    /// sign-in, so it reads as "Remove Server" rather than "Sign Out".
+    private func removeButtonTitle(isCredentialFree: Bool, isLast: Bool) -> String {
+        if isCredentialFree { return "Remove Server" }
+        return isLast ? "Sign Out & Remove Server" : "Sign Out"
     }
 
     // MARK: - Remove server (household)

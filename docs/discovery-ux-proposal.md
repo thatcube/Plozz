@@ -124,9 +124,10 @@ only matters to one of them**:
   **doesn't advertise at all** (or is on another subnet mDNS can't cross).
 - **Channel B — port sweep on an already-known device (curated list).** For a
   box whose IP we already have (found via Bonjour on *any* service, or typed by
-  the user), we can probe a **curated list of ports** for other transports. Here
-  the port list is **our choice** — and it can include popular **app-default**
-  ports, not just protocol well-known ones.
+  the user), we can probe a **curated list of ports** for other transports. Each
+  target must confirm protocol-specific evidence — an open socket alone is never
+  labeled as a transport. The port list is **our choice** and can include popular
+  **app-default** ports, not just protocol well-known ones.
 
 Why this matters for Brandon's `:8384` Unraid WebDAV: `8384` is not a *protocol*
 well-known WebDAV port (those are 80/443), but it **is** that app's **default**.
@@ -649,14 +650,10 @@ struct TransportOnboardingDescriptor: Sendable {
 
     // --- discovery ---
     let bonjourServiceTypes: [String]            // ["_smb._tcp"], ["_webdav._tcp","_webdavs._tcp"], ["_nfs._tcp"], ["_sftp-ssh._tcp"], ["_ftp._tcp"]
-    // Curated ports to probe on an ALREADY-KNOWN device (Channel B, §1.1).
-    // Includes protocol well-known ports AND popular app defaults, so a box
-    // that doesn't advertise WebDAV can still be found — e.g. Unraid's :8384.
-    let sweepPorts: [Int]                         // [445] ; [80,443,8384,8080,8443] ; [2049] ; [22] ; [21]
-    // Reuse the EXISTING probe half of the transport's TransportClaimant so
-    // "is transport T at host:port?" has ONE implementation shared by the
-    // route-detector AND discovery.
-    let probe: @Sendable (_ host: String, _ port: Int?) async -> Bool
+    // Curated targets on an ALREADY-KNOWN device (Channel B, §1.1).
+    // Every target declares a protocol-specific confirmation strategy:
+    // WebDAV evidence, SSH banner, FTP banner, etc. TCP-open alone is not proof.
+    let sweepTargets: [TransportSweepTarget]
 
     // --- authenticate (mirrors the vault's validate() matrix) ---
     let authModes: [MediaShareAuthMode]          // e.g. [.anonymous,.password] ; [.anonymous,.password,.bearer] ; [.password,.generatedKey] ; [.none]
@@ -713,10 +710,10 @@ WebDAV PROPFIND become two `listChildren` implementations.
 - **Group discovered services by box** = host identity (collapse IPv4/IPv6/`.local`
   records for one host, as `ResolveBox` already de-dups today), producing
   `DiscoveredBox { host, displayName, foundServices: [kind] }`.
-- **On box select (or manual address):** run each descriptor's `probe` against
-  its `sweepPorts` **in parallel** → the doors we can reach. This is the same
-  probe the route-detector uses, so behavior is consistent and there's one place
-  to fix a transport's detection.
+- **As each box is discovered:** run its descriptor `sweepTargets` **in
+  parallel**. Only protocol-confirmed targets become visible doors. For WebDAV,
+  confirmation requires `DAV`, `PROPFIND`, HTTP 207, `MS-Author-Via: DAV`, or an
+  explicit DAV/WebDAV authentication realm; a generic NAS web UI is rejected.
 - **This is Channel B (§1.1):** it lets a box that *didn't* Bonjour-advertise a
   transport still reveal it when it sits on a **curated** port — and because the
   list can include **app defaults** (e.g. Unraid WebDAV `:8384`), it closes most
@@ -725,13 +722,13 @@ WebDAV PROPFIND become two `listChildren` implementations.
 
 ### 6.4 What each transport contributes (illustrative, not implemented here)
 
-| Transport | Bonjour service type(s) | Curated sweep ports | Probe (reuse) |
+| Transport | Bonjour service type(s) | Curated sweep ports | Confirmation |
 | --- | --- | --- | --- |
-| SMB | `_smb._tcp` | 445 (139 legacy) | TCP-connect (as discovery resolve does today) |
-| WebDAV | `_webdav._tcp`, `_webdavs._tcp` | 80, 443, **5005, 5006** (Synology/QNAP WebDAV), 8080, 8443, 8000, 8888, **8384** | existing `WebDAVReachabilityProbe` OPTIONS |
-| NFS | `_nfs._tcp` | 2049 (111 portmapper) | TCP-connect |
-| SFTP | `_sftp-ssh._tcp` | 22 | TCP-connect / SSH banner |
-| FTP | `_ftp._tcp` | 21 (990 FTPS) | TCP-connect / FTP banner |
+| SMB | `_smb._tcp` | — until SMB negotiate probe lands | Bonjour advertisement |
+| WebDAV | `_webdav._tcp`, `_webdavs._tcp` | 80, 443, **5005, 5006** (Synology/QNAP WebDAV), 8080, 8443, 8000, 8888, **8384** | DAV-specific HTTP evidence |
+| NFS | `_nfs._tcp` | — until RPC/NFS probe lands | Bonjour advertisement |
+| SFTP | `_sftp-ssh._tcp` | 22 | `SSH-` banner |
+| FTP | `_ftp._tcp` | 21 | `220` FTP banner |
 
 *Sweep-port research (Synology/QNAP/Unraid/TrueNAS/Nextcloud):* the WebDAV list
 is the interesting one — **5005/5006 are the Synology & QNAP WebDAV defaults**,
@@ -843,4 +840,3 @@ engine, credential form, and trust machine unit-testable without a live network.
    location pick. Want me to extend it to show the **credential cards + the trust
    approval screen** per transport (SMB/WebDAV/SFTP/NFS/FTP) so you can see the
    unified auth/trust flow too?
-

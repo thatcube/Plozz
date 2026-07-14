@@ -101,12 +101,10 @@ struct UnifiedAddShareView: View {
             Panel(title: "Detected automatically", accessory: {
                 if viewModel.scanning { ProgressView() }
             }) {
-                if viewModel.boxes.isEmpty {
-                    placeholder(viewModel.scanning
-                        ? "Searching…"
-                        : "Nothing detected yet. Some devices don’t announce themselves — enter its address below.")
-                } else {
-                    VStack(spacing: 14) {
+                VStack(spacing: 14) {
+                    if viewModel.boxes.isEmpty {
+                        placeholder(viewModel.scanning ? "Searching…" : "Nothing detected yet.")
+                    } else {
                         ForEach(viewModel.boxes) { box in
                             Button { viewModel.openConnect(for: box) } label: {
                                 deviceRow(box)
@@ -118,25 +116,37 @@ struct UnifiedAddShareView: View {
                 }
             }
 
-            Panel(title: "Or enter an address") {
-                Button { viewModel.openManualConnect() } label: {
-                    HStack(spacing: 16) {
-                        Image(systemName: "keyboard").font(.system(size: 26)).frame(width: 40)
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Type an address…").font(.headline)
-                            Text("An IP or name, with a port if it uses one — e.g. 192.168.68.71:8384")
-                                .font(.subheadline).foregroundStyle(.secondary)
-                        }
-                        Spacer(minLength: 12)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, 12).padding(.horizontal, 12)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(SettingsFocusButtonStyle(size: .prominent))
-                .focused($focus, equals: .enterAddress)
-            }
+            manualEntryCard
         }
+    }
+
+    private var manualEntryCard: some View {
+        Button { viewModel.openManualConnect() } label: {
+            HStack(spacing: 20) {
+                Image(systemName: "keyboard")
+                    .font(.system(size: 30))
+                    .frame(width: 44, height: 44)
+                    .foregroundStyle(.secondary)
+                Text("Enter an address manually").font(.headline)
+                Spacer(minLength: 12)
+                Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 14)
+            .padding(.horizontal, 12)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(SettingsFocusButtonStyle(size: .prominent))
+        .focused($focus, equals: .enterAddress)
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(.ultraThinMaterial)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
+        )
     }
 
     private func deviceRow(_ box: DiscoveredMediaShareBox) -> some View {
@@ -159,34 +169,56 @@ struct UnifiedAddShareView: View {
 
     private var connectStep: some View {
         Group {
-            headerRow(title: LocalizedStringKey(connectTitle), back: { viewModel.backToDevices() }) { EmptyView() }
+            headerRow(
+                title: "",
+                showsTitle: false,
+                back: { viewModel.backToDevices() }
+            ) { EmptyView() }
 
             if let warning = viewModel.plaintextWarning {
                 InlineErrorMessage(LocalizedStringKey(warning), systemImage: "lock.open")
             }
 
             Panel(title: "Protocol") {
-                Picker("Protocol", selection: protocolBinding) {
-                    Text("Auto-detect").tag(MediaShareTransportKind?.none)
+                Menu {
                     ForEach(MediaShareTransportCatalog.preferenceOrder, id: \.self) { kind in
-                        Text(protocolLabel(kind)).tag(MediaShareTransportKind?.some(kind))
+                        Button {
+                            viewModel.applyTransport(kind)
+                        } label: {
+                            if kind == viewModel.selectedTransport {
+                                Label(protocolLabel(kind), systemImage: "checkmark")
+                            } else {
+                                Text(protocolLabel(kind))
+                            }
+                        }
                     }
+                } label: {
+                    HStack {
+                        Text(protocolLabel(viewModel.selectedTransport))
+                        Spacer()
+                        Image(systemName: "chevron.up.chevron.down").font(.footnote).foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .focused($focus, equals: .proto)
             }
 
             Panel(title: "Address") {
                 VStack(alignment: .leading, spacing: 16) {
-                    TextField("e.g. 192.168.68.71 or mynas.local", text: $viewModel.address)
-                        .textContentType(.URL).autocorrectionDisabled().keyboardType(.URL)
-                        .focused($focus, equals: .address)
-                    if viewModel.selectedTransport != nil {
-                        TextField("Port", text: $viewModel.portText)
-                            .keyboardType(.numberPad)
-                            .frame(maxWidth: 220)
-                            .focused($focus, equals: .port)
-                        portChips
+                    HStack(alignment: .top, spacing: 16) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            TextField("e.g. 192.168.68.71 or mynas.local", text: $viewModel.address)
+                                .textContentType(.URL).autocorrectionDisabled().keyboardType(.URL)
+                                .focused($focus, equals: .address)
+                        }
+                        VStack(alignment: .leading, spacing: 6) {
+                            TextField("Port", text: $viewModel.portText)
+                                .keyboardType(.numberPad)
+                                .frame(width: 200)
+                                .focused($focus, equals: .port)
+                        }
                     }
+                    portChips
                 }
             }
 
@@ -208,16 +240,19 @@ struct UnifiedAddShareView: View {
 
     @ViewBuilder
     private var portChips: some View {
-        if let kind = viewModel.selectedTransport {
-            let ports = viewModel.detectedPorts(for: kind)
-            if ports.count > 1 {
-                HStack(spacing: 10) {
-                    Text("detected:").font(.footnote).foregroundStyle(.secondary)
-                    ForEach(ports, id: \.self) { p in
-                        Button(":\(p)") { viewModel.portText = String(p) }
-                            .buttonStyle(.bordered)
-                            .focused($focus, equals: .portChip(p))
+        let kind = viewModel.selectedTransport
+        let ports = viewModel.detectedPorts(for: kind)
+        if ports.count > 1 {
+            HStack(spacing: 10) {
+                Text("Detected:").font(.footnote).foregroundStyle(.secondary)
+                ForEach(ports, id: \.self) { p in
+                    Button {
+                        viewModel.portText = String(p)
+                    } label: {
+                        Text(verbatim: ":\(p)")
                     }
+                        .buttonStyle(.bordered)
+                        .focused($focus, equals: .portChip(p))
                 }
             }
         }
@@ -225,7 +260,8 @@ struct UnifiedAddShareView: View {
 
     @ViewBuilder
     private var credentialPanel: some View {
-        if let kind = viewModel.selectedTransport, let descriptor = viewModel.descriptor(kind) {
+        let kind = viewModel.selectedTransport
+        if let descriptor = viewModel.descriptor(kind) {
             if descriptor.authModes.isEmpty {
                 EmptyView() // NFS: no sign-in
             } else {
@@ -255,18 +291,6 @@ struct UnifiedAddShareView: View {
                 }
             }
         }
-    }
-
-    private var connectTitle: String {
-        if viewModel.address.isEmpty { return "Connect" }
-        return viewModel.address
-    }
-
-    private var protocolBinding: Binding<MediaShareTransportKind?> {
-        Binding(
-            get: { viewModel.selectedTransport },
-            set: { viewModel.applyTransport($0) }
-        )
     }
 
     private func protocolLabel(_ kind: MediaShareTransportKind) -> String {
@@ -333,7 +357,7 @@ struct UnifiedAddShareView: View {
     }
 
     private var locationTitle: String {
-        guard let kind = viewModel.selectedTransport, let d = viewModel.descriptor(kind) else { return "Choose" }
+        guard let d = viewModel.descriptor(viewModel.selectedTransport) else { return "Choose" }
         return d.listsSharesNotFolders ? "Choose a share" : "Choose a folder"
     }
 
@@ -431,6 +455,7 @@ struct UnifiedAddShareView: View {
 
     private func headerRow<Trailing: View>(
         title: LocalizedStringKey,
+        showsTitle: Bool = true,
         back: @escaping () -> Void,
         @ViewBuilder trailing: () -> Trailing
     ) -> some View {
@@ -442,7 +467,9 @@ struct UnifiedAddShareView: View {
                 Spacer(minLength: 24)
                 trailing()
             }
-            OnboardingHeader(title, subtitle: "").frame(maxWidth: .infinity)
+            if showsTitle {
+                OnboardingHeader(title, subtitle: "").frame(maxWidth: .infinity)
+            }
         }
         .padding(.top, 24)
     }

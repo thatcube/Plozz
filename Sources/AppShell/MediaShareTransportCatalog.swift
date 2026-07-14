@@ -1,6 +1,7 @@
 #if canImport(SwiftUI)
 import Foundation
 import CoreModels
+import ProviderShare
 
 /// How the user supplies a credential for a transport, as the unified onboarding
 /// UI renders it. Deliberately smaller than the vault's `MediaShareAuthentication`
@@ -60,10 +61,10 @@ struct TransportOnboardingDescriptor: Sendable {
     /// Bonjour service type(s) this transport advertises as. Empty = not
     /// LAN-advertised (still reachable via a curated port sweep or manual entry).
     let bonjourServiceTypes: [String]
-    /// Curated ports to probe on an already-known host (Channel B). Includes
-    /// protocol well-known ports and popular app defaults (e.g. Unraid WebDAV
-    /// `:8384`) so a box that doesn't advertise a transport can still be found.
-    let sweepPorts: [Int]
+    /// Curated targets to confirm on an already-known host (Channel B). Each
+    /// target carries a protocol-specific proof strategy; an open TCP port alone
+    /// never becomes a detected transport label.
+    let sweepTargets: [TransportSweepTarget]
     /// The port assumed when the user types none.
     let defaultPort: Int
 
@@ -104,7 +105,9 @@ enum MediaShareTransportCatalog {
         TransportOnboardingDescriptor(
             kind: .smb,
             bonjourServiceTypes: ["_smb._tcp"],
-            sweepPorts: [445],
+            // SMB is trusted when advertised via `_smb._tcp`. Do not infer SMB
+            // from an open socket until a real SMB negotiate probe exists.
+            sweepTargets: [],
             defaultPort: 445,
             authModes: [.usernamePassword],
             allowsBlankGuest: true,
@@ -116,9 +119,20 @@ enum MediaShareTransportCatalog {
         TransportOnboardingDescriptor(
             kind: .webDAV,
             bonjourServiceTypes: ["_webdav._tcp", "_webdavs._tcp"],
-            // Protocol ports + Synology/QNAP WebDAV defaults (5005/6) + common
-            // alt-HTTP + Unraid-style app ports. Tunable data, not mechanism.
-            sweepPorts: [80, 443, 5005, 5006, 8080, 8443, 8000, 8888, 8384],
+            // Protocol ports + Synology/QNAP defaults + common alt-HTTP + the
+            // Unraid WebDAV app default. Every response must carry DAV-specific
+            // evidence; generic NAS web UIs are rejected.
+            sweepTargets: [
+                TransportSweepTarget(port: 80, probe: .webDAVHTTP),
+                TransportSweepTarget(port: 443, probe: .webDAVHTTPS),
+                TransportSweepTarget(port: 5005, probe: .webDAVHTTP),
+                TransportSweepTarget(port: 5006, probe: .webDAVHTTPS),
+                TransportSweepTarget(port: 8080, probe: .webDAVHTTP),
+                TransportSweepTarget(port: 8443, probe: .webDAVHTTPS),
+                TransportSweepTarget(port: 8000, probe: .webDAVHTTP),
+                TransportSweepTarget(port: 8888, probe: .webDAVHTTP),
+                TransportSweepTarget(port: 8384, probe: .webDAVHTTP),
+            ],
             defaultPort: 443,
             authModes: [.usernamePassword, .token],
             allowsBlankGuest: true,
@@ -130,7 +144,9 @@ enum MediaShareTransportCatalog {
         TransportOnboardingDescriptor(
             kind: .nfs,
             bonjourServiceTypes: ["_nfs._tcp"],
-            sweepPorts: [2049],
+            // Do not infer NFS from an open 2049 socket until an RPC/NFS probe
+            // lands with the NFS transport branch.
+            sweepTargets: [],
             defaultPort: 2049,
             authModes: [],
             allowsBlankGuest: false,
@@ -142,7 +158,9 @@ enum MediaShareTransportCatalog {
         TransportOnboardingDescriptor(
             kind: .sftp,
             bonjourServiceTypes: ["_sftp-ssh._tcp"],
-            sweepPorts: [22],
+            sweepTargets: [
+                TransportSweepTarget(port: 22, probe: .sshBanner),
+            ],
             defaultPort: 22,
             authModes: [.usernamePassword],
             allowsBlankGuest: false,

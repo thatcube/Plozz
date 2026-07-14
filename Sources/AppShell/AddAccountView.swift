@@ -316,7 +316,7 @@ private struct ProviderChoiceGroup: View {
 
             ProviderChoiceRow(
                 provider: .mediaShare,
-                title: "Local media",
+                title: "Media Share",
                 height: 108,
                 focusedControl: focusedControl
             ) {

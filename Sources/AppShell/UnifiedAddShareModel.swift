@@ -64,8 +64,10 @@ final class UnifiedAddShareModel {
     private(set) var step: Step = .chooseDevice
 
     // MARK: Connect form
-    /// nil = "Auto-detect" (manual path); otherwise the chosen transport.
-    var selectedTransport: MediaShareTransportKind?
+    /// The chosen transport on the Connect form. Always a concrete protocol —
+    /// there is no "auto-detect". Defaults to a sensible protocol and is set to
+    /// the best detected door when a device is opened.
+    var selectedTransport: MediaShareTransportKind = .smb
     var address = ""
     var portText = ""
     var username = ""
@@ -98,9 +100,12 @@ final class UnifiedAddShareModel {
     private let discovery: BonjourServiceDiscovery
     private let sweeper = MediaSharePortSweeper()
     private let webDAVProbe: any WebDAVOnboardingProbing
-    private let routeDetector = MediaShareRouteDetector()
     private var scanTask: Task<Void, Never>?
     private var workTask: Task<Void, Never>?
+    private var sweptHosts = Set<String>()
+    /// Every detected door per host, keeping ALL ports (advertised + swept) so a
+    /// specific configured port like WebDAV :8384 is never lost to de-duplication.
+    private var fullDoorsByHost: [String: [DiscoveredMediaShareBox.Door]] = [:]
 
     init(webDAVProbe: any WebDAVOnboardingProbing = WebDAVOnboardingProbe()) {
         self.webDAVProbe = webDAVProbe
@@ -117,7 +122,11 @@ final class UnifiedAddShareModel {
         }
     )
     private static let sweepSpecs = MediaShareTransportCatalog.all.map {
-        TransportSweepSpec(transport: $0.kind, ports: $0.sweepPorts, defaultPort: $0.defaultPort)
+        TransportSweepSpec(
+            transport: $0.kind,
+            targets: $0.sweepTargets,
+            defaultPort: $0.defaultPort
+        )
     }
 
     func descriptor(_ kind: MediaShareTransportKind) -> TransportOnboardingDescriptor? {
@@ -130,14 +139,57 @@ final class UnifiedAddShareModel {
         scanTask?.cancel()
         boxes = []
         scanning = true
+        sweptHosts = []
+        fullDoorsByHost = [:]
         scanTask = Task { [discovery] in
             var services: [DiscoveredNetworkService] = []
             for await service in discovery.discover(timeout: 6) {
                 if Task.isCancelled { break }
                 services.append(service)
-                self.boxes = MediaShareBoxGrouping.group(services)
+                // Record the advertised door (Bonjour carries the REAL port).
+                self.recordDoors(host: service.host, [
+                    DiscoveredMediaShareBox.Door(transport: service.transport, port: service.port)
+                ])
+                self.boxes = MediaShareBoxGrouping.group(services).map { box in
+                    box.mergingDoors(
+                        self.fullDoorsByHost[box.host.lowercased()] ?? []
+                    )
+                }
+                // Curated Channel-B sweep on each newly-seen host, DURING discovery,
+                // so non-advertised doors (e.g. WebDAV on :8384) show on the device
+                // row and prefill the form — not only after the box is opened.
+                if self.sweptHosts.insert(service.host.lowercased()).inserted {
+                    self.sweepAndMerge(host: service.host)
+                }
             }
             if !Task.isCancelled { self.scanning = false }
+        }
+    }
+
+    /// Records detected doors for a host, keeping EVERY port we found (a NAS can
+    /// expose one transport on several ports — we never throw a detected port
+    /// away). The per-box row label only needs the distinct transports, but the
+    /// Connect form needs the exact ports so it can prefill and offer chips.
+    private func recordDoors(host: String, _ doors: [DiscoveredMediaShareBox.Door]) {
+        let key = host.lowercased()
+        var list = fullDoorsByHost[key] ?? []
+        for door in doors where !list.contains(door) { list.append(door) }
+        fullDoorsByHost[key] = list
+    }
+
+    private func sweepAndMerge(host: String) {
+        Task { [sweeper] in
+            let found = await sweeper.sweep(host: host, specs: Self.sweepSpecs)
+            if Task.isCancelled || found.isEmpty { return }
+            self.recordDoors(host: host, found)
+            guard let idx = self.boxes.firstIndex(where: { $0.host.lowercased() == host.lowercased() }) else { return }
+            self.boxes[idx] = self.boxes[idx].mergingDoors(found)
+            // If the user is already on this box's Connect form, reflect the new
+            // doors there too.
+            if self.address.lowercased() == host.lowercased() {
+                self.detectedDoors = self.fullDoorsByHost[host.lowercased()] ?? self.boxes[idx].doors
+                self.applyTransport(self.selectedTransport)
+            }
         }
     }
 
@@ -149,55 +201,49 @@ final class UnifiedAddShareModel {
 
     // MARK: - Entering the Connect form
 
-    /// Open the Connect form pre-filled from a discovered device. Kicks off a
-    /// curated port sweep to reveal non-advertised doors.
+    /// Open the Connect form pre-filled from a discovered device. Its doors were
+    /// already gathered during discovery (Bonjour + the curated sweep), so the
+    /// best one is pre-selected and its port prefilled.
     func openConnect(for box: DiscoveredMediaShareBox) {
         stopScan()
         resetForm()
         address = box.host
-        detectedDoors = box.doors
-        let best = MediaShareTransportCatalog.preferredKind(among: box.doors.map(\.transport))
-        applyTransport(best, doors: box.doors)
+        // Use the FULL detected-door set (all ports), not the row's deduped list.
+        detectedDoors = fullDoorsByHost[box.host.lowercased()] ?? box.doors
+        let best = MediaShareTransportCatalog.preferredKind(among: detectedDoors.map(\.transport)) ?? .smb
+        applyTransport(best)
         step = .connect
-        // Channel B: sweep for more doors on this known host.
-        let host = box.host
-        Task { [sweeper] in
-            let found = await sweeper.sweep(host: host, specs: Self.sweepSpecs)
-            guard !Task.isCancelled, self.address == host else { return }
-            var merged = self.detectedDoors
-            for door in found where !merged.contains(where: { $0.transport == door.transport }) {
-                merged.append(door)
-            }
-            self.detectedDoors = merged
-        }
     }
 
-    /// Open the Connect form blank for a typed address (Auto-detect).
+    /// Open the Connect form blank for a typed address. No auto-detect — the user
+    /// picks a protocol explicitly; it defaults to the most common (SMB).
     func openManualConnect() {
         stopScan()
         resetForm()
         detectedDoors = []
-        selectedTransport = nil // Auto-detect
+        applyTransport(.smb)
         step = .connect
     }
 
     private func resetForm() {
         connectError = nil
         username = ""; password = ""; token = ""; manualShare = ""; displayName = ""
+        address = ""
         portText = ""
         authMode = .usernamePassword
         locations = []; locationLoad = .idle; currentPath = "/"
         trust = .system; approvedPin = nil
     }
 
-    /// Set the chosen protocol and prefill the port from a detected door (or the
-    /// transport default).
-    func applyTransport(_ kind: MediaShareTransportKind?, doors: [DiscoveredMediaShareBox.Door]? = nil) {
+    /// Set the chosen protocol and prefill the port from what we DETECTED for that
+    /// protocol. When a device answered on a specific (non-default) port — e.g.
+    /// WebDAV on :8384 — we use that exact port, because it's the one the user
+    /// configured. We never discard a detected port in favour of the default.
+    func applyTransport(_ kind: MediaShareTransportKind, doors: [DiscoveredMediaShareBox.Door]? = nil) {
         selectedTransport = kind
-        guard let kind, let descriptor = descriptor(kind) else { portText = ""; return }
-        let doorList = doors ?? detectedDoors
-        if let door = doorList.first(where: { $0.transport == kind }) {
-            portText = door.port.map(String.init) ?? String(descriptor.defaultPort)
+        guard let descriptor = descriptor(kind) else { portText = ""; return }
+        if let port = bestDetectedPort(for: kind, descriptor: descriptor) {
+            portText = String(port)
         } else {
             portText = String(descriptor.defaultPort)
         }
@@ -205,19 +251,32 @@ final class UnifiedAddShareModel {
         if !descriptor.authModes.contains(.token) { authMode = .usernamePassword }
     }
 
-    /// Ports detected for a given transport (drives the port chips).
+    /// The port to prefill for a transport, from the detected doors: prefer a
+    /// specific (non-default) port the device answered on — that's the meaningful
+    /// find — and take the highest one if several. Returns nil when the only
+    /// detection is on the default port (then the default is used implicitly).
+    private func bestDetectedPort(for kind: MediaShareTransportKind, descriptor: TransportOnboardingDescriptor) -> Int? {
+        let ports = detectedDoors
+            .filter { $0.transport == kind }
+            .map { $0.port ?? descriptor.defaultPort }
+        guard !ports.isEmpty else { return nil }
+        let nonDefault = ports.filter { $0 != descriptor.defaultPort }
+        if let specific = nonDefault.max() { return specific }
+        return descriptor.defaultPort
+    }
+
+    /// All distinct ports detected for a transport (drives the port chips).
     func detectedPorts(for kind: MediaShareTransportKind) -> [Int] {
         let descriptor = descriptor(kind)
-        return detectedDoors
+        let ports = detectedDoors
             .filter { $0.transport == kind }
             .map { $0.port ?? (descriptor?.defaultPort ?? 0) }
+        return Array(Set(ports)).sorted()
     }
 
     var canConnect: Bool {
         guard !address.trimmingCharacters(in: .whitespaces).isEmpty else { return false }
-        guard let kind = selectedTransport, let descriptor = descriptor(kind) else {
-            return true // Auto-detect only needs an address
-        }
+        guard let descriptor = descriptor(selectedTransport) else { return true }
         if descriptor.authModes.isEmpty { return true } // NFS: no creds
         if !descriptor.allowsBlankGuest, authMode == .usernamePassword {
             return !username.trimmingCharacters(in: .whitespaces).isEmpty
@@ -227,7 +286,7 @@ final class UnifiedAddShareModel {
 
     /// The plaintext-credential warning to show for the current form, if any.
     var plaintextWarning: String? {
-        guard let kind = selectedTransport, let descriptor = descriptor(kind) else { return nil }
+        guard let descriptor = descriptor(selectedTransport) else { return nil }
         switch descriptor.plaintextCredentialRisk {
         case .never:
             return nil
@@ -251,12 +310,11 @@ final class UnifiedAddShareModel {
         workTask?.cancel()
         connectError = nil
         let host = normalizedHost(address)
-        let port = Int(portText.trimmingCharacters(in: .whitespaces))
+        // Port comes from the Port field; if the user pasted host:port into the
+        // address, honour that inline port too.
+        let port = inlinePort(from: address) ?? Int(portText.trimmingCharacters(in: .whitespaces))
 
-        guard let kind = selectedTransport else {
-            autoDetectThenConnect(rawAddress: address)
-            return
-        }
+        let kind = selectedTransport
         guard let descriptor = descriptor(kind) else { return }
         guard descriptor.isImplemented else {
             step = .comingSoon(kind)
@@ -285,39 +343,13 @@ final class UnifiedAddShareModel {
         return s.trimmingCharacters(in: .whitespaces)
     }
 
-    private func autoDetectThenConnect(rawAddress: String) {
-        detecting = true
-        let addressForDetection: String = {
-            let raw = rawAddress.trimmingCharacters(in: .whitespaces)
-            if let p = Int(portText.trimmingCharacters(in: .whitespaces)),
-               !raw.contains("/"), raw.filter({ $0 == ":" }).count == 0 {
-                return "\(raw):\(p)"
-            }
-            return raw
-        }()
-        workTask = Task { [routeDetector] in
-            let result = await routeDetector.detect(address: addressForDetection)
-            if Task.isCancelled { return }
-            self.detecting = false
-            switch result {
-            case .success(.smb(let host, let port)):
-                self.applyTransport(.smb)
-                self.address = host
-                if let port { self.portText = String(port) }
-                self.selectedTransport = .smb
-                self.resolvedHost = host; self.resolvedPort = port
-                self.enterSMBLocation()
-            case .success(.webDAV(let url, _)):
-                self.selectedTransport = .webDAV
-                self.address = url.absoluteString
-                self.beginWebDAV(url: url)
-            case .failure:
-                self.connectError = "Couldn’t reach a share there. Check the address, or pick a protocol and try again."
-            }
-        }
+    private func inlinePort(from raw: String) -> Int? {
+        var s = raw.trimmingCharacters(in: .whitespaces)
+        if let range = s.range(of: "://") { s = String(s[range.upperBound...]) }
+        if let slash = s.firstIndex(of: "/") { s = String(s[..<slash]) }
+        guard s.filter({ $0 == ":" }).count == 1, let colon = s.firstIndex(of: ":") else { return nil }
+        return Int(s[s.index(after: colon)...])
     }
-
-    // MARK: - SMB location (real backend)
 
     private func enterSMBLocation() {
         step = .pickLocation
@@ -504,7 +536,7 @@ final class UnifiedAddShareModel {
         workTask?.cancel()
         step = .chooseDevice
         resetForm()
-        selectedTransport = nil
+        selectedTransport = .smb
         detectedDoors = []
         startScan()
     }

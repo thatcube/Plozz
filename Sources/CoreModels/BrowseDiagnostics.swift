@@ -92,9 +92,17 @@ public enum BrowseDiagnostics {
     ) -> Task<Void, Never>? {
         guard isEnabled else { return nil }
         return Task.detached(priority: .utility) {
+            let clockFmt = DateFormatter()
+            clockFmt.dateFormat = "HH:mm:ss"
             var windowStart = DispatchTime.now()
+            // Per-5s-window accumulators, so each summary line is self-describing
+            // (idle vs. interacting phases can be told apart purely from the log).
+            var samples = 0
+            var sumHopMs = 0.0
             var maxHopMs = 0.0
-            var hitches = 0
+            var n50 = 0, n100 = 0, n250 = 0   // hop-latency distribution buckets
+            var scanActiveSamples = 0          // samples taken while a scan was live
+            var maxListers = 0                 // peak concurrent listings this window
             while !Task.isCancelled {
                 let t0 = DispatchTime.now()
                 // Time from t0 (off-main) until this closure actually runs ON main
@@ -102,20 +110,32 @@ public enum BrowseDiagnostics {
                 let hopMs: Double = await MainActor.run {
                     Double(DispatchTime.now().uptimeNanoseconds &- t0.uptimeNanoseconds) / 1_000_000
                 }
+                let s = ShareBackgroundActivity.snapshot()
+                samples += 1
+                sumHopMs += hopMs
                 if hopMs > maxHopMs { maxHopMs = hopMs }
+                if hopMs >= 50 { n50 += 1 }
+                if hopMs >= 100 { n100 += 1 }
+                if hopMs >= 250 { n250 += 1 }
+                if s.scans > 0 { scanActiveSamples += 1 }
+                if s.activeListers > maxListers { maxListers = s.activeListers }
                 if hopMs >= hitchThresholdMs {
-                    hitches += 1
-                    let s = ShareBackgroundActivity.snapshot()
                     emit(String(
-                        format: "hitch mainHop=%.0fms shareScan=%d listers=%d peakListers=%d shareEnrich=%d",
-                        hopMs, s.scans, s.activeListers, s.peakListers, s.enrichPasses
+                        format: "hitch %@ mainHop=%.0fms shareScan=%d listers=%d shareEnrich=%d",
+                        clockFmt.string(from: Date()), hopMs, s.scans, s.activeListers, s.enrichPasses
                     ))
                 }
                 let windowMs = Double(DispatchTime.now().uptimeNanoseconds &- windowStart.uptimeNanoseconds) / 1_000_000
                 if windowMs >= 5_000 {
-                    emit(String(format: "mainhop window=5s maxHop=%.0fms hitches=%d", maxHopMs, hitches))
-                    maxHopMs = 0
-                    hitches = 0
+                    let avg = samples > 0 ? sumHopMs / Double(samples) : 0
+                    let scanPct = samples > 0 ? (scanActiveSamples * 100 / samples) : 0
+                    emit(String(
+                        format: "window %@ 5s samples=%d avgHop=%.0fms maxHop=%.0fms n50=%d n100=%d n250=%d scanActive=%d%% maxListers=%d",
+                        clockFmt.string(from: Date()), samples, avg, maxHopMs, n50, n100, n250, scanPct, maxListers
+                    ))
+                    samples = 0; sumHopMs = 0; maxHopMs = 0
+                    n50 = 0; n100 = 0; n250 = 0
+                    scanActiveSamples = 0; maxListers = 0
                     windowStart = DispatchTime.now()
                 }
                 try? await Task.sleep(nanoseconds: UInt64(sampleInterval * 1_000_000_000))

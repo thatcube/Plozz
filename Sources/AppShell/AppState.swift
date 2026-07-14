@@ -2819,7 +2819,7 @@ public final class AppState {
             host: trimmedHost,
             port: port,
             path: normalizedPath,
-            principal: trimmedUser.lowercased()
+            principal: trimmedUser
         )
         persistMediaShare(
             serverID: serverID,
@@ -2844,8 +2844,11 @@ public final class AppState {
             switch self {
             case .anonymous: return "anon"
             case .password(let username, _):
+                // POSIX usernames are case-sensitive, so distinct server users
+                // (`Admin` vs `admin`) must stay distinct accounts — preserve
+                // case, matching the WebDAV principal convention.
                 let trimmed = username.trimmingCharacters(in: .whitespaces)
-                return trimmed.isEmpty ? "anon" : trimmed.lowercased()
+                return trimmed.isEmpty ? "anon" : trimmed
             }
         }
 

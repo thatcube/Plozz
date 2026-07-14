@@ -10,6 +10,7 @@ import MediaTransportCore
 import MediaTransportHTTP
 import MediaTransportSMB
 import MediaTransportWebDAV
+import MediaTransportSFTP
 import ProviderJellyfin
 import ProviderPlex
 import ProviderShare
@@ -1501,6 +1502,7 @@ public final class AppState {
             makeSMBAdapter(accountStore: accountStore),
             makeWebDAVAdapter(scheme: .http, accountStore: accountStore),
             makeWebDAVAdapter(scheme: .https, accountStore: accountStore),
+            makeSFTPAdapter(accountStore: accountStore),
         ]
     }
 
@@ -1576,6 +1578,57 @@ public final class AppState {
             trustPolicy = .system
         }
         return WebDAVMediaTransportConfiguration(credential: credential, trustPolicy: trustPolicy)
+    }
+
+    /// Builds the SFTP adapter. Loads the envelope inside the provider so a
+    /// missing/incompatible credential surfaces as a `MediaTransportError` (never
+    /// a raw vault error, which `ShareTransportBrowser` would retry-loop on), and
+    /// maps the vault's mandatory `.sftp` host-key pin into the transport's
+    /// trust policy.
+    private static func makeSFTPAdapter(
+        accountStore: any AccountPersisting
+    ) -> SFTPMediaTransportAdapter {
+        SFTPMediaTransportAdapter { accountID, revision in
+            let envelope: MediaShareCredentialEnvelope
+            do {
+                envelope = try accountStore.mediaShareCredential(for: accountID, revision: revision)
+            } catch {
+                throw MediaTransportError.authentication(reason: "SFTP credential unavailable")
+            }
+            guard envelope.transport == .sftp else {
+                throw MediaTransportError.unsupportedCapability("non-SFTP credential")
+            }
+            return try Self.sftpConfiguration(from: envelope)
+        }
+    }
+
+    /// Maps a stored credential envelope to the transport-layer SFTP
+    /// configuration (credential + SSH host-key pin). The vault guarantees every
+    /// `.sftp` envelope carries a host-key SHA-256 pin, so its absence is a hard
+    /// error rather than a silent fall-through to unpinned trust.
+    nonisolated static func sftpConfiguration(
+        from envelope: MediaShareCredentialEnvelope
+    ) throws -> SFTPMediaTransportConfiguration {
+        let credential: SFTPMediaTransportCredential
+        switch envelope.authentication {
+        case let .password(username, password):
+            credential = .password(username: username, password: password)
+        case .generatedKey:
+            // The generated private key is resolved from the vault by key id and
+            // wired up by the credential/keygen ("Discovery UX") work; this
+            // headless transport ships password auth. Fail closed until then.
+            throw MediaTransportError.unsupportedCapability("SFTP key authentication")
+        case .anonymous, .bearer, .noCredentials:
+            throw MediaTransportError.unsupportedCapability("SFTP authentication")
+        }
+
+        guard let pin = envelope.trust.sshHostKeySHA256 else {
+            throw MediaTransportError.trust(reason: "SFTP host key pin missing")
+        }
+        return SFTPMediaTransportConfiguration(
+            credential: credential,
+            hostKeyPolicy: .pinned(sha256: Array(pin.bytes))
+        )
     }
 
     /// Registers every media-share transport adapter, keyed by the scheme its

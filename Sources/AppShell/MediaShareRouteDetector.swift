@@ -17,6 +17,10 @@ enum MediaShareRoute: Equatable, Sendable {
     /// A fully-resolved WebDAV base URL (scheme already decided: https tried
     /// before http). `insecureHTTP` is true when it resolved to plain http.
     case webDAV(baseURL: URL, insecureHTTP: Bool)
+    /// An SFTP endpoint. The credential-entry + host-key trust-on-first-use
+    /// approval flow is owned by the unified add-share ("Discovery UX") work;
+    /// detection only needs to recognize the endpoint here.
+    case sftp(host: String, port: Int?)
 }
 
 enum MediaShareRouteError: Error, Equatable, Sendable {
@@ -106,7 +110,7 @@ struct MediaShareRouteDetector: Sendable {
     /// NAS host that answers no HTTP. `probe` is injectable for tests.
     init(probe: any WebDAVReachabilityProbing = WebDAVReachabilityProbe()) {
         self.init(
-            claimants: [SMBClaimant(), WebDAVClaimant(probe: probe)],
+            claimants: [SMBClaimant(), SFTPClaimant(), WebDAVClaimant(probe: probe)],
             fallback: { .smb(host: $0.host, port: $0.port) }
         )
     }
@@ -205,9 +209,25 @@ struct SMBClaimant: TransportClaimant {
     func probe(_ address: ParsedShareAddress) async -> MediaShareRoute? { nil }
 }
 
-/// WebDAV claims explicit `http(s)://`, and otherwise probes over HTTP (https
-/// before http). It has NO decisive port: `80`/`443`/etc. are ambiguous (a NAS
-/// web-admin page lives there too), so an un-schemed address is always probed.
+/// SFTP claims explicit `sftp://` and the well-known SSH port `22`. Like SMB it
+/// has no network probe — a decisive scheme/port is enough, and an un-schemed
+/// host on a non-decisive port is never guessed as SFTP (that would require
+/// credentials to even attempt).
+struct SFTPClaimant: TransportClaimant {
+    var transportName: String { "SFTP" }
+
+    func decisiveRoute(for address: ParsedShareAddress) -> MediaShareRoute? {
+        if address.scheme == "sftp" {
+            return .sftp(host: address.host, port: address.port)
+        }
+        if address.scheme == nil, address.port == 22 {
+            return .sftp(host: address.host, port: address.port)
+        }
+        return nil
+    }
+
+    func probe(_ address: ParsedShareAddress) async -> MediaShareRoute? { nil }
+}
 struct WebDAVClaimant: TransportClaimant {
     let probe: any WebDAVReachabilityProbing
 

@@ -328,15 +328,17 @@ final class UnifiedAddShareModel {
         case .never:
             return nil
         case .always:
-            return "This connection is not encrypted."
+            return hasEnteredCredential
+                ? "Credentials will be sent without encryption."
+                : nil
         case .whenInsecureScheme:
             let explicit = explicitScheme(from: address)
             let scheme = explicit
                 ?? ((webDAVSchemePort == currentPort) ? webDAVScheme : nil)
                 ?? (portIs(80) ? "http" : nil)
             let insecure = scheme == "http"
-            return insecure
-                ? "HTTP connection is not encrypted."
+            return insecure && hasEnteredCredential
+                ? "Credentials will be sent over HTTP."
                 : nil
         }
     }

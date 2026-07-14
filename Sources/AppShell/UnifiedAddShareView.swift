@@ -215,12 +215,6 @@ struct UnifiedAddShareView: View {
                         }
                     }
                     portChips
-                    if let warning = viewModel.plaintextWarning {
-                        Label(warning, systemImage: "lock.open")
-                            .font(.footnote.weight(.medium))
-                            .foregroundStyle(.orange)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
                 }
             }
 
@@ -288,6 +282,15 @@ struct UnifiedAddShareView: View {
                             SecureField(descriptor.allowsBlankGuest ? "Password (optional)" : "Password", text: $viewModel.password)
                                 .textContentType(.password)
                                 .focused($focus, equals: .password)
+                        }
+                        if let warning = viewModel.plaintextWarning {
+                            Text(warning)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(
+                                    horizontal: false,
+                                    vertical: true
+                                )
                         }
                     }
                 }

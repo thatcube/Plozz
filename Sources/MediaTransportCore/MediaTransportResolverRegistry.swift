@@ -114,11 +114,54 @@ public actor MediaTransportResolverRegistry: MediaTransportResolving {
         guard !retiredScopes.contains(scope) else {
             throw MediaTransportError.cancelled
         }
-        if var record = records[key] {
+        if let record = records[key] {
             guard !record.retired else { throw MediaTransportError.cancelled }
-            record.leaseCount += 1
-            records[key] = record
-            return MediaTransportResolverLease(key: key, session: record.session, registry: self)
+
+            // An in-use session (active leases) is owned by its consumer and must
+            // NEVER be torn down under it — hand it back as-is.
+            if record.leaseCount > 0 {
+                var mutated = record
+                mutated.leaseCount += 1
+                records[key] = mutated
+                return MediaTransportResolverLease(key: key, session: mutated.session, registry: self)
+            }
+
+            // Idle cached session: its underlying connection may have been dropped
+            // during a pause (server/NAT idle-timeout). Probe liveness before
+            // reuse; a dead one is evicted + reconnected rather than handed back.
+            let healthy = await record.session.isHealthy()
+
+            // Reentrancy: the actor may have serviced other calls during the
+            // await above. Only act on the SAME session if it's still present,
+            // still idle, and not retired.
+            if let current = records[key], !current.retired,
+               current.leaseCount == 0, current.session === record.session {
+                if healthy {
+                    var mutated = current
+                    mutated.leaseCount += 1
+                    records[key] = mutated
+                    return MediaTransportResolverLease(key: key, session: mutated.session, registry: self)
+                }
+                // Dead idle session: evict (release its socket/event-loop) and
+                // fall through to the reconnect path below.
+                records.removeValue(forKey: key)
+                await current.finalizer(current.session)
+            } else if let current = records[key], !current.retired {
+                // Changed during the probe (now in use, or replaced by a fresh
+                // reconnect): reuse whatever is current.
+                var mutated = current
+                mutated.leaseCount += 1
+                records[key] = mutated
+                return MediaTransportResolverLease(key: key, session: mutated.session, registry: self)
+            }
+            // Otherwise retired/removed during the probe → fall through to the
+            // reconnect path, which re-checks `retiredScopes`.
+        }
+
+        // Re-check retirement: it may have been set during an `isHealthy()` or
+        // `finalizer` await above.
+        guard !retiredScopes.contains(scope) else {
+            throw MediaTransportError.cancelled
         }
         guard let adapter = adapters[key.endpoint.transportIdentifier] else {
             throw MediaTransportError.unsupportedCapability("transport adapter")

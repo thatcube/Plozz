@@ -52,6 +52,19 @@ final class ResolverStaleSessionTests: XCTestCase {
         }
     }
 
+    /// Deterministically waits for `release()` (fire-and-forget via a Task) to
+    /// bring a key's active lease count to zero, so a subsequent lease exercises
+    /// the idle-cached path rather than racing the release.
+    private func waitForIdle(
+        _ registry: MediaTransportResolverRegistry,
+        key: MediaTransportSessionKey
+    ) async {
+        for _ in 0..<1_000 {
+            if await registry.activeLeaseCount(for: key) == 0 { return }
+            await Task.yield()
+        }
+    }
+
     func testHealthyIdleSessionIsReusedNotReconnected() async throws {
         let key = try makeSessionKey()
         let adapter = ReconnectingAdapter(transportIdentifier: key.endpoint.transportIdentifier)
@@ -59,8 +72,8 @@ final class ResolverStaleSessionTests: XCTestCase {
         try await registry.register(adapter: adapter)
 
         let first = try await registry.lease(for: key)
-        first.release() // now idle-cached, still healthy
-        _ = await waitUntil { true }
+        first.release()
+        await waitForIdle(registry, key: key) // now idle-cached, still healthy
 
         let second = try await registry.lease(for: key)
         XCTAssertTrue(first.session === second.session, "healthy idle session must be reused")
@@ -74,12 +87,11 @@ final class ResolverStaleSessionTests: XCTestCase {
         let registry = MediaTransportResolverRegistry()
         try await registry.register(adapter: adapter)
 
-        // First lease → session #1. Release so it becomes idle-cached.
+        // First lease → session #1. Release + wait until it's genuinely idle.
         let first = try await registry.lease(for: key)
         let session1 = adapter.producedSessions[0]
         first.release()
-        let idle = await waitUntil { session1.shutdownCount == 0 }
-        XCTAssertTrue(idle)
+        await waitForIdle(registry, key: key)
 
         // Simulate the connection dropping during the pause.
         session1.setHealthy(false)
@@ -128,7 +140,7 @@ final class ResolverStaleSessionTests: XCTestCase {
 
         let first = try await registry.lease(for: key)
         first.release()
-        _ = await waitUntil { true }
+        await waitForIdle(registry, key: key)
         let second = try await registry.lease(for: key)
         XCTAssertTrue(second.session === session)
         XCTAssertEqual(adapter.connectCount, 1, "default-healthy session is reused, never reconnected")

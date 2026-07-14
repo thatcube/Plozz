@@ -215,6 +215,13 @@ public actor MediaTransportResolverRegistry: MediaTransportResolving {
 
     public var liveSessionCount: Int { records.count }
 
+    /// Test/diagnostic seam: active lease count for a key (0 ⇒ idle-cached,
+    /// nil-record ⇒ 0). Lets tests deterministically wait for a `release()` —
+    /// which is fire-and-forget via a `Task` — to land before re-leasing.
+    func activeLeaseCount(for key: MediaTransportSessionKey) -> Int {
+        records[key]?.leaseCount ?? 0
+    }
+
     fileprivate func release(key: MediaTransportSessionKey) async {
         guard var record = records[key], record.leaseCount > 0 else { return }
         record.leaseCount -= 1

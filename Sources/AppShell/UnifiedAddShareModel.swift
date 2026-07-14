@@ -328,16 +328,15 @@ final class UnifiedAddShareModel {
         case .never:
             return nil
         case .always:
-            return "This transport sends your username and password unencrypted. On a trusted home network that’s usually fine."
+            return "This connection is not encrypted."
         case .whenInsecureScheme:
             let explicit = explicitScheme(from: address)
             let scheme = explicit
                 ?? ((webDAVSchemePort == currentPort) ? webDAVScheme : nil)
                 ?? (portIs(80) ? "http" : nil)
             let insecure = scheme == "http"
-            let hasCredential = authMode == .token ? !token.isEmpty : !username.isEmpty
-            return (insecure && hasCredential)
-                ? "This uses http://, so your credential is sent unencrypted. Use https:// to encrypt it."
+            return insecure
+                ? "HTTP connection is not encrypted."
                 : nil
         }
     }

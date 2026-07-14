@@ -175,10 +175,6 @@ struct UnifiedAddShareView: View {
                 back: { viewModel.backToDevices() }
             ) { EmptyView() }
 
-            if let warning = viewModel.plaintextWarning {
-                InlineErrorMessage(LocalizedStringKey(warning), systemImage: "lock.open")
-            }
-
             Panel(title: "Protocol") {
                 Menu {
                     ForEach(MediaShareTransportCatalog.preferenceOrder, id: \.self) { kind in
@@ -219,6 +215,12 @@ struct UnifiedAddShareView: View {
                         }
                     }
                     portChips
+                    if let warning = viewModel.plaintextWarning {
+                        Label(warning, systemImage: "lock.open")
+                            .font(.footnote.weight(.medium))
+                            .foregroundStyle(.orange)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
             }
 

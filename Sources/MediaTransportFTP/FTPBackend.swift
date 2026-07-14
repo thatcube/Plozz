@@ -30,6 +30,10 @@ protocol FTPBackend: Sendable {
     /// Opens the control channel, negotiates TLS (per the security policy),
     /// logs in, and prepares the session (`TYPE I`, UTF-8).
     func connect() async throws
+    /// Whether the server affirmed restart support (`REST` in `FEAT`), i.e. can
+    /// do random-access ranged reads for seeking. Queried after `connect()`;
+    /// gates capability advertising + `openSource` fail-closed policy.
+    func supportsRestart() async -> Bool
     func list(path: String) async throws -> [FTPBackendEntry]
     func stat(path: String) async throws -> FTPBackendEntry
     func readSmallFile(path: String, maximumBytes: Int) async throws -> Data

@@ -232,7 +232,7 @@ final class FTPMediaTransportTests: XCTestCase {
         }
     }
 
-    func testProbeAdvertisesRandomAccess() async throws {
+    func testProbeAdvertisesRandomAccessWhenRestartSupported() async throws {
         let server = FakeFTPServer()
         server.addDirectory(path: "/media")
         let adapter = makeAdapter(server: server)
@@ -242,5 +242,38 @@ final class FTPMediaTransportTests: XCTestCase {
         XCTAssertEqual(probe.capabilities.byteRangeBehavior, .randomAccess)
         XCTAssertTrue(probe.capabilities.supportsList)
         XCTAssertEqual(probe.capabilities.consistency, .changeDetecting)
+    }
+
+    func testProbeAdvertisesBoundedWhenRestartUnsupported() async throws {
+        let server = FakeFTPServer()
+        server.restartSupported = false
+        server.addDirectory(path: "/media")
+        let adapter = makeAdapter(server: server)
+        let session = try await adapter.connect(for: try makeKey())
+
+        // Honest capability: no REST → list-but-not-seekable (fail-closed).
+        let probe = try await session.fileSystem.probe()
+        XCTAssertEqual(probe.capabilities.byteRangeBehavior, .bounded)
+    }
+
+    func testOpenSourceFailsClosedWithoutRestart() async throws {
+        let server = FakeFTPServer()
+        server.restartSupported = false
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        server.addDirectory(path: "/media")
+        server.addFile(path: "/media/movie.mkv", data: Data(count: 1000), mtime: now)
+        let adapter = makeAdapter(server: server)
+        let session = try await adapter.connect(for: try makeKey())
+
+        do {
+            _ = try await session.fileSystem.openSource(
+                for: try locator(relativePath: "movie.mkv", size: 1000, modifiedAt: now)
+            )
+            XCTFail("expected unsupportedRange for a non-REST server")
+        } catch let error as MediaTransportError {
+            guard case .unsupportedRange = error else {
+                return XCTFail("expected unsupportedRange, got \(error)")
+            }
+        }
     }
 }

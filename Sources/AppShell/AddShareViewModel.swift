@@ -153,10 +153,10 @@ final class AddShareViewModel {
                 self.serverLabel = host
                 self.enterShareStep()
             case .success(.ftp):
-                // FTP detection is implemented + tested but not activated in the
-                // shipping detector yet (it needs a dedicated onboarding form —
-                // see MediaShareRouteDetector). Handle defensively so the switch
-                // stays exhaustive; not reached in production.
+                // Headless branch: FTP is detected (claimant active) but the
+                // unified add-share + credential-entry flow that consumes `.ftp`
+                // is owned by the Discovery-UX branch. Until it lands, surface a
+                // clear non-crash placeholder rather than a bespoke screen.
                 self.shareLoad = .unreachable
                 self.step = .chooseShare
             case .failure:

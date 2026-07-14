@@ -17,6 +17,8 @@ final class FakeFTPServer: @unchecked Sendable {
     private let lock = NSLock()
     private var nodes: [String: Node] = [:]
     var connectError: Error?
+    /// Whether the fake server affirms `REST` (seekable). Default true.
+    var restartSupported = true
 
     func addDirectory(path: String, mtime: Date? = nil) {
         lock.withLock {
@@ -74,6 +76,10 @@ final class FakeFTPBackend: FTPBackend, @unchecked Sendable {
 
     func connect() async throws {
         if let error = server.connectError { throw error }
+    }
+
+    func supportsRestart() async -> Bool {
+        server.restartSupported
     }
 
     func list(path: String) async throws -> [FTPBackendEntry] {

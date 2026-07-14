@@ -4,9 +4,9 @@ import Foundation
 import XCTest
 
 /// Unit coverage for `FTPClaimant` (decisive routes for `ftp://`/`ftps://` and
-/// port 21). The claimant is implemented + tested here but intentionally not
-/// registered in the shipping detector yet (it needs a dedicated onboarding
-/// form); these tests prove it in isolation and via a detector built with it.
+/// port 21). The claimant is active in the shipping detector; routing through
+/// the shipping detector is covered in `MediaShareRouteDetectorTests`, while
+/// these tests exercise the claimant in isolation.
 final class FTPClaimantTests: XCTestCase {
     private func address(
         _ raw: String,

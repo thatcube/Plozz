@@ -150,16 +150,19 @@ final class FTPMediaTransportFileSystem: MediaTransportFileSystem, @unchecked Se
     }
 
     func probe() async throws -> MediaTransportProbe {
-        // Transport-level capabilities. Per-file seekability rests on the
-        // server honoring `REST`; a server that rejects it fails at
-        // `openSource`/first ranged read rather than being falsely advertised
-        // here (mirrors WebDAV's per-file ETag enforcement).
-        MediaTransportProbe(
+        // Advertise honestly: seek (random access) requires the server to affirm
+        // restart (`REST` in FEAT). A server without it can still list + read
+        // whole small files, but is not seekable — advertised as `.bounded`, so
+        // playback that needs seeking is truthfully gated (fail-closed policy,
+        // mirroring WebDAV's per-file ETag enforcement). Per-file confirmation
+        // happens at `openSource`.
+        let supportsRestart = await primary.supportsRestart()
+        return MediaTransportProbe(
             capabilities: try MediaTransportCapabilities(
                 supportsList: true,
                 supportsStat: true,
                 supportsBoundedWholeFileRead: true,
-                byteRangeBehavior: .randomAccess,
+                byteRangeBehavior: supportsRestart ? .randomAccess : .bounded,
                 maximumBoundedWholeFileReadBytes: Self.maximumSmallFileSize,
                 consistency: .changeDetecting
             )
@@ -221,6 +224,15 @@ final class FTPMediaTransportFileSystem: MediaTransportFileSystem, @unchecked Se
         }
         let absolute = try FTPPathPolicy.absolutePath(root: rootPath, relative: locator.relativePath)
         do {
+            // Fail closed when the server can't do restart/ranged reads: the file
+            // lists + stats fine but is not seekable, so it's not playable (the
+            // FTP analogue of WebDAV rejecting a representation without a strong
+            // ETag).
+            guard await primary.supportsRestart() else {
+                throw MediaTransportError.unsupportedRange(
+                    reason: "FTP server does not support REST (not seekable)"
+                )
+            }
             // Re-validate against the current server state before committing to
             // playback, so a file changed since the scan fails fast.
             let current = try await primary.stat(path: absolute)

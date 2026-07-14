@@ -110,6 +110,11 @@ actor FTPNetworkBackend: FTPBackend {
         }
     }
 
+    func supportsRestart() async -> Bool {
+        // `REST STREAM` in FEAT is the server's affirmation of restart support.
+        features.contains("REST")
+    }
+
     private func loadFeatures(_ control: FTPControlConnection) async throws {
         guard let reply = try? await control.send("FEAT"), reply.code == 211 else {
             features = []

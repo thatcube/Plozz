@@ -107,15 +107,13 @@ struct MediaShareRouteDetector: Sendable {
 
     /// Convenience for the shipping set (SMB + WebDAV), assuming SMB for a bare
     /// NAS host that answers no HTTP. `probe` is injectable for tests.
-    /// The shipping detector's claimant set. FTP detection (`FTPClaimant`) is
-    /// implemented + unit-tested but intentionally NOT activated here yet: it
-    /// emits a `.ftp` route that needs a dedicated onboarding form (a WebDAV-
-    /// wizard-scale flow) to complete. Registering it is a one-line change once
-    /// that form lands — the adapter/dispatch wiring already makes any persisted
-    /// `ftp://`/`ftps://` account fully functional.
+    /// The shipping detector's claimant set. `FTPClaimant` is active so a typed
+    /// `ftp://`/`ftps://` address (or port 21) is detected; the resulting `.ftp`
+    /// route is consumed by the unified add-share flow (Discovery-UX branch),
+    /// which owns FTP credential entry + the plaintext-credential warning.
     init(probe: any WebDAVReachabilityProbing = WebDAVReachabilityProbe()) {
         self.init(
-            claimants: [SMBClaimant(), WebDAVClaimant(probe: probe)],
+            claimants: [SMBClaimant(), WebDAVClaimant(probe: probe), FTPClaimant()],
             fallback: { .smb(host: $0.host, port: $0.port) }
         )
     }

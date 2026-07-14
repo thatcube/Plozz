@@ -19,6 +19,22 @@ final class HeroRandomLibraryLoaderTests: XCTestCase {
         }
     }
 
+    /// Waits until the probe reports `count` in-flight fetches, or the timeout
+    /// elapses. Uses real (short) sleeps rather than a fixed `Task.yield()` budget:
+    /// a yield only reschedules the caller and can burn through its whole budget in
+    /// microseconds before the child tasks are ever scheduled (observed on loaded CI
+    /// runners, where `active` stayed 0). Sleeping cedes actual wall-clock time so
+    /// the concurrent fetches get to run.
+    private func waitUntil(_ probe: ConcurrencyProbe,
+                           active count: Int,
+                           timeout: TimeInterval = 3) async {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if await probe.active == count { return }
+            try? await Task.sleep(nanoseconds: 10_000_000) // 10ms
+        }
+    }
+
     func testEligibleLibrariesFetchConcurrentlyWithinBound() async {
         let libraries = (0..<6).map {
             HeroRandomLibrary(
@@ -110,10 +126,7 @@ final class HeroRandomLibraryLoaderTests: XCTestCase {
             }
         }
 
-        for _ in 0..<1_000 {
-            if await probe.active == 4 { break }
-            await Task.yield()
-        }
+        await waitUntil(probe, active: 4)
         let activeBeforeCancellation = await probe.active
         XCTAssertEqual(activeBeforeCancellation, 4)
 

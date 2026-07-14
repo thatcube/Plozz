@@ -94,6 +94,13 @@ final class NFSByteSource: MediaTransportCursorIsolatedByteSource, @unchecked Se
                 return reader
             }
             let reader = try await readerFactory()
+            // `shutdown()` can run during the `await` above and drain the map; if
+            // so, this freshly-opened reader would leak its connection (shutdown
+            // won't revisit it). Re-check and close it rather than insert.
+            guard !isClosed else {
+                await reader.close()
+                throw MediaTransportError.cancelled
+            }
             // A concurrent read for the SAME cursor can't happen (the reader
             // upstream serializes per cursor), but guard against a lost reader
             // if the map changed while awaiting the factory.

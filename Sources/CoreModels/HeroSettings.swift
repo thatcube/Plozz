@@ -125,6 +125,17 @@ public struct HeroSettings: Codable, Equatable, Sendable {
     public var isActive: Bool {
         isEnabled && !sources.isEmpty
     }
+
+    /// Whether honoring Hide Watched requires live external watch history beyond
+    /// the already-resolved Continue Watching / Watchlist sources. Only the async
+    /// discovery sources — Featured (Seerr) and Random-from-library — surface
+    /// titles whose current per-profile watch state isn't already known, so this
+    /// is the single predicate that gates the extra provider watch-state fetch and
+    /// the hero's `externalRefreshRevision` bump.
+    public var requiresExternalWatchHistory: Bool {
+        isActive && hideWatched
+            && (isEnabled(.featured) || isEnabled(.randomFromLibrary))
+    }
 }
 
 private extension Comparable {

@@ -14,11 +14,38 @@ public final class HomeHeroRuntimeState {
     var items: [MediaItem] = []
     var completedKey: HeroRecomputeKey?
     var externalRefreshRevision = 0
+    /// Live, in-session watched/unwatched intents replayed onto the hero until the
+    /// durable snapshot catches up. Kept bounded via ``registerWatchMutation(_:)``.
     var watchMutations: [MediaItemMutation] = []
     var durableWatchMutations: [MediaItemMutation] = []
     var hasHydratedDurableMutations = false
 
+    /// Safety cap on retained session overlays, beyond the per-target coalescing in
+    /// ``registerWatchMutation(_:)`` — a pathological session still can't grow the
+    /// list without bound. Realistic sessions stay far below this.
+    static let maxSessionWatchMutations = 128
+
     public init() {}
+
+    /// Records a live watched/unwatched intent for hero replay, collapsing any
+    /// prior intent covering the same target set. This bounds the overlay by the
+    /// number of *distinct* titles toggled this session rather than every toggle,
+    /// so a long session can't inflate every reconcile fold. Last-write-wins per
+    /// target, which is exactly what folding the full history would resolve to.
+    func registerWatchMutation(_ mutation: MediaItemMutation) {
+        let key = Self.targetKey(for: mutation)
+        watchMutations.removeAll { Self.targetKey(for: $0) == key }
+        watchMutations.append(mutation)
+        if watchMutations.count > Self.maxSessionWatchMutations {
+            watchMutations.removeFirst(watchMutations.count - Self.maxSessionWatchMutations)
+        }
+    }
+
+    private static func targetKey(for mutation: MediaItemMutation) -> String {
+        let scoped = mutation.scopedItemIDs.sorted().joined(separator: ",")
+        let bare = mutation.itemIDs.sorted().joined(separator: ",")
+        return "\(scoped)|\(bare)"
+    }
 }
 
 /// The Home screen: an optional cinematic **hero** carousel followed by
@@ -168,38 +195,17 @@ public struct HomeView: View {
             )
             // Seed the hero synchronously from the already-loaded sources
             // (Continue Watching + Watchlist) so it renders in the *same frame* as
-            // the rows — no pop-in. Once `recomputeHero` finishes, `heroItems`
-            // (which also includes the async Featured/Random sources) takes over.
-            let watchMutations = heroRuntime.durableWatchMutations
-                + heroRuntime.watchMutations
-            let hasCurrentAsyncItems = heroRuntime.completedKey == heroRecomputeKey
-                && !heroRuntime.items.isEmpty
-            let canReuseLoadedItems = heroRuntime.completedKey?.matchesIgnoringExternalRefresh(
-                heroRecomputeKey
-            ) == true && !heroRuntime.items.isEmpty
-            let reconciledLoadedItems = hasCurrentAsyncItems || canReuseLoadedItems
-                ? heroCurator.reconcile(
-                    heroRuntime.items,
-                    settings: heroSettings?.settings,
-                    watchMutations: watchMutations
-                )
-                : []
-            let durableReplayReady = heroSettings?.settings.hideWatched != true
-                || heroRuntime.hasHydratedDurableMutations
-            let displayHeroItems: [MediaItem] = {
-                if !reconciledLoadedItems.isEmpty {
-                    return reconciledLoadedItems
-                }
-                guard durableReplayReady else { return [] }
-                return heroSettings.map {
-                    heroCurator.curateSync(
-                        settings: $0.settings,
-                        continueWatching: content.continueWatching,
-                        watchlist: content.watchlist,
-                        watchMutations: watchMutations
-                    )
-                } ?? []
-            }()
+            // the rows — no pop-in. Once `recomputeHero` finishes, the retained
+            // runtime items (which also include the async Featured/Random sources)
+            // take over. See `HomeHeroDisplayResolver` for the full priority order.
+            let displayHeroItems = HomeHeroDisplayResolver.resolve(
+                runtime: heroRuntime,
+                key: heroRecomputeKey,
+                settings: heroSettings?.settings,
+                continueWatching: content.continueWatching,
+                watchlist: content.watchlist,
+                curator: heroCurator
+            )
             let heroSlotState = HomeHeroSlotState.resolve(
                 isConfigured: heroSettings?.settings.isActive ?? false,
                 hasItems: !displayHeroItems.isEmpty,
@@ -427,7 +433,7 @@ public struct HomeView: View {
             if let mutation = MediaItemMutation.from(note) {
                 viewModel.applyWatchedState(mutation)
                 if mutation.played != nil {
-                    heroRuntime.watchMutations.append(mutation)
+                    heroRuntime.registerWatchMutation(mutation)
                     if shouldRefreshAsyncWatchHistory {
                         heroRuntime.externalRefreshRevision &+= 1
                     }
@@ -453,14 +459,7 @@ public struct HomeView: View {
     }
 
     private var shouldRefreshAsyncWatchHistory: Bool {
-        guard let settings = heroSettings?.settings,
-              settings.isActive,
-              settings.hideWatched
-        else {
-            return false
-        }
-        return settings.sources.contains(.featured)
-            || settings.sources.contains(.randomFromLibrary)
+        heroSettings?.settings.requiresExternalWatchHistory ?? false
     }
 
     /// A subtle, non-focusable status pill shown while a media share is scanning or
@@ -809,9 +808,8 @@ struct HeroRecomputeKey: Equatable {
         self.randomLibraries = activeSources.contains(.randomFromLibrary)
             ? randomLibraries
             : []
-        let needsExternalWatchHistory = settings?.hideWatched == true
-            && (activeSources.contains(.featured) || activeSources.contains(.randomFromLibrary))
-        self.externalRefreshRevision = needsExternalWatchHistory ? externalRefreshRevision : 0
+        self.externalRefreshRevision = settings?.requiresExternalWatchHistory == true
+            ? externalRefreshRevision : 0
     }
 
     /// Whether the loaded candidate set is still structurally valid while only
@@ -914,6 +912,56 @@ enum HomeHeroSlotState: Equatable {
         guard isConfigured else { return .hidden }
         if hasItems { return .content }
         return recomputeComplete ? .hidden : .placeholder
+    }
+}
+
+/// Resolves which hero items to render *this pass* from the retained runtime
+/// snapshot, the current recompute key, and the already-loaded page content —
+/// pulled out of `HomeView.body` so the (non-trivial) branching is unit-testable
+/// in isolation, exactly like ``HomeHeroSlotState/resolve(isConfigured:hasItems:recomputeComplete:)``.
+///
+/// Priority:
+/// 1. If the runtime holds items for the current key — or one that differs only
+///    by an in-flight external-history refresh — reconcile them against the live
+///    watch overlays and show those. This keeps the async Featured/Random slides
+///    and preserves focus while a just-watched title still drops out.
+/// 2. Otherwise seed synchronously from the already-loaded Continue Watching +
+///    Watchlist sources so the hero renders in the same frame as the rows — but
+///    hold that seed back until durable (offline) watch intents have hydrated when
+///    Hide Watched is on, so a seen title can't flash in before it's filtered.
+enum HomeHeroDisplayResolver {
+    @MainActor
+    static func resolve(
+        runtime: HomeHeroRuntimeState,
+        key: HeroRecomputeKey,
+        settings: HeroSettings?,
+        continueWatching: [MediaItem],
+        watchlist: [MediaItem],
+        curator: HeroCurator
+    ) -> [MediaItem] {
+        let watchMutations = runtime.durableWatchMutations + runtime.watchMutations
+        let hasCurrentAsyncItems = runtime.completedKey == key && !runtime.items.isEmpty
+        let canReuseLoadedItems = runtime.completedKey?.matchesIgnoringExternalRefresh(key) == true
+            && !runtime.items.isEmpty
+        if hasCurrentAsyncItems || canReuseLoadedItems {
+            let reconciled = curator.reconcile(
+                runtime.items,
+                settings: settings,
+                watchMutations: watchMutations
+            )
+            if !reconciled.isEmpty { return reconciled }
+        }
+        let durableReplayReady = settings?.hideWatched != true
+            || runtime.hasHydratedDurableMutations
+        guard durableReplayReady else { return [] }
+        return settings.map {
+            curator.curateSync(
+                settings: $0,
+                continueWatching: continueWatching,
+                watchlist: watchlist,
+                watchMutations: watchMutations
+            )
+        } ?? []
     }
 }
 

@@ -12,6 +12,18 @@ import FeatureDiscovery
 import FeatureHome
 import FeaturePlayback
 
+/// Composes the identity that scopes the Home tab subtree — and the retained
+/// ``HomeHeroRuntimeState`` it owns — to the active profile and Plex Home-user
+/// generation. A change to either forces SwiftUI to tear down and rebuild
+/// `MainTabView`, resetting the retained hero runtime, so watched overlays and
+/// curated items from one profile can never leak into another. Extracted as a
+/// pure function so this profile-isolation invariant is locked by a test.
+enum HomeRuntimeScope {
+    static func identityKey(profileID: String, plexIdentityGeneration: Int) -> String {
+        "\(profileID)#\(plexIdentityGeneration)"
+    }
+}
+
 /// Top-level view that renders one screen per `SessionState`.
 public struct RootView: View {
     @State private var appState: AppState
@@ -207,7 +219,10 @@ public struct RootView: View {
                         identitySources: appState.identitySourcesProvider,
                         onWarmIdentityIndex: { appState.warmIdentityIndex() }
                     )
-                    .id("\(appState.profilesModel.activeProfileID)#\(appState.plexIdentityGeneration)")
+                    .id(HomeRuntimeScope.identityKey(
+                        profileID: appState.profilesModel.activeProfileID,
+                        plexIdentityGeneration: appState.plexIdentityGeneration
+                    ))
                     .transition(.opacity)
                     }
                 }

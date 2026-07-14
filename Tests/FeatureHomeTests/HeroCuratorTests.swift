@@ -750,6 +750,143 @@ final class HomeHeroRuntimeStateTests: XCTestCase {
         XCTAssertEqual(reconstructedViewOwner.items.map(\.id), ["featured"])
         XCTAssertTrue(reconstructedViewOwner.hasHydratedDurableMutations)
     }
+
+    func testRegisterWatchMutationCoalescesRepeatedTogglesOfSameTarget() {
+        let runtime = HomeHeroRuntimeState()
+        runtime.registerWatchMutation(MediaItemMutation(itemIDs: ["a"], played: true))
+        runtime.registerWatchMutation(MediaItemMutation(itemIDs: ["b"], played: true))
+        // Re-toggling "a" must collapse onto the newest intent, not append.
+        runtime.registerWatchMutation(MediaItemMutation(itemIDs: ["a"], played: false))
+
+        XCTAssertEqual(runtime.watchMutations.count, 2)
+        let a = runtime.watchMutations.first { $0.itemIDs == ["a"] }
+        XCTAssertEqual(a?.played, false)
+        // The newest intent for "a" is last (append-after-remove), preserving order.
+        XCTAssertEqual(runtime.watchMutations.last?.itemIDs, ["a"])
+    }
+
+    func testRegisterWatchMutationScopesCoalesceByFullTargetSet() {
+        let runtime = HomeHeroRuntimeState()
+        runtime.registerWatchMutation(
+            MediaItemMutation(itemIDs: ["a"], scopedItemIDs: ["acct:a"], played: true)
+        )
+        // Same bare id but a different scoped set is a distinct physical target.
+        runtime.registerWatchMutation(
+            MediaItemMutation(itemIDs: ["a"], scopedItemIDs: ["other:a"], played: true)
+        )
+
+        XCTAssertEqual(runtime.watchMutations.count, 2)
+    }
+
+    func testRegisterWatchMutationCapsSessionOverlay() {
+        let runtime = HomeHeroRuntimeState()
+        let overflow = HomeHeroRuntimeState.maxSessionWatchMutations + 20
+        for index in 0..<overflow {
+            runtime.registerWatchMutation(
+                MediaItemMutation(itemIDs: ["item-\(index)"], played: true)
+            )
+        }
+
+        XCTAssertEqual(
+            runtime.watchMutations.count,
+            HomeHeroRuntimeState.maxSessionWatchMutations
+        )
+        // Oldest evicted, newest retained.
+        XCTAssertFalse(runtime.watchMutations.contains { $0.itemIDs == ["item-0"] })
+        XCTAssertTrue(
+            runtime.watchMutations.contains { $0.itemIDs == ["item-\(overflow - 1)"] }
+        )
+    }
+}
+
+@MainActor
+final class HomeHeroDisplayResolverTests: XCTestCase {
+    private func settings(
+        sources: [HeroSourceKind] = [.continueWatching],
+        hideWatched: Bool
+    ) -> HeroSettings {
+        HeroSettings(
+            isEnabled: true,
+            sources: sources,
+            maxItems: 8,
+            trailersEnabled: false,
+            hideWatched: hideWatched,
+            randomLibraryKeys: [],
+            autoAdvance: true,
+            autoAdvanceSeconds: 10
+        )
+    }
+
+    private func key(_ settings: HeroSettings, content: HomeViewModel.Content) -> HeroRecomputeKey {
+        HeroRecomputeKey(content: content, settings: settings, randomLibraries: [])
+    }
+
+    private func item(_ id: String, hasBeenPlayed: Bool = false) -> MediaItem {
+        MediaItem(
+            id: id,
+            title: id,
+            kind: .movie,
+            hasBeenPlayed: hasBeenPlayed,
+            backdropURL: URL(string: "https://example.com/\(id).jpg")
+        )
+    }
+
+    func testReconcilesRetainedItemsWhenKeyMatchesAndDropsNewlyWatched() {
+        let settings = settings(hideWatched: true)
+        let content = HomeViewModel.Content(continueWatching: [item("a"), item("b")])
+        let recomputeKey = key(settings, content: content)
+        let runtime = HomeHeroRuntimeState()
+        runtime.items = [item("a"), item("b", hasBeenPlayed: true)]
+        runtime.completedKey = recomputeKey
+        runtime.hasHydratedDurableMutations = true
+
+        let resolved = HomeHeroDisplayResolver.resolve(
+            runtime: runtime,
+            key: recomputeKey,
+            settings: settings,
+            continueWatching: content.continueWatching,
+            watchlist: [],
+            curator: HeroCurator()
+        )
+
+        XCTAssertEqual(resolved.map(\.id), ["a"])
+    }
+
+    func testFallsBackToSynchronousSeedWhenNoRetainedItems() {
+        let settings = settings(hideWatched: false)
+        let content = HomeViewModel.Content(continueWatching: [item("seed")])
+        let runtime = HomeHeroRuntimeState()
+
+        let resolved = HomeHeroDisplayResolver.resolve(
+            runtime: runtime,
+            key: key(settings, content: content),
+            settings: settings,
+            continueWatching: content.continueWatching,
+            watchlist: [],
+            curator: HeroCurator()
+        )
+
+        XCTAssertEqual(resolved.map(\.id), ["seed"])
+    }
+
+    func testSuppressesSeedUntilDurableMutationsHydrateWhenHidingWatched() {
+        let settings = settings(hideWatched: true)
+        let content = HomeViewModel.Content(continueWatching: [item("seed")])
+        let runtime = HomeHeroRuntimeState()
+        // hasHydratedDurableMutations defaults false → seed must stay hidden so a
+        // title an offline mutation already marked watched can't flash in.
+
+        let resolved = HomeHeroDisplayResolver.resolve(
+            runtime: runtime,
+            key: key(settings, content: content),
+            settings: settings,
+            continueWatching: content.continueWatching,
+            watchlist: [],
+            curator: HeroCurator()
+        )
+
+        XCTAssertTrue(resolved.isEmpty)
+    }
 }
 
 final class HeroRandomLibrarySelectionTests: XCTestCase {

@@ -16,8 +16,14 @@ public typealias SFTPMediaTransportConfigurationProvider =
 public struct SFTPMediaTransportAdapter: MediaTransportAdapter, Sendable {
     public let transportIdentifier = MediaShareTransportKind.sftp.rawValue
 
+    /// Default cadence for the byte source's mid-playback size/mtime revalidation
+    /// (see `SFTPByteSource`). Bounds how long an in-place file change can go
+    /// undetected without paying an `FSTAT` round-trip on every read.
+    static let defaultRevalidationInterval: TimeInterval = 10
+
     private let configurationProvider: SFTPMediaTransportConfigurationProvider
     private let backendFactory: @Sendable () -> any SFTPTransportBackend
+    private let revalidationInterval: TimeInterval
 
     public init(configurationProvider: @escaping SFTPMediaTransportConfigurationProvider) {
         self.init(
@@ -27,13 +33,16 @@ public struct SFTPMediaTransportAdapter: MediaTransportAdapter, Sendable {
     }
 
     /// DI seam: tests inject a `backendFactory` returning an in-memory fake so the
-    /// full connect/list/stat/read/openSource path runs offline.
+    /// full connect/list/stat/read/openSource path runs offline, and can override
+    /// `revalidationInterval` (e.g. 0 to force per-read revalidation).
     init(
         configurationProvider: @escaping SFTPMediaTransportConfigurationProvider,
-        backendFactory: @escaping @Sendable () -> any SFTPTransportBackend
+        backendFactory: @escaping @Sendable () -> any SFTPTransportBackend,
+        revalidationInterval: TimeInterval = SFTPMediaTransportAdapter.defaultRevalidationInterval
     ) {
         self.configurationProvider = configurationProvider
         self.backendFactory = backendFactory
+        self.revalidationInterval = revalidationInterval
     }
 
     public func connect(for key: MediaTransportSessionKey) async throws -> any MediaTransportSession {
@@ -69,7 +78,8 @@ public struct SFTPMediaTransportAdapter: MediaTransportAdapter, Sendable {
             backend: backend,
             rootPath: resolvedRoot,
             accountID: key.accountID,
-            credentialRevision: key.credentialRevision
+            credentialRevision: key.credentialRevision,
+            revalidationInterval: revalidationInterval
         )
         return SFTPMediaTransportSession(key: key, fileSystem: fileSystem, backend: backend)
     }
@@ -121,17 +131,20 @@ final class SFTPMediaTransportFileSystem: MediaTransportFileSystem, @unchecked S
     private let rootPath: String
     private let accountID: String
     private let credentialRevision: CredentialRevision
+    private let revalidationInterval: TimeInterval
 
     init(
         backend: any SFTPTransportBackend,
         rootPath: String,
         accountID: String,
-        credentialRevision: CredentialRevision
+        credentialRevision: CredentialRevision,
+        revalidationInterval: TimeInterval
     ) {
         self.backend = backend
         self.rootPath = rootPath
         self.accountID = accountID
         self.credentialRevision = credentialRevision
+        self.revalidationInterval = revalidationInterval
     }
 
     func validate() async throws {
@@ -202,11 +215,13 @@ final class SFTPMediaTransportFileSystem: MediaTransportFileSystem, @unchecked S
             throw MediaTransportError.invalidInput(reason: "invalid small-file bound")
         }
         let normalizedPath = try SFTPPathPolicy.normalizedRelative(relativePath)
+        let path = absolutePath(forRelative: normalizedPath)
         do {
-            return try await backend.readSmallFile(
-                path: absolutePath(forRelative: normalizedPath),
-                maximumBytes: maximumBytes
-            )
+            // readSmallFile returns up to 16 MB of file CONTENT (posters, .nfo,
+            // etc.), so it needs the same symlink containment as openSource — a
+            // symlink under the root must not disclose a file outside it.
+            try await assertWithinRoot(path)
+            return try await backend.readSmallFile(path: path, maximumBytes: maximumBytes)
         } catch {
             throw mapSFTPError(error)
         }
@@ -228,16 +243,7 @@ final class SFTPMediaTransportFileSystem: MediaTransportFileSystem, @unchecked S
         let normalizedPath = try SFTPPathPolicy.normalizedRelative(locator.relativePath)
         let path = absolutePath(forRelative: normalizedPath)
 
-        // Containment: `OPEN`/`STAT` follow symlinks (leaf and intermediate), so a
-        // path lexically under the root could still resolve to a file outside it.
-        // Canonicalize with `REALPATH` and require the result to stay within the
-        // configured root before opening — fail closed on any escape.
-        try await withMappedSFTPError {
-            let resolved = try SFTPPathPolicy.normalizedAbsoluteRoot(await backend.realPath(path))
-            guard SFTPPathPolicy.isWithinRoot(resolved, root: rootPath) else {
-                throw MediaTransportError.permissionDenied
-            }
-        }
+        try await assertWithinRoot(path)
 
         let opened = try await withMappedSFTPError {
             try await backend.openFile(path: path)
@@ -252,7 +258,8 @@ final class SFTPMediaTransportFileSystem: MediaTransportFileSystem, @unchecked S
                 byteSize: size,
                 backend: backend,
                 handle: opened.handle,
-                representation: locator.representation
+                representation: locator.representation,
+                revalidationInterval: revalidationInterval
             )
             return MediaTransportSourceLease(source: source)
         } catch {
@@ -279,6 +286,17 @@ final class SFTPMediaTransportFileSystem: MediaTransportFileSystem, @unchecked S
         guard !relativePath.isEmpty else { return rootPath }
         guard rootPath != "/" else { return "/" + relativePath }
         return rootPath + "/" + relativePath
+    }
+
+    /// Canonicalizes `path` with `REALPATH` and requires the result to stay within
+    /// the configured root — the containment guard shared by every content-reading
+    /// path (`OPEN`/`STAT` follow symlinks server-side, so a path lexically under
+    /// the root could still resolve outside it). Fails closed on any escape.
+    private func assertWithinRoot(_ path: String) async throws {
+        let resolved = try SFTPPathPolicy.normalizedAbsoluteRoot(await backend.realPath(path))
+        guard SFTPPathPolicy.isWithinRoot(resolved, root: rootPath) else {
+            throw MediaTransportError.permissionDenied
+        }
     }
 }
 

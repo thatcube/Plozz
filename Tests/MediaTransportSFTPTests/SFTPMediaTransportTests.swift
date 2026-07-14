@@ -140,6 +140,31 @@ final class SFTPMediaTransportTests: XCTestCase {
         await lease.waitForFinalShutdown()
     }
 
+    func testByteSourceThrottlesRevalidationWithinInterval() async throws {
+        let revision = CredentialRevision()
+        let backend = FakeSFTPBackend()
+        let modifiedAt = Date(timeIntervalSince1970: 100)
+        backend.entriesByPath["/media/movie.mkv"] =
+            entry(name: "movie.mkv", kind: .file, size: 10, modifiedAt: modifiedAt)
+        backend.dataByPath["/media/movie.mkv"] = Data(0..<10)
+        // A large interval throttles mid-playback revalidation off for the test's
+        // duration, so a change within the window is intentionally not re-checked.
+        let session = try await connect(backend: backend, revision: revision, revalidationInterval: 3600)
+
+        let locator = try makeLocator(revision: revision, size: 10, modifiedAt: modifiedAt)
+        let lease = try await session.fileSystem.openSource(for: locator)
+        let cursor = try XCTUnwrap(lease.makeCursor())
+
+        _ = try await cursor.read(at: 0, length: 4)
+        // File changes underneath, but within the throttle window it isn't re-fstat'd.
+        backend.entriesByPath["/media/movie.mkv"] =
+            entry(name: "movie.mkv", kind: .file, size: 10, modifiedAt: Date(timeIntervalSince1970: 200))
+        let bytes = try await cursor.read(at: 4, length: 4)
+        XCTAssertEqual(bytes, Data(Data(0..<10)[4..<8]))
+        cursor.close()
+        await lease.waitForFinalShutdown()
+    }
+
     func testOpenSourceRejectsSymlinkEscapingRoot() async throws {
         let revision = CredentialRevision()
         let backend = FakeSFTPBackend()
@@ -308,8 +333,11 @@ final class SFTPMediaTransportTests: XCTestCase {
 
     private func connect(
         backend: FakeSFTPBackend,
-        revision: CredentialRevision = CredentialRevision()
+        revision: CredentialRevision = CredentialRevision(),
+        revalidationInterval: TimeInterval = 0
     ) async throws -> any MediaTransportSession {
+        // Tests default to interval 0 (revalidate every read) so drift detection is
+        // deterministic; the throttle test overrides it.
         let adapter = SFTPMediaTransportAdapter(
             configurationProvider: { _, _ in
                 SFTPMediaTransportConfiguration(
@@ -317,7 +345,8 @@ final class SFTPMediaTransportTests: XCTestCase {
                     hostKeyPolicy: .pinned(sha256: Array(repeating: 1, count: 32))
                 )
             },
-            backendFactory: { backend }
+            backendFactory: { backend },
+            revalidationInterval: revalidationInterval
         )
         return try await adapter.connect(for: makeKey(revision: revision))
     }

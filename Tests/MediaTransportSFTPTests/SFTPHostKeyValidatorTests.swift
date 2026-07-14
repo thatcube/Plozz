@@ -68,7 +68,7 @@ final class SFTPHostKeyValidatorTests: XCTestCase {
         XCTAssertEqual(validator.capturedFingerprint, fingerprint)
     }
 
-    func testUserAuthOffersPasswordExactlyOnce() throws {
+    func testUserAuthOffersPasswordThenFailsTerminallyOnRejection() throws {
         let loop = EmbeddedEventLoop()
         defer { try? loop.syncShutdownGracefully() }
         let delegate = SFTPUserAuthenticationDelegate(
@@ -83,15 +83,19 @@ final class SFTPHostKeyValidatorTests: XCTestCase {
             return XCTFail("expected a password offer")
         }
         XCTAssertEqual(password.password, "secret")
+        XCTAssertFalse(delegate.didExhaustCredentials)
 
-        // A second challenge (server rejected the first) yields no further offer,
-        // so authentication fails cleanly instead of looping.
+        // A second challenge (server rejected the first) fails TERMINALLY as auth
+        // so the share browser doesn't retry a wrong password like a network blip.
         let second = loop.makePromise(of: NIOSSHUserAuthenticationOffer?.self)
         delegate.nextAuthenticationType(availableMethods: .password, nextChallengePromise: second)
-        XCTAssertNil(try second.futureResult.wait())
+        XCTAssertThrowsError(try second.futureResult.wait()) { error in
+            XCTAssertEqual(error as? MediaTransportError, .authentication(reason: "SFTP authentication rejected"))
+        }
+        XCTAssertTrue(delegate.didExhaustCredentials)
     }
 
-    func testUserAuthWithoutPasswordMethodOffersNothing() throws {
+    func testUserAuthWithoutPasswordMethodFailsTerminally() throws {
         let loop = EmbeddedEventLoop()
         defer { try? loop.syncShutdownGracefully() }
         let delegate = SFTPUserAuthenticationDelegate(
@@ -100,7 +104,13 @@ final class SFTPHostKeyValidatorTests: XCTestCase {
 
         let promise = loop.makePromise(of: NIOSSHUserAuthenticationOffer?.self)
         delegate.nextAuthenticationType(availableMethods: .publicKey, nextChallengePromise: promise)
-        XCTAssertNil(try promise.futureResult.wait())
+        XCTAssertThrowsError(try promise.futureResult.wait()) { error in
+            XCTAssertEqual(
+                error as? MediaTransportError,
+                .authentication(reason: "SFTP server does not accept password auth")
+            )
+        }
+        XCTAssertTrue(delegate.didExhaustCredentials)
     }
 
     func testUserAuthPrivateKeyIsNotYetSupported() {

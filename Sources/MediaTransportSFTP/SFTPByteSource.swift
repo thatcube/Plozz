@@ -10,37 +10,61 @@ import MediaTransportCore
 /// isolation is needed. Reads past EOF return empty data rather than erroring,
 /// matching how AVIO probes past the end of a file.
 ///
-/// Seek-safety: SFTP has no ETag, so — exactly as SMB does — before each read we
-/// `FSTAT` the open handle and reject any size/mtime drift from the representation
-/// captured at scan time (`.sourceChanged`). An `FSTAT` on the handle reflects an
-/// in-place rewrite of the file (same inode) as well as the scanned representation
-/// going stale, which a one-time open-only check would miss.
+/// Seek-safety: SFTP has no ETag, and unlike WebDAV (`If-Match` piggybacks on every
+/// ranged GET for free) or SMB (a stat is cheap on its LAN links), an SFTP `FSTAT`
+/// is a separate round-trip — costly on the WAN links SFTP commonly runs over. So
+/// rather than revalidating on every read (which would roughly halve WAN
+/// throughput), the source validates at open time (in `openSource`) and then
+/// re-`FSTAT`s + rechecks size/mtime at a throttled cadence during playback,
+/// failing closed on drift (`.sourceChanged`). This bounds the staleness window to
+/// `revalidationInterval` while keeping the hot read path RTT-efficient. An
+/// interval of 0 forces per-read revalidation (used by tests).
 final class SFTPByteSource: MediaTransportByteSource, @unchecked Sendable {
     let byteSize: Int64
 
     private let backend: any SFTPTransportBackend
     private let handle: SFTPFileHandle
     private let representation: RemoteFileRepresentation
+    private let revalidationInterval: TimeInterval
+    private let clock: @Sendable () -> Date
     private let lock = NSLock()
     private var isClosed = false
+    private var lastValidatedAt: Date
 
     init(
         byteSize: Int64,
         backend: any SFTPTransportBackend,
         handle: SFTPFileHandle,
-        representation: RemoteFileRepresentation
+        representation: RemoteFileRepresentation,
+        revalidationInterval: TimeInterval,
+        clock: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.byteSize = byteSize
         self.backend = backend
         self.handle = handle
         self.representation = representation
+        self.revalidationInterval = max(0, revalidationInterval)
+        self.clock = clock
+        // openSource just validated this handle, so start the throttle clock now.
+        self.lastValidatedAt = clock()
     }
 
     func read(at offset: Int64, length: Int) async throws -> Data {
         guard offset >= 0, length > 0 else {
             throw MediaTransportError.invalidInput(reason: "invalid SFTP byte range")
         }
-        guard !lock.withLock({ isClosed }) else {
+        // Claim a revalidation slot (or observe closure) atomically so concurrent
+        // cursor reads don't each issue an FSTAT within the same interval.
+        let decision: (closed: Bool, revalidate: Bool) = lock.withLock {
+            if isClosed { return (true, false) }
+            let now = clock()
+            if now.timeIntervalSince(lastValidatedAt) >= revalidationInterval {
+                lastValidatedAt = now
+                return (false, true)
+            }
+            return (false, false)
+        }
+        guard !decision.closed else {
             throw MediaTransportError.cancelled
         }
         // A read at or past EOF is a normal end-of-stream signal, not an error.
@@ -53,11 +77,12 @@ final class SFTPByteSource: MediaTransportByteSource, @unchecked Sendable {
         let clampedLength = Int(end - offset + 1)
 
         do {
-            // Revalidate the open handle against the scanned representation before
-            // serving bytes, so a file changing underneath playback fails closed
-            // rather than mixing versions (mirrors SMB's per-read validation).
-            let current = try await backend.fstat(handle: handle)
-            try validateSFTPRepresentation(current, against: representation)
+            if decision.revalidate {
+                // Fail closed if the file changed underneath the open handle
+                // (size/mtime drift) rather than mixing versions.
+                let current = try await backend.fstat(handle: handle)
+                try validateSFTPRepresentation(current, against: representation)
+            }
             return try await backend.read(handle: handle, offset: offset, length: clampedLength)
         } catch {
             throw mapSFTPError(error)

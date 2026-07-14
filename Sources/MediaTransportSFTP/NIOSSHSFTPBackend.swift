@@ -138,6 +138,12 @@ final class NIOSSHSFTPBackend: SFTPTransportBackend, @unchecked Sendable {
         } catch {
             deadlineHandler.cancel()
             try? await group.shutdownGracefully()
+            // A rejected/unaccepted credential surfaces here as an assorted
+            // connection error; classify it as TERMINAL auth so the share browser
+            // doesn't retry-loop on a wrong password.
+            if authDelegate.didExhaustCredentials {
+                throw MediaTransportError.authentication(reason: "SFTP authentication failed")
+            }
             throw mapSFTPError(error)
         }
     }
@@ -173,26 +179,36 @@ final class NIOSSHSFTPBackend: SFTPTransportBackend, @unchecked Sendable {
             throw MediaTransportError.protocolViolation(reason: "unexpected SFTP OPENDIR response")
         }
 
-        var entries: [SFTPBackendEntry] = []
-        defer {
-            let handleCopy = handle
-            Task { await self.closeRawHandle(handleCopy) }
-        }
-        while true {
-            let readBody = try await request { id, allocator in
-                SFTP.encodeReadDir(id: id, handle: handle, allocator: allocator)
-            }
-            switch readBody {
-            case let .name(names):
-                for name in names {
-                    entries.append(backendEntry(name: name.filename, attributes: name.attributes))
+        // Deterministically close the directory handle on both success and error
+        // (rather than a fire-and-forget Task) so server-side handles don't
+        // accumulate during rapid scans and shutdown can't race the close.
+        do {
+            var entries: [SFTPBackendEntry] = []
+            loop: while true {
+                // Stop a cancelled scan promptly rather than draining the whole
+                // directory over the (strictly-ordered) single SSH channel, which
+                // would head-of-line block newer requests.
+                try Task.checkCancellation()
+                let readBody = try await request { id, allocator in
+                    SFTP.encodeReadDir(id: id, handle: handle, allocator: allocator)
                 }
-            case let .status(code, _):
-                if code == .eof { return entries }
-                throw SFTPStatusError(code: code)
-            default:
-                throw MediaTransportError.protocolViolation(reason: "unexpected SFTP READDIR response")
+                switch readBody {
+                case let .name(names):
+                    for name in names {
+                        entries.append(backendEntry(name: name.filename, attributes: name.attributes))
+                    }
+                case let .status(code, _):
+                    if code == .eof { break loop }
+                    throw SFTPStatusError(code: code)
+                default:
+                    throw MediaTransportError.protocolViolation(reason: "unexpected SFTP READDIR response")
+                }
             }
+            await closeRawHandle(handle)
+            return entries
+        } catch {
+            await closeRawHandle(handle)
+            throw error
         }
     }
 
@@ -286,11 +302,14 @@ final class NIOSSHSFTPBackend: SFTPTransportBackend, @unchecked Sendable {
         }
         let handleBuffer = ByteBuffer(bytes: handle.rawValue)
         var result = Data()
-        result.reserveCapacity(min(length, 1 << 20))
+        result.reserveCapacity(min(length, 8 << 20))
         var position = offset
         var remaining = length
 
         while remaining > 0 {
+            // Stop promptly if the caller (e.g. a seek) cancelled this read rather
+            // than draining every remaining chunk first.
+            try Task.checkCancellation()
             let chunk = min(remaining, SFTP.maxReadChunk)
             let body = try await request { id, allocator in
                 SFTP.encodeRead(
@@ -303,14 +322,17 @@ final class NIOSSHSFTPBackend: SFTPTransportBackend, @unchecked Sendable {
             }
             switch body {
             case let .data(buffer):
-                let count = buffer.readableBytes
-                guard count > 0 else { return result }
-                result.append(contentsOf: buffer.readableBytesView)
-                position += Int64(count)
-                remaining -= count
-                // A short read means we reached the end of what the server will
-                // return contiguously; stop rather than spin at EOF.
-                if count < chunk { return result }
+                // Defensive: never return more than the caller requested even if a
+                // misbehaving server over-delivers a DATA packet.
+                let take = min(buffer.readableBytes, remaining)
+                guard take > 0 else { return result }
+                result.append(contentsOf: buffer.readableBytesView.prefix(take))
+                position += Int64(take)
+                remaining -= take
+                // A short DATA reply is NOT necessarily EOF — a server may return
+                // fewer bytes than requested mid-file. Keep reading from the new
+                // offset; only SSH_FX_EOF (below) terminates. (Truncating on a
+                // short read would corrupt playback against such servers.)
             case let .status(code, _):
                 if code == .eof { return result }
                 throw SFTPStatusError(code: code)
@@ -375,7 +397,15 @@ final class NIOSSHSFTPBackend: SFTPTransportBackend, @unchecked Sendable {
                 eventLoop.execute { handler.failRequest(id: id, error: error) }
             }
 
-        return try await promise.futureResult.get()
+        // `EventLoopFuture.get()` ignores task cancellation, so bridge it: on
+        // cancellation (e.g. a seek abandoning the current read) fail the pending
+        // promise and drop its id, unblocking immediately instead of waiting for
+        // the reply or the full operation timeout.
+        return try await withTaskCancellationHandler {
+            try await promise.futureResult.get()
+        } onCancel: {
+            eventLoop.execute { handler.failRequest(id: id, error: CancellationError()) }
+        }
     }
 
     private func closeRawHandle(_ handle: ByteBuffer) async {
@@ -584,8 +614,16 @@ final class SFTPClientHandler: ChannelInboundHandler, @unchecked Sendable {
         var payload = packet.payload
         if packet.type == SFTP.PacketType.version.rawValue {
             let version = try SFTP.parseVersion(&payload)
-            guard version >= 1 else {
-                throw MediaTransportError.protocolViolation(reason: "unusable SFTP version")
+            // We only implement the v3 wire layout (attributes, names). A server
+            // that negotiates a different version would hand us packets we'd
+            // misparse, so require exactly v3 and fail closed otherwise. (OpenSSH
+            // and virtually all servers negotiate down to the client's offered v3.)
+            guard version == SFTP.protocolVersion else {
+                if !readyResolved {
+                    readyResolved = true
+                    readyPromise.fail(MediaTransportError.unsupportedCapability("SFTP protocol version"))
+                }
+                return
             }
             if !readyResolved {
                 readyResolved = true
@@ -660,6 +698,11 @@ final class SFTPHostKeyValidator: NIOSSHClientServerAuthenticationDelegate, @unc
 final class SFTPUserAuthenticationDelegate: NIOSSHClientUserAuthenticationDelegate, @unchecked Sendable {
     private let credential: SFTPMediaTransportCredential
     private let offered = NIOLockedValueBox<Bool>(false)
+    private let exhausted = NIOLockedValueBox<Bool>(false)
+
+    /// True once the single credential was rejected or the server won't accept our
+    /// method — used by `connect` to classify the failure as terminal auth.
+    var didExhaustCredentials: Bool { exhausted.withLockedValue { $0 } }
 
     init(credential: SFTPMediaTransportCredential) {
         self.credential = credential
@@ -670,20 +713,27 @@ final class SFTPUserAuthenticationDelegate: NIOSSHClientUserAuthenticationDelega
         nextChallengePromise: EventLoopPromise<NIOSSHUserAuthenticationOffer?>
     ) {
         // Offer our single credential once. If the server rejects it (and asks
-        // again), stop so auth fails cleanly instead of looping.
+        // again) or won't accept our method, mark the credential exhausted and
+        // fail — so connect() surfaces a TERMINAL `.authentication` rather than a
+        // transient error the share browser would retry-loop on (e.g. wrong
+        // password re-tried like a network blip).
         let alreadyOffered = offered.withLockedValue { value -> Bool in
             defer { value = true }
             return value
         }
         guard !alreadyOffered else {
-            nextChallengePromise.succeed(nil)
+            exhausted.withLockedValue { $0 = true }
+            nextChallengePromise.fail(MediaTransportError.authentication(reason: "SFTP authentication rejected"))
             return
         }
 
         switch credential {
         case let .password(username, password):
             guard availableMethods.contains(.password) else {
-                nextChallengePromise.succeed(nil)
+                exhausted.withLockedValue { $0 = true }
+                nextChallengePromise.fail(
+                    MediaTransportError.authentication(reason: "SFTP server does not accept password auth")
+                )
                 return
             }
             let offer = NIOSSHUserAuthenticationOffer(
@@ -725,6 +775,10 @@ final class SSHConnectDeadlineHandler: ChannelInboundHandler, @unchecked Sendabl
     typealias InboundIn = Any
 
     private let timeout: TimeAmount
+    // The event loop is captured into a thread-safe box so `cancel()` (called from
+    // the connecting async context, off-loop) can hop onto the loop without ever
+    // reading `context`/`scheduled` off-loop — those stay loop-confined.
+    private let loopBox = NIOLockedValueBox<EventLoop?>(nil)
     private var scheduled: Scheduled<Void>?
     private var context: ChannelHandlerContext?
     private var cancelled = false
@@ -735,6 +789,7 @@ final class SSHConnectDeadlineHandler: ChannelInboundHandler, @unchecked Sendabl
 
     func handlerAdded(context: ChannelHandlerContext) {
         self.context = context
+        loopBox.withLockedValue { $0 = context.eventLoop }
         arm(context: context)
     }
 
@@ -756,11 +811,11 @@ final class SSHConnectDeadlineHandler: ChannelInboundHandler, @unchecked Sendabl
         }
     }
 
-    /// Cancels the deadline (handshake succeeded). Hops to the event loop since it
-    /// is invoked from the connecting async context.
+    /// Cancels the deadline (handshake succeeded). Reads only the (thread-safe)
+    /// event-loop reference off-loop, then hops onto the loop for all state.
     func cancel() {
-        guard let context else { return }
-        context.eventLoop.execute { [weak self] in
+        guard let loop = loopBox.withLockedValue({ $0 }) else { return }
+        loop.execute { [weak self] in
             self?.cancelled = true
             self?.scheduled?.cancel()
             self?.scheduled = nil

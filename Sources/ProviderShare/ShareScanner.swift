@@ -367,6 +367,8 @@ actor ShareScanner {
     private static func processDirectory(_ dir: String, using lister: ScanLister) async -> DirResult {
         let entries: [RemoteFileEntry]
         do {
+            ShareBackgroundActivity.listStarted()
+            defer { ShareBackgroundActivity.listFinished() }
             entries = try await lister.list(dir)
         } catch {
             PlozzLog.boot("share.scan skip dir \(dir.isEmpty ? "<root>" : dir) (\(error))")

@@ -615,6 +615,11 @@ public final class AppState {
     @ObservationIgnored
     private var identityWarmTask: Task<Void, Never>?
 
+    /// App-lifetime main-thread responsiveness probe (dev-only; nil unless
+    /// `PLZXMEM=1`). Held so it lives as long as the app state.
+    @ObservationIgnored
+    private var perfHitchProbeTask: Task<Void, Never>?
+
     /// Monotonically bumped every time the identity index is swapped out from under
     /// an in-flight warm — on a profile reset and at the start of each warm wave
     /// (which cancels its predecessor). A warm task captures the value at launch and
@@ -1591,6 +1596,11 @@ public final class AppState {
     /// Restores stored accounts on launch (relaunch without re-login). Shows the
     /// profile picker when the household has opted into "ask on startup".
     public func bootstrap() {
+        // Dev-only: start the main-thread responsiveness probe (no-op unless
+        // PLZXMEM=1) so we can measure whether background share scans stall the UI.
+        if perfHitchProbeTask == nil {
+            perfHitchProbeTask = BrowseDiagnostics.startMainThreadHitchProbe()
+        }
         do {
             try accountStore.recoverCredentialMutations()
         } catch {

@@ -116,6 +116,11 @@ public struct NFSClient: Sendable {
         // exports  = *exportnode           (each link prefixed by a "value follows" bool)
         // exportnode { dirpath; groups; }
         // groups   = *name                 (same linked-list encoding)
+        //
+        // On a cap breach we THROW rather than break: a break would leave the XDR
+        // cursor mid-stream, so a hostile server that overruns a cap could make the
+        // remaining bytes (and thus later export names) misparse. Fail closed to
+        // match the readdir parser's `.malformedResponse` discipline.
         var exports: [String] = []
         var nodeCount = 0
         while try decoder.decodeBool() {
@@ -124,12 +129,12 @@ public struct NFSClient: Sendable {
             while try decoder.decodeBool() {
                 _ = try decoder.decodeString(maxLength: 4096)
                 groupCount += 1
-                if groupCount > 4096 { break }
+                if groupCount > 4096 { throw NFSError.malformedResponse }
             }
             let trimmed = dirpath.trimmingCharacters(in: .whitespaces)
             if !trimmed.isEmpty { exports.append(trimmed) }
             nodeCount += 1
-            if nodeCount > 4096 { break }
+            if nodeCount > 4096 { throw NFSError.malformedResponse }
         }
         return exports
     }

@@ -95,27 +95,42 @@ final class NIOSSHSFTPBackend: SFTPTransportBackend, @unchecked Sendable {
             // Open the `sftp` subsystem child channel. We reference only the
             // (Sendable) event loop and the (@unchecked Sendable) handler inside
             // the escaping closures, never the non-Sendable `Channel` itself.
-            let sftpChannel: Channel = try await channel.pipeline
-                .handler(type: NIOSSHHandler.self)
-                .flatMap { sshHandler -> EventLoopFuture<Channel> in
-                    let promise = eventLoop.makePromise(of: Channel.self)
-                    sshHandler.createChannel(promise, channelType: .session) { childChannel, channelType in
-                        guard channelType == .session else {
-                            return childChannel.eventLoop.makeFailedFuture(
-                                MediaTransportError.protocolViolation(reason: "unexpected SSH channel type")
-                            )
+            let sftpChannel: Channel
+            do {
+                sftpChannel = try await channel.pipeline
+                    .handler(type: NIOSSHHandler.self)
+                    .flatMap { sshHandler -> EventLoopFuture<Channel> in
+                        let promise = eventLoop.makePromise(of: Channel.self)
+                        sshHandler.createChannel(promise, channelType: .session) { childChannel, channelType in
+                            guard channelType == .session else {
+                                return childChannel.eventLoop.makeFailedFuture(
+                                    MediaTransportError.protocolViolation(reason: "unexpected SSH channel type")
+                                )
+                            }
+                            return childChannel.eventLoop.makeCompletedFuture {
+                                try childChannel.syncOptions?.setOption(.allowRemoteHalfClosure, value: true)
+                                try childChannel.pipeline.syncOperations.addHandler(sftpHandler)
+                            }
                         }
-                        return childChannel.eventLoop.makeCompletedFuture {
-                            try childChannel.syncOptions?.setOption(.allowRemoteHalfClosure, value: true)
-                            try childChannel.pipeline.syncOperations.addHandler(sftpHandler)
-                        }
-                    }
-                    return promise.futureResult
-                }.get()
+                        return promise.futureResult
+                    }.get()
+            } catch {
+                // The subsystem channel never opened — commonly because SSH auth
+                // was rejected (wrong username/password) or the host key was
+                // refused before user-auth. In that case `sftpHandler` was created
+                // but NEVER added to a pipeline, so nothing will ever complete its
+                // `readyPromise`; left unfulfilled it leaks and traps NIO in debug
+                // builds. Complete it here (safe: with no pipeline attached there is
+                // no concurrent completion) and re-throw to the connect teardown.
+                sftpHandler.failReadyPromise(error: error)
+                throw error
+            }
 
-            // Wait for the `sftp` subsystem request + INIT/VERSION handshake. The
-            // deadline handler bounds this (and everything before it); if it fires
-            // it closes the channel, which fails readyFuture.
+            // Wait for the `sftp` subsystem request + INIT/VERSION handshake. From
+            // here the handler IS in a pipeline, so its own channelInactive/failAll
+            // owns `readyPromise` — never complete it externally past this point.
+            // The deadline handler bounds this (and everything before it); if it
+            // fires it closes the channel, which fails readyFuture.
             try await sftpHandler.readyFuture.get()
             deadlineHandler.cancel()
 
@@ -484,6 +499,18 @@ final class SFTPClientHandler: ChannelInboundHandler, @unchecked Sendable {
     private var terminalError: Error?
 
     var readyFuture: EventLoopFuture<Void> { readyPromise.futureResult }
+
+    /// Completes `readyPromise` for the case where this handler was created but
+    /// never added to a pipeline (the `sftp` subsystem channel failed to open —
+    /// typically SSH auth was rejected). Without this the unfulfilled promise
+    /// leaks and NIO traps in debug builds. MUST only be called on that
+    /// never-attached path: once the handler is in a pipeline, `failAll0` owns the
+    /// promise and completing it here too would be a double-completion trap.
+    /// `EventLoopPromise` completion is thread-safe, and no pipeline means no
+    /// concurrent completion.
+    func failReadyPromise(error: Error) {
+        readyPromise.fail(error)
+    }
 
     init(eventLoop: EventLoop) {
         self.eventLoop = eventLoop

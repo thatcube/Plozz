@@ -34,6 +34,22 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
     private var restartingScans: Set<String> = []
     private var arbiters: [String: MediaIOArbiter] = [:]
     private let arbiterFactory: ArbiterFactory
+    /// When each share last COMPLETED a background (non-forced) scan+enrich cycle.
+    /// `catalog` is a computed property queried on every Home/browse access, and
+    /// each access calls `ensureScanning`; without this, a share whose real walk
+    /// finished (e.g. a small WebDAV root in ~20ms) would re-spawn a fresh no-op
+    /// scan+enrich cycle on EVERY access — dozens per second while Home renders.
+    /// Recording completion lets `ensureScanning` skip re-spawning within the
+    /// coalesce window, moving the staleness throttle *before* the task machinery
+    /// instead of inside the spawned task (`scanIfStale`), where it was too late.
+    private var lastBackgroundScanCompletedAt: [String: Date] = [:]
+    /// Minimum gap between background scan *spawns* for one share. Kept equal to
+    /// `ShareScanner.scanIfStale`'s default `minInterval` so a spawn is only
+    /// allowed once the walk would actually run — anything sooner is a guaranteed
+    /// no-op. If the two ever drift, degradation is graceful: at worst one no-op
+    /// spawn per window (never the per-render thrash, never a blocked needed scan
+    /// as long as this stays ≤ the scanIfStale interval).
+    private static let backgroundScanCoalesceInterval: TimeInterval = 600
     /// Where scan/enrich progress is reported for the Home banner + Settings.
     /// Wired once by the app (`AppState`); `.noop` until then (tests/previews).
     private var reporter: ShareScanReporter = .noop
@@ -225,12 +241,19 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
     }
 
     /// Spawn a throttled scan attempt (then an enrichment pass) unless one is
-    /// already in flight for this share. `ShareScanner.scanIfStale` time-throttles
-    /// the real walk, so a rapid burst of Home reloads collapses to one run.
+    /// already in flight for this share, or one completed within the coalesce
+    /// window. `catalog` is queried on every Home/browse access, so without the
+    /// completion cooldown a share whose walk already finished would re-spawn a
+    /// no-op scan+enrich on every access. `ShareScanner.scanIfStale` still
+    /// governs whether the actual walk runs when a spawn IS allowed.
     private func ensureScanning(_ accountKey: String) async {
         guard scanTasks[accountKey]?.isEmpty != false,
               !restartingScans.contains(accountKey),
               let scanner = scanners[accountKey] else { return }
+        if let completedAt = lastBackgroundScanCompletedAt[accountKey],
+           Date().timeIntervalSince(completedAt) < Self.backgroundScanCoalesceInterval {
+            return
+        }
         await startScan(accountKey: accountKey, scanner: scanner, force: false)
     }
 
@@ -278,6 +301,11 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
                 ShareBackgroundActivity.enrichFinished()
                 BrowseDiagnostics.event("enrich- \(accountKey)")
             }
+            // Record completion so `ensureScanning` coalesces the frequent
+            // per-render re-triggers into at most one cycle per window. A forced
+            // "Scan now" also resets it, so a manual scan doesn't immediately
+            // re-thrash on the next Home render.
+            await self?.noteScanCompleted(accountKey)
             await self?.clearScanTask(accountKey, taskID: taskID)
         }
         resource.attach(task)
@@ -290,6 +318,12 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
         if scanTasks[accountKey]?.isEmpty == true {
             scanTasks[accountKey] = nil
         }
+    }
+
+    /// Records that a background scan+enrich cycle finished for this share, so
+    /// `ensureScanning` coalesces the frequent per-render re-triggers.
+    private func noteScanCompleted(_ accountKey: String) {
+        lastBackgroundScanCompletedAt[accountKey] = Date()
     }
 
     private func clearDrainingScanTasks(
@@ -312,6 +346,7 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
         let scanner = scanners.removeValue(forKey: accountKey)
         scannerIDs[accountKey] = nil
         scannerRevisions[accountKey] = nil
+        lastBackgroundScanCompletedAt[accountKey] = nil
         let activeTasks = scanTasks.removeValue(forKey: accountKey) ?? [:]
         let drainingTasks = drainingScanTasks.removeValue(forKey: accountKey) ?? [:]
         let taskEntries = activeTasks.merging(

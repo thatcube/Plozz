@@ -702,4 +702,111 @@ final class ShareScannerTests: XCTestCase {
         await playback.releaseAndWait()
         await coordinator.invalidate(accountKey: accountID)
     }
+
+    /// Regression: `catalog` is a computed property queried on every Home/browse
+    /// access, and each access calls `store()` → `ensureScanning`. A share whose
+    /// walk finishes fast (e.g. a small WebDAV root) must NOT re-spawn a fresh
+    /// scan on every access — that was the observed "scan-thrash" (dozens of
+    /// scan+enrich cycles per second). After one completes, a burst of further
+    /// `store()` calls within the coalesce window must spawn no additional scans.
+    func testRepeatedStoreAccessCoalescesToOneScan() async throws {
+        let accountID = "coalesce-\(UUID().uuidString)"
+        let revision = CredentialRevision()
+        let endpoint = try MediaTransportEndpointIdentity(
+            transportIdentifier: "http",
+            host: "nas.local",
+            port: 8384,
+            rootPath: "/"
+        )
+        let rootLists = CountingBox()
+        let coordinator = ShareCatalogCoordinator { accountID in
+            MediaIOArbiter(
+                accountID: accountID,
+                deadline: ImmediateTimeoutDeadline(),
+                drainTimeout: .zero
+            )
+        }
+        let sessionFactory: ShareTransportSessionFactory = { role in
+            CountingListSession(
+                key: MediaTransportSessionKey(
+                    accountID: accountID,
+                    credentialRevision: revision,
+                    endpoint: endpoint,
+                    trustRevision: UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)),
+                    role: role
+                ),
+                rootLists: rootLists
+            )
+        }
+
+        // Simulate many Home/browse accesses of the catalog, as SwiftUI would.
+        for _ in 0..<8 {
+            _ = await coordinator.store(
+                accountKey: accountID,
+                displayName: "NAS",
+                credentialRevision: revision,
+                sessionFactory: sessionFactory
+            )
+            try? await Task.sleep(nanoseconds: 40_000_000) // 40ms between accesses
+        }
+        // Let any in-flight scan settle.
+        try? await Task.sleep(nanoseconds: 300_000_000)
+
+        // Exactly one real walk should have listed the root, despite 8 accesses.
+        XCTAssertEqual(rootLists.count, 1, "repeated catalog access must coalesce to one scan, not thrash")
+        await coordinator.invalidate(accountKey: accountID)
+    }
+}
+
+/// Thread-safe integer counter for asserting scan coalescing.
+private final class CountingBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = 0
+    var count: Int { lock.withLock { value } }
+    func increment() { lock.withLock { value += 1 } }
+}
+
+/// A non-blocking session whose root listing is empty (so a scan completes
+/// immediately) but counts how many times the root ("") was listed — i.e. how
+/// many real walks ran.
+private final class CountingListSession: MediaTransportSession, @unchecked Sendable {
+    let key: MediaTransportSessionKey
+    let fileSystem: any MediaTransportFileSystem
+    init(key: MediaTransportSessionKey, rootLists: CountingBox) {
+        self.key = key
+        self.fileSystem = CountingListFileSystem(rootLists: rootLists)
+    }
+    func shutdown() async {}
+}
+
+private final class CountingListFileSystem: MediaTransportFileSystem, @unchecked Sendable {
+    private let rootLists: CountingBox
+    init(rootLists: CountingBox) { self.rootLists = rootLists }
+
+    func validate() async throws {}
+    func probe() async throws -> MediaTransportProbe {
+        MediaTransportProbe(
+            capabilities: try MediaTransportCapabilities(
+                supportsList: true,
+                supportsStat: true,
+                supportsBoundedWholeFileRead: false,
+                byteRangeBehavior: .unsupported,
+                maximumBoundedWholeFileReadBytes: nil,
+                consistency: .changeDetecting
+            )
+        )
+    }
+    func list(relativePath: String) async throws -> [RemoteFileEntry] {
+        if relativePath.isEmpty { rootLists.increment() }
+        return []
+    }
+    func stat(relativePath: String) async throws -> RemoteFileEntry {
+        throw MediaTransportError.unsupportedCapability("stat")
+    }
+    func readSmallFile(relativePath: String, maximumBytes: Int) async throws -> Data {
+        throw MediaTransportError.unsupportedCapability("bounded read")
+    }
+    func openSource(for locator: NetworkFileLocator) async throws -> MediaTransportSourceLease {
+        throw MediaTransportError.unsupportedCapability("source")
+    }
 }

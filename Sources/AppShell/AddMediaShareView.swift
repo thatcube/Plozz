@@ -14,13 +14,15 @@ struct AddMediaShareView: View {
     let onBack: () -> Void
     let onSMBConfigured: (ShareDraft) -> Void
     let onWebDAVConfigured: (WebDAVShareConfiguration) -> Void
+    var onMediaShareConfigured: (MediaShareOnboardingResult) -> Void = { _ in }
 
     var body: some View {
         UnifiedAddShareView(
             isPageReady: isPageReady,
             onBack: onBack,
             onSMBConfigured: onSMBConfigured,
-            onWebDAVConfigured: onWebDAVConfigured
+            onWebDAVConfigured: onWebDAVConfigured,
+            onMediaShareConfigured: onMediaShareConfigured
         )
     }
 }

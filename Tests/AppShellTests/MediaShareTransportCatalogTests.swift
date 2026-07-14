@@ -70,11 +70,16 @@ final class MediaShareTransportCatalogTests: XCTestCase {
         let kinds = Set(MediaShareTransportCatalog.all.map(\.kind))
         XCTAssertTrue(kinds.contains(.smb))
         XCTAssertTrue(kinds.contains(.webDAV))
-        // Present (dummy-wired) so discovery/UI light up before backends land.
         XCTAssertTrue(kinds.contains(.nfs))
         XCTAssertTrue(kinds.contains(.sftp))
-        XCTAssertTrue(MediaShareTransportCatalog.descriptor(for: .smb)?.isImplemented == true)
-        XCTAssertTrue(MediaShareTransportCatalog.descriptor(for: .nfs)?.isImplemented == false)
+        XCTAssertTrue(kinds.contains(.ftp))
+        // Every shipping transport now has a real onboarding backend.
+        for descriptor in MediaShareTransportCatalog.all {
+            XCTAssertTrue(
+                descriptor.isImplemented,
+                "\(descriptor.kind) should be implemented"
+            )
+        }
     }
 
     func testPreferredKindFavoursNativeFilesystem() {

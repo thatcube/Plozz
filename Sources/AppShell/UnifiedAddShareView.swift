@@ -16,6 +16,7 @@ struct UnifiedAddShareView: View {
     let onBack: () -> Void
     let onSMBConfigured: (ShareDraft) -> Void
     let onWebDAVConfigured: (WebDAVShareConfiguration) -> Void
+    var onMediaShareConfigured: (MediaShareOnboardingResult) -> Void = { _ in }
 
     @State private var viewModel = UnifiedAddShareModel()
     @FocusState private var focus: Field?
@@ -56,6 +57,7 @@ struct UnifiedAddShareView: View {
         .onAppear {
             viewModel.onSMBConfigured = onSMBConfigured
             viewModel.onWebDAVConfigured = onWebDAVConfigured
+            viewModel.onMediaShareConfigured = onMediaShareConfigured
             if isPageReady { viewModel.startScan() }
             focus = .back
         }
@@ -311,14 +313,20 @@ struct UnifiedAddShareView: View {
     // MARK: - Step 3: verify trust
 
     private func verifyStep(_ sha256: Data) -> some View {
-        Group {
-            headerRow(title: "Verify Certificate", back: { viewModel.rejectTrust() }) { EmptyView() }
-            Panel(title: "Certificate SHA-256") {
+        let isHostKey = viewModel.selectedTransport == .sftp
+        return Group {
+            headerRow(
+                title: isHostKey ? "Verify Host Key" : "Verify Certificate",
+                back: { viewModel.rejectTrust() }
+            ) { EmptyView() }
+            Panel(title: isHostKey ? "SSH Host Key SHA-256" : "Certificate SHA-256") {
                 Text(formatFingerprint(sha256))
                     .font(.system(.body, design: .monospaced))
                     .fixedSize(horizontal: false, vertical: true)
             }
-            Text("Only approve if this matches your server. Approving pins this exact certificate; a change requires re-approval.")
+            Text(isHostKey
+                ? "Only approve if this matches your server’s SSH host key. Approving pins this exact key; a change requires re-approval."
+                : "Only approve if this matches your server. Approving pins this exact certificate; a change requires re-approval.")
                 .font(.footnote).foregroundStyle(.secondary)
             HStack(spacing: 20) {
                 Button("Approve & Continue") { viewModel.approveTrust() }
@@ -373,6 +381,38 @@ struct UnifiedAddShareView: View {
 
     @ViewBuilder
     private var loadedLocations: some View {
+        if viewModel.isPathEntryTransport {
+            pathEntryConfirm
+        } else {
+            browsableLocations
+        }
+    }
+
+    /// The confirm-and-name panel for NFS/SFTP/FTP: the typed root path is shown
+    /// for review (no live folder list), then named and saved.
+    @ViewBuilder
+    private var pathEntryConfirm: some View {
+        Panel(title: "Folder") {
+            HStack(spacing: 16) {
+                Image(systemName: "folder.fill").foregroundStyle(.secondary)
+                Text(viewModel.confirmedPath).font(.headline)
+                    .lineLimit(1).truncationMode(.middle)
+            }
+        }
+        Text("Plozz will scan this folder for media. You can type a deeper path in the address to narrow it.")
+            .font(.footnote).foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+        Panel(title: "Display name (optional)") {
+            TextField("Display name", text: $viewModel.displayName)
+                .autocorrectionDisabled().focused($focus, equals: .displayName)
+        }
+        Button("Add Share") { viewModel.chooseFilesystemRoot() }
+            .buttonStyle(.borderedProminent)
+            .focused($focus, equals: .useFolder)
+    }
+
+    @ViewBuilder
+    private var browsableLocations: some View {
         let isWebDAV = viewModel.selectedTransport == .webDAV
         if isWebDAV && viewModel.currentPath != "/" {
             Button {

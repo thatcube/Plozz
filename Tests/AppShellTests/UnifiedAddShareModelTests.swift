@@ -1,6 +1,8 @@
 import XCTest
+import Foundation
 import CoreModels
 import ProviderShare
+import MediaTransportSFTP
 @testable import AppShell
 
 @MainActor
@@ -61,6 +63,168 @@ final class UnifiedAddShareModelTests: XCTestCase {
             timeout: TimeInterval
         ) async -> Bool {
             target.probe == .webDAVHTTP
+        }
+    }
+
+    // MARK: - NFS / SFTP / FTP unified onboarding
+
+    func testNFSConnectConfirmsPathAndSaves() {
+        let model = UnifiedAddShareModel()
+        var result: MediaShareOnboardingResult?
+        model.onMediaShareConfigured = { result = $0 }
+
+        model.openManualConnect()
+        model.applyTransport(.nfs)
+        model.address = "192.168.1.5/export/media"
+        model.connect()
+
+        XCTAssertEqual(model.step, .pickLocation)
+        XCTAssertEqual(model.confirmedPath, "/export/media")
+
+        model.displayName = "Movies"
+        model.chooseFilesystemRoot()
+
+        guard case let .nfs(config) = result else {
+            return XCTFail("expected NFS result, got \(String(describing: result))")
+        }
+        XCTAssertEqual(config.host, "192.168.1.5")
+        XCTAssertEqual(config.exportPath, "/export/media")
+        XCTAssertEqual(config.displayName, "Movies")
+    }
+
+    func testFTPAnonymousBuildsPlainFTPURL() {
+        let model = UnifiedAddShareModel()
+        var result: MediaShareOnboardingResult?
+        model.onMediaShareConfigured = { result = $0 }
+
+        model.openManualConnect()
+        model.applyTransport(.ftp)
+        model.address = "ftp://192.168.1.5/pub"
+        model.connect()
+
+        XCTAssertEqual(model.step, .pickLocation)
+        model.chooseFilesystemRoot()
+
+        guard case let .ftp(config) = result else {
+            return XCTFail("expected FTP result, got \(String(describing: result))")
+        }
+        XCTAssertEqual(config.baseURL.absoluteString, "ftp://192.168.1.5/pub")
+        XCTAssertEqual(config.auth, .anonymous)
+        XCTAssertNil(config.trustPin)
+    }
+
+    func testFTPSPort990BuildsImplicitTLSURLWithPassword() {
+        let model = UnifiedAddShareModel()
+        var result: MediaShareOnboardingResult?
+        model.onMediaShareConfigured = { result = $0 }
+
+        model.openManualConnect()
+        model.applyTransport(.ftp)
+        model.address = "192.168.1.5"
+        model.portText = "990"
+        model.username = "bob"
+        model.password = "secret"
+        model.connect()
+        model.chooseFilesystemRoot()
+
+        guard case let .ftp(config) = result else {
+            return XCTFail("expected FTP result, got \(String(describing: result))")
+        }
+        XCTAssertEqual(config.baseURL.scheme, "ftps")
+        XCTAssertEqual(config.auth, .password(username: "bob", password: "secret"))
+    }
+
+    func testSFTPCapturesHostKeyThenVerifiesThenSaves() async {
+        let pin = Data(repeating: 0x11, count: 32)
+        let model = UnifiedAddShareModel(sftpProbe: StubSFTPProbe(result: .success(hostKeySHA256: pin)))
+        var result: MediaShareOnboardingResult?
+        model.onMediaShareConfigured = { result = $0 }
+
+        model.openManualConnect()
+        model.applyTransport(.sftp)
+        model.address = "192.168.1.5/media"
+        model.username = "brandon"
+        model.password = "hunter2"
+        model.connect()
+
+        for _ in 0..<50 {
+            if case .verifyTrust = model.step { break }
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+        guard case .verifyTrust(let sha256) = model.step else {
+            return XCTFail("expected verifyTrust, got \(model.step)")
+        }
+        XCTAssertEqual(sha256, pin)
+
+        model.approveTrust()
+        XCTAssertEqual(model.step, .pickLocation)
+        XCTAssertEqual(model.confirmedPath, "/media")
+
+        model.chooseFilesystemRoot()
+        guard case let .sftp(config) = result else {
+            return XCTFail("expected SFTP result, got \(String(describing: result))")
+        }
+        XCTAssertEqual(config.host, "192.168.1.5")
+        XCTAssertEqual(config.path, "/media")
+        XCTAssertEqual(config.username, "brandon")
+        XCTAssertEqual(config.password, "hunter2")
+        XCTAssertEqual(config.hostKeyPin.bytes, pin)
+    }
+
+    func testSFTPAuthFailureSurfacesErrorAndStaysOnConnect() async {
+        let model = UnifiedAddShareModel(sftpProbe: StubSFTPProbe(result: .authenticationFailed))
+        var result: MediaShareOnboardingResult?
+        model.onMediaShareConfigured = { result = $0 }
+
+        model.openManualConnect()
+        model.applyTransport(.sftp)
+        model.address = "192.168.1.5"
+        model.username = "brandon"
+        model.password = "wrong"
+        model.connect()
+
+        for _ in 0..<50 {
+            if model.connectError != nil { break }
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+        XCTAssertNotNil(model.connectError)
+        XCTAssertEqual(model.step, .connect)
+        XCTAssertNil(result)
+    }
+
+    func testRejectingSFTPHostKeyDiscardsPin() async {
+        let pin = Data(repeating: 0x22, count: 32)
+        let model = UnifiedAddShareModel(sftpProbe: StubSFTPProbe(result: .success(hostKeySHA256: pin)))
+        var result: MediaShareOnboardingResult?
+        model.onMediaShareConfigured = { result = $0 }
+
+        model.openManualConnect()
+        model.applyTransport(.sftp)
+        model.address = "192.168.1.5/media"
+        model.username = "brandon"
+        model.password = "hunter2"
+        model.connect()
+
+        for _ in 0..<50 {
+            if case .verifyTrust = model.step { break }
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+        model.rejectTrust()
+        XCTAssertEqual(model.step, .connect)
+        // With the pin discarded, a save must not fabricate an SFTP config.
+        model.chooseFilesystemRoot()
+        XCTAssertNil(result)
+    }
+
+    private struct StubSFTPProbe: SFTPOnboardingProbing {
+        let result: SFTPOnboardingProbeResult
+        func captureHostKey(
+            host: String,
+            port: Int,
+            username: String,
+            password: String
+        ) async -> SFTPOnboardingProbeResult {
+            result
         }
     }
 }

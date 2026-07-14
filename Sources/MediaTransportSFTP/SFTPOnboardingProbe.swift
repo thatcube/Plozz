@@ -1,0 +1,96 @@
+import Foundation
+import MediaTransportCore
+
+/// The outcome of a first-connect SFTP onboarding probe.
+public enum SFTPOnboardingProbeResult: Sendable, Equatable {
+    /// The SSH handshake completed, the credentials authenticated, and the
+    /// server's host key was captured. `hostKeySHA256` is the 32-byte SHA-256 of
+    /// the presented host key, to surface for trust-on-first-use approval and to
+    /// persist as the account's mandatory host-key pin.
+    case success(hostKeySHA256: Data)
+    /// The server was unreachable or the SSH handshake stalled/failed.
+    case unreachable
+    /// The credentials were rejected (auth failure).
+    case authenticationFailed
+    /// The server spoke SSH but something else went wrong (subsystem, protocol).
+    case failed(String)
+    /// The probe was cancelled.
+    case cancelled
+}
+
+/// A testable seam for the SFTP add-share onboarding probe. The real
+/// implementation drives a one-shot `.captureTrustOnFirstUse` SSH connect; tests
+/// substitute a stub so the AppShell onboarding state machine runs offline.
+///
+/// Capturing the host key and authenticating happen in the SAME connect: SSH
+/// presents its host key during the handshake (before auth), and a
+/// `.captureTrustOnFirstUse` connect accepts it and records its fingerprint, then
+/// proceeds to authenticate. A `.success` therefore proves BOTH that the entered
+/// credentials work AND yields the key to pin — exactly what first-connect needs.
+/// This is the standard SSH trust-on-first-use tradeoff: the first connection
+/// trusts the key it's shown, and the user confirms the fingerprint afterward.
+public protocol SFTPOnboardingProbing: Sendable {
+    func captureHostKey(
+        host: String,
+        port: Int,
+        username: String,
+        password: String
+    ) async -> SFTPOnboardingProbeResult
+}
+
+/// The production ``SFTPOnboardingProbing``: a one-shot `.captureTrustOnFirstUse`
+/// connect over `NIOSSHSFTPBackend`, returning the captured host-key SHA-256. The
+/// connection is torn down immediately — onboarding only needs the key + a proof
+/// the credentials authenticate; playback opens its own pinned session later.
+public struct SFTPOnboardingProbe: SFTPOnboardingProbing {
+    public init() {}
+
+    public func captureHostKey(
+        host: String,
+        port: Int,
+        username: String,
+        password: String
+    ) async -> SFTPOnboardingProbeResult {
+        let backend = NIOSSHSFTPBackend()
+        defer { Task { await backend.shutdown() } }
+        do {
+            try await backend.connect(
+                host: host,
+                port: port,
+                credential: .password(username: username, password: password),
+                hostKeyPolicy: .captureTrustOnFirstUse
+            )
+        } catch {
+            return Self.classify(error)
+        }
+        guard let fingerprint = backend.capturedHostKeyFingerprint, fingerprint.count == 32 else {
+            // A successful connect under `.captureTrustOnFirstUse` must have
+            // recorded a 32-byte SHA-256; its absence is a hard failure rather
+            // than a silent fall-through to an unpinned save.
+            return .failed("Couldn’t read this server’s host key.")
+        }
+        return .success(hostKeySHA256: Data(fingerprint))
+    }
+
+    private static func classify(_ error: Error) -> SFTPOnboardingProbeResult {
+        guard let transportError = error as? MediaTransportError else {
+            return .failed("Couldn’t connect to this server.")
+        }
+        switch transportError {
+        case .authentication, .permissionDenied:
+            return .authenticationFailed
+        case .cancelled:
+            return .cancelled
+        case .transport, .timeout, .resourceBusy:
+            return .unreachable
+        case .trust(let reason),
+             .protocolViolation(let reason),
+             .invalidInput(let reason),
+             .unsupportedRange(let reason),
+             .sourceChanged(let reason):
+            return .failed(reason)
+        case .unsupportedCapability(let reason):
+            return .failed(reason)
+        }
+    }
+}

@@ -87,19 +87,16 @@ struct TransportOnboardingDescriptor: Sendable {
     let listsSharesNotFolders: Bool
 
     /// Whether the transport has a real onboarding backend yet. `false` transports
-    /// (NFS/SFTP today) appear in discovery and the form but are dummy-wired: the
-    /// flow surfaces a "coming soon" notice instead of doing live I/O, until the
-    /// owning transport branch merges here.
+    /// appear in discovery and the form but are dummy-wired: the flow surfaces a
+    /// "coming soon" notice instead of doing live I/O. All shipping transports
+    /// (SMB/WebDAV/NFS/SFTP/FTP) are `true`; the flag remains for staging any
+    /// future transport that lands discovery ahead of its backend.
     let isImplemented: Bool
 }
 
 /// The single registry the unified onboarding flow consults. Composed here (the
 /// same layer that builds `MediaShareRouteDetector`) so detection, discovery,
 /// auth, and trust all stay in lockstep and a new transport is registered once.
-///
-/// FTP is intentionally absent: `MediaShareTransportKind` has no `.ftp` case yet,
-/// and whether FTP is on the roadmap is an open question. Adding it later is a
-/// descriptor entry + an enum case + a vault rule — no new screens.
 enum MediaShareTransportCatalog {
     static let all: [TransportOnboardingDescriptor] = [
         TransportOnboardingDescriptor(
@@ -153,7 +150,7 @@ enum MediaShareTransportCatalog {
             plaintextCredentialRisk: .never,
             trust: .none,
             listsSharesNotFolders: false,
-            isImplemented: false
+            isImplemented: true
         ),
         TransportOnboardingDescriptor(
             kind: .sftp,
@@ -167,7 +164,29 @@ enum MediaShareTransportCatalog {
             plaintextCredentialRisk: .never,
             trust: .sshHostKeyRequired,
             listsSharesNotFolders: false,
-            isImplemented: false
+            isImplemented: true
+        ),
+        TransportOnboardingDescriptor(
+            kind: .ftp,
+            bonjourServiceTypes: ["_ftp._tcp"],
+            // FTP control port; a `220` service-ready banner confirms it. Implicit
+            // FTPS (990) is reachable via manual entry but not swept, since its
+            // banner is wrapped in TLS.
+            sweepTargets: [
+                TransportSweepTarget(port: 21, probe: .ftpBanner),
+            ],
+            defaultPort: 21,
+            authModes: [.usernamePassword],
+            // Blank username + password = anonymous FTP, a normal public-share case.
+            allowsBlankGuest: true,
+            // FTP sends credentials in cleartext (plain FTP); warn whenever one is
+            // supplied. Implicit FTPS (the `ftps` scheme) encrypts, but the warning
+            // is conservative and harmless there.
+            plaintextCredentialRisk: .always,
+            // A leaf pin is only meaningful over implicit FTPS; plain FTP skips it.
+            trust: .tlsLeafOnUntrusted,
+            listsSharesNotFolders: false,
+            isImplemented: true
         ),
     ]
 
@@ -179,7 +198,7 @@ enum MediaShareTransportCatalog {
     /// filesystem protocols first (better random-access seeking for large video,
     /// most common), then HTTP/SSH transports. Drives the default protocol pick
     /// when a device exposes several doors — a default, not an editorial badge.
-    static let preferenceOrder: [MediaShareTransportKind] = [.smb, .nfs, .webDAV, .sftp]
+    static let preferenceOrder: [MediaShareTransportKind] = [.smb, .nfs, .webDAV, .sftp, .ftp]
 
     /// The best default door among a set of detected transports.
     static func preferredKind(among kinds: [MediaShareTransportKind]) -> MediaShareTransportKind? {

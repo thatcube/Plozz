@@ -5,6 +5,50 @@ import CoreModels
 import FeatureAuth
 import ProviderShare
 import MediaTransportHTTP
+import MediaTransportSFTP
+
+/// The finished configuration for an NFS export, handed back to
+/// `AppState.didConfigureNFSShare`. NFS is credential-free; the export path is the
+/// share root.
+struct NFSShareConfiguration: Equatable {
+    let host: String
+    let port: Int?
+    let exportPath: String
+    let displayName: String
+}
+
+/// The finished configuration for an SFTP share, handed back to
+/// `AppState.didConfigureSFTPShare`. Carries the host key captured (and pinned)
+/// during onboarding — the vault mandates it.
+struct SFTPShareConfiguration: Equatable {
+    let host: String
+    let port: Int?
+    let path: String
+    let username: String
+    let password: String
+    let hostKeyPin: SHA256Fingerprint
+    let displayName: String
+}
+
+/// The finished configuration for an FTP/FTPS share, handed back to
+/// `AppState.didConfigureFTPShare`. `baseURL` carries the real scheme (`ftp` /
+/// `ftps`).
+struct FTPShareConfiguration: Equatable {
+    let baseURL: URL
+    let auth: AppState.FTPShareAuth
+    let trustPin: SHA256Fingerprint?
+    let displayName: String
+}
+
+/// A completed add-a-share result for the credential-envelope transports the
+/// unified flow drives through one callback (NFS/SFTP/FTP), keeping SMB and
+/// WebDAV on their existing dedicated callbacks.
+enum MediaShareOnboardingResult: Equatable {
+    case nfs(NFSShareConfiguration)
+    case sftp(SFTPShareConfiguration)
+    case ftp(FTPShareConfiguration)
+}
+
 
 /// Drives the ONE unified "Add a Media Share" flow for every transport, as
 /// approved in `docs/discovery-ux-proposal.md`:
@@ -100,11 +144,15 @@ final class UnifiedAddShareModel {
     // Outputs
     var onSMBConfigured: (ShareDraft) -> Void = { _ in }
     var onWebDAVConfigured: (WebDAVShareConfiguration) -> Void = { _ in }
+    /// The credential-envelope transports (NFS/SFTP/FTP) report through one
+    /// callback; SMB/WebDAV keep their dedicated ones above.
+    var onMediaShareConfigured: (MediaShareOnboardingResult) -> Void = { _ in }
 
     private let discovery: BonjourServiceDiscovery
     private let sweeper = MediaSharePortSweeper()
     private let serviceProbe: any MediaShareServiceProbing
     private let webDAVProbe: any WebDAVOnboardingProbing
+    private let sftpProbe: any SFTPOnboardingProbing
     private var scanTask: Task<Void, Never>?
     private var workTask: Task<Void, Never>?
     private var sweptHosts = Set<String>()
@@ -112,12 +160,23 @@ final class UnifiedAddShareModel {
     /// specific configured port like WebDAV :8384 is never lost to de-duplication.
     private var fullDoorsByHost: [String: [DiscoveredMediaShareBox.Door]] = [:]
 
+    /// The confirmed root path for a path-entry transport (NFS/SFTP/FTP), shown
+    /// at the pick-location step for review before saving.
+    private(set) var confirmedPath = "/"
+    /// The SFTP host key captured during the connect probe, awaiting the user's
+    /// approval on the verify step.
+    private var pendingSFTPHostKey: Data?
+    /// The SFTP host key the user approved, pinned into the saved account.
+    private var approvedHostKeyPin: Data?
+
     init(
         webDAVProbe: any WebDAVOnboardingProbing = WebDAVOnboardingProbe(),
-        serviceProbe: any MediaShareServiceProbing = ProtocolServiceProbe()
+        serviceProbe: any MediaShareServiceProbing = ProtocolServiceProbe(),
+        sftpProbe: any SFTPOnboardingProbing = SFTPOnboardingProbe()
     ) {
         self.webDAVProbe = webDAVProbe
         self.serviceProbe = serviceProbe
+        self.sftpProbe = sftpProbe
         self.discovery = BonjourServiceDiscovery(mapping: Self.mapping)
     }
 
@@ -259,6 +318,19 @@ final class UnifiedAddShareModel {
         webDAVScheme = nil
         webDAVSchemePort = nil
         trust = .system; approvedPin = nil
+        confirmedPath = "/"
+        pendingSFTPHostKey = nil
+        approvedHostKeyPin = nil
+    }
+
+    /// Whether the selected transport confirms a single typed root path at the
+    /// pick-location step (NFS/SFTP/FTP) rather than browsing a live list
+    /// (SMB shares / WebDAV folders).
+    var isPathEntryTransport: Bool {
+        switch selectedTransport {
+        case .nfs, .sftp, .ftp: return true
+        case .smb, .webDAV: return false
+        }
     }
 
     /// Set the chosen protocol and prefill the port from what we DETECTED for that
@@ -372,8 +444,10 @@ final class UnifiedAddShareModel {
             enterSMBLocation()
         case .webDAV:
             beginWebDAV(rawAddress: address, host: host, port: port)
-        default:
-            step = .comingSoon(kind)
+        case .nfs, .ftp:
+            enterFilesystemLocation()
+        case .sftp:
+            beginSFTP(host: host, port: port ?? descriptor.defaultPort)
         }
     }
 
@@ -419,6 +493,128 @@ final class UnifiedAddShareModel {
     private func enterSMBLocation() {
         step = .pickLocation
         loadSMBShares()
+    }
+
+    // MARK: - NFS / SFTP / FTP (path-entry transports)
+
+    /// Extracts the literal, decoded root path a user typed in the address
+    /// (`host/movies`, `nfs://host/export`, `sftp://host:22/media`). Unlike the
+    /// WebDAV path helper this keeps the path literal (filesystem transports
+    /// address by decoded names), defaulting to `/` when none is given.
+    private func filesystemPath(from raw: String) -> String {
+        var s = raw.trimmingCharacters(in: .whitespaces)
+        if let range = s.range(of: "://") { s = String(s[range.upperBound...]) }
+        guard let slash = s.firstIndex(of: "/") else { return "/" }
+        let path = String(s[slash...])
+        return path.isEmpty ? "/" : path
+    }
+
+    /// NFS/FTP have no pre-connect handshake in onboarding: confirm the typed root
+    /// so the user can name it and save. (SFTP arrives here only after its host
+    /// key is captured + approved.)
+    private func enterFilesystemLocation() {
+        confirmedPath = filesystemPath(from: address)
+        locationLoad = .loaded
+        step = .pickLocation
+    }
+
+    /// SFTP first-connect: capture the server's host key (and confirm the
+    /// credentials authenticate) in one `.captureTrustOnFirstUse` connect, then
+    /// route to the verify step for explicit approval before pinning + saving.
+    private func beginSFTP(host: String, port: Int) {
+        workTask?.cancel()
+        detecting = true
+        let user = username.trimmingCharacters(in: .whitespaces)
+        let pass = password
+        workTask = Task { [sftpProbe] in
+            defer { self.detecting = false }
+            let result = await sftpProbe.captureHostKey(
+                host: host,
+                port: port,
+                username: user,
+                password: pass
+            )
+            if Task.isCancelled { return }
+            switch result {
+            case .success(let sha256):
+                self.pendingSFTPHostKey = sha256
+                self.step = .verifyTrust(sha256: sha256)
+            case .authenticationFailed:
+                self.connectError = "That username or password was rejected."
+            case .unreachable:
+                self.connectError = "Couldn’t reach that server. Check the address and network."
+            case .failed(let message):
+                self.connectError = message
+            case .cancelled:
+                break
+            }
+        }
+    }
+
+    private func makeFTPURL(scheme: String, path: String) -> URL? {
+        var comps = URLComponents()
+        comps.scheme = scheme
+        comps.host = resolvedHost.contains(":") ? "[\(resolvedHost)]" : resolvedHost
+        let defaultPort = scheme == "ftps" ? 990 : 21
+        if let port = resolvedPort, port != defaultPort { comps.port = port }
+        comps.path = path == "/" ? "" : path
+        return comps.url
+    }
+
+    private func ftpScheme(from raw: String, port: Int?) -> String {
+        let lower = raw.trimmingCharacters(in: .whitespaces).lowercased()
+        if lower.hasPrefix("ftps://") { return "ftps" }
+        if lower.hasPrefix("ftp://") { return "ftp" }
+        // Implicit-FTPS default control port; otherwise plain FTP.
+        return port == 990 ? "ftps" : "ftp"
+    }
+
+    /// Confirms the reviewed root and hands the completed configuration back for
+    /// persistence. NFS/FTP build here; SFTP reuses the captured + approved pin.
+    func chooseFilesystemRoot() {
+        let name = displayName.trimmingCharacters(in: .whitespaces)
+        let path = confirmedPath
+        switch selectedTransport {
+        case .nfs:
+            onMediaShareConfigured(.nfs(NFSShareConfiguration(
+                host: resolvedHost,
+                port: resolvedPort,
+                exportPath: path,
+                displayName: name
+            )))
+        case .sftp:
+            let user = username.trimmingCharacters(in: .whitespaces)
+            guard !user.isEmpty,
+                  let pinData = approvedHostKeyPin,
+                  let pin = try? SHA256Fingerprint(bytes: pinData) else { return }
+            onMediaShareConfigured(.sftp(SFTPShareConfiguration(
+                host: resolvedHost,
+                port: resolvedPort,
+                path: path,
+                username: user,
+                password: password,
+                hostKeyPin: pin,
+                displayName: name
+            )))
+        case .ftp:
+            let scheme = ftpScheme(from: address, port: resolvedPort)
+            guard let url = makeFTPURL(scheme: scheme, path: path) else {
+                connectError = "That doesn’t look like a valid address."
+                return
+            }
+            let user = username.trimmingCharacters(in: .whitespaces)
+            let auth: AppState.FTPShareAuth = (user.isEmpty && password.isEmpty)
+                ? .anonymous
+                : .password(username: user, password: password)
+            onMediaShareConfigured(.ftp(FTPShareConfiguration(
+                baseURL: url,
+                auth: auth,
+                trustPin: nil,
+                displayName: name
+            )))
+        case .smb, .webDAV:
+            break
+        }
     }
 
     func loadSMBShares() {
@@ -595,7 +791,18 @@ final class UnifiedAddShareModel {
     private var pendingWebDAVURL: URL?
 
     func approveTrust() {
-        guard case .verifyTrust(let sha256) = step, let url = pendingWebDAVURL else { return }
+        guard case .verifyTrust(let sha256) = step else { return }
+        // SFTP: the fingerprint is an SSH host key already captured by the connect
+        // probe. Approving pins it and proceeds to confirm the share root; no
+        // second network round-trip (the credentials were already validated).
+        if let hostKey = pendingSFTPHostKey {
+            pendingSFTPHostKey = nil
+            approvedHostKeyPin = hostKey
+            enterFilesystemLocation()
+            return
+        }
+        // WebDAV: the fingerprint is a TLS leaf cert; pin it and browse.
+        guard let url = pendingWebDAVURL else { return }
         trust = .pinnedLeaf(sha256: sha256)
         approvedPin = sha256
         workTask?.cancel()
@@ -607,6 +814,8 @@ final class UnifiedAddShareModel {
     func rejectTrust() {
         trust = .system; approvedPin = nil
         pendingWebDAVURL = nil
+        pendingSFTPHostKey = nil
+        approvedHostKeyPin = nil
         step = .connect
     }
 

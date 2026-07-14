@@ -68,10 +68,12 @@ struct ServersAndLibrariesDetailView: View {
                     .padding(.top, 4)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(group.serverName).font(.headline)
-                    Text(summary(for: group))
-                        .font(.subheadline)
-                        .settingsRowSecondary()
-                        .lineLimit(1)
+                    if let summary = summary(for: group) {
+                        Text(summary)
+                            .font(.subheadline)
+                            .settingsRowSecondary()
+                            .lineLimit(1)
+                    }
                 }
                 Spacer()
                 Image(systemName: "chevron.right")
@@ -87,16 +89,18 @@ struct ServersAndLibrariesDetailView: View {
     }
 
     /// Global sign-in summary — who's signed in to this server, household-wide.
-    private func summary(for group: ServerAccountGroup) -> String {
+    /// `nil` when there's nothing worth a second line (a credential-free NFS
+    /// connection), so the row shows just the server name.
+    private func summary(for group: ServerAccountGroup) -> String? {
         let accountCount = group.accounts.count
         if accountCount == 0 {
             return "No one signed in"
         } else if accountCount == 1, let only = group.accounts.first {
             let userName = only.userName.trimmingCharacters(in: .whitespaces)
             if userName.isEmpty {
-                // NFS is credential-free (AUTH_UNIX, no login); an empty user on
-                // any other share means an anonymous/guest connection.
-                return group.transportKind == .nfs ? "No sign-in needed" : "Guest access"
+                // NFS is credential-free (AUTH_UNIX, no login) — no subtitle. An
+                // empty user on any other share is an anonymous/guest connection.
+                return group.transportKind == .nfs ? nil : "Guest access"
             }
             return "Signed in as \(userName)"
         } else {

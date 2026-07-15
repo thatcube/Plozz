@@ -112,6 +112,39 @@ final class EndpointRequestTests: XCTestCase {
     }
 }
 
+final class HTTPDecodeDiagnosticsTests: XCTestCase {
+    private struct Envelope: Decodable {
+        struct Item: Decodable {
+            let id: String
+        }
+        let items: [Item]
+    }
+
+    func testFailureDescriptionIncludesExactCodingPathWithoutPayloadValue() {
+        let data = Data(#"{"items":[{"id":42}]}"#.utf8)
+
+        XCTAssertThrowsError(try JSONDecoder().decode(Envelope.self, from: data)) { error in
+            let description = HTTPDecodeDiagnostics.failureDescription(error)
+            XCTAssertEqual(description, "typeMismatch(String) at items.[0].id")
+            XCTAssertFalse(description.contains("42"))
+        }
+    }
+
+    func testPayloadShapeReportsOnlyObjectKeys() {
+        let data = Data(#"{"AccessToken":"SECRET","MediaSources":[]}"#.utf8)
+
+        let shape = HTTPDecodeDiagnostics.payloadShape(data)
+
+        XCTAssertEqual(shape, "object(keys:AccessToken,MediaSources)")
+        XCTAssertFalse(shape.contains("SECRET"))
+    }
+
+    func testPayloadShapeDistinguishesNonJSONAndEmptyResponses() {
+        XCTAssertEqual(HTTPDecodeDiagnostics.payloadShape(Data()), "empty")
+        XCTAssertEqual(HTTPDecodeDiagnostics.payloadShape(Data("<html>".utf8)), "nonJSON")
+    }
+}
+
 final class URLErrorMappingTests: XCTestCase {
     func testTimeoutMapsToServerUnreachable() {
         XCTAssertEqual(URLSessionHTTPClient.map(URLError(.timedOut)), .serverUnreachable)

@@ -43,6 +43,9 @@ public struct PlozzLogger: Sendable {
 
 public enum PlozzLog {
     static let subsystem = "com.plozz.app"
+    private static let mirrorsStandardOut =
+        ProcessInfo.processInfo.environment["PLOZZ_LOG_STDOUT"] == "1"
+    private static let standardOutLock = NSLock()
 
     public static let networking = PlozzLogger(category: "networking")
     public static let auth = PlozzLogger(category: "auth")
@@ -149,6 +152,12 @@ public enum PlozzLog {
 
     static func record(_ level: Level, category: String, message: String) {
         ring.append(LogEntry(id: UUID(), date: Date(), level: level, category: category, message: message))
+        guard mirrorsStandardOut else { return }
+        standardOutLock.lock()
+        defer { standardOutLock.unlock() }
+        try? FileHandle.standardOutput.write(
+            contentsOf: Data(("PLZLOG [\(level.rawValue)] \(category): \(message)\n").utf8)
+        )
     }
 
     /// The most recent captured log entries, oldest→newest, capped to `limit`.

@@ -35,13 +35,59 @@ public extension HTTPClient {
         baseURL: URL,
         decoder: JSONDecoder = .plozz
     ) async throws -> T {
-        let (data, _) = try await send(endpoint, baseURL: baseURL)
+        let (data, response) = try await send(endpoint, baseURL: baseURL)
         do {
             return try decoder.decode(T.self, from: data)
         } catch {
-            PlozzLog.networking.error("Decoding \(String(describing: T.self)) failed")
+            let contentType = response.value(forHTTPHeaderField: "Content-Type") ?? "<none>"
+            PlozzLog.networking.error(
+                "Decode failed method=\(endpoint.method.rawValue) path=\(endpoint.path) "
+                    + "type=\(String(describing: T.self)) status=\(response.statusCode) "
+                    + "bytes=\(data.count) contentType=\(contentType) "
+                    + "payload=\(HTTPDecodeDiagnostics.payloadShape(data)) "
+                    + "error=\(HTTPDecodeDiagnostics.failureDescription(error))"
+            )
             throw AppError.decoding
         }
+    }
+}
+
+enum HTTPDecodeDiagnostics {
+    static func failureDescription(_ error: Error) -> String {
+        switch error {
+        case let DecodingError.keyNotFound(key, context):
+            return "keyNotFound(\(key.stringValue)) at \(codingPath(context.codingPath))"
+        case let DecodingError.typeMismatch(type, context):
+            return "typeMismatch(\(String(describing: type))) at \(codingPath(context.codingPath))"
+        case let DecodingError.valueNotFound(type, context):
+            return "valueNotFound(\(String(describing: type))) at \(codingPath(context.codingPath))"
+        case let DecodingError.dataCorrupted(context):
+            return "dataCorrupted at \(codingPath(context.codingPath))"
+        default:
+            return String(describing: type(of: error))
+        }
+    }
+
+    static func payloadShape(_ data: Data) -> String {
+        guard !data.isEmpty else { return "empty" }
+        guard let value = try? JSONSerialization.jsonObject(with: data) else {
+            return "nonJSON"
+        }
+        if let object = value as? [String: Any] {
+            return "object(keys:\(object.keys.sorted().joined(separator: ",")))"
+        }
+        if let array = value as? [Any] {
+            return "array(count:\(array.count))"
+        }
+        return String(describing: type(of: value))
+    }
+
+    private static func codingPath(_ path: [CodingKey]) -> String {
+        guard !path.isEmpty else { return "<root>" }
+        return path.map { key in
+            if let index = key.intValue { return "[\(index)]" }
+            return key.stringValue
+        }.joined(separator: ".")
     }
 }
 
@@ -95,7 +141,10 @@ public struct URLSessionHTTPClient: HTTPClient {
             throw AppError.invalidResponse
         }
 
-        PlozzLog.networking.debug("← \(http.statusCode)")
+        PlozzLog.networking.debug(
+            "← \(http.statusCode) \(endpoint.method.rawValue) "
+                + "\(PlozzLog.redact(url: request.url ?? baseURL)) bytes=\(data.count)"
+        )
         return (data, http)
     }
 

@@ -107,7 +107,7 @@ struct BaseItemDto: Decodable {
     let People: [BaseItemPersonDto]?
     /// Production studios (e.g. `MAPPA`, `Wit Studio`). Present only when
     /// `Studios` is requested in `Fields`.
-    let Studios: [NameGuidPairDto]?
+    let Studios: [NamedReferenceDto]?
     /// Free-form tags the server/metadata provider attached (e.g. `Isekai`,
     /// `Shounen`). Present only when `Tags` is requested in `Fields`.
     let Tags: [String]?
@@ -164,6 +164,14 @@ struct MediaUrlDto: Decodable {
 struct NameGuidPairDto: Decodable {
     let Name: String?
     let Id: String?
+}
+
+/// A named reference whose identifier is intentionally ignored. Jellyfin emits
+/// studio ids as GUID strings, while Emby defines `Studios` as `NameLongIdPair`
+/// with integer ids. Plozz only displays the studio name, so decoding just that
+/// shared field preserves both schemas without weakening artist-id typing.
+struct NamedReferenceDto: Decodable {
+    let Name: String?
 }
 
 /// One cast/crew member from `BaseItemDto.People`. `Type` is the role kind

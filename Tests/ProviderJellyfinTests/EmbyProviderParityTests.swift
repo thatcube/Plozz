@@ -56,7 +56,8 @@ final class EmbyProviderParityTests: XCTestCase {
     func testEmbyPlaybackUsesBIFTrickplayAndEmbyAuthenticatedResources() async throws {
         let stub = StubHTTPClient()
         stub.stub(pathSuffix: "/Users/u1/Items/movie1", json: """
-        {"Id":"movie1","Name":"Movie","Type":"Movie","RunTimeTicks":36000000000}
+        {"Id":"movie1","Name":"Movie","Type":"Movie","RunTimeTicks":36000000000,
+         "Studios":[{"Name":"Emby Studio","Id":1234}]}
         """)
         stub.stub(pathSuffix: "/Items/movie1/PlaybackInfo", json: """
         {"MediaSources":[{"Id":"src1","Container":"mp4","SupportsDirectPlay":true}],
@@ -71,6 +72,7 @@ final class EmbyProviderParityTests: XCTestCase {
         )
 
         XCTAssertEqual(request.sourceProvider, .emby)
+        XCTAssertEqual(request.item.studios, ["Emby Studio"])
         guard case .some(.authenticatedHTTP(let locator)) = request.scrubPreview?.plexBIFResource else {
             return XCTFail("expected authenticated Emby BIF resource")
         }

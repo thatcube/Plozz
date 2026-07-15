@@ -238,7 +238,7 @@ public final class AppState {
                 URLQueryItem(name: $0.name, value: $0.value)
             }
             switch locator.provider {
-            case .jellyfin:
+            case .jellyfin, .emby:
                 queryItems.append(URLQueryItem(name: "api_key", value: context.token))
                 if let playSessionID = locator.playSessionID {
                     queryItems.append(
@@ -1352,6 +1352,15 @@ public final class AppState {
                 .map { ($0.transportIdentifier, $0) }
         )
         registry.register(.jellyfin) { context in
+            JellyfinProvider(
+                session: context.session,
+                accountID: context.accountID,
+                credentialRevision: context.credentialRevision,
+                interactiveHTTP: URLSessionHTTPClient(session: .plozzInteractive),
+                hybridEngineEnabled: HybridPlayback.enabled
+            )
+        }
+        registry.register(.emby) { context in
             JellyfinProvider(
                 session: context.session,
                 accountID: context.accountID,

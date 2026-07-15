@@ -10,6 +10,7 @@ import CoreUI
 public struct ServerPickerView: View {
     @State private var viewModel: ServerPickerViewModel
     @FocusState private var focusedControl: FocusTarget?
+    private let provider: ProviderKind
     private let isPageReady: Bool
     private let onSelect: (MediaServer) -> Void
     /// Invoked when the user backs out — the in-bounds Back button or the Siri
@@ -29,14 +30,16 @@ public struct ServerPickerView: View {
     @MainActor
     public init(
         viewModel: ServerPickerViewModel? = nil,
+        provider: ProviderKind = .jellyfin,
         isPageReady: Bool = true,
         signedInServers: [SignedInServer] = [],
         onBack: (() -> Void)? = nil,
         onSelect: @escaping (MediaServer) -> Void
     ) {
-        let vm = viewModel ?? ServerPickerViewModel()
+        let vm = viewModel ?? ServerPickerViewModel(provider: provider)
         vm.setSignedInServers(signedInServers)
         _viewModel = State(initialValue: vm)
+        self.provider = provider
         self.isPageReady = isPageReady
         self.onBack = onBack
         self.onSelect = onSelect
@@ -97,7 +100,7 @@ public struct ServerPickerView: View {
 
                 PickerPanel(
                     title: "Enter address",
-                    footer: "Enter an IP address or full URL, e.g. 192.168.1.10 or jelly.example.com"
+                    footer: "Enter an IP address or full URL, e.g. 192.168.1.10 or \(provider == .emby ? "emby.example.com" : "jelly.example.com")"
                 ) {
                     VStack(alignment: .leading, spacing: 18) {
                         TextField("Server address", text: $viewModel.manualURLText)

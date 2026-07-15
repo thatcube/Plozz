@@ -1254,6 +1254,10 @@ struct LyricsSourceBadge: View {
         switch source {
         case .jellyfin:
             Image("JellyfinLogo").renderingMode(.template).resizable().scaledToFit().frame(width: 16, height: 16)
+        case .emby:
+            Image(systemName: "play.rectangle.on.rectangle.fill")
+                .font(.system(size: 13))
+                .frame(width: 16, height: 16)
         case .plex:
             Image("PlexLogo").renderingMode(.template).resizable().scaledToFit().frame(width: 16, height: 16)
         case .lrclib:

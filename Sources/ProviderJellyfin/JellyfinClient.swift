@@ -11,6 +11,7 @@ import CoreNetworking
 public struct JellyfinClient: Sendable {
     public let baseURL: URL
     public let deviceProfile: JellyfinDeviceProfile
+    public let providerKind: ProviderKind
     private let token: String?
     private let http: HTTPClient
     /// Foreground/critical-path client with its own connection pool (see
@@ -26,6 +27,7 @@ public struct JellyfinClient: Sendable {
     public init(
         baseURL: URL,
         deviceProfile: JellyfinDeviceProfile,
+        providerKind: ProviderKind = .jellyfin,
         token: String? = nil,
         http: HTTPClient = URLSessionHTTPClient(),
         interactiveHTTP: HTTPClient? = nil,
@@ -40,6 +42,7 @@ public struct JellyfinClient: Sendable {
         let observedHTTP = ReachabilityObservingHTTPClient(wrapped: http, latch: latch)
         self.baseURL = baseURL
         self.deviceProfile = deviceProfile
+        self.providerKind = providerKind
         self.token = token
         self.reachability = latch
         self.http = observedHTTP
@@ -62,6 +65,7 @@ public struct JellyfinClient: Sendable {
         preserving reachability: ReachabilityLatch,
         baseURL: URL,
         deviceProfile: JellyfinDeviceProfile,
+        providerKind: ProviderKind,
         token: String?,
         http: HTTPClient,
         interactiveHTTP: HTTPClient,
@@ -69,6 +73,7 @@ public struct JellyfinClient: Sendable {
     ) {
         self.baseURL = baseURL
         self.deviceProfile = deviceProfile
+        self.providerKind = providerKind
         self.token = token
         self.reachability = reachability
         self.http = http
@@ -92,6 +97,7 @@ public struct JellyfinClient: Sendable {
             preserving: reachability,
             baseURL: baseURL,
             deviceProfile: deviceProfile,
+            providerKind: providerKind,
             token: token,
             http: http,
             interactiveHTTP: interactiveHTTP,
@@ -114,9 +120,9 @@ public struct JellyfinClient: Sendable {
         let info = try await http.decode(PublicSystemInfo.self, from: endpoint, baseURL: baseURL)
         return MediaServer(
             id: info.Id ?? baseURL.absoluteString,
-            name: info.ServerName ?? baseURL.host ?? "Jellyfin Server",
+            name: info.ServerName ?? baseURL.host ?? "\(providerKind.displayName) Server",
             baseURL: baseURL,
-            provider: .jellyfin,
+            provider: providerKind,
             version: info.Version
         )
     }
@@ -187,7 +193,11 @@ public struct JellyfinClient: Sendable {
     // MARK: Items
 
     func userViews(userID: String) async throws -> [BaseItemDto] {
-        let endpoint = Endpoint(path: "/Users/\(userID)/Views", headers: authHeaders)
+        let endpoint = Endpoint(
+            path: "/Users/\(userID)/Views",
+            queryItems: [URLQueryItem(name: "IncludeExternalContent", value: "false")],
+            headers: authHeaders
+        )
         return try await http.decode(UserViewsResponse.self, from: endpoint, baseURL: baseURL).Items
     }
 
@@ -288,7 +298,7 @@ public struct JellyfinClient: Sendable {
     func item(userID: String, id: String) async throws -> BaseItemDto {
         let endpoint = Endpoint(
             path: "/Users/\(userID)/Items/\(id)",
-            queryItems: [URLQueryItem(name: "Fields", value: "Overview,OriginalTitle,MediaStreams,MediaSources,ProviderIds,Trickplay,Genres,People,Studios,Tags,Taglines")],
+            queryItems: [URLQueryItem(name: "Fields", value: "Overview,OriginalTitle,MediaStreams,MediaSources,ProviderIds,Trickplay,Chapters,Genres,People,Studios,Tags,Taglines")],
             headers: authHeaders
         )
         let result = try await interactiveHTTP.decode(BaseItemDto.self, from: endpoint, baseURL: baseURL)
@@ -298,6 +308,18 @@ public struct JellyfinClient: Sendable {
     /// `GET /Items/{id}/ThemeSongs`. Parent inheritance lets season and episode
     /// requests resolve their series theme when the server supports it.
     func themeSongs(userID: String, id: String) async throws -> ItemsResponse {
+        if providerKind == .emby {
+            let endpoint = Endpoint(
+                path: "/Items/\(id)/ThemeMedia",
+                queryItems: [
+                    URLQueryItem(name: "UserId", value: userID),
+                    URLQueryItem(name: "InheritFromParent", value: "true")
+                ],
+                headers: authHeaders
+            )
+            return try await http.decode(ThemeMediaResponse.self, from: endpoint, baseURL: baseURL)
+                .ThemeSongsResult ?? ItemsResponse(Items: [], TotalRecordCount: 0)
+        }
         let endpoint = Endpoint(
             path: "/Items/\(id)/ThemeSongs",
             queryItems: [
@@ -512,6 +534,8 @@ public struct JellyfinClient: Sendable {
 
     func playbackInfo(userID: String, itemID: String, mediaSourceID: String? = nil, mode: PlaybackStreamMode = .auto) async throws -> PlaybackInfoResponse {
         var queryItems = [URLQueryItem(name: "UserId", value: userID)]
+        let enableDirectPlay: Bool?
+        let enableDirectStream: Bool?
         // Target a specific version when one was chosen; otherwise the server
         // returns every source and picks its default.
         if let mediaSourceID {
@@ -520,7 +544,8 @@ public struct JellyfinClient: Sendable {
         switch mode {
         case .auto:
             // Let the server pick: DirectPlay > DirectStream > transcode.
-            break
+            enableDirectPlay = nil
+            enableDirectStream = nil
         case .remux:
             // Disable direct play but keep direct stream: the server remuxes the
             // container to seekable fMP4 HLS while **copying** the video/audio
@@ -528,11 +553,15 @@ public struct JellyfinClient: Sendable {
             // tagged `dvh1`). Used to route a DoVi MKV to AVPlayer for true DoVi.
             queryItems.append(URLQueryItem(name: "EnableDirectPlay", value: "false"))
             queryItems.append(URLQueryItem(name: "EnableDirectStream", value: "true"))
+            enableDirectPlay = false
+            enableDirectStream = true
         case .transcode:
             // Force a full transcode: neither direct play nor direct stream. Used
             // as the player's fallback when a direct stream fails to load.
             queryItems.append(URLQueryItem(name: "EnableDirectPlay", value: "false"))
             queryItems.append(URLQueryItem(name: "EnableDirectStream", value: "false"))
+            enableDirectPlay = false
+            enableDirectStream = false
         }
         var endpoint = Endpoint(
             method: .post,
@@ -544,6 +573,10 @@ public struct JellyfinClient: Sendable {
             UserId: userID,
             MaxStreamingBitrate: capabilityProfile.maxStreamingBitrate,
             AutoOpenLiveStream: true,
+            MediaSourceId: mediaSourceID,
+            EnableDirectPlay: enableDirectPlay,
+            EnableDirectStream: enableDirectStream,
+            EnableTranscoding: true,
             DeviceProfile: capabilityProfile
         ))
         return try await http.decode(PlaybackInfoResponse.self, from: endpoint, baseURL: baseURL)

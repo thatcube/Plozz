@@ -49,28 +49,33 @@ public final class ServerPickerViewModel {
 
     private let discovery: ServerDiscovering
     private let validator: ServerValidator
+    private let provider: ProviderKind
     private var store: LastServerStoring
     private var scanTask: Task<Void, Never>?
     private var reachabilityTask: Task<Void, Never>?
 
     #if canImport(Network)
     public init(
-        discovery: ServerDiscovering = UDPServerDiscovery(),
-        validator: ServerValidator = ServerValidator(),
+        provider: ProviderKind = .jellyfin,
+        discovery: ServerDiscovering? = nil,
+        validator: ServerValidator? = nil,
         store: LastServerStoring = UserDefaultsLastServerStore()
     ) {
-        self.discovery = discovery
-        self.validator = validator
+        self.provider = provider
+        self.discovery = discovery ?? UDPServerDiscovery(provider: provider)
+        self.validator = validator ?? ServerValidator(provider: provider)
         self.store = store
     }
     #else
     public init(
+        provider: ProviderKind = .jellyfin,
         discovery: ServerDiscovering,
-        validator: ServerValidator = ServerValidator(),
+        validator: ServerValidator? = nil,
         store: LastServerStoring = UserDefaultsLastServerStore()
     ) {
+        self.provider = provider
         self.discovery = discovery
-        self.validator = validator
+        self.validator = validator ?? ServerValidator(provider: provider)
         self.store = store
     }
     #endif
@@ -81,7 +86,9 @@ public final class ServerPickerViewModel {
     /// filtered out so each server appears once.
     public var recentServers: [MediaServer] {
         let signedIn = signedInKeys
-        return store.recentServers.filter { !signedIn.contains(ServerIdentity.key(for: $0)) }
+        return store.recentServers.filter {
+            $0.provider == provider && !signedIn.contains(ServerIdentity.key(for: $0))
+        }
     }
 
     /// Updates the set of servers this device already has accounts on. Kept
@@ -185,6 +192,7 @@ public final class ServerPickerViewModel {
     }
 
     private func merge(_ server: MediaServer) {
+        guard server.provider == provider else { return }
         let key = ServerIdentity.key(for: server)
         // Hearing from a server on the LAN is definitive: mark it present and
         // reachable so its row (recent or discovered) reads "On your network".

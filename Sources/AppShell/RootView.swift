@@ -494,7 +494,7 @@ private struct OnboardingPageContent: View {
                 canReturnToApp: canReturnToApp,
                 initialProvider: appState.pendingOnboardingProvider,
                 signedInServers: appState.signedInServers,
-                onJellyfinServerSelected: { server in appState.selectServer(server) },
+                onMediaBrowserServerSelected: { server in appState.selectServer(server) },
                 onPlexAuthenticated: { session in appState.didAuthenticatePlex(session) },
                 onPlexAuthenticatedMany: { sessions in appState.didAuthenticatePlexMany(sessions) },
                 onShareConfigured: { draft in

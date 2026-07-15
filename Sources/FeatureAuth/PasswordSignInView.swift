@@ -8,6 +8,7 @@ import CoreUI
 public struct PasswordSignInView: View {
     @State private var viewModel: PasswordSignInViewModel
     private let serverName: String
+    private let providerName: String
     private let onBack: () -> Void
 
     @FocusState private var focusedField: Field?
@@ -16,10 +17,12 @@ public struct PasswordSignInView: View {
     public init(
         viewModel: PasswordSignInViewModel,
         serverName: String,
+        providerName: String = "Jellyfin",
         onBack: @escaping () -> Void
     ) {
         _viewModel = State(initialValue: viewModel)
         self.serverName = serverName
+        self.providerName = providerName
         self.onBack = onBack
     }
 
@@ -27,7 +30,7 @@ public struct PasswordSignInView: View {
         VStack(spacing: 32) {
             OnboardingHeader(
                 "Sign in to \(serverName)",
-                subtitle: "Enter your Jellyfin username and password."
+                subtitle: "Enter your \(providerName) username and password."
             )
 
             // A Form gives the native tvOS grouped-row appearance and the

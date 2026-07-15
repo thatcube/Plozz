@@ -377,7 +377,7 @@ extension JellyfinProvider: MusicProvider {
             track = MusicTrack(id: trackID, title: "")
         }
         let locator = try AuthenticatedHTTPPlaybackLocator(
-            provider: .jellyfin,
+            provider: kind,
             accountID: accountID,
             credentialRevision: credentialRevision,
             itemID: trackID,
@@ -438,7 +438,8 @@ extension JellyfinProvider: MusicProvider {
             lines.sort { ($0.start ?? 0) < ($1.start ?? 0) }
         }
         let lyrics = Lyrics(lines: lines)
-        return lyrics.isEmpty ? nil : lyrics.taggingSource(.jellyfin)
+        let source: LyricsSource = kind == .emby ? .emby : .jellyfin
+        return lyrics.isEmpty ? nil : lyrics.taggingSource(source)
     }
 
     /// Containers AVPlayer direct-plays on tvOS — must match the `Container`

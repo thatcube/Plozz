@@ -165,7 +165,7 @@ targets:
         LastFmAPIKey: "$(LASTFM_API_KEY)"
         LastFmSharedSecret: "$(LASTFM_SHARED_SECRET)"
         # Local network access is required for LAN server discovery on tvOS.
-        NSLocalNetworkUsageDescription: "Plozz uses your local network to discover Jellyfin servers and SMB media shares automatically."
+        NSLocalNetworkUsageDescription: "Plozz uses your local network to discover Jellyfin and Emby servers and media shares automatically."
         NSBonjourServices:
           - _jellyfin._tcp
           # SMB file servers (NAS, macOS/Windows file sharing) advertise

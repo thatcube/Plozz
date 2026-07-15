@@ -99,7 +99,16 @@ final class JellyfinDiscoveryParserTests: XCTestCase {
 
     func testProbeConstants() {
         XCTAssertEqual(JellyfinDiscoveryParser.probeMessage, "Who is JellyfinServer?")
+        XCTAssertEqual(JellyfinDiscoveryParser.probeMessage(for: .emby), "Who is EmbyServer?")
         XCTAssertEqual(JellyfinDiscoveryParser.discoveryPort, 7359)
+    }
+
+    func testParsesEmbyAnnouncementWithEmbyIdentity() {
+        let json = #"{"Address":"http://192.168.1.30:8096","Id":"emby1","Name":"Emby Home"}"#
+        let announcement = JellyfinDiscoveryParser.parse(Data(json.utf8), provider: .emby)
+
+        XCTAssertEqual(announcement?.provider, .emby)
+        XCTAssertEqual(announcement?.primaryServer?.provider, .emby)
     }
 }
 
@@ -114,6 +123,17 @@ final class ServerValidatorTests: XCTestCase {
         XCTAssertEqual(server.name, "My Server")
         XCTAssertEqual(server.version, "10.9.0")
         XCTAssertEqual(server.baseURL.absoluteString, "http://192.168.1.10:8096")
+    }
+
+    func testValidatesEmbyServerWithEmbyIdentity() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(path: "/System/Info/Public", json: #"{"Id":"emby1","ServerName":"Emby Home","ProductName":"Emby Server"}"#)
+        let validator = ServerValidator(provider: .emby, http: stub)
+
+        let server = try await validator.validate(rawURL: "192.168.1.30")
+
+        XCTAssertEqual(server.provider, .emby)
+        XCTAssertEqual(server.name, "Emby Home")
     }
 
     func testRejectsNonJellyfinResponse() async {

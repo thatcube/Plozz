@@ -6,14 +6,14 @@ import FeatureAuth
 import FeatureDiscovery
 
 /// Entry point for adding an account, letting the user pick which backend to
-/// connect: **Jellyfin** (existing server picker → Quick Connect) or **Plex**
+/// connect: **Jellyfin**, **Emby**, **Plex**, or a direct media share.
 /// (plex.tv PIN link). Selecting a provider pushes its own sign-in flow; both
 /// ultimately hand back through `AppState` and join the multi-account list.
 struct AddAccountView: View {
     let deviceID: String
     let canReturnToApp: Bool
     let signedInServers: [SignedInServer]
-    let onJellyfinServerSelected: (MediaServer) -> Void
+    let onMediaBrowserServerSelected: (MediaServer) -> Void
     let onPlexAuthenticated: (UserSession) -> Void
     let onPlexAuthenticatedMany: ([UserSession]) -> Void
     let onShareConfigured: (ShareDraft) -> Void
@@ -34,7 +34,7 @@ struct AddAccountView: View {
         canReturnToApp: Bool,
         initialProvider: ProviderKind? = nil,
         signedInServers: [SignedInServer] = [],
-        onJellyfinServerSelected: @escaping (MediaServer) -> Void,
+        onMediaBrowserServerSelected: @escaping (MediaServer) -> Void,
         onPlexAuthenticated: @escaping (UserSession) -> Void,
         onPlexAuthenticatedMany: @escaping ([UserSession]) -> Void = { _ in },
         onShareConfigured: @escaping (ShareDraft) -> Void = { _ in },
@@ -45,7 +45,7 @@ struct AddAccountView: View {
         self.deviceID = deviceID
         self.canReturnToApp = canReturnToApp
         self.signedInServers = signedInServers
-        self.onJellyfinServerSelected = onJellyfinServerSelected
+        self.onMediaBrowserServerSelected = onMediaBrowserServerSelected
         self.onPlexAuthenticated = onPlexAuthenticated
         self.onPlexAuthenticatedMany = onPlexAuthenticatedMany
         self.onShareConfigured = onShareConfigured
@@ -55,7 +55,7 @@ struct AddAccountView: View {
         // Seed the flow's starting screen. Cancelling Quick Connect returns here
         // with the provider preserved so we land on its server list, not the
         // chooser. Plex has no intermediate list, so it falls back to the chooser.
-        _choice = State(initialValue: initialProvider == .jellyfin ? initialProvider : nil)
+        _choice = State(initialValue: initialProvider?.usesMediaBrowserAPI == true ? initialProvider : nil)
         _plexAuthViewModel = State(initialValue: PlexAuthViewModel(
             service: PlexAuthService(deviceID: deviceID),
             onAuthenticated: onPlexAuthenticated,
@@ -89,10 +89,18 @@ struct AddAccountView: View {
             chooser
         case .jellyfin:
             ServerPickerView(
+                provider: .jellyfin,
                 isPageReady: pageIsReady,
                 signedInServers: signedInServers.filter { $0.server.provider == .jellyfin },
                 onBack: navigateBackToChooser
-            ) { onJellyfinServerSelected($0) }
+            ) { onMediaBrowserServerSelected($0) }
+        case .emby:
+            ServerPickerView(
+                provider: .emby,
+                isPageReady: pageIsReady,
+                signedInServers: signedInServers.filter { $0.server.provider == .emby },
+                onBack: navigateBackToChooser
+            ) { onMediaBrowserServerSelected($0) }
         case .plex:
             PlexLinkView(
                 viewModel: plexAuthViewModel,
@@ -130,6 +138,7 @@ struct AddAccountView: View {
         switch choice {
         case .none: "providerChooser"
         case .jellyfin: "jellyfin"
+        case .emby: "emby"
         case .plex: "plex"
         case .mediaShare: "mediaShare"
         }
@@ -190,12 +199,14 @@ struct AddAccountView: View {
 private enum ProviderChooserFocus: Hashable {
     case back
     case jellyfin
+    case emby
     case plex
     case mediaShare
 
     init(provider: ProviderKind) {
         switch provider {
         case .jellyfin: self = .jellyfin
+        case .emby: self = .emby
         case .plex: self = .plex
         case .mediaShare: self = .mediaShare
         }
@@ -250,6 +261,7 @@ private struct ProviderChooserView: View {
         guard showsBackButton else { return }
         switch (focusedControl, direction) {
         case (.some(.jellyfin), .left),
+             (.some(.emby), .left),
              (.some(.plex), .left),
              (.some(.mediaShare), .left):
             focusedControl = .back
@@ -302,6 +314,17 @@ private struct ProviderChoiceGroup: View {
                 focusedControl: focusedControl
             ) {
                 onSelect(.jellyfin)
+            }
+
+            Divider().padding(.horizontal, 1)
+
+            ProviderChoiceRow(
+                provider: .emby,
+                title: "Emby",
+                height: 108,
+                focusedControl: focusedControl
+            ) {
+                onSelect(.emby)
             }
 
             Divider().padding(.horizontal, 1)

@@ -5,7 +5,7 @@
 <h1 align="center">Plozz</h1>
 
 <p align="center">
-  A free forever, open source, native Apple TV app for Jellyfin, Plex, and local shares.
+  A free forever, open source, native Apple TV app for Jellyfin, Emby, Plex, and local shares.
 </p>
 
 <p align="center">
@@ -28,20 +28,20 @@ Found a bug or have an idea? [**Open an issue**](https://github.com/thatcube/Plo
 
 ## Unique Features
 
-- **Multiple servers, one library.** Merge all of your content into one library across plex, jellyfin and local share (SMB only) servers.
-- **Sync watch history across all servers** - Optionally sync your watch history across every server that's connected. Watch it on Plex, it will sync that same watch status to Jellyfin (if Jellyfin has the same title).
+- **Multiple servers, one library.** Merge all of your content into one library across Plex, Jellyfin, Emby, and local-share servers.
+- **Sync watch history across all servers** - Optionally sync watch history across every connected server.
 - **Mark as watched** - Mark an entire season as watched or "up to here" to quickly update watch history.
 - **Watched & unwatched indicators** — Choose a watched checkmark or an unwatched corner badge (Infuse / classic-Plex style) on your posters, across Plex, Jellyfin and SMB shares.
 - **Trakt, AniList, MyAnimeList, Simkl, and Last.fm** - Full support for every tracker across your movies, tv, anime, and music.
 - **Seerr integration** - Connect a seerr account and request media from directly within the search or hero of the app.
 - **Highly customizable interface** - Change the theme of the entire app (light, dark, Pure Black). Change the density of media, optionally show hero content, change the navigation style.
-- **Jellyfin, Plex, and local shares (SMB)**
+- **Jellyfin, Emby, Plex, and local shares**
 - **Circadian mode** - Automatically warm and dim the display at set times to help you sleep (only at the app level)
 - **Subtitle customization** — Vastly customize the subtitles directly in the player. Change font, size, color, opacity, background, font weight, HDR brightness, shadow, position.
 - **Dual subtitle support** - Turn on 2 different subtitle tracks at the same
 
-- **Auto-discovery** — Automatically detect jellyfin servers, seerr servers
-- **Remote-free sign-in** — Jellyfin **Quick Connect** and Plex **Link** supported
+- **Auto-discovery** — Automatically detect Jellyfin, Emby, and Seerr servers
+- **Remote-free sign-in** — Jellyfin **Quick Connect**, Emby password sign-in, and Plex **Link** supported
 
 - **Profiles** — Native Apple TV profile support - all settings are per-profile and your profile selection is remembered based on the Apple TV profile that was last used
 - **(Almost) All video formats supported** - Powered by [AetherEngine](https://github.com/superuser404notfound/AetherEngine), an open source engine that fully supports HDR, Dolby Vision, AV1, virtually everything.[View the full list](https://github.com/superuser404notfound/AetherEngine/blob/main/docs/formats.md).
@@ -56,7 +56,7 @@ app target generated with [XcodeGen](https://github.com/yonaskolb/XcodeGen).
 | [`CoreModels`](Sources/CoreModels/README.md) | Domain models, `AppError`, `LoadState`, caption settings, and the **`MediaProvider`** protocol (the provider abstraction). |
 | [`CoreNetworking`](Sources/CoreNetworking/README.md) | `HTTPClient`, `Endpoint`, URL normalization, and a secret-safe logger (`PlozzLog`). |
 | [`CoreUI`](Sources/CoreUI/README.md) | Shared focusable components, theme, image cache, content-state views. |
-| [`ProviderJellyfin`](Sources/ProviderJellyfin/README.md) | Jellyfin REST client, DTOs, device profile, and a `MediaProvider` implementation. |
+| [`ProviderJellyfin`](Sources/ProviderJellyfin/README.md) | Shared Jellyfin/Emby MediaBrowser client, DTOs, compatibility shims, device profile, and `MediaProvider` implementation. |
 | [`ProviderPlex`](Sources/ProviderPlex/README.md) | Plex client, DTOs, PIN/auth, connection resolver/selector, and a `MediaProvider` implementation. |
 | [`ProviderTrailers`](Sources/ProviderTrailers/README.md) | Synthetic `MediaProvider` for online (YouTube) trailers, with stream extraction via YouTubeKit. |
 | [`MetadataKit`](Sources/MetadataKit/README.md) | Keyless-first artwork & metadata enrichment (AniList, Kitsu, TVmaze, Deezer, MusicBrainz/CAA, Wikidata/Wikipedia) routed by content type with a persistent on-disk cache. Bundled TheTVDB tier + optional maintainer-hosted TMDb tier. |
@@ -75,8 +75,8 @@ app target generated with [XcodeGen](https://github.com/yonaskolb/XcodeGen).
 
 Each module's `README.md` documents its responsibility, public surface, and
 invariants. Everything above the provider layer talks to the **`MediaProvider`**
-abstraction rather than a specific backend, so Jellyfin and Plex are each just a
-conformer — adding another backend means one new conformer, no feature rewrites.
+abstraction rather than a specific backend. Jellyfin and Emby intentionally share
+one conformer so their supported features remain in lockstep.
 
 ## Building & running
 

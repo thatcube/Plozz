@@ -3,7 +3,7 @@ import CoreModels
 import CoreNetworking
 import ProviderJellyfin
 
-/// Signs a user in with a Jellyfin username + password and builds a
+/// Signs a user in with a Jellyfin/Emby username + password and builds a
 /// `UserSession`.
 ///
 /// This is intentionally the *lower-priority* alternative to Quick Connect: it
@@ -26,7 +26,12 @@ public struct PasswordSignInService: Sendable {
     }
 
     private var client: JellyfinClient {
-        JellyfinClient(baseURL: server.baseURL, deviceProfile: JellyfinDeviceProfile(deviceID: deviceID), http: http)
+        JellyfinClient(
+            baseURL: server.baseURL,
+            deviceProfile: JellyfinDeviceProfile(deviceID: deviceID),
+            providerKind: server.provider,
+            http: http
+        )
     }
 
     /// Authenticates against the server. Throws `.invalidCredentials` when the
@@ -37,7 +42,7 @@ public struct PasswordSignInService: Sendable {
             id: auth.serverID ?? server.id,
             name: server.name,
             baseURL: server.baseURL,
-            provider: .jellyfin,
+            provider: server.provider,
             version: server.version
         )
         return UserSession(

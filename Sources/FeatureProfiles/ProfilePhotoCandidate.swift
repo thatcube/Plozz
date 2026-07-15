@@ -39,13 +39,13 @@ public struct ProfilePhotoCandidate: Identifiable, Hashable, Sendable {
         var out: [ProfilePhotoCandidate] = []
 
         // Jellyfin: one candidate per signed-in user with a *real* avatar.
-        for account in accounts where account.server.provider == .jellyfin {
+        for account in accounts where account.server.provider.usesMediaBrowserAPI {
             guard let url = account.avatarURL, !isLikelyDefaultAvatar(url) else { continue }
             out.append(ProfilePhotoCandidate(
-                providerLabel: "Jellyfin",
+                providerLabel: account.server.provider.displayName,
                 detailLabel: "\(account.userName) on \(account.server.name)",
                 imageURL: url,
-                sourceTag: "jellyfin.\(account.id)"
+                sourceTag: "\(account.server.provider.rawValue).\(account.id)"
             ))
         }
 

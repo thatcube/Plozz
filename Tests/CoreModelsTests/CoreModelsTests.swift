@@ -116,13 +116,13 @@ final class HandoffDiagnosticsRedactionTests: XCTestCase {
 }
 
 final class ProviderKindTests: XCTestCase {
-    func testJellyfinAndPlexAreBothFirstClassProviders() {
-        // Jellyfin and Plex are the first-class, co-equal backends; mediaShare is
-        // a deliberately second-class local-file backend (see ProviderKind docs).
-        XCTAssertEqual(Set(ProviderKind.allCases), [.jellyfin, .plex, .mediaShare])
+    func testDedicatedServersAreFirstClassProviders() {
+        XCTAssertEqual(Set(ProviderKind.allCases), [.jellyfin, .emby, .plex, .mediaShare])
         XCTAssertEqual(ProviderKind.jellyfin.displayName, "Jellyfin")
+        XCTAssertEqual(ProviderKind.emby.displayName, "Emby")
         XCTAssertEqual(ProviderKind.plex.displayName, "Plex")
         XCTAssertEqual(ProviderKind.mediaShare.displayName, "Media Share")
+        XCTAssertTrue(ProviderKind.emby.usesMediaBrowserAPI)
     }
 }
 

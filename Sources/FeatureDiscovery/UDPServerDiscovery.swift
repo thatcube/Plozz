@@ -33,18 +33,25 @@ public final class UDPServerDiscovery: ServerDiscovering, @unchecked Sendable {
     /// servers advertising a foreign address). Uses a short-timeout session so
     /// trying several candidates per server stays fast.
     private let validator: ServerValidator
+    private let provider: ProviderKind
 
     public init(
+        provider: ProviderKind = .jellyfin,
         maxSweepHosts: UInt32 = 1024,
-        validator: ServerValidator = ServerValidator(http: URLSessionHTTPClient(session: .plozzDiscovery))
+        validator: ServerValidator? = nil
     ) {
+        self.provider = provider
         self.maxSweepHosts = maxSweepHosts
-        self.validator = validator
+        self.validator = validator ?? ServerValidator(
+            provider: provider,
+            http: URLSessionHTTPClient(session: .plozzDiscovery)
+        )
     }
 
     public func discover(timeout: TimeInterval) -> AsyncStream<MediaServer> {
         let maxSweepHosts = self.maxSweepHosts
         let validator = self.validator
+        let provider = self.provider
 
         return AsyncStream { continuation in
             let cancelled = AtomicFlag()
@@ -54,7 +61,10 @@ public final class UDPServerDiscovery: ServerDiscovering, @unchecked Sendable {
                 // (or wrong) candidate for one server never holds up another.
                 await withTaskGroup(of: Void.self) { group in
                     let stream = Self.announcements(
-                        timeout: timeout, maxSweepHosts: maxSweepHosts, cancelled: cancelled
+                        timeout: timeout,
+                        maxSweepHosts: maxSweepHosts,
+                        provider: provider,
+                        cancelled: cancelled
                     )
                     for await announcement in stream {
                         if Task.isCancelled { break }
@@ -106,12 +116,18 @@ public final class UDPServerDiscovery: ServerDiscovering, @unchecked Sendable {
     private static func announcements(
         timeout: TimeInterval,
         maxSweepHosts: UInt32,
+        provider: ProviderKind,
         cancelled: AtomicFlag
     ) -> AsyncStream<JellyfinAnnouncement> {
         AsyncStream { continuation in
             let queue = DispatchQueue(label: "com.plozz.discovery.socket")
             queue.async {
-                Self.run(timeout: timeout, maxSweepHosts: maxSweepHosts, cancelled: cancelled) { announcement in
+                Self.run(
+                    timeout: timeout,
+                    maxSweepHosts: maxSweepHosts,
+                    provider: provider,
+                    cancelled: cancelled
+                ) { announcement in
                     continuation.yield(announcement)
                 }
                 continuation.finish()
@@ -124,6 +140,7 @@ public final class UDPServerDiscovery: ServerDiscovering, @unchecked Sendable {
     private static func run(
         timeout: TimeInterval,
         maxSweepHosts: UInt32,
+        provider: ProviderKind,
         cancelled: AtomicFlag,
         yield: (JellyfinAnnouncement) -> Void
     ) {
@@ -155,7 +172,7 @@ public final class UDPServerDiscovery: ServerDiscovering, @unchecked Sendable {
         }
 
         let targets = Self.probeTargets(maxSweepHosts: maxSweepHosts)
-        let probe = Array(JellyfinDiscoveryParser.probeMessage.utf8)
+        let probe = Array(JellyfinDiscoveryParser.probeMessage(for: provider).utf8)
         PlozzLog.discovery.info("Discovery probing \(targets.count) target(s)")
 
         func sendProbes() {
@@ -192,7 +209,11 @@ public final class UDPServerDiscovery: ServerDiscovering, @unchecked Sendable {
             if n > 0 {
                 let data = Data(buffer[0..<n])
                 let sourceIP = Self.ipString(from: from)
-                if let announcement = JellyfinDiscoveryParser.parse(data, sourceIP: sourceIP),
+                if let announcement = JellyfinDiscoveryParser.parse(
+                    data,
+                    sourceIP: sourceIP,
+                    provider: provider
+                ),
                    seen.insert(announcement.id).inserted {
                     PlozzLog.discovery.info(
                         "Announce \(announcement.name) — \(announcement.candidateURLs.count) candidate(s)"

@@ -66,8 +66,17 @@ struct ItemsResponse: Decodable {
     let TotalRecordCount: Int?
 }
 
+struct ThemeMediaResponse: Decodable {
+    let ThemeSongsResult: ItemsResponse?
+}
+
 struct UserViewsResponse: Decodable {
     let Items: [BaseItemDto]
+}
+
+struct ChapterInfoDto: Decodable {
+    let StartPositionTicks: Int64?
+    let MarkerType: String?
 }
 
 struct BaseItemDto: Decodable {
@@ -110,6 +119,8 @@ struct BaseItemDto: Decodable {
     let MediaStreams: [MediaStreamDto]?
     let ImageTags: [String: String]?
     let BackdropImageTags: [String]?
+    /// Emby exposes intro and credits markers as chapter entries.
+    let Chapters: [ChapterInfoDto]?
     /// Trickplay (scrubbing-thumbnail) manifests, keyed by media-source id then
     /// by thumbnail width. Present only when `Trickplay` is requested in `Fields`
     /// and the server has generated trickplay images for the item.
@@ -231,6 +242,10 @@ struct PlaybackInfoBody: Encodable {
     let UserId: String
     let MaxStreamingBitrate: Int
     let AutoOpenLiveStream: Bool
+    let MediaSourceId: String?
+    let EnableDirectPlay: Bool?
+    let EnableDirectStream: Bool?
+    let EnableTranscoding: Bool
     let DeviceProfile: JellyfinCapabilityProfile
 }
 

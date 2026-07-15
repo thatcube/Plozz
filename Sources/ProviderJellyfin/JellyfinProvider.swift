@@ -2,13 +2,13 @@ import Foundation
 import CoreModels
 import CoreNetworking
 
-/// `MediaProvider` conformer for Jellyfin.
+/// `MediaProvider` conformer for the shared Jellyfin/Emby MediaBrowser API.
 ///
 /// Holds an authenticated `JellyfinClient` and maps Jellyfin DTOs onto the
 /// provider-agnostic `CoreModels` types. Feature modules depend only on
 /// `MediaProvider`; this is the single place Jellyfin specifics live.
 public struct JellyfinProvider: MediaProvider {
-    public let kind: ProviderKind = .jellyfin
+    public let kind: ProviderKind
     public let session: UserSession
     public let accountID: String
     public let credentialRevision: CredentialRevision
@@ -26,6 +26,8 @@ public struct JellyfinProvider: MediaProvider {
             await ThemeMusicArchive.resolvedURL(tvdbID: $0)
         }
     ) {
+        precondition(session.server.provider.usesMediaBrowserAPI)
+        self.kind = session.server.provider
         self.session = session
         self.accountID = accountID ?? session.server.id
         self.credentialRevision = credentialRevision
@@ -33,6 +35,7 @@ public struct JellyfinProvider: MediaProvider {
         self.client = JellyfinClient(
             baseURL: session.server.baseURL,
             deviceProfile: JellyfinDeviceProfile(deviceID: session.deviceID),
+            providerKind: session.server.provider,
             token: session.accessToken,
             http: http,
             interactiveHTTP: interactiveHTTP,
@@ -275,7 +278,7 @@ public struct JellyfinProvider: MediaProvider {
            !song.Id.isEmpty {
             let playSessionID = UUID().uuidString
             let locator = try AuthenticatedHTTPPlaybackLocator(
-                provider: .jellyfin,
+                provider: kind,
                 accountID: accountID,
                 credentialRevision: credentialRevision,
                 itemID: song.Id,
@@ -309,10 +312,57 @@ public struct JellyfinProvider: MediaProvider {
     }
 
     public func mediaSegments(for itemID: String) async throws -> [MediaSegment] {
+        if kind == .emby {
+            let item = try? await client.item(userID: session.userID, id: itemID)
+            return Self.map(
+                embyChapters: item?.Chapters ?? [],
+                runtimeTicks: item?.RunTimeTicks
+            )
+        }
         // Best-effort: servers without a media-segment provider 404 here, which
         // should degrade to "no skip markers" rather than failing playback.
         let dtos = (try? await client.mediaSegments(itemID: itemID)) ?? []
         return dtos.compactMap(Self.map(segment:))
+    }
+
+    /// Emby stores intro/credit markers in `Chapters` rather than Jellyfin's
+    /// `/MediaSegments` endpoint. Pair intro markers and extend credits to runtime.
+    private static func map(
+        embyChapters chapters: [ChapterInfoDto],
+        runtimeTicks: Int64?
+    ) -> [MediaSegment] {
+        let sorted = chapters.sorted {
+            ($0.StartPositionTicks ?? 0) < ($1.StartPositionTicks ?? 0)
+        }
+        var introStart: Int64?
+        var result: [MediaSegment] = []
+        for chapter in sorted {
+            guard let ticks = chapter.StartPositionTicks else { continue }
+            switch chapter.MarkerType?.lowercased() {
+            case "introstart":
+                introStart = ticks
+            case "introend":
+                if let start = introStart, ticks > start {
+                    result.append(MediaSegment(
+                        kind: .intro,
+                        start: JellyfinTicks.seconds(fromTicks: start) ?? 0,
+                        end: JellyfinTicks.seconds(fromTicks: ticks) ?? 0
+                    ))
+                }
+                introStart = nil
+            case "creditsstart":
+                if let runtimeTicks, runtimeTicks > ticks {
+                    result.append(MediaSegment(
+                        kind: .credits,
+                        start: JellyfinTicks.seconds(fromTicks: ticks) ?? 0,
+                        end: JellyfinTicks.seconds(fromTicks: runtimeTicks) ?? 0
+                    ))
+                }
+            default:
+                continue
+            }
+        }
+        return result
     }
 
     /// Maps a Jellyfin media-segment DTO onto the provider-agnostic
@@ -616,12 +666,51 @@ public struct JellyfinProvider: MediaProvider {
             deliveryMode: Self.deliveryMode(transcoding: source.TranscodingUrl != nil, didRemux: didRemux),
             sourceMetadata: Self.sourceMetadata(container: originalContainer, streams: originalStreams),
             localRemuxSource: localRemuxSource,
-            scrubPreview: trickplayManifest(itemID: itemID, source: source, trickplay: detail.Trickplay).map(ScrubPreviewSource.tiled),
-            sourceProvider: .jellyfin,
+            scrubPreview: scrubPreview(itemID: itemID, source: source, trickplay: detail.Trickplay),
+            sourceProvider: kind,
             serverName: session.server.name,
             sourceFileName: PlaybackRequest.sourceFileName(from: originalSource.Path)
                 ?? PlaybackRequest.sourceFileName(from: originalSource.Name)
         )
+    }
+
+    private func scrubPreview(
+        itemID: String,
+        source: MediaSourceInfo,
+        trickplay: [String: [String: TrickplayInfoDto]]?
+    ) -> ScrubPreviewSource? {
+        if kind == .emby {
+            return embyBIFPreview(itemID: itemID, mediaSourceID: source.Id)
+        }
+        return trickplayManifest(itemID: itemID, source: source, trickplay: trickplay)
+            .map(ScrubPreviewSource.tiled)
+    }
+
+    /// Emby serves Roku BIF trickplay at `/Videos/{id}/index.bif`.
+    private func embyBIFPreview(
+        itemID: String,
+        mediaSourceID: String?
+    ) -> ScrubPreviewSource? {
+        guard let resource = try? AuthenticatedHTTPResource(
+            pathBase: .configuredBaseURL,
+            path: "Videos/\(itemID)/index.bif",
+            queryItems: [
+                try AuthenticatedHTTPQueryItem(name: "Width", value: "320")
+            ]
+        ), let locator = try? AuthenticatedHTTPPlaybackLocator(
+            provider: kind,
+            accountID: accountID,
+            credentialRevision: credentialRevision,
+            itemID: itemID,
+            mediaSourceID: mediaSourceID,
+            deliveryMode: .directFile,
+            formatHint: MediaFormatHint(container: "bif"),
+            purpose: .scrubPreview,
+            resource: resource
+        ) else {
+            return nil
+        }
+        return .plexBIF(resource: .authenticatedHTTP(locator))
     }
 
     /// Picks the requested source by id, falling back to the server's first
@@ -753,7 +842,7 @@ public struct JellyfinProvider: MediaProvider {
         )
         return .authenticatedHTTP(
             try AuthenticatedHTTPPlaybackLocator(
-                provider: .jellyfin,
+                provider: kind,
                 accountID: accountID,
                 credentialRevision: credentialRevision,
                 itemID: itemID,
@@ -976,7 +1065,7 @@ public struct JellyfinProvider: MediaProvider {
             )
         }
         return try AuthenticatedHTTPPlaybackLocator(
-            provider: .jellyfin,
+            provider: kind,
             accountID: accountID,
             credentialRevision: credentialRevision,
             itemID: itemID,
@@ -1010,7 +1099,7 @@ public struct JellyfinProvider: MediaProvider {
         return LocalRemuxSourceDescriptor(
             itemID: itemID,
             mediaSourceID: source.Id,
-            provider: .jellyfin,
+            provider: kind,
             originalSource: .authenticatedHTTP(originalLocator),
             referencePlaybackSource: .authenticatedHTTP(referencePlaybackLocator),
             durationSeconds: durationSeconds,
@@ -1318,7 +1407,7 @@ public struct JellyfinProvider: MediaProvider {
         )
         return .authenticatedHTTP(
             try AuthenticatedHTTPPlaybackLocator(
-                provider: .jellyfin,
+                provider: kind,
                 accountID: accountID,
                 credentialRevision: credentialRevision,
                 itemID: itemID,

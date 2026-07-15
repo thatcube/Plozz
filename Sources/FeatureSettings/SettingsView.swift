@@ -210,7 +210,7 @@ public struct SettingsView: View {
     private var activeProfileCanDownloadSubtitles: Bool {
         accounts.contains { account in
             isAccountIncludedInActiveProfile(account.id)
-                && (account.server.provider == .jellyfin || account.server.provider == .plex)
+                && (account.server.provider.usesMediaBrowserAPI || account.server.provider == .plex)
         }
     }
 

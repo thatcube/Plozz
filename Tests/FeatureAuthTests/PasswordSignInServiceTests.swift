@@ -31,4 +31,26 @@ final class PasswordSignInServiceTests: XCTestCase {
         let session = try await service.signIn(username: "alice", password: "pw")
         XCTAssertEqual(session.server.id, "s")
     }
+
+    func testEmbySignInPreservesProviderIdentity() async throws {
+        let embyServer = MediaServer(
+            id: "emby",
+            name: "Emby Home",
+            baseURL: URL(string: "http://host:8096")!,
+            provider: .emby
+        )
+        let stub = StubHTTPClient()
+        stub.stubFixed(pathSuffix: "/Users/AuthenticateByName", json: """
+        {"AccessToken":"TOK","ServerId":"emby","User":{"Id":"u1","Name":"Alice"}}
+        """)
+
+        let session = try await PasswordSignInService(
+            server: embyServer,
+            deviceID: "dev1",
+            http: stub
+        ).signIn(username: "alice", password: "pw")
+
+        XCTAssertEqual(session.server.provider, .emby)
+        XCTAssertEqual(session.accessToken, "TOK")
+    }
 }

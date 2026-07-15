@@ -286,12 +286,10 @@ struct AccountAvatar: View {
     }
 }
 
-/// Builds the Jellyfin avatar URL fallback when the account's `avatarURL` is
-/// nil. Plex always supplies one; Jellyfin needs the `/Users/<id>/Images/Primary`
-/// path on the server's base URL.
+/// Builds the Jellyfin/Emby avatar URL fallback when `avatarURL` is nil.
 func resolvedAvatarURL(for account: Account) -> URL? {
     if let avatarURL = account.avatarURL { return avatarURL }
-    guard account.server.provider == .jellyfin,
+    guard account.server.provider.usesMediaBrowserAPI,
           var components = URLComponents(url: account.server.baseURL, resolvingAgainstBaseURL: false) else {
         return nil
     }

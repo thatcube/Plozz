@@ -23,12 +23,19 @@ struct JellyfinDiscoveryResponse: Decodable {
 public struct JellyfinAnnouncement: Equatable, Sendable {
     public let id: String
     public let name: String
+    public let provider: ProviderKind
     /// Candidate base URLs, reachable-first. `candidateURLs[0]` is the best bet.
     public let candidateURLs: [URL]
 
-    public init(id: String, name: String, candidateURLs: [URL]) {
+    public init(
+        id: String,
+        name: String,
+        provider: ProviderKind = .jellyfin,
+        candidateURLs: [URL]
+    ) {
         self.id = id
         self.name = name
+        self.provider = provider
         self.candidateURLs = candidateURLs
     }
 
@@ -37,7 +44,7 @@ public struct JellyfinAnnouncement: Equatable, Sendable {
     /// no extra HTTP round-trip is required to list it.
     public var primaryServer: MediaServer? {
         guard let baseURL = candidateURLs.first else { return nil }
-        return MediaServer(id: id, name: name, baseURL: baseURL, provider: .jellyfin)
+        return MediaServer(id: id, name: name, baseURL: baseURL, provider: provider)
     }
 }
 
@@ -49,7 +56,12 @@ public enum JellyfinDiscoveryParser {
     /// The probe message Plozz sends. Jellyfin servers listen for this exact
     /// string on UDP port 7359 and reply to the sender.
     public static let probeMessage = "Who is JellyfinServer?"
+    public static let embyProbeMessage = "Who is EmbyServer?"
     public static let discoveryPort: UInt16 = 7359
+
+    public static func probeMessage(for provider: ProviderKind) -> String {
+        provider == .emby ? embyProbeMessage : probeMessage
+    }
 
     /// Decodes a single UDP response payload into an announcement, or `nil` if
     /// it isn't a usable Jellyfin reply.
@@ -59,7 +71,11 @@ public enum JellyfinDiscoveryParser {
     ///   - sourceIP: the address the datagram actually arrived from. Preferred
     ///     over the payload's `Address`/`EndpointAddress` because it is known to
     ///     be reachable on this LAN.
-    public static func parse(_ data: Data, sourceIP: String? = nil) -> JellyfinAnnouncement? {
+    public static func parse(
+        _ data: Data,
+        sourceIP: String? = nil,
+        provider: ProviderKind = .jellyfin
+    ) -> JellyfinAnnouncement? {
         guard let response = try? JSONDecoder().decode(JellyfinDiscoveryResponse.self, from: data),
               response.Id != nil || response.Name != nil || response.Address != nil else {
             return nil
@@ -98,8 +114,13 @@ public enum JellyfinDiscoveryParser {
         guard let primary = candidates.first else { return nil }
 
         let id = response.Id ?? primary.absoluteString
-        let name = response.Name ?? sourceIP ?? primary.host ?? "Jellyfin Server"
-        return JellyfinAnnouncement(id: id, name: name, candidateURLs: candidates)
+        let name = response.Name ?? sourceIP ?? primary.host ?? "\(provider.displayName) Server"
+        return JellyfinAnnouncement(
+            id: id,
+            name: name,
+            provider: provider,
+            candidateURLs: candidates
+        )
     }
 
     /// Returns `template` with its host replaced by `host`, preserving scheme,

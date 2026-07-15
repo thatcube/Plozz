@@ -19,7 +19,7 @@ public enum ScrubPreviewResource: Hashable, Sendable {
 /// matching loader:
 ///  * **Jellyfin** packs thumbnails into a few grid "tile" images described by a
 ///    `TrickplayManifest` (`.tiled`).
-///  * **Plex** stores them in a single Roku **BIF** index file that the client
+///  * **Plex / Emby** store them in a single Roku **BIF** index file that the client
 ///    downloads and slices frame-by-frame (`.plexBIF`).
 ///
 /// An unusable/absent source simply means the player shows no scrub preview — it
@@ -27,7 +27,7 @@ public enum ScrubPreviewResource: Hashable, Sendable {
 public enum ScrubPreviewSource: Hashable, Sendable {
     /// Pre-tiled grid images (Jellyfin trickplay).
     case tiled(TrickplayManifest)
-    /// A single Plex **BIF** index file (Roku trickplay format) to download and
+    /// A single **BIF** index file (Roku trickplay format) to download and
     /// parse lazily. The blob packs every preview frame plus a fixed-interval
     /// index; the player slices frames out of it while scrubbing.
     case plexBIF(resource: ScrubPreviewResource)
@@ -46,7 +46,7 @@ public enum ScrubPreviewSource: Hashable, Sendable {
         return nil
     }
 
-    /// The Plex BIF index URL, when this source is BIF-based; `nil` otherwise.
+    /// The BIF index URL, when this source is BIF-based; `nil` otherwise.
     public var plexBIFResource: ScrubPreviewResource? {
         if case .plexBIF(let resource) = self { return resource }
         return nil

@@ -1,6 +1,6 @@
 # FeatureAuth
 
-Sign-in for both Plex and Jellyfin, an explicit session state machine that
+Sign-in for Plex, Jellyfin, and Emby, an explicit session state machine that
 keeps the UI free of ad-hoc boolean flags, and Keychain-backed account /
 session persistence.
 
@@ -13,8 +13,8 @@ session persistence.
   - `PlexAuthService` + `PlexAuthViewModel` + `PlexLinkView` — Plex
     **Link** (`plex.tv/link`) PIN-code OAuth flow, polling for activation.
   - `PasswordSignInService` + `PasswordSignInViewModel` +
-    `PasswordSignInView` — fallback username/password sign-in for
-    Jellyfin servers that don't have Quick Connect enabled.
+    `PasswordSignInView` — username/password sign-in for Emby and the
+    fallback for Jellyfin servers without Quick Connect.
 - **Session state machine** — `SessionStateMachine`. A pure `reduce`
   function over `(state, event) → state` (`launching → selectingServer →
   authenticating → authenticated → failed`). Unit-tested independently of
@@ -38,9 +38,8 @@ session persistence.
   never logged. `AccountStore` is split-storage by design.
 - **Pure state machine.** `SessionStateMachine` has no I/O — all side
   effects live in the services it produces events for.
-- **Both providers, one UI.** Quick Connect (Jellyfin) and Plex Link
-  share the same code-display / polling shape; one shouldn't feel like
-  a second-class citizen.
+- **Provider-appropriate sign-in.** Jellyfin uses Quick Connect or password,
+  Emby uses password, and Plex uses Link.
 - **Always cancellable.** Every flow must be Cancel-able from the remote
   without leaking polling tasks.
 

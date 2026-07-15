@@ -120,6 +120,8 @@ struct ServerDetailView: View {
             return "Plex shares one sign-in across the household. Each profile picks its own Plex user and libraries under Profile › Your Libraries."
         case .jellyfin:
             return "Jellyfin signs in per profile, each with its own credentials. Choose what shows on your Home under Profile › Your Libraries."
+        case .emby:
+            return "Emby signs in per profile, each with its own credentials. Choose what shows on your Home under Profile › Your Libraries."
         case .mediaShare:
             if transport == .nfs {
                 return "This NFS export connects without a sign-in — anyone on this Apple TV can browse it. Choose what shows on your Home under Profile › Your Libraries."

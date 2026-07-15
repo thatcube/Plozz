@@ -1,13 +1,17 @@
 # ProviderJellyfin
 
-Jellyfin implementation of `CoreModels.MediaProvider`. One of Plozz's two
-first-class backends; co-equal with `ProviderPlex`.
+Shared Jellyfin/Emby implementation of `CoreModels.MediaProvider`. Both use the
+MediaBrowser API lineage and intentionally share one implementation so every
+supported capability remains at parity.
 
 ## Responsibility
 
-- `JellyfinClient` (the `MediaProvider` conformer) — libraries, items,
+- `JellyfinProvider` (the `MediaProvider` conformer) — libraries, items,
   continue-watching, latest, seasons/episodes, search, watched state,
-  playback URL/streaming info, progress reporting, Quick Connect support.
+  playback URL/streaming info, progress reporting, and Jellyfin Quick Connect.
+- Emby compatibility — password authentication, Emby UDP discovery, chapter
+  intro/credit markers, BIF trickplay, combined theme media, and Emby playback
+  negotiation while preserving the shared feature surface.
 - `JellyfinDTOs` — server JSON shapes, mapped into `CoreModels` value types
   at the seam (no DTO ever leaks above this module).
 - `JellyfinDeviceProfile` + `JellyfinCapabilityProfile` — the
@@ -25,8 +29,10 @@ first-class backends; co-equal with `ProviderPlex`.
   flow through `CoreNetworking` redaction.
 - **Maps every error to `AppError`.** Transport / decode / HTTP-status
   failures don't escape this module raw.
-- **Co-equal with `ProviderPlex`.** Any new `MediaProvider` capability must
-  be implemented here whenever it's implemented for Plex (and vice versa).
+- **Jellyfin/Emby parity by construction.** Shared capabilities stay in one
+  implementation; provider-specific branches are limited to API differences.
+- **Co-equal with `ProviderPlex`.** Any new `MediaProvider` capability must be
+  implemented here whenever it's implemented for Plex (and vice versa).
 
 ## Where to look first
 

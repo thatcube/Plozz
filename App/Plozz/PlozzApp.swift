@@ -2,7 +2,7 @@ import SwiftUI
 import AppShell
 import CoreModels
 
-/// Plozz — an open-source tvOS Jellyfin client.
+/// Plozz — an open-source tvOS client for Jellyfin, Emby, Plex, and media shares.
 @main
 struct PlozzApp: App {
     init() {

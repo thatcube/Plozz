@@ -29,29 +29,42 @@ public struct AuthView: View {
 
 
     public var body: some View {
-        Group {
-        if showingPasswordSignIn {
+        if server.provider == .emby {
             PasswordSignInView(
                 viewModel: PasswordSignInViewModel(
                     service: PasswordSignInService(server: server, deviceID: deviceID),
                     onAuthenticated: onAuthenticated
                 ),
                 serverName: server.name,
-                onBack: { showingPasswordSignIn = false }
+                providerName: server.provider.displayName,
+                onBack: onCancel
             )
         } else {
-            QuickConnectView(
-                viewModel: QuickConnectViewModel(
-                    service: QuickConnectService(server: server, deviceID: deviceID),
-                    onAuthenticated: onAuthenticated
-                ),
-                serverName: server.name,
-                onCancel: onCancel,
-                secondaryAction: .init(title: "Sign in with username & password") {
-                    showingPasswordSignIn = true
+            Group {
+                if showingPasswordSignIn {
+                    PasswordSignInView(
+                        viewModel: PasswordSignInViewModel(
+                            service: PasswordSignInService(server: server, deviceID: deviceID),
+                            onAuthenticated: onAuthenticated
+                        ),
+                        serverName: server.name,
+                        providerName: server.provider.displayName,
+                        onBack: { showingPasswordSignIn = false }
+                    )
+                } else {
+                    QuickConnectView(
+                        viewModel: QuickConnectViewModel(
+                            service: QuickConnectService(server: server, deviceID: deviceID),
+                            onAuthenticated: onAuthenticated
+                        ),
+                        serverName: server.name,
+                        onCancel: onCancel,
+                        secondaryAction: .init(title: "Sign in with username & password") {
+                            showingPasswordSignIn = true
+                        }
+                    )
                 }
-            )
-        }
+            }
         }
     }
 }

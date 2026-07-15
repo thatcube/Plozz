@@ -1,6 +1,6 @@
 # FeatureDiscovery
 
-LAN auto-discovery of Jellyfin servers (Plozz's "drop the box on the
+LAN auto-discovery of Jellyfin and Emby servers (Plozz's "drop the box on the
 network and Plozz finds it" experience) plus the server-picker UI and
 last-server persistence. Plex relies on `plex.tv` for server enumeration
 in `ProviderPlex`, not LAN UDP.
@@ -11,7 +11,7 @@ in `ProviderPlex`, not LAN UDP.
   `AsyncStream<MediaServer>` of unique servers, capped by a timeout.
   Lives in its own portable file so view-models can depend on the
   abstraction without importing the `Network`-based implementation.
-- `JellyfinDiscoveryParser` — parses Jellyfin's UDP discovery responses
+- `JellyfinDiscoveryParser` — parses the shared Jellyfin/Emby UDP discovery responses
   into `MediaServer` value types (independent of the transport so it's
   unit-testable on Linux).
 - Concrete Apple-platform implementation — uses `Network` framework UDP
@@ -27,7 +27,7 @@ in `ProviderPlex`, not LAN UDP.
 
 - **No tokens stored here.** Only non-secret server metadata
   (`MediaServer`).
-- **Both providers represented.** Server selection must produce a
+- **Every provider represented.** Server selection must produce a
   `MediaServer` whose `provider: ProviderKind` is set correctly — the
   rest of the app branches on that.
 - **Network errors degrade visibly.** Discovery timing out is normal and

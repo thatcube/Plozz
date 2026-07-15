@@ -7,8 +7,13 @@ import CoreNetworking
 /// `CoreNetworking` so the discovery feature doesn't pull in a provider.
 public struct ServerValidator: Sendable {
     private let http: HTTPClient
+    private let provider: ProviderKind
 
-    public init(http: HTTPClient = URLSessionHTTPClient()) {
+    public init(
+        provider: ProviderKind = .jellyfin,
+        http: HTTPClient = URLSessionHTTPClient()
+    ) {
+        self.provider = provider
         self.http = http
     }
 
@@ -36,9 +41,9 @@ public struct ServerValidator: Sendable {
         }
         return MediaServer(
             id: info.Id ?? baseURL.absoluteString,
-            name: info.ServerName ?? baseURL.host ?? "Jellyfin Server",
+            name: info.ServerName ?? baseURL.host ?? "\(provider.displayName) Server",
             baseURL: baseURL,
-            provider: .jellyfin,
+            provider: provider,
             version: info.Version
         )
     }

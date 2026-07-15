@@ -30,13 +30,14 @@ public extension LastServerStoring {
 /// host + port so the same box entered two ways still de-duplicates.
 enum ServerIdentity {
     static func isSame(_ a: MediaServer, _ b: MediaServer) -> Bool {
+        guard a.provider == b.provider else { return false }
         if !a.id.isEmpty, !b.id.isEmpty, a.id == b.id { return true }
         return a.baseURL.host == b.baseURL.host && a.baseURL.port == b.baseURL.port
     }
 
     /// A stable dictionary key for a server (id when present, else host:port).
     static func key(for server: MediaServer) -> String {
-        server.identityKey
+        "\(server.provider.rawValue):\(server.identityKey)"
     }
 }
 

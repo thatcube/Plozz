@@ -76,7 +76,7 @@ public protocol ProviderTeardown: Sendable {
 /// A registry mapping `ProviderKind` → provider factory.
 ///
 /// The composition root (`AppShell`) registers the concrete factories it links
-/// (today: `.jellyfin` and `.plex`). Adding another backend is a one-line
+/// (today: `.jellyfin`, `.emby`, `.plex`, and `.mediaShare`). Adding another backend is a one-line
 /// `register(.someKind, …)` at the composition root — **no change** to this
 /// type, `AppState`, or any feature module.
 public final class ProviderRegistry: ProviderResolving, @unchecked Sendable {

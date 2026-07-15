@@ -346,6 +346,8 @@ public struct TranscodingProfile: Encodable, Sendable, Equatable {
     public var audioCodec: String
     public var breakOnNonKeyFrames: Bool
     public var enableSubtitlesInManifest: Bool
+    /// Emby's equivalent of Jellyfin's `EnableSubtitlesInManifest`.
+    public var manifestSubtitles: String? = "vtt"
     public var minSegments: Int
     public var maxAudioChannels: String
 
@@ -358,6 +360,7 @@ public struct TranscodingProfile: Encodable, Sendable, Equatable {
         case audioCodec = "AudioCodec"
         case breakOnNonKeyFrames = "BreakOnNonKeyFrames"
         case enableSubtitlesInManifest = "EnableSubtitlesInManifest"
+        case manifestSubtitles = "ManifestSubtitles"
         case minSegments = "MinSegments"
         case maxAudioChannels = "MaxAudioChannels"
     }

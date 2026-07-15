@@ -37,7 +37,11 @@ public struct ProviderBrandMark: View {
     }
 
     private var assetName: String {
-        provider == .plex ? "PlexLogo" : "JellyfinLogo"
+        switch provider {
+        case .jellyfin: "JellyfinLogo"
+        case .plex: "PlexLogo"
+        case .emby, .mediaShare: ""
+        }
     }
 
     /// Interior padding for the bundled logo asset. The Plex mark reads visibly
@@ -54,7 +58,11 @@ public struct ProviderBrandMark: View {
     /// A media share has no bundled brand logo (it isn't a product), so it draws
     /// an SF Symbol instead of a `*Logo` asset. `nil` for the real providers.
     private var systemSymbolName: String? {
-        provider == .mediaShare ? "externaldrive.connected.to.line.below.fill" : nil
+        switch provider {
+        case .emby: "play.rectangle.on.rectangle.fill"
+        case .mediaShare: "externaldrive.connected.to.line.below.fill"
+        case .jellyfin, .plex: nil
+        }
     }
 
     /// The transport badge string (SMB / WebDAV / …), only for a media share that
@@ -147,6 +155,8 @@ public struct ProviderBrandMark: View {
         switch provider {
         case .jellyfin:
             return Color(red: 0.53, green: 0.38, blue: 0.95)
+        case .emby:
+            return Color(red: 0.32, green: 0.75, blue: 0.38)
         case .plex:
             return Color(red: 0xE5 / 255, green: 0xA0 / 255, blue: 0x0D / 255)
         case .mediaShare:
@@ -163,6 +173,8 @@ public struct ProviderBrandMark: View {
             switch provider {
             case .jellyfin:
                 return Color(red: 0.38, green: 0.25, blue: 0.78)
+            case .emby:
+                return Color(red: 0.12, green: 0.48, blue: 0.18)
             case .plex:
                 return Color(red: 0.60, green: 0.39, blue: 0.00)
             case .mediaShare:
@@ -175,6 +187,8 @@ public struct ProviderBrandMark: View {
         switch provider {
         case .jellyfin:
             return Color(red: 0.65, green: 0.52, blue: 0.98)
+        case .emby:
+            return Color(red: 0.45, green: 0.90, blue: 0.50)
         case .plex:
             return Color(red: 0.96, green: 0.73, blue: 0.18)
         case .mediaShare:

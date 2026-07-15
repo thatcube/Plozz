@@ -33,6 +33,7 @@ public struct LyricLine: Codable, Hashable, Sendable {
 /// the keyless public fallback used when the server has none.
 public enum LyricsSource: String, Codable, Hashable, Sendable {
     case jellyfin
+    case emby
     case plex
     case lrclib
 
@@ -40,6 +41,7 @@ public enum LyricsSource: String, Codable, Hashable, Sendable {
     public var displayName: String {
         switch self {
         case .jellyfin: return "Jellyfin"
+        case .emby: return "Emby"
         case .plex: return "Plex"
         case .lrclib: return "LRCLIB"
         }

@@ -73,6 +73,12 @@ public struct HomeView: View {
     /// the bare app background. Defaults to a real image-load check; tests/previews
     /// can inject a deterministic one.
     private let heroArtworkValidator: HeroArtworkValidating
+    /// Re-checks an already-curated set's watch-state without re-fetching or
+    /// re-validating it — used by the external-refresh fast path so a warmed identity
+    /// index / cross-device watch doesn't trigger a full (multi-second) re-curate.
+    /// Defaults to a passthrough (tests + the no-op case); the app injects a bounded
+    /// provider watch-state re-enrichment.
+    private let heroWatchStateRefresher: @Sendable ([MediaItem]) async -> [MediaItem]
     /// Whether the on-device Home performance HUD is shown (Settings ▸ Diagnostics).
     /// A power-user/debug aid for validating smoothness on older hardware; off by
     /// default and fully inert when off.
@@ -146,6 +152,7 @@ public struct HomeView: View {
             }
         },
         heroArtworkValidator: HeroArtworkValidating? = nil,
+        heroWatchStateRefresher: @escaping @Sendable ([MediaItem]) async -> [MediaItem] = { $0 },
         homePerfOverlayEnabled: Bool = false,
         seerConnected: Bool = false,
         onRequestItem: ((MediaItem) async -> MediaAvailabilityStatus?)? = nil,
@@ -171,6 +178,7 @@ public struct HomeView: View {
         self.heroArtworkValidator = heroArtworkValidator ?? { urls in
             await HeroBackdropArtworkPolicy.warmFirstUsablePreview(for: urls)
         }
+        self.heroWatchStateRefresher = heroWatchStateRefresher
         self.homePerfOverlayEnabled = homePerfOverlayEnabled
         self.heroSeerConnected = seerConnected
         self.onRequestItem = onRequestItem
@@ -624,6 +632,36 @@ public struct HomeView: View {
             heroRuntime.completedKey = key
             return
         }
+
+        // External-refresh-only fast path. When the candidate structure is unchanged
+        // and only watch history may have moved (a watch mutation / warmed identity
+        // index bumped `externalRefreshRevision`), re-check the EXISTING curated
+        // items' watch-state instead of re-fetching Seerr/random and re-validating
+        // artwork. On-device profiling showed the full re-curate cost 2–8.5s and drove
+        // the main-thread hitches while browsing; reusing the loaded set avoids the
+        // network re-fetch, the artwork re-decode, and the hero's visual rebuild.
+        if let completed = heroRuntime.completedKey,
+           completed != key,
+           completed.matchesIgnoringExternalRefresh(key),
+           !heroRuntime.items.isEmpty {
+            let refreshed = await HomePerfDiagnostics.measureCurate {
+                await heroWatchStateRefresher(heroRuntime.items)
+            }
+            guard !Task.isCancelled else { return }
+            let durable = await viewModel.pendingHeroWatchMutations()
+            heroRuntime.durableWatchMutations = durable
+            heroRuntime.hasHydratedDurableMutations = true
+            let reconciled = heroCurator.reconcile(
+                refreshed,
+                settings: settings,
+                watchMutations: durable + heroRuntime.watchMutations
+            )
+            if reconciled != heroRuntime.items { heroRuntime.items = reconciled }
+            heroRuntime.completedKey = key
+            PlozzLog.boot("HomeHero.curate REFRESH-ONLY items=\(reconciled.count)")
+            return
+        }
+
         PlozzLog.boot(
             "HomeHero.curate START max=\(settings.maxItems) sources=\(settings.sources.count)"
         )

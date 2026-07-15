@@ -705,6 +705,28 @@ private func makeHeroWatchStateFetcher(
     }
 }
 
+/// A light re-enrichment of an already-curated hero set's watch-state — bounded
+/// per-item provider lookups, no Seerr/random re-fetch and no artwork re-validation.
+/// Backs `HomeView`'s external-refresh fast path so a warmed identity index or a
+/// cross-device watch drops a now-seen title without the full re-curate that
+/// profiling showed drove multi-second stalls while browsing. A no-op passthrough
+/// when Hide Watched is off (nothing to re-check).
+private func makeHeroWatchStateRefresher(
+    accounts: [ResolvedAccount],
+    hideWatched: Bool,
+    identitySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef]
+) -> @Sendable ([MediaItem]) async -> [MediaItem] {
+    let fetchWatchState = makeHeroWatchStateFetcher(accounts: accounts)
+    return { items in
+        await HeroCandidateWatchStateEnricher.enrich(
+            items,
+            enabled: hideWatched,
+            sourceRefs: identitySources,
+            fetch: fetchWatchState
+        )
+    }
+}
+
 /// Bounded, order-independent Random source fan-out. A typical Movies + TV setup
 /// now issues both native random queries concurrently instead of serially, while a
 /// large multi-server library set cannot flood the interactive networking pool.
@@ -1601,6 +1623,11 @@ private struct HomeTab: View {
                     hideWatched: heroSettings.settings.hideWatched
                 ),
                 heroRandomProvider: makeHeroRandomProvider(
+                    accounts: accounts,
+                    hideWatched: heroSettings.settings.hideWatched,
+                    identitySources: identitySources
+                ),
+                heroWatchStateRefresher: makeHeroWatchStateRefresher(
                     accounts: accounts,
                     hideWatched: heroSettings.settings.hideWatched,
                     identitySources: identitySources

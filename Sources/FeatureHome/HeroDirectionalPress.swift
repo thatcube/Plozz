@@ -208,8 +208,8 @@ struct HeroTextLegibilityShadow: ViewModifier {
 
     func body(content: Content) -> some View {
         content.shadow(
-            color: (colorScheme == .dark ? Color.black : Color.white).opacity(0.28),
-            radius: 2,
+            color: (colorScheme == .dark ? Color.black : Color.white).opacity(0.4),
+            radius: 4,
             y: 1
         )
     }

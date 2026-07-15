@@ -112,6 +112,8 @@ public struct SettingsView: View {
     private let plexHomeUsersFetcher: (String) async -> [PlexHomeUser]
     private let onSelectPlexHomeUser: (String, PlexHomeUser?) -> Void
     private let onSetSeerrUser: (String, SeerUser?) -> Void
+    private let searchIndexStatus: @Sendable () async -> SearchIndexDiagnosticsSnapshot
+    private let rebuildSearchIndex: @Sendable () async -> Void
 
     public init(
         subtitleBehavior: SubtitleBehaviorModel,
@@ -160,7 +162,11 @@ public struct SettingsView: View {
         onResetToFirstRun: @escaping () -> Void,
         plexHomeUsersFetcher: @escaping (String) async -> [PlexHomeUser],
         onSelectPlexHomeUser: @escaping (String, PlexHomeUser?) -> Void,
-        onSetSeerrUser: @escaping (String, SeerUser?) -> Void = { _, _ in }
+        onSetSeerrUser: @escaping (String, SeerUser?) -> Void = { _, _ in },
+        searchIndexStatus: @escaping @Sendable () async -> SearchIndexDiagnosticsSnapshot = {
+            SearchIndexDiagnosticsSnapshot()
+        },
+        rebuildSearchIndex: @escaping @Sendable () async -> Void = {}
     ) {
         self.subtitleBehavior = subtitleBehavior
         self.spoilers = spoilers
@@ -209,6 +215,8 @@ public struct SettingsView: View {
         self.plexHomeUsersFetcher = plexHomeUsersFetcher
         self.onSelectPlexHomeUser = onSelectPlexHomeUser
         self.onSetSeerrUser = onSetSeerrUser
+        self.searchIndexStatus = searchIndexStatus
+        self.rebuildSearchIndex = rebuildSearchIndex
     }
 
     /// Whether the active profile includes at least one server that can download
@@ -679,7 +687,9 @@ public struct SettingsView: View {
                 accounts: accounts,
                 diagnostics: diagnostics,
                 crashReporting: crashReporting,
-                crashReportingConfigured: crashReportingConfigured
+                crashReportingConfigured: crashReportingConfigured,
+                searchIndexStatus: searchIndexStatus,
+                rebuildSearchIndex: rebuildSearchIndex
             )
         case .recentActivity:
             RecentActivityDetailView(

@@ -79,6 +79,7 @@ public struct LocalSearchRequest: Sendable {
     public let excludedLibraryKeys: Set<String>
     public let limit: Int
     public let minimumSemanticScore: Float
+    public let rankingWeights: HybridRankingWeights
 
     public init(
         queryText: String,
@@ -87,7 +88,8 @@ public struct LocalSearchRequest: Sendable {
         intent: LocalSearchIntent = LocalSearchIntent(),
         excludedLibraryKeys: Set<String> = [],
         limit: Int = 40,
-        minimumSemanticScore: Float = -.infinity
+        minimumSemanticScore: Float = -.infinity,
+        rankingWeights: HybridRankingWeights = HybridRankingWeights()
     ) {
         self.queryText = queryText
         self.queryVector = queryVector
@@ -96,6 +98,7 @@ public struct LocalSearchRequest: Sendable {
         self.excludedLibraryKeys = excludedLibraryKeys
         self.limit = limit
         self.minimumSemanticScore = minimumSemanticScore
+        self.rankingWeights = rankingWeights
     }
 }
 
@@ -536,6 +539,30 @@ public actor LocalSearchIndex {
         return result
     }
 
+    public func needsFullScan(
+        scope: SearchScanScope,
+        refreshInterval: TimeInterval,
+        now: Date = Date()
+    ) throws -> Bool {
+        try ensureOpen()
+        if try checkpoint(for: scope) != nil { return true }
+        var lastFullScanAt: Date?
+        try query("""
+        SELECT last_full_scan_at FROM sync_state
+        WHERE account_id=? AND provider_user_key=? AND library_id=? AND kind=?;
+        """, bind: { statement in
+            bind(scope, to: statement)
+        }) { statement in
+            if sqlite3_column_type(statement, 0) != SQLITE_NULL {
+                lastFullScanAt = Date(
+                    timeIntervalSince1970: sqlite3_column_double(statement, 0)
+                )
+            }
+        }
+        guard let lastFullScanAt else { return true }
+        return now.timeIntervalSince(lastFullScanAt) >= refreshInterval
+    }
+
     public func remove(accountID: String) throws {
         try ensureOpen()
         try execute("DELETE FROM documents WHERE account_id=?;") { statement in
@@ -571,6 +598,83 @@ public actor LocalSearchIndex {
             try execute("DELETE FROM sync_state;")
         }
         vectorCache.removeAll()
+    }
+
+    public func retainOnly(
+        accountIDs: Set<String>,
+        reconciledAccountIDs: Set<String>,
+        libraryKeys: Set<String>,
+        providerUserKeysByAccount: [String: String]
+    ) throws {
+        try ensureOpen()
+        struct StoredScope: Hashable {
+            let accountID: String
+            let libraryID: String
+            let providerUserKey: String
+        }
+        var removals: [StoredScope] = []
+        try query("""
+        SELECT DISTINCT account_id, library_id, provider_user_key FROM documents;
+        """) {
+            statement in
+            guard let accountID = columnText(statement, 0),
+                  let libraryID = columnText(statement, 1),
+                  let providerUserKey = columnText(statement, 2) else {
+                return
+            }
+            let shouldRemoveAccount = !accountIDs.contains(accountID)
+            let shouldReconcile = reconciledAccountIDs.contains(accountID)
+            let wrongLibrary = shouldReconcile &&
+                !libraryKeys.contains("\(accountID):\(libraryID)")
+            let wrongProviderUser = providerUserKeysByAccount[accountID]
+                .map { $0 != providerUserKey } ?? false
+            if shouldRemoveAccount || wrongLibrary || wrongProviderUser {
+                removals.append(StoredScope(
+                    accountID: accountID,
+                    libraryID: libraryID,
+                    providerUserKey: providerUserKey
+                ))
+            }
+        }
+        guard !removals.isEmpty else { return }
+        try transaction {
+            for removal in removals {
+                try execute("""
+                DELETE FROM documents
+                WHERE account_id=? AND library_id=? AND provider_user_key=?;
+                """) { statement in
+                    bindText(removal.accountID, to: statement, index: 1)
+                    bindText(removal.libraryID, to: statement, index: 2)
+                    bindText(removal.providerUserKey, to: statement, index: 3)
+                }
+                try execute("""
+                DELETE FROM sync_state
+                WHERE account_id=? AND library_id=? AND provider_user_key=?;
+                """) { statement in
+                    bindText(removal.accountID, to: statement, index: 1)
+                    bindText(removal.libraryID, to: statement, index: 2)
+                    bindText(removal.providerUserKey, to: statement, index: 3)
+                }
+            }
+        }
+        vectorCache.removeAll()
+    }
+
+    public func releaseVectorCache() {
+        vectorCache.removeAll()
+    }
+
+    public func deleteCacheFiles() throws {
+        connection?.close()
+        connection = nil
+        vectorCache.removeAll()
+        for url in [
+            databaseURL,
+            URL(fileURLWithPath: databaseURL.path + "-wal"),
+            URL(fileURLWithPath: databaseURL.path + "-shm")
+        ] where FileManager.default.fileExists(atPath: url.path) {
+            try FileManager.default.removeItem(at: url)
+        }
     }
 
     public func documentCount() throws -> Int {
@@ -649,7 +753,9 @@ public actor LocalSearchIndex {
                 semanticScore: score.score
             ))
         }
-        return try await HybridRankingPolicy().rank(
+        return try await HybridRankingPolicy(
+            weights: request.rankingWeights
+        ).rank(
             rankingInputs,
             query: request.queryText,
             limit: request.limit

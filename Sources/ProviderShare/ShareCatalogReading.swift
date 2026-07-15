@@ -30,6 +30,14 @@ public protocol ShareCatalogReading: Sendable {
     /// Exact indexed series count for a library.
     func seriesCount(in library: CatalogLibrary) async -> Int
 
+    /// Transport-free page for local description indexing.
+    func searchCatalogItems(
+        libraryID: String,
+        kind: MediaItemKind,
+        offset: Int,
+        limit: Int
+    ) async -> MediaPage
+
     /// Seasons under a series.
     func seasons(seriesKey: String) async -> [MediaItem]
 
@@ -57,3 +65,14 @@ public protocol ShareCatalogReading: Sendable {
 /// synchronous actor-isolated reads, which satisfy the `async` requirements when
 /// the store is used through `any ShareCatalogReading`.
 extension ShareCatalogStore: ShareCatalogReading {}
+
+public extension ShareCatalogReading {
+    func searchCatalogItems(
+        libraryID: String,
+        kind: MediaItemKind,
+        offset: Int,
+        limit: Int
+    ) async -> MediaPage {
+        MediaPage(items: [], startIndex: offset, totalCount: 0)
+    }
+}

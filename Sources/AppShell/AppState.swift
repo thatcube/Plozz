@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import AppRuntime
+import SearchIndexKit
 import CoreModels
 import CoreNetworking
 import FeatureAuth
@@ -507,7 +508,9 @@ public final class AppState {
     /// status, the active-share set, and the "Scan now" entry point. Built in
     /// `init` once the accounts hub exists (it depends into the hub for rescans).
     public let mediaShare: MediaShareRuntimeFacet
+    public let searchIndexCoordinator: SearchIndexCoordinator
     private let durableLocalStateStore: DurableLocalStateStore?
+    private var searchIndexRefreshGeneration = 0
     /// Optional tvOS system-user seam (default app-owned no-op). See
     /// `SystemProfileBridging`.
     private let systemBridge: SystemProfileBridging
@@ -518,6 +521,7 @@ public final class AppState {
         registry: ProviderRegistry? = nil,
         authenticatedHTTPResolver: (any AuthenticatedHTTPResourceResolving)? = nil,
         mediaShareRuntime: (any MediaShareRuntime)? = nil,
+        searchIndexCoordinator: SearchIndexCoordinator? = nil,
         durableLocalStateStore: DurableLocalStateStore? = nil,
         profilesModel: ProfilesModel? = nil,
         systemBridge: SystemProfileBridging? = nil,
@@ -562,6 +566,8 @@ public final class AppState {
             resolvedDurableLocalStateStore = nil
         }
         self.durableLocalStateStore = resolvedDurableLocalStateStore
+        self.searchIndexCoordinator =
+            searchIndexCoordinator ?? SearchIndexCoordinator()
         let resolvedRuntime: any MediaShareRuntime = mediaShareRuntime
             ?? AppShellMediaShareRuntimeFactory.make(accountStore: resolvedAccountStore)
         let defaultAuthenticatedHTTPResolver: ManagedAuthenticatedHTTPResolver?
@@ -857,6 +863,46 @@ public final class AppState {
     public var mayRememberProfileSelection: Bool { systemBridge.mayRememberProfileSelection }
 
     public var lastServerStore: LastServerStoring { UserDefaultsLastServerStore() }
+
+    public func refreshSearchIndex() {
+        searchIndexRefreshGeneration &+= 1
+        let generation = searchIndexRefreshGeneration
+        let namespace = profilesModel.activeNamespace
+        let accounts = accountsProviders.homeAccounts
+        let disabledKeys =
+            profileSettings.homeLibraryVisibilityModel.visibility.disabledKeys
+        let homeUsers = plexHomeUsers.resolvedHomeUsers
+        let profile = profilesModel.activeProfile
+        let providerUserKeys = SearchIndexSourceBuilder.providerUserKeys(
+            accounts: accounts,
+            plexHomeUsers: homeUsers,
+            profile: profile
+        )
+        let coordinator = searchIndexCoordinator
+        Task {
+            let sources = await SearchIndexSourceBuilder.build(
+                accounts: accounts,
+                disabledLibraryKeys: disabledKeys,
+                plexHomeUsers: homeUsers,
+                profile: profile
+            )
+            guard generation == self.searchIndexRefreshGeneration else { return }
+            await coordinator.reconcile(
+                profileNamespace: namespace,
+                sources: sources,
+                retainingAccountIDs: Set(accounts.map(\.account.id)),
+                providerUserKeysByAccount: providerUserKeys
+            )
+        }
+    }
+
+    public func setSearchIndexForeground(_ value: Bool) {
+        Task { await searchIndexCoordinator.setForeground(value) }
+    }
+
+    public func handleSearchIndexMemoryPressure() {
+        Task { await searchIndexCoordinator.handleMemoryPressure() }
+    }
 
     /// Maps a household **profile** to a Seerr user (or clears the mapping when
     /// `user` is `nil`, reverting to requesting as admin). Non-secret metadata,
@@ -1624,6 +1670,7 @@ public final class AppState {
         }
         plexHomeUsers.forgetAccount(id)
         apply(.accountsChanged(accountsProviders.accounts))
+        Task { await searchIndexCoordinator.purge(accountID: id) }
     }
 
     /// Signs out of the primary active account (the one Settings currently shows).
@@ -1661,6 +1708,9 @@ public final class AppState {
             plexHomeUsers.forgetAccount(account.id)
         }
         apply(.accountsChanged(accountsProviders.accounts))
+        if accountsProviders.accounts.isEmpty {
+            Task { await searchIndexCoordinator.purgeAll() }
+        }
     }
 
     /// Debug-only: wipes everything that gates the first-run experience —

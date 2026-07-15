@@ -14,6 +14,7 @@ import CoreModels
 public final class SearchViewModel {
     public var query: String = ""
     public private(set) var state: LoadState<[SearchSection]> = .idle
+    public private(set) var isSemanticIndexBuilding = false
 
     private let accounts: [ResolvedAccount]
     private let limit: Int
@@ -38,9 +39,12 @@ public final class SearchViewModel {
     /// matched a playable library result. The cue is shown only when at least one
     /// season is genuinely requestable, never from aggregate partial status alone.
     private let seerRequestAvailability: (@Sendable (MediaItem) async -> MediaRequestAvailability?)?
+    private let semanticSearch: (@Sendable (String, Set<String>) async -> [MediaItem])?
+    private let semanticIndexBuilding: (@Sendable () async -> Bool)?
     /// Best-effort cue enrichment runs after the playable search results publish.
     /// A new query cancels it so stale availability can never mutate fresh results.
     private nonisolated(unsafe) var availabilityCueEnrichmentTask: Task<Void, Never>?
+    private nonisolated(unsafe) var semanticEnrichmentTask: Task<Void, Never>?
 
     public init(
         accounts: [ResolvedAccount],
@@ -49,7 +53,9 @@ public final class SearchViewModel {
         identitySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef] = { _ in [] },
         disabledLibraryKeys: @escaping () -> Set<String> = { [] },
         seerSearch: (@Sendable (String) async -> [MediaItem])? = nil,
-        seerRequestAvailability: (@Sendable (MediaItem) async -> MediaRequestAvailability?)? = nil
+        seerRequestAvailability: (@Sendable (MediaItem) async -> MediaRequestAvailability?)? = nil,
+        semanticSearch: (@Sendable (String, Set<String>) async -> [MediaItem])? = nil,
+        semanticIndexBuilding: (@Sendable () async -> Bool)? = nil
     ) {
         self.accounts = accounts
         self.limit = limit
@@ -58,10 +64,13 @@ public final class SearchViewModel {
         self.disabledLibraryKeys = disabledLibraryKeys
         self.seerSearch = seerSearch
         self.seerRequestAvailability = seerRequestAvailability
+        self.semanticSearch = semanticSearch
+        self.semanticIndexBuilding = semanticIndexBuilding
     }
 
     deinit {
         availabilityCueEnrichmentTask?.cancel()
+        semanticEnrichmentTask?.cancel()
     }
 
     /// Runs a debounced search for the current `query`. Safe to call on every
@@ -70,6 +79,9 @@ public final class SearchViewModel {
     public func search() async {
         availabilityCueEnrichmentTask?.cancel()
         availabilityCueEnrichmentTask = nil
+        semanticEnrichmentTask?.cancel()
+        semanticEnrichmentTask = nil
+        isSemanticIndexBuilding = false
         let requested = SearchPolicy.normalized(query)
 
         guard SearchPolicy.shouldSearch(requested) else {
@@ -135,12 +147,21 @@ public final class SearchViewModel {
                 discoveryResults: discoveryItems,
                 libraryResults: dedupedLibrary
             )
-        } else if let libraryError {
-            // Nothing to show and the library search failed outright — surface the
-            // error (matches prior behaviour). A Seerr-only failure just reads empty.
-            state = .failed(libraryError)
+            scheduleSemanticEnrichment(
+                requestedQuery: requested,
+                existingItems: sections.flatMap(\.items)
+            )
         } else {
-            state = .empty
+            if semanticSearch != nil {
+                state = .empty
+                scheduleSemanticEnrichment(
+                    requestedQuery: requested,
+                    existingItems: [],
+                    fallbackError: libraryError
+                )
+            } else {
+                state = libraryError.map(LoadState.failed) ?? .empty
+            }
         }
     }
 
@@ -160,6 +181,61 @@ public final class SearchViewModel {
     /// Production UI never waits for this work.
     func waitForAvailabilityCueEnrichment() async {
         await availabilityCueEnrichmentTask?.value
+    }
+
+    func waitForSemanticEnrichment() async {
+        await semanticEnrichmentTask?.value
+    }
+
+    private func semanticItems(_ items: [MediaItem]) -> [MediaItem] {
+        let serverInfo = accounts.sourceServerInfo()
+        return SearchDeduplicator.deduplicate(
+            items,
+            identitySources: identitySources,
+            serverInfo: { serverInfo[$0] }
+        )
+    }
+
+    private func scheduleSemanticEnrichment(
+        requestedQuery: String,
+        existingItems: [MediaItem],
+        fallbackError: AppError? = nil
+    ) {
+        guard let semanticSearch else { return }
+        let excluded = disabledLibraryKeys()
+        semanticEnrichmentTask = Task { [weak self] in
+            let results = await semanticSearch(requestedQuery, excluded)
+            let indexIsBuilding = await self?.semanticIndexBuilding?() ?? false
+            guard !Task.isCancelled, let self else { return }
+            guard SearchPolicy.isCurrent(
+                requestedQuery: requestedQuery,
+                liveQuery: self.query
+            ) else { return }
+            let deduped = self.semanticItems(results)
+            guard let section = SearchSection.matchesByDescriptionSection(
+                semanticResults: deduped,
+                existingItems: existingItems,
+                limit: self.limit
+            ) else {
+                self.isSemanticIndexBuilding = indexIsBuilding
+                if let fallbackError, case .empty = self.state {
+                    self.state = .failed(fallbackError)
+                    self.isSemanticIndexBuilding = false
+                }
+                return
+            }
+            switch self.state {
+            case let .loaded(currentSections):
+                guard !currentSections.contains(where: {
+                    $0.title == SearchSection.matchesByDescriptionTitle
+                }) else { return }
+                self.state = .loaded(currentSections + [section])
+            case .empty:
+                self.state = .loaded([section])
+            default:
+                return
+            }
+        }
     }
 
     private func scheduleAvailabilityCueEnrichment(

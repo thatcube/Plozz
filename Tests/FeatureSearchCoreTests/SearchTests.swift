@@ -143,6 +143,27 @@ final class SearchSectionTests: XCTestCase {
         XCTAssertNil(SearchSection.availabilityCue(for: discovery(1, .movie, availability: .partiallyAvailable)))
         XCTAssertNil(SearchSection.availabilityCue(for: MediaItem(id: "s", title: "Show", kind: .series)))
     }
+
+    func testDescriptionMatchesDoNotCollapseUnrelatedEpisodesWithSameTitle() {
+        let literal = MediaItem(
+            id: "pilot-a",
+            title: "Pilot",
+            kind: .episode,
+            sourceAccountID: "a"
+        )
+        let semantic = MediaItem(
+            id: "pilot-b",
+            title: "Pilot",
+            kind: .episode,
+            sourceAccountID: "b"
+        )
+        let section = SearchSection.matchesByDescriptionSection(
+            semanticResults: [semantic],
+            existingItems: [literal],
+            limit: 10
+        )
+        XCTAssertEqual(section?.items.map(\.id), ["pilot-b"])
+    }
 }
 
 @MainActor
@@ -152,6 +173,21 @@ final class SearchViewModelTests: XCTestCase {
             ResolvedAccount(account: Account(id: provider.accountID, from: provider.session), provider: provider)
         }
         return SearchViewModel(accounts: accounts, debounceMilliseconds: debounceMilliseconds)
+    }
+
+    private func makeSemanticVM(
+        provider: SearchStubProvider,
+        semanticSearch: @escaping @Sendable (String, Set<String>) async -> [MediaItem]
+    ) -> SearchViewModel {
+        let account = ResolvedAccount(
+            account: Account(id: provider.accountID, from: provider.session),
+            provider: provider
+        )
+        return SearchViewModel(
+            accounts: [account],
+            debounceMilliseconds: 0,
+            semanticSearch: semanticSearch
+        )
     }
 
     /// Builds a view model wired to a Seerr discovery search closure.
@@ -208,6 +244,74 @@ final class SearchViewModelTests: XCTestCase {
         await vm.search()
 
         if case .empty = vm.state {} else { XCTFail("Expected empty, got \(vm.state)") }
+    }
+
+    func testSemanticResultsAppendWithoutReorderingLiteralSections() async {
+        let provider = SearchStubProvider(results: [
+            MediaItem(id: "movie", title: "Exact", kind: .movie)
+        ])
+        let vm = makeSemanticVM(provider: provider) { _, _ in
+            [MediaItem(
+                id: "episode",
+                title: "Dinner",
+                kind: .episode,
+                overview: "Friends wait at a restaurant.",
+                sourceAccountID: provider.accountID
+            )]
+        }
+        vm.query = "friends wait at a restaurant"
+        await vm.search()
+        await vm.waitForSemanticEnrichment()
+
+        guard case let .loaded(sections) = vm.state else {
+            return XCTFail("Expected loaded sections")
+        }
+        XCTAssertEqual(sections.map(\.title), [
+            "Movies", SearchSection.matchesByDescriptionTitle
+        ])
+        XCTAssertEqual(sections.first?.items.map(\.id), ["movie"])
+        XCTAssertEqual(sections.last?.items.map(\.id), ["episode"])
+    }
+
+    func testSemanticOnlyResultLoadsAfterEmptyLiteralSearch() async {
+        let provider = SearchStubProvider(results: [])
+        let vm = makeSemanticVM(provider: provider) { _, _ in
+            [MediaItem(
+                id: "episode",
+                title: "Dinner",
+                kind: .episode,
+                sourceAccountID: provider.accountID
+            )]
+        }
+        vm.query = "the dinner episode"
+        await vm.search()
+        await vm.waitForSemanticEnrichment()
+
+        guard case let .loaded(sections) = vm.state else {
+            return XCTFail("Expected semantic result")
+        }
+        XCTAssertEqual(sections.map(\.title), [
+            SearchSection.matchesByDescriptionTitle
+        ])
+    }
+
+    func testSemanticDuplicateOfLiteralResultIsNotAppended() async {
+        let item = MediaItem(
+            id: "movie",
+            title: "Exact",
+            kind: .movie,
+            providerIDs: ["Tmdb": "1"]
+        )
+        let provider = SearchStubProvider(results: [item])
+        let vm = makeSemanticVM(provider: provider) { _, _ in [item] }
+        vm.query = "exact"
+        await vm.search()
+        await vm.waitForSemanticEnrichment()
+
+        guard case let .loaded(sections) = vm.state else {
+            return XCTFail("Expected literal result")
+        }
+        XCTAssertEqual(sections.map(\.title), ["Movies"])
     }
 
     func testFailureSurfacesError() async {

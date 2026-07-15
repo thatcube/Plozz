@@ -429,6 +429,39 @@ final class LocalSearchIndexTests: XCTestCase {
         XCTAssertEqual(afterSecondEmpty, 0)
     }
 
+    func testCompletedScopeSkipsUntilRefreshIntervalExpires() async throws {
+        let store = LocalSearchIndex(scopeKey: "profile", directory: try tempDirectory())
+        let token = await store.activateWriteGeneration()
+        let scope = SearchScanScope(
+            accountID: "a",
+            providerUserKey: "u",
+            libraryID: "shows",
+            kind: .episode
+        )
+        let checkpoint = try await store.beginOrResumeFullScan(
+            scope: scope,
+            writeToken: token
+        )
+        try await store.finishFullScan(
+            checkpoint: checkpoint,
+            writeToken: token,
+            expectedTotalCount: 0,
+            completedAt: Date(timeIntervalSince1970: 1_000)
+        )
+        let recent = try await store.needsFullScan(
+            scope: scope,
+            refreshInterval: 3_600,
+            now: Date(timeIntervalSince1970: 2_000)
+        )
+        let stale = try await store.needsFullScan(
+            scope: scope,
+            refreshInterval: 3_600,
+            now: Date(timeIntervalSince1970: 5_000)
+        )
+        XCTAssertFalse(recent)
+        XCTAssertTrue(stale)
+    }
+
     func testPersistedVectorsProduceSameRankingAfterReopen() async throws {
         let directory = try tempDirectory()
         let firstStore = LocalSearchIndex(scopeKey: "profile", directory: directory)

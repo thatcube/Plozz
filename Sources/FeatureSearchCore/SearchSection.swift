@@ -32,6 +32,45 @@ public struct SearchSection: Identifiable, Equatable, Sendable {
     /// The title of the discovery ("not in your library") section, appended after
     /// the library sections when Seerr is connected and returns requestable hits.
     public static let notInLibraryTitle = "Not in Your Library"
+    public static let matchesByDescriptionTitle = "Matches by Description"
+
+    public static func matchesByDescriptionSection(
+        semanticResults: [MediaItem],
+        existingItems: [MediaItem],
+        limit: Int
+    ) -> SearchSection? {
+        let existingIdentities = Set(existingItems.flatMap {
+            MediaItemIdentity.identities(for: $0)
+        })
+        let existingSources = Set(existingItems.flatMap(sourceKeys))
+        var seenIdentities = Set<MediaIdentity>()
+        var seenSources = Set<String>()
+        let filtered = semanticResults.filter { item in
+            let identities = MediaItemIdentity.identities(for: item)
+            let sources = sourceKeys(item)
+            guard existingIdentities.isDisjoint(with: identities),
+                  existingSources.isDisjoint(with: sources),
+                  seenIdentities.isDisjoint(with: identities),
+                  seenSources.isDisjoint(with: sources) else {
+                return false
+            }
+            seenIdentities.formUnion(identities)
+            seenSources.formUnion(sources)
+            return true
+        }
+        let capped = limit > 0 ? Array(filtered.prefix(limit)) : filtered
+        return capped.isEmpty
+            ? nil
+            : SearchSection(title: matchesByDescriptionTitle, items: capped)
+    }
+
+    private static func sourceKeys(_ item: MediaItem) -> [String] {
+        var keys = item.sources.map(\.id)
+        if let accountID = item.sourceAccountID {
+            keys.append("\(accountID):\(item.id)")
+        }
+        return keys
+    }
 
     /// Compact Search-only cue for a playable series whose Seerr match says only
     /// part of the show is available. Ordinary library cards have no availability,

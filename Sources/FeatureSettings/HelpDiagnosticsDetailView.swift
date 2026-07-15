@@ -4,6 +4,28 @@ import CoreModels
 import CoreNetworking
 import CoreUI
 
+public struct SearchIndexDiagnosticsSnapshot: Equatable, Sendable {
+    public var documentCount: Int
+    public var databaseBytes: UInt64
+    public var isBuilding: Bool
+    public var queuedScopes: Int
+    public var pausedReason: String?
+
+    public init(
+        documentCount: Int = 0,
+        databaseBytes: UInt64 = 0,
+        isBuilding: Bool = false,
+        queuedScopes: Int = 0,
+        pausedReason: String? = nil
+    ) {
+        self.documentCount = documentCount
+        self.databaseBytes = databaseBytes
+        self.isBuilding = isBuilding
+        self.queuedScopes = queuedScopes
+        self.pausedReason = pausedReason
+    }
+}
+
 /// Level-2 "Help & Diagnostics" page: the user-facing bug-report path plus the
 /// on-device diagnostics controls.
 ///
@@ -24,6 +46,10 @@ struct HelpDiagnosticsDetailView: View {
     /// Whether this build shipped with a crash-reporting endpoint. When `false`
     /// the opt-in is shown disabled with a note (there's nowhere to send reports).
     let crashReportingConfigured: Bool
+    let searchIndexStatus: @Sendable () async -> SearchIndexDiagnosticsSnapshot
+    let rebuildSearchIndex: @Sendable () async -> Void
+    @State private var searchStatus = SearchIndexDiagnosticsSnapshot()
+    @State private var confirmSearchRebuild = false
 
     /// Email surfaced as a no-GitHub-account fallback for reporting problems.
     private static let feedbackEmail = "feedback@plozz.app"
@@ -53,6 +79,7 @@ struct HelpDiagnosticsDetailView: View {
                 sendDiagnosticsPanel
                 crashReportingPanel
                 diagnosticsPanel
+                searchIndexPanel
                 recentActivityPanel
             }
             .frame(maxWidth: 1200, alignment: .leading)
@@ -61,6 +88,24 @@ struct HelpDiagnosticsDetailView: View {
             .padding(.vertical, 40)
         }
         .scrollClipDisabled()
+        .task {
+            searchStatus = await searchIndexStatus()
+        }
+        .confirmationDialog(
+            "Rebuild description search?",
+            isPresented: $confirmSearchRebuild,
+            titleVisibility: .visible
+        ) {
+            Button("Rebuild Search Index", role: .destructive) {
+                Task {
+                    await rebuildSearchIndex()
+                    searchStatus = await searchIndexStatus()
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Title search keeps working while Plozz rebuilds descriptions locally.")
+        }
     }
 
     /// Whether the on-demand diagnostics upload can run right now: the build
@@ -159,6 +204,34 @@ struct HelpDiagnosticsDetailView: View {
 
             Toggle("Home Performance Overlay", isOn: $diagnostics.settings.homePerformanceOverlayEnabled)
                 .toggleStyle(SettingsSwitchToggleStyle())
+        }
+    }
+
+    private var searchIndexPanel: some View {
+        SettingsPanel(
+            title: "Description Search",
+            footer: "Built and stored only on this Apple TV. Queries, titles and descriptions are never sent to an AI service."
+        ) {
+            VStack(alignment: .leading, spacing: 16) {
+                infoRow("Titles", searchStatus.documentCount.formatted())
+                infoRow(
+                    "Storage",
+                    ByteCountFormatter.string(
+                        fromByteCount: Int64(searchStatus.databaseBytes),
+                        countStyle: .file
+                    )
+                )
+                infoRow(
+                    "Status",
+                    searchStatus.isBuilding
+                        ? "Building (\(searchStatus.queuedScopes) remaining)"
+                        : (searchStatus.pausedReason.map { "Paused: \($0)" } ?? "Ready")
+                )
+                Button("Rebuild Search Index") {
+                    confirmSearchRebuild = true
+                }
+                .buttonStyle(SettingsFocusButtonStyle())
+            }
         }
     }
 

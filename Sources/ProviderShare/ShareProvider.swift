@@ -17,7 +17,7 @@ import MediaTransportCore
 /// watch-state stamping/writes through `ShareWatchStateService`, and playback
 /// file access (locator, sidecar subtitles, stream probe) through
 /// `SharePlaybackSourceService`. It keeps only browse/playback orchestration.
-public struct ShareProvider: MediaProvider {
+public struct ShareProvider: MediaProvider, SearchCatalogProviding {
     public let kind: ProviderKind = .mediaShare
     public let session: UserSession
     public let localMediaContext: LocalMediaContext
@@ -53,6 +53,74 @@ public struct ShareProvider: MediaProvider {
             catalogCoordinator: catalogCoordinator,
             streamProber: streamProber
         )
+    }
+
+    private struct ShareProviderSearchCursor: Codable {
+        let offset: Int
+    }
+
+    public func searchCatalogPage(
+        _ request: SearchCatalogPageRequest
+    ) async throws -> SearchCatalogPage {
+        guard supportsSearchCatalog(
+            libraryID: request.libraryID,
+            kind: request.kind
+        ) else {
+            return .unsupported
+        }
+        let offset: Int
+        if let cursor = request.cursor {
+            guard let value = try? JSONDecoder().decode(
+                ShareProviderSearchCursor.self,
+                from: cursor
+            ) else {
+                throw AppError.decoding
+            }
+            offset = value.offset
+        } else {
+            offset = 0
+        }
+        guard let catalog = await catalogCoordinator.existingCatalogReader(
+            accountKey: localMediaContext.accountID
+        ) else {
+            return SearchCatalogPage(
+                records: [],
+                nextCursor: nil,
+                totalCount: 0
+            )
+        }
+        let page = await catalog.searchCatalogItems(
+            libraryID: request.libraryID,
+            kind: request.kind,
+            offset: offset,
+            limit: request.limit
+        )
+        let nextCursor = !page.items.isEmpty && page.hasMore
+            ? try JSONEncoder().encode(
+                ShareProviderSearchCursor(offset: page.endIndex)
+            )
+            : nil
+        return SearchCatalogPage(
+            records: page.items.map(SearchCatalogRecord.init(item:)),
+            nextCursor: nextCursor,
+            totalCount: page.totalCount
+        )
+    }
+
+    private func supportsSearchCatalog(
+        libraryID: String,
+        kind: MediaItemKind
+    ) -> Bool {
+        switch (libraryID, kind) {
+        case (ShareCatalogID.moviesLibrary, .movie),
+             (ShareCatalogID.tvLibrary, .series),
+             (ShareCatalogID.tvLibrary, .episode),
+             (ShareCatalogID.animeLibrary, .series),
+             (ShareCatalogID.animeLibrary, .episode):
+            true
+        default:
+            false
+        }
     }
 
     /// Test seam with an injectable durable store and catalog reader.

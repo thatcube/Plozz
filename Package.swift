@@ -220,6 +220,7 @@ let package = Package(
                 "CoreNetworking",
                 "MediaTransportCore",
                 "MetadataKit",
+                "SearchIndexKit",
                 .product(name: "SMBClient", package: "SMBClient"),
             ]
         ),

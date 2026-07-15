@@ -3,6 +3,9 @@ import SwiftUI
 #if canImport(AVFoundation)
 import AVFoundation
 #endif
+#if canImport(UIKit)
+import UIKit
+#endif
 import AppRuntime
 import CoreModels
 import CoreNetworking
@@ -168,6 +171,7 @@ public struct RootView: View {
                         crashReportingModel: appState.crashReportingModel,
                         crashReportingConfigured: crashReporting.isConfigured,
                         shareScanStatusModel: appState.mediaShare.scanStatus,
+                        searchIndexCoordinator: appState.searchIndexCoordinator,
                         audioController: appState.audioController,
                         homeLayoutStore: HomeLayoutStore(namespace: appState.profilesModel.activeNamespace),
                         homeContentStore: HomeContentStore(namespace: appState.profilesModel.activeNamespace),
@@ -230,7 +234,8 @@ public struct RootView: View {
                         onSelectPlexHomeUser: { appState.plexHomeUsers.setPlexHomeUserForActiveProfile(accountID: $0, user: $1) },
                         onSetSeerrUser: { appState.setSeerrUserForProfile(profileID: $0, user: $1) },
                         identitySources: appState.identityIndex.identitySourcesProvider,
-                        onWarmIdentityIndex: { appState.identityIndex.warmIdentityIndex() }
+                        onWarmIdentityIndex: { appState.identityIndex.warmIdentityIndex() },
+                        onRefreshSearchIndex: { appState.refreshSearchIndex() }
                     )
                     .id(HomeRuntimeScope.identityKey(
                         profileID: appState.profilesModel.activeProfileID,
@@ -298,7 +303,17 @@ public struct RootView: View {
         }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active { appState.drainWatchOutbox() }
+            appState.setSearchIndexForeground(newPhase != .background)
         }
+        #if canImport(UIKit)
+        .onReceive(
+            NotificationCenter.default.publisher(
+                for: UIApplication.didReceiveMemoryWarningNotification
+            )
+        ) { _ in
+            appState.handleSearchIndexMemoryPressure()
+        }
+        #endif
         .onOpenURL { appState.handle(url: $0) }
         // Window-level HDR/DV exit veil: a black layer above Home that the player
         // raises (via the injected `DisplayVeilModel`) just before it dismisses, so

@@ -87,6 +87,9 @@ public final class PlexHomeUsersModel {
     /// `RootView` rebuilds the signed-in subtree and content reloads as the new
     /// Plex Home user.
     public private(set) var plexIdentityGeneration = 0
+    public var resolvedHomeUsers: [String: String] {
+        plexResolvedHomeUser
+    }
     /// A pending "Which Plex user are you?" step, populated after a Plex account
     /// with 2+ Home users signs in (and this profile hasn't bound one yet).
     /// `RootView` presents the picker bound to this; `nil` when none is pending.

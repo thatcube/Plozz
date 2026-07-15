@@ -15,10 +15,16 @@ public struct ImmediateSearchIndexAdmission: SearchIndexResourceAdmitting {
 public struct SearchCatalogIndexingPolicy: Sendable {
     public let pageSize: Int
     public let embeddingSliceSize: Int
+    public let fullRefreshInterval: TimeInterval
 
-    public init(pageSize: Int = 200, embeddingSliceSize: Int = 20) {
+    public init(
+        pageSize: Int = 200,
+        embeddingSliceSize: Int = 20,
+        fullRefreshInterval: TimeInterval = 6 * 60 * 60
+    ) {
         self.pageSize = max(1, pageSize)
         self.embeddingSliceSize = max(1, embeddingSliceSize)
+        self.fullRefreshInterval = max(0, fullRefreshInterval)
     }
 }
 

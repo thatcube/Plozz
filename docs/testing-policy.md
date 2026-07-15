@@ -68,6 +68,11 @@ Run `tools/test-impact.py --list-tests` for the authoritative current list, or
 harness. It participates in the data-driven full sweep and can also be invoked
 alone; set `PLOZZ_SPIKE_DOCUMENT_COUNT` to pin its synthetic catalog size.
 
+For the release-grade physical check, run `tools/search-bench-device.sh`. It
+installs only the standalone debug `SearchIndexSpikeHost`, prints aggregate
+quality/latency/memory metrics, and removes the host afterward. It never installs
+or launches Plozz.
+
 ## Tiered policy — which command when
 
 1. **Inner loop (every change):** `tools/test-fast.sh` — auto-detects changed

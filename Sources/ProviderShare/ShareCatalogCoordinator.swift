@@ -15,6 +15,17 @@ public protocol ShareCatalogCoordinating: Sendable {
     func rescan(accountKey: String) async
     func enrichItem(accountKey: String, itemID: String) async
     func noteInteractiveActivity(accountKey: String) async
+    func existingCatalogReader(
+        accountKey: String
+    ) async -> (any ShareCatalogReading)?
+}
+
+public extension ShareCatalogCoordinating {
+    func existingCatalogReader(
+        accountKey: String
+    ) async -> (any ShareCatalogReading)? {
+        nil
+    }
 }
 
 /// App-owned cache and I/O coordinator for share catalogs, scanners, and
@@ -154,6 +165,12 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
     /// Existing committed catalog only. Unlike `store(...)`, this never creates
     /// scanner/enricher state, starts a scan, or acquires a transport lease.
     func existingStore(accountKey: String) -> ShareCatalogStore? {
+        stores[accountKey]
+    }
+
+    public func existingCatalogReader(
+        accountKey: String
+    ) -> (any ShareCatalogReading)? {
         stores[accountKey]
     }
 

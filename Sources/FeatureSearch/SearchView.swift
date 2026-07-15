@@ -26,7 +26,10 @@ public struct SearchView: View {
 
     public var body: some View {
         content
-            .searchable(text: $viewModel.query, prompt: "Search movies, shows, and episodes")
+            .searchable(
+                text: $viewModel.query,
+                prompt: "Search titles or describe what happens"
+            )
             .task(id: viewModel.query) { await viewModel.search() }
             .onReceive(NotificationCenter.default.publisher(for: .mediaItemDidMutate)) { note in
                 if let mutation = MediaItemMutation.from(note) {
@@ -44,7 +47,11 @@ public struct SearchView: View {
             // Before the first search there's nothing to show — keep it clean.
             Color.clear
         case .empty:
-            PlozzEmptyStateView("No results. Try a different search.")
+            PlozzEmptyStateView(
+                viewModel.isSemanticIndexBuilding
+                    ? "Still adding titles to description search…"
+                    : "No results. Try a different search."
+            )
         default:
             ContentStateView(
                 state: viewModel.state,

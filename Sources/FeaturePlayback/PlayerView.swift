@@ -17,6 +17,7 @@ import CoreUI
 public struct PlayerView: View {
     @State private var viewModel: PlayerViewModel
     @State private var diagnosticsSampler = PlaybackDiagnosticsSampler()
+    @State private var didRegisterPlaybackActivity = false
     /// Smooths the HDR/Dolby-Vision HDMI display-mode switch by fading to black
     /// around it (with a timeout so it can never strand on black).
     @State private var hdrTransition = HDRTransitionModel()
@@ -65,6 +66,11 @@ public struct PlayerView: View {
             }
         }
         .modifier(DisplaySettleObserver { hdrTransition.displayDidSettle() })
+        .onAppear {
+            guard !didRegisterPlaybackActivity else { return }
+            didRegisterPlaybackActivity = true
+            PlaybackActivity.started()
+        }
         .onChange(of: scenePhase) { _, phase in
             // The TV Home button / sleep / app suspension never fires the view's
             // onDisappear, so stop() (and its final convergence write) would never
@@ -73,16 +79,28 @@ public struct PlayerView: View {
             // real background transition, then rebuild the engine when active again.
             switch phase {
             case .active:
+                if !didRegisterPlaybackActivity {
+                    didRegisterPlaybackActivity = true
+                    PlaybackActivity.started()
+                }
                 Task { await viewModel.resumeAfterBackground() }
             case .inactive:
                 viewModel.suspendForBackground()
             case .background:
+                if didRegisterPlaybackActivity {
+                    didRegisterPlaybackActivity = false
+                    PlaybackActivity.finished()
+                }
                 viewModel.didEnterBackground()
             @unknown default:
                 viewModel.suspendForBackground()
             }
         }
         .onDisappear {
+            if didRegisterPlaybackActivity {
+                didRegisterPlaybackActivity = false
+                PlaybackActivity.finished()
+            }
             diagnosticsSampler.stop()
             Task { await viewModel.stop() }
         }

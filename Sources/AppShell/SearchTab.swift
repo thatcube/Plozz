@@ -18,12 +18,14 @@ import SimklService
 import AniListService
 import MALService
 import LastFmService
+import SearchIndexKit
 
 /// Search tab with its own navigation stack: Search → Detail and full-screen
 /// player presentation, mirroring `HomeTab`'s wiring. Search is aggregated
 /// across every active account; results route to their owning provider.
 struct SearchTab: View {
     let accounts: [ResolvedAccount]
+    let searchIndexCoordinator: SearchIndexCoordinator
     /// Detail-snapshot cache scoped to the active content identity, threaded from
     /// `MainTabView` so revisit paints never cross a profile/account/credential.
     let detailSnapshotCache: DetailSnapshotCache
@@ -113,6 +115,15 @@ struct SearchTab: View {
                     seerSearch: { [seer] query in (try? await seer.search(query)) ?? [] },
                     seerRequestAvailability: { [seer] item in
                         await seer.requestAvailability(for: item)
+                    },
+                    semanticSearch: { [searchIndexCoordinator] query, excluded in
+                        await searchIndexCoordinator.semanticSearch(
+                            query: query,
+                            excludedLibraryKeys: excluded
+                        )
+                    },
+                    semanticIndexBuilding: { [searchIndexCoordinator] in
+                        await searchIndexCoordinator.building()
                     }
                 ),
                 spoilerSettings: spoilerSettings,

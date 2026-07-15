@@ -18,6 +18,7 @@ import SimklService
 import AniListService
 import MALService
 import LastFmService
+import SearchIndexKit
 
 /// The signed-in experience: Home, Search and Settings tabs, with item-detail
 /// navigation and full-screen playback.
@@ -105,6 +106,7 @@ struct MainTabView: View {
     /// App-wide media-share scan/enrich status, injected into the environment so
     /// Home shows an "Updating library…" banner and Settings shows last-scanned.
     let shareScanStatusModel: ShareScanStatusModel
+    let searchIndexCoordinator: SearchIndexCoordinator
     /// Per-profile Night Shift settings, edited in Settings ▸ Night Shift. Its
     /// overlay is installed at the app root (RootView); here it's only threaded
     /// into Settings for editing.
@@ -175,6 +177,7 @@ struct MainTabView: View {
     /// Kicks off (or incrementally refreshes) the identity index for the signed-in
     /// accounts. Invoked when the signed-in UI appears.
     let onWarmIdentityIndex: () -> Void
+    let onRefreshSearchIndex: () -> Void
 
     @State private var discovery = LibraryDiscoveryModel()
     /// Owns the Settings library-discovery result as an `@Observable` reference so
@@ -284,6 +287,7 @@ struct MainTabView: View {
             Tab("Search", systemImage: "magnifyingglass", value: MainTab.search) {
             SearchTab(
                 accounts: accounts,
+                searchIndexCoordinator: searchIndexCoordinator,
                 detailSnapshotCache: detailSnapshotCache,
                 authenticatedHTTPResolver: authenticatedHTTPResolver,
                 seer: seer,
@@ -382,7 +386,20 @@ struct MainTabView: View {
                 onResetToFirstRun: onResetToFirstRun,
                 plexHomeUsersFetcher: plexHomeUsersFetcher,
                 onSelectPlexHomeUser: onSelectPlexHomeUser,
-                onSetSeerrUser: onSetSeerrUser
+                onSetSeerrUser: onSetSeerrUser,
+                searchIndexStatus: { [searchIndexCoordinator] in
+                    let status = await searchIndexCoordinator.status()
+                    return SearchIndexDiagnosticsSnapshot(
+                        documentCount: status.documentCount,
+                        databaseBytes: status.databaseBytes,
+                        isBuilding: status.isBuilding,
+                        queuedScopes: status.queuedScopes,
+                        pausedReason: status.pausedReason?.rawValue
+                    )
+                },
+                rebuildSearchIndex: { [searchIndexCoordinator] in
+                    await searchIndexCoordinator.rebuild()
+                }
             )
             }
         }
@@ -483,6 +500,9 @@ struct MainTabView: View {
         .task(id: accounts.map(\.account.id)) {
             onWarmIdentityIndex()
         }
+        .task(id: searchIndexProbeKey) {
+            onRefreshSearchIndex()
+        }
         .task(id: musicProbeKey) {
             // Paint the Music tab on the first frame from the last persisted
             // result (synchronous, no network) so tab visibility never waits on
@@ -547,6 +567,12 @@ struct MainTabView: View {
         let ids = accounts.map(\.account.id).sorted()
         let disabled = homeVisibility.visibility.disabledKeys.sorted()
         return (ids + ["|"] + disabled).joined(separator: ",")
+    }
+
+    private var searchIndexProbeKey: String {
+        let ids = accounts.map(\.account.id).sorted()
+        let disabled = homeVisibility.visibility.disabledKeys.sorted()
+        return (ids + ["|search|"] + disabled).joined(separator: ",")
     }
 }
 #endif

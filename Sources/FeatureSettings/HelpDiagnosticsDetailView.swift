@@ -89,7 +89,10 @@ struct HelpDiagnosticsDetailView: View {
         }
         .scrollClipDisabled()
         .task {
-            searchStatus = await searchIndexStatus()
+            while !Task.isCancelled {
+                searchStatus = await searchIndexStatus()
+                try? await Task.sleep(for: .seconds(1))
+            }
         }
         .confirmationDialog(
             "Rebuild description search?",
@@ -223,9 +226,7 @@ struct HelpDiagnosticsDetailView: View {
                 )
                 infoRow(
                     "Status",
-                    searchStatus.isBuilding
-                        ? "Building (\(searchStatus.queuedScopes) remaining)"
-                        : (searchStatus.pausedReason.map { "Paused: \($0)" } ?? "Ready")
+                    searchIndexStatusDescription
                 )
                 Button("Rebuild Search Index") {
                     confirmSearchRebuild = true
@@ -233,6 +234,20 @@ struct HelpDiagnosticsDetailView: View {
                 .buttonStyle(SettingsFocusButtonStyle())
             }
         }
+    }
+
+    private var searchIndexStatusDescription: String {
+        let remaining = searchStatus.queuedScopes
+        let groups = remaining == 1
+            ? "1 catalog group remaining"
+            : "\(remaining) catalog groups remaining"
+        if searchStatus.isBuilding {
+            if let reason = searchStatus.pausedReason {
+                return "Paused: \(reason) (\(groups))"
+            }
+            return remaining > 0 ? "Building (\(groups))" : "Finishing"
+        }
+        return searchStatus.pausedReason.map { "Paused: \($0)" } ?? "Ready"
     }
 
     // MARK: - Recent activity (read-only, redacted) — opens its own page

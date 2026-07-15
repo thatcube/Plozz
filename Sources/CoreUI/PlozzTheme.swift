@@ -160,6 +160,8 @@ public enum PlozzTheme {
         /// the aggressive rounding of Home's poster glass (`posterArtCornerRadius`
         /// + `cardInset` = 28) so panels read as part of the same card family.
         public static let mediumCardCornerRadius: CGFloat = 28
+        /// Shared outer radius for the video player's info and diagnostics panels.
+        public static let playerPanelCornerRadius: CGFloat = mediumMediaCornerRadius + 24
 
         /// **Global corner-radius scale** — one shared vocabulary of radii so every
         /// card, panel and nested surface reads with the same roundness, *regardless

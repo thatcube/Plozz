@@ -192,6 +192,15 @@ struct HomeHeroView: View {
     /// and populate the resolved-art cache; still owned only by this view.
     @State var resolvedBackdrop: [String: URL] = [:]
 
+    /// Experimental (env-gated) double-buffered foreground state: the bounded
+    /// prev/current/next ring that maps visual slots to item indices so adjacent
+    /// slides are pre-built during the dwell and swapped in at page time without
+    /// rebuilding the foreground on the transition frame. Only consulted when
+    /// ``HeroForegroundExperiment/isBufferedForegroundEnabled`` is on; inert (and
+    /// the standard single-foreground path renders) otherwise. Seeded on appear
+    /// and re-seated on set-swaps; rotated in ``page(to:keepButton:forward:)``.
+    @State private var buffers = HeroForegroundBuffers(itemCount: 0, index: 0)
+
     /// Pending "resume auto-advance" work, scheduled after each remote input and
     /// cancelled/rescheduled by the next one, so the carousel only starts counting
     /// down again once the user has been idle for ``resumeAfterIdle`` seconds.
@@ -354,7 +363,11 @@ struct HomeHeroView: View {
         // makes the recede clean — see the offset notes below.
         Group {
             if let item = current {
-                content(for: item)
+                if HeroForegroundExperiment.isBufferedForegroundEnabled {
+                    bufferedContent(for: item)
+                } else {
+                    content(for: item)
+                }
             } else {
                 Color.clear
             }
@@ -379,6 +392,11 @@ struct HomeHeroView: View {
             // Start the first dwell from appearance so the initial slide's gauge
             // and auto-advance are anchored to now, not to view construction.
             restartDwell()
+            // Seed the experimental foreground ring around the fronted slide (inert
+            // unless the buffered path is gated on).
+            if HeroForegroundExperiment.isBufferedForegroundEnabled {
+                buffers.reseedAll(itemCount: items.count, index: index)
+            }
             guard !heroVisible else { return }
             withAnimation(.easeInOut(duration: 0.35)) { heroVisible = true }
         }
@@ -426,6 +444,12 @@ struct HomeHeroView: View {
             // so this never touches (or drops) focus.
             if items.indices.contains(index) {
                 selectedButton = min(selectedButton, max(0, buttons(for: items[index]).count - 1))
+            }
+            // Re-seat the experimental foreground ring around the (possibly
+            // relocated/clamped) fronted slide. A set swap is not an adjacent page,
+            // so rebuild the whole prev/current/next window (inert unless gated on).
+            if HeroForegroundExperiment.isBufferedForegroundEnabled {
+                buffers.reseedAll(itemCount: items.count, index: index)
             }
         }
         // Drop optimistic watchlist overrides once the authoritative loaded set
@@ -677,6 +701,269 @@ struct HomeHeroView: View {
         // Cap the overview to the button-row width: adopt the pills' measured width.
         .onPreferenceChange(HeroButtonsWidthKey.self) { width in
             if width > 0 { actionButtonsWidth = width }
+        }
+    }
+
+    // MARK: - Experimental buffered foreground (PLZHERO_BUFFERED_FOREGROUND)
+    //
+    // A reversible, env-gated mirror of the content column that pre-builds the
+    // adjacent slides' *visual* foreground (logo / metadata / overview / pill
+    // visuals) during the dwell and swaps an already-built buffer in at page
+    // time — so the transition frame no longer rebuilds the foreground from the
+    // new item's data (measured to be 100% of the paging hitch). Exactly ONE
+    // stable, interactive focus overlay + guards + move/select handlers are
+    // retained (copied verbatim from `actionRow(for:)`), so focus/paging
+    // behaviour is unchanged. The whole path is inert unless
+    // `HeroForegroundExperiment.isBufferedForegroundEnabled` — the standard
+    // `content(for:)` / `actionRow(for:)` above are left byte-for-byte untouched
+    // so production/`main` is unaffected until an authorized on-device A/B test.
+
+    /// Whether physical `slot`'s buffered visuals should currently be shown: only
+    /// the fronted slot, and only while its metadata is un-hidden. On a page the
+    /// outgoing slot stops being current (snaps to 0) while the incoming fronted
+    /// slot fades in once the wipe lands — preserving the standard fade semantics
+    /// per-buffer.
+    private func bufferedForegroundVisible(slot: Int) -> Bool {
+        slot == buffers.currentSlot && metadataVisible
+    }
+
+    /// Buffered mirror of `content(for:)`. Identical column scaffold (top Spacer,
+    /// recede anchor, paging dots, fixed integer height, paddings, recede offset,
+    /// width-cap preference); only the description column and the action-row pills
+    /// are replaced by 3-slot pre-built visual buffers.
+    @ViewBuilder
+    private func bufferedContent(for item: MediaItem) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Spacer(minLength: 0)
+
+            bufferedDescription()
+
+            // Single zero-height recede scroll target (never per-buffer — a
+            // duplicate `.id` would break the ScrollViewProxy).
+            Color.clear
+                .frame(height: 0)
+                .id(Self.recedeAnchorID)
+
+            bufferedActionRow(for: item)
+
+            pagingDots
+                .frame(maxWidth: .infinity, alignment: .center)
+                .offset(y: Self.pagingDotsDrop)
+        }
+        .frame(height: HomeHeroLayout.screenHeight - Self.contentBottomInset)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.trailing, PlozzTheme.Metrics.screenPadding)
+        .padding(.leading, PlozzTheme.Metrics.heroLeadingPadding)
+        .padding(.bottom, Self.contentBottomInset)
+        .offset(y: receded ? -Self.recedeContentLift : 0)
+        .onPreferenceChange(HeroButtonsWidthKey.self) { width in
+            if width > 0 { actionButtonsWidth = width }
+        }
+    }
+
+    /// The 3-slot description buffer stack (logo / metadata / overview). All slots
+    /// are stacked and overlap, keep stable per-slot identity (so a page never
+    /// tears down the fronted slot's already-loaded logo), and only the fronted
+    /// slot is visible. Off-slot buffers stay laid out (pre-built) at opacity 0.
+    /// The stack SIZES to the current slot only (see ``HeroCurrentSlotStack``) so
+    /// a taller/wider neighbour can never shift the visible slide's geometry —
+    /// matching the standard path, where the column sizes to the current item.
+    @ViewBuilder
+    private func bufferedDescription() -> some View {
+        HeroCurrentSlotStack(currentSlot: buffers.currentSlot, alignment: .topLeading) {
+            ForEach(0..<HeroForegroundBuffers.slotCount, id: \.self) { slot in
+                bufferedDescriptionSlot(slot)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func bufferedDescriptionSlot(_ slot: Int) -> some View {
+        if let itemIndex = buffers.itemIndex(forSlot: slot), items.indices.contains(itemIndex) {
+            let slotItem = items[itemIndex]
+            let hideText = spoilerSettings.shouldHideText(for: slotItem)
+            let visible = bufferedForegroundVisible(slot: slot)
+            VStack(alignment: .leading, spacing: 12) {
+                HeroLogoArtwork(
+                    primaryURL: slotItem.logoURL,
+                    asyncFallbackURL: logoFallback(for: slotItem),
+                    backgroundSample: backgroundSample(for: slotItem),
+                    maxWidth: actionButtonsWidth > 0 ? actionButtonsWidth : 620,
+                    presentationPolicy: .onArrival(maximumWait: 0.2)
+                ) {
+                    Text(hideText ? spoilerSettings.maskedTitle(for: slotItem) : slotItem.title)
+                        .font(.system(size: 64, weight: .bold))
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.5)
+                        .multilineTextAlignment(.leading)
+                        .frame(maxWidth: actionButtonsWidth > 0 ? actionButtonsWidth : 1200, alignment: .leading)
+                        .contentTransition(.opacity)
+                }
+                // Per-SLOT identity (never per-item): a page keeps the fronted
+                // slot's logo loaded, an offscreen reseed diffs it, and small
+                // carousels never collide on a shared item id.
+                .id("hero-buffer-logo-slot-\(slot)")
+
+                metadataLine(for: slotItem)
+                    .modifier(HeroTextLegibilityShadow(colorScheme: colorScheme))
+
+                if !hideText, let overview = slotItem.overview {
+                    Text(overview)
+                        .font(.system(size: 22))
+                        .foregroundStyle(.secondary)
+                        .lineSpacing(2)
+                        .lineLimit(3, reservesSpace: true)
+                        .frame(maxWidth: actionButtonsWidth > 0 ? actionButtonsWidth : 960, alignment: .topLeading)
+                        .modifier(HeroTextLegibilityShadow(colorScheme: colorScheme))
+                        .contentTransition(.opacity)
+                }
+            }
+            .opacity(visible ? 1 : 0)
+            // Snap hides instantly (outgoing text vanishes as the wipe starts);
+            // only the fronted slot's fade-IN animates.
+            .transaction { if !visible { $0.animation = nil } }
+        }
+    }
+
+    /// Buffered mirror of `actionRow(for:)`. Copied verbatim EXCEPT the single
+    /// visible-pills `HStack` is replaced by the 3-slot `bufferedPills()` stack;
+    /// the left/right guards, the one focus overlay, the `.focusSection()` and all
+    /// move/select/focus/recede handlers are identical, so focus & paging behave
+    /// exactly as the standard row.
+    @ViewBuilder
+    private func bufferedActionRow(for item: MediaItem) -> some View {
+        let itemButtons = buttons(for: item)
+        let a11yActions: [(String, () -> Void)] = itemButtons.map { button in
+            switch button {
+            case .play: return (item.resumeProgressFraction != nil ? "Resume" : "Play", { onPlay(item) })
+            case .request: return ("Request", { performRequest(for: item) })
+            case .downloadStatus: return (downloadStatusText(for: item), {})
+            case .moreInfo: return ("More Info", { onSelect(item) })
+            case .watchlist:
+                let fav = watchlistTarget(for: item).isFavorite
+                return (fav ? "Remove from Watchlist" : "Add to Watchlist", { performWatchlist(for: item) })
+            case .next: return ("Next", { advanceForward() })
+            }
+        }
+        HStack(spacing: 0) {
+            Color.clear
+                .frame(width: 1, height: 1)
+                .focusable(leftGuardActive)
+                .focused($focus, equals: .leftGuard)
+                .accessibilityHidden(true)
+
+            bufferedPills()
+                .overlay {
+                    Color.clear
+                        .background {
+                            HeroDirectionalPressMonitor(
+                                capturesLeft: !allowsSidebarEscape,
+                                gate: directionalPressGate
+                            )
+                        }
+                        .contentShape(Rectangle())
+                        .focusable(true)
+                        .focused($focus, equals: .row)
+                        .prefersDefaultFocus(true, in: focusScope)
+                        .focusEffectDisabled()
+                        .onTapGesture { activateSelected() }
+                        .onPlayPauseCommand { noteInteraction(); if let item = current { onPlay(item) } }
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityAddTraits(.isButton)
+                        .accessibilityLabel(accessibilityLabel(for: item))
+                        .accessibilityAction { activateSelected() }
+                        .modifier(HeroActionAccessibility(actions: a11yActions))
+                }
+                .id(Self.actionRowFocusID)
+
+            Color.clear
+                .frame(width: 1, height: 1)
+                .focusable(true)
+                .focused($focus, equals: .rightGuard)
+                .accessibilityHidden(true)
+        }
+        .padding(.top, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .focusSection()
+        .onMoveCommand { _ in handleMove() }
+        .onChange(of: focus) { old, new in
+            let oldName = old.map { "\($0)" } ?? "nil"
+            let newName = new.map { "\($0)" } ?? "nil"
+            HeroFocusDiagnostics.emit("focus \(oldName)->\(newName) | \(hfState())")
+            switch new {
+            case .leftGuard:
+                if directionalPressGate.shouldHandle(.left) {
+                    handleLeft()
+                } else {
+                    HeroFocusDiagnostics.emit("suppressed repeated physical Left")
+                    noteInteraction()
+                    focus = .row
+                }
+            case .rightGuard:
+                if directionalPressGate.shouldHandle(.right) {
+                    handleRight()
+                } else {
+                    HeroFocusDiagnostics.emit("suppressed repeated physical Right")
+                    noteInteraction()
+                    focus = .row
+                }
+            case .row:
+                if old == nil {
+                    HeroFocusDiagnostics.emit("focus ENTER hero (row, from outside) | \(hfState())")
+                    if let item = current {
+                        selectedButton = min(selectedButton, max(0, buttons(for: item).count - 1))
+                    }
+                    onFocusGained()
+                }
+            case .none:
+                HeroFocusDiagnostics.emit("focus LEFT hero (->nil) from \(oldName) | \(hfState())")
+            }
+        }
+        .onChange(of: receded) { _, isReceded in
+            if isReceded { pauseWhileReceded() } else { resumeFromRecede() }
+        }
+    }
+
+    /// The 3-slot pills buffer stack. Same non-focusable glass pills as the
+    /// standard row, but built once per slide during the dwell. Only the fronted
+    /// slot draws its selection highlight and reports its width up to cap the
+    /// logo/overview — so an offscreen wider slide can neither mis-cap the current
+    /// slide nor mis-size the focus overlay.
+    @ViewBuilder
+    private func bufferedPills() -> some View {
+        HeroCurrentSlotStack(currentSlot: buffers.currentSlot, alignment: .leading) {
+            ForEach(0..<HeroForegroundBuffers.slotCount, id: \.self) { slot in
+                bufferedPillsSlot(slot)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func bufferedPillsSlot(_ slot: Int) -> some View {
+        if let itemIndex = buffers.itemIndex(forSlot: slot), items.indices.contains(itemIndex) {
+            let slotItem = items[itemIndex]
+            let isCurrent = slot == buffers.currentSlot
+            let visible = bufferedForegroundVisible(slot: slot)
+            let slotButtons = buttons(for: slotItem)
+            HStack(spacing: 24) {
+                ForEach(Array(slotButtons.enumerated()), id: \.element) { offset, button in
+                    heroButtonVisual(
+                        button,
+                        for: slotItem,
+                        selected: isCurrent && focus != nil && selectedButton == offset
+                    )
+                }
+            }
+            .background {
+                if isCurrent {
+                    GeometryReader { geo in
+                        Color.clear.preference(key: HeroButtonsWidthKey.self, value: geo.size.width)
+                    }
+                }
+            }
+            .opacity(visible ? 1 : 0)
+            .transaction { if !visible { $0.animation = nil } }
+            .allowsHitTesting(false)
         }
     }
 
@@ -1293,6 +1580,34 @@ struct HomeHeroView: View {
         restartDwell()
         metadataVisible = false
         selectedButton = min(keepButton, max(0, buttons(for: items[toItem]).count - 1))
+
+        // Experimental buffered foreground (gated): rotate the ring so the
+        // destination's ALREADY-BUILT buffer becomes current with no content
+        // rebuild on this transition frame, then re-seed the single far slot
+        // OFFSCREEN once the wipe has landed. A non-adjacent target (shouldn't
+        // happen on a ±1 page) falls back to a full reseat.
+        if HeroForegroundExperiment.isBufferedForegroundEnabled {
+            if buffers.page(toIndex: toItem, itemCount: items.count) {
+                scheduleBufferNeighborRefresh()
+            } else {
+                buffers.reseedAll(itemCount: items.count, index: toItem)
+            }
+        }
+    }
+
+    /// Re-seeds the buffered foreground's off-edge slot after the wipe window, so
+    /// the one slot whose content changed on a page diffs OFFSCREEN rather than on
+    /// the transition frame. Keyed to `advanceToken` so a newer page supersedes a
+    /// pending refresh; `refreshNeighbors` is idempotent and reads live state, so
+    /// even a late fire leaves the window correct.
+    private func scheduleBufferNeighborRefresh() {
+        let token = advanceToken
+        Task { @MainActor in
+            // Past the ~280ms metadata fade / backdrop wipe window.
+            try? await Task.sleep(nanoseconds: 320_000_000)
+            guard token == advanceToken else { return }
+            buffers.refreshNeighbors(itemCount: items.count)
+        }
     }
 
     /// Begins a fresh auto-advance dwell from now: the progress gauge fills from
@@ -1569,6 +1884,49 @@ struct HomeHeroView: View {
     private struct ArtworkResolutionKey: Equatable {
         let slideToken: Int
         let index: Int
+    }
+}
+
+/// A `ZStack`-like container for the experimental buffered hero foreground that
+/// **sizes itself to a single designated subview** (the fronted buffer slot)
+/// while still laying out and placing every subview. Ordinary `ZStack` +
+/// `.opacity(0)` keeps the hidden neighbour buffers in layout, so the stack would
+/// size to the *union* of all slides — letting a taller/wider neighbour shift the
+/// visible slide's logo position and mis-size the single focus overlay. Sizing to
+/// only `currentSlot` reproduces the standard path's "size to the current item"
+/// geometry exactly, while the neighbour buffers stay pre-built/pre-laid-out
+/// (their SwiftUI identity is stable across a page — only this container's
+/// reported size changes when `currentSlot` rotates, so no subtree rebuilds on
+/// the transition frame).
+private struct HeroCurrentSlotStack: Layout {
+    var currentSlot: Int
+    var alignment: Alignment = .topLeading
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard !subviews.isEmpty else { return .zero }
+        let index = subviews.indices.contains(currentSlot) ? currentSlot : subviews.startIndex
+        return subviews[index].sizeThatFits(proposal)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        // Place every buffer at the same anchor within the current slot's bounds
+        // so the fronted slide lands exactly where the standard column would put
+        // it; hidden neighbours (opacity 0) sit behind it, proposed the current
+        // size — they can't inflate the container.
+        let sizeProposal = ProposedViewSize(width: bounds.width, height: bounds.height)
+        let point: CGPoint
+        let anchor: UnitPoint
+        switch alignment {
+        case .leading:
+            point = CGPoint(x: bounds.minX, y: bounds.midY)
+            anchor = .leading
+        default: // .topLeading
+            point = CGPoint(x: bounds.minX, y: bounds.minY)
+            anchor = .topLeading
+        }
+        for subview in subviews {
+            subview.place(at: point, anchor: anchor, proposal: sizeProposal)
+        }
     }
 }
 

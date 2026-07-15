@@ -781,10 +781,29 @@ struct HomeHeroView: View {
     /// resolved focus/selection/CTA/spoiler state (pure mapping lives in
     /// ``HeroForegroundModelBuilder``).
     private func foregroundModel(for item: MediaItem) -> HeroForegroundModel {
-        foregroundModel(for: item, selectedIndex: selectedButton, heroFocused: focus != nil)
+        // Only the fronted slide carries the live auto-advance dwell so its active
+        // paging pill can render the "time until next page" gauge; neighbours are
+        // built neutral and re-applied with the real dwell when they front.
+        foregroundModel(
+            for: item,
+            selectedIndex: selectedButton,
+            heroFocused: focus != nil,
+            dotsAutoAdvance: settings.autoAdvance && items.count > 1,
+            dotsDwellStart: dwellStart,
+            dotsDwellDuration: Double(settings.autoAdvanceSeconds),
+            dotsPausedAt: pausedAt
+        )
     }
 
-    private func foregroundModel(for item: MediaItem, selectedIndex: Int, heroFocused: Bool) -> HeroForegroundModel {
+    private func foregroundModel(
+        for item: MediaItem,
+        selectedIndex: Int,
+        heroFocused: Bool,
+        dotsAutoAdvance: Bool = false,
+        dotsDwellStart: Date? = nil,
+        dotsDwellDuration: Double = 0,
+        dotsPausedAt: Date? = nil
+    ) -> HeroForegroundModel {
         let hideText = spoilerSettings.shouldHideText(for: item)
         let masked = hideText ? spoilerSettings.maskedTitle(for: item) : nil
         let slideIndex = items.firstIndex(where: { $0.id == item.id }) ?? index
@@ -796,7 +815,11 @@ struct HomeHeroView: View {
             selectedIndex: selectedIndex,
             heroFocused: heroFocused,
             slideCount: items.count,
-            slideIndex: slideIndex
+            slideIndex: slideIndex,
+            dotsAutoAdvance: dotsAutoAdvance,
+            dotsDwellStart: dotsDwellStart,
+            dotsDwellDuration: dotsDwellDuration,
+            dotsPausedAt: dotsPausedAt
         )
     }
 
@@ -808,7 +831,12 @@ struct HomeHeroView: View {
             switch button {
             case .play:
                 let resume = item.resumeProgressFraction
-                return .init(kind: .play, resumeProgress: resume, isResume: resume != nil)
+                return .init(
+                    kind: .play,
+                    resumeProgress: resume,
+                    isResume: resume != nil,
+                    resumeRemainingText: item.resumeRemainingText
+                )
             case .request:
                 return .init(kind: .request)
             case .downloadStatus:

@@ -63,10 +63,26 @@ final class HeroForegroundModelTests: XCTestCase {
         XCTAssertNil(pill.progress)
     }
 
-    func testPlayPillUsesResumeLabelAndProgressWhenResumable() {
-        let pill = Builder.pill(for: PillInput(kind: .play, resumeProgress: 0.42, isResume: true))
-        XCTAssertEqual(pill.text, "Resume")
+    func testPlayPillResumeFormUsesRemainingTextAndProgress() {
+        // Resume form (matches PlayResumeButtonLabel): the trailing text is the
+        // remaining-time string — NOT the word "Resume" — and the inline progress
+        // bar carries the resume fraction.
+        let pill = Builder.pill(for: PillInput(
+            kind: .play, resumeProgress: 0.42, isResume: true, resumeRemainingText: "20m"
+        ))
+        XCTAssertEqual(pill.text, "20m")
+        XCTAssertEqual(pill.systemImage, "play.fill")
         XCTAssertEqual(pill.progress, 0.42)
+    }
+
+    func testPlayPillFallsBackToResumeWordWithoutRemainingText() {
+        // Resumable but no remaining-time string: fall back to the plain titled pill
+        // with no inline bar (mirrors PlayResumeButtonLabel's non-resume-form path).
+        let pill = Builder.pill(for: PillInput(
+            kind: .play, resumeProgress: 0.42, isResume: true, resumeRemainingText: nil
+        ))
+        XCTAssertEqual(pill.text, "Resume")
+        XCTAssertNil(pill.progress)
     }
 
     func testRequestPill() {

@@ -55,21 +55,35 @@ struct HeroForegroundModel: Equatable {
     struct Pill: Equatable {
         enum Kind: Equatable { case play, request, downloadStatus, moreInfo, watchlist, next }
         let kind: Kind
-        /// Text label (e.g. "Play", "Request", "82%"), or `nil` for an icon-only pill.
+        /// Trailing text label (e.g. "Play", "Request", "Requested", the remaining
+        /// time "20m", or the download "83%"), or `nil` for an icon-only pill.
         let text: String?
         /// SF Symbol name for the leading glyph, or `nil` for a text-only pill.
         let systemImage: String?
-        /// In-progress fraction (`0...1`) to draw a small progress bar inside the
-        /// pill (Play resume / active download), or `nil`.
+        /// In-progress fraction (`0...1`). When non-nil the renderer draws the shared
+        /// inline progress bar (Play resume / active download) *between* the glyph and
+        /// the trailing text — matching `PlayResumeButtonLabel` / `downloadStatusLabel`.
         let progress: Double?
     }
 
-    /// Paging-indicator state for the renderer (count + fronted index). The exact
-    /// windowing is computed by the renderer via ``HeroPagingDots`` so this stays a
-    /// pure value.
+    /// Paging-indicator state for the renderer (count + fronted index) plus the
+    /// live auto-advance dwell so the active pill can fill left→right as a "time
+    /// until next page" gauge, exactly like the SwiftUI hero. The exact windowing
+    /// is computed by the renderer via ``HeroPagingDots`` so this stays a pure value.
     struct Dots: Equatable {
         let count: Int
         let index: Int
+        /// Whether auto-advance is on (drives whether the active pill shows a moving
+        /// gauge vs. a full static pill).
+        var autoAdvance: Bool = false
+        /// When the current slide's dwell started; the renderer interpolates the
+        /// gauge from here across ``dwellDuration``. `nil` disables the gauge.
+        var dwellStart: Date? = nil
+        /// Total dwell seconds for the active slide.
+        var dwellDuration: Double = 0
+        /// When the dwell is frozen (user interacting / hero receded), the instant it
+        /// froze at; the gauge holds here. `nil` when running.
+        var pausedAt: Date? = nil
     }
 }
 
@@ -89,6 +103,11 @@ enum HeroForegroundModelBuilder {
         var resumeProgress: Double? = nil
         /// For `.play`: whether the item is resumable (Play vs Resume label).
         var isResume: Bool = false
+        /// For `.play`: the remaining-time text ("20m") shown in the resume form.
+        /// When present alongside an in-range ``resumeProgress`` the pill renders the
+        /// glyph + inline progress bar + this text (no "Resume" word), matching
+        /// `PlayResumeButtonLabel`'s resume layout.
+        var resumeRemainingText: String? = nil
         /// For `.downloadStatus`: active download fraction, or `nil` when the
         /// request is queued/searching (shows a plain "Requested" status).
         var downloadProgress: Double? = nil
@@ -104,11 +123,20 @@ enum HeroForegroundModelBuilder {
     static func pill(for input: PillInput) -> HeroForegroundModel.Pill {
         switch input.kind {
         case .play:
+            // Resume form (matches PlayResumeButtonLabel): glyph + inline progress
+            // bar + remaining-time text, with NO "Resume" word. Only when we have a
+            // genuine in-range fraction *and* a remaining-time string; otherwise fall
+            // back to the plain titled pill ("Resume" if resumable, else "Play").
+            if let p = input.resumeProgress, p > 0, p < 1, let remaining = input.resumeRemainingText {
+                return HeroForegroundModel.Pill(
+                    kind: .play, text: remaining, systemImage: "play.fill", progress: p
+                )
+            }
             return HeroForegroundModel.Pill(
                 kind: .play,
                 text: input.isResume ? "Resume" : "Play",
                 systemImage: "play.fill",
-                progress: input.resumeProgress
+                progress: nil
             )
         case .request:
             return HeroForegroundModel.Pill(
@@ -156,12 +184,25 @@ enum HeroForegroundModelBuilder {
         selectedIndex: Int,
         heroFocused: Bool,
         slideCount: Int,
-        slideIndex: Int
+        slideIndex: Int,
+        dotsAutoAdvance: Bool = false,
+        dotsDwellStart: Date? = nil,
+        dotsDwellDuration: Double = 0,
+        dotsPausedAt: Date? = nil
     ) -> HeroForegroundModel {
         let pills = pillInputs.map(pill(for:))
         let clamped = pills.isEmpty ? 0 : min(max(selectedIndex, 0), pills.count - 1)
         let dots: HeroForegroundModel.Dots? =
-            slideCount > 1 ? HeroForegroundModel.Dots(count: slideCount, index: slideIndex) : nil
+            slideCount > 1
+            ? HeroForegroundModel.Dots(
+                count: slideCount,
+                index: slideIndex,
+                autoAdvance: dotsAutoAdvance,
+                dwellStart: dotsDwellStart,
+                dwellDuration: dotsDwellDuration,
+                pausedAt: dotsPausedAt
+            )
+            : nil
         return HeroForegroundModel(
             itemID: item.id,
             title: maskedTitle ?? item.title,

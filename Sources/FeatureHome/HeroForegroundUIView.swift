@@ -20,13 +20,25 @@ final class HeroForegroundUIView: UIView {
     private let metadataLabel = UILabel()
     private let overviewLabel = UILabel()
     private let pillsContainer = UIView()
-    private let dotsContainer = UIView()
+    /// Liquid Glass capsule that hosts the paging dots (real `UIGlassEffect` on
+    /// tvOS 26+, ultra-thin blur below), mirroring the SwiftUI `pagingDotsGlass`.
+    private let dotsContainer: UIVisualEffectView = {
+        if #available(tvOS 26.0, *) {
+            return UIVisualEffectView(effect: UIGlassEffect(style: .regular))
+        }
+        return UIVisualEffectView(effect: UIBlurEffect(style: .dark))
+    }()
 
     /// Reused pill views (pooled), so a page updates labels/frames in place rather
     /// than allocating a fresh row — persistent identity, the whole point.
     private var pillViews: [HeroForegroundPillView] = []
     /// Reused dot views (pooled) for the same reason.
-    private var dotViews: [UIView] = []
+    private var dotViews: [HeroPagingDotView] = []
+
+    /// Drives the active paging pill's live auto-advance gauge (matches the SwiftUI
+    /// hero's 30 Hz `TimelineView`). Only runs while a slide is auto-advancing and
+    /// not paused; otherwise the fill is set once (full or empty) and the link stops.
+    private var dotsGaugeLink: CADisplayLink?
 
     /// The slide whose logo the view currently expects, so a late async logo load
     /// is dropped if the slide has since changed (belt-and-braces with the
@@ -40,7 +52,13 @@ final class HeroForegroundUIView: UIView {
     private let dotSize: CGFloat = 10
     private let activeDotWidth: CGFloat = 30
     private let dotSpacing: CGFloat = 12
+    private let dotsGlassHPad: CGFloat = 14
+    private let dotsGlassVPad: CGFloat = 9
     private let bottomMargin: CGFloat = 24
+
+    /// Total height of the paging-dot glass capsule (dot + vertical padding), used to
+    /// reserve vertical space in the bottom-anchored layout.
+    private var dotsGlassHeight: CGFloat { dotSize + dotsGlassVPad * 2 }
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -73,10 +91,13 @@ final class HeroForegroundUIView: UIView {
         for v in [logoImageView, titleLabel, ratingLabel, metadataLabel, overviewLabel, pillsContainer, dotsContainer] {
             addSubview(v)
         }
+        dotsContainer.clipsToBounds = true
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    deinit { dotsGaugeLink?.invalidate() }
 
     // MARK: - Imperative apply
 
@@ -152,14 +173,15 @@ final class HeroForegroundUIView: UIView {
     private func applyDots(_ model: HeroForegroundModel) {
         guard let dots = model.dots else {
             dotViews.forEach { $0.isHidden = true }
+            dotsContainer.isHidden = true
+            stopDotsGauge()
             return
         }
         let layout = HeroPagingDots.layout(count: dots.count, index: dots.index)
         while dotViews.count < layout.count {
-            let dot = UIView()
-            dot.backgroundColor = UIColor.white.withAlphaComponent(0.28)
+            let dot = HeroPagingDotView()
             dotViews.append(dot)
-            dotsContainer.addSubview(dot)
+            dotsContainer.contentView.addSubview(dot)
         }
         for (i, dotView) in dotViews.enumerated() {
             if i < layout.count {
@@ -171,17 +193,71 @@ final class HeroForegroundUIView: UIView {
                 case .medium: scale = 0.78
                 case .small: scale = 0.55
                 }
-                dotView.tag = active ? 1 : 0
-                dotView.backgroundColor = active
-                    ? UIColor.white
-                    : UIColor.white.withAlphaComponent(0.28)
-                // Store scale via layer for layout.
-                dotView.layer.setValue(scale, forKey: "plzScale")
+                dotView.configure(active: active, tint: .white, scale: scale)
                 dotView.isHidden = false
             } else {
                 dotView.isHidden = true
             }
         }
+        // Drive (or freeze) the active pill's live gauge from the dwell.
+        refreshDotsGauge(dots)
+    }
+
+    // MARK: Auto-advance gauge
+
+    /// Starts/stops the display link and sets the active pill's fill for the current
+    /// dwell. Mirrors the SwiftUI `brightFillWidth`: no auto-advance ⇒ a full pill;
+    /// auto-advance ⇒ a dot growing to the full pill across the dwell; paused ⇒
+    /// frozen at `pausedAt`.
+    private func refreshDotsGauge(_ dots: HeroForegroundModel.Dots) {
+        guard let active = dotViews.first(where: { !$0.isHidden && $0.isActive }) else {
+            stopDotsGauge()
+            return
+        }
+        guard dots.autoAdvance, let start = dots.dwellStart, dots.dwellDuration > 0 else {
+            // Auto-advance off (or no dwell): the active pill is a solid full pill.
+            stopDotsGauge()
+            active.setFillFraction(1)
+            return
+        }
+        if let paused = dots.pausedAt {
+            // Frozen: hold the fill at the paused instant, no ticking.
+            stopDotsGauge()
+            active.setFillFraction(gaugeFraction(start: start, duration: dots.dwellDuration, now: paused))
+            return
+        }
+        // Live: tick the fill at ~30 Hz until the page changes.
+        activeDwellStart = start
+        activeDwellDuration = dots.dwellDuration
+        if dotsGaugeLink == nil {
+            let link = CADisplayLink(target: self, selector: #selector(tickDotsGauge))
+            link.preferredFrameRateRange = CAFrameRateRange(minimum: 15, maximum: 30, preferred: 30)
+            link.add(to: .main, forMode: .common)
+            dotsGaugeLink = link
+        }
+        tickDotsGauge()
+    }
+
+    private var activeDwellStart: Date?
+    private var activeDwellDuration: Double = 0
+
+    @objc private func tickDotsGauge() {
+        guard let start = activeDwellStart,
+              let active = dotViews.first(where: { !$0.isHidden && $0.isActive }) else {
+            stopDotsGauge()
+            return
+        }
+        active.setFillFraction(gaugeFraction(start: start, duration: activeDwellDuration, now: Date()))
+    }
+
+    private func gaugeFraction(start: Date, duration: Double, now: Date) -> CGFloat {
+        guard duration > 0 else { return 1 }
+        return CGFloat(min(1, max(0, now.timeIntervalSince(start) / duration)))
+    }
+
+    private func stopDotsGauge() {
+        dotsGaugeLink?.invalidate()
+        dotsGaugeLink = nil
     }
 
     // MARK: Fade (metadataVisible)
@@ -221,12 +297,11 @@ final class HeroForegroundUIView: UIView {
         // Measure the bottom-anchored block bottom→top.
         var y = bounds.height - bottomMargin
 
-        // Dots at the very bottom of the block.
+        // Dots (in their glass capsule) at the very bottom of the block.
         if model?.dots != nil {
-            let dotsHeight = dotSize
             layoutDots(bottom: y, leading: leading)
             dotsContainer.isHidden = false
-            y -= dotsHeight + columnSpacing
+            y -= dotsGlassHeight + columnSpacing
         } else {
             dotsContainer.isHidden = true
         }
@@ -300,28 +375,89 @@ final class HeroForegroundUIView: UIView {
 
     private func layoutDots(bottom: CGFloat, leading: CGFloat) {
         let visible = dotViews.filter { !$0.isHidden }
-        guard !visible.isEmpty else { return }
-        var totalWidth: CGFloat = 0
+        guard !visible.isEmpty else {
+            dotsContainer.isHidden = true
+            return
+        }
+        // Fixed-pitch slots: the active pill is `activeDotWidth` wide, every other dot
+        // occupies a full `dotSize` slot (a shrunk edge dot is centred inside its slot)
+        // so the row's total width — and thus the glass capsule — never breathes.
+        var rowWidth: CGFloat = 0
         for (i, dot) in visible.enumerated() {
-            let w = dot.tag == 1 ? activeDotWidth : dotSize
-            totalWidth += w
-            if i < visible.count - 1 { totalWidth += dotSpacing }
+            rowWidth += dot.isActive ? activeDotWidth : dotSize
+            if i < visible.count - 1 { rowWidth += dotSpacing }
         }
-        // Center the dots across the hero width (matching the SwiftUI hero).
-        let startX = max(leading, (bounds.width - totalWidth) / 2)
-        dotsContainer.frame = CGRect(x: 0, y: bottom - dotSize, width: bounds.width, height: dotSize)
-        var x = startX
+        let glassWidth = rowWidth + dotsGlassHPad * 2
+        let glassHeight = dotsGlassHeight
+        // Centre the capsule across the hero width, matching the SwiftUI hero.
+        let glassX = (bounds.width - glassWidth) / 2
+        dotsContainer.frame = CGRect(x: glassX, y: bottom - glassHeight, width: glassWidth, height: glassHeight)
+        dotsContainer.layer.cornerRadius = glassHeight / 2
+
+        // Lay the dots inside the glass content view (its own coordinate space).
+        var x = dotsGlassHPad
+        let cy = glassHeight / 2
         for dot in visible {
-            let active = dot.tag == 1
-            let w = active ? activeDotWidth : dotSize
-            let scale = (dot.layer.value(forKey: "plzScale") as? CGFloat) ?? 1
-            let drawH = active ? dotSize : dotSize * scale
-            let drawW = active ? activeDotWidth : dotSize * scale
-            // Frame is relative to dotsContainer's own coordinate space.
-            dot.frame = CGRect(x: x + (w - drawW) / 2, y: (dotSize - drawH) / 2, width: drawW, height: drawH)
-            dot.layer.cornerRadius = drawH / 2
-            x += w + dotSpacing
+            if dot.isActive {
+                dot.frame = CGRect(x: x, y: cy - dotSize / 2, width: activeDotWidth, height: dotSize)
+                dot.layoutIfNeeded()
+                x += activeDotWidth + dotSpacing
+            } else {
+                // Shrunk circle centred inside a full-size slot.
+                let scale = dot.currentScale
+                let draw = dotSize * scale
+                dot.frame = CGRect(x: x + (dotSize - draw) / 2, y: cy - draw / 2, width: draw, height: draw)
+                dot.layoutIfNeeded()
+                x += dotSize + dotSpacing
+            }
         }
+    }
+}
+
+/// One paging indicator drawn in UIKit: a dim capsule track plus (for the active
+/// slide) a bright fill that grows from a dot to the full pill as the auto-advance
+/// dwell elapses — the UIKit twin of the SwiftUI `pagingIndicator`/`activeDotFill`.
+private final class HeroPagingDotView: UIView {
+    private(set) var isActive = false
+    private(set) var currentScale: CGFloat = 1
+    private let fill = UIView()
+    private var fraction: CGFloat = 0
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isUserInteractionEnabled = false
+        clipsToBounds = true
+        fill.isHidden = true
+        addSubview(fill)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func configure(active: Bool, tint: UIColor, scale: CGFloat) {
+        isActive = active
+        currentScale = scale
+        backgroundColor = tint.withAlphaComponent(0.28)
+        fill.backgroundColor = tint
+        fill.isHidden = !active
+        setNeedsLayout()
+    }
+
+    /// Sets the bright fill fraction (`0...1`). The fill interpolates from a dot
+    /// (`height`) up to the full pill (`width`) so it starts moving immediately,
+    /// matching the SwiftUI `brightFillWidth`.
+    func setFillFraction(_ f: CGFloat) {
+        fraction = max(0, min(1, f))
+        setNeedsLayout()
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        layer.cornerRadius = bounds.height / 2
+        guard isActive, bounds.height > 0 else { return }
+        let w = bounds.height + (bounds.width - bounds.height) * fraction
+        fill.frame = CGRect(x: 0, y: 0, width: w, height: bounds.height)
+        fill.layer.cornerRadius = bounds.height / 2
     }
 }
 

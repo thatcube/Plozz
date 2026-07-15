@@ -26,9 +26,36 @@ public enum HomePerfDiagnostics {
         subsystem: "com.plozz.app",
         category: "homeperf"
     )
+    private static let logger = Logger(subsystem: "com.plozz.app", category: "homeperf")
     #endif
 
     private static let store = Store()
+
+    /// When the process is launched with `PLZPERF_STDOUT=1`, the sampler mirrors a
+    /// compact perf line to stdout each tick so `devicectl device process launch
+    /// --console` can stream it off the (wireless) Apple TV — the only way to read
+    /// on-device performance remotely on this toolchain, since the unified log can't
+    /// be read over the network here. Off by default; read once at startup.
+    public static let isStdoutMirrorEnabled: Bool =
+        ProcessInfo.processInfo.environment["PLZPERF_STDOUT"] == "1"
+
+    /// Monotonic clock start so each streamed line carries a relative `t+<ms>` stamp.
+    private static let start = DispatchTime.now().uptimeNanoseconds
+
+    /// Emits one perf line (tagged `PLZPERF`, with a `t+<ms>` stamp) to the unified
+    /// log and — when the mirror is on — unbuffered stdout for live `--console`
+    /// capture. No-op when the mirror is disabled; the line is an `@autoclosure` so
+    /// the formatting cost is skipped entirely on shipped runs.
+    public static func emitLine(_ line: @autoclosure () -> String) {
+        guard isStdoutMirrorEnabled else { return }
+        let now = DispatchTime.now().uptimeNanoseconds
+        let stamp = String(format: "t+%.0fms", Double(now &- start) / 1_000_000)
+        let text = "PLZPERF \(stamp) \(line())"
+        #if canImport(OSLog)
+        logger.notice("\(text, privacy: .public)")
+        #endif
+        try? FileHandle.standardOutput.write(contentsOf: Data((text + "\n").utf8))
+    }
 
     /// Milliseconds the most recent hero curation took, or `nil` if none yet.
     public static var lastCurateMs: Double? { store.lastCurateMs }

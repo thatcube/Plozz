@@ -40,6 +40,11 @@ public final class HomePerfSampler {
     private var windowHitches: Int = 0
     private var windowWorstMs: Double = 0
     private var windowStart: CFTimeInterval = 0
+    // Separate ~1s window for the stdout stream so remote `--console` capture stays
+    // readable (one line/sec) with accurate per-second hitch counts.
+    private var emitHitches: Int = 0
+    private var emitWorstMs: Double = 0
+    private var emitStart: CFTimeInterval = 0
 
     public nonisolated init() {}
 
@@ -50,6 +55,9 @@ public final class HomePerfSampler {
         windowHitches = 0
         windowWorstMs = 0
         windowStart = 0
+        emitHitches = 0
+        emitWorstMs = 0
+        emitStart = 0
         let proxy = DisplayLinkProxy { [weak self] link in
             self?.tick(link)
         }
@@ -79,8 +87,11 @@ public final class HomePerfSampler {
                 // A hitch is a frame that ran meaningfully past the display budget.
                 if delta > nominal * 1.5 {
                     windowHitches += 1
+                    emitHitches += 1
                 }
-                windowWorstMs = max(windowWorstMs, delta * 1_000)
+                let frameMs = delta * 1_000
+                windowWorstMs = max(windowWorstMs, frameMs)
+                emitWorstMs = max(emitWorstMs, frameMs)
             }
         }
         lastTimestamp = now
@@ -93,6 +104,15 @@ public final class HomePerfSampler {
             windowHitches = 0
             windowWorstMs = 0
         }
+
+        if emitStart == 0 { emitStart = now }
+        let emitElapsed = now - emitStart
+        if emitElapsed >= 1.0 {
+            emitStreamLine(windowElapsed: emitElapsed)
+            emitStart = now
+            emitHitches = 0
+            emitWorstMs = 0
+        }
     }
 
     private func publish(windowElapsed: CFTimeInterval) {
@@ -104,6 +124,39 @@ public final class HomePerfSampler {
         if let mb = Self.memoryFootprintMB() { memoryMB = mb }
         curateMs = HomePerfDiagnostics.lastCurateMs
         artworkMs = HomePerfDiagnostics.lastArtworkMs
+    }
+
+    /// One compact per-second line for remote `--console` capture. Cheap and a
+    /// no-op unless launched with `PLZPERF_STDOUT=1` (the string is only built then).
+    private func emitStreamLine(windowElapsed: CFTimeInterval) {
+        guard HomePerfDiagnostics.isStdoutMirrorEnabled else { return }
+        let perSecond = windowElapsed > 0 ? Double(emitHitches) / windowElapsed : 0
+        let curate = HomePerfDiagnostics.lastCurateMs.map { String(format: "%.0f", $0) } ?? "-"
+        let art = HomePerfDiagnostics.lastArtworkMs.map { String(format: "%.0f", $0) } ?? "-"
+        HomePerfDiagnostics.emitLine(
+            String(
+                format: "fps=%.0f hitch/s=%.1f total=%d worst=%.0fms thermal=%@ mem=%.0fMB curate=%@ms art=%@ms dev=%@",
+                fpsEMA,
+                perSecond,
+                hitchesTotal,
+                emitWorstMs,
+                Self.thermalToken(ProcessInfo.processInfo.thermalState),
+                Self.memoryFootprintMB() ?? 0,
+                curate,
+                art,
+                deviceModel
+            )
+        )
+    }
+
+    private static func thermalToken(_ state: ProcessInfo.ThermalState) -> String {
+        switch state {
+        case .nominal: return "nominal"
+        case .fair: return "fair"
+        case .serious: return "serious"
+        case .critical: return "critical"
+        @unknown default: return "unknown"
+        }
     }
 
     // MARK: - System probes

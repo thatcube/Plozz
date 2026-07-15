@@ -485,10 +485,18 @@ public struct HomeView: View {
                     .padding(.trailing, 80)
             }
         }
-        .onAppear { if homePerfOverlayEnabled { perfSampler.start() } }
+        .onAppear {
+            if homePerfOverlayEnabled || HomePerfDiagnostics.isStdoutMirrorEnabled {
+                perfSampler.start()
+            }
+        }
         .onDisappear { perfSampler.stop() }
         .onChange(of: homePerfOverlayEnabled) { _, enabled in
-            if enabled { perfSampler.start() } else { perfSampler.stop() }
+            if enabled || HomePerfDiagnostics.isStdoutMirrorEnabled {
+                perfSampler.start()
+            } else {
+                perfSampler.stop()
+            }
         }
     }
 

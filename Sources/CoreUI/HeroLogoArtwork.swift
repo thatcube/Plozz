@@ -282,6 +282,29 @@ public enum HeroLogoPreloader {
             priority: .utility
         )
     }
+
+    #if canImport(UIKit)
+    /// Returns the fully **prepared** (decoded, background-stripped, trimmed) hero
+    /// logo image for `primaryURL` — falling back to `asyncFallbackURL` when the
+    /// provider has no usable logo — or `nil` when none can be resolved.
+    ///
+    /// Unlike ``HeroLogoArtwork`` (which loads asynchronously *inside* a SwiftUI
+    /// view and therefore can't be captured by a one-shot `ImageRenderer`), this
+    /// resolves the processed `UIImage` up front so a caller can bake it into a
+    /// synchronous snapshot. The result is cached by the shared logo pipeline, so
+    /// warming it here also warms the live component. Used by the experimental hero
+    /// foreground rasterizer; safe to call off the main actor.
+    public static func preparedImage(
+        primaryURL: URL?,
+        asyncFallbackURL: (@Sendable () async -> URL?)? = nil
+    ) async -> UIImage? {
+        await loadPreparedHeroLogo(
+            primaryURL: primaryURL,
+            asyncFallbackURL: asyncFallbackURL,
+            priority: .userInitiated
+        )?.image
+    }
+    #endif
 }
 
 private func loadPreparedHeroLogo(

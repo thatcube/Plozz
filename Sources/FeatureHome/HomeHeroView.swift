@@ -202,6 +202,16 @@ struct HomeHeroView: View {
 
     @Environment(\.colorScheme) private var colorScheme
 
+    /// The display scale used to render foreground snapshots at native pixel
+    /// density (experiment only). Captured from the environment so the rasterizer
+    /// draws crisp images that match the live column.
+    @Environment(\.displayScale) private var displayScale
+
+    /// The experimental foreground rasterizer (PLZHERO_RASTER_FOREGROUND). Inert
+    /// and untouched on the default path — it is only read/prepared when the flag
+    /// is on — so constructing it here is a cheap, behaviourally-neutral no-op.
+    @State private var foregroundRasterizer = HeroForegroundRasterizer()
+
     private var current: MediaItem? {
         guard items.indices.contains(index) else { return items.first }
         return items[index]
@@ -393,6 +403,12 @@ struct HomeHeroView: View {
         .onChange(of: items.map(\.id)) { oldIDs, newIDs in
             guard oldIDs != newIDs else { return }
             artworkSetToken &+= 1
+            // The curated identity set changed: every prepared foreground snapshot
+            // may now belong to a different slide, so bump the rasterizer generation
+            // and drop them all (experiment only; no-op when the flag is off).
+            if HeroRasterExperiment.isEnabled {
+                foregroundRasterizer.invalidateAll(reason: "set-swap")
+            }
             let oldIdx = index
             let frontedID = oldIDs.indices.contains(index) ? oldIDs[index] : nil
             if let frontedID, let newIdx = newIDs.firstIndex(of: frontedID) {
@@ -469,6 +485,37 @@ struct HomeHeroView: View {
         // text title. The shared limiter keeps this behind foreground artwork.
         .task(id: artworkSetToken) {
             await warmHeroLogos()
+        }
+        // Foreground raster preparation (PLZHERO_RASTER_FOREGROUND). During dwell,
+        // prepare the bounded ±2 window's description snapshots so a later page can
+        // O(1)-swap a prepared image instead of laying out the live column on the
+        // transition frame. Keyed so it re-runs when the fronted slide, the pill
+        // width (which caps the text), the colour scheme, or the identity set
+        // changes; cancelled on every re-key so rapid paging never renders a slide
+        // the user has already left. No-op (and never scheduled work) when OFF.
+        .task(id: ForegroundRasterKey(
+            index: index,
+            width: Int(actionButtonsWidth.rounded()),
+            isDark: colorScheme == .dark,
+            setToken: artworkSetToken
+        )) {
+            await prepareForegroundRaster()
+        }
+        // Theme flips invalidate every snapshot (text/shadow tints are appearance
+        // dependent), so regenerate rather than show a light snapshot in dark mode.
+        .onChange(of: colorScheme) { _, _ in
+            if HeroRasterExperiment.isEnabled {
+                foregroundRasterizer.invalidateAll(reason: "theme")
+            }
+        }
+        // Record a gated HIT/MISS marker for the slide the carousel just settled on
+        // (experiment only). Uses the same synchronous fingerprint the body looks up,
+        // so the marker reflects exactly what the transition frame showed.
+        .onChange(of: index) { _, _ in
+            guard HeroRasterExperiment.isEnabled, let item = current else { return }
+            foregroundRasterizer.recordTransition(
+                itemID: item.id, fingerprint: foregroundFingerprint(for: item)
+            )
         }
         // Auto-advance: the fire is rescheduled whenever `autoAdvanceKey` changes
         // (slide change, manual page, pause/resume, or the item count settling).
@@ -577,58 +624,18 @@ struct HomeHeroView: View {
             // down to the next focusable (a Continue Watching card). Keeping the
             // buttons opaque and focusable throughout the transition pins focus and
             // the scroll in place.
-            VStack(alignment: .leading, spacing: 12) {
-                HeroLogoArtwork(
-                    primaryURL: item.logoURL,
-                    asyncFallbackURL: logoFallback(for: item),
-                    backgroundSample: backgroundSample(for: item),
-                    // Cap the logo image to the action-button row width (measured
-                    // below) so it never runs wider than the buttons beneath it —
-                    // matching the title/overview. Falls back to the component's
-                    // default until first measured.
-                    maxWidth: actionButtonsWidth > 0 ? actionButtonsWidth : 620,
-                    // The parent keeps metadata hidden for 280ms during a wipe. A
-                    // cache-hot logo lands inside that window; a later result warms
-                    // the next visit but never pops into an already-settled slide.
-                    presentationPolicy: .onArrival(maximumWait: 0.2)
-                ) {
-                    Text(hideText ? spoilerSettings.maskedTitle(for: item) : item.title)
-                        .font(.system(size: 64, weight: .bold))
-                        .lineLimit(2)
-                        .minimumScaleFactor(0.5)
-                        .multilineTextAlignment(.leading)
-                        // Cap the text title to the action-button row width (measured
-                        // below) so it wraps to fit within the buttons, like the
-                        // overview. Falls back to the old cap until first measured.
-                        .frame(maxWidth: actionButtonsWidth > 0 ? actionButtonsWidth : 1200, alignment: .leading)
-                        .contentTransition(.opacity)
-                }
-                .id("logo-\(item.id)")
-
-                metadataLine(for: item)
-                    .modifier(HeroTextLegibilityShadow(colorScheme: colorScheme))
-
-                if !hideText, let overview = item.overview {
-                    Text(overview)
-                        .font(.system(size: 22))
-                        .foregroundStyle(.secondary)
-                        .lineSpacing(2)
-                        .lineLimit(3, reservesSpace: true)
-                        // Cap the description to the action-button row width (measured
-                        // below) so it never runs wider than the buttons beneath it.
-                        // Falls back to the previous fixed cap until first measured.
-                        .frame(maxWidth: actionButtonsWidth > 0 ? actionButtonsWidth : 960, alignment: .topLeading)
-                        // Subtle legibility shadow so the description reads clearly
-                        // over the (now more dissolved) lower hero — see modifier.
-                        .modifier(HeroTextLegibilityShadow(colorScheme: colorScheme))
-                        .contentTransition(.opacity)
-                }
-            }
-            .opacity(metadataVisible ? 1 : 0)
-            // Snap the metadata *hide* instantly (so the outgoing text vanishes as
-            // the wipe starts instead of fading out over the incoming art) while
-            // still allowing the delayed fade-IN once the wipe has landed.
-            .transaction { if !metadataVisible { $0.animation = nil } }
+            // The description column is either the live SwiftUI subtree (standard
+            // path) or, under PLZHERO_RASTER_FOREGROUND with a prepared snapshot,
+            // an O(1) rasterized image swapped in on the transition frame so the
+            // page never pays the live foreground layout/diff cost. Same opacity /
+            // transaction wrapper either way, so the metadata-fade semantics and
+            // the column's layout footprint are identical.
+            descriptionColumn(for: item, hideText: hideText)
+                .opacity(metadataVisible ? 1 : 0)
+                // Snap the metadata *hide* instantly (so the outgoing text vanishes as
+                // the wipe starts instead of fading out over the incoming art) while
+                // still allowing the delayed fade-IN once the wipe has landed.
+                .transaction { if !metadataVisible { $0.animation = nil } }
 
             // Zero-height recede target: sits just above the buttons so a
             // down-press lifts the logo/title off the top of the screen.
@@ -677,6 +684,170 @@ struct HomeHeroView: View {
         // Cap the overview to the button-row width: adopt the pills' measured width.
         .onPreferenceChange(HeroButtonsWidthKey.self) { width in
             if width > 0 { actionButtonsWidth = width }
+        }
+    }
+
+    /// Chooses the rasterized snapshot (experiment ON + prepared HIT) or the live
+    /// SwiftUI description column. The raster branch is accessibility-hidden — the
+    /// live accessibility/focus overlay (`actionRow`) still owns VoiceOver — and is
+    /// drawn at the snapshot's point size so it occupies the same footprint as the
+    /// live column (only the top Spacer absorbs any height difference, exactly as in
+    /// the live path). A MISS falls straight back to the live column (never blank or
+    /// stale) and records a gated perf marker.
+    @ViewBuilder
+    private func descriptionColumn(for item: MediaItem, hideText: Bool) -> some View {
+        if HeroRasterExperiment.isEnabled,
+           let image = foregroundRasterizer.image(
+               for: item.id, fingerprint: foregroundFingerprint(for: item)
+           ) {
+            Image(uiImage: image)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityHidden(true)
+        } else {
+            liveDescriptionColumn(for: item, hideText: hideText)
+        }
+    }
+
+    /// The standard, always-live description column (logo/title + metadata +
+    /// overview). This is the exact subtree used on the default (flag OFF) path and
+    /// the fallback when a raster snapshot is missing/stale.
+    @ViewBuilder
+    private func liveDescriptionColumn(for item: MediaItem, hideText: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HeroLogoArtwork(
+                primaryURL: item.logoURL,
+                asyncFallbackURL: logoFallback(for: item),
+                backgroundSample: backgroundSample(for: item),
+                // Cap the logo image to the action-button row width (measured
+                // below) so it never runs wider than the buttons beneath it —
+                // matching the title/overview. Falls back to the component's
+                // default until first measured.
+                maxWidth: actionButtonsWidth > 0 ? actionButtonsWidth : 620,
+                // The parent keeps metadata hidden for 280ms during a wipe. A
+                // cache-hot logo lands inside that window; a later result warms
+                // the next visit but never pops into an already-settled slide.
+                presentationPolicy: .onArrival(maximumWait: 0.2)
+            ) {
+                Text(hideText ? spoilerSettings.maskedTitle(for: item) : item.title)
+                    .font(.system(size: 64, weight: .bold))
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.5)
+                    .multilineTextAlignment(.leading)
+                    // Cap the text title to the action-button row width (measured
+                    // below) so it wraps to fit within the buttons, like the
+                    // overview. Falls back to the old cap until first measured.
+                    .frame(maxWidth: actionButtonsWidth > 0 ? actionButtonsWidth : 1200, alignment: .leading)
+                    .contentTransition(.opacity)
+            }
+            .id("logo-\(item.id)")
+
+            metadataLine(for: item)
+                .modifier(HeroTextLegibilityShadow(colorScheme: colorScheme))
+
+            if !hideText, let overview = item.overview {
+                Text(overview)
+                    .font(.system(size: 22))
+                    .foregroundStyle(.secondary)
+                    .lineSpacing(2)
+                    .lineLimit(3, reservesSpace: true)
+                    // Cap the description to the action-button row width (measured
+                    // below) so it never runs wider than the buttons beneath it.
+                    // Falls back to the previous fixed cap until first measured.
+                    .frame(maxWidth: actionButtonsWidth > 0 ? actionButtonsWidth : 960, alignment: .topLeading)
+                    // Subtle legibility shadow so the description reads clearly
+                    // over the (now more dissolved) lower hero — see modifier.
+                    .modifier(HeroTextLegibilityShadow(colorScheme: colorScheme))
+                    .contentTransition(.opacity)
+            }
+        }
+    }
+
+    // MARK: - Foreground raster experiment (PLZHERO_RASTER_FOREGROUND)
+
+    /// The synchronous snapshot key for a slide's description column. Reproduced
+    /// identically by the dwell preparer (which stores under it) and by the body at
+    /// the transition frame (which looks up under it), so a prepared snapshot is
+    /// only served (HIT) while its content is still current. No async logo resolve
+    /// here — the logo is keyed by URL, not by whether it has decoded yet — so this
+    /// is cheap enough to compute on the transition frame.
+    func foregroundFingerprint(for item: MediaItem) -> HeroForegroundFingerprint {
+        let hideText = spoilerSettings.shouldHideText(for: item)
+        let title = hideText ? spoilerSettings.maskedTitle(for: item) : item.title
+        let overview = hideText ? nil : item.overview
+        return HeroForegroundFingerprint(
+            itemID: item.id,
+            title: title,
+            overview: overview,
+            metadata: item.metadataComponents().joined(separator: "  ·  "),
+            ratingBadgeID: item.ratingBadge?.id,
+            logoURLString: item.logoURL?.absoluteString,
+            isDarkMode: colorScheme == .dark,
+            contentWidth: Int(actionButtonsWidth.rounded())
+        )
+    }
+
+    /// Async render inputs for one slide's description column: resolves the
+    /// processed logo image up front (off the transition path) so a one-shot
+    /// `ImageRenderer` bakes the final logo, and packages the same title / overview
+    /// / metadata / badge / width the live column draws.
+    func makeForegroundContent(for item: MediaItem) async -> HeroForegroundContent? {
+        let hideText = spoilerSettings.shouldHideText(for: item)
+        let title = hideText ? spoilerSettings.maskedTitle(for: item) : item.title
+        let overview = hideText ? nil : item.overview
+        let logo = await HeroLogoPreloader.preparedImage(
+            primaryURL: item.logoURL,
+            asyncFallbackURL: logoFallback(for: item)
+        )
+        return HeroForegroundContent(
+            title: title,
+            overview: overview,
+            metadata: item.metadataComponents().joined(separator: "  ·  "),
+            ratingBadge: item.ratingBadge,
+            logoImage: logo,
+            contentWidth: actionButtonsWidth
+        )
+    }
+
+    /// Prepares the bounded ±2 window's foreground snapshots during dwell. A no-op
+    /// (schedules no work) unless the experiment flag is on.
+    func prepareForegroundRaster() async {
+        guard HeroRasterExperiment.isEnabled else { return }
+        await foregroundRasterizer.prepare(
+            items: items,
+            index: index,
+            colorScheme: colorScheme,
+            displayScale: displayScale,
+            fingerprint: { self.foregroundFingerprint(for: $0) },
+            makeContent: { await self.makeForegroundContent(for: $0) }
+        )
+    }
+
+    /// The metadata + overview VoiceOver text to fold into the live overlay when
+    /// the raster path hides the live description column. Empty (→ no modifier)
+    /// unless the experiment is enabled, so the default path is unchanged. Respects
+    /// spoiler masking (never speaks a hidden overview).
+    private func rasterA11yValue(for item: MediaItem) -> String {
+        guard HeroRasterExperiment.isEnabled else { return "" }
+        let hideText = spoilerSettings.shouldHideText(for: item)
+        var parts: [String] = []
+        let metadata = item.metadataComponents()
+        if !metadata.isEmpty { parts.append(metadata.joined(separator: ", ")) }
+        if !hideText, let overview = item.overview, !overview.isEmpty {
+            parts.append(overview)
+        }
+        return parts.joined(separator: ". ")
+    }
+
+    /// Adds an accessibility *value* only when non-empty, so the default (flag-OFF)
+    /// path attaches no modifier and stays behaviourally identical.
+    private struct HeroForegroundA11yValue: ViewModifier {
+        let text: String
+        func body(content: Content) -> some View {
+            if text.isEmpty {
+                content
+            } else {
+                content.accessibilityValue(Text(text))
+            }
         }
     }
 
@@ -823,6 +994,12 @@ struct HomeHeroView: View {
                     .accessibilityElement(children: .ignore)
                     .accessibilityAddTraits(.isButton)
                     .accessibilityLabel(accessibilityLabel(for: item))
+                    // When the description column is rasterized (and therefore
+                    // accessibility-hidden), fold its metadata/overview into the
+                    // live focus overlay's accessibility *value* so VoiceOver still
+                    // speaks them. Gated so the default (flag-OFF) path is
+                    // byte-identical — no modifier is added there.
+                    .modifier(HeroForegroundA11yValue(text: rasterA11yValue(for: item)))
                     .accessibilityAction { activateSelected() }
                     .modifier(HeroActionAccessibility(actions: a11yActions))
             }
@@ -1569,6 +1746,18 @@ struct HomeHeroView: View {
     private struct ArtworkResolutionKey: Equatable {
         let slideToken: Int
         let index: Int
+    }
+
+    /// Re-keys the dwell raster-prepare task. A change in the fronted slide, the
+    /// measured pill width (which caps the text/logo), the colour scheme, or the
+    /// curated identity set means the current window's snapshots may be missing or
+    /// stale, so the task restarts (cancelling any in-flight pass for the old
+    /// window). Experiment only.
+    private struct ForegroundRasterKey: Equatable {
+        let index: Int
+        let width: Int
+        let isDark: Bool
+        let setToken: Int
     }
 }
 

@@ -173,6 +173,10 @@ struct HomeHeroView: View {
     /// faded back in once the backdrop wipe has landed — so the old show's text
     /// never lingers over the new artwork.
     @State private var metadataVisible = true
+    /// Identity used only by the non-interactive foreground visuals while the
+    /// stagger experiment is enabled. The canonical `index` remains authoritative
+    /// for the backdrop, focus, navigation, actions, and accessibility at all times.
+    @State private var foregroundStagger = HeroForegroundStaggerState()
     /// Measured width of the action-button row (the visible pills), used to cap the
     /// overview/description to the same width so the text block never runs wider
     /// than the buttons beneath it. `0` until first measured (overview falls back to
@@ -205,6 +209,20 @@ struct HomeHeroView: View {
     private var current: MediaItem? {
         guard items.indices.contains(index) else { return items.first }
         return items[index]
+    }
+
+    /// The item whose logo/title/metadata/overview/pills are rendered. This is
+    /// exactly `current` on the standard path. In the opt-in experiment it may lag
+    /// briefly while hidden, then advances after a controlled frame boundary.
+    private var visualForegroundItem: MediaItem? {
+        let itemKeys = items.map(HeroForegroundItemKey.init)
+        guard HeroForegroundStaggerExperiment.isEnabled,
+              let visualIndex = foregroundStagger.visualIndex(in: itemKeys),
+              items.indices.contains(visualIndex)
+        else {
+            return current
+        }
+        return items[visualIndex]
     }
 
     /// Legibility scrim tone — dark in dark mode, light in light mode (matching
@@ -353,8 +371,8 @@ struct HomeHeroView: View {
         // on it lands it edge-to-edge across the whole screen. Top-anchoring is what
         // makes the recede clean — see the offset notes below.
         Group {
-            if let item = current {
-                content(for: item)
+            if let item = current, let visualItem = visualForegroundItem {
+                content(visualItem: visualItem, interactionItem: item)
             } else {
                 Color.clear
             }
@@ -379,6 +397,12 @@ struct HomeHeroView: View {
             // Start the first dwell from appearance so the initial slide's gauge
             // and auto-advance are anchored to now, not to view construction.
             restartDwell()
+            if HeroForegroundStaggerExperiment.isEnabled {
+                foregroundStagger.reseed(
+                    itemKeys: items.map(HeroForegroundItemKey.init),
+                    canonicalIndex: index
+                )
+            }
             guard !heroVisible else { return }
             withAnimation(.easeInOut(duration: 0.35)) { heroVisible = true }
         }
@@ -390,18 +414,21 @@ struct HomeHeroView: View {
         // fronted with no slide and stale art (the "wrong image / instant appear"
         // bug). Key on identity: preserve the fronted item if it survived the
         // swap, else clamp, then prune resolved art and re-resolve.
-        .onChange(of: items.map(\.id)) { oldIDs, newIDs in
-            guard oldIDs != newIDs else { return }
+        .onChange(of: items.map(HeroForegroundItemKey.init)) { oldKeys, newKeys in
+            guard oldKeys != newKeys else { return }
             artworkSetToken &+= 1
             let oldIdx = index
-            let frontedID = oldIDs.indices.contains(index) ? oldIDs[index] : nil
-            if let frontedID, let newIdx = newIDs.firstIndex(of: frontedID) {
+            let frontedKey = oldKeys.indices.contains(index) ? oldKeys[index] : nil
+            if let frontedKey, let newIdx = newKeys.firstIndex(of: frontedKey) {
                 index = newIdx
             } else {
-                index = min(index, max(0, newIDs.count - 1))
+                index = min(index, max(0, newKeys.count - 1))
             }
-            HeroFocusDiagnostics.emit("items SET-SWAP count \(oldIDs.count)->\(newIDs.count) index \(oldIdx)->\(index) frontedSurvived=\(frontedID.map { newIDs.contains($0) } ?? false) | \(hfState())")
-            let present = Set(newIDs)
+            HeroFocusDiagnostics.emit("items SET-SWAP count \(oldKeys.count)->\(newKeys.count) index \(oldIdx)->\(index) frontedSurvived=\(frontedKey.map { newKeys.contains($0) } ?? false) | \(hfState())")
+            if HeroForegroundStaggerExperiment.isEnabled {
+                foregroundStagger.reseed(itemKeys: newKeys, canonicalIndex: index)
+            }
+            let present = Set(items.map(\.id))
             resolvedBackdrop = resolvedBackdrop.filter { present.contains($0.key) }
             // A set swap is not a page: cancel any pending metadata fade-in and
             // show the (possibly relocated) current item. The backdrop tracks
@@ -554,7 +581,7 @@ struct HomeHeroView: View {
     static let actionRowFocusID = "home-hero-action-row"
 
     @ViewBuilder
-    private func content(for item: MediaItem) -> some View {
+    private func content(visualItem item: MediaItem, interactionItem: MediaItem) -> some View {
         let hideText = spoilerSettings.shouldHideText(for: item)
         VStack(alignment: .leading, spacing: 12) {
             // Absorbs the vertical slack at the TOP of the (fixed-height) column so
@@ -603,7 +630,7 @@ struct HomeHeroView: View {
                         .frame(maxWidth: actionButtonsWidth > 0 ? actionButtonsWidth : 1200, alignment: .leading)
                         .contentTransition(.opacity)
                 }
-                .id("logo-\(item.id)")
+                .id(HeroForegroundItemKey(item))
 
                 metadataLine(for: item)
                     .modifier(HeroTextLegibilityShadow(colorScheme: colorScheme))
@@ -639,7 +666,7 @@ struct HomeHeroView: View {
             // The pills fade with the metadata (see `actionRow`), but their focus
             // target is an always-opaque overlay — so a page never drops focus or
             // shifts the scroll even as the buttons disappear and reappear.
-            actionRow(for: item)
+            actionRow(visualItem: item, interactionItem: interactionItem)
 
             pagingDots
                 // Center the page indicators across the full hero width (leading
@@ -703,20 +730,22 @@ struct HomeHeroView: View {
     // MARK: - Action row + focus/paging
 
     @ViewBuilder
-    private func actionRow(for item: MediaItem) -> some View {
+    private func actionRow(visualItem item: MediaItem, interactionItem: MediaItem) -> some View {
         let itemButtons = buttons(for: item)
+        let interactionButtons = buttons(for: interactionItem)
         // Named VoiceOver actions for *every* visible pill (the row is a single
         // a11y element, so without these only the highlighted action would be
-        // reachable). Order matches the visible pills.
-        let a11yActions: [(String, () -> Void)] = itemButtons.map { button in
+        // reachable). These always target the canonical item, even while the
+        // hidden visual pills are waiting for a staggered update.
+        let a11yActions: [(String, () -> Void)] = interactionButtons.map { button in
             switch button {
-            case .play: return (item.resumeProgressFraction != nil ? "Resume" : "Play", { onPlay(item) })
-            case .request: return ("Request", { performRequest(for: item) })
-            case .downloadStatus: return (downloadStatusText(for: item), {})
-            case .moreInfo: return ("More Info", { onSelect(item) })
+            case .play: return (interactionItem.resumeProgressFraction != nil ? "Resume" : "Play", { onPlay(interactionItem) })
+            case .request: return ("Request", { performRequest(for: interactionItem) })
+            case .downloadStatus: return (downloadStatusText(for: interactionItem), {})
+            case .moreInfo: return ("More Info", { onSelect(interactionItem) })
             case .watchlist:
-                let fav = watchlistTarget(for: item).isFavorite
-                return (fav ? "Remove from Watchlist" : "Add to Watchlist", { performWatchlist(for: item) })
+                let fav = watchlistTarget(for: interactionItem).isFavorite
+                return (fav ? "Remove from Watchlist" : "Add to Watchlist", { performWatchlist(for: interactionItem) })
             case .next: return ("Next", { advanceForward() })
             }
         }
@@ -822,7 +851,7 @@ struct HomeHeroView: View {
                     .onPlayPauseCommand { noteInteraction(); if let item = current { onPlay(item) } }
                     .accessibilityElement(children: .ignore)
                     .accessibilityAddTraits(.isButton)
-                    .accessibilityLabel(accessibilityLabel(for: item))
+                    .accessibilityLabel(accessibilityLabel(for: interactionItem))
                     .accessibilityAction { activateSelected() }
                     .modifier(HeroActionAccessibility(actions: a11yActions))
             }
@@ -1283,7 +1312,7 @@ struct HomeHeroView: View {
 
         // Restart the metadata fade cycle: hide the outgoing show's text instantly,
         // fade the new show's text back in once the wipe has landed.
-        beginTransition()
+        beginTransition(to: toItem)
 
         index = toItem
         advanceToken &+= 1
@@ -1388,9 +1417,50 @@ struct HomeHeroView: View {
     /// together, part-way through the backdrop wipe rather than waiting for it to
     /// fully land. Guarded by ``slideToken`` so a rapid second page cancels the
     /// first page's pending fade-in.
-    private func beginTransition() {
+    private func beginTransition(to targetIndex: Int) {
         slideToken &+= 1
         let token = slideToken
+
+        if HeroForegroundStaggerExperiment.isEnabled {
+            let update = foregroundStagger.schedule(
+                itemKeys: items.map(HeroForegroundItemKey.init),
+                canonicalIndex: targetIndex
+            )
+            let scheduledAt = DispatchTime.now().uptimeNanoseconds
+            HomePerfDiagnostics.emitLine(
+                "STAGGER schedule generation=\(update.generation) delayMs=\(HeroForegroundStaggerExperiment.applyDelayMilliseconds)"
+            )
+            Task { @MainActor in
+                try? await Task.sleep(
+                    nanoseconds: HeroForegroundStaggerExperiment.applyDelayNanoseconds
+                )
+                let elapsedMilliseconds = Int(
+                    (DispatchTime.now().uptimeNanoseconds &- scheduledAt) / 1_000_000
+                )
+                guard foregroundStagger.apply(
+                    update,
+                    itemKeys: items.map(HeroForegroundItemKey.init),
+                    canonicalIndex: index
+                ) else {
+                    HomePerfDiagnostics.emitLine(
+                        "STAGGER cancel generation=\(update.generation) delayMs=\(elapsedMilliseconds)"
+                    )
+                    return
+                }
+                HomePerfDiagnostics.emitLine(
+                    "STAGGER apply generation=\(update.generation) delayMs=\(elapsedMilliseconds)"
+                )
+
+                let remainingNanoseconds =
+                    280_000_000 - HeroForegroundStaggerExperiment.applyDelayNanoseconds
+                try? await Task.sleep(nanoseconds: remainingNanoseconds)
+                guard slideToken == token else { return }
+                withAnimation(.easeInOut(duration: 0.3)) { metadataVisible = true }
+                HeroFocusDiagnostics.emit("metadata fade-in (token=\(token)) | \(hfState())")
+            }
+            return
+        }
+
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 280_000_000)
             guard slideToken == token else { return }

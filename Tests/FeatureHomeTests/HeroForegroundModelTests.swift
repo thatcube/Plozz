@@ -1,0 +1,284 @@
+import XCTest
+import CoreModels
+@testable import FeatureHome
+
+/// Pure-logic coverage for the env-gated imperative UIKit hero foreground's value
+/// layer (``HeroForegroundModel`` / ``HeroForegroundModelBuilder``). These lock the
+/// slide → visuals mapping — metadata joining, per-pill label/glyph resolution,
+/// selection clamping, dots presence, spoiler masking and overview gating — with no
+/// view or simulator, so the persistent renderer can stay a thin apply-in-place
+/// layer over a trusted model.
+final class HeroForegroundModelTests: XCTestCase {
+    private typealias Builder = HeroForegroundModelBuilder
+    private typealias PillInput = HeroForegroundModelBuilder.PillInput
+
+    private func movie(
+        id: String = "m1",
+        title: String = "The Example",
+        overview: String? = "An example overview.",
+        year: Int? = 2021,
+        officialRating: String? = "TV-14",
+        genres: [String] = ["Action", "Drama"],
+        runtime: TimeInterval? = nil,
+        resumePosition: TimeInterval? = nil,
+        logoURL: URL? = URL(string: "https://example.com/logo.png")
+    ) -> MediaItem {
+        MediaItem(
+            id: id,
+            title: title,
+            kind: .movie,
+            overview: overview,
+            productionYear: year,
+            officialRating: officialRating,
+            genres: genres,
+            runtime: runtime,
+            resumePosition: resumePosition,
+            logoURL: logoURL
+        )
+    }
+
+    // MARK: - metadataText
+
+    func testMetadataTextJoinsYearAndGenresWithHeroSeparator() {
+        let text = Builder.metadataText(for: movie(year: 2021, genres: ["Action", "Drama"]))
+        XCTAssertEqual(text, "2021  ·  Action  ·  Drama")
+    }
+
+    func testMetadataTextIsNilWhenNoComponents() {
+        let bare = movie(year: nil, genres: [], runtime: nil)
+        XCTAssertNil(Builder.metadataText(for: bare))
+    }
+
+    func testMetadataTextCapsGenresAtThree() {
+        let item = movie(year: nil, genres: ["A", "B", "C", "D", "E"])
+        XCTAssertEqual(Builder.metadataText(for: item), "A  ·  B  ·  C")
+    }
+
+    // MARK: - pill(for:)
+
+    func testPlayPillUsesPlayLabelWhenNotResumable() {
+        let pill = Builder.pill(for: PillInput(kind: .play, resumeProgress: nil, isResume: false))
+        XCTAssertEqual(pill.text, "Play")
+        XCTAssertEqual(pill.systemImage, "play.fill")
+        XCTAssertNil(pill.progress)
+    }
+
+    func testPlayPillUsesResumeLabelAndProgressWhenResumable() {
+        let pill = Builder.pill(for: PillInput(kind: .play, resumeProgress: 0.42, isResume: true))
+        XCTAssertEqual(pill.text, "Resume")
+        XCTAssertEqual(pill.progress, 0.42)
+    }
+
+    func testRequestPill() {
+        let pill = Builder.pill(for: PillInput(kind: .request))
+        XCTAssertEqual(pill.text, "Request")
+        XCTAssertEqual(pill.systemImage, "plus.circle")
+    }
+
+    func testDownloadStatusPillShowsPercentWhenDownloading() {
+        let pill = Builder.pill(for: PillInput(kind: .downloadStatus, downloadProgress: 0.826))
+        XCTAssertEqual(pill.text, "83%")
+        XCTAssertEqual(pill.progress, 0.826)
+    }
+
+    func testDownloadStatusPillShowsRequestedWhenNoProgress() {
+        let pill = Builder.pill(for: PillInput(kind: .downloadStatus, downloadProgress: nil))
+        XCTAssertEqual(pill.text, "Requested")
+        XCTAssertNil(pill.progress)
+    }
+
+    func testMoreInfoPillIsIconOnly() {
+        let pill = Builder.pill(for: PillInput(kind: .moreInfo))
+        XCTAssertNil(pill.text)
+        XCTAssertEqual(pill.systemImage, "info.circle")
+    }
+
+    func testWatchlistPillReflectsFavouriteState() {
+        XCTAssertEqual(Builder.pill(for: PillInput(kind: .watchlist, isFavorite: true)).systemImage, "bookmark.fill")
+        XCTAssertEqual(Builder.pill(for: PillInput(kind: .watchlist, isFavorite: false)).systemImage, "bookmark")
+    }
+
+    func testNextPillIsChevron() {
+        XCTAssertEqual(Builder.pill(for: PillInput(kind: .next)).systemImage, "chevron.right")
+    }
+
+    // MARK: - model(...)
+
+    func testModelMapsPillsInOrderAndClampsSelection() {
+        let model = Builder.model(
+            item: movie(),
+            overviewVisible: true,
+            maskedTitle: nil,
+            pillInputs: [PillInput(kind: .play), PillInput(kind: .moreInfo)],
+            selectedIndex: 9,
+            heroFocused: true,
+            slideCount: 3,
+            slideIndex: 0
+        )
+        XCTAssertEqual(model.pills.map(\.kind), [.play, .moreInfo])
+        XCTAssertEqual(model.selectedIndex, 1, "out-of-range selection clamps to the last pill")
+        XCTAssertTrue(model.heroFocused)
+    }
+
+    func testModelClampsNegativeSelectionToZero() {
+        let model = Builder.model(
+            item: movie(),
+            overviewVisible: true,
+            maskedTitle: nil,
+            pillInputs: [PillInput(kind: .play), PillInput(kind: .moreInfo)],
+            selectedIndex: -5,
+            heroFocused: false,
+            slideCount: 1,
+            slideIndex: 0
+        )
+        XCTAssertEqual(model.selectedIndex, 0)
+    }
+
+    func testModelSelectionIsZeroWhenNoPills() {
+        let model = Builder.model(
+            item: movie(),
+            overviewVisible: true,
+            maskedTitle: nil,
+            pillInputs: [],
+            selectedIndex: 3,
+            heroFocused: true,
+            slideCount: 1,
+            slideIndex: 0
+        )
+        XCTAssertEqual(model.selectedIndex, 0)
+        XCTAssertTrue(model.pills.isEmpty)
+    }
+
+    func testModelHasNoDotsForSingleSlide() {
+        let model = Builder.model(
+            item: movie(),
+            overviewVisible: true,
+            maskedTitle: nil,
+            pillInputs: [],
+            selectedIndex: 0,
+            heroFocused: false,
+            slideCount: 1,
+            slideIndex: 0
+        )
+        XCTAssertNil(model.dots)
+    }
+
+    func testModelHasDotsForMultipleSlides() {
+        let model = Builder.model(
+            item: movie(),
+            overviewVisible: true,
+            maskedTitle: nil,
+            pillInputs: [],
+            selectedIndex: 0,
+            heroFocused: false,
+            slideCount: 5,
+            slideIndex: 2
+        )
+        XCTAssertEqual(model.dots, HeroForegroundModel.Dots(count: 5, index: 2))
+    }
+
+    func testModelHidesOverviewWhenNotVisible() {
+        let model = Builder.model(
+            item: movie(overview: "Secret plot."),
+            overviewVisible: false,
+            maskedTitle: nil,
+            pillInputs: [],
+            selectedIndex: 0,
+            heroFocused: false,
+            slideCount: 1,
+            slideIndex: 0
+        )
+        XCTAssertNil(model.overview)
+    }
+
+    func testModelShowsOverviewWhenVisible() {
+        let model = Builder.model(
+            item: movie(overview: "Visible plot."),
+            overviewVisible: true,
+            maskedTitle: nil,
+            pillInputs: [],
+            selectedIndex: 0,
+            heroFocused: false,
+            slideCount: 1,
+            slideIndex: 0
+        )
+        XCTAssertEqual(model.overview, "Visible plot.")
+    }
+
+    func testModelPrefersMaskedTitleAndKeepsLogo() {
+        let model = Builder.model(
+            item: movie(title: "Real Title", logoURL: URL(string: "https://example.com/logo.png")),
+            overviewVisible: false,
+            maskedTitle: "Hidden Show",
+            pillInputs: [],
+            selectedIndex: 0,
+            heroFocused: false,
+            slideCount: 1,
+            slideIndex: 0
+        )
+        XCTAssertEqual(model.title, "Hidden Show")
+        XCTAssertEqual(model.logoURL, URL(string: "https://example.com/logo.png"))
+    }
+
+    func testModelCarriesRatingBadgeText() {
+        let model = Builder.model(
+            item: movie(officialRating: "TV-MA"),
+            overviewVisible: true,
+            maskedTitle: nil,
+            pillInputs: [],
+            selectedIndex: 0,
+            heroFocused: false,
+            slideCount: 1,
+            slideIndex: 0
+        )
+        XCTAssertEqual(model.ratingBadgeText, "TV-MA")
+    }
+
+    func testModelRatingBadgeIsNilWhenUnrated() {
+        let model = Builder.model(
+            item: movie(officialRating: nil),
+            overviewVisible: true,
+            maskedTitle: nil,
+            pillInputs: [],
+            selectedIndex: 0,
+            heroFocused: false,
+            slideCount: 1,
+            slideIndex: 0
+        )
+        XCTAssertNil(model.ratingBadgeText)
+    }
+
+    // MARK: - Equatable (same value = cheap no-op skip in the coordinator)
+
+    func testEqualInputsProduceEqualModels() {
+        func make() -> HeroForegroundModel {
+            Builder.model(
+                item: movie(),
+                overviewVisible: true,
+                maskedTitle: nil,
+                pillInputs: [PillInput(kind: .play, resumeProgress: 0.5, isResume: true), PillInput(kind: .moreInfo)],
+                selectedIndex: 0,
+                heroFocused: true,
+                slideCount: 3,
+                slideIndex: 1
+            )
+        }
+        XCTAssertEqual(make(), make())
+    }
+
+    func testSelectionChangeProducesUnequalModels() {
+        func make(selected: Int) -> HeroForegroundModel {
+            Builder.model(
+                item: movie(),
+                overviewVisible: true,
+                maskedTitle: nil,
+                pillInputs: [PillInput(kind: .play), PillInput(kind: .moreInfo)],
+                selectedIndex: selected,
+                heroFocused: true,
+                slideCount: 2,
+                slideIndex: 0
+            )
+        }
+        XCTAssertNotEqual(make(selected: 0), make(selected: 1))
+    }
+}

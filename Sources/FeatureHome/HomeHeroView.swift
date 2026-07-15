@@ -1274,6 +1274,9 @@ struct HomeHeroView: View {
             return
         }
         HeroFocusDiagnostics.emit("page BEGIN from=\(index) to=\(toItem) keepButton=\(keepButton) forward=\(isForward) | \(hfState())")
+        // Perf marker (PLZPERF stream only): lets a capture attribute frame hitches
+        // to specific slide transitions vs idle. Zero-cost unless PLZPERF_STDOUT=1.
+        HomePerfDiagnostics.emitLine("TRANSITION from=\(index) to=\(toItem) forward=\(isForward)")
         // Record the entering direction so the backdrop wipe pushes from the
         // correct edge. Batched with `index` below into one SwiftUI update.
         lastPageForward = isForward

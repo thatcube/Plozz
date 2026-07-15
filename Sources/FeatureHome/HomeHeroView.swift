@@ -611,7 +611,7 @@ struct HomeHeroView: View {
                 if !hideText, let overview = item.overview {
                     Text(overview)
                         .font(.system(size: 22))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.primary)
                         .lineSpacing(2)
                         .lineLimit(3, reservesSpace: true)
                         // Cap the description to the action-button row width (measured
@@ -692,7 +692,7 @@ struct HomeHeroView: View {
                 if !metadata.isEmpty {
                     Text(metadata.joined(separator: "  ·  "))
                         .font(.system(size: 23, weight: .medium))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.primary)
                         .lineLimit(1)
                         .contentTransition(.opacity)
                 }

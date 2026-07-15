@@ -2,6 +2,7 @@
 import Foundation
 import Darwin
 import CoreModels
+import SearchIndexKit
 
 public struct SearchIndexQualityResult: Sendable {
     public let format: VectorStorageFormat
@@ -21,6 +22,7 @@ public struct SearchIndexSQLiteScaleResult: Sendable {
     public let buildSeconds: Double
     public let warmSeconds: Double
     public let querySeconds: Double
+    public let filteredQuerySeconds: Double
     public let databaseBytes: UInt64
 }
 
@@ -51,7 +53,7 @@ public struct SearchIndexSpikeReport: Sendable {
         result.append(contentsOf: sqliteScale.map {
             "SEARCH_INDEX_SQLITE count=\($0.documentCount) " +
                 "build=\($0.buildSeconds)s warm=\($0.warmSeconds)s " +
-                "query=\($0.querySeconds)s " +
+                "query=\($0.querySeconds)s filtered=\($0.filteredQuerySeconds)s " +
                 "databaseBytes=\($0.databaseBytes)"
         })
         return result
@@ -115,7 +117,7 @@ public struct SearchIndexSpikeRunner: Sendable {
                     .map { match in
                         (
                             sourceKey: match.sourceKey,
-                            score: match.score + HybridSearchScorer.lexicalBoost(
+                            score: match.score + HybridRankingPolicy().lexicalBoost(
                                 query: query,
                                 title: match.sourceKey,
                                 metadataText: textByID[match.sourceKey] ?? ""
@@ -252,15 +254,16 @@ public struct SearchIndexSpikeRunner: Sendable {
         for start in stride(from: 0, to: count, by: batchSize) {
             let end = min(start + batchSize, count)
             let writes = try (start..<end).map { index -> SearchIndexWrite in
+                let kind: MediaItemKind = index.isMultiple(of: 2) ? .episode : .movie
                 let item = MediaItem(
                     id: String(index),
-                    title: "Episode \(index)",
-                    kind: .episode,
-                    overview: "Synthetic episode \(index) about a family mystery.",
-                    parentTitle: "Synthetic Show",
-                    seasonNumber: index / 20,
-                    episodeNumber: index % 20,
-                    libraryID: "shows"
+                    title: "\(kind == .episode ? "Episode" : "Movie") \(index)",
+                    kind: kind,
+                    overview: "Synthetic \(kind.rawValue) \(index) about a family mystery.",
+                    parentTitle: kind == .episode ? "Synthetic Show" : nil,
+                    seasonNumber: kind == .episode ? index / 20 : nil,
+                    episodeNumber: kind == .episode ? index % 20 : nil,
+                    libraryID: "mixed"
                 )
                 let document = builder.document(
                     for: item,
@@ -297,6 +300,7 @@ public struct SearchIndexSpikeRunner: Sendable {
         )
         let warmStart = clock.now
         _ = try await store.warm(descriptor: descriptor)
+        _ = try await store.warm(descriptor: descriptor, kind: .episode)
         let warmSeconds = Self.seconds(warmStart.duration(to: clock.now))
         let queryStart = clock.now
         _ = try await store.search(LocalSearchRequest(
@@ -306,6 +310,17 @@ public struct SearchIndexSpikeRunner: Sendable {
             limit: 20
         ))
         let querySeconds = Self.seconds(queryStart.duration(to: clock.now))
+        let filteredStart = clock.now
+        _ = try await store.search(LocalSearchRequest(
+            queryText: "an episode about a family mystery",
+            queryVector: queryVector,
+            descriptor: descriptor,
+            intent: LocalSearchIntent(kinds: [.episode]),
+            limit: 20
+        ))
+        let filteredQuerySeconds = Self.seconds(
+            filteredStart.duration(to: clock.now)
+        )
         let databaseBytes = (try? FileManager.default.attributesOfItem(
             atPath: store.databaseURL.path
         )[.size] as? NSNumber)?.uint64Value ?? 0
@@ -314,6 +329,7 @@ public struct SearchIndexSpikeRunner: Sendable {
             buildSeconds: buildSeconds,
             warmSeconds: warmSeconds,
             querySeconds: querySeconds,
+            filteredQuerySeconds: filteredQuerySeconds,
             databaseBytes: databaseBytes
         )
     }

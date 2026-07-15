@@ -149,9 +149,6 @@ struct PlexMetadata: Decodable {
     /// Epoch-seconds timestamp of the user's last playback, used as the
     /// most-recent-wins tiebreaker when unifying watch-state across servers.
     let lastViewedAt: Int?
-    /// Epoch-seconds catalog timestamps used by the local search index.
-    let addedAt: Int?
-    let updatedAt: Int?
     /// The explicit edition / cut Plex records for the item (e.g. "Director's
     /// Cut", "Theatrical"). Surfaced as `MediaVersion.edition`, taking precedence
     /// over anything parsed from a file name.

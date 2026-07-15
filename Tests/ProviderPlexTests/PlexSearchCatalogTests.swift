@@ -29,8 +29,7 @@ final class PlexSearchCatalogTests: XCTestCase {
            "Genre":[{"tag":"Comedy"}],"Tag":[{"tag":"Bottle Episode"}],
            "Role":[{"id":1,"tag":"Actor","role":"Friend"}],
            "Director":[{"id":2,"tag":"Director"}],
-           "Guid":[{"id":"tvdb://123"}],
-           "updatedAt":1720000000}
+           "Guid":[{"id":"tvdb://123"}]}
         ]}}
         """)
         let provider = PlexProvider(session: session(), http: stub)
@@ -49,7 +48,6 @@ final class PlexSearchCatalogTests: XCTestCase {
         XCTAssertEqual(page.records.first?.item.episodeNumber, 11)
         XCTAssertEqual(page.records.first?.item.genres, ["Comedy"])
         XCTAssertEqual(page.records.first?.item.people.count, 2)
-        XCTAssertNotNil(page.records.first?.providerUpdatedAt)
         XCTAssertNotNil(page.nextCursor)
 
         let query = stub.queryItems(forPathSuffix: "/library/sections/5/all") ?? []

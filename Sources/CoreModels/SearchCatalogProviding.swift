@@ -2,16 +2,11 @@ import Foundation
 
 /// One physical provider item ready for local search indexing.
 ///
-/// `providerUpdatedAt` is the provider's metadata-change timestamp, not watch
-/// activity. It stays outside `MediaItem` because it is indexing state rather
-/// than presentation data.
 public struct SearchCatalogRecord: Sendable {
     public let item: MediaItem
-    public let providerUpdatedAt: Date?
 
-    public init(item: MediaItem, providerUpdatedAt: Date? = nil) {
+    public init(item: MediaItem) {
         self.item = item
-        self.providerUpdatedAt = providerUpdatedAt
     }
 }
 
@@ -38,19 +33,36 @@ public struct SearchCatalogPageRequest: Equatable, Sendable {
 }
 
 /// One provider page. A `nil` next cursor completes this library/kind scan.
+public enum SearchCatalogPageStatus: Sendable {
+    case available
+    case unsupported
+}
+
 public struct SearchCatalogPage: Sendable {
     public let records: [SearchCatalogRecord]
     public let nextCursor: Data?
     public let totalCount: Int?
+    public let status: SearchCatalogPageStatus
 
     public init(
         records: [SearchCatalogRecord],
         nextCursor: Data?,
-        totalCount: Int? = nil
+        totalCount: Int? = nil,
+        status: SearchCatalogPageStatus = .available
     ) {
         self.records = records
         self.nextCursor = nextCursor
         self.totalCount = totalCount
+        self.status = status
+    }
+
+    public static var unsupported: SearchCatalogPage {
+        SearchCatalogPage(
+            records: [],
+            nextCursor: nil,
+            totalCount: nil,
+            status: .unsupported
+        )
     }
 }
 

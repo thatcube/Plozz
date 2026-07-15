@@ -70,12 +70,12 @@ final class VectorMathTests: XCTestCase {
     }
 
     func testHybridScorerBoostsMetadataOverlap() {
-        let matching = HybridSearchScorer.lexicalBoost(
+        let matching = HybridRankingPolicy().lexicalBoost(
             query: "thieves take artwork during an event",
             title: "The Gallery",
             metadataText: "A detective prevents thieves from stealing a painting during a gala."
         )
-        let unrelated = HybridSearchScorer.lexicalBoost(
+        let unrelated = HybridRankingPolicy().lexicalBoost(
             query: "thieves take artwork during an event",
             title: "Dinner",
             metadataText: "Amateur chefs compete to recreate a family recipe."

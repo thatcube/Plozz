@@ -367,7 +367,7 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding, Sea
         case .series: type = 2
         case .episode: type = 4
         default:
-            return SearchCatalogPage(records: [], nextCursor: nil, totalCount: 0)
+            return .unsupported
         }
         let startIndex: Int
         if let cursor = request.cursor {
@@ -392,13 +392,7 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding, Sea
             if item.libraryID == nil {
                 item.libraryID = request.libraryID
             }
-            let timestamp = dto.updatedAt ?? dto.addedAt
-            return SearchCatalogRecord(
-                item: item,
-                providerUpdatedAt: timestamp.map {
-                    Date(timeIntervalSince1970: TimeInterval($0))
-                }
-            )
+            return SearchCatalogRecord(item: item)
         }
         let nextStart = startIndex + records.count
         let hasMore = container.totalSize.map { nextStart < $0 }

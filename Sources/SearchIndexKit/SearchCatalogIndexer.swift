@@ -34,6 +34,11 @@ public struct SearchCatalogIndexingResult: Equatable, Sendable {
     }
 }
 
+public enum SearchCatalogIndexingError: Error, Equatable {
+    case unsupportedPartition
+    case inconsistentProviderTotal(previous: Int, current: Int)
+}
+
 /// Provider-independent full-scan loop. Provider adapters only expose stable
 /// pages; this type owns resume cursors, local document construction, serial
 /// embedding slices, batch SQLite writes, and safe final pruning.
@@ -74,6 +79,7 @@ public struct SearchCatalogIndexer: Sendable {
         var indexedDocuments = 0
         var embeddedDocuments = 0
         var pages = 0
+        var expectedTotalCount: Int?
 
         while true {
             try await admission.waitForSearchIndexing()
@@ -86,6 +92,22 @@ public struct SearchCatalogIndexer: Sendable {
                 )
             )
             pages += 1
+            guard page.status == .available else {
+                try await index.abandonFullScan(
+                    checkpoint: checkpoint,
+                    writeToken: writeToken
+                )
+                throw SearchCatalogIndexingError.unsupportedPartition
+            }
+            if let totalCount = page.totalCount {
+                if let expectedTotalCount, expectedTotalCount != totalCount {
+                    throw SearchCatalogIndexingError.inconsistentProviderTotal(
+                        previous: expectedTotalCount,
+                        current: totalCount
+                    )
+                }
+                expectedTotalCount = totalCount
+            }
 
             for start in stride(
                 from: 0,
@@ -94,9 +116,14 @@ public struct SearchCatalogIndexer: Sendable {
             ) {
                 try await admission.waitForSearchIndexing()
                 let end = min(start + policy.embeddingSliceSize, page.records.count)
-                var writes: [SearchIndexWrite] = []
-                writes.reserveCapacity(end - start)
-
+                struct Prepared {
+                    let record: SearchCatalogRecord
+                    let document: SearchIndexDocument
+                    let descriptor: EmbeddingModelDescriptor?
+                    let semanticText: String
+                }
+                var prepared: [Prepared] = []
+                prepared.reserveCapacity(end - start)
                 for record in page.records[start..<end] {
                     try Task.checkCancellation()
                     let document = documentBuilder.document(
@@ -104,14 +131,68 @@ public struct SearchCatalogIndexer: Sendable {
                         accountID: scope.accountID,
                         providerUserKey: scope.providerUserKey
                     )
-                    let embeddings = try await embeddingsIfNeeded(for: document)
+                    let semanticText = document.semanticTexts.last
+                        ?? document.metadataText
+                    let language = await languageDetector
+                        .hypotheses(for: semanticText, maximumCount: 1)
+                        .first ?? .english
+                    let descriptor = await embeddingProvider.descriptor(for: language)
+                    prepared.append(Prepared(
+                        record: record,
+                        document: document,
+                        descriptor: descriptor,
+                        semanticText: semanticText
+                    ))
+                }
+
+                var neededByDescriptor: [EmbeddingModelDescriptor: Set<String>] = [:]
+                for (descriptor, values) in Dictionary(
+                    grouping: prepared.compactMap { value in
+                        value.descriptor.map { ($0, value.document) }
+                    },
+                    by: \.0
+                ) {
+                    neededByDescriptor[descriptor] = try await index
+                        .sourceKeysNeedingEmbedding(
+                            documents: values.map(\.1),
+                            descriptor: descriptor
+                        )
+                }
+
+                var writes: [SearchIndexWrite] = []
+                writes.reserveCapacity(prepared.count)
+                for value in prepared {
+                    let embeddings: [SearchDocumentEmbedding]?
+                    if let descriptor = value.descriptor {
+                        let needsEmbedding = neededByDescriptor[descriptor]?
+                            .contains(value.document.sourceKey) ?? true
+                        if needsEmbedding {
+                            if let vector = await embeddingProvider.vector(
+                                for: value.semanticText,
+                                using: descriptor
+                            ) {
+                                embeddings = [
+                                    SearchDocumentEmbedding(
+                                        segment: 0,
+                                        descriptor: descriptor,
+                                        vector: vector
+                                    )
+                                ]
+                            } else {
+                                embeddings = []
+                            }
+                        } else {
+                            embeddings = nil
+                        }
+                    } else {
+                        embeddings = []
+                    }
                     if embeddings?.isEmpty == false {
                         embeddedDocuments += 1
                     }
                     writes.append(SearchIndexWrite(
-                        document: document,
-                        embeddings: embeddings,
-                        providerUpdatedAt: record.providerUpdatedAt
+                        document: value.document,
+                        embeddings: embeddings
                     ))
                 }
 
@@ -132,7 +213,8 @@ public struct SearchCatalogIndexer: Sendable {
             guard let nextCursor = page.nextCursor else {
                 try await index.finishFullScan(
                     checkpoint: checkpoint,
-                    writeToken: writeToken
+                    writeToken: writeToken,
+                    expectedTotalCount: expectedTotalCount
                 )
                 return SearchCatalogIndexingResult(
                     indexedDocuments: indexedDocuments,
@@ -152,34 +234,4 @@ public struct SearchCatalogIndexer: Sendable {
         }
     }
 
-    private func embeddingsIfNeeded(
-        for document: SearchIndexDocument
-    ) async throws -> [SearchDocumentEmbedding]? {
-        let semanticText = document.semanticTexts.last ?? document.metadataText
-        let language = await languageDetector
-            .hypotheses(for: semanticText, maximumCount: 1)
-            .first ?? .english
-        guard let descriptor = await embeddingProvider.descriptor(for: language) else {
-            return []
-        }
-        guard try await index.needsEmbedding(
-            document: document,
-            descriptor: descriptor
-        ) else {
-            return nil
-        }
-        guard let vector = await embeddingProvider.vector(
-            for: semanticText,
-            using: descriptor
-        ) else {
-            return []
-        }
-        return [
-            SearchDocumentEmbedding(
-                segment: 0,
-                descriptor: descriptor,
-                vector: vector
-            )
-        ]
-    }
 }

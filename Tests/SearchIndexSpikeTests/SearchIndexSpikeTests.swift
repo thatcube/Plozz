@@ -1,5 +1,6 @@
 import XCTest
 @testable import SearchIndexKit
+import SearchIndexBenchmarkSupport
 
 #if DEBUG && canImport(NaturalLanguage)
 final class SearchIndexSpikeTests: XCTestCase {

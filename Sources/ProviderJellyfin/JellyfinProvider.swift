@@ -473,7 +473,7 @@ public struct JellyfinProvider: MediaProvider, SearchCatalogProviding {
         case .series: itemType = "Series"
         case .episode: itemType = "Episode"
         default:
-            return SearchCatalogPage(records: [], nextCursor: nil, totalCount: 0)
+            return .unsupported
         }
         let startIndex: Int
         if let cursor = request.cursor {
@@ -497,11 +497,7 @@ public struct JellyfinProvider: MediaProvider, SearchCatalogProviding {
         let records = response.Items.map { dto -> SearchCatalogRecord in
             var item = map(item: dto)
             item.libraryID = request.libraryID
-            let updatedAt = [
-                Self.parseDate(dto.DateCreated),
-                Self.parseDate(dto.DateLastSaved)
-            ].compactMap { $0 }.max()
-            return SearchCatalogRecord(item: item, providerUpdatedAt: updatedAt)
+            return SearchCatalogRecord(item: item)
         }
         let nextStart = startIndex + records.count
         let hasMore = response.TotalRecordCount.map { nextStart < $0 }

@@ -24,13 +24,37 @@ Provider-independent, fully local natural-language search foundations.
 ## Phase 2 provider ingestion
 
 - Jellyfin exposes rich, recursive pages separately for movies, series, and
-  episodes, including provider metadata timestamps.
+  episodes.
 - Plex exposes section-scoped type 1/2/4 pages for movies, series, and episodes.
 - `ShareSearchCatalogAdapter` reads only an existing committed
   `ShareCatalogStore`, covering SMB, WebDAV, NFS, SFTP, and FTP/FTPS without
   rescanning files or acquiring transport leases.
 - Failed or cancelled page loops retain their cursor and never prune old rows.
   Only a complete library/kind generation performs mark-and-sweep deletion.
+
+## Phase 2.5 hardening
+
+- SQLite failures are typed. Only proven corruption/not-a-database errors rebuild
+  the cache; transient locks and future schema versions preserve it.
+- A stepped migration ladder preserves documents/vectors across schema changes.
+- Full scans reconcile unique current-generation rows against stable provider
+  totals before pruning. Empty partitions require two completed scans.
+- Unsupported provider partitions close without completing or pruning.
+- Warmed vectors represent the last completed generation while page writes run;
+  the cache invalidates once that generation commits.
+- Embedding freshness is checked once per 20-document slice rather than once per
+  item, and single-kind searches load only that kind's vectors.
+- Production semantic/lexical scoring is centralized in `HybridRankingPolicy`.
+- Synthetic corpus and device-memory tooling live in
+  `SearchIndexBenchmarkSupport`, not the shipping search module.
+
+Post-hardening Brando TV measurements:
+
+- Float16 SQLite build: ~3.2s / 17.5s / 34.6s at 10k / 50k / 100k.
+- Warm-up: ~0.56s / 3.03s / 6.05s for the all-kind plus episode-only caches.
+- Unfiltered query: ~36ms / 83ms / 129ms.
+- Episode-kind filtered query: ~32ms / 60ms / 96ms.
+- Quality remains 80% top-1 and 100% top-5 across Float32, Float16, and Int8.
 
 ## Phase 0 findings
 

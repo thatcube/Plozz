@@ -1,5 +1,5 @@
 import SwiftUI
-import SearchIndexKit
+import SearchIndexBenchmarkSupport
 import Darwin
 
 #if DEBUG && canImport(NaturalLanguage)

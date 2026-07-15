@@ -4,9 +4,11 @@ import CoreModels
 
 public enum SearchIndexStoreError: Error, Equatable {
     case openFailed(String)
-    case sqlite(String)
+    case sqlite(SearchIndexSQLiteFailure)
+    case unsupportedSchema(Int)
     case staleWriteGeneration
     case invalidCheckpoint
+    case inconsistentScan(expected: Int, actual: Int)
 }
 
 public struct SearchDocumentEmbedding: Sendable {
@@ -28,16 +30,13 @@ public struct SearchDocumentEmbedding: Sendable {
 public struct SearchIndexWrite: Sendable {
     public let document: SearchIndexDocument
     public let embeddings: [SearchDocumentEmbedding]?
-    public let providerUpdatedAt: Date?
 
     public init(
         document: SearchIndexDocument,
-        embeddings: [SearchDocumentEmbedding]?,
-        providerUpdatedAt: Date? = nil
+        embeddings: [SearchDocumentEmbedding]?
     ) {
         self.document = document
         self.embeddings = embeddings
-        self.providerUpdatedAt = providerUpdatedAt
     }
 }
 
@@ -100,39 +99,22 @@ public struct LocalSearchRequest: Sendable {
     }
 }
 
-public struct SearchIndexMatch: Sendable {
-    public let sourceKey: String
-    public let item: MediaItem
-    public let semanticScore: Float
-    public let combinedScore: Float
-
-    public init(
-        sourceKey: String,
-        item: MediaItem,
-        semanticScore: Float,
-        combinedScore: Float
-    ) {
-        self.sourceKey = sourceKey
-        self.item = item
-        self.semanticScore = semanticScore
-        self.combinedScore = combinedScore
-    }
-}
-
 public actor LocalSearchIndex {
+    private struct CandidateCacheKey: Hashable {
+        let descriptor: EmbeddingModelDescriptor
+        let kindRawValue: String?
+    }
+
     public nonisolated let databaseURL: URL
     public let storageFormat: VectorStorageFormat
 
-    private var db: OpaquePointer?
-    private var didOpen = false
+    private var connection: SearchSQLiteConnection?
     private var activeWriteGeneration: UUID?
-    private var vectorCache: [EmbeddingModelDescriptor: [SemanticCandidate]] = [:]
+    private var vectorCache: [CandidateCacheKey: [SemanticCandidate]] = [:]
+    private let connectionFactory: @Sendable (URL) throws -> SearchSQLiteConnection
 
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
-
-    private static let schemaVersion: Int32 = 2
-    private static let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
     public init(
         scopeKey: String,
@@ -150,12 +132,26 @@ public actor LocalSearchIndex {
         self.storageFormat = storageFormat
         encoder = JSONEncoder()
         decoder = JSONDecoder()
+        connectionFactory = { try SearchSQLiteConnection(url: $0) }
     }
 
-    deinit {
-        if let db {
-            sqlite3_close(db)
-        }
+    init(
+        scopeKey: String,
+        directory: URL,
+        storageFormat: VectorStorageFormat = .float16,
+        connectionFactory: @escaping @Sendable (URL) throws -> SearchSQLiteConnection
+    ) {
+        try? FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        databaseURL = directory.appendingPathComponent(
+            "search-index-\(Self.sanitize(scopeKey)).sqlite"
+        )
+        self.storageFormat = storageFormat
+        encoder = JSONEncoder()
+        decoder = JSONDecoder()
+        self.connectionFactory = connectionFactory
     }
 
     @discardableResult
@@ -183,16 +179,16 @@ public actor LocalSearchIndex {
         let nextGeneration = (try maximumGeneration(for: scope)) + 1
         try execute("""
         INSERT INTO sync_state(
-          account_id, provider_user_key, library_id, kind, cursor, last_delta_at,
+          account_id, provider_user_key, library_id, kind, cursor,
           last_full_scan_at, scan_generation, scan_active
-        ) VALUES(?,?,?,?,?,NULL,NULL,?,1)
+        ) VALUES(?,?,?,?,?,NULL,?,1)
         ON CONFLICT(account_id, provider_user_key, library_id, kind) DO UPDATE SET
           cursor=excluded.cursor,
           scan_generation=excluded.scan_generation,
           scan_active=1;
         """) { statement in
             bind(scope, to: statement)
-            sqlite3_bind_blob(statement, 5, nil, 0, Self.transient)
+            bindBlob(Data(), to: statement, index: 5)
             sqlite3_bind_int64(statement, 6, nextGeneration)
         }
         return SearchScanCheckpoint(
@@ -218,6 +214,24 @@ public actor LocalSearchIndex {
             bindOptionalBlob(cursor, to: statement, index: 1)
             bind(checkpoint.scope, to: statement, startingAt: 2)
             sqlite3_bind_int64(statement, 6, checkpoint.generation)
+        }
+        guard changed == 1 else { throw SearchIndexStoreError.invalidCheckpoint }
+    }
+
+    public func abandonFullScan(
+        checkpoint: SearchScanCheckpoint,
+        writeToken: UUID
+    ) throws {
+        try requireWriteToken(writeToken)
+        try ensureOpen()
+        let changed = try execute("""
+        UPDATE sync_state
+        SET cursor=NULL, scan_active=0
+        WHERE account_id=? AND provider_user_key=? AND library_id=? AND kind=?
+          AND scan_generation=?;
+        """) { statement in
+            bind(checkpoint.scope, to: statement)
+            sqlite3_bind_int64(statement, 5, checkpoint.generation)
         }
         guard changed == 1 else { throw SearchIndexStoreError.invalidCheckpoint }
     }
@@ -249,10 +263,55 @@ public actor LocalSearchIndex {
         return needs
     }
 
+    public func sourceKeysNeedingEmbedding(
+        documents: [SearchIndexDocument],
+        descriptor: EmbeddingModelDescriptor
+    ) throws -> Set<String> {
+        try ensureOpen()
+        guard !documents.isEmpty else { return [] }
+        let byKey = Dictionary(
+            documents.map { ($0.sourceKey, $0.contentHash) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        var needed = Set(byKey.keys)
+        let placeholders = Array(repeating: "?", count: documents.count)
+            .joined(separator: ",")
+        try query("""
+        SELECT d.source_key, d.content_hash, COUNT(v.source_key)
+        FROM documents d
+        LEFT JOIN vectors v
+          ON v.source_key=d.source_key
+         AND v.language=? AND v.revision=? AND v.dimension=?
+        WHERE d.source_key IN (\(placeholders))
+        GROUP BY d.source_key;
+        """, bind: { statement in
+            bindText(descriptor.language.rawValue, to: statement, index: 1)
+            sqlite3_bind_int64(statement, 2, Int64(descriptor.revision))
+            sqlite3_bind_int64(statement, 3, Int64(descriptor.dimension))
+            for (offset, document) in documents.enumerated() {
+                bindText(
+                    document.sourceKey,
+                    to: statement,
+                    index: Int32(offset + 4)
+                )
+            }
+        }) { statement in
+            guard let sourceKey = columnText(statement, 0),
+                  let expectedHash = byKey[sourceKey] else {
+                return
+            }
+            let storedHash = columnText(statement, 1)
+            let vectorCount = Int(sqlite3_column_int64(statement, 2))
+            if storedHash == expectedHash, vectorCount > 0 {
+                needed.remove(sourceKey)
+            }
+        }
+        return needed
+    }
+
     public func upsert(
         document: SearchIndexDocument,
         embeddings: [SearchDocumentEmbedding]?,
-        providerUpdatedAt: Date? = nil,
         scanGeneration: Int64,
         writeToken: UUID
     ) throws {
@@ -260,8 +319,7 @@ public actor LocalSearchIndex {
             [
                 SearchIndexWrite(
                     document: document,
-                    embeddings: embeddings,
-                    providerUpdatedAt: providerUpdatedAt
+                    embeddings: embeddings
                 )
             ],
             scanGeneration: scanGeneration,
@@ -277,6 +335,7 @@ public actor LocalSearchIndex {
         try requireWriteToken(writeToken)
         try ensureOpen()
         guard !writes.isEmpty else { return }
+        let preserveCompletedGenerationCache = try hasActiveScan()
         try transaction {
             for write in writes {
                 try upsert(
@@ -285,7 +344,12 @@ public actor LocalSearchIndex {
                 )
             }
         }
-        vectorCache.removeAll()
+        // A warmed cache represents the last completed generation. Keep serving
+        // that stable snapshot while a new page-based scan writes in the
+        // background; `finishFullScan` invalidates it once the generation commits.
+        if !preserveCompletedGenerationCache {
+            vectorCache.removeAll()
+        }
     }
 
     private func upsert(
@@ -298,8 +362,8 @@ public actor LocalSearchIndex {
             INSERT INTO documents(
               source_key, account_id, provider_user_key, item_id, library_id,
               kind, title_normalized, parent_title_normalized, metadata_text,
-              media_item_json, content_hash, provider_updated_at, scan_generation
-            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
+              media_item_json, content_hash,               scan_generation
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(source_key) DO UPDATE SET
               account_id=excluded.account_id,
               provider_user_key=excluded.provider_user_key,
@@ -311,22 +375,20 @@ public actor LocalSearchIndex {
               metadata_text=excluded.metadata_text,
               media_item_json=excluded.media_item_json,
               content_hash=excluded.content_hash,
-              provider_updated_at=excluded.provider_updated_at,
               scan_generation=excluded.scan_generation;
             """) { statement in
                 bindText(document.sourceKey, to: statement, index: 1)
                 bindText(document.accountID, to: statement, index: 2)
                 bindText(document.providerUserKey, to: statement, index: 3)
                 bindText(document.item.id, to: statement, index: 4)
-                bindOptionalText(document.libraryID, to: statement, index: 5)
+                bindText(document.libraryID ?? "", to: statement, index: 5)
                 bindText(document.item.kind.rawValue, to: statement, index: 6)
                 bindText(document.normalizedTitle, to: statement, index: 7)
                 bindOptionalText(document.normalizedParentTitle, to: statement, index: 8)
                 bindText(document.metadataText, to: statement, index: 9)
                 bindBlob(itemData, to: statement, index: 10)
                 bindText(document.contentHash, to: statement, index: 11)
-                bindOptionalDate(write.providerUpdatedAt, to: statement, index: 12)
-                sqlite3_bind_int64(statement, 13, scanGeneration)
+                sqlite3_bind_int64(statement, 12, scanGeneration)
             }
 
         guard let embeddings = write.embeddings else { return }
@@ -365,23 +427,45 @@ public actor LocalSearchIndex {
     public func finishFullScan(
         checkpoint: SearchScanCheckpoint,
         writeToken: UUID,
+        expectedTotalCount: Int?,
         completedAt: Date = Date()
     ) throws {
         try requireWriteToken(writeToken)
         try ensureOpen()
+        let actualCount = try currentGenerationCount(checkpoint)
+        if let expectedTotalCount, actualCount != expectedTotalCount {
+            throw SearchIndexStoreError.inconsistentScan(
+                expected: expectedTotalCount,
+                actual: actualCount
+            )
+        }
+        let shouldPrune: Bool
+        if let expectedTotalCount {
+            if expectedTotalCount == 0 {
+                let newestStoredGeneration = try newestStoredGeneration(checkpoint.scope)
+                shouldPrune = newestStoredGeneration == nil ||
+                    newestStoredGeneration! <= checkpoint.generation - 2
+            } else {
+                shouldPrune = true
+            }
+        } else {
+            shouldPrune = false
+        }
         try transaction {
-            try execute("""
-            DELETE FROM documents
-            WHERE account_id=? AND provider_user_key=?
-              AND COALESCE(library_id, '')=?
-              AND kind=?
-              AND scan_generation < ?;
-            """) { statement in
-                bindText(checkpoint.scope.accountID, to: statement, index: 1)
-                bindText(checkpoint.scope.providerUserKey, to: statement, index: 2)
-                bindText(checkpoint.scope.libraryID, to: statement, index: 3)
-                bindText(checkpoint.scope.kind.rawValue, to: statement, index: 4)
-                sqlite3_bind_int64(statement, 5, checkpoint.generation)
+            if shouldPrune {
+                try execute("""
+                DELETE FROM documents
+                WHERE account_id=? AND provider_user_key=?
+                  AND library_id=?
+                  AND kind=?
+                  AND scan_generation < ?;
+                """) { statement in
+                    bindText(checkpoint.scope.accountID, to: statement, index: 1)
+                    bindText(checkpoint.scope.providerUserKey, to: statement, index: 2)
+                    bindText(checkpoint.scope.libraryID, to: statement, index: 3)
+                    bindText(checkpoint.scope.kind.rawValue, to: statement, index: 4)
+                    sqlite3_bind_int64(statement, 5, checkpoint.generation)
+                }
             }
             let changed = try execute("""
             UPDATE sync_state
@@ -396,6 +480,40 @@ public actor LocalSearchIndex {
             guard changed == 1 else { throw SearchIndexStoreError.invalidCheckpoint }
         }
         vectorCache.removeAll()
+    }
+
+    private func currentGenerationCount(
+        _ checkpoint: SearchScanCheckpoint
+    ) throws -> Int {
+        var count = 0
+        try query("""
+        SELECT COUNT(*) FROM documents
+        WHERE account_id=? AND provider_user_key=? AND library_id=? AND kind=?
+          AND scan_generation=?;
+        """, bind: { statement in
+            bind(checkpoint.scope, to: statement)
+            sqlite3_bind_int64(statement, 5, checkpoint.generation)
+        }) { statement in
+            count = Int(sqlite3_column_int64(statement, 0))
+        }
+        return count
+    }
+
+    private func newestStoredGeneration(
+        _ scope: SearchScanScope
+    ) throws -> Int64? {
+        var generation: Int64?
+        try query("""
+        SELECT MAX(scan_generation) FROM documents
+        WHERE account_id=? AND provider_user_key=? AND library_id=? AND kind=?;
+        """, bind: { statement in
+            bind(scope, to: statement)
+        }) { statement in
+            if sqlite3_column_type(statement, 0) != SQLITE_NULL {
+                generation = sqlite3_column_int64(statement, 0)
+            }
+        }
+        return generation
     }
 
     public func checkpoint(for scope: SearchScanScope) throws -> SearchScanCheckpoint? {
@@ -437,7 +555,7 @@ public actor LocalSearchIndex {
             let libraryID = String(key[key.index(after: separator)...])
             try execute("""
             DELETE FROM documents
-            WHERE account_id=? AND COALESCE(library_id, '')=?;
+            WHERE account_id=? AND library_id=?;
             """) { statement in
                 bindText(accountID, to: statement, index: 1)
                 bindText(libraryID, to: statement, index: 2)
@@ -461,9 +579,12 @@ public actor LocalSearchIndex {
     }
 
     @discardableResult
-    public func warm(descriptor: EmbeddingModelDescriptor) throws -> Int {
+    public func warm(
+        descriptor: EmbeddingModelDescriptor,
+        kind: MediaItemKind? = nil
+    ) throws -> Int {
         try ensureOpen()
-        return try candidates(for: descriptor).count
+        return try candidates(for: descriptor, kind: kind).count
     }
 
     public func search(_ request: LocalSearchRequest) async throws -> [SearchIndexMatch] {
@@ -474,9 +595,14 @@ public actor LocalSearchIndex {
             return []
         }
 
-        let candidates = try candidates(for: request.descriptor)
-        let hasHardFilters = !request.intent.kinds.isEmpty ||
-            request.intent.seriesTitle != nil ||
+        let kindFilter = request.intent.kinds.count == 1
+            ? request.intent.kinds.first
+            : nil
+        let candidates = try candidates(
+            for: request.descriptor,
+            kind: kindFilter
+        )
+        let hasPostHydrationFilters = request.intent.seriesTitle != nil ||
             request.intent.seasonNumber != nil ||
             request.intent.episodeNumber != nil ||
             request.intent.minimumYear != nil ||
@@ -485,7 +611,7 @@ public actor LocalSearchIndex {
             request.intent.runtime != nil
         let candidateLimit = min(
             candidates.count,
-            hasHardFilters
+            hasPostHydrationFilters
                 ? max(request.limit * 32, 2_048)
                 : max(request.limit * 8, 256)
         )
@@ -498,7 +624,8 @@ public actor LocalSearchIndex {
         let hydrated = try loadDocuments(
             sourceKeys: semantic.map(\.sourceKey)
         )
-        var best: [SearchIndexMatch] = []
+        var rankingInputs: [HybridRankingInput] = []
+        rankingInputs.reserveCapacity(semantic.count)
 
         for score in semantic {
             try Task.checkCancellation()
@@ -515,36 +642,29 @@ public actor LocalSearchIndex {
                   ) else {
                 continue
             }
-            let match = SearchIndexMatch(
+            rankingInputs.append(HybridRankingInput(
                 sourceKey: score.sourceKey,
                 item: document.item,
-                semanticScore: score.score,
-                combinedScore: score.score + HybridSearchScorer.lexicalBoost(
-                    query: request.queryText,
-                    title: document.item.title,
-                    metadataText: document.metadataText
-                )
-            )
-            let worst = best.last
-            let shouldInsert = best.count < request.limit ||
-                match.combinedScore > (worst?.combinedScore ?? -.infinity)
-            if shouldInsert {
-                let insertion = best.firstIndex { existing in
-                    match.combinedScore > existing.combinedScore
-                } ?? best.endIndex
-                best.insert(match, at: insertion)
-                if best.count > request.limit {
-                    best.removeLast()
-                }
-            }
+                metadataText: document.metadataText,
+                semanticScore: score.score
+            ))
         }
-        return best
+        return try await HybridRankingPolicy().rank(
+            rankingInputs,
+            query: request.queryText,
+            limit: request.limit
+        )
     }
 
     private func candidates(
-        for descriptor: EmbeddingModelDescriptor
+        for descriptor: EmbeddingModelDescriptor,
+        kind: MediaItemKind?
     ) throws -> [SemanticCandidate] {
-        if let cached = vectorCache[descriptor] {
+        let cacheKey = CandidateCacheKey(
+            descriptor: descriptor,
+            kindRawValue: kind?.rawValue
+        )
+        if let cached = vectorCache[cacheKey] {
             return cached
         }
         var result: [SemanticCandidate] = []
@@ -559,15 +679,25 @@ public actor LocalSearchIndex {
                 vectors: currentVectors
             ))
         }
-        try query("""
-        SELECT source_key, dimension, storage_format, vector_data
-        FROM vectors
-        WHERE language=? AND revision=? AND dimension=?
-        ORDER BY source_key, segment;
-        """, bind: { statement in
+        var sql = """
+        SELECT v.source_key, v.dimension, v.storage_format, v.vector_data
+        FROM vectors v
+        """
+        if kind != nil {
+            sql += " JOIN documents d ON d.source_key=v.source_key "
+        }
+        sql += " WHERE v.language=? AND v.revision=? AND v.dimension=? "
+        if kind != nil {
+            sql += " AND d.kind=? "
+        }
+        sql += " ORDER BY v.source_key, v.segment;"
+        try query(sql, bind: { statement in
             bindText(descriptor.language.rawValue, to: statement, index: 1)
             sqlite3_bind_int64(statement, 2, Int64(descriptor.revision))
             sqlite3_bind_int64(statement, 3, Int64(descriptor.dimension))
+            if let kind {
+                bindText(kind.rawValue, to: statement, index: 4)
+            }
         }) { statement in
             rowCount += 1
             if rowCount.isMultiple(of: 256) {
@@ -592,7 +722,7 @@ public actor LocalSearchIndex {
             currentVectors.append(vector)
         }
         appendCurrent()
-        vectorCache[descriptor] = result
+        vectorCache[cacheKey] = result
         return result
     }
 
@@ -623,7 +753,7 @@ public actor LocalSearchIndex {
             }
             result[sourceKey] = (
                 accountID: accountID,
-                libraryID: columnText(statement, 2),
+                libraryID: columnText(statement, 2).flatMap { $0.isEmpty ? nil : $0 },
                 item: item,
                 metadataText: metadataText
             )
@@ -690,6 +820,10 @@ public actor LocalSearchIndex {
         return value
     }
 
+    private func hasActiveScan() throws -> Bool {
+        try scalarInt("SELECT COUNT(*) FROM sync_state WHERE scan_active=1;") > 0
+    }
+
     private func requireWriteToken(_ token: UUID) throws {
         guard token == activeWriteGeneration else {
             throw SearchIndexStoreError.staleWriteGeneration
@@ -697,95 +831,39 @@ public actor LocalSearchIndex {
     }
 
     private func ensureOpen() throws {
-        guard !didOpen else {
-            if db == nil { throw SearchIndexStoreError.openFailed(databaseURL.lastPathComponent) }
-            return
-        }
-        didOpen = true
+        guard connection == nil else { return }
         do {
-            try openAndCreateSchema()
-        } catch {
-            if let db {
-                sqlite3_close(db)
-                self.db = nil
+            let opened = try connectionFactory(databaseURL)
+            try SearchIndexSchemaMigrator().migrate(opened)
+            connection = opened
+        } catch let error as SearchIndexStoreError {
+            guard case let .sqlite(failure) = error, failure.isCorruption else {
+                throw error
             }
-            try? FileManager.default.removeItem(at: databaseURL)
-            try openAndCreateSchema()
+            connection?.close()
+            connection = nil
+            try removeDatabaseFiles()
+            let rebuilt = try connectionFactory(databaseURL)
+            try SearchIndexSchemaMigrator().migrate(rebuilt)
+            connection = rebuilt
         }
     }
 
-    private func openAndCreateSchema() throws {
-        var handle: OpaquePointer?
-        let flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX
-        guard sqlite3_open_v2(databaseURL.path, &handle, flags, nil) == SQLITE_OK,
-              let handle else {
-            if let handle { sqlite3_close(handle) }
-            throw SearchIndexStoreError.openFailed(databaseURL.lastPathComponent)
+    private func removeDatabaseFiles() throws {
+        for url in [
+            databaseURL,
+            URL(fileURLWithPath: databaseURL.path + "-wal"),
+            URL(fileURLWithPath: databaseURL.path + "-shm")
+        ] where FileManager.default.fileExists(atPath: url.path) {
+            try FileManager.default.removeItem(at: url)
         }
-        db = handle
-        try exec("PRAGMA foreign_keys=ON;")
-        try exec("PRAGMA journal_mode=WAL;")
-        try exec("PRAGMA synchronous=NORMAL;")
-
-        let version = try scalarInt("PRAGMA user_version;")
-        guard version == 0 || version == Int(Self.schemaVersion) else {
-            throw SearchIndexStoreError.sqlite("unsupported schema \(version)")
-        }
-        try exec("""
-        CREATE TABLE IF NOT EXISTS documents(
-          source_key TEXT PRIMARY KEY,
-          account_id TEXT NOT NULL,
-          provider_user_key TEXT NOT NULL,
-          item_id TEXT NOT NULL,
-          library_id TEXT,
-          kind TEXT NOT NULL,
-          title_normalized TEXT NOT NULL,
-          parent_title_normalized TEXT,
-          metadata_text TEXT NOT NULL,
-          media_item_json BLOB NOT NULL,
-          content_hash TEXT NOT NULL,
-          provider_updated_at REAL,
-          scan_generation INTEGER NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS idx_search_documents_scope
-          ON documents(account_id, provider_user_key, library_id, kind);
-        CREATE TABLE IF NOT EXISTS vectors(
-          source_key TEXT NOT NULL REFERENCES documents(source_key) ON DELETE CASCADE,
-          segment INTEGER NOT NULL,
-          language TEXT NOT NULL,
-          revision INTEGER NOT NULL,
-          dimension INTEGER NOT NULL,
-          storage_format TEXT NOT NULL,
-          vector_data BLOB NOT NULL,
-          PRIMARY KEY(source_key, segment)
-        );
-        CREATE INDEX IF NOT EXISTS idx_search_vectors_model
-          ON vectors(language, revision, dimension);
-        CREATE TABLE IF NOT EXISTS sync_state(
-          account_id TEXT NOT NULL,
-          provider_user_key TEXT NOT NULL,
-          library_id TEXT NOT NULL,
-          kind TEXT NOT NULL,
-          cursor BLOB,
-          last_delta_at REAL,
-          last_full_scan_at REAL,
-          scan_generation INTEGER NOT NULL,
-          scan_active INTEGER NOT NULL DEFAULT 0,
-          PRIMARY KEY(account_id, provider_user_key, library_id, kind)
-        );
-        """)
-        try exec("PRAGMA user_version=\(Self.schemaVersion);")
     }
 
     private func transaction(_ body: () throws -> Void) throws {
-        try exec("BEGIN IMMEDIATE;")
-        do {
-            try body()
-            try exec("COMMIT;")
-        } catch {
-            try? exec("ROLLBACK;")
-            throw error
+        guard let connection else {
+            throw SearchIndexStoreError.openFailed(databaseURL.lastPathComponent)
         }
+        try connection.transaction(body)
     }
 
     @discardableResult
@@ -793,15 +871,10 @@ public actor LocalSearchIndex {
         _ sql: String,
         bind: (OpaquePointer?) -> Void = { _ in }
     ) throws -> Int {
-        guard let db else { throw SearchIndexStoreError.sqlite("database unavailable") }
-        var statement: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
-            throw sqliteError()
+        guard let connection else {
+            throw SearchIndexStoreError.openFailed(databaseURL.lastPathComponent)
         }
-        defer { sqlite3_finalize(statement) }
-        bind(statement)
-        guard sqlite3_step(statement) == SQLITE_DONE else { throw sqliteError() }
-        return Int(sqlite3_changes(db))
+        return try connection.execute(sql, bind: bind)
     }
 
     private func query(
@@ -809,40 +882,24 @@ public actor LocalSearchIndex {
         bind: (OpaquePointer?) -> Void = { _ in },
         row: (OpaquePointer?) throws -> Void
     ) throws {
-        guard let db else { throw SearchIndexStoreError.sqlite("database unavailable") }
-        var statement: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
-            throw sqliteError()
+        guard let connection else {
+            throw SearchIndexStoreError.openFailed(databaseURL.lastPathComponent)
         }
-        defer { sqlite3_finalize(statement) }
-        bind(statement)
-        while sqlite3_step(statement) == SQLITE_ROW {
-            try row(statement)
-        }
+        try connection.query(sql, bind: bind, row: row)
     }
 
     private func exec(_ sql: String) throws {
-        guard let db else { throw SearchIndexStoreError.sqlite("database unavailable") }
-        var message: UnsafeMutablePointer<Int8>?
-        guard sqlite3_exec(db, sql, nil, nil, &message) == SQLITE_OK else {
-            let text = message.map { String(cString: $0) }
-                ?? String(cString: sqlite3_errmsg(db))
-            sqlite3_free(message)
-            throw SearchIndexStoreError.sqlite(text)
+        guard let connection else {
+            throw SearchIndexStoreError.openFailed(databaseURL.lastPathComponent)
         }
+        try connection.exec(sql)
     }
 
     private func scalarInt(_ sql: String) throws -> Int {
-        var value = 0
-        try query(sql) { statement in
-            value = Int(sqlite3_column_int64(statement, 0))
+        guard let connection else {
+            throw SearchIndexStoreError.openFailed(databaseURL.lastPathComponent)
         }
-        return value
-    }
-
-    private func sqliteError() -> SearchIndexStoreError {
-        guard let db else { return .sqlite("database unavailable") }
-        return .sqlite(String(cString: sqlite3_errmsg(db)))
+        return try connection.scalarInt(sql)
     }
 
     private func bind(
@@ -857,7 +914,7 @@ public actor LocalSearchIndex {
     }
 
     private func bindText(_ value: String, to statement: OpaquePointer?, index: Int32) {
-        sqlite3_bind_text(statement, index, value, -1, Self.transient)
+        connection?.bindText(value, to: statement, index: index)
     }
 
     private func bindOptionalText(
@@ -873,15 +930,7 @@ public actor LocalSearchIndex {
     }
 
     private func bindBlob(_ value: Data, to statement: OpaquePointer?, index: Int32) {
-        _ = value.withUnsafeBytes { bytes in
-            sqlite3_bind_blob(
-                statement,
-                index,
-                bytes.baseAddress,
-                Int32(bytes.count),
-                Self.transient
-            )
-        }
+        connection?.bindBlob(value, to: statement, index: index)
     }
 
     private func bindOptionalBlob(
@@ -896,33 +945,12 @@ public actor LocalSearchIndex {
         }
     }
 
-    private func bindOptionalDate(
-        _ value: Date?,
-        to statement: OpaquePointer?,
-        index: Int32
-    ) {
-        if let value {
-            sqlite3_bind_double(statement, index, value.timeIntervalSince1970)
-        } else {
-            sqlite3_bind_null(statement, index)
-        }
-    }
-
     private func columnText(_ statement: OpaquePointer?, _ index: Int32) -> String? {
-        guard sqlite3_column_type(statement, index) != SQLITE_NULL,
-              let text = sqlite3_column_text(statement, index) else {
-            return nil
-        }
-        return String(cString: text)
+        connection?.columnText(statement, index)
     }
 
     private func columnBlob(_ statement: OpaquePointer?, _ index: Int32) -> Data? {
-        guard sqlite3_column_type(statement, index) != SQLITE_NULL else { return nil }
-        let count = Int(sqlite3_column_bytes(statement, index))
-        guard count > 0, let bytes = sqlite3_column_blob(statement, index) else {
-            return Data()
-        }
-        return Data(bytes: bytes, count: count)
+        connection?.columnBlob(statement, index)
     }
 
     private static func defaultDirectory() -> URL {

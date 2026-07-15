@@ -446,8 +446,7 @@ public struct JellyfinClient: Sendable {
     ) async throws -> ItemsResponse {
         let fields = [
             "PrimaryImageAspectRatio", "Overview", "OriginalTitle", "ProviderIds",
-            "Genres", "People", "Studios", "Tags", "Taglines",
-            "DateCreated", "DateLastSaved"
+            "Genres", "People", "Studios", "Tags", "Taglines"
         ].joined(separator: ",")
         let endpoint = Endpoint(
             path: "/Users/\(userID)/Items",

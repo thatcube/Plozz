@@ -89,7 +89,11 @@ final class LocalSearchIndexTests: XCTestCase {
         let resumed = try await store.beginOrResumeFullScan(scope: scope, writeToken: token)
         XCTAssertEqual(resumed.generation, first.generation)
         XCTAssertEqual(resumed.cursor, Data("page-2".utf8))
-        try await store.finishFullScan(checkpoint: resumed, writeToken: token)
+        try await store.finishFullScan(
+            checkpoint: resumed,
+            writeToken: token,
+            expectedTotalCount: 2
+        )
 
         let second = try await store.beginOrResumeFullScan(scope: scope, writeToken: token)
         let survivor = SearchDocumentBuilder().document(
@@ -105,7 +109,11 @@ final class LocalSearchIndexTests: XCTestCase {
         )
         let beforePrune = try await store.documentCount()
         XCTAssertEqual(beforePrune, 2)
-        try await store.finishFullScan(checkpoint: second, writeToken: token)
+        try await store.finishFullScan(
+            checkpoint: second,
+            writeToken: token,
+            expectedTotalCount: 1
+        )
         let afterPrune = try await store.documentCount()
         XCTAssertEqual(afterPrune, 1)
     }
@@ -326,6 +334,101 @@ final class LocalSearchIndexTests: XCTestCase {
         XCTAssertEqual(matches.map(\.sourceKey), ["account:a"])
     }
 
+    func testMismatchedProviderTotalDoesNotPrunePreviousGeneration() async throws {
+        let store = LocalSearchIndex(scopeKey: "profile", directory: try tempDirectory())
+        let token = await store.activateWriteGeneration()
+        let scope = SearchScanScope(
+            accountID: "a",
+            providerUserKey: "u",
+            libraryID: "shows",
+            kind: .episode
+        )
+        let builder = SearchDocumentBuilder()
+        let first = try await store.beginOrResumeFullScan(scope: scope, writeToken: token)
+        let initial = ["1", "2"].map { id in
+            SearchIndexWrite(
+                document: builder.document(
+                    for: item(id: id, title: id, overview: id),
+                    accountID: "a",
+                    providerUserKey: "u"
+                ),
+                embeddings: []
+            )
+        }
+        try await store.upsert(initial, scanGeneration: first.generation, writeToken: token)
+        try await store.finishFullScan(
+            checkpoint: first,
+            writeToken: token,
+            expectedTotalCount: 2
+        )
+
+        let second = try await store.beginOrResumeFullScan(scope: scope, writeToken: token)
+        try await store.upsert(
+            [initial[0]],
+            scanGeneration: second.generation,
+            writeToken: token
+        )
+        do {
+            try await store.finishFullScan(
+                checkpoint: second,
+                writeToken: token,
+                expectedTotalCount: 2
+            )
+            XCTFail("Expected reconciliation failure")
+        } catch {
+            XCTAssertEqual(
+                error as? SearchIndexStoreError,
+                .inconsistentScan(expected: 2, actual: 1)
+            )
+        }
+        let preservedCount = try await store.documentCount()
+        XCTAssertEqual(preservedCount, 2)
+    }
+
+    func testEmptyPartitionRequiresTwoCompletedScansBeforePruning() async throws {
+        let store = LocalSearchIndex(scopeKey: "profile", directory: try tempDirectory())
+        let token = await store.activateWriteGeneration()
+        let scope = SearchScanScope(
+            accountID: "a",
+            providerUserKey: "u",
+            libraryID: "shows",
+            kind: .episode
+        )
+        let write = SearchIndexWrite(
+            document: SearchDocumentBuilder().document(
+                for: item(id: "1", title: "One", overview: "One"),
+                accountID: "a",
+                providerUserKey: "u"
+            ),
+            embeddings: []
+        )
+        let first = try await store.beginOrResumeFullScan(scope: scope, writeToken: token)
+        try await store.upsert([write], scanGeneration: first.generation, writeToken: token)
+        try await store.finishFullScan(
+            checkpoint: first,
+            writeToken: token,
+            expectedTotalCount: 1
+        )
+
+        let firstEmpty = try await store.beginOrResumeFullScan(scope: scope, writeToken: token)
+        try await store.finishFullScan(
+            checkpoint: firstEmpty,
+            writeToken: token,
+            expectedTotalCount: 0
+        )
+        let afterFirstEmpty = try await store.documentCount()
+        XCTAssertEqual(afterFirstEmpty, 1)
+
+        let secondEmpty = try await store.beginOrResumeFullScan(scope: scope, writeToken: token)
+        try await store.finishFullScan(
+            checkpoint: secondEmpty,
+            writeToken: token,
+            expectedTotalCount: 0
+        )
+        let afterSecondEmpty = try await store.documentCount()
+        XCTAssertEqual(afterSecondEmpty, 0)
+    }
+
     func testPersistedVectorsProduceSameRankingAfterReopen() async throws {
         let directory = try tempDirectory()
         let firstStore = LocalSearchIndex(scopeKey: "profile", directory: directory)
@@ -362,5 +465,72 @@ final class LocalSearchIndexTests: XCTestCase {
         let reopened = LocalSearchIndex(scopeKey: "profile", directory: directory)
         let after = try await reopened.search(request).map(\.sourceKey)
         XCTAssertEqual(after, before)
+    }
+
+    func testWarmedCacheStaysOnCompletedGenerationUntilScanFinishes() async throws {
+        let store = LocalSearchIndex(scopeKey: "profile", directory: try tempDirectory())
+        let token = await store.activateWriteGeneration()
+        let scope = SearchScanScope(
+            accountID: "account",
+            providerUserKey: "user",
+            libraryID: "shows",
+            kind: .episode
+        )
+        let builder = SearchDocumentBuilder()
+        func write(_ id: String, vector: [Float]) -> SearchIndexWrite {
+            SearchIndexWrite(
+                document: builder.document(
+                    for: item(id: id, title: id, overview: id),
+                    accountID: "account",
+                    providerUserKey: "user"
+                ),
+                embeddings: [
+                    SearchDocumentEmbedding(
+                        segment: 0,
+                        descriptor: descriptor,
+                        vector: vector
+                    )
+                ]
+            )
+        }
+
+        let first = try await store.beginOrResumeFullScan(scope: scope, writeToken: token)
+        try await store.upsert(
+            [write("old", vector: [1, 0, 0])],
+            scanGeneration: first.generation,
+            writeToken: token
+        )
+        try await store.finishFullScan(
+            checkpoint: first,
+            writeToken: token,
+            expectedTotalCount: 1
+        )
+        _ = try await store.warm(descriptor: descriptor)
+
+        let second = try await store.beginOrResumeFullScan(scope: scope, writeToken: token)
+        try await store.upsert(
+            [
+                write("old", vector: [1, 0, 0]),
+                write("new", vector: [1, 0, 0])
+            ],
+            scanGeneration: second.generation,
+            writeToken: token
+        )
+        let request = LocalSearchRequest(
+            queryText: "query",
+            queryVector: [1, 0, 0],
+            descriptor: descriptor,
+            limit: 10
+        )
+        let duringScan = try await store.search(request).map(\.sourceKey)
+        XCTAssertEqual(duringScan, ["account:old"])
+
+        try await store.finishFullScan(
+            checkpoint: second,
+            writeToken: token,
+            expectedTotalCount: 2
+        )
+        let afterCommit = try await store.search(request).map(\.sourceKey)
+        XCTAssertEqual(afterCommit, ["account:new", "account:old"])
     }
 }

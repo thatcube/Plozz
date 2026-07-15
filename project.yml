@@ -55,7 +55,7 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
     dependencies:
       - package: Plozz
-        product: SearchIndexKit
+        product: SearchIndexBenchmarkSupport
 
   Plozz:
     type: application

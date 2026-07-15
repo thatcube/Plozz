@@ -29,9 +29,7 @@ final class JellyfinSearchCatalogTests: XCTestCase {
            "ParentIndexNumber":2,"IndexNumber":11,
            "Genres":["Comedy"],"Tags":["Bottle Episode"],
            "People":[{"Id":"p1","Name":"Actor","Type":"Actor","Role":"Friend"}],
-           "ProviderIds":{"Tvdb":"123"},
-           "DateCreated":"2024-01-01T00:00:00.0000000Z",
-           "DateLastSaved":"2024-02-01T00:00:00.0000000Z"}
+           "ProviderIds":{"Tvdb":"123"}}
         ],"TotalRecordCount":2}
         """)
         let provider = JellyfinProvider(session: session(), http: stub)
@@ -49,7 +47,6 @@ final class JellyfinSearchCatalogTests: XCTestCase {
         XCTAssertEqual(page.records.first?.item.seasonNumber, 2)
         XCTAssertEqual(page.records.first?.item.episodeNumber, 11)
         XCTAssertEqual(page.records.first?.item.genres, ["Comedy"])
-        XCTAssertNotNil(page.records.first?.providerUpdatedAt)
         XCTAssertNotNil(page.nextCursor)
 
         let query = stub.queryItems(forPathSuffix: "/Users/user/Items") ?? []
@@ -61,7 +58,6 @@ final class JellyfinSearchCatalogTests: XCTestCase {
         XCTAssertEqual(values["Recursive"], "true")
         XCTAssertEqual(values["SortBy"], "DateCreated,SortName")
         XCTAssertTrue(values["Fields"]?.contains("Overview") == true)
-        XCTAssertTrue(values["Fields"]?.contains("DateLastSaved") == true)
 
         _ = try await provider.searchCatalogPage(
             SearchCatalogPageRequest(

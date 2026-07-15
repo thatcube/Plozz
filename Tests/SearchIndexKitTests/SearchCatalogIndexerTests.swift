@@ -140,7 +140,8 @@ final class SearchCatalogIndexerTests: XCTestCase {
             languageDetector: EnglishDetector(),
             policy: SearchCatalogIndexingPolicy(pageSize: 2, embeddingSliceSize: 1)
         )
-        _ = try await secondIndexer.index(scope: scope, writeToken: token)
+        let second = try await secondIndexer.index(scope: scope, writeToken: token)
+        XCTAssertEqual(second.embeddedDocuments, 0)
         let secondCount = try await store.documentCount()
         XCTAssertEqual(secondCount, 1)
     }
@@ -191,5 +192,40 @@ final class SearchCatalogIndexerTests: XCTestCase {
         let finalCount = try await store.documentCount()
         XCTAssertEqual(resumedOffsets.first, 1)
         XCTAssertEqual(finalCount, 2)
+    }
+
+    func testUnsupportedPartitionNeverCompletesOrPrunes() async throws {
+        struct UnsupportedProvider: SearchCatalogProviding {
+            func searchCatalogPage(
+                _ request: SearchCatalogPageRequest
+            ) async throws -> SearchCatalogPage {
+                .unsupported
+            }
+        }
+        let store = LocalSearchIndex(scopeKey: "profile", directory: try tempDirectory())
+        let token = await store.activateWriteGeneration()
+        let scope = SearchScanScope(
+            accountID: "account",
+            providerUserKey: "user",
+            libraryID: "unsupported",
+            kind: .video
+        )
+        let indexer = SearchCatalogIndexer(
+            provider: UnsupportedProvider(),
+            index: store,
+            embeddingProvider: FakeEmbeddingProvider(),
+            languageDetector: EnglishDetector()
+        )
+        do {
+            _ = try await indexer.index(scope: scope, writeToken: token)
+            XCTFail("Expected unsupported partition")
+        } catch {
+            XCTAssertEqual(
+                error as? SearchCatalogIndexingError,
+                .unsupportedPartition
+            )
+        }
+        let checkpoint = try await store.checkpoint(for: scope)
+        XCTAssertNil(checkpoint)
     }
 }

@@ -26,6 +26,10 @@ let package = Package(
         .library(name: "MetadataKit", targets: ["MetadataKit"]),
         .library(name: "FeatureDiscoveryCore", targets: ["FeatureDiscoveryCore"]),
         .library(name: "SearchIndexKit", targets: ["SearchIndexKit"]),
+        .library(
+            name: "SearchIndexBenchmarkSupport",
+            targets: ["SearchIndexBenchmarkSupport"]
+        ),
         .library(name: "FeatureDiscovery", targets: ["FeatureDiscovery"]),
         .library(name: "ProviderJellyfin", targets: ["ProviderJellyfin"]),
         .library(name: "ProviderPlex", targets: ["ProviderPlex"]),
@@ -188,6 +192,10 @@ let package = Package(
             linkerSettings: [
                 .linkedLibrary("sqlite3")
             ]
+        ),
+        .target(
+            name: "SearchIndexBenchmarkSupport",
+            dependencies: ["CoreModels", "SearchIndexKit"]
         ),
 
         // MARK: Providers
@@ -645,7 +653,11 @@ let package = Package(
         // test sweep because callers choose the synthetic catalog size.
         .testTarget(
             name: "SearchIndexSpikeTests",
-            dependencies: ["SearchIndexKit", "CoreModels"]
+            dependencies: [
+                "SearchIndexKit",
+                "SearchIndexBenchmarkSupport",
+                "CoreModels"
+            ]
         ),
         .testTarget(
             name: "FeatureDiscoveryTests",

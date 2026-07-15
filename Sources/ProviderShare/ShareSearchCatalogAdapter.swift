@@ -30,6 +30,9 @@ public struct ShareSearchCatalogAdapter: SearchCatalogProviding {
         } else {
             offset = 0
         }
+        guard supports(libraryID: request.libraryID, kind: request.kind) else {
+            return .unsupported
+        }
         guard let store = await coordinator.existingStore(accountKey: accountID) else {
             return SearchCatalogPage(records: [], nextCursor: nil, totalCount: 0)
         }
@@ -52,6 +55,19 @@ public struct ShareSearchCatalogAdapter: SearchCatalogProviding {
             nextCursor: nextCursor,
             totalCount: page.totalCount
         )
+    }
+
+    private func supports(libraryID: String, kind: MediaItemKind) -> Bool {
+        switch (libraryID, kind) {
+        case (ShareCatalogID.moviesLibrary, .movie),
+             (ShareCatalogID.tvLibrary, .series),
+             (ShareCatalogID.tvLibrary, .episode),
+             (ShareCatalogID.animeLibrary, .series),
+             (ShareCatalogID.animeLibrary, .episode):
+            true
+        default:
+            false
+        }
     }
 }
 

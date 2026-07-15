@@ -21,6 +21,8 @@ first-class backends; co-equal with `ProviderJellyfin`.
   to the server, parameterised by whether the on-device decode engine
   (Plozzigen) is linked.
 - `PlexDTOs` — Plex JSON shapes, mapped into `CoreModels` at the seam.
+- `PlexProvider` also conforms to `SearchCatalogProviding`, using section-scoped
+  type 1/2/4 pages for the fully local movie/series/episode index.
 
 ## Invariants
 

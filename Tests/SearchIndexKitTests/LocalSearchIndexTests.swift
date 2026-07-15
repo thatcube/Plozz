@@ -64,7 +64,12 @@ final class LocalSearchIndexTests: XCTestCase {
     func testFullScanResumesAndPrunesOnlyWhenCompleted() async throws {
         let store = LocalSearchIndex(scopeKey: "profile", directory: try tempDirectory())
         let token = await store.activateWriteGeneration()
-        let scope = SearchScanScope(accountID: "a", providerUserKey: "u", libraryID: "shows")
+        let scope = SearchScanScope(
+            accountID: "a",
+            providerUserKey: "u",
+            libraryID: "shows",
+            kind: .episode
+        )
         let first = try await store.beginOrResumeFullScan(scope: scope, writeToken: token)
 
         for id in ["1", "2"] {
@@ -112,7 +117,12 @@ final class LocalSearchIndexTests: XCTestCase {
             storageFormat: .float16
         )
         let token = await store.activateWriteGeneration()
-        let scope = SearchScanScope(accountID: "a", providerUserKey: "u", libraryID: "shows")
+        let scope = SearchScanScope(
+            accountID: "a",
+            providerUserKey: "u",
+            libraryID: "shows",
+            kind: .episode
+        )
         let checkpoint = try await store.beginOrResumeFullScan(scope: scope, writeToken: token)
         let builder = SearchDocumentBuilder()
 

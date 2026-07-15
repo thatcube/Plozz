@@ -7,7 +7,7 @@ import CoreNetworking
 /// Holds an authenticated `PlexClient` and maps Plex `Metadata`/`Directory`
 /// onto the provider-agnostic `CoreModels` types. Feature modules depend only on
 /// `MediaProvider`; this is the single place Plex specifics live.
-public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
+public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding, SearchCatalogProviding {
     public let kind: ProviderKind = .plex
     public let session: UserSession
     public let accountID: String
@@ -356,6 +356,67 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
             PlozzLog.networking.error("Plex library browse failed: section=\(containerID) error=\(String(describing: error))")
             throw error
         }
+    }
+
+    public func searchCatalogPage(
+        _ request: SearchCatalogPageRequest
+    ) async throws -> SearchCatalogPage {
+        let type: Int
+        switch request.kind {
+        case .movie: type = 1
+        case .series: type = 2
+        case .episode: type = 4
+        default:
+            return SearchCatalogPage(records: [], nextCursor: nil, totalCount: 0)
+        }
+        let startIndex: Int
+        if let cursor = request.cursor {
+            guard let decoded = try? JSONDecoder().decode(
+                PlexSearchCatalogCursor.self,
+                from: cursor
+            ) else {
+                throw AppError.decoding
+            }
+            startIndex = decoded.startIndex
+        } else {
+            startIndex = 0
+        }
+        let container = try await client.searchCatalogSectionItems(
+            sectionID: request.libraryID,
+            type: type,
+            start: startIndex,
+            size: request.limit
+        )
+        let records = (container.Metadata ?? []).map { dto -> SearchCatalogRecord in
+            var item = map(metadata: dto)
+            if item.libraryID == nil {
+                item.libraryID = request.libraryID
+            }
+            let timestamp = dto.updatedAt ?? dto.addedAt
+            return SearchCatalogRecord(
+                item: item,
+                providerUpdatedAt: timestamp.map {
+                    Date(timeIntervalSince1970: TimeInterval($0))
+                }
+            )
+        }
+        let nextStart = startIndex + records.count
+        let hasMore = container.totalSize.map { nextStart < $0 }
+            ?? (records.count == request.limit)
+        let nextCursor = hasMore && !records.isEmpty
+            ? try JSONEncoder().encode(
+                PlexSearchCatalogCursor(startIndex: nextStart)
+            )
+            : nil
+        return SearchCatalogPage(
+            records: records,
+            nextCursor: nextCursor,
+            totalCount: container.totalSize
+        )
+    }
+
+    private struct PlexSearchCatalogCursor: Codable {
+        let startIndex: Int
     }
 
     /// The alphabet fast-scroll index for a name-sorted section. Plex's

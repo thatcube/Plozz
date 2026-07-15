@@ -10,6 +10,8 @@ Provider-independent, fully local natural-language search foundations.
 - Parse deterministic constraints such as media kind, series, episode, year,
   genre, and runtime.
 - Persist a rebuildable SQLite index under the active profile's cache namespace.
+- Consume any `SearchCatalogProviding` source through a resumable, resource-
+  admitted page loop with serial 20-document embedding slices.
 
 ## Invariants
 
@@ -18,6 +20,17 @@ Provider-independent, fully local natural-language search foundations.
 - Vectors from different languages or model revisions are never compared.
 - Provider construction, catalog crawling, and UI integration live outside this
   module.
+
+## Phase 2 provider ingestion
+
+- Jellyfin exposes rich, recursive pages separately for movies, series, and
+  episodes, including provider metadata timestamps.
+- Plex exposes section-scoped type 1/2/4 pages for movies, series, and episodes.
+- `ShareSearchCatalogAdapter` reads only an existing committed
+  `ShareCatalogStore`, covering SMB, WebDAV, NFS, SFTP, and FTP/FTPS without
+  rescanning files or acquiring transport leases.
+- Failed or cancelled page loops retain their cursor and never prune old rows.
+  Only a complete library/kind generation performs mark-and-sweep deletion.
 
 ## Phase 0 findings
 

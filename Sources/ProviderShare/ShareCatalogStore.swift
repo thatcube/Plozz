@@ -2221,7 +2221,85 @@ actor ShareCatalogStore {
         ensureOpen(); return readQueries.seriesCount(in: library)
     }
 
-    /// Season container items for a series.
+    /// Transport-free page for semantic indexing. Reads only this committed
+    /// SQLite snapshot and never touches a scanner or media file.
+    func searchCatalogItems(
+        libraryID: String,
+        kind: MediaItemKind,
+        offset: Int,
+        limit: Int
+    ) -> MediaPage {
+        guard let library = ShareCatalogID.catalogLibrary(forID: libraryID) else {
+            return MediaPage(items: [], startIndex: offset, totalCount: 0)
+        }
+        switch kind {
+        case .movie where library == .movies:
+            return MediaPage(
+                items: movies(offset: offset, limit: limit),
+                startIndex: offset,
+                totalCount: movieCount()
+            )
+        case .series where library != .movies:
+            return MediaPage(
+                items: series(in: library, offset: offset, limit: limit),
+                startIndex: offset,
+                totalCount: seriesCount(in: library)
+            )
+        case .episode where library != .movies:
+            return MediaPage(
+                items: catalogEpisodes(in: library, offset: offset, limit: limit),
+                startIndex: offset,
+                totalCount: catalogEpisodeCount(in: library)
+            )
+        default:
+            return MediaPage(items: [], startIndex: offset, totalCount: 0)
+        }
+    }
+
+    private func catalogEpisodes(
+        in library: CatalogLibrary,
+        offset: Int,
+        limit: Int
+    ) -> [MediaItem] {
+        ensureOpen()
+        guard db != nil else { return [] }
+        var items: [MediaItem] = []
+        query("""
+        SELECT rel_path, title, 'episode' AS kind, library, year, series_title,
+               series_key, season, episode
+        FROM assets
+        WHERE library=? AND kind='episode' AND series_key IS NOT NULL
+        ORDER BY series_key, COALESCE(season,1), COALESCE(episode,999999),
+                 sort_title, rel_path
+        LIMIT ? OFFSET ?;
+        """, bind: {
+            self.bindText($0, 1, library.rawValue)
+            sqlite3_bind_int64($0, 2, Int64(limit))
+            sqlite3_bind_int64($0, 3, Int64(offset))
+        }) { statement in
+            guard let seriesKey = self.columnText(statement, 6) else { return }
+            items.append(self.episodeItem(from: statement, seriesKey: seriesKey))
+        }
+        return items.map(withEnrichment)
+    }
+
+    private func catalogEpisodeCount(in library: CatalogLibrary) -> Int {
+        ensureOpen()
+        guard db != nil else { return 0 }
+        var count = 0
+        query("""
+        SELECT COUNT(*) FROM assets
+        WHERE library=? AND kind='episode' AND series_key IS NOT NULL;
+        """, bind: {
+            self.bindText($0, 1, library.rawValue)
+        }) { statement in
+            count = Int(sqlite3_column_int64(statement, 0))
+        }
+        return count
+    }
+
+    /// Season container items for a series (distinct season numbers; a `NULL`
+    /// season is treated as season 1).
     func seasons(seriesKey: String) -> [MediaItem] {
         ensureOpen(); return readQueries.seasons(seriesKey: seriesKey)
     }

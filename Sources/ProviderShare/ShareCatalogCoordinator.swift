@@ -151,6 +151,18 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
         )
     }
 
+    /// Existing committed catalog only. Unlike `store(...)`, this never creates
+    /// scanner/enricher state, starts a scan, or acquires a transport lease.
+    func existingStore(accountKey: String) -> ShareCatalogStore? {
+        stores[accountKey]
+    }
+
+    /// Test seam for a pre-populated committed catalog. Production creates stores
+    /// only through `store(...)`.
+    func registerExistingStore(_ store: ShareCatalogStore, accountKey: String) {
+        stores[accountKey] = store
+    }
+
     /// Return the shared catalog store for a share, creating it (and a dedicated
     /// scan transport session + scanner + enricher) on first use, and kicking a
     /// throttled background scan followed by enrichment. The scan browser is

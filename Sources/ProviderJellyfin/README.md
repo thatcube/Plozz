@@ -24,6 +24,8 @@ supported capability remains at parity.
   decode them locally.
 - `JellyfinMusicProvider` — music-library queries (artists, albums, tracks)
   surfaced through the shared provider abstraction.
+- `JellyfinProvider` also conforms to `SearchCatalogProviding`, paging rich
+  movie/series/episode metadata into Plozz's fully local semantic index.
 
 ## Invariants
 

@@ -96,6 +96,9 @@ struct BaseItemDto: Decodable {
     let IndexNumber: Int?
     let ParentIndexNumber: Int?
     let ProductionYear: Int?
+    /// Server metadata timestamps used only by the local search index.
+    let DateCreated: String?
+    let DateLastSaved: String?
     let RunTimeTicks: Int64?
     let OfficialRating: String?
     let CommunityRating: Double?

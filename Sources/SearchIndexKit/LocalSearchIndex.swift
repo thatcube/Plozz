@@ -45,11 +45,18 @@ public struct SearchScanScope: Codable, Hashable, Sendable {
     public let accountID: String
     public let providerUserKey: String
     public let libraryID: String
+    public let kind: MediaItemKind
 
-    public init(accountID: String, providerUserKey: String, libraryID: String) {
+    public init(
+        accountID: String,
+        providerUserKey: String,
+        libraryID: String,
+        kind: MediaItemKind
+    ) {
         self.accountID = accountID
         self.providerUserKey = providerUserKey
         self.libraryID = libraryID
+        self.kind = kind
     }
 }
 
@@ -124,7 +131,7 @@ public actor LocalSearchIndex {
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
 
-    private static let schemaVersion: Int32 = 1
+    private static let schemaVersion: Int32 = 2
     private static let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
     public init(
@@ -176,17 +183,17 @@ public actor LocalSearchIndex {
         let nextGeneration = (try maximumGeneration(for: scope)) + 1
         try execute("""
         INSERT INTO sync_state(
-          account_id, provider_user_key, library_id, cursor, last_delta_at,
+          account_id, provider_user_key, library_id, kind, cursor, last_delta_at,
           last_full_scan_at, scan_generation, scan_active
-        ) VALUES(?,?,?,?,NULL,NULL,?,1)
-        ON CONFLICT(account_id, provider_user_key, library_id) DO UPDATE SET
+        ) VALUES(?,?,?,?,?,NULL,NULL,?,1)
+        ON CONFLICT(account_id, provider_user_key, library_id, kind) DO UPDATE SET
           cursor=excluded.cursor,
           scan_generation=excluded.scan_generation,
           scan_active=1;
         """) { statement in
             bind(scope, to: statement)
-            sqlite3_bind_blob(statement, 4, nil, 0, Self.transient)
-            sqlite3_bind_int64(statement, 5, nextGeneration)
+            sqlite3_bind_blob(statement, 5, nil, 0, Self.transient)
+            sqlite3_bind_int64(statement, 6, nextGeneration)
         }
         return SearchScanCheckpoint(
             scope: scope,
@@ -205,12 +212,12 @@ public actor LocalSearchIndex {
         let changed = try execute("""
         UPDATE sync_state
         SET cursor=?, scan_active=1
-        WHERE account_id=? AND provider_user_key=? AND library_id=?
+        WHERE account_id=? AND provider_user_key=? AND library_id=? AND kind=?
           AND scan_generation=?;
         """) { statement in
             bindOptionalBlob(cursor, to: statement, index: 1)
             bind(checkpoint.scope, to: statement, startingAt: 2)
-            sqlite3_bind_int64(statement, 5, checkpoint.generation)
+            sqlite3_bind_int64(statement, 6, checkpoint.generation)
         }
         guard changed == 1 else { throw SearchIndexStoreError.invalidCheckpoint }
     }
@@ -367,22 +374,24 @@ public actor LocalSearchIndex {
             DELETE FROM documents
             WHERE account_id=? AND provider_user_key=?
               AND COALESCE(library_id, '')=?
+              AND kind=?
               AND scan_generation < ?;
             """) { statement in
                 bindText(checkpoint.scope.accountID, to: statement, index: 1)
                 bindText(checkpoint.scope.providerUserKey, to: statement, index: 2)
                 bindText(checkpoint.scope.libraryID, to: statement, index: 3)
-                sqlite3_bind_int64(statement, 4, checkpoint.generation)
+                bindText(checkpoint.scope.kind.rawValue, to: statement, index: 4)
+                sqlite3_bind_int64(statement, 5, checkpoint.generation)
             }
             let changed = try execute("""
             UPDATE sync_state
             SET cursor=NULL, last_full_scan_at=?, scan_active=0
-            WHERE account_id=? AND provider_user_key=? AND library_id=?
+            WHERE account_id=? AND provider_user_key=? AND library_id=? AND kind=?
               AND scan_generation=?;
             """) { statement in
                 sqlite3_bind_double(statement, 1, completedAt.timeIntervalSince1970)
                 bind(checkpoint.scope, to: statement, startingAt: 2)
-                sqlite3_bind_int64(statement, 5, checkpoint.generation)
+                sqlite3_bind_int64(statement, 6, checkpoint.generation)
             }
             guard changed == 1 else { throw SearchIndexStoreError.invalidCheckpoint }
         }
@@ -395,7 +404,7 @@ public actor LocalSearchIndex {
         try query("""
         SELECT scan_generation, cursor, scan_active
         FROM sync_state
-        WHERE account_id=? AND provider_user_key=? AND library_id=?;
+        WHERE account_id=? AND provider_user_key=? AND library_id=? AND kind=?;
         """, bind: { statement in
             bind(scope, to: statement)
         }) { statement in
@@ -672,7 +681,7 @@ public actor LocalSearchIndex {
         var value: Int64 = 0
         try query("""
         SELECT scan_generation FROM sync_state
-        WHERE account_id=? AND provider_user_key=? AND library_id=?;
+        WHERE account_id=? AND provider_user_key=? AND library_id=? AND kind=?;
         """, bind: { statement in
             bind(scope, to: statement)
         }) { statement in
@@ -756,12 +765,13 @@ public actor LocalSearchIndex {
           account_id TEXT NOT NULL,
           provider_user_key TEXT NOT NULL,
           library_id TEXT NOT NULL,
+          kind TEXT NOT NULL,
           cursor BLOB,
           last_delta_at REAL,
           last_full_scan_at REAL,
           scan_generation INTEGER NOT NULL,
           scan_active INTEGER NOT NULL DEFAULT 0,
-          PRIMARY KEY(account_id, provider_user_key, library_id)
+          PRIMARY KEY(account_id, provider_user_key, library_id, kind)
         );
         """)
         try exec("PRAGMA user_version=\(Self.schemaVersion);")
@@ -843,6 +853,7 @@ public actor LocalSearchIndex {
         bindText(scope.accountID, to: statement, index: index)
         bindText(scope.providerUserKey, to: statement, index: index + 1)
         bindText(scope.libraryID, to: statement, index: index + 2)
+        bindText(scope.kind.rawValue, to: statement, index: index + 3)
     }
 
     private func bindText(_ value: String, to statement: OpaquePointer?, index: Int32) {

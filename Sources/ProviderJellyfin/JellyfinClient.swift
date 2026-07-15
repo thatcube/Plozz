@@ -436,6 +436,38 @@ public struct JellyfinClient: Sendable {
         return try await http.decode(ItemsResponse.self, from: endpoint, baseURL: baseURL)
     }
 
+    /// Rich, deterministic page used only by the fully local search index.
+    func searchCatalogItems(
+        userID: String,
+        parentID: String,
+        includeItemType: String,
+        startIndex: Int,
+        limit: Int
+    ) async throws -> ItemsResponse {
+        let fields = [
+            "PrimaryImageAspectRatio", "Overview", "OriginalTitle", "ProviderIds",
+            "Genres", "People", "Studios", "Tags", "Taglines",
+            "DateCreated", "DateLastSaved"
+        ].joined(separator: ",")
+        let endpoint = Endpoint(
+            path: "/Users/\(userID)/Items",
+            queryItems: [
+                URLQueryItem(name: "ParentId", value: parentID),
+                URLQueryItem(name: "StartIndex", value: String(startIndex)),
+                URLQueryItem(name: "Limit", value: String(limit)),
+                URLQueryItem(name: "Recursive", value: "true"),
+                URLQueryItem(name: "IncludeItemTypes", value: includeItemType),
+                URLQueryItem(name: "SortBy", value: "DateCreated,SortName"),
+                URLQueryItem(name: "SortOrder", value: "Ascending"),
+                URLQueryItem(name: "Fields", value: fields),
+                URLQueryItem(name: "ImageTypeLimit", value: "1"),
+                URLQueryItem(name: "EnableTotalRecordCount", value: "true")
+            ],
+            headers: authHeaders
+        )
+        return try await http.decode(ItemsResponse.self, from: endpoint, baseURL: baseURL)
+    }
+
     /// Count of items in a container, matching the same recursive/type filters
     /// `items(...)` uses, optionally restricted to those whose **sort name** is
     /// alphabetically less than `nameLessThan`. `Limit=0` fetches no rows — only

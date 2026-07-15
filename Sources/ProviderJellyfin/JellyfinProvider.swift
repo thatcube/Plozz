@@ -7,7 +7,7 @@ import CoreNetworking
 /// Holds an authenticated `JellyfinClient` and maps Jellyfin DTOs onto the
 /// provider-agnostic `CoreModels` types. Feature modules depend only on
 /// `MediaProvider`; this is the single place Jellyfin specifics live.
-public struct JellyfinProvider: MediaProvider {
+public struct JellyfinProvider: MediaProvider, SearchCatalogProviding {
     public let kind: ProviderKind
     public let session: UserSession
     public let accountID: String
@@ -462,6 +462,64 @@ public struct JellyfinProvider: MediaProvider {
             PlozzLog.networking.error("Library browse failed: container=\(containerID) error=\(String(describing: error))")
             throw error
         }
+    }
+
+    public func searchCatalogPage(
+        _ request: SearchCatalogPageRequest
+    ) async throws -> SearchCatalogPage {
+        let itemType: String
+        switch request.kind {
+        case .movie: itemType = "Movie"
+        case .series: itemType = "Series"
+        case .episode: itemType = "Episode"
+        default:
+            return SearchCatalogPage(records: [], nextCursor: nil, totalCount: 0)
+        }
+        let startIndex: Int
+        if let cursor = request.cursor {
+            guard let decoded = try? JSONDecoder().decode(
+                JellyfinSearchCatalogCursor.self,
+                from: cursor
+            ) else {
+                throw AppError.decoding
+            }
+            startIndex = decoded.startIndex
+        } else {
+            startIndex = 0
+        }
+        let response = try await client.searchCatalogItems(
+            userID: session.userID,
+            parentID: request.libraryID,
+            includeItemType: itemType,
+            startIndex: startIndex,
+            limit: request.limit
+        )
+        let records = response.Items.map { dto -> SearchCatalogRecord in
+            var item = map(item: dto)
+            item.libraryID = request.libraryID
+            let updatedAt = [
+                Self.parseDate(dto.DateCreated),
+                Self.parseDate(dto.DateLastSaved)
+            ].compactMap { $0 }.max()
+            return SearchCatalogRecord(item: item, providerUpdatedAt: updatedAt)
+        }
+        let nextStart = startIndex + records.count
+        let hasMore = response.TotalRecordCount.map { nextStart < $0 }
+            ?? (records.count == request.limit)
+        let nextCursor = hasMore && !records.isEmpty
+            ? try JSONEncoder().encode(
+                JellyfinSearchCatalogCursor(startIndex: nextStart)
+            )
+            : nil
+        return SearchCatalogPage(
+            records: records,
+            nextCursor: nextCursor,
+            totalCount: response.TotalRecordCount
+        )
+    }
+
+    private struct JellyfinSearchCatalogCursor: Codable {
+        let startIndex: Int
     }
 
     /// The alphabet fast-scroll index for a name-sorted library. For each of

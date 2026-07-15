@@ -322,6 +322,25 @@ public struct PlexClient: Sendable {
         ).MediaContainer
     }
 
+    /// Lean catalog page: rich metadata and GUIDs without stream enrichment.
+    func searchCatalogSectionItems(
+        sectionID: String,
+        type: Int,
+        start: Int,
+        size: Int
+    ) async throws -> PlexMediaContainer {
+        var query = containerQuery(start: start, size: size)
+        query.append(URLQueryItem(name: "type", value: String(type)))
+        query.append(URLQueryItem(name: "sort", value: "addedAt:asc,titleSort:asc"))
+        let endpoint = Endpoint(
+            path: "/library/sections/\(sectionID)/all",
+            queryItems: query,
+            headers: headers
+        )
+        return try await decode(PlexMediaContainerResponse.self, endpoint)
+            .MediaContainer
+    }
+
     /// `GET /hubs/sections/{id}` — the library's promoted "hubs" (Recently Added,
     /// On Deck, "More in <Genre>", "Because you watched…", Top Rated, …).
     ///

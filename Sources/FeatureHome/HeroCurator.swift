@@ -157,8 +157,12 @@ public struct HeroCurator: Sendable {
             settings: HeroSettings,
             mutations: [MediaItemMutation]
         ) -> [MediaItem] {
-            let reconciled = mutations.reduce(items) { current, mutation in
-                current.map { mutation.applied(to: $0) }
+            // Apply every mutation to each item in a single pass. (A reduce that
+            // `map`ped per mutation reallocated the whole array once per mutation;
+            // this folds them in one allocation so a growing session overlay can't
+            // inflate the cost of a reconcile that runs during view updates.)
+            let reconciled = mutations.isEmpty ? items : items.map { item in
+                mutations.reduce(item) { current, mutation in mutation.applied(to: current) }
             }
             guard settings.hideWatched else { return reconciled }
             return reconciled.filter { item in
@@ -176,6 +180,12 @@ public struct HeroCurator: Sendable {
 /// Keeps poster-only or artwork-free items out of the full-bleed hero. Parent
 /// backdrops remain eligible so episodes can use their series artwork.
 private enum HeroArtworkEligibility {
+    /// How many candidate art checks overlap within a single source. The check is
+    /// cache-first and only reaches the network for un-warmed art, so a small window
+    /// hides that latency without flooding the shared image loader (which is also
+    /// serving the visible slide's full-resolution backdrop).
+    static let maxConcurrentValidations = 4
+
     static func filterDirect(_ perSource: [[MediaItem]]) -> [[MediaItem]] {
         perSource.map { items in
             items.filter(hasDirectHeroArtwork)
@@ -194,36 +204,12 @@ private enum HeroArtworkEligibility {
         return await withTaskGroup(of: (Int, [MediaItem]).self) { group in
             for (sourceIndex, items) in perSource.enumerated() {
                 group.addTask {
-                    var eligible: [MediaItem] = []
-                    eligible.reserveCapacity(min(items.count, limitPerSource))
-                    var seen = Set<String>()
-
-                    for item in items {
-                        guard !Task.isCancelled else { break }
-                        let tokens = HeroDedupe.tokens(for: item)
-                        guard !tokens.contains(where: seen.contains) else { continue }
-
-                        // Admit the slide only if it can actually render a usable
-                        // full-bleed image. A non-nil URL isn't proof — a broken or
-                        // missing backdrop would leave the hero showing the bare app
-                        // background. Try the item's own art first, then the async
-                        // provider (TMDb) as a fallback, and drop it when neither
-                        // yields a usable hero image.
-                        var candidate = item
-                        var usable = await validate(heroArtworkURLs(for: candidate))
-                        if !usable, let resolvedURL = await artworkProvider(item) {
-                            candidate.heroBackdropURL = resolvedURL
-                            usable = await validate(heroArtworkURLs(for: candidate))
-                        }
-
-                        guard !Task.isCancelled else { break }
-                        if usable {
-                            seen.formUnion(tokens)
-                            eligible.append(candidate)
-                            if eligible.count == limitPerSource { break }
-                        }
-                    }
-
+                    let eligible = await eligible(
+                        in: items,
+                        limitPerSource: limitPerSource,
+                        artworkProvider: artworkProvider,
+                        validate: validate
+                    )
                     return (sourceIndex, eligible)
                 }
             }
@@ -234,6 +220,67 @@ private enum HeroArtworkEligibility {
             }
             return resolved
         }
+    }
+
+    /// The usable, deduped, capped hero candidates for one source. Art checks run
+    /// with a bounded look-ahead window, but results are reassembled in the source's
+    /// original order — so dedup (only across *accepted* items) and the `limit` cap
+    /// match a purely serial pass exactly; concurrency only hides the check latency.
+    private static func eligible(
+        in items: [MediaItem],
+        limitPerSource: Int,
+        artworkProvider: @escaping HeroArtworkProviding,
+        validate: @escaping HeroArtworkValidating
+    ) async -> [MediaItem] {
+        guard !items.isEmpty else { return [] }
+
+        // Determine one candidate's usability independently: its own art first,
+        // then the async provider (TMDb) as a fallback, dropping it when neither
+        // yields a usable full-bleed image.
+        @Sendable func determine(_ index: Int) async -> (Int, MediaItem, Bool) {
+            var candidate = items[index]
+            var usable = await validate(heroArtworkURLs(for: candidate))
+            if !usable, let resolvedURL = await artworkProvider(candidate) {
+                candidate.heroBackdropURL = resolvedURL
+                usable = await validate(heroArtworkURLs(for: candidate))
+            }
+            return (index, candidate, usable)
+        }
+
+        var eligible: [MediaItem] = []
+        eligible.reserveCapacity(min(items.count, limitPerSource))
+        var accepted = Set<String>()
+
+        // Walk the source in bounded, index-ordered chunks: each chunk's art checks
+        // run concurrently, then are consumed in order so dedup (across accepted
+        // items only) and the cap match a serial pass. Stopping at the first chunk
+        // that fills the hero bounds the over-check to at most one window.
+        var index = 0
+        while index < items.count, eligible.count < limitPerSource, !Task.isCancelled {
+            let end = min(index + maxConcurrentValidations, items.count)
+            let chunk = await withTaskGroup(
+                of: (Int, MediaItem, Bool).self,
+                returning: [(Int, MediaItem, Bool)].self
+            ) { group in
+                for candidateIndex in index..<end {
+                    group.addTask { await determine(candidateIndex) }
+                }
+                var results: [(Int, MediaItem, Bool)] = []
+                for await result in group { results.append(result) }
+                return results.sorted { $0.0 < $1.0 }
+            }
+
+            for (_, candidate, usable) in chunk {
+                guard usable else { continue }
+                let tokens = HeroDedupe.tokens(for: candidate)
+                guard !tokens.contains(where: accepted.contains) else { continue }
+                accepted.formUnion(tokens)
+                eligible.append(candidate)
+                if eligible.count == limitPerSource { break }
+            }
+            index = end
+        }
+        return eligible
     }
 
     /// The candidate's ordered hero backdrop URLs, mirroring the view's

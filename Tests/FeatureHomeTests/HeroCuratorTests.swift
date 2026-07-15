@@ -371,6 +371,28 @@ final class HeroCuratorTests: XCTestCase {
         XCTAssertTrue(result.isEmpty)
     }
 
+    func testConcurrentArtworkValidationPreservesSourceOrder() async {
+        let curator = HeroCurator()
+        // More than one concurrency window, with broken items interleaved, so a
+        // reordering bug (results consumed out of source order) would surface.
+        let candidates = (0..<12).map { item("item-\($0)") }
+        let result = await curator.curate(
+            settings: settings(sources: [.continueWatching], maxItems: 6),
+            continueWatching: candidates,
+            watchlist: [],
+            artworkValidator: { urls in
+                // Odd-indexed titles have "broken" art and must be dropped.
+                guard let url = urls.first else { return false }
+                let name = url.deletingPathExtension().lastPathComponent // "item-3"
+                guard let n = Int(name.dropFirst("item-".count)) else { return true }
+                return n.isMultiple(of: 2)
+            }
+        )
+
+        // The surviving even-indexed titles, in source order, capped at maxItems.
+        XCTAssertEqual(result.map(\.id), ["item-0", "item-2", "item-4", "item-6", "item-8", "item-10"])
+    }
+
     func testArtworkResolutionStopsOnceSourceCanFillHero() async {
         let curator = HeroCurator()
         let calls = ArtworkCalls()
@@ -388,7 +410,15 @@ final class HeroCuratorTests: XCTestCase {
         let resolvedIDs = await calls.ids
 
         XCTAssertEqual(result.map(\.id), ["router-1", "router-2", "router-3"])
-        XCTAssertEqual(resolvedIDs, ["router-1", "router-2", "router-3"])
+        // The source fills after the first bounded window, so art resolution never
+        // scans all 10 candidates — concurrency over-checks by at most one window.
+        XCTAssertLessThan(resolvedIDs.count, candidates.count)
+        XCTAssertGreaterThanOrEqual(resolvedIDs.count, 3)
+        XCTAssertEqual(Set(resolvedIDs).count, resolvedIDs.count, "no candidate resolved twice")
+        XCTAssertTrue(
+            Set(resolvedIDs).isSubset(of: Set((1...6).map { "router-\($0)" })),
+            "resolution stays within the first bounded window"
+        )
     }
 
     // MARK: - Synchronous seed (pop-in avoidance)

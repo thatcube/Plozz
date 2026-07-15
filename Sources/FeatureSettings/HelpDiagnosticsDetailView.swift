@@ -155,6 +155,12 @@ struct HelpDiagnosticsDetailView: View {
         ) {
             Toggle("Playback Diagnostics Overlay", isOn: $diagnostics.settings.isEnabled)
                 .toggleStyle(SettingsSwitchToggleStyle())
+
+            Toggle(
+                "Home Performance Overlay",
+                isOn: $diagnostics.settings.homePerformanceOverlayEnabled
+            )
+            .toggleStyle(SettingsSwitchToggleStyle())
         }
     }
 

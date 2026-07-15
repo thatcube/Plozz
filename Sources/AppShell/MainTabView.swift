@@ -277,6 +277,7 @@ struct MainTabView: View {
                 seriesTrackStore: seriesTrackStore,
                 spoilerSettings: spoilerModel.settings,
                 showDiagnostics: diagnosticsModel.settings.isEnabled,
+                homePerfOverlayEnabled: diagnosticsModel.settings.homePerformanceOverlayEnabled,
                 themePalette: resolvedPalette,
                 ratingsProvider: ratingsProvider,
                 scrobbler: RealtimePlaybackScrobbler(trakt: trakt.scrobbler, simkl: simkl.scrobbler),
@@ -1544,6 +1545,8 @@ private struct HomeTab: View {
     let seriesTrackStore: any SeriesTrackPreferenceStoring
     let spoilerSettings: SpoilerSettings
     let showDiagnostics: Bool
+    /// Whether the on-device Home performance HUD is shown (Settings ▸ Diagnostics).
+    let homePerfOverlayEnabled: Bool
     let themePalette: ThemePalette
     let ratingsProvider: any ExternalRatingsProviding
     let scrobbler: any TraktScrobbling
@@ -1602,6 +1605,7 @@ private struct HomeTab: View {
                     hideWatched: heroSettings.settings.hideWatched,
                     identitySources: identitySources
                 ),
+                homePerfOverlayEnabled: homePerfOverlayEnabled,
                 seerConnected: seer.isConfigured,
                 onRequestItem: { item in
                     let outcome = await seer.request(item, actingUserID: activeSeerrUserID)

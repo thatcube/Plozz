@@ -46,7 +46,9 @@ extension HomeHeroView {
         // is speculative and much heavier than the all-slide preview pass, so wait
         // for a real dwell. Rapid presses cancel during this sleep; the small previews
         // get the background lanes first instead of waiting behind four 2000px decodes.
-        _ = await resolveArtworkURL(for: items[targetIndices[0]])
+        _ = await HomePerfDiagnostics.measureArtwork {
+            await resolveArtworkURL(for: items[targetIndices[0]])
+        }
         try? await Task.sleep(nanoseconds: 600_000_000)
         guard !Task.isCancelled else { return }
 

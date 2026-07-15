@@ -73,6 +73,13 @@ public struct HomeView: View {
     /// the bare app background. Defaults to a real image-load check; tests/previews
     /// can inject a deterministic one.
     private let heroArtworkValidator: HeroArtworkValidating
+    /// Whether the on-device Home performance HUD is shown (Settings ▸ Diagnostics).
+    /// A power-user/debug aid for validating smoothness on older hardware; off by
+    /// default and fully inert when off.
+    private let homePerfOverlayEnabled: Bool
+    /// Live frame/hitch/thermal sampler backing the HUD. Runs only while the
+    /// overlay is enabled (started/stopped from the body lifecycle).
+    @State private var perfSampler = HomePerfSampler()
     /// Whether Seerr is currently connected — threaded to the hero so a not-owned
     /// featured title only offers a Request CTA when a server is reachable.
     private let heroSeerConnected: Bool
@@ -139,6 +146,7 @@ public struct HomeView: View {
             }
         },
         heroArtworkValidator: HeroArtworkValidating? = nil,
+        homePerfOverlayEnabled: Bool = false,
         seerConnected: Bool = false,
         onRequestItem: ((MediaItem) async -> MediaAvailabilityStatus?)? = nil,
         navigationStyle: NavigationStyle = .default,
@@ -163,6 +171,7 @@ public struct HomeView: View {
         self.heroArtworkValidator = heroArtworkValidator ?? { urls in
             await HeroBackdropArtworkPolicy.warmFirstUsablePreview(for: urls)
         }
+        self.homePerfOverlayEnabled = homePerfOverlayEnabled
         self.heroSeerConnected = seerConnected
         self.onRequestItem = onRequestItem
         self.navigationStyle = navigationStyle
@@ -469,6 +478,18 @@ public struct HomeView: View {
                 }
             }
         }
+        .overlay(alignment: .topTrailing) {
+            if homePerfOverlayEnabled {
+                HomePerfOverlay(sampler: perfSampler)
+                    .padding(.top, 60)
+                    .padding(.trailing, 80)
+            }
+        }
+        .onAppear { if homePerfOverlayEnabled { perfSampler.start() } }
+        .onDisappear { perfSampler.stop() }
+        .onChange(of: homePerfOverlayEnabled) { _, enabled in
+            if enabled { perfSampler.start() } else { perfSampler.stop() }
+        }
     }
 
     private var shouldRefreshAsyncWatchHistory: Bool {
@@ -602,17 +623,19 @@ public struct HomeView: View {
         guard !Task.isCancelled else { return }
         heroRuntime.durableWatchMutations = durableWatchMutations
         heroRuntime.hasHydratedDurableMutations = true
-        let items = await heroCurator.curate(
-            settings: settings,
-            continueWatching: content.continueWatching,
-            watchlist: content.watchlist,
-            randomLibraries: randomLibraries,
-            watchMutations: durableWatchMutations + heroRuntime.watchMutations,
-            featuredProvider: heroFeaturedProvider,
-            randomProvider: heroRandomProvider,
-            artworkProvider: heroArtworkProvider,
-            artworkValidator: heroArtworkValidator
-        )
+        let items = await HomePerfDiagnostics.measureCurate {
+            await heroCurator.curate(
+                settings: settings,
+                continueWatching: content.continueWatching,
+                watchlist: content.watchlist,
+                randomLibraries: randomLibraries,
+                watchMutations: durableWatchMutations + heroRuntime.watchMutations,
+                featuredProvider: heroFeaturedProvider,
+                randomProvider: heroRandomProvider,
+                artworkProvider: heroArtworkProvider,
+                artworkValidator: heroArtworkValidator
+            )
+        }
         guard !Task.isCancelled else {
             let elapsedMS = Int(Date().timeIntervalSince(started) * 1_000)
             PlozzLog.boot("HomeHero.curate CANCEL ms=\(elapsedMS)")

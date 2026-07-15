@@ -1,5 +1,6 @@
 #if canImport(AVFoundation)
 import XCTest
+import CoreModels
 @testable import FeaturePlayback
 
 /// Gated sleeper that records each requested duration so a test can release a
@@ -94,6 +95,20 @@ final class HDRTransitionModelTests: XCTestCase {
         let model = HDRTransitionModel()
         XCTAssertTrue(model.beginTransition(from: .hdr10, to: .dolbyVision))
         XCTAssertEqual(model.veilOpacity, 1)
+    }
+
+    func testDisplayModeRecognizesCanonicalDolbyVisionToken() {
+        let metadata = MediaSourceMetadata(
+            video: .init(videoRangeType: "DOVIWithHDR10")
+        )
+        XCTAssertEqual(HDRDisplayMode(metadata), .dolbyVision)
+    }
+
+    func testDisplayModeRecognizesHDR10PlusAsHDR() {
+        let metadata = MediaSourceMetadata(
+            video: .init(videoRangeType: "HDR10Plus")
+        )
+        XCTAssertEqual(HDRDisplayMode(metadata), .hdr10)
     }
 
     // MARK: Reveal on settle

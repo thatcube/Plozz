@@ -284,6 +284,12 @@ struct MediaStreamDto: Decodable {
     let VideoRange: String?
     let VideoRangeType: String?
     let ColorTransfer: String?
+    /// Emby's authoritative HDR classification. Jellyfin uses `VideoRangeType`;
+    /// Emby instead emits `Hdr10`, `Hdr10Plus`, `HyperLogGamma`, or
+    /// `DolbyVision` here and may leave the coarse `VideoRange` as `SDR`.
+    let ExtendedVideoType: String?
+    let ExtendedVideoSubType: String?
+    let ExtendedVideoSubTypeDescription: String?
     // Audio facts
     let Channels: Int?
     let SampleRate: Int?

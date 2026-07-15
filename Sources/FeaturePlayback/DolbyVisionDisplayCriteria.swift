@@ -34,7 +34,7 @@ enum HDRDisplayMode: Equatable {
             self = .dolbyVision
         } else if rangeType == "HLG" || transfer == "arib-std-b67" {
             self = .hlg
-        } else if rangeType == "HDR10" || rangeType == "HDR" || transfer == "smpte2084"
+        } else if rangeType.hasPrefix("HDR10") || rangeType == "HDR" || transfer == "smpte2084"
             || range == "HDR" {
             self = .hdr10
         } else {

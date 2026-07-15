@@ -57,7 +57,13 @@ final class EmbyProviderParityTests: XCTestCase {
         let stub = StubHTTPClient()
         stub.stub(pathSuffix: "/Users/u1/Items/movie1", json: """
         {"Id":"movie1","Name":"Movie","Type":"Movie","RunTimeTicks":36000000000,
-         "Studios":[{"Name":"Emby Studio","Id":1234}]}
+         "Studios":[{"Name":"Emby Studio","Id":1234}],
+         "MediaStreams":[
+           {"Index":0,"Type":"Video","Codec":"hevc","Width":3840,"Height":2160,
+            "VideoRange":"SDR","ExtendedVideoType":"DolbyVision",
+            "ExtendedVideoSubType":"DoviProfile81"},
+           {"Index":1,"Type":"Audio","Codec":"truehd","Channels":8,"IsDefault":true}
+         ]}
         """)
         stub.stub(pathSuffix: "/Items/movie1/PlaybackInfo", json: """
         {"MediaSources":[{"Id":"src1","Container":"mp4","SupportsDirectPlay":true}],
@@ -73,6 +79,12 @@ final class EmbyProviderParityTests: XCTestCase {
 
         XCTAssertEqual(request.sourceProvider, .emby)
         XCTAssertEqual(request.item.studios, ["Emby Studio"])
+        XCTAssertEqual(
+            request.item.technicalBadges.map(\.label),
+            ["4K", "Dolby Vision", "Dolby TrueHD", "HDR10"]
+        )
+        XCTAssertEqual(request.sourceMetadata?.video?.dolbyVisionProfile, 8)
+        XCTAssertEqual(request.sourceMetadata?.video?.videoRangeType, "DOVIWithHDR10")
         guard case .some(.authenticatedHTTP(let locator)) = request.scrubPreview?.plexBIFResource else {
             return XCTFail("expected authenticated Emby BIF resource")
         }
@@ -87,6 +99,23 @@ final class EmbyProviderParityTests: XCTestCase {
         let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
         XCTAssertEqual(json["MediaSourceId"] as? String, "src1")
         XCTAssertEqual(json["EnableTranscoding"] as? Bool, true)
+    }
+
+    func testEmbyExtendedHDRTypeOverridesCoarseSDRRange() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Users/u1/Items/air", json: """
+        {"Id":"air","Name":"Air","Type":"Movie",
+         "MediaStreams":[
+           {"Index":0,"Type":"Video","Codec":"hevc","Width":3840,"Height":2160,
+            "VideoRange":"SDR","ExtendedVideoType":"Hdr10"}
+         ]}
+        """)
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        let item = try await provider.item(id: "air")
+
+        XCTAssertEqual(item.technicalBadges.map(\.label), ["4K", "HDR10"])
+        XCTAssertFalse(item.technicalBadges.map(\.label).contains("SDR"))
     }
 
     func testEmbyThemeMusicUsesCombinedThemeMediaEndpoint() async throws {

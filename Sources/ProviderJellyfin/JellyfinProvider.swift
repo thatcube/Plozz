@@ -941,7 +941,8 @@ public struct JellyfinProvider: MediaProvider {
             ?? streams.first { $0.`Type` == "Subtitle" }
 
         let videoStream = video.map { v in
-            MediaSourceMetadata.VideoStream(
+            let rangeType = normalizedVideoRangeType(for: v)
+            return MediaSourceMetadata.VideoStream(
                 codec: v.Codec,
                 codecTag: v.CodecTag,
                 profile: v.Profile,
@@ -952,9 +953,12 @@ public struct JellyfinProvider: MediaProvider {
                 bitrate: v.BitRate,
                 frameRate: v.RealFrameRate ?? v.AverageFrameRate,
                 videoRange: v.VideoRange,
-                videoRangeType: v.VideoRangeType,
+                videoRangeType: rangeType,
                 colorTransfer: v.ColorTransfer,
-                dolbyVisionProfile: Self.dolbyVisionProfile(for: v.VideoRangeType)
+                dolbyVisionProfile: Self.dolbyVisionProfile(
+                    for: rangeType,
+                    extendedSubType: v.ExtendedVideoSubType
+                )
             )
         }
         let audioStream = audio.map { a in
@@ -985,15 +989,70 @@ public struct JellyfinProvider: MediaProvider {
         return metadata.isEmpty ? nil : metadata
     }
 
-    static func dolbyVisionProfile(for videoRangeType: String?) -> Int? {
+    /// Bridges Emby's `ExtendedVideoType` onto the canonical range tokens the
+    /// provider-agnostic badge and playback layers already consume for Jellyfin.
+    static func normalizedVideoRangeType(for stream: MediaStreamDto) -> String? {
+        switch (stream.ExtendedVideoType ?? "").uppercased() {
+        case "DOLBYVISION":
+            let dovi = embyDolbyVisionInfo(stream.ExtendedVideoSubType)
+            switch dovi.compatibilityID {
+            case 1: return "DOVIWithHDR10"
+            case 2: return "DOVIWithSDR"
+            case 4: return "DOVIWithHLG"
+            case 0: return "DOVI"
+            default:
+                // Without a compatibility id, profiles 7/8 conventionally carry
+                // an HDR10-compatible base layer; otherwise make no fallback claim.
+                if dovi.profile == 7 || dovi.profile == 8 {
+                    return "DOVIWithHDR10"
+                }
+                return "DOVI"
+            }
+        case "HDR10PLUS":
+            return "HDR10Plus"
+        case "HDR10":
+            return "HDR10"
+        case "HYPERLOGGAMMA":
+            return "HLG"
+        case "", "NONE":
+            return stream.VideoRangeType
+        default:
+            return stream.VideoRangeType ?? stream.ExtendedVideoType
+        }
+    }
+
+    static func dolbyVisionProfile(
+        for videoRangeType: String?,
+        extendedSubType: String? = nil
+    ) -> Int? {
+        if let profile = embyDolbyVisionInfo(extendedSubType).profile {
+            return profile
+        }
         switch (videoRangeType ?? "").uppercased() {
         case "DOVIWITHHDR10", "DOVIWITHHLG", "DOVIWITHSDR":
             return 8
-        case "DOVI":
+        case "DOVI", "DOLBYVISION":
             return 5
         default:
             return nil
         }
+    }
+
+    /// Emby's subtype tokens are `DoviProfileXY`, where X is the Dolby Vision
+    /// profile and Y is the base-layer compatibility id (0 none, 1 HDR10,
+    /// 2 SDR, 4 HLG). Current Emby enum values are always two digits.
+    private static func embyDolbyVisionInfo(
+        _ extendedSubType: String?
+    ) -> (profile: Int?, compatibilityID: Int?) {
+        guard let extendedSubType else { return (nil, nil) }
+        let digits = extendedSubType
+            .uppercased()
+            .replacingOccurrences(of: "DOVIPROFILE", with: "")
+        guard digits.count == 2 else { return (nil, nil) }
+        return (
+            digits.first.flatMap { Int(String($0)) },
+            digits.last.flatMap { Int(String($0)) }
+        )
     }
 
     public func reportPlayback(_ progress: PlaybackProgress, event: PlaybackEvent) async throws {

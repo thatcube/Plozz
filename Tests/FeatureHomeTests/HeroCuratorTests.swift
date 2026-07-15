@@ -325,6 +325,52 @@ final class HeroCuratorTests: XCTestCase {
         XCTAssertEqual(result.first?.heroBackdropURL, resolvedURL)
     }
 
+    func testArtworkValidatorDropsCandidatesWhoseArtCannotLoad() async {
+        let curator = HeroCurator()
+        // Both have a non-nil backdrop URL, so presence-only eligibility would keep
+        // them — but the injected validator reports "broken" art as unusable.
+        let result = await curator.curate(
+            settings: settings(sources: [.continueWatching]),
+            continueWatching: [item("loads"), item("broken")],
+            watchlist: [],
+            artworkValidator: { urls in
+                !urls.contains { $0.absoluteString.contains("broken") }
+            }
+        )
+
+        XCTAssertEqual(result.map(\.id), ["loads"])
+    }
+
+    func testArtworkValidatorFallsBackToRouterWhenDirectArtIsBroken() async {
+        let curator = HeroCurator()
+        let rescued = URL(string: "https://cdn.example.com/rescued-hero.jpg")!
+        // The item's own backdrop is broken, but the router supplies a usable one:
+        // the item should be kept with the router art rather than dropped.
+        let result = await curator.curate(
+            settings: settings(sources: [.continueWatching]),
+            continueWatching: [item("broken")],
+            watchlist: [],
+            artworkProvider: { _ in rescued },
+            artworkValidator: { urls in urls.contains(rescued) }
+        )
+
+        XCTAssertEqual(result.map(\.id), ["broken"])
+        XCTAssertEqual(result.first?.heroBackdropURL, rescued)
+    }
+
+    func testArtworkValidatorDropsCandidateWhenRouterArtAlsoUnusable() async {
+        let curator = HeroCurator()
+        let result = await curator.curate(
+            settings: settings(sources: [.continueWatching]),
+            continueWatching: [item("broken")],
+            watchlist: [],
+            artworkProvider: { _ in URL(string: "https://cdn.example.com/also-broken.jpg") },
+            artworkValidator: { _ in false }
+        )
+
+        XCTAssertTrue(result.isEmpty)
+    }
+
     func testArtworkResolutionStopsOnceSourceCanFillHero() async {
         let curator = HeroCurator()
         let calls = ArtworkCalls()

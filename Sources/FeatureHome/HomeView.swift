@@ -68,6 +68,11 @@ public struct HomeView: View {
     private let heroFeaturedStatusProvider: FeaturedContentProviding
     private let heroRandomProvider: RandomLibraryContentProviding
     private let heroArtworkProvider: HeroArtworkProviding
+    /// Confirms a hero candidate's art actually loads before it becomes a slide, so
+    /// a title with only a broken/missing backdrop is dropped rather than shown over
+    /// the bare app background. Defaults to a real image-load check; tests/previews
+    /// can inject a deterministic one.
+    private let heroArtworkValidator: HeroArtworkValidating
     /// Whether Seerr is currently connected — threaded to the hero so a not-owned
     /// featured title only offers a Request CTA when a server is reachable.
     private let heroSeerConnected: Bool
@@ -133,6 +138,7 @@ public struct HomeView: View {
                 return await ArtworkRouter.shared.artworkURL(.hero, for: item)
             }
         },
+        heroArtworkValidator: HeroArtworkValidating? = nil,
         seerConnected: Bool = false,
         onRequestItem: ((MediaItem) async -> MediaAvailabilityStatus?)? = nil,
         navigationStyle: NavigationStyle = .default,
@@ -150,6 +156,13 @@ public struct HomeView: View {
         self.heroFeaturedStatusProvider = heroFeaturedStatusProvider ?? heroFeaturedProvider
         self.heroRandomProvider = heroRandomProvider
         self.heroArtworkProvider = heroArtworkProvider
+        // Confirm art actually loads (real image fetch/decode, cache-first) unless a
+        // test/preview injects a deterministic validator. Set here rather than as a
+        // default argument because the public init can't reference the internal
+        // `HeroBackdropArtworkPolicy` from a default-argument value.
+        self.heroArtworkValidator = heroArtworkValidator ?? { urls in
+            await HeroBackdropArtworkPolicy.warmFirstUsablePreview(for: urls)
+        }
         self.heroSeerConnected = seerConnected
         self.onRequestItem = onRequestItem
         self.navigationStyle = navigationStyle
@@ -597,7 +610,8 @@ public struct HomeView: View {
             watchMutations: durableWatchMutations + heroRuntime.watchMutations,
             featuredProvider: heroFeaturedProvider,
             randomProvider: heroRandomProvider,
-            artworkProvider: heroArtworkProvider
+            artworkProvider: heroArtworkProvider,
+            artworkValidator: heroArtworkValidator
         )
         guard !Task.isCancelled else {
             let elapsedMS = Int(Date().timeIntervalSince(started) * 1_000)

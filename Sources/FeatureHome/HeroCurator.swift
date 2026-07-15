@@ -7,6 +7,19 @@ public enum HeroArtworkProvider {
     public static let none: HeroArtworkProviding = { _ in nil }
 }
 
+/// Confirms a candidate's ordered hero artwork URLs can actually produce a usable
+/// full-bleed image before the curator admits its slide. The hero is built
+/// entirely around full-screen artwork, so a title whose only "art" is a broken or
+/// missing URL must be dropped rather than shown over the bare app background.
+public typealias HeroArtworkValidating = @Sendable ([URL]) async -> Bool
+
+public enum HeroArtworkValidator {
+    /// Presence-only eligibility: any candidate URL counts. This preserves the
+    /// pure curator's original behavior (and keeps tests deterministic); the app
+    /// injects a real image-load check so unrenderable art is filtered out.
+    public static let presence: HeroArtworkValidating = { !$0.isEmpty }
+}
+
 /// Builds the ordered list of items the Home **hero** carousel rotates through,
 /// mixing the user's enabled sources (Featured/Seerr, Continue Watching, Random,
 /// Watchlist) per their per-profile ``HeroSettings``.
@@ -44,7 +57,8 @@ public struct HeroCurator: Sendable {
         watchMutations: [MediaItemMutation] = [],
         featuredProvider: FeaturedContentProviding = HeroFeaturedProvider.none,
         randomProvider: RandomLibraryContentProviding = HeroRandomProvider.none,
-        artworkProvider: @escaping HeroArtworkProviding = HeroArtworkProvider.none
+        artworkProvider: @escaping HeroArtworkProviding = HeroArtworkProvider.none,
+        artworkValidator: @escaping HeroArtworkValidating = HeroArtworkValidator.presence
     ) async -> [MediaItem] {
         guard settings.isActive else { return [] }
         let limit = settings.maxItems
@@ -79,7 +93,8 @@ public struct HeroCurator: Sendable {
         let eligible = await HeroArtworkEligibility.resolve(
             perSource,
             limitPerSource: limit,
-            artworkProvider: artworkProvider
+            artworkProvider: artworkProvider,
+            validate: artworkValidator
         )
         return strategy.compose(eligible, limit: limit)
     }
@@ -170,7 +185,8 @@ private enum HeroArtworkEligibility {
     static func resolve(
         _ perSource: [[MediaItem]],
         limitPerSource: Int,
-        artworkProvider: @escaping HeroArtworkProviding
+        artworkProvider: @escaping HeroArtworkProviding,
+        validate: @escaping HeroArtworkValidating = HeroArtworkValidator.presence
     ) async -> [[MediaItem]] {
         guard limitPerSource > 0 else {
             return Array(repeating: [], count: perSource.count)
@@ -187,21 +203,23 @@ private enum HeroArtworkEligibility {
                         let tokens = HeroDedupe.tokens(for: item)
                         guard !tokens.contains(where: seen.contains) else { continue }
 
-                        let resolvedItem: MediaItem?
-                        if hasDirectHeroArtwork(item) {
-                            resolvedItem = item
-                        } else if let resolvedURL = await artworkProvider(item) {
-                            var itemWithArtwork = item
-                            itemWithArtwork.heroBackdropURL = resolvedURL
-                            resolvedItem = itemWithArtwork
-                        } else {
-                            resolvedItem = nil
+                        // Admit the slide only if it can actually render a usable
+                        // full-bleed image. A non-nil URL isn't proof — a broken or
+                        // missing backdrop would leave the hero showing the bare app
+                        // background. Try the item's own art first, then the async
+                        // provider (TMDb) as a fallback, and drop it when neither
+                        // yields a usable hero image.
+                        var candidate = item
+                        var usable = await validate(heroArtworkURLs(for: candidate))
+                        if !usable, let resolvedURL = await artworkProvider(item) {
+                            candidate.heroBackdropURL = resolvedURL
+                            usable = await validate(heroArtworkURLs(for: candidate))
                         }
 
                         guard !Task.isCancelled else { break }
-                        if let resolvedItem {
+                        if usable {
                             seen.formUnion(tokens)
-                            eligible.append(resolvedItem)
+                            eligible.append(candidate)
                             if eligible.count == limitPerSource { break }
                         }
                     }
@@ -216,6 +234,13 @@ private enum HeroArtworkEligibility {
             }
             return resolved
         }
+    }
+
+    /// The candidate's ordered hero backdrop URLs, mirroring the view's
+    /// `primaryBackdropURLs`: server hero art, then wide backdrop, then the
+    /// parent/fallback backdrop an episode borrows from its series.
+    private static func heroArtworkURLs(for item: MediaItem) -> [URL] {
+        [item.heroBackdropURL, item.backdropURL, item.fallbackArtworkURL].compactMap { $0 }
     }
 
     private static func hasDirectHeroArtwork(_ item: MediaItem) -> Bool {

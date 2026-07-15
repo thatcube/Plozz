@@ -138,6 +138,10 @@ public final class PlozzigenVideoEngine: VideoEngine {
     private let authenticatedHTTPResolver: (any AuthenticatedHTTPResourceResolving)?
     private var cancellables = Set<AnyCancellable>()
     private var progressTimer: Task<Void, Never>?
+    /// A foreground reload reports its error directly to `PlayerViewModel`.
+    /// Suppress the normal engine-failure callback so this recovery attempt
+    /// cannot consume the cross-engine/transcode fallback budget too.
+    private var suppressFailureCallbackForForegroundReload = false
     /// The leased network source backing the current load (SMB/network-file path
     /// only). Retained so ``drainTransport()`` can await its full shutdown before a
     /// stall-recovery retry re-opens, instead of letting deinit release it
@@ -209,6 +213,7 @@ public final class PlozzigenVideoEngine: VideoEngine {
     // MARK: - VideoEngine Lifecycle
 
     public func load(request: PlaybackRequest, startPosition: TimeInterval) async {
+        suppressFailureCallbackForForegroundReload = false
         status = .loading
         isPaused = false
         intendsPause = false
@@ -319,6 +324,37 @@ public final class PlozzigenVideoEngine: VideoEngine {
         intendsPause = true
         engine.pause()
         isPaused = true
+    }
+
+    public func reloadAfterForeground() async throws {
+        suppressFailureCallbackForForegroundReload = true
+        status = .loading
+        do {
+            try await engine.reloadAtCurrentPosition()
+            // Custom-source reloads report failure through `state = .error` and
+            // return normally. Drain the adapter's queued Combine delivery, then
+            // inspect engine truth before declaring recovery successful.
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                DispatchQueue.main.async { continuation.resume() }
+            }
+            if case .error(let message) = engine.state {
+                throw AppError.unknown(message)
+            }
+            syncTracks()
+            if intendsPause {
+                engine.pause()
+                isPaused = true
+            } else {
+                engine.play()
+                isPaused = false
+            }
+            status = .ready
+            suppressFailureCallbackForForegroundReload = false
+        } catch {
+            let appError = (error as? AppError) ?? .unknown(String(describing: error))
+            status = .failed(appError)
+            throw appError
+        }
     }
 
     public func seek(to seconds: TimeInterval) async {
@@ -446,7 +482,9 @@ public final class PlozzigenVideoEngine: VideoEngine {
                     )
                     let err: AppError = .unknown(msg)
                     self.status = .failed(err)
-                    self.onFailure?(err)
+                    if !self.suppressFailureCallbackForForegroundReload {
+                        self.onFailure?(err)
+                    }
                 }
             }
             .store(in: &cancellables)

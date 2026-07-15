@@ -196,10 +196,16 @@ public struct PlayerView: View {
             // The TV Home button / sleep / app suspension never fires the view's
             // onDisappear, so stop() (and its final convergence write) would never
             // run on that path — and the engine would keep decoding audio behind the
-            // Home screen until the OS suspends us. Take a durable checkpoint at the
-            // live position AND pause playback as we leave active, so the latest
-            // position is captured and audio doesn't keep playing in the background.
-            if phase != .active {
+            // Home screen until the OS suspends us. Pause on inactive, record the
+            // real background transition, then rebuild the engine when active again.
+            switch phase {
+            case .active:
+                Task { await viewModel.resumeAfterBackground() }
+            case .inactive:
+                viewModel.suspendForBackground()
+            case .background:
+                viewModel.didEnterBackground()
+            @unknown default:
                 viewModel.suspendForBackground()
             }
         }

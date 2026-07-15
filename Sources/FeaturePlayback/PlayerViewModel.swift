@@ -72,7 +72,7 @@ public final class PlayerViewModel {
     public var showBringUpSpinner: Bool {
         switch phase {
         case .loading: return true
-        case .ready: return awaitingFirstFrame
+        case .ready: return awaitingFirstFrame || isRecoveringAfterForeground
         case .failed: return false
         }
     }
@@ -222,6 +222,12 @@ public final class PlayerViewModel {
     private let watchdogTimeout: TimeInterval = 30
 
     private var request: PlaybackRequest?
+    /// Prevents a pause/unpause event from racing ahead of the initial start
+    /// report when tvOS backgrounds the app during engine bring-up.
+    private var hasReportedPlaybackStart = false
+    /// Latest transport state requested while the initial start report is in
+    /// flight. Replayed afterward when it differs from the state sent at start.
+    private var pendingPlaybackStateReport: Bool?
     private var subtitleDownloadTask: Task<Void, Never>?
     /// In-flight manual subtitle search (separate from the download task so a
     /// re-search cancels the previous search without touching a running download).
@@ -345,6 +351,16 @@ public final class PlayerViewModel {
     /// decisions key off this, not the (mirror-polluted) paused flags. Defaults
     /// true because load auto-plays.
     private var intendsPlayback = true
+
+    /// Incremented for each real tvOS background entry. A foreground recovery
+    /// consumes exactly one generation, preventing duplicate `.active` callbacks
+    /// from rebuilding the same playback session more than once.
+    private var backgroundGeneration = 0
+    private var pendingForegroundReloadGeneration: Int?
+
+    /// Keeps the existing full-screen loading indicator visible while a suspended
+    /// engine rebuilds its media pipeline at the preserved position.
+    public private(set) var isRecoveringAfterForeground = false
 
     /// Persisted player preferences (e.g. last-used playback speed).
     private let preferencesStore: PlaybackPreferencesStoring
@@ -1464,6 +1480,16 @@ public final class PlayerViewModel {
         let loadStart = Date()
         await engine.load(request: request, startPosition: startPosition)
         HandoffDiagnostics.emit("engine.load returned engine=\(engineKind.rawValue) took=\(HandoffDiagnostics.ms(loadStart))")
+        // A background transition or user transport command can arrive while
+        // load() is suspended. Reconcile that current intent before publishing
+        // ready or reporting start so the engine and provider agree.
+        if intendsPlayback {
+            engine.play()
+        } else {
+            engine.pause()
+        }
+        controls.isPaused = !intendsPlayback
+        controls.intendsPause = !intendsPlayback
         phase = .ready
         // Hold the bring-up spinner until the engine actually presents its first
         // frame, so `.loading` → `.ready` is one continuous indicator rather than
@@ -1477,7 +1503,22 @@ public final class PlayerViewModel {
         // which can still read 0 before the seek settles). When best-source routing
         // resumed a position learned from another server, this converges the chosen
         // server to that unified furthest-progress point on entry.
-        await report(event: .start, isPaused: false, positionOverride: startPosition > 0 ? startPosition : nil)
+        let startWasPaused = !intendsPlayback
+        await report(
+            event: .start,
+            isPaused: startWasPaused,
+            positionOverride: startPosition > 0 ? startPosition : nil
+        )
+        hasReportedPlaybackStart = true
+        if let pendingPaused = pendingPlaybackStateReport {
+            pendingPlaybackStateReport = nil
+            if pendingPaused != startWasPaused {
+                await report(
+                    event: pendingPaused ? .pause : .unpause,
+                    isPaused: pendingPaused
+                )
+            }
+        }
         // Register the live session (idempotent) now that the server has a real
         // now-playing session, so convergence writes against this server defer
         // until stop() ends it.
@@ -1887,6 +1928,98 @@ public final class PlayerViewModel {
         }
     }
 
+    /// Marks a genuine tvOS background entry. AetherEngine intentionally tears
+    /// down its AVPlayer item, loopback HLS server, demuxer, and decode session on
+    /// this transition, so a later `.active` phase must rebuild rather than call
+    /// `play()` on the empty player shell.
+    public func didEnterBackground() {
+        suspendForBackground()
+        backgroundGeneration += 1
+        pendingForegroundReloadGeneration = backgroundGeneration
+    }
+
+    /// Restores an engine after a real background round-trip while preserving the
+    /// user's paused state. No provider re-resolve or playback lifecycle report is
+    /// emitted: Plex, Jellyfin, and file-share sources all recover through the same
+    /// engine seam at their existing position and session URL.
+    public func resumeAfterBackground() async {
+        guard let generation = pendingForegroundReloadGeneration else { return }
+
+        // Background can interrupt initial bring-up. Wait for that load to settle,
+        // then rebuild the pipeline that tvOS invalidated before returning active.
+        while phase == .loading,
+              pendingForegroundReloadGeneration == generation,
+              !didStop {
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
+
+        guard pendingForegroundReloadGeneration == generation,
+              phase == .ready,
+              !didStop else { return }
+
+        pendingForegroundReloadGeneration = nil
+        let recoveringEngine = engine
+        let recoveringEngineToken = engineToken
+        isRecoveringAfterForeground = true
+        defer {
+            if backgroundGeneration == generation {
+                isRecoveringAfterForeground = false
+            }
+        }
+
+        do {
+            try await recoveringEngine.reloadAfterForeground()
+        } catch {
+            guard backgroundGeneration == generation,
+                  engineToken == recoveringEngineToken,
+                  !didStop else { return }
+            let appError = (error as? AppError) ?? .unknown(String(describing: error))
+            phase = .failed(appError)
+            return
+        }
+
+        guard backgroundGeneration == generation,
+              engineToken == recoveringEngineToken else { return }
+        guard !didStop else {
+            recoveringEngine.stop()
+            return
+        }
+
+        recoveringEngine.setPlaybackSpeed(controls.playbackSpeed)
+        if currentEngineKind == .plozzigen {
+            if let selectedAudioTrackID,
+               selectedAudioTrackID != recoveringEngine.currentAudioTrackID,
+               let track = recoveringEngine.audioTracks.first(where: { $0.id == selectedAudioTrackID }) {
+                recoveringEngine.selectAudioTrack(track)
+            }
+            if let selectedSubtitleTrackID,
+               let track = recoveringEngine.subtitleTracks.first(where: { $0.id == selectedSubtitleTrackID }) {
+                recoveringEngine.selectSubtitleTrack(track)
+            } else {
+                recoveringEngine.selectSubtitleTrack(nil)
+            }
+            if let selectedSecondarySubtitleTrackID,
+               let track = recoveringEngine.subtitleTracks.first(where: {
+                   $0.id == selectedSecondarySubtitleTrackID
+               }) {
+                recoveringEngine.selectSecondarySubtitleTrack(track)
+            } else {
+                recoveringEngine.selectSecondarySubtitleTrack(nil)
+            }
+        }
+        // A play press can arrive while the async rebuild is in flight. Reconcile
+        // last, after restoring speed/tracks that may restart AVPlayer, and avoid a
+        // duplicate pause/unpause report; the genuine user action already sent it.
+        if intendsPlayback {
+            recoveringEngine.play()
+        } else {
+            recoveringEngine.pause()
+        }
+        controls.isPaused = !intendsPlayback
+        controls.intendsPause = !intendsPlayback
+        loadTrackOptions()
+    }
+
     // MARK: - Transport
 
     /// Requests a committed seek. Coalesces rapid presses: while one seek is
@@ -2226,7 +2359,11 @@ public final class PlayerViewModel {
             cancelResumeConfirm()
         }
         controls.isPaused = paused
-        Task { await report(event: paused ? .pause : .unpause, isPaused: paused) }
+        if hasReportedPlaybackStart {
+            Task { await report(event: paused ? .pause : .unpause, isPaused: paused) }
+        } else {
+            pendingPlaybackStateReport = paused
+        }
     }
 
     /// Guards against a double teardown: `PlayerView` may call `stop()` itself on

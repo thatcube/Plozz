@@ -90,6 +90,12 @@ public protocol VideoEngine: AnyObject {
     /// Pauses playback.
     func pause()
 
+    /// Rebuilds playback resources that tvOS invalidated while the app was in the
+    /// background. Engines that tear down their decode pipeline on suspension
+    /// restore it at the preserved position; engines that remain valid can no-op.
+    /// The caller reconciles play/pause intent after this returns.
+    func reloadAfterForeground() async throws
+
     /// Seeks to `seconds`, clamped into the playable range.
     func seek(to seconds: TimeInterval) async
 
@@ -309,6 +315,9 @@ public protocol VideoEngine: AnyObject {
 }
 
 public extension VideoEngine {
+    /// Default: the engine's playback resources survive background suspension.
+    func reloadAfterForeground() async throws {}
+
     /// Default: engines that don't track buffering report no buffer fill.
     var bufferedPosition: TimeInterval { 0 }
 

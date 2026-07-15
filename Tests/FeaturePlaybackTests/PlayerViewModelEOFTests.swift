@@ -71,6 +71,49 @@ final class PlayerViewModelEOFTests: XCTestCase {
         XCTAssertEqual(checkpoints.onlyCall?.percent, 25)
     }
 
+    func testInactiveOnlyPauseDoesNotReloadEngine() async {
+        let (viewModel, engine, _) = makeViewModel()
+        await viewModel.load()
+
+        viewModel.suspendForBackground()
+        await viewModel.resumeAfterBackground()
+
+        XCTAssertEqual(engine.reloadAfterForegroundCount, 0)
+        XCTAssertTrue(engine.isPaused)
+    }
+
+    func testForegroundReturnReloadsOnceAndRemainsPaused() async {
+        let (viewModel, engine, provider) = makeViewModel()
+        await viewModel.load()
+        engine.currentTime = 30
+
+        viewModel.didEnterBackground()
+        await viewModel.resumeAfterBackground()
+        await viewModel.resumeAfterBackground()
+        for _ in 0..<10 { await Task.yield() }
+
+        XCTAssertEqual(engine.reloadAfterForegroundCount, 1)
+        XCTAssertTrue(engine.isPaused)
+        XCTAssertTrue(viewModel.controls.isPaused)
+        let reports = await provider.reports
+        XCTAssertEqual(reports.map(\.event.rawValue), ["start", "pause"])
+    }
+
+    func testBackgroundDuringBringUpReportsPausedStartBeforeRecovery() async {
+        let (viewModel, engine, provider) = makeViewModel()
+
+        viewModel.didEnterBackground()
+        await viewModel.load()
+        await viewModel.resumeAfterBackground()
+        for _ in 0..<10 { await Task.yield() }
+
+        XCTAssertEqual(engine.reloadAfterForegroundCount, 1)
+        XCTAssertTrue(engine.isPaused)
+        let reports = await provider.reports
+        XCTAssertEqual(reports.map(\.event.rawValue), ["start"])
+        XCTAssertEqual(reports.first?.progress.isPaused, true)
+    }
+
     func testStopAfterRewindUsesCurrentPositionInsteadOfFurthest() async {
         let item = MediaItem(id: "movie", title: "Movie", kind: .movie, runtime: 600)
         let request = PlaybackRequest(
@@ -168,6 +211,26 @@ final class PlayerViewModelEOFTests: XCTestCase {
 
         await viewModel.stop()
     }
+
+    private func makeViewModel() -> (
+        PlayerViewModel,
+        SpyVideoEngine,
+        RecordingPlaybackProvider
+    ) {
+        let item = MediaItem(id: "movie", title: "Movie", kind: .movie, runtime: 120)
+        let request = PlaybackRequest(
+            item: item,
+            streamURL: URL(string: "https://example.test/movie.m3u8")!
+        )
+        let provider = RecordingPlaybackProvider(request: request)
+        let engine = SpyVideoEngine()
+        let viewModel = PlayerViewModel(
+            provider: provider,
+            itemID: item.id,
+            engineFactory: EngineFactory(makeNative: { _ in engine })
+        )
+        return (viewModel, engine, provider)
+    }
 }
 
 private actor RecordingPlaybackProvider: MediaProvider {
@@ -235,6 +298,7 @@ private final class SpyVideoEngine: VideoEngine {
     var onSecondarySubtitleCues: (@MainActor ([SubtitleCue]) -> Void)?
     var loadCount = 0
     var stopCount = 0
+    var reloadAfterForegroundCount = 0
 
     func load(request: PlaybackRequest, startPosition: TimeInterval) async {
         loadCount += 1
@@ -245,6 +309,9 @@ private final class SpyVideoEngine: VideoEngine {
 
     func play() { isPaused = false }
     func pause() { isPaused = true }
+    func reloadAfterForeground() async throws {
+        reloadAfterForegroundCount += 1
+    }
     func seek(to seconds: TimeInterval) async {
         currentTime = seconds
         furthestObservedPosition = max(furthestObservedPosition, seconds)

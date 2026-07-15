@@ -2,8 +2,8 @@
 import SwiftUI
 import CoreModels
 
-/// Shared brand mark for a media provider (Jellyfin / Plex): the real bundled
-/// `JellyfinLogo` / `PlexLogo` assets — the SAME logos Settings uses — instead
+/// Shared brand mark for a media provider: the real bundled Jellyfin, Plex, and
+/// Emby logo assets — the SAME logos Settings uses — instead
 /// of an SF Symbol stand-in. Template-rendered with a focus-aware provider color:
 /// darker on a white focus card and lighter on a black one, preserving brand
 /// identity while maintaining contrast.
@@ -40,7 +40,8 @@ public struct ProviderBrandMark: View {
         switch provider {
         case .jellyfin: "JellyfinLogo"
         case .plex: "PlexLogo"
-        case .emby, .mediaShare: ""
+        case .emby: "EmbyLogo"
+        case .mediaShare: ""
         }
     }
 
@@ -59,9 +60,8 @@ public struct ProviderBrandMark: View {
     /// an SF Symbol instead of a `*Logo` asset. `nil` for the real providers.
     private var systemSymbolName: String? {
         switch provider {
-        case .emby: "play.rectangle.on.rectangle.fill"
         case .mediaShare: "externaldrive.connected.to.line.below.fill"
-        case .jellyfin, .plex: nil
+        case .jellyfin, .plex, .emby: nil
         }
     }
 
@@ -156,7 +156,7 @@ public struct ProviderBrandMark: View {
         case .jellyfin:
             return Color(red: 0.53, green: 0.38, blue: 0.95)
         case .emby:
-            return Color(red: 0.32, green: 0.75, blue: 0.38)
+            return Color(red: 0x52 / 255, green: 0xB5 / 255, blue: 0x4B / 255)
         case .plex:
             return Color(red: 0xE5 / 255, green: 0xA0 / 255, blue: 0x0D / 255)
         case .mediaShare:
@@ -174,7 +174,7 @@ public struct ProviderBrandMark: View {
             case .jellyfin:
                 return Color(red: 0.38, green: 0.25, blue: 0.78)
             case .emby:
-                return Color(red: 0.12, green: 0.48, blue: 0.18)
+                return Color(red: 0x2D / 255, green: 0x7D / 255, blue: 0x32 / 255)
             case .plex:
                 return Color(red: 0.60, green: 0.39, blue: 0.00)
             case .mediaShare:
@@ -188,7 +188,7 @@ public struct ProviderBrandMark: View {
         case .jellyfin:
             return Color(red: 0.65, green: 0.52, blue: 0.98)
         case .emby:
-            return Color(red: 0.45, green: 0.90, blue: 0.50)
+            return Color(red: 0x64 / 255, green: 0xD2 / 255, blue: 0x5C / 255)
         case .plex:
             return Color(red: 0.96, green: 0.73, blue: 0.18)
         case .mediaShare:

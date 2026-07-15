@@ -8,11 +8,11 @@
 #      (using the same .p8 creds fastlane uses), then
 #   2. finding the commit on the release branch that was current at that time
 #      (build numbers don't map to commits, so the upload DATE is the bridge), and
-#   3. printing the commit log + diffstat between that baseline and the target,
-#      split into a "likely user-facing" view and the full list.
+#   3. printing the NET changed files + diffstat between that baseline and target,
+#      with commit history available only as secondary context.
 #
 # The `fastlane beta` lane needs a WHAT_TO_TEST.txt (or PLOZZ_WHATS_NEW). The
-# normal flow is: run this, read the report, write a short tester-facing summary
+# normal flow is: run this, inspect the net diff, write a short tester-facing summary
 # to WHAT_TO_TEST.txt, then `fastlane beta --env fastlane`. See the "How to deploy
 # to TestFlight" section in AGENTS.local.md.
 #
@@ -20,7 +20,7 @@
 #   tools/release-changeset.sh                 # baseline = last TestFlight build
 #   tools/release-changeset.sh --base <ref>    # baseline = an explicit git ref
 #   tools/release-changeset.sh --target <ref>  # target (default: origin/main)
-#   tools/release-changeset.sh --full          # also print the full unfiltered log
+#   tools/release-changeset.sh --full          # also print historical commit context
 #
 # Reads .env.fastlane (ASC_KEY_ID / ASC_ISSUER_ID / ASC_KEY_PATH) if present.
 # Falls back to the latest git tag, else the target's last 40 commits, when App
@@ -145,13 +145,15 @@ if [ "$COMMITS" -eq 0 ]; then
   exit 0
 fi
 
-# Heuristic: hide internal-only churn so the user-facing story is obvious.
+# Commit subjects are historical context only. A range can contain experiments,
+# reversions, and work later replaced wholesale, so subjects must never be copied
+# directly into release notes or treated as proof that behavior ships.
 INTERNAL_RE='^(test|tests|ci|chore|docs|build|refactor|style)(\(|:)|flaky|quarantin|run-tests|test-fast|deriveddata|gitignore|README|CONTRIBUTING|issue template|code review|address .*review|pre-merge review|-agent review|AGENTS'
 
-echo "USER-FACING COMMITS (internal churn filtered out):"
-git log "$RANGE" --no-merges --pretty='%s' \
-  | grep -viE "$INTERNAL_RE" \
-  | sed 's/^/  • /' || echo "  (none — everything was internal)"
+echo "NET USER-FACING FILES CHANGED (source of truth for what ships):"
+git diff --name-status "$RANGE" -- 'Sources/*' 'App/*' \
+  | grep -vE $'\t(.*Tests/|.*README\\.md$)' \
+  | sed 's/^/  /' || echo "  (none)"
 echo
 
 echo "TOP CHANGED AREAS (Sources/ modules + App, by churn):"
@@ -162,14 +164,22 @@ git diff --numstat "$RANGE" -- 'Sources/*' 'App/*' \
 echo
 
 if [ "$SHOW_FULL" -eq 1 ]; then
-  echo "FULL LOG (all $COMMITS commits, newest first):"
+  echo "HISTORICAL COMMIT CONTEXT (never use as release-note source):"
+  echo "The entries below may describe reverted or superseded behavior."
+  git log "$RANGE" --no-merges --pretty='%s' \
+    | grep -viE "$INTERNAL_RE" \
+    | sed 's/^/  • /' || echo "  (none — everything was internal)"
+  echo
+  echo "FULL HISTORICAL LOG (all $COMMITS commits, newest first):"
   git log "$RANGE" --no-merges --date=short --pretty='  %ad %s'
   echo
 fi
 
 hr
 echo "Next: draft a short, plain-text, tester-facing 'What to Test' from the"
-echo "user-facing commits above (group by feature, no markdown bullets, don't list"
-echo "internal churn), write it to WHAT_TO_TEST.txt at the repo root, then run:"
+echo "NET DIFF above — never from commit subjects alone, because history may include"
+echo "reverted or superseded work. Verify every claimed behavior exists in the target"
+echo "tree. Group by feature, use no markdown bullets, and omit internal churn. Write"
+echo "it to WHAT_TO_TEST.txt at the repo root, then run:"
 echo "    fastlane beta --env fastlane"
 hr

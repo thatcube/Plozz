@@ -8,8 +8,8 @@ import Foundation
 /// case here — no feature rewrites.
 public enum ProviderKind: String, Codable, Sendable, CaseIterable {
     case jellyfin
-    case emby
     case plex
+    case emby
     /// A local network media share (SMB today). Deliberately **second-class**:
     /// there's no server doing library management, metadata, or watch-state, so
     /// Plozz scans the files itself and synthesises everything a first-class

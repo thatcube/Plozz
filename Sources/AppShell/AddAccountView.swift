@@ -319,17 +319,6 @@ private struct ProviderChoiceGroup: View {
             Divider().padding(.horizontal, 1)
 
             ProviderChoiceRow(
-                provider: .emby,
-                title: "Emby",
-                height: 108,
-                focusedControl: focusedControl
-            ) {
-                onSelect(.emby)
-            }
-
-            Divider().padding(.horizontal, 1)
-
-            ProviderChoiceRow(
                 provider: .plex,
                 title: "Plex",
                 height: 108,
@@ -337,6 +326,17 @@ private struct ProviderChoiceGroup: View {
                 focusedControl: focusedControl
             ) {
                 onSelect(.plex)
+            }
+
+            Divider().padding(.horizontal, 1)
+
+            ProviderChoiceRow(
+                provider: .emby,
+                title: "Emby",
+                height: 108,
+                focusedControl: focusedControl
+            ) {
+                onSelect(.emby)
             }
 
             Divider().padding(.horizontal, 1)

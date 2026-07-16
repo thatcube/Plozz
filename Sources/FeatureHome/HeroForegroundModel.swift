@@ -28,6 +28,10 @@ struct HeroForegroundModel: Equatable {
     /// cached image (the CoreUI background-removal logo pipeline is internal), so a
     /// slide with a logo shows the image, otherwise the title text.
     let logoURL: URL?
+    /// For an **episode** slide, the "S{season} · E{episode}" line shown directly
+    /// under the logo (mirroring the detail hero's subtitle); `nil` for movies and
+    /// series, whose season/episode numbers don't apply.
+    let seasonEpisodeText: String?
     /// The dotted metadata line (year · runtime · genres), pre-joined with the
     /// hero's `  ·  ` separator, or `nil` when the slide has none.
     let metadataText: String?
@@ -119,6 +123,37 @@ enum HeroForegroundModelBuilder {
         return parts.isEmpty ? nil : parts.joined(separator: "  ·  ")
     }
 
+    /// Hero certification label. Missing list-record metadata remains absent until
+    /// Home's provider-detail enrichment supplies the real value; never fabricate NR
+    /// when the full detail record may carry a certification.
+    static func ratingBadgeText(for item: MediaItem) -> String? {
+        item.ratingBadge?.label
+    }
+
+    /// The "S{season} · E{episode}" subtitle for an **episode** slide, or `nil`.
+    /// Mirrors `MediaItem.subtitle`'s episode branch but is deliberately scoped to
+    /// episodes so a movie/series slide never surfaces a parent-title/year subtitle
+    /// in the hero — matching the detail hero, which shows this line for episodes.
+    static func seasonEpisodeText(for item: MediaItem) -> String? {
+        guard item.kind == .episode,
+              let season = item.seasonNumber,
+              let episode = item.episodeNumber else { return nil }
+        return "S\(season) · E\(episode)"
+    }
+
+    /// Text fallback used when logo artwork is unavailable. Episodes represent their
+    /// series in the hero, so pair the series title with the separate S/E line rather
+    /// than showing an episode title such as "Episode 1" above "S2 · E1".
+    static func titleText(for item: MediaItem, maskedTitle: String?) -> String {
+        if item.kind == .episode,
+           let parentTitle = item.parentTitle?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !parentTitle.isEmpty {
+            return parentTitle
+        }
+        if let maskedTitle { return maskedTitle }
+        return item.title
+    }
+
     /// Maps one resolved ``PillInput`` to its rendered ``HeroForegroundModel/Pill``.
     static func pill(for input: PillInput) -> HeroForegroundModel.Pill {
         switch input.kind {
@@ -205,10 +240,11 @@ enum HeroForegroundModelBuilder {
             : nil
         return HeroForegroundModel(
             itemID: item.id,
-            title: maskedTitle ?? item.title,
+            title: titleText(for: item, maskedTitle: maskedTitle),
             logoURL: item.logoURL,
+            seasonEpisodeText: seasonEpisodeText(for: item),
             metadataText: metadataText(for: item),
-            ratingBadgeText: item.ratingBadge?.label,
+            ratingBadgeText: ratingBadgeText(for: item),
             overview: overviewVisible ? item.overview : nil,
             pills: pills,
             selectedIndex: clamped,

@@ -79,6 +79,9 @@ public struct HomeView: View {
     /// Defaults to a passthrough (tests + the no-op case); the app injects a bounded
     /// provider watch-state re-enrichment.
     private let heroWatchStateRefresher: @Sendable ([MediaItem]) async -> [MediaItem]
+    /// Fills sparse hero list records from their provider's full item endpoint
+    /// (notably Plex series certifications) without changing identity/order.
+    private let heroMetadataEnricher: @Sendable ([MediaItem]) async -> [MediaItem]
     /// Whether the on-device Home performance HUD is shown (Settings ▸ Diagnostics).
     /// A power-user/debug aid for validating smoothness on older hardware; off by
     /// default and fully inert when off.
@@ -153,6 +156,7 @@ public struct HomeView: View {
         },
         heroArtworkValidator: HeroArtworkValidating? = nil,
         heroWatchStateRefresher: @escaping @Sendable ([MediaItem]) async -> [MediaItem] = { $0 },
+        heroMetadataEnricher: @escaping @Sendable ([MediaItem]) async -> [MediaItem] = { $0 },
         homePerfOverlayEnabled: Bool = false,
         seerConnected: Bool = false,
         onRequestItem: ((MediaItem) async -> MediaAvailabilityStatus?)? = nil,
@@ -179,6 +183,7 @@ public struct HomeView: View {
             await HeroBackdropArtworkPolicy.warmFirstUsablePreview(for: urls)
         }
         self.heroWatchStateRefresher = heroWatchStateRefresher
+        self.heroMetadataEnricher = heroMetadataEnricher
         self.homePerfOverlayEnabled = homePerfOverlayEnabled
         self.heroSeerConnected = seerConnected
         self.onRequestItem = onRequestItem
@@ -670,7 +675,7 @@ public struct HomeView: View {
         heroRuntime.durableWatchMutations = durableWatchMutations
         heroRuntime.hasHydratedDurableMutations = true
         let items = await HomePerfDiagnostics.measureCurate {
-            await heroCurator.curate(
+            let curated = await heroCurator.curate(
                 settings: settings,
                 continueWatching: content.continueWatching,
                 watchlist: content.watchlist,
@@ -681,6 +686,7 @@ public struct HomeView: View {
                 artworkProvider: heroArtworkProvider,
                 artworkValidator: heroArtworkValidator
             )
+            return await heroMetadataEnricher(curated)
         }
         guard !Task.isCancelled else {
             let elapsedMS = Int(Date().timeIntervalSince(started) * 1_000)

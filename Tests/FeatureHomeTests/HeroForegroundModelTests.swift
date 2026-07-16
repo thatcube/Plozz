@@ -54,6 +54,72 @@ final class HeroForegroundModelTests: XCTestCase {
         XCTAssertEqual(Builder.metadataText(for: item), "A  ·  B  ·  C")
     }
 
+    // MARK: - seasonEpisodeText
+
+    private func episode(
+        id: String = "e1",
+        title: String = "Pilot",
+        parentTitle: String? = "Example Show",
+        season: Int? = 12,
+        number: Int? = 2
+    ) -> MediaItem {
+        MediaItem(
+            id: id,
+            title: title,
+            kind: .episode,
+            parentTitle: parentTitle,
+            seasonNumber: season,
+            episodeNumber: number
+        )
+    }
+
+    func testSeasonEpisodeTextFormatsEpisode() {
+        XCTAssertEqual(Builder.seasonEpisodeText(for: episode(season: 12, number: 2)), "S12 · E2")
+    }
+
+    func testSeasonEpisodeTextNilForMovie() {
+        XCTAssertNil(Builder.seasonEpisodeText(for: movie()))
+    }
+
+    func testSeasonEpisodeTextNilWhenNumbersMissing() {
+        XCTAssertNil(Builder.seasonEpisodeText(for: episode(season: nil, number: 2)))
+        XCTAssertNil(Builder.seasonEpisodeText(for: episode(season: 1, number: nil)))
+    }
+
+    func testBuiltEpisodeModelCarriesSeasonEpisodeText() {
+        let model = Builder.model(
+            item: episode(season: 3, number: 7),
+            overviewVisible: true,
+            maskedTitle: nil,
+            pillInputs: [],
+            selectedIndex: 0,
+            heroFocused: false,
+            slideCount: 1,
+            slideIndex: 0
+        )
+        XCTAssertEqual(model.seasonEpisodeText, "S3 · E7")
+    }
+
+    func testEpisodeTextFallbackUsesSeriesTitle() {
+        let item = episode(title: "Episode 1", parentTitle: "The Series", season: 2, number: 1)
+        XCTAssertEqual(Builder.titleText(for: item, maskedTitle: nil), "The Series")
+    }
+
+    func testEpisodeTextFallbackUsesEpisodeTitleWhenSeriesTitleIsUnavailable() {
+        let item = episode(title: "Episode 1", parentTitle: "  ")
+        XCTAssertEqual(Builder.titleText(for: item, maskedTitle: nil), "Episode 1")
+    }
+
+    func testEpisodeTextFallbackKeepsSeriesTitleWhenEpisodeIsSpoilerMasked() {
+        let item = episode(title: "Episode 1", parentTitle: "The Series")
+        XCTAssertEqual(Builder.titleText(for: item, maskedTitle: "Episode 1"), "The Series")
+    }
+
+    func testEpisodeTextFallbackUsesSpoilerMaskWhenSeriesTitleIsUnavailable() {
+        let item = episode(title: "Spoiler Title", parentTitle: nil)
+        XCTAssertEqual(Builder.titleText(for: item, maskedTitle: "Episode 1"), "Episode 1")
+    }
+
     // MARK: - pill(for:)
 
     func testPlayPillUsesPlayLabelWhenNotResumable() {
@@ -262,6 +328,18 @@ final class HeroForegroundModelTests: XCTestCase {
             slideIndex: 0
         )
         XCTAssertNil(model.ratingBadgeText)
+    }
+
+    func testSeriesCarriesYearAndUsesNRWhenProviderOmitsRating() {
+        let item = MediaItem(
+            id: "s1",
+            title: "Example Series",
+            kind: .series,
+            productionYear: 2024,
+            officialRating: nil
+        )
+        XCTAssertEqual(Builder.metadataText(for: item), "2024")
+        XCTAssertNil(Builder.ratingBadgeText(for: item))
     }
 
     // MARK: - Equatable (same value = cheap no-op skip in the coordinator)

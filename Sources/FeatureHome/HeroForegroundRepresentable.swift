@@ -19,6 +19,11 @@ struct HeroForegroundRepresentable: UIViewRepresentable {
     /// Neighbour slides (previous / next) to prepare off-transition so a page finds
     /// the model + logo already warm (a bounded window — see the coordinator).
     let neighbours: [HeroForegroundModel]
+    /// Async `.logo` URL resolvers by itemID, mirroring the SwiftUI hero's
+    /// `asyncFallbackURL`. Most items carry no baked `logoURL`, so the real logo (the
+    /// series logo for an episode) is resolved on demand via `ArtworkRouter`. Keyed to
+    /// the current slide + its prepared neighbours so it stays bounded.
+    let logoFallbacks: [String: @Sendable () async -> URL?]
     /// Whether the show description (logo/metadata/overview/pills) is currently
     /// shown; the SwiftUI hero snaps this to `false` on a page and back to `true`
     /// ~280ms later. The renderer mirrors it as an imperative alpha animation.
@@ -31,6 +36,7 @@ struct HeroForegroundRepresentable: UIViewRepresentable {
     func makeUIView(context: Context) -> HeroForegroundUIView {
         let view = HeroForegroundUIView()
         context.coordinator.view = view
+        context.coordinator.logoFallbacks = logoFallbacks
         context.coordinator.configure(width: width, height: height)
         context.coordinator.prepare(neighbours)
         context.coordinator.apply(model, metadataVisible: metadataVisible)
@@ -39,12 +45,14 @@ struct HeroForegroundRepresentable: UIViewRepresentable {
 
     func updateUIView(_ uiView: HeroForegroundUIView, context: Context) {
         context.coordinator.view = uiView
+        context.coordinator.logoFallbacks = logoFallbacks
         context.coordinator.configure(width: width, height: height)
         context.coordinator.prepare(neighbours)
         context.coordinator.apply(model, metadataVisible: metadataVisible)
     }
 
     static func dismantleUIView(_ uiView: HeroForegroundUIView, coordinator: HeroForegroundCoordinator) {
+        uiView.stopContinuousUpdates()
         coordinator.cancelLoads()
     }
 }
@@ -77,6 +85,11 @@ final class HeroForegroundCoordinator {
     /// transition" optimisation.
     private var warmedLogos: [String: UIImage] = [:]
     private var loadTasks: [String: Task<Void, Never>] = [:]
+
+    /// Async `.logo` URL resolvers by itemID (mirrors the SwiftUI hero's
+    /// `asyncFallbackURL`). Used when a slide has no baked `logoURL` — the common
+    /// case — to resolve the real (series, for an episode) logo on demand.
+    var logoFallbacks: [String: @Sendable () async -> URL?] = [:]
 
     func configure(width: CGFloat, height: CGFloat) {
         guard width != configuredWidth || height != configuredHeight else { return }
@@ -126,23 +139,36 @@ final class HeroForegroundCoordinator {
         HeroForegroundDiagnostics.measure("update") {
             view.apply(
                 model,
-                logo: model.logoURL.flatMap { _ in warmedLogos[model.itemID] },
+                logo: warmedLogos[model.itemID],
                 metadataVisible: metadataVisible,
                 slideChanged: slideChanged
             )
         }
         // Resolve/refresh the logo asynchronously if we don't already have it warm.
-        if model.logoURL != nil, warmedLogos[model.itemID] == nil {
+        // `warmLogo` self-guards on whether a primary URL or a fallback resolver
+        // exists, so most slides (no baked `logoURL`) still resolve via the router.
+        if warmedLogos[model.itemID] == nil {
             warmLogo(for: model, generation: gen, assignIfCurrent: true)
         }
     }
 
     /// Loads a slide's raw logo image off the shared artwork cache, generation- and
-    /// identity-guarded so a slow load can never paint the wrong slide's logo.
+    /// identity-guarded so a slow load can never paint the wrong slide's logo. When
+    /// the slide has no baked `logoURL` it first resolves one via the async `.logo`
+    /// fallback (the router), exactly like the SwiftUI hero's `asyncFallbackURL`.
     private func warmLogo(for model: HeroForegroundModel, generation gen: Int, assignIfCurrent: Bool = false) {
-        guard let url = model.logoURL, warmedLogos[model.itemID] == nil, loadTasks[model.itemID] == nil else { return }
+        guard warmedLogos[model.itemID] == nil, loadTasks[model.itemID] == nil else { return }
         let id = model.itemID
+        let primary = model.logoURL
+        let fallback = logoFallbacks[id]
+        guard primary != nil || fallback != nil else { return }
         loadTasks[id] = Task { [weak self] in
+            var url = primary
+            if url == nil, let fallback { url = await fallback() }
+            guard let url else {
+                await MainActor.run { self?.loadTasks[id] = nil }
+                return
+            }
             let image = await ArtworkImageCache.shared.image(for: url, variant: .original, background: true)
             await MainActor.run {
                 guard let self else { return }

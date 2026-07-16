@@ -16,24 +16,49 @@ final class HeroForegroundUIView: UIView {
     // MARK: Subviews
     private let logoImageView = UIImageView()
     private let titleLabel = UILabel()
+    private let seasonEpisodeLabel = UILabel()
     private let ratingLabel = PaddedLabel()
     private let metadataLabel = UILabel()
     private let overviewLabel = UILabel()
     private let pillsContainer = UIView()
     /// Liquid Glass capsule that hosts the paging dots (real `UIGlassEffect` on
     /// tvOS 26+, ultra-thin blur below), mirroring the SwiftUI `pagingDotsGlass`.
+    /// When glass is A/B-disabled it becomes an effect-less container with a flat
+    /// translucent `backgroundColor` (cheap; no live re-composite on transitions).
     private let dotsContainer: UIVisualEffectView = {
-        if #available(tvOS 26.0, *) {
-            return UIVisualEffectView(effect: UIGlassEffect(style: .regular))
+        let v = HeroForegroundGlass.makeView()
+        if v.effect == nil {
+            // Flat styles: a theme-aware translucent capsule with a hairline border,
+            // matching the pills. No live backdrop sampling.
+            v.backgroundColor = HeroForegroundGlass.flatFill()
+            v.layer.borderColor = HeroForegroundGlass.flatBorder().resolvedColor(with: v.traitCollection).cgColor
+            v.layer.borderWidth = HeroForegroundGlass.borderWidth
         }
-        return UIVisualEffectView(effect: UIBlurEffect(style: .dark))
+        return v
     }()
+    private let useGauge = HeroForegroundConfig.useGauge
 
     /// Reused pill views (pooled), so a page updates labels/frames in place rather
     /// than allocating a fresh row — persistent identity, the whole point.
     private var pillViews: [HeroForegroundPillView] = []
-    /// Reused dot views (pooled) for the same reason.
-    private var dotViews: [HeroPagingDotView] = []
+    /// Paging-dot views keyed by their real slide index (matching the SwiftUI hero's
+    /// index-identity `ForEach`). Keying by slide — not by fixed slot — means that on
+    /// a windowed page the persisting dots slide slot→slot, the dot leaving the window
+    /// fades off its edge and the entering dot fades in, while the active pill holds at
+    /// its slot: the "dots scroll under a held pill" animation. Views are created
+    /// lazily and removed once they scroll out of the window.
+    private var dotViewsByIndex: [Int: HeroPagingDotView] = [:]
+    /// The dots to render this page, in slot order (from `HeroPagingDots.layout`).
+    private var currentDotLayout: [HeroPagingDots.Dot] = []
+    /// The active (fronted) slide index, drawn as the wide pill.
+    private var activeDotIndex: Int?
+    /// Indices whose view was created for the incoming page, so `layoutDots` can slide
+    /// them in from the entering edge (with a fade) rather than popping at the origin.
+    private var enteringDotIndices: Set<Int> = []
+    /// Signature of the last positioned dot layout, so a same-page re-apply (a
+    /// selection / metadata-fade update) is a no-op instead of snapping the dot frames
+    /// to final and cancelling a running page-morph animation.
+    private var lastDotsSignature: [Int] = []
 
     /// Drives the active paging pill's live auto-advance gauge (matches the SwiftUI
     /// hero's 30 Hz `TimelineView`). Only runs while a slide is auto-advancing and
@@ -46,12 +71,36 @@ final class HeroForegroundUIView: UIView {
     private var currentItemID: String?
     private var model: HeroForegroundModel?
 
+    /// The last rendered paging index, so a genuine page change can animate the
+    /// active-dot morph (dot→pill / pill→dot sliding left→right, matching the SwiftUI
+    /// hero); `nil` until the first dotted slide is shown.
+    private var lastDotsIndex: Int?
+    /// Set for exactly one layout pass whenever the page changed, so `layoutDots`
+    /// animates the dot frames into place rather than snapping them.
+    private var animateDotsMorph = false
+    /// Direction of the last page change: `true` when the index INCREASED (window
+    /// scrolls so new dots enter at the RIGHT edge), `false` when it decreased (new
+    /// dots enter at the LEFT). Drives which edge an entering dot slides in from.
+    private var dotsScrollForward = true
+    /// Duration of the dot page-morph (matches the SwiftUI hero's `dotMorph`).
+    private let dotsMorphDuration: CFTimeInterval = 0.3
+    /// Opacity an entering edge dot starts at (it appears at full height and its final
+    /// slot, then fades up to 1 within the morph — a slight initial fill, not a pop
+    /// from nothing). Mirrors SwiftUI's opacity insertion transition.
+    private let dotEnterStartAlpha: CGFloat = 0.3
+
     // MARK: Metrics (mirror the SwiftUI hero)
     private let columnSpacing: CGFloat = 12
+    /// Extra breathing room above the action-pill row (on top of `columnSpacing`).
+    private let pillsTopPadding: CGFloat = 16
     private let pillSpacing: CGFloat = 24
     private let dotSize: CGFloat = 10
     private let activeDotWidth: CGFloat = 30
     private let dotSpacing: CGFloat = 12
+    /// Narrower cinematic text column: 60% of the original 960pt cap.
+    private let contentMaxWidth: CGFloat = 576
+    /// Keep logos proportionally aligned with the narrower column (60% of 620pt).
+    private let logoMaxWidth: CGFloat = 372
     private let dotsGlassHPad: CGFloat = 14
     private let dotsGlassVPad: CGFloat = 9
     private let bottomMargin: CGFloat = 24
@@ -69,26 +118,40 @@ final class HeroForegroundUIView: UIView {
         logoImageView.isHidden = true
 
         titleLabel.font = .systemFont(ofSize: 64, weight: .bold)
-        titleLabel.textColor = .white
         titleLabel.numberOfLines = 2
 
-        ratingLabel.font = .systemFont(ofSize: 20, weight: .semibold)
-        ratingLabel.textColor = UIColor.white.withAlphaComponent(0.85)
-        ratingLabel.layer.borderColor = UIColor.white.withAlphaComponent(0.55).cgColor
-        ratingLabel.layer.borderWidth = 1.5
+        // Episode "S{n} · E{m}" subtitle, matching DetailHeroView (26pt medium,
+        // secondary). Hidden for movies/series.
+        seasonEpisodeLabel.font = .systemFont(ofSize: 26, weight: .medium)
+        seasonEpisodeLabel.numberOfLines = 1
+        seasonEpisodeLabel.isHidden = true
+
+        ratingLabel.font = UIFont(name: "Bungee-Regular", size: 18)
+            ?? .systemFont(ofSize: 18, weight: .semibold)
+        ratingLabel.layer.borderWidth = 3
         ratingLabel.layer.cornerRadius = 6
-        ratingLabel.insets = UIEdgeInsets(top: 2, left: 10, bottom: 2, right: 10)
+        ratingLabel.insets = UIEdgeInsets(top: 0, left: 11, bottom: 0, right: 11)
+        ratingLabel.fixedHeight = 36
+        ratingLabel.textAlignment = .center
         ratingLabel.isHidden = true
 
         metadataLabel.font = .systemFont(ofSize: 23, weight: .medium)
-        metadataLabel.textColor = UIColor.white.withAlphaComponent(0.7)
         metadataLabel.numberOfLines = 1
 
         overviewLabel.font = .systemFont(ofSize: 22)
-        overviewLabel.textColor = UIColor.white.withAlphaComponent(0.7)
         overviewLabel.numberOfLines = 3
 
-        for v in [logoImageView, titleLabel, ratingLabel, metadataLabel, overviewLabel, pillsContainer, dotsContainer] {
+        // A low-opacity, wide-radius glyph shadow keeps copy readable over bright
+        // artwork without looking outlined. It is static layer chrome (no backdrop
+        // sampling), so it preserves the flat foreground's transition advantage.
+        for label in [titleLabel, seasonEpisodeLabel, ratingLabel, metadataLabel, overviewLabel] {
+            label.layer.shadowOpacity = 0.32
+            label.layer.shadowRadius = 7
+            label.layer.shadowOffset = CGSize(width: 0, height: 2)
+        }
+        applyThemeColors()
+
+        for v in [logoImageView, titleLabel, seasonEpisodeLabel, ratingLabel, metadataLabel, overviewLabel, pillsContainer, dotsContainer] {
             addSubview(v)
         }
         dotsContainer.clipsToBounds = true
@@ -98,6 +161,42 @@ final class HeroForegroundUIView: UIView {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     deinit { dotsGaugeLink?.invalidate() }
+
+    override func willMove(toWindow newWindow: UIWindow?) {
+        super.willMove(toWindow: newWindow)
+        if newWindow == nil { stopContinuousUpdates() }
+    }
+
+    /// Explicit representable teardown. A `CADisplayLink` retains its target, so
+    /// relying on `deinit` alone would keep this entire renderer alive indefinitely.
+    func stopContinuousUpdates() {
+        stopDotsGauge()
+    }
+
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        if previousTraitCollection?.hasDifferentColorAppearance(comparedTo: traitCollection) == true {
+            applyThemeColors()
+            setNeedsLayout()
+        }
+    }
+
+    private func applyThemeColors() {
+        let primary = HeroForegroundGlass.primaryInk()
+        let secondary = HeroForegroundGlass.secondaryInk()
+        titleLabel.textColor = primary
+        seasonEpisodeLabel.textColor = secondary
+        ratingLabel.textColor = primary
+        metadataLabel.textColor = secondary
+        overviewLabel.textColor = secondary
+
+        let resolvedPrimary = primary.resolvedColor(with: traitCollection)
+        ratingLabel.layer.borderColor = resolvedPrimary.withAlphaComponent(0.65).cgColor
+        let shadow = traitCollection.userInterfaceStyle == .light ? UIColor.white : UIColor.black
+        for label in [titleLabel, seasonEpisodeLabel, ratingLabel, metadataLabel, overviewLabel] {
+            label.layer.shadowColor = shadow.cgColor
+        }
+    }
 
     // MARK: - Imperative apply
 
@@ -120,7 +219,7 @@ final class HeroForegroundUIView: UIView {
         }
 
         if let rating = model.ratingBadgeText, !rating.isEmpty {
-            ratingLabel.text = rating
+            ratingLabel.text = rating.uppercased()
             ratingLabel.isHidden = false
         } else {
             ratingLabel.isHidden = true
@@ -128,6 +227,9 @@ final class HeroForegroundUIView: UIView {
 
         metadataLabel.text = model.metadataText
         metadataLabel.isHidden = (model.metadataText ?? "").isEmpty
+
+        seasonEpisodeLabel.text = model.seasonEpisodeText
+        seasonEpisodeLabel.isHidden = (model.seasonEpisodeText ?? "").isEmpty
 
         overviewLabel.text = model.overview
         overviewLabel.isHidden = (model.overview ?? "").isEmpty
@@ -172,32 +274,72 @@ final class HeroForegroundUIView: UIView {
 
     private func applyDots(_ model: HeroForegroundModel) {
         guard let dots = model.dots else {
-            dotViews.forEach { $0.isHidden = true }
+            dotViewsByIndex.values.forEach { $0.removeFromSuperview() }
+            dotViewsByIndex.removeAll()
+            currentDotLayout = []
+            activeDotIndex = nil
+            enteringDotIndices.removeAll()
+            lastDotsSignature = []
             dotsContainer.isHidden = true
             stopDotsGauge()
+            lastDotsIndex = nil
             return
         }
-        let layout = HeroPagingDots.layout(count: dots.count, index: dots.index)
-        while dotViews.count < layout.count {
-            let dot = HeroPagingDotView()
-            dotViews.append(dot)
-            dotsContainer.contentView.addSubview(dot)
-        }
-        for (i, dotView) in dotViews.enumerated() {
-            if i < layout.count {
-                let d = layout[i]
-                let active = d.index == dots.index
-                let scale: CGFloat
-                switch d.size {
-                case .full: scale = 1.0
-                case .medium: scale = 0.78
-                case .small: scale = 0.55
-                }
-                dotView.configure(active: active, tint: .white, scale: scale)
-                dotView.isHidden = false
+        // Animate the whole row's morph on a genuine page change (never on the first
+        // show, and never when the page didn't actually move — e.g. a selection or
+        // metadata-fade re-apply). Every page change animates, matching SwiftUI's
+        // `.animation(value: index)`; `.beginFromCurrentState` lets a rapid burst
+        // retarget the in-flight morph instead of piling up.
+        if let last = lastDotsIndex, last != dots.index {
+            animateDotsMorph = true
+            if last == dots.count - 1, dots.index == 0 {
+                dotsScrollForward = true
+            } else if last == 0, dots.index == dots.count - 1 {
+                dotsScrollForward = false
             } else {
-                dotView.isHidden = true
+                dotsScrollForward = dots.index > last
             }
+        } else {
+            animateDotsMorph = false
+        }
+        lastDotsIndex = dots.index
+
+        let layout = HeroPagingDots.layout(count: dots.count, index: dots.index)
+        currentDotLayout = layout
+        activeDotIndex = dots.index
+        enteringDotIndices.removeAll()
+
+        // Get-or-create a view per REAL slide index, so identity is stable across the
+        // window scroll and the persisting dots animate slot→slot.
+        for d in layout {
+            let view: HeroPagingDotView
+            if let existing = dotViewsByIndex[d.index] {
+                view = existing
+            } else {
+                view = HeroPagingDotView()
+                dotViewsByIndex[d.index] = view
+                dotsContainer.contentView.addSubview(view)
+                // Entering on an animated page change: it appears at its final slot
+                // and full height, starting slightly filled (not from nothing) and
+                // fading up to full — matching SwiftUI's opacity insertion. No vertical
+                // slide / scale-in ("from the top").
+                if animateDotsMorph {
+                    enteringDotIndices.insert(d.index)
+                    view.alpha = dotEnterStartAlpha
+                }
+            }
+            let scale: CGFloat
+            switch d.size {
+            case .full: scale = 1.0
+            case .medium: scale = 0.78
+            case .small: scale = 0.55
+            }
+            view.configure(
+                active: d.index == dots.index,
+                tint: HeroForegroundGlass.primaryInk(),
+                scale: scale
+            )
+            view.isHidden = false
         }
         // Drive (or freeze) the active pill's live gauge from the dwell.
         refreshDotsGauge(dots)
@@ -205,17 +347,24 @@ final class HeroForegroundUIView: UIView {
 
     // MARK: Auto-advance gauge
 
+    /// The wide active pill's view (the one that renders the auto-advance gauge).
+    private var activeDotView: HeroPagingDotView? {
+        guard let activeDotIndex else { return nil }
+        return dotViewsByIndex[activeDotIndex]
+    }
+
     /// Starts/stops the display link and sets the active pill's fill for the current
     /// dwell. Mirrors the SwiftUI `brightFillWidth`: no auto-advance ⇒ a full pill;
     /// auto-advance ⇒ a dot growing to the full pill across the dwell; paused ⇒
     /// frozen at `pausedAt`.
     private func refreshDotsGauge(_ dots: HeroForegroundModel.Dots) {
-        guard let active = dotViews.first(where: { !$0.isHidden && $0.isActive }) else {
+        guard let active = activeDotView else {
             stopDotsGauge()
             return
         }
-        guard dots.autoAdvance, let start = dots.dwellStart, dots.dwellDuration > 0 else {
-            // Auto-advance off (or no dwell): the active pill is a solid full pill.
+        guard dots.autoAdvance, useGauge, let start = dots.dwellStart, dots.dwellDuration > 0 else {
+            // Auto-advance off, gauge A/B-disabled, or no dwell: the active pill is a
+            // solid full pill with no per-frame ticking.
             stopDotsGauge()
             active.setFillFraction(1)
             return
@@ -242,8 +391,7 @@ final class HeroForegroundUIView: UIView {
     private var activeDwellDuration: Double = 0
 
     @objc private func tickDotsGauge() {
-        guard let start = activeDwellStart,
-              let active = dotViews.first(where: { !$0.isHidden && $0.isActive }) else {
+        guard let start = activeDwellStart, let active = activeDotView else {
             stopDotsGauge()
             return
         }
@@ -265,7 +413,7 @@ final class HeroForegroundUIView: UIView {
     /// The set of views that fade with the show description on a page (the SwiftUI
     /// hero fades logo/metadata/overview + pills together; dots stay visible).
     private var fadeViews: [UIView] {
-        [logoImageView, titleLabel, ratingLabel, metadataLabel, overviewLabel, pillsContainer]
+        [logoImageView, titleLabel, seasonEpisodeLabel, ratingLabel, metadataLabel, overviewLabel, pillsContainer]
     }
 
     private func applyFade(metadataVisible: Bool, slideChanged: Bool) {
@@ -292,7 +440,7 @@ final class HeroForegroundUIView: UIView {
         guard bounds.width > 0 else { return }
         let leading = HomeHeroLayout.contentLeadingPadding
         let trailing: CGFloat = 60
-        let maxWidth = max(1, min(bounds.width - leading - trailing, 960))
+        let maxWidth = max(1, min(bounds.width - leading - trailing, contentMaxWidth))
 
         // Measure the bottom-anchored block bottom→top.
         var y = bounds.height - bottomMargin
@@ -308,7 +456,7 @@ final class HeroForegroundUIView: UIView {
 
         // Pills row above the dots.
         let pillsHeight = layoutPills(bottom: y, leading: leading)
-        y -= pillsHeight + columnSpacing
+        y -= pillsHeight + columnSpacing + pillsTopPadding
 
         // Overview above the pills (bottom-anchored: its bottom sits at y).
         if !overviewLabel.isHidden {
@@ -320,7 +468,7 @@ final class HeroForegroundUIView: UIView {
 
         // Metadata line.
         if !metadataLabel.isHidden || !ratingLabel.isHidden {
-            let h: CGFloat = 30
+            let h: CGFloat = 36
             var x = leading
             if !ratingLabel.isHidden {
                 let rSize = ratingLabel.intrinsicContentSize
@@ -333,12 +481,30 @@ final class HeroForegroundUIView: UIView {
             y -= h + columnSpacing
         }
 
+        // Season/episode subtitle (episodes only), directly beneath the logo and
+        // above the metadata line — matching the detail hero.
+        if !seasonEpisodeLabel.isHidden {
+            let h = ceil(seasonEpisodeLabel.font.lineHeight)
+            seasonEpisodeLabel.frame = CGRect(x: leading, y: y - h, width: maxWidth, height: h)
+            y -= h + columnSpacing
+        }
+
         // Logo or title on top of the block.
         if !logoImageView.isHidden, let image = logoImageView.image, image.size.width > 0 {
-            let cap = min(maxWidth, 620)
+            let cap = min(maxWidth, logoMaxWidth)
+            let maxH: CGFloat = 160
             let aspect = image.size.height / image.size.width
-            let w = min(cap, image.size.width)
-            let h = min(160, w * aspect)
+            // Fit within both the width cap and the height cap, preserving aspect and
+            // never upscaling. Crucially, size the frame to the ACTUAL fitted image —
+            // if the height cap binds we shrink the width too. Otherwise the frame
+            // stays wider than the scaled image and `.scaleAspectFit` centres it,
+            // making a tall/narrow logo look shifted right instead of left-aligned.
+            var w = min(cap, image.size.width)
+            var h = w * aspect
+            if h > maxH {
+                h = maxH
+                w = h / aspect
+            }
             logoImageView.frame = CGRect(x: leading, y: y - h, width: w, height: h)
         } else if !titleLabel.isHidden {
             let size = titleLabel.sizeThatFits(CGSize(width: min(maxWidth, 1000), height: .greatestFiniteMagnitude))
@@ -366,7 +532,14 @@ final class HeroForegroundUIView: UIView {
         pillsContainer.frame = CGRect(x: leading, y: bottom - height, width: totalWidth, height: height)
         var x: CGFloat = 0
         for (i, pill) in visible.enumerated() {
-            pill.frame = CGRect(x: x, y: 0, width: widths[i], height: height)
+            // Position via bounds+center, not frame: a selected pill carries a 1.06
+            // `transform`, and setting `.frame` on a transformed view back-computes a
+            // shrunken bounds (width/1.06) and lays its content out in that smaller box
+            // before scaling up — which visibly shifts the glyph/text on focus. bounds
+            // and center are transform-independent, so the content stays put and only
+            // the uniform scale is applied around the centre.
+            pill.bounds = CGRect(x: 0, y: 0, width: widths[i], height: height)
+            pill.center = CGPoint(x: x + widths[i] / 2, y: height / 2)
             pill.layoutIfNeeded()
             x += widths[i] + pillSpacing
         }
@@ -374,18 +547,22 @@ final class HeroForegroundUIView: UIView {
     }
 
     private func layoutDots(bottom: CGFloat, leading: CGFloat) {
-        let visible = dotViews.filter { !$0.isHidden }
-        guard !visible.isEmpty else {
+        guard !currentDotLayout.isEmpty else {
             dotsContainer.isHidden = true
             return
         }
+        dotsContainer.isHidden = false
+
         // Fixed-pitch slots: the active pill is `activeDotWidth` wide, every other dot
         // occupies a full `dotSize` slot (a shrunk edge dot is centred inside its slot)
         // so the row's total width — and thus the glass capsule — never breathes.
+        let slotWidths: [CGFloat] = currentDotLayout.map {
+            $0.index == activeDotIndex ? activeDotWidth : dotSize
+        }
         var rowWidth: CGFloat = 0
-        for (i, dot) in visible.enumerated() {
-            rowWidth += dot.isActive ? activeDotWidth : dotSize
-            if i < visible.count - 1 { rowWidth += dotSpacing }
+        for (i, w) in slotWidths.enumerated() {
+            rowWidth += w
+            if i < slotWidths.count - 1 { rowWidth += dotSpacing }
         }
         let glassWidth = rowWidth + dotsGlassHPad * 2
         let glassHeight = dotsGlassHeight
@@ -394,22 +571,117 @@ final class HeroForegroundUIView: UIView {
         dotsContainer.frame = CGRect(x: glassX, y: bottom - glassHeight, width: glassWidth, height: glassHeight)
         dotsContainer.layer.cornerRadius = glassHeight / 2
 
-        // Lay the dots inside the glass content view (its own coordinate space).
-        var x = dotsGlassHPad
-        let cy = glassHeight / 2
-        for dot in visible {
-            if dot.isActive {
-                dot.frame = CGRect(x: x, y: cy - dotSize / 2, width: activeDotWidth, height: dotSize)
-                dot.layoutIfNeeded()
-                x += activeDotWidth + dotSpacing
+        let morph = animateDotsMorph
+        animateDotsMorph = false
+
+        // A same-page re-apply (selection / metadata-fade) reaches here with an
+        // unchanged layout. Re-running the positioning would snap the dot frames to
+        // final and cancel a running page-morph animation, so skip it — the dots are
+        // already where they belong. (Only the layout signature matters; the glass
+        // capsule frame above is refreshed every pass in case the hero width changed.)
+        let signature = [activeDotIndex ?? -1]
+            + currentDotLayout.flatMap { [$0.index, $0.size.rank] }
+        if !morph && signature == lastDotsSignature { return }
+        lastDotsSignature = signature
+
+        // Leading x of each visible slot, in its own (container) coordinate space.
+        var slotX: [Int: CGFloat] = [:]
+        var cursor = dotsGlassHPad
+        for (i, d) in currentDotLayout.enumerated() {
+            slotX[d.index] = cursor
+            cursor += slotWidths[i] + dotSpacing
+        }
+        let windowStart = currentDotLayout.first!.index
+        let windowEnd = currentDotLayout.last!.index
+        let glassH = glassHeight
+        let cy = glassH / 2
+
+        // Start entering dots just OUTSIDE the entry edge of the capsule, at their
+        // FULL-size (dotSize) height, then let `positionDots` slide them to their slot
+        // inside the animation — so a new dot glides in horizontally from the left/right
+        // edge (the direction the window scrolled) at full height and fades up from a
+        // slight fill, rather than "forming" in place / growing from a corner. This
+        // mirrors SwiftUI, where the whole row translates so the newcomer visibly
+        // travels in from the edge while its opacity rises.
+        let enterEdgeX = dotsScrollForward
+            ? glassWidth - dotsGlassHPad + dotSpacing   // just past the right inner edge
+            : dotsGlassHPad - dotSize - dotSpacing        // just past the left inner edge
+        // A cyclic last↔first wrap replaces the entire visible index window. Starting
+        // all eight new views at one edge makes them fan out from a single point.
+        // SwiftUI instead treats these as independent insertion/removal transitions,
+        // so crossfade each newcomer at its own final slot for this discontinuity.
+        let replacesWholeWindow = enteringDotIndices.count > 1
+        for idx in enteringDotIndices {
+            guard let view = dotViewsByIndex[idx] else { continue }
+            let draw = dotSize * view.currentScale
+            view.bounds = CGRect(x: 0, y: 0, width: draw, height: draw)
+            if replacesWholeWindow, let sx = slotX[idx] {
+                view.center = CGPoint(x: sx + dotSize / 2, y: cy)
             } else {
-                // Shrunk circle centred inside a full-size slot.
-                let scale = dot.currentScale
-                let draw = dotSize * scale
-                dot.frame = CGRect(x: x + (dotSize - draw) / 2, y: cy - draw / 2, width: draw, height: draw)
-                dot.layoutIfNeeded()
-                x += dotSize + dotSpacing
+                view.center = CGPoint(x: enterEdgeX + dotSize / 2, y: cy)
             }
+            view.alpha = dotEnterStartAlpha
+        }
+        enteringDotIndices.removeAll()
+
+        // Views that scrolled out of the window: fade them out IN PLACE (again like
+        // SwiftUI's removal transition) and remove once faded — but only if they're
+        // still outside the window then, so a dot that scrolls back in during rapid
+        // reverse paging isn't deleted by a stale completion.
+        let leaving = dotViewsByIndex.filter { $0.key < windowStart || $0.key > windowEnd }
+
+        let positionDots = { [self] in
+            for d in currentDotLayout {
+                guard let view = dotViewsByIndex[d.index] else { continue }
+                view.alpha = 1
+                if d.index == activeDotIndex {
+                    view.bounds = CGRect(x: 0, y: 0, width: activeDotWidth, height: dotSize)
+                    view.center = CGPoint(x: slotX[d.index]! + activeDotWidth / 2, y: cy)
+                } else {
+                    // Shrunk circle centred inside a full-size slot.
+                    let draw = dotSize * view.currentScale
+                    view.bounds = CGRect(x: 0, y: 0, width: draw, height: draw)
+                    view.center = CGPoint(x: slotX[d.index]! + dotSize / 2, y: cy)
+                }
+                view.layoutIfNeeded()
+            }
+            // Leaving dots fade in place — keep their current frame, just go transparent.
+            for (_, view) in leaving {
+                view.alpha = 0
+            }
+        }
+        let cleanup = { [self] in
+            for (idx, view) in leaving {
+                // Still out of the (latest) window? Then it really left — remove it.
+                let start = currentDotLayout.first?.index ?? 0
+                let end = currentDotLayout.last?.index ?? -1
+                if idx < start || idx > end {
+                    view.removeFromSuperview()
+                    dotViewsByIndex[idx] = nil
+                }
+            }
+        }
+        if morph {
+            UIView.animate(withDuration: dotsMorphDuration, delay: 0,
+                           options: [.curveEaseInOut, .beginFromCurrentState],
+                           animations: positionDots,
+                           completion: { _ in cleanup() })
+        } else {
+            positionDots()
+            cleanup()
+        }
+    }
+}
+
+/// Stable ordering of the windowed dot sizes, used to build a cheap layout signature
+/// so a same-page re-apply can be detected and skipped (avoids stomping a running
+/// page-morph animation).
+private extension HeroPagingDots.Size {
+    var rank: Int {
+        switch self {
+        case .full: return 0
+        case .medium: return 1
+        case .small: return 2
         }
     }
 }
@@ -435,11 +707,23 @@ private final class HeroPagingDotView: UIView {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     func configure(active: Bool, tint: UIColor, scale: CGFloat) {
+        let becameActive = active && !isActive
         isActive = active
         currentScale = scale
         backgroundColor = tint.withAlphaComponent(0.28)
         fill.backgroundColor = tint
         fill.isHidden = !active
+        if becameActive, bounds.height > 0 {
+            // Seed the active fill as a full-height circle before the enclosing dot
+            // morph begins. Otherwise its first layout animates from CGRect.zero,
+            // visibly growing from the parent's top-left corner.
+            let height = bounds.height
+            UIView.performWithoutAnimation {
+                fill.bounds = CGRect(x: 0, y: 0, width: height, height: height)
+                fill.center = CGPoint(x: height / 2, y: bounds.midY)
+                fill.layer.cornerRadius = height / 2
+            }
+        }
         setNeedsLayout()
     }
 
@@ -456,7 +740,8 @@ private final class HeroPagingDotView: UIView {
         layer.cornerRadius = bounds.height / 2
         guard isActive, bounds.height > 0 else { return }
         let w = bounds.height + (bounds.width - bounds.height) * fraction
-        fill.frame = CGRect(x: 0, y: 0, width: w, height: bounds.height)
+        fill.bounds = CGRect(x: 0, y: 0, width: w, height: bounds.height)
+        fill.center = CGPoint(x: w / 2, y: bounds.midY)
         fill.layer.cornerRadius = bounds.height / 2
     }
 }
@@ -464,10 +749,14 @@ private final class HeroPagingDotView: UIView {
 /// A `UILabel` with content insets, used for the bordered rating chip.
 private final class PaddedLabel: UILabel {
     var insets = UIEdgeInsets.zero
+    var fixedHeight: CGFloat?
     override func drawText(in rect: CGRect) { super.drawText(in: rect.inset(by: insets)) }
     override var intrinsicContentSize: CGSize {
         let s = super.intrinsicContentSize
-        return CGSize(width: s.width + insets.left + insets.right, height: s.height + insets.top + insets.bottom)
+        return CGSize(
+            width: s.width + insets.left + insets.right,
+            height: fixedHeight ?? (s.height + insets.top + insets.bottom)
+        )
     }
 }
 #endif

@@ -644,7 +644,10 @@ struct HomeHeroView: View {
                     // the next visit but never pops into an already-settled slide.
                     presentationPolicy: .onArrival(maximumWait: 0.2)
                 ) {
-                    Text(hideText ? spoilerSettings.maskedTitle(for: item) : item.title)
+                    Text(HeroForegroundModelBuilder.titleText(
+                        for: item,
+                        maskedTitle: hideText ? spoilerSettings.maskedTitle(for: item) : nil
+                    ))
                         .font(.system(size: 64, weight: .bold))
                         .lineLimit(2)
                         .minimumScaleFactor(0.5)
@@ -656,6 +659,15 @@ struct HomeHeroView: View {
                         .contentTransition(.opacity)
                 }
                 .id("logo-\(item.id)")
+
+                if let seasonEpisode = HeroForegroundModelBuilder.seasonEpisodeText(for: item) {
+                    Text(seasonEpisode)
+                        .font(.system(size: 26, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .contentTransition(.opacity)
+                        .modifier(HeroTextLegibilityShadow(colorScheme: colorScheme))
+                }
 
                 metadataLine(for: item)
                     .modifier(HeroTextLegibilityShadow(colorScheme: colorScheme))
@@ -764,6 +776,7 @@ struct HomeHeroView: View {
             HeroForegroundRepresentable(
                 model: foregroundModel(for: item),
                 neighbours: foregroundNeighbours(for: item),
+                logoFallbacks: foregroundLogoFallbacks(for: item),
                 metadataVisible: metadataVisible,
                 width: HomeHeroLayout.screenWidth,
                 height: HomeHeroLayout.screenHeight - Self.contentBottomInset
@@ -871,10 +884,33 @@ struct HomeHeroView: View {
         return result
     }
 
+    /// Async `.logo` URL resolvers for the current slide plus its prepared
+    /// neighbours, keyed by itemID. Mirrors the SwiftUI hero's `logoFallback(for:)`
+    /// (`ArtworkRouter.logo`), which resolves the show-level logo — including the
+    /// series logo for an episode (the router builds its query from `parentTitle`).
+    /// Bounded to the same window the coordinator prepares so it never grows.
+    private func foregroundLogoFallbacks(for item: MediaItem) -> [String: @Sendable () async -> URL?] {
+        var targets: [MediaItem] = [item]
+        if items.count > 1 {
+            let current = items.firstIndex(where: { $0.id == item.id }) ?? index
+            let previous = (current - 1 + items.count) % items.count
+            let next = (current + 1) % items.count
+            for i in [previous, next] where items.indices.contains(i) { targets.append(items[i]) }
+        }
+        var result: [String: @Sendable () async -> URL?] = [:]
+        for target in targets where result[target.id] == nil {
+            let source = target
+            result[source.id] = { await ArtworkRouter.shared.artworkURL(.logo, for: source) }
+        }
+        return result
+    }
+
     @ViewBuilder
     private func metadataLine(for item: MediaItem) -> some View {
         let metadata = item.metadataComponents()
-        let badge = item.ratingBadge
+        let badge = HeroForegroundModelBuilder.ratingBadgeText(for: item).map {
+            MediaBadge($0, style: .rating)
+        }
         if badge != nil || !metadata.isEmpty {
             HStack(alignment: .center, spacing: 16) {
                 if let badge {
@@ -1384,7 +1420,7 @@ struct HomeHeroView: View {
         }
     }
 
-    /// The glass-pill chrome shared by every hero action. Identity-stable (only
+    /// The pill chrome shared by every hero action. Identity-stable (only
     /// animatable properties vary with `selected`), so nothing here can disturb
     /// focus. Every idle pill is the same translucent glass; the selected pill (when
     /// the hero holds focus) gets the bright white fill + dark glyph + lift.
@@ -1426,7 +1462,16 @@ struct HomeHeroView: View {
 
     @ViewBuilder
     private func heroPillIdleBackground(shape: Capsule) -> some View {
-        if #available(tvOS 26.0, *) {
+        if HeroForegroundConfig.useSwiftUIFlatChrome {
+            shape
+                .fill(Color(uiColor: HeroForegroundGlass.flatFill()))
+                .overlay {
+                    shape.stroke(
+                        Color(uiColor: HeroForegroundGlass.flatBorder()),
+                        lineWidth: HeroForegroundGlass.borderWidth
+                    )
+                }
+        } else if #available(tvOS 26.0, *) {
             // Liquid Glass for every idle pill.
             shape.fill(.clear)
                 .glassEffect(.regular, in: shape)
@@ -1714,13 +1759,21 @@ struct HomeHeroView: View {
         return height + (trackWidth - height) * progress
     }
 
-    /// Liquid Glass background for the paging-dot container: real glass on
-    /// tvOS 26+, `.ultraThinMaterial` below (mirrors `heroPillIdleBackground`). The
-    /// container width is constant across pages, so this pill never resizes — the
-    /// paging jitter was the dots' animation, not this background.
+    /// Paging-dot container background. The measurement-only SwiftUI-flat gate uses
+    /// the exact same non-sampling fill/border tokens as UIKit; otherwise this stays
+    /// real glass on tvOS 26+ and `.ultraThinMaterial` below.
     @ViewBuilder
     private func pagingDotsGlass(shape: Capsule) -> some View {
-        if #available(tvOS 26.0, *) {
+        if HeroForegroundConfig.useSwiftUIFlatChrome {
+            shape
+                .fill(Color(uiColor: HeroForegroundGlass.flatFill()))
+                .overlay {
+                    shape.stroke(
+                        Color(uiColor: HeroForegroundGlass.flatBorder()),
+                        lineWidth: HeroForegroundGlass.borderWidth
+                    )
+                }
+        } else if #available(tvOS 26.0, *) {
             shape.fill(.clear).glassEffect(.regular, in: shape)
         } else {
             shape.fill(.ultraThinMaterial)

@@ -3,17 +3,57 @@ import Foundation
 import OSLog
 #endif
 
-/// Env-gate + telemetry for the **imperative UIKit hero foreground** proof-of-concept.
+/// Runtime selection + telemetry for the imperative UIKit hero foreground.
 ///
-/// The whole feature is off unless the process is launched with
-/// `PLZHERO_UIKIT_FOREGROUND=1`. When off, `HomeHeroView` renders its normal
-/// SwiftUI foreground unchanged — the standard path is never touched — so this is
-/// a fully reversible A/B lever for measuring whether an imperatively-updated
-/// UIKit visual foreground removes the SwiftUI page-transition hitch.
+/// UIKit is the production default after the on-device A/B showed fewer hitches and
+/// no 50ms transition spikes. The complete SwiftUI renderer remains available as a
+/// runtime safety fallback with `PLZHERO_UIKIT_FOREGROUND=0`.
 enum HeroForegroundConfig {
-    /// Read once at startup. `true` only when `PLZHERO_UIKIT_FOREGROUND=1`.
+    /// Read once at startup. UIKit is on unless explicitly disabled with
+    /// `PLZHERO_UIKIT_FOREGROUND=0`; `1` remains accepted for existing A/B scripts.
     static let useUIKitForeground: Bool =
-        ProcessInfo.processInfo.environment["PLZHERO_UIKIT_FOREGROUND"] == "1"
+        ProcessInfo.processInfo.environment["PLZHERO_UIKIT_FOREGROUND"] != "0"
+
+    /// Independent A/B gate that gives the standard SwiftUI foreground the same
+    /// non-sampling flat capsule chrome as the UIKit `clean` style. Default off, so
+    /// the production SwiftUI path remains unchanged unless explicitly measured.
+    static let useSwiftUIFlatChrome: Bool =
+        ProcessInfo.processInfo.environment["PLZHERO_SWIFTUI_FLAT"] == "1"
+
+    /// The idle pill / paging-container background treatment. Chosen because real
+    /// Liquid Glass (`UIGlassEffect`) live-re-blurs the moving backdrop **every
+    /// transition frame** — the measured 42–49ms hitch we're eliminating. The two
+    /// flat styles never sample the backdrop, so both hit the ~17ms/zero-hitch floor;
+    /// they differ only in looks, for a live visual A/B:
+    ///
+    /// * **`clean`** *(default)* — a solid theme-aware semi-transparent capsule with a
+    ///   hairline light border. No attempt to mimic glass. Cheapest, calmest.
+    /// * **`glassish`** — the same flat capsule plus a subtle top-down highlight
+    ///   gradient to fake a glass sheen (still no live sampling, still ~17ms).
+    /// * **`glass`** — real live `UIGlassEffect`. Faithful but pays the transition
+    ///   hitch; kept only so the regression can be re-measured on demand.
+    ///
+    /// Select with `PLZHERO_UIKIT_PILLSTYLE=clean|glassish|glass` (default `clean`).
+    enum PillStyle: String {
+        case clean, glassish, glass
+    }
+
+    static let pillStyle: PillStyle = {
+        let raw = ProcessInfo.processInfo.environment["PLZHERO_UIKIT_PILLSTYLE"]?
+            .lowercased() ?? ""
+        return PillStyle(rawValue: raw) ?? .clean
+    }()
+
+    /// Convenience: true only for the real live-glass style (drives the shared
+    /// `UIVisualEffectView` factory and the dots capsule).
+    static var useGlass: Bool { pillStyle == .glass }
+
+    /// Whether the active paging pill runs the live auto-advance **gauge**
+    /// (`CADisplayLink` filling the pill across the dwell). Purely cosmetic; costs a
+    /// per-frame relayout of one dot. Defaults **on**; `PLZHERO_UIKIT_GAUGE=0`
+    /// freezes it to a static full pill so its cost can be isolated.
+    static let useGauge: Bool =
+        ProcessInfo.processInfo.environment["PLZHERO_UIKIT_GAUGE"] != "0"
 }
 
 /// Gated, secret-safe markers for the UIKit foreground renderer: how long an

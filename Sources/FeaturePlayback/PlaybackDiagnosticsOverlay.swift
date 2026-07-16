@@ -32,7 +32,11 @@ struct PlaybackDiagnosticsOverlay: View {
         }
         .padding(40)
         .frame(maxWidth: 820, alignment: .leading)
-        .plozzGlassPanel(cornerRadius: 64, scrimOpacity: 0.45, refractEdgesOnly: true)
+        .plozzGlassPanel(
+            cornerRadius: PlozzTheme.Metrics.playerPanelCornerRadius,
+            scrimOpacity: 0.45,
+            refractEdgesOnly: true
+        )
         // Pinned to the player's top-left corner (the overlay host ignores the
         // safe area so this hugs the corner, not the wider tvOS overscan inset).
         .padding(.leading, 48)

@@ -202,17 +202,14 @@ struct HeroDirectionalPressMonitor: UIViewRepresentable {
     }
 }
 
-/// A subtle, mode-aware legibility shadow for hero text (year / description) so it
-/// reads clearly over the artwork. In dark mode a soft dark shadow makes the light
-/// text pop; in light mode it drops to a faint value that just grounds the dark
-/// text without muddying it (the light-mode scrim already gives a light backing).
+/// A barely visible, mode-aware edge that separates solid hero text from artwork.
 struct HeroTextLegibilityShadow: ViewModifier {
     let colorScheme: ColorScheme
 
     func body(content: Content) -> some View {
         content.shadow(
-            color: .black.opacity(colorScheme == .dark ? 0.55 : 0.15),
-            radius: 5,
+            color: (colorScheme == .dark ? Color.black : Color.white).opacity(0.4),
+            radius: 4,
             y: 1
         )
     }

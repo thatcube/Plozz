@@ -5,7 +5,7 @@
 <h1 align="center">Plozz</h1>
 
 <p align="center">
-  A free forever, open source, native Apple TV app for Jellyfin, Plex, and local shares.
+  A free forever, open source, native Apple TV app for Jellyfin, Plex, Emby, and local shares (SMB, NFS, WebDAV, SFTP, FTP).
 </p>
 
 <p align="center">
@@ -35,7 +35,7 @@ Found a bug or have an idea? [**Open an issue**](https://github.com/thatcube/Plo
 - **Trakt, AniList, MyAnimeList, Simkl, and Last.fm** - Full support for every tracker across your movies, tv, anime, and music.
 - **Seerr integration** - Connect a seerr account and request media from directly within the search or hero of the app.
 - **Highly customizable interface** - Change the theme of the entire app (light, dark, Pure Black). Change the density of media, optionally show hero content, change the navigation style.
-- **Jellyfin, Plex, and local shares (SMB)**
+- **Jellyfin, Plex, Emby, and local shares (SMB, NFS, WebDAV, SFTP, FTP are experimental atm but supported)**
 - **Circadian mode** - Automatically warm and dim the display at set times to help you sleep (only at the app level)
 - **Subtitle customization** — Vastly customize the subtitles directly in the player. Change font, size, color, opacity, background, font weight, HDR brightness, shadow, position.
 - **Dual subtitle support** - Turn on 2 different subtitle tracks at the same

@@ -308,7 +308,44 @@ public struct JellyfinProvider: MediaProvider {
     }
 
     public func children(of itemID: String) async throws -> [MediaItem] {
-        try await client.children(userID: session.userID, parentID: itemID).map(map(item:))
+        let children = try await client.children(
+            userID: session.userID,
+            parentID: itemID
+        ).map(map(item:))
+        return Self.canonicalChildOrder(children)
+    }
+
+    /// Emby and Jellyfin can apply `SortName` differently (e.g. Episode 10 before
+    /// Episode 2). Numbered seasons/episodes are always displayed in broadcast
+    /// order; unnumbered extras retain their original server order at the end.
+    static func canonicalChildOrder(_ children: [MediaItem]) -> [MediaItem] {
+        children.enumerated().sorted { lhs, rhs in
+            let left = hierarchyOrdinal(lhs.element)
+            let right = hierarchyOrdinal(rhs.element)
+            switch (left, right) {
+            case let (.some(left), .some(right)) where left != right:
+                return left < right
+            case (.some, .none):
+                return true
+            case (.none, .some):
+                return false
+            default:
+                return lhs.offset < rhs.offset
+            }
+        }.map(\.element)
+    }
+
+    private static func hierarchyOrdinal(_ item: MediaItem) -> (Int, Int)? {
+        switch item.kind {
+        case .season:
+            guard let season = item.seasonNumber else { return nil }
+            return (season, -1)
+        case .episode:
+            guard let episode = item.episodeNumber else { return nil }
+            return (item.seasonNumber ?? 0, episode)
+        default:
+            return nil
+        }
     }
 
     public func mediaSegments(for itemID: String) async throws -> [MediaSegment] {

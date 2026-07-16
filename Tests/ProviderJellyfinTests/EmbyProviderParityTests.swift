@@ -139,6 +139,30 @@ final class EmbyProviderParityTests: XCTestCase {
         XCTAssertFalse(item.technicalBadges.map(\.label).contains("SDR"))
     }
 
+    func testEmbyEpisodesAreNormalizedIntoNumericOrder() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Users/u1/Items", json: """
+        {"Items":[
+          {"Id":"extra","Name":"Behind the Scenes","Type":"Video"},
+          {"Id":"e10","Name":"Episode 10","Type":"Episode","ParentIndexNumber":1,"IndexNumber":10},
+          {"Id":"e2","Name":"Episode 2","Type":"Episode","ParentIndexNumber":1,"IndexNumber":2},
+          {"Id":"e1","Name":"Episode 1","Type":"Episode","ParentIndexNumber":1,"IndexNumber":1}
+        ],"TotalRecordCount":4}
+        """)
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        let children = try await provider.children(of: "season1")
+
+        XCTAssertEqual(children.map(\.id), ["e1", "e2", "e10", "extra"])
+        let query = try XCTUnwrap(
+            stub.queryItems(forPathSuffix: "/Users/u1/Items")
+        )
+        XCTAssertEqual(
+            query.first(where: { $0.name == "SortBy" })?.value,
+            "ParentIndexNumber,IndexNumber,SortName"
+        )
+    }
+
     func testEmbyThemeMusicUsesCombinedThemeMediaEndpoint() async throws {
         let stub = StubHTTPClient()
         stub.stub(pathSuffix: "/Items/show1/ThemeMedia", json: """

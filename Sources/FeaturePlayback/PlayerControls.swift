@@ -896,7 +896,6 @@ struct PlayerControls: View {
         // so both corners share a centre.
         let thumbRadius = PlozzTheme.Metrics.mediumMediaCornerRadius
         let contentPad: CGFloat = 24
-        let cardRadius = thumbRadius + contentPad
         let thumbHeight: CGFloat = 210
 
         return HStack(alignment: .top, spacing: 28) {
@@ -987,7 +986,7 @@ struct PlayerControls: View {
         }
         .padding(contentPad)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .modifier(PanelGlassBackground(cornerRadius: cardRadius))
+        .modifier(PanelGlassBackground(cornerRadius: PlozzTheme.Metrics.playerPanelCornerRadius))
     }
 
     private func infoThumbnail(cornerRadius: CGFloat, height: CGFloat) -> some View {

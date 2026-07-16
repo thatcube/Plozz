@@ -277,7 +277,9 @@ struct MainTabView: View {
                 seriesTrackStore: seriesTrackStore,
                 spoilerSettings: spoilerModel.settings,
                 showDiagnostics: diagnosticsModel.settings.isEnabled,
-                homePerfOverlayEnabled: diagnosticsModel.settings.homePerformanceOverlayEnabled,
+                // Keep the on-screen Home profiler out of production. Remote,
+                // env-gated PLZPERF capture remains available for engineering A/Bs.
+                homePerfOverlayEnabled: false,
                 themePalette: resolvedPalette,
                 ratingsProvider: ratingsProvider,
                 scrobbler: RealtimePlaybackScrobbler(trakt: trakt.scrobbler, simkl: simkl.scrobbler),
@@ -724,6 +726,83 @@ private func makeHeroWatchStateRefresher(
             sourceRefs: identitySources,
             fetch: fetchWatchState
         )
+    }
+}
+
+/// Hydrates only sparse metadata needed by the hero chrome. List endpoints are kept
+/// lightweight, but some Plex show rows omit `contentRating` even though the full
+/// `/library/metadata/{id}` record contains it. Fetch at most four details at once,
+/// preserve curated identity/order/watch state, and copy only missing presentation
+/// fields so this cannot reseat the carousel or alter playback routing.
+private func makeHeroMetadataEnricher(
+    accounts: [ResolvedAccount],
+    identitySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef]
+) -> @Sendable ([MediaItem]) async -> [MediaItem] {
+    let providersByAccount = Dictionary(
+        accounts.map { ($0.account.id, $0.provider) },
+        uniquingKeysWith: { first, _ in first }
+    )
+    return { items in
+        let targets = Dictionary(uniqueKeysWithValues: items.indices.compactMap { index -> (Int, MediaItem)? in
+            let item = items[index]
+            guard item.officialRating?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false
+                    || item.productionYear == nil else { return nil }
+            let target = bestSourcePlayItem(
+                item,
+                accounts: accounts,
+                identitySources: identitySources
+            )
+            guard let accountID = target.sourceAccountID,
+                  providersByAccount[accountID] != nil else { return nil }
+            return (index, target)
+        })
+        let candidates = targets.keys.sorted()
+        guard !candidates.isEmpty else { return items }
+
+        let concurrency = min(4, candidates.count)
+        let details = await withTaskGroup(
+            of: (Int, MediaItem?).self,
+            returning: [Int: MediaItem].self
+        ) { group in
+            var next = 0
+            for _ in 0..<concurrency {
+                let index = candidates[next]
+                next += 1
+                guard let target = targets[index],
+                      let accountID = target.sourceAccountID,
+                      let provider = providersByAccount[accountID] else { continue }
+                group.addTask { (index, try? await provider.item(id: target.id)) }
+            }
+
+            var result: [Int: MediaItem] = [:]
+            while let (index, detail) = await group.next() {
+                if let detail { result[index] = detail }
+                if next < candidates.count, !Task.isCancelled {
+                    let queuedIndex = candidates[next]
+                    next += 1
+                    guard let target = targets[queuedIndex],
+                          let accountID = target.sourceAccountID,
+                          let provider = providersByAccount[accountID] else { continue }
+                    group.addTask { (queuedIndex, try? await provider.item(id: target.id)) }
+                }
+            }
+            return result
+        }
+        guard !Task.isCancelled else { return items }
+
+        var enriched = items
+        for (index, detail) in details {
+            if enriched[index].officialRating?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false {
+                enriched[index].officialRating = detail.officialRating
+            }
+            if enriched[index].productionYear == nil {
+                enriched[index].productionYear = detail.productionYear
+            }
+            if enriched[index].genres.isEmpty {
+                enriched[index].genres = detail.genres
+            }
+        }
+        return enriched
     }
 }
 
@@ -1630,6 +1709,10 @@ private struct HomeTab: View {
                 heroWatchStateRefresher: makeHeroWatchStateRefresher(
                     accounts: accounts,
                     hideWatched: heroSettings.settings.hideWatched,
+                    identitySources: identitySources
+                ),
+                heroMetadataEnricher: makeHeroMetadataEnricher(
+                    accounts: accounts,
                     identitySources: identitySources
                 ),
                 homePerfOverlayEnabled: homePerfOverlayEnabled,

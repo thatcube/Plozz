@@ -553,8 +553,60 @@ struct HomeHeroView: View {
     /// focus is retained across a page (item id changes).
     static let actionRowFocusID = "home-hero-action-row"
 
+    /// Reserved focus-region size for the env-gated UIKit foreground path
+    /// (``HeroForegroundConfig``). When the UIKit view draws the pill visuals, the
+    /// SwiftUI action row keeps only its (invisible) focus leaf; this fixed region
+    /// holds its place in the lower third. Left/Right are logical (resolved via the
+    /// guards), so exact pixel overlap with the drawn pills isn't required — a
+    /// deliberate POC simplification.
+    private static let uikitFocusRegionWidth: CGFloat = 620
+    private static let uikitFocusRegionHeight: CGFloat = 76
+    /// Reserved paging-dots footprint below the focus region on the UIKit-foreground
+    /// path (the UIKit view draws the real dots); keeps the focus leaf at the same
+    /// vertical position as the SwiftUI path.
+    private static let uikitDotsReserve: CGFloat = 24
+
+    /// The base of the action row: the visible SwiftUI pills (standard path) or a
+    /// reserved clear focus region (UIKit-foreground path, which draws the pills).
+    /// The single focus leaf + row identity are attached by the caller to whichever
+    /// base this returns, so the focus/accessibility overlay stays canonical.
+    @ViewBuilder
+    private func pillsBase(for item: MediaItem, itemButtons: [HeroButton], drawPills: Bool) -> some View {
+        if drawPills {
+            HStack(spacing: 24) {
+                ForEach(Array(itemButtons.enumerated()), id: \.element) { offset, button in
+                    heroButtonVisual(button, for: item, selected: focus != nil && selectedButton == offset)
+                }
+            }
+            // Report the pills' natural width up so the overview above can cap itself
+            // to the button row (see `actionButtonsWidth`). Measured on the pills
+            // themselves — NOT the enclosing action row, which is `maxWidth: .infinity`.
+            .background {
+                GeometryReader { geo in
+                    Color.clear.preference(key: HeroButtonsWidthKey.self, value: geo.size.width)
+                }
+            }
+            .opacity(metadataVisible ? 1 : 0)
+            // Snap the pills' hide instantly (matches the metadata above); the
+            // delayed fade-IN still animates.
+            .transaction { if !metadataVisible { $0.animation = nil } }
+            .allowsHitTesting(false)
+        } else {
+            Color.clear.frame(width: Self.uikitFocusRegionWidth, height: Self.uikitFocusRegionHeight)
+        }
+    }
+
     @ViewBuilder
     private func content(for item: MediaItem) -> some View {
+        if HeroForegroundConfig.useUIKitForeground {
+            uikitContent(for: item)
+        } else {
+            swiftUIContent(for: item)
+        }
+    }
+
+    @ViewBuilder
+    private func swiftUIContent(for item: MediaItem) -> some View {
         let hideText = spoilerSettings.shouldHideText(for: item)
         VStack(alignment: .leading, spacing: 12) {
             // Absorbs the vertical slack at the TOP of the (fixed-height) column so
@@ -592,7 +644,10 @@ struct HomeHeroView: View {
                     // the next visit but never pops into an already-settled slide.
                     presentationPolicy: .onArrival(maximumWait: 0.2)
                 ) {
-                    Text(hideText ? spoilerSettings.maskedTitle(for: item) : item.title)
+                    Text(HeroForegroundModelBuilder.titleText(
+                        for: item,
+                        maskedTitle: hideText ? spoilerSettings.maskedTitle(for: item) : nil
+                    ))
                         .font(.system(size: 64, weight: .bold))
                         .lineLimit(2)
                         .minimumScaleFactor(0.5)
@@ -605,13 +660,22 @@ struct HomeHeroView: View {
                 }
                 .id("logo-\(item.id)")
 
+                if let seasonEpisode = HeroForegroundModelBuilder.seasonEpisodeText(for: item) {
+                    Text(seasonEpisode)
+                        .font(.system(size: 26, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .contentTransition(.opacity)
+                        .modifier(HeroTextLegibilityShadow(colorScheme: colorScheme))
+                }
+
                 metadataLine(for: item)
                     .modifier(HeroTextLegibilityShadow(colorScheme: colorScheme))
 
                 if !hideText, let overview = item.overview {
                     Text(overview)
                         .font(.system(size: 22))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.primary)
                         .lineSpacing(2)
                         .lineLimit(3, reservesSpace: true)
                         // Cap the description to the action-button row width (measured
@@ -680,10 +744,173 @@ struct HomeHeroView: View {
         }
     }
 
+    /// Env-gated (``HeroForegroundConfig``) imperative **UIKit** visual foreground.
+    /// The persistent ``HeroForegroundRepresentable`` draws the logo/metadata/
+    /// overview/pill/dot *visuals* imperatively (no SwiftUI foreground rebuild per
+    /// page — the measured hitch source). The SwiftUI layer here keeps ONLY the
+    /// canonical focus/navigation/accessibility overlay (`actionRow(drawPills:false)`
+    /// plus the L/R guards) so focus, selection dispatch, recede and VoiceOver are
+    /// byte-for-byte unchanged. Both bottom-anchor to the same column frame.
+    @ViewBuilder
+    private func uikitContent(for item: MediaItem) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Spacer(minLength: 0)
+            // Zero-height recede target (identical to the SwiftUI path).
+            Color.clear
+                .frame(height: 0)
+                .id(Self.recedeAnchorID)
+            // Focus/accessibility overlay only — the UIKit view draws the pills.
+            actionRow(for: item, drawPills: false)
+            // Reserve the paging-dots footprint so the focus region sits at the same
+            // height as the SwiftUI path (the UIKit view draws the real dots).
+            Color.clear
+                .frame(maxWidth: .infinity)
+                .frame(height: Self.uikitDotsReserve)
+        }
+        .frame(height: HomeHeroLayout.screenHeight - Self.contentBottomInset)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        // The imperative UIKit visual layer fills the same column frame, bottom-
+        // anchored, behind the focus overlay. Instantiated only on this gated path,
+        // so the standard SwiftUI path pays nothing.
+        .background(alignment: .bottomLeading) {
+            HeroForegroundRepresentable(
+                model: foregroundModel(for: item),
+                neighbours: foregroundNeighbours(for: item),
+                logoFallbacks: foregroundLogoFallbacks(for: item),
+                metadataVisible: metadataVisible,
+                width: HomeHeroLayout.screenWidth,
+                height: HomeHeroLayout.screenHeight - Self.contentBottomInset
+            )
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+        }
+        .padding(.trailing, PlozzTheme.Metrics.screenPadding)
+        .padding(.leading, PlozzTheme.Metrics.heroLeadingPadding)
+        .padding(.bottom, Self.contentBottomInset)
+        .offset(y: receded ? -Self.recedeContentLift : 0)
+    }
+
+    /// Builds the current slide's ``HeroForegroundModel`` from the view's already
+    /// resolved focus/selection/CTA/spoiler state (pure mapping lives in
+    /// ``HeroForegroundModelBuilder``).
+    private func foregroundModel(for item: MediaItem) -> HeroForegroundModel {
+        // Only the fronted slide carries the live auto-advance dwell so its active
+        // paging pill can render the "time until next page" gauge; neighbours are
+        // built neutral and re-applied with the real dwell when they front.
+        foregroundModel(
+            for: item,
+            selectedIndex: selectedButton,
+            heroFocused: focus != nil,
+            dotsAutoAdvance: settings.autoAdvance && items.count > 1,
+            dotsDwellStart: dwellStart,
+            dotsDwellDuration: Double(settings.autoAdvanceSeconds),
+            dotsPausedAt: pausedAt
+        )
+    }
+
+    private func foregroundModel(
+        for item: MediaItem,
+        selectedIndex: Int,
+        heroFocused: Bool,
+        dotsAutoAdvance: Bool = false,
+        dotsDwellStart: Date? = nil,
+        dotsDwellDuration: Double = 0,
+        dotsPausedAt: Date? = nil
+    ) -> HeroForegroundModel {
+        let hideText = spoilerSettings.shouldHideText(for: item)
+        let masked = hideText ? spoilerSettings.maskedTitle(for: item) : nil
+        let slideIndex = items.firstIndex(where: { $0.id == item.id }) ?? index
+        return HeroForegroundModelBuilder.model(
+            item: item,
+            overviewVisible: !hideText,
+            maskedTitle: masked,
+            pillInputs: foregroundPillInputs(for: item),
+            selectedIndex: selectedIndex,
+            heroFocused: heroFocused,
+            slideCount: items.count,
+            slideIndex: slideIndex,
+            dotsAutoAdvance: dotsAutoAdvance,
+            dotsDwellStart: dotsDwellStart,
+            dotsDwellDuration: dotsDwellDuration,
+            dotsPausedAt: dotsPausedAt
+        )
+    }
+
+    /// Maps the slide's `buttons(for:)` (identical order to the SwiftUI pills) into
+    /// the pure pill inputs, resolving the same dynamic state the SwiftUI pills use
+    /// (resume progress, download %, watchlist fill).
+    private func foregroundPillInputs(for item: MediaItem) -> [HeroForegroundModelBuilder.PillInput] {
+        buttons(for: item).map { button in
+            switch button {
+            case .play:
+                let resume = item.resumeProgressFraction
+                return .init(
+                    kind: .play,
+                    resumeProgress: resume,
+                    isResume: resume != nil,
+                    resumeRemainingText: item.resumeRemainingText
+                )
+            case .request:
+                return .init(kind: .request)
+            case .downloadStatus:
+                if case let .downloading(progress) = heroCTA(for: item) {
+                    return .init(kind: .downloadStatus, downloadProgress: progress)
+                }
+                return .init(kind: .downloadStatus)
+            case .moreInfo:
+                return .init(kind: .moreInfo)
+            case .watchlist:
+                return .init(kind: .watchlist, isFavorite: watchlistTarget(for: item).isFavorite)
+            case .next:
+                return .init(kind: .next)
+            }
+        }
+    }
+
+    /// Bounded neighbour models (previous / next slide) handed to the coordinator to
+    /// prepare off-transition so a page finds the model + logo already warm. Built
+    /// with a neutral selection/focus (the real page re-applies the correct one).
+    private func foregroundNeighbours(for item: MediaItem) -> [HeroForegroundModel] {
+        guard items.count > 1 else { return [] }
+        let current = items.firstIndex(where: { $0.id == item.id }) ?? index
+        let previous = (current - 1 + items.count) % items.count
+        let next = (current + 1) % items.count
+        var seen: Set<Int> = [current]
+        var result: [HeroForegroundModel] = []
+        for neighbour in [previous, next] where !seen.contains(neighbour) && items.indices.contains(neighbour) {
+            seen.insert(neighbour)
+            result.append(foregroundModel(for: items[neighbour], selectedIndex: 0, heroFocused: false))
+        }
+        return result
+    }
+
+    /// Async `.logo` URL resolvers for the current slide plus its prepared
+    /// neighbours, keyed by itemID. Mirrors the SwiftUI hero's `logoFallback(for:)`
+    /// (`ArtworkRouter.logo`), which resolves the show-level logo — including the
+    /// series logo for an episode (the router builds its query from `parentTitle`).
+    /// Bounded to the same window the coordinator prepares so it never grows.
+    private func foregroundLogoFallbacks(for item: MediaItem) -> [String: @Sendable () async -> URL?] {
+        var targets: [MediaItem] = [item]
+        if items.count > 1 {
+            let current = items.firstIndex(where: { $0.id == item.id }) ?? index
+            let previous = (current - 1 + items.count) % items.count
+            let next = (current + 1) % items.count
+            for i in [previous, next] where items.indices.contains(i) { targets.append(items[i]) }
+        }
+        var result: [String: @Sendable () async -> URL?] = [:]
+        for target in targets where result[target.id] == nil {
+            let source = target
+            result[source.id] = { await ArtworkRouter.shared.artworkURL(.logo, for: source) }
+        }
+        return result
+    }
+
     @ViewBuilder
     private func metadataLine(for item: MediaItem) -> some View {
         let metadata = item.metadataComponents()
-        let badge = item.ratingBadge
+        let badge = HeroForegroundModelBuilder.ratingBadgeText(for: item).map {
+            MediaBadge($0, style: .rating)
+        }
         if badge != nil || !metadata.isEmpty {
             HStack(alignment: .center, spacing: 16) {
                 if let badge {
@@ -692,7 +919,7 @@ struct HomeHeroView: View {
                 if !metadata.isEmpty {
                     Text(metadata.joined(separator: "  ·  "))
                         .font(.system(size: 23, weight: .medium))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.primary)
                         .lineLimit(1)
                         .contentTransition(.opacity)
                 }
@@ -703,7 +930,7 @@ struct HomeHeroView: View {
     // MARK: - Action row + focus/paging
 
     @ViewBuilder
-    private func actionRow(for item: MediaItem) -> some View {
+    private func actionRow(for item: MediaItem, drawPills: Bool = true) -> some View {
         let itemButtons = buttons(for: item)
         // Named VoiceOver actions for *every* visible pill (the row is a single
         // a11y element, so without these only the highlighted action would be
@@ -759,24 +986,7 @@ struct HomeHeroView: View {
             // stabilising this row — and the pills are hidden (opacity 0, snapped)
             // during the ~280ms page window anyway, so a one-tick focus/highlight
             // blip here is invisible. So this stays the simple, direct row.
-            HStack(spacing: 24) {
-                ForEach(Array(itemButtons.enumerated()), id: \.element) { offset, button in
-                    heroButtonVisual(button, for: item, selected: focus != nil && selectedButton == offset)
-                }
-            }
-            // Report the pills' natural width up so the overview above can cap itself
-            // to the button row (see `actionButtonsWidth`). Measured on the pills
-            // themselves — NOT the enclosing action row, which is `maxWidth: .infinity`.
-            .background {
-                GeometryReader { geo in
-                    Color.clear.preference(key: HeroButtonsWidthKey.self, value: geo.size.width)
-                }
-            }
-            .opacity(metadataVisible ? 1 : 0)
-            // Snap the pills' hide instantly (matches the metadata above); the
-            // delayed fade-IN still animates.
-            .transaction { if !metadataVisible { $0.animation = nil } }
-            .allowsHitTesting(false)
+            pillsBase(for: item, itemButtons: itemButtons, drawPills: drawPills)
             // ── The single hero focus target: an always-opaque, invisible SwiftUI
             // leaf layered *over* the pills. Because `.overlay` is applied after the
             // pills' `.opacity`, it stays fully opaque and focusable even while the
@@ -1210,7 +1420,7 @@ struct HomeHeroView: View {
         }
     }
 
-    /// The glass-pill chrome shared by every hero action. Identity-stable (only
+    /// The pill chrome shared by every hero action. Identity-stable (only
     /// animatable properties vary with `selected`), so nothing here can disturb
     /// focus. Every idle pill is the same translucent glass; the selected pill (when
     /// the hero holds focus) gets the bright white fill + dark glyph + lift.
@@ -1252,7 +1462,16 @@ struct HomeHeroView: View {
 
     @ViewBuilder
     private func heroPillIdleBackground(shape: Capsule) -> some View {
-        if #available(tvOS 26.0, *) {
+        if HeroForegroundConfig.useSwiftUIFlatChrome {
+            shape
+                .fill(Color(uiColor: HeroForegroundGlass.flatFill()))
+                .overlay {
+                    shape.stroke(
+                        Color(uiColor: HeroForegroundGlass.flatBorder()),
+                        lineWidth: HeroForegroundGlass.borderWidth
+                    )
+                }
+        } else if #available(tvOS 26.0, *) {
             // Liquid Glass for every idle pill.
             shape.fill(.clear)
                 .glassEffect(.regular, in: shape)
@@ -1540,13 +1759,21 @@ struct HomeHeroView: View {
         return height + (trackWidth - height) * progress
     }
 
-    /// Liquid Glass background for the paging-dot container: real glass on
-    /// tvOS 26+, `.ultraThinMaterial` below (mirrors `heroPillIdleBackground`). The
-    /// container width is constant across pages, so this pill never resizes — the
-    /// paging jitter was the dots' animation, not this background.
+    /// Paging-dot container background. The measurement-only SwiftUI-flat gate uses
+    /// the exact same non-sampling fill/border tokens as UIKit; otherwise this stays
+    /// real glass on tvOS 26+ and `.ultraThinMaterial` below.
     @ViewBuilder
     private func pagingDotsGlass(shape: Capsule) -> some View {
-        if #available(tvOS 26.0, *) {
+        if HeroForegroundConfig.useSwiftUIFlatChrome {
+            shape
+                .fill(Color(uiColor: HeroForegroundGlass.flatFill()))
+                .overlay {
+                    shape.stroke(
+                        Color(uiColor: HeroForegroundGlass.flatBorder()),
+                        lineWidth: HeroForegroundGlass.borderWidth
+                    )
+                }
+        } else if #available(tvOS 26.0, *) {
             shape.fill(.clear).glassEffect(.regular, in: shape)
         } else {
             shape.fill(.ultraThinMaterial)

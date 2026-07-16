@@ -65,14 +65,17 @@ public enum BrowseDiagnostics {
     /// `.cancel()` in the browse view's `onDisappear`). No-op — returns `nil` —
     /// when disabled, so callers add nothing when the flag is off.
     ///
-    /// `artworkCacheStats` (optional) lets a caller with access to the decoded
-    /// image cache (which lives above this module) report its live count + cost so
-    /// a memory climb can be attributed to the cache vs. render surfaces / view
-    /// backing stores — the two have different fixes.
+    /// `artworkCacheStats` (optional) lets a caller with access to CoreUI's decoded
+    /// and response-byte caches report their live usage.
     public static func startSampler(
         interval: TimeInterval = 2,
         label: String,
-        artworkCacheStats: (@Sendable () -> (count: Int, costMB: Double))? = nil
+        artworkCacheStats: (@Sendable () -> (
+            count: Int,
+            decodedMB: Double,
+            responseMemoryMB: Double,
+            responseDiskMB: Double
+        ))? = nil
     ) -> Task<Void, Never>? {
         guard isEnabled else { return nil }
         return Task.detached(priority: .utility) {
@@ -84,7 +87,12 @@ public enum BrowseDiagnostics {
                 let eng = PlaybackInstrumentation.count(.nativeEngine)
                 let share = ShareBackgroundActivity.snapshot()
                 let art = artworkCacheStats?()
-                let artStr = art.map { String(format: " artCount=%d artMB=%.1f", $0.count, $0.costMB) } ?? ""
+                let artStr = art.map {
+                    String(
+                        format: " artCount=%d artDecodedMB=%.1f artResponseMemMB=%.1f artResponseDiskMB=%.1f",
+                        $0.count, $0.decodedMB, $0.responseMemoryMB, $0.responseDiskMB
+                    )
+                } ?? ""
                 emit(String(
                     format: "sample %@ t=%.0fs mem=%.1fMB vms=%d nativeEng=%d shareScan=%d listers=%d peakListers=%d shareEnrich=%d%@",
                     label, Date().timeIntervalSince(start), mem, vms, eng,

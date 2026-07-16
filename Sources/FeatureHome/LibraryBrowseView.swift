@@ -152,8 +152,15 @@ public struct LibraryBrowseView: View {
             guard BrowseDiagnostics.isEnabled else { return }
             BrowseDiagnostics.event("screen browse+")
             let sampler = BrowseDiagnostics.startSampler(label: "browse") {
-                let s = ArtworkImageCache.shared.currentStats()
-                return (count: s.count, costMB: s.costMB)
+                let decoded = ArtworkImageCache.shared.currentStats()
+                let responses = ArtworkSession.cacheUsage()
+                let mb = Double(1024 * 1024)
+                return (
+                    count: decoded.count,
+                    decodedMB: decoded.costMB,
+                    responseMemoryMB: Double(responses.memoryBytes) / mb,
+                    responseDiskMB: Double(responses.diskBytes) / mb
+                )
             }
             defer {
                 sampler?.cancel()

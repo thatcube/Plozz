@@ -207,6 +207,16 @@ public actor MediaIOArbiter {
         return MediaIOPlaybackLease(id: id, arbiter: self)
     }
 
+    /// Whether passive metadata work may use this account right now. The scheduler
+    /// polls this between short slices, so playback/scanning never needs to retain a
+    /// callback into a higher-level module.
+    public func permitsBackgroundWork() -> Bool {
+        playbackIDs.isEmpty
+            && !playbackPending
+            && activeScanner == nil
+            && !scannerTransitionPending
+    }
+
     private func stopAndDrain(_ scanner: ScannerAdmission) async throws {
         await scanner.resource.cancel()
         let drained = await deadline.waitForDrain(

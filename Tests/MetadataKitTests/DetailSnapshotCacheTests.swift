@@ -84,4 +84,74 @@ final class DetailSnapshotCacheTests: XCTestCase {
         )) ?? []
         XCTAssertLessThanOrEqual(files.count, 2)
     }
+
+    func testPrunesLeastRecentlyUsedBeyondByteBudget() async {
+        let dir = makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let maxBytes = 6_000
+        let cache = DetailSnapshotCache(
+            directory: dir,
+            maxEntries: 100,
+            maxBytes: maxBytes
+        )
+        for index in 0..<8 {
+            let snap = DetailSnapshotCache.Snapshot(
+                item: MediaItem(
+                    id: "m\(index)",
+                    title: "Movie \(index)",
+                    kind: .movie,
+                    overview: String(repeating: "x", count: 2_000)
+                ),
+                children: []
+            )
+            await cache.store(snap, for: "byte-key-\(index)")
+        }
+        await cache.awaitPendingPrune()
+        let files = (try? FileManager.default.contentsOfDirectory(
+            at: dir.appendingPathComponent("plozz-detail-cache-v2"),
+            includingPropertiesForKeys: [.fileSizeKey]
+        )) ?? []
+        let totalBytes = files.reduce(0) { partial, file in
+            partial + ((try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
+        }
+        XCTAssertLessThanOrEqual(totalBytes, maxBytes)
+    }
+
+    func testExistingDirectoryIsPrunedToByteBudgetOnInitialization() async {
+        let dir = makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let writer = DetailSnapshotCache(
+            directory: dir,
+            maxEntries: 100,
+            maxBytes: 1_000_000
+        )
+        for index in 0..<8 {
+            await writer.store(.init(
+                item: MediaItem(
+                    id: "legacy-\(index)",
+                    title: "Legacy \(index)",
+                    kind: .movie,
+                    overview: String(repeating: "y", count: 2_000)
+                ),
+                children: []
+            ), for: "legacy-key-\(index)")
+        }
+        await writer.awaitPendingPrune()
+
+        let maxBytes = 6_000
+        let reader = DetailSnapshotCache(
+            directory: dir,
+            maxEntries: 100,
+            maxBytes: maxBytes
+        )
+        await reader.awaitPendingPrune()
+        let files = (try? FileManager.default.contentsOfDirectory(
+            at: dir.appendingPathComponent("plozz-detail-cache-v2"),
+            includingPropertiesForKeys: [.fileSizeKey]
+        )) ?? []
+        let totalBytes = files.reduce(0) { partial, file in
+            partial + ((try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
+        }
+        XCTAssertLessThanOrEqual(totalBytes, maxBytes)
+    }
 }

@@ -121,6 +121,26 @@ private final class BlockingForceCloseScannerResource: MediaIOScannerResource, @
 }
 
 final class SourceLeaseAndArbiterTests: XCTestCase {
+    func testBackgroundAdmissionTracksScannerAndPlayback() async throws {
+        let arbiter = MediaIOArbiter(accountID: "account")
+        var allowed = await arbiter.permitsBackgroundWork()
+        XCTAssertTrue(allowed)
+
+        let scanner = try await arbiter.acquireScanner(resource: FakeScannerResource())
+        allowed = await arbiter.permitsBackgroundWork()
+        XCTAssertFalse(allowed)
+        await scanner.finishAndWait()
+        allowed = await arbiter.permitsBackgroundWork()
+        XCTAssertTrue(allowed)
+
+        let playback = try await arbiter.acquirePlayback()
+        allowed = await arbiter.permitsBackgroundWork()
+        XCTAssertFalse(allowed)
+        await playback.releaseAndWait()
+        allowed = await arbiter.permitsBackgroundWork()
+        XCTAssertTrue(allowed)
+    }
+
     func testLeaseWithoutCursorShutsDownWhenClosed() async {
         let source = FakeByteSource(data: Data())
         let lease = MediaTransportSourceLease(source: source)

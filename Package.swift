@@ -68,17 +68,16 @@ let package = Package(
         // decodes cleanly (#92), software-path seek holds last frame (#90). See
         // AGENTS.local.md › "Playback engine (AetherEngine / Plozzigen)".
         //
-        // Pinned to AetherEngine 5.0.1 + Plozz's re-applied local patches + the
+        // Pinned to AetherEngine 5.0.7 + Plozz's re-applied local patches + the
         // bounded stalled-seek / sparse-cache fix. Lineage (verified in the fork
-        // history): upstream 5.0.1 (carries the merged Dolby Vision startup fix,
-        // PR #118) → `9fb4907` "Carry Plozz's local patches on top of 5.0.1"
+        // history): upstream 5.0.7 (includes the merged Dolby Vision startup fix,
+        // PR #118, and the seek-reset subtitle dedupe fix, #121) → `94235fc`
+        // re-applies "Carry Plozz's local patches on top of AetherEngine 5.0.1"
         // (public `stop(resetDisplayCriteria:)` + the SDR pre-play settle gate that
         // skips the ~1000ms waitForSwitch for SDR/non-switching loads; DV/HDR
-        // behavior byte-for-byte identical to 5.0.1) → this commit adds the
-        // bounded seek/sparse-cache recovery. This is `d97fad24` and is a strict
-        // superset of the old pre-5.0.1 pin (`b62837d5`, 177 commits behind): the
-        // five "extra" commits on that old line are just older copies of the same
-        // Plozz patches, already re-applied here on top of 5.0.1.
+        // behavior remains upstream-identical) → `127033b` re-applies the bounded
+        // seek/sparse-cache recovery. This supersedes the 5.0.1-based `d97fad24`
+        // pin without dropping either Plozz-specific patch.
         //
         // SMB enters AetherEngine only through Plozz's protocol-neutral custom-source
         // bridge; the engine's legacy SMB URL product is not linked. PR #94's
@@ -86,7 +85,7 @@ let package = Package(
         // muxer needs a PARSED audio packet to build the AC-3/E-AC-3/TrueHD sample
         // entry, else a mid-file backward seek wedged the muxer. See
         // docs/media-share-proposal.md § 5.1.
-        .package(url: "https://github.com/thatcube/AetherEngine", revision: "d97fad242c069711fb3065df449444cc31267251"),
+        .package(url: "https://github.com/thatcube/AetherEngine", revision: "127033b681a5fe8287f19ea53b43cfacf19b0542"),
         // NOTE: FFmpegBuild (FFmpeg n8.1.x decode-only) and LibDovi (Dolby Vision
         // RPU parser) are pulled in TRANSITIVELY by AetherEngine — its own manifest
         // declares and consumes them. Plozz used to declare them directly only for

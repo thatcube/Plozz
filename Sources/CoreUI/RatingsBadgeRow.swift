@@ -54,6 +54,10 @@ public struct RatingBadge: View {
                 .tracking(0.6)
                 .foregroundStyle(.secondary)
         }
+        // Preserve each icon + score as one indivisible badge. Without this,
+        // SwiftUI compresses the numeric text first when several ratings share a
+        // row, producing values such as "8…".
+        .fixedSize(horizontal: true, vertical: false)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(rating.source.displayName) rating \(rating.displayValue)")
     }

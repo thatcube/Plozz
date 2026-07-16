@@ -85,74 +85,80 @@ public struct MediaBadgeChip: View {
     }
 
     public var body: some View {
-        switch badge.style {
-        case .rating:
-            label(badge.label, textColor: palette.primaryText, font: Font.custom("Bungee-Regular", size: 18))
-                .overlay(
-                    RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
-                        .strokeBorder(palette.primaryText.opacity(0.65), lineWidth: 3)
-                )
-                .accessibilityLabel(badge.label)
-        case .prominent:
-            // The eye-catching "chip": a solid fill of the theme's primary colour
-            // with the background colour punched through as the text, so it stays
-            // a high-contrast highlight in every theme (white-on-dark in light
-            // mode, dark-on-white in dark and Pure Black) rather than white-on-white.
-            label(badge.label, textColor: palette.backgroundBase)
-                .background(
-                    RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
-                        .fill(palette.primaryText)
-                )
-                .accessibilityLabel(badge.label)
-        case .spec:
-            label(badge.label, textColor: palette.primaryText)
-                .background(
-                    RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
-                        .fill(palette.primaryText.opacity(0.16))
-                )
-                .accessibilityLabel(badge.label)
-        case .hdr:
-            hdrLabel(badge.label)
-                .accessibilityLabel(badge.label)
-        case .sdr:
-            sdrBrushedLabel(badge.label)
-                .accessibilityLabel(badge.label)
-        case .dts:
-            HStack(alignment: .center, spacing: 6) {
-                dtsLabel(badge.label)
-                if let detail = badge.detail {
-                    // DTS-HD: nudge the channel number down/left to sit better
-                    // against the shorter, baseline-aligned dts-HD wordmark, and
-                    // render it a little bolder.
-                    channelText(detail, font: Self.dtsChannelFont)
-                        .offset(x: -2, y: 2)
-                }
-            }
-            .accessibilityLabel(badge.accessibilityText)
-        case .dolby:
-            HStack(alignment: .center, spacing: 7) {
-                VStack(alignment: .center, spacing: -1) {
-                    HStack(alignment: .center, spacing: 5) {
-                        DolbyDoubleD()
+        Group {
+            switch badge.style {
+            case .rating:
+                label(badge.label, textColor: palette.primaryText, font: Font.custom("Bungee-Regular", size: 18))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
+                            .strokeBorder(palette.primaryText.opacity(0.65), lineWidth: 3)
+                    )
+                    .accessibilityLabel(badge.label)
+            case .prominent:
+                // The eye-catching "chip": a solid fill of the theme's primary colour
+                // with the background colour punched through as the text, so it stays
+                // a high-contrast highlight in every theme (white-on-dark in light
+                // mode, dark-on-white in dark and Pure Black) rather than white-on-white.
+                label(badge.label, textColor: palette.backgroundBase)
+                    .background(
+                        RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
                             .fill(palette.primaryText)
-                            .frame(width: 21, height: 14)
-                        Text("Dolby")
-                            .font(Self.dolbyWordFont)
-                            .foregroundStyle(palette.primaryText)
+                    )
+                    .accessibilityLabel(badge.label)
+            case .spec:
+                label(badge.label, textColor: palette.primaryText)
+                    .background(
+                        RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
+                            .fill(palette.primaryText.opacity(0.16))
+                    )
+                    .accessibilityLabel(badge.label)
+            case .hdr:
+                hdrLabel(badge.label)
+                    .accessibilityLabel(badge.label)
+            case .sdr:
+                sdrBrushedLabel(badge.label)
+                    .accessibilityLabel(badge.label)
+            case .dts:
+                HStack(alignment: .center, spacing: 6) {
+                    dtsLabel(badge.label)
+                    if let detail = badge.detail {
+                        // DTS-HD: nudge the channel number down/left to sit better
+                        // against the shorter, baseline-aligned dts-HD wordmark, and
+                        // render it a little bolder.
+                        channelText(detail, font: Self.dtsChannelFont)
+                            .offset(x: -2, y: 2)
                     }
-                    Text(badge.dolbyFormatWord.uppercased())
-                        .font(Self.dolbyFormatFont)
-                        .foregroundStyle(palette.primaryText)
-                        .tracking(1.0)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.75)
                 }
-                if let detail = badge.detail {
-                    channelText(detail)
+                .accessibilityLabel(badge.accessibilityText)
+            case .dolby:
+                HStack(alignment: .center, spacing: 7) {
+                    VStack(alignment: .center, spacing: -1) {
+                        HStack(alignment: .center, spacing: 5) {
+                            DolbyDoubleD()
+                                .fill(palette.primaryText)
+                                .frame(width: 21, height: 14)
+                            Text("Dolby")
+                                .font(Self.dolbyWordFont)
+                                .foregroundStyle(palette.primaryText)
+                        }
+                        Text(badge.dolbyFormatWord.uppercased())
+                            .font(Self.dolbyFormatFont)
+                            .foregroundStyle(palette.primaryText)
+                            .tracking(1.0)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
+                    }
+                    if let detail = badge.detail {
+                        channelText(detail)
+                    }
                 }
+                .accessibilityLabel(badge.accessibilityText)
             }
-            .accessibilityLabel(badge.accessibilityText)
         }
+        // A badge is one visual wordmark/chip. Let rows overflow as a unit rather
+        // than independently truncating "Dolby Digital+" or a trailing channel
+        // count while later badges remain visible.
+        .fixedSize(horizontal: true, vertical: false)
     }
 
     /// A trailing channel-layout number (`5.1`/`7.1`) rendered as plain white

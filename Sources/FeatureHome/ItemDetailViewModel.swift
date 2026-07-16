@@ -1566,13 +1566,12 @@ public final class ItemDetailViewModel {
         provider: any MediaProvider,
         sourceGeneration: UInt64
     ) async {
-        guard item.mediaInfo?.audio?.codec?.lowercased() == "eac3",
-              item.mediaInfo?.audio?.profile?.localizedCaseInsensitiveContains("atmos") != true,
+        guard item.mediaInfo?.audio?.profile?
+                  .localizedCaseInsensitiveContains("atmos") != true,
               let provider = provider as? any SupplementalStreamFactsProviding else {
             return
         }
         guard let facts = await provider.supplementalStreamFacts(for: item),
-              facts.audioIsAtmos,
               !Task.isCancelled,
               self.sourceGeneration == sourceGeneration,
               case var .loaded(detail) = state,
@@ -1580,7 +1579,7 @@ public final class ItemDetailViewModel {
             return
         }
 
-        let enrichedItem = detail.item.confirmingAtmos()
+        let enrichedItem = detail.item.applyingSupplementalStreamFacts(facts)
         detail.item = enrichedItem
         state = .loaded(detail)
         sources = sources.map { stampedPrimarySource($0, from: enrichedItem) }

@@ -73,6 +73,54 @@ final class ItemDetailViewModelTests: XCTestCase {
         )
     }
 
+    func testShareProbeCreatesAtmosMetadataWithoutServerStreamFacts() async {
+        let item = MediaItem(
+            id: "share-movie",
+            title: "Movie",
+            kind: .movie,
+            sourceAccountID: "share",
+            versions: [
+                MediaVersion(
+                    id: "Movies/Movie.mkv",
+                    container: "mkv",
+                    sourceItemID: "share-movie",
+                    sourceAccountID: "share"
+                )
+            ]
+        )
+        let provider = FakeMediaProvider(allItems: [item], kind: .mediaShare)
+        provider.supplementalFactsByItem[item.id] = ProbedStreamFacts(
+            videoWidth: 3840,
+            videoHeight: 2160,
+            videoRangeType: "DOVI",
+            videoCodec: "hevc",
+            audioTrackID: 1,
+            audioCodec: "eac3",
+            audioChannels: 6,
+            audioIsAtmos: true
+        )
+        let vm = ItemDetailViewModel(
+            provider: provider,
+            itemID: item.id,
+            sourceAccountID: "share",
+            onlineTrailerResolver: { _ in [] },
+            playableVideoIDResolver: { _ in nil },
+            trailerCache: TrailerResolutionCache()
+        )
+
+        await vm.load()
+        await waitUntil {
+            vm.state.value?.item.mediaInfo?.audio?.profile == "Dolby Atmos"
+        }
+
+        XCTAssertEqual(vm.state.value?.item.mediaInfo?.video?.videoRangeType, "DOVI")
+        XCTAssertEqual(vm.state.value?.item.versions.first?.audioProfile, "Dolby Atmos")
+        XCTAssertEqual(
+            vm.state.value?.item.versions.first?.technicalBadges.map { $0.label },
+            ["4K", "Dolby Vision", "Dolby Atmos"]
+        )
+    }
+
     func testAtmosProbeDoesNotRunWhenServerAlreadyReportsAtmos() async {
         let item = MediaItem(
             id: "movie",

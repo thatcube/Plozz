@@ -10,7 +10,10 @@ import XCTest
 /// SMB-style entry (modification time, no ETag) falls back to
 /// `.modificationTime`, and an entry with neither is rejected.
 final class ShareProviderLocatorTests: XCTestCase {
-    private func makeProvider(stat: RemoteFileEntry) -> ShareProvider {
+    private func makeProvider(
+        stat: RemoteFileEntry,
+        streamProber: NetworkFileStreamProbing? = nil
+    ) -> ShareProvider {
         let fileSystem = LocatorFakeFileSystem(statEntry: stat)
         let session = LocatorFakeSession(fileSystem: fileSystem)
         let server = MediaServer(
@@ -28,7 +31,8 @@ final class ShareProviderLocatorTests: XCTestCase {
         )
         return ShareProvider(
             session: userSession,
-            sessionFactory: { _ in session }
+            sessionFactory: { _ in session },
+            streamProber: streamProber
         )
     }
 
@@ -66,6 +70,60 @@ final class ShareProviderLocatorTests: XCTestCase {
             guard case .protocolViolation = error else {
                 return XCTFail("expected protocolViolation, got \(error)")
             }
+        }
+    }
+
+    func testSupplementalProbeIsCachedAndPropagatesAtmosIntoPlayback() async throws {
+        let entry = try RemoteFileEntry(
+            relativePath: "movie.mkv",
+            kind: .file,
+            size: 4096,
+            modifiedAt: Date(timeIntervalSince1970: 10)
+        )
+        let prober = LocatorStreamProber(
+            facts: ProbedStreamFacts(
+                videoWidth: 3840,
+                videoHeight: 2160,
+                videoRangeType: "DOVI",
+                videoCodec: "hevc",
+                audioTrackID: 1,
+                audioCodec: "eac3",
+                audioChannels: 6,
+                audioIsAtmos: true
+            )
+        )
+        let provider = makeProvider(stat: entry, streamProber: prober)
+        let item = MediaItem(id: "f:movie.mkv", title: "Movie", kind: .video)
+
+        let first = await provider.supplementalStreamFacts(for: item)
+        let second = await provider.supplementalStreamFacts(for: item)
+        let request = try await provider.playbackInfo(
+            for: item.id,
+            mediaSourceID: nil,
+            forceTranscode: false
+        )
+        let callCount = await prober.callCount
+
+        XCTAssertEqual(first, second)
+        XCTAssertEqual(callCount, 1)
+        XCTAssertEqual(request.item.mediaInfo?.video?.videoRangeType, "DOVI")
+        XCTAssertEqual(request.item.mediaInfo?.audio?.profile, "Dolby Atmos")
+        XCTAssertEqual(request.sourceMetadata?.audio?.profile, "Dolby Atmos")
+        XCTAssertEqual(request.audioTracks.first?.id, 1)
+        XCTAssertTrue(request.audioTracks.first?.isAtmos ?? false)
+    }
+
+    private actor LocatorStreamProber: NetworkFileStreamProbing {
+        let facts: ProbedStreamFacts?
+        private(set) var callCount = 0
+
+        init(facts: ProbedStreamFacts?) {
+            self.facts = facts
+        }
+
+        func probe(locator: NetworkFileLocator) async -> ProbedStreamFacts? {
+            callCount += 1
+            return facts
         }
     }
 }

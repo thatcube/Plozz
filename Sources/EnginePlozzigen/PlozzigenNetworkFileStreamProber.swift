@@ -6,11 +6,8 @@ import MediaTransportCore
 /// Probes a network file's headers through the same transport resolver and
 /// representation-bound source used by playback.
 ///
-/// NOTE: this uses AetherEngine's standard `probe(source:)`, which currently opens
-/// with the engine's default demux budget (not the bounded browse budget) — the
-/// on-device timing measurement will tell us whether that resolves fast enough over
-/// SMB for the common (well-formed) case, or whether we need a bounded/header-only
-/// fast path (plan Phase 2).
+/// Uses AetherEngine's opt-in bounded Atmos probe. This remains detail-only in
+/// production; browse scans never decode media.
 public struct PlozzigenNetworkFileStreamProber: NetworkFileStreamProbing {
     private let resolver: any MediaTransportNetworkFileResolving
 
@@ -28,8 +25,8 @@ public struct PlozzigenNetworkFileStreamProber: NetworkFileStreamProbing {
 
         // find_stream_info is a BLOCKING call; run it on a dedicated serial thread so
         // it never occupies (and exhausts) the Swift concurrency pool.
-        let probe = await PlozzigenStreamProbeExecutor.runHeaderProbe {
-            try? AetherEngine.probe(source: source)
+        let probe = await PlozzigenStreamProbeExecutor.runAtmosProbe {
+            try? AetherEngine.probeDetectingAtmos(source: source)
         }
         reader.close()
         await reader.waitForFinalShutdown()
@@ -54,6 +51,7 @@ public struct PlozzigenNetworkFileStreamProber: NetworkFileStreamProbing {
             videoHeight: h > 0 ? h : nil,
             videoRangeType: range,
             videoCodec: probe.videoCodecName,
+            audioTrackID: audio?.id,
             audioCodec: audio?.codec,
             audioChannels: audio.map(\.channels).flatMap { $0 > 0 ? $0 : nil },
             audioIsAtmos: audio?.isAtmos ?? false,

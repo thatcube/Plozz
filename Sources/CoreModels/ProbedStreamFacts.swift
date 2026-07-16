@@ -52,3 +52,16 @@ public protocol NetworkFileStreamProbing: Sendable {
     /// if the probe failed/timed out (the caller then shows nothing, never a guess).
     func probe(locator: NetworkFileLocator) async -> ProbedStreamFacts?
 }
+
+/// Probes a managed provider's credential-free authenticated HTTP locator.
+/// Implementations resolve credentials only at the I/O boundary; the locator
+/// and returned facts remain secret-free.
+public protocol AuthenticatedHTTPStreamProbing: Sendable {
+    func probe(locator: AuthenticatedHTTPPlaybackLocator) async -> ProbedStreamFacts?
+}
+
+/// Optional provider capability for delayed, authoritative stream inspection.
+/// Detail pages invoke this only after first paint and never await it for Play.
+public protocol SupplementalStreamFactsProviding: Sendable {
+    func supplementalStreamFacts(for item: MediaItem) async -> ProbedStreamFacts?
+}

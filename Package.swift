@@ -69,11 +69,15 @@ let package = Package(
         // AGENTS.local.md › "Playback engine (AetherEngine / Plozzigen)".
         //
         // Pinned to AetherEngine 5.3.1 + Plozz's re-applied local patches + the
-        // bounded stalled-seek / sparse-cache fix. Lineage (verified in the fork
+        // bounded stalled-seek / sparse-cache fix and opt-in Atmos detection.
+        // Lineage (verified in the fork
         // history): upstream 5.3.1 → `07814d8` applies bounded seek/sparse-cache
         // recovery and the reviewed late-landing/transport/subtitle hardening →
         // `126f020` exposes `stop(resetDisplayCriteria:)` for same-range episode
-        // handoff. The two changes are also proposed upstream as PRs #129 and #128.
+        // handoff → `a7355b8` adds a strictly opt-in,
+        // bounded one-frame E-AC-3 JOC probe used only by delayed detail-page
+        // enrichment. Default probe/playback paths remain unchanged. The base
+        // changes are also proposed upstream as PRs #129 and #128.
         //
         // SMB enters AetherEngine only through Plozz's protocol-neutral custom-source
         // bridge; the engine's legacy SMB URL product is not linked. PR #94's
@@ -81,7 +85,7 @@ let package = Package(
         // muxer needs a PARSED audio packet to build the AC-3/E-AC-3/TrueHD sample
         // entry, else a mid-file backward seek wedged the muxer. See
         // docs/media-share-proposal.md § 5.1.
-        .package(url: "https://github.com/thatcube/AetherEngine", revision: "126f020362453548189446132dc2619f2c1e9e4e"),
+        .package(url: "https://github.com/thatcube/AetherEngine", revision: "a7355b87dd8141a3dc585e25bf5978f17f0dab63"),
         // NOTE: FFmpegBuild (FFmpeg n8.1.x decode-only) and LibDovi (Dolby Vision
         // RPU parser) are pulled in TRANSITIVELY by AetherEngine — its own manifest
         // declares and consumes them. Plozz used to declare them directly only for

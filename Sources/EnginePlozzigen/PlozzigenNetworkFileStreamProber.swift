@@ -12,15 +12,6 @@ import MediaTransportCore
 /// SMB for the common (well-formed) case, or whether we need a bounded/header-only
 /// fast path (plan Phase 2).
 public struct PlozzigenNetworkFileStreamProber: NetworkFileStreamProbing {
-    /// A dedicated serial queue for the BLOCKING find_stream_info call, so it never
-    /// occupies a Swift concurrency (cooperative) thread — a blocked cooperative
-    /// thread starves all other async work (image loading, enrichment, UI). Serial,
-    /// so it also can't run two blocking probes at once.
-    private static let probeQueue = DispatchQueue(
-        label: "com.thatcube.Plozz.network-file-stream-probe",
-        qos: .utility
-    )
-
     private let resolver: any MediaTransportNetworkFileResolving
 
     public init(resolver: any MediaTransportNetworkFileResolving) {
@@ -37,10 +28,8 @@ public struct PlozzigenNetworkFileStreamProber: NetworkFileStreamProbing {
 
         // find_stream_info is a BLOCKING call; run it on a dedicated serial thread so
         // it never occupies (and exhausts) the Swift concurrency pool.
-        let probe: SourceProbe? = await withCheckedContinuation { continuation in
-            Self.probeQueue.async {
-                continuation.resume(returning: try? AetherEngine.probe(source: source))
-            }
+        let probe = await PlozzigenStreamProbeExecutor.runHeaderProbe {
+            try? AetherEngine.probe(source: source)
         }
         reader.close()
         await reader.waitForFinalShutdown()

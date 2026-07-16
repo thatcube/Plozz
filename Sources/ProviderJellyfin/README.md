@@ -12,6 +12,9 @@ supported capability remains at parity.
 - Emby compatibility — password authentication, Emby UDP discovery, chapter
   intro/credit markers, BIF trickplay, combined theme media, and Emby playback
   negotiation while preserving the shared feature surface.
+- Delayed E-AC-3 JOC enrichment — when Emby omits Atmos from its API, Plozz
+  performs a bounded one-frame decode after first paint, caches the confirmed
+  result by source revision, and updates badges without delaying detail or Play.
 - `JellyfinDTOs` — server JSON shapes, mapped into `CoreModels` value types
   at the seam (no DTO ever leaks above this module).
 - `JellyfinDeviceProfile` + `JellyfinCapabilityProfile` — the

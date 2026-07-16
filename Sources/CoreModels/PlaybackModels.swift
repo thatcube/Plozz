@@ -236,17 +236,22 @@ public struct MediaSourceMetadata: Hashable, Sendable, Codable {
 
     /// Original container, e.g. `mkv`, `mp4`.
     public var container: String?
+    /// Provider source revision used to retain asynchronously-probed facts only
+    /// while the underlying file is unchanged.
+    public var sourceRevision: String?
     public var video: VideoStream?
     public var audio: AudioStream?
     public var subtitle: SubtitleStream?
 
     public init(
         container: String? = nil,
+        sourceRevision: String? = nil,
         video: VideoStream? = nil,
         audio: AudioStream? = nil,
         subtitle: SubtitleStream? = nil
     ) {
         self.container = container
+        self.sourceRevision = sourceRevision
         self.video = video
         self.audio = audio
         self.subtitle = subtitle
@@ -254,7 +259,7 @@ public struct MediaSourceMetadata: Hashable, Sendable, Codable {
 
     /// True when no useful field was populated (lets callers skip wiring it up).
     public var isEmpty: Bool {
-        container == nil && video == nil && audio == nil && subtitle == nil
+        container == nil && sourceRevision == nil && video == nil && audio == nil && subtitle == nil
     }
 }
 

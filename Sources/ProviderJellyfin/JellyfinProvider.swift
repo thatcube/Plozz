@@ -14,6 +14,8 @@ public struct JellyfinProvider: MediaProvider {
     public let credentialRevision: CredentialRevision
     let client: JellyfinClient
     let themeArchiveResolver: @Sendable (String?) async -> URL?
+    private let authenticatedStreamProber: (any AuthenticatedHTTPStreamProbing)?
+    private let probeDescriptors: MediaBrowserProbeDescriptorStore
 
     public init(
         session: UserSession,
@@ -22,9 +24,11 @@ public struct JellyfinProvider: MediaProvider {
         http: HTTPClient = URLSessionHTTPClient(),
         interactiveHTTP: HTTPClient? = nil,
         hybridEngineEnabled: Bool = false,
+        authenticatedStreamProber: (any AuthenticatedHTTPStreamProbing)? = nil,
         themeArchiveResolver: @escaping @Sendable (String?) async -> URL? = {
             await ThemeMusicArchive.resolvedURL(tvdbID: $0)
         }
+
     ) {
         precondition(session.server.provider.usesMediaBrowserAPI)
         self.kind = session.server.provider
@@ -32,6 +36,8 @@ public struct JellyfinProvider: MediaProvider {
         self.accountID = accountID ?? session.server.id
         self.credentialRevision = credentialRevision
         self.themeArchiveResolver = themeArchiveResolver
+        self.authenticatedStreamProber = authenticatedStreamProber
+        self.probeDescriptors = MediaBrowserProbeDescriptorStore()
         self.client = JellyfinClient(
             baseURL: session.server.baseURL,
             deviceProfile: JellyfinDeviceProfile(deviceID: session.deviceID),
@@ -254,6 +260,7 @@ public struct JellyfinProvider: MediaProvider {
 
     public func item(id: String) async throws -> MediaItem {
         let dto = try await client.item(userID: session.userID, id: id)
+        await probeDescriptors.remember(itemID: id, sources: dto.MediaSources)
         return map(item: dto)
     }
 
@@ -701,7 +708,11 @@ public struct JellyfinProvider: MediaProvider {
             startPosition: mappedItem.resumePosition ?? 0,
             isTranscoding: source.TranscodingUrl != nil,
             deliveryMode: Self.deliveryMode(transcoding: source.TranscodingUrl != nil, didRemux: didRemux),
-            sourceMetadata: Self.sourceMetadata(container: originalContainer, streams: originalStreams),
+            sourceMetadata: Self.sourceMetadata(
+                container: originalContainer,
+                streams: originalStreams,
+                sourceRevision: Self.sourceRevision(itemID: itemID, source: originalSource)
+            ),
             localRemuxSource: localRemuxSource,
             scrubPreview: scrubPreview(itemID: itemID, source: source, trickplay: detail.Trickplay),
             sourceProvider: kind,
@@ -970,7 +981,11 @@ public struct JellyfinProvider: MediaProvider {
     /// Builds provider-agnostic source facts (codec/HDR/resolution/channels/…)
     /// from the original file's media streams, so the diagnostics overlay stays
     /// accurate even when the server transcodes to a metadata-poor HLS stream.
-    static func sourceMetadata(container: String?, streams: [MediaStreamDto]) -> MediaSourceMetadata? {
+    static func sourceMetadata(
+        container: String?,
+        streams: [MediaStreamDto],
+        sourceRevision: String? = nil
+    ) -> MediaSourceMetadata? {
         let video = streams.first { $0.`Type` == "Video" }
         let audio = streams.first { ($0.`Type` == "Audio") && ($0.IsDefault ?? false) }
             ?? streams.first { $0.`Type` == "Audio" }
@@ -1019,6 +1034,7 @@ public struct JellyfinProvider: MediaProvider {
 
         let metadata = MediaSourceMetadata(
             container: container,
+            sourceRevision: sourceRevision,
             video: videoStream,
             audio: audioStream,
             subtitle: subtitleStream
@@ -1300,7 +1316,10 @@ public struct JellyfinProvider: MediaProvider {
             providerIDs: dto.ProviderIds ?? [:],
             mediaInfo: Self.sourceMetadata(
                 container: dto.MediaSources?.first?.Container,
-                streams: dto.MediaStreams ?? dto.MediaSources?.first?.MediaStreams ?? []
+                streams: dto.MediaStreams ?? dto.MediaSources?.first?.MediaStreams ?? [],
+                sourceRevision: dto.MediaSources?.first.map {
+                    Self.sourceRevision(itemID: dto.Id, source: $0)
+                }
             ),
             versions: Self.versions(
                 from: dto.MediaSources,
@@ -1377,6 +1396,18 @@ public struct JellyfinProvider: MediaProvider {
                 container: source.Container
             )
         }
+    }
+
+    private static func sourceRevision(
+        itemID: String,
+        source: MediaSourceInfo
+    ) -> String {
+        MediaBrowserProbeDescriptorStore.revision(
+            itemID: itemID,
+            sourceID: source.Id ?? itemID,
+            etag: source.ETag,
+            size: source.Size
+        )
     }
 
     private static let iso8601Fractional: ISO8601DateFormatter = {
@@ -1601,6 +1632,65 @@ public struct JellyfinProvider: MediaProvider {
         case "boxsets": return .collection
         default: return .folder
         }
+    }
+}
+
+extension JellyfinProvider: SupplementalStreamFactsProviding {
+    public func supplementalStreamFacts(for item: MediaItem) async -> ProbedStreamFacts? {
+        guard kind == .emby,
+              item.mediaInfo?.audio?.codec?.lowercased() == "eac3",
+              item.mediaInfo?.audio?.profile?.localizedCaseInsensitiveContains("atmos") != true,
+              let authenticatedStreamProber else {
+            return nil
+        }
+
+        var descriptor = await probeDescriptors.descriptor(for: item.id)
+        if descriptor == nil,
+           let dto = try? await client.item(userID: session.userID, id: item.id) {
+            await probeDescriptors.remember(itemID: item.id, sources: dto.MediaSources)
+            descriptor = await probeDescriptors.descriptor(for: item.id)
+        }
+        guard let descriptor,
+              item.mediaInfo?.sourceRevision == nil
+                || item.mediaInfo?.sourceRevision == descriptor.revision else {
+            return nil
+        }
+
+        let cached = await probeDescriptors.cachedResult(for: descriptor.revision)
+        if cached.completed { return cached.facts }
+
+        var queryItems = [
+            try? AuthenticatedHTTPQueryItem(name: "static", value: "true"),
+            try? AuthenticatedHTTPQueryItem(
+                name: "mediaSourceId",
+                value: descriptor.sourceID
+            )
+        ].compactMap { $0 }
+        if let etag = descriptor.etag,
+           let tag = try? AuthenticatedHTTPQueryItem(name: "tag", value: etag) {
+            queryItems.append(tag)
+        }
+        guard let resource = try? AuthenticatedHTTPResource(
+            pathBase: .configuredBaseURL,
+            path: "Videos/\(descriptor.itemID)/stream.\(descriptor.container)",
+            queryItems: queryItems
+        ), let locator = try? AuthenticatedHTTPPlaybackLocator(
+            provider: kind,
+            accountID: accountID,
+            credentialRevision: credentialRevision,
+            itemID: descriptor.itemID,
+            mediaSourceID: descriptor.sourceID,
+            deliveryMode: .directFile,
+            formatHint: MediaFormatHint(container: descriptor.container),
+            purpose: .originalFile,
+            resource: resource
+        ) else {
+            return nil
+        }
+
+        let facts = await authenticatedStreamProber.probe(locator: locator)
+        await probeDescriptors.store(facts, for: descriptor.revision)
+        return facts
     }
 }
 

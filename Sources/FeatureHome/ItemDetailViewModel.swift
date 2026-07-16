@@ -322,6 +322,12 @@ public final class ItemDetailViewModel {
     /// pays zero speculative cost. Zero under tests. (Trailer extraction has its
     /// own dwell on the awaited path — see ``trailerExtractionDwellNanos``.)
     private static var enrichmentDwellNanos: UInt64 { isRunningUnderTests ? 0 : 800_000_000 }
+    /// Additional settle time before a bounded one-frame stream probe. This keeps
+    /// the probe entirely behind first paint and lets a quick Play/back cancel it
+    /// before any media bytes are requested.
+    private static var streamProbeDwellNanos: UInt64 {
+        isRunningUnderTests ? 0 : 1_500_000_000
+    }
 
     /// Further dwell before the authoritative YouTubeKit/JavaScriptCore trailer
     /// extraction (the single biggest CPU consumer during browsing) runs, so only
@@ -524,7 +530,10 @@ public final class ItemDetailViewModel {
             // Immutable snapshot so the concurrent async-lets below capture a
             // Sendable value (Swift 6 strict-concurrency forbids capturing
             // mutated `var`s into concurrently-executing code).
-            let item = redirected.item
+            let item = Self.preservingConfirmedAtmos(
+                in: redirected.item,
+                from: state.value?.item
+            )
             let taggedItem = tagged(item)
 
             // Container kinds (series/season/folder/collection) have children
@@ -700,6 +709,11 @@ public final class ItemDetailViewModel {
             self.enrichmentGeneration = token
             self.startAlternateSourceEnrichment(primaryID: item.id)
             self.startCrossServerDiscovery(for: taggedItem)
+            await self.enrichSupplementalStreamFacts(
+                for: item,
+                provider: self.activeProvider,
+                sourceGeneration: self.sourceGeneration
+            )
             self.enrichmentComplete = true
         }
     }
@@ -965,7 +979,10 @@ public final class ItemDetailViewModel {
         let redirected = await redirectingSeasonToSeries(fetched, using: provider)
         guard !Task.isCancelled, isCurrent() else { return }
         preselectedSeasonID = redirected.preselectedSeasonID
-        let item = redirected.item
+        let item = Self.preservingConfirmedAtmos(
+            in: redirected.item,
+            from: state.value?.item
+        )
         captureSeriesContext(from: item)
         let children: [MediaItem]
         switch item.kind {
@@ -1420,6 +1437,16 @@ public final class ItemDetailViewModel {
     /// downgrading anything the live fetch already produced (each merge is guarded
     /// on the current value being empty/thinner).
     private func adoptSnapshotEnrichments(_ snapshot: DetailSnapshotCache.Snapshot) {
+        if case var .loaded(detail) = state {
+            let enriched = Self.preservingConfirmedAtmos(
+                in: detail.item,
+                from: snapshot.item
+            )
+            if enriched != detail.item {
+                detail.item = enriched
+                state = .loaded(detail)
+            }
+        }
         if let detail = state.value, detail.children.isEmpty, !snapshot.children.isEmpty {
             state = .loaded(Detail(item: detail.item, children: snapshot.children.map(tagged), childrenLoaded: true))
         }
@@ -1506,6 +1533,77 @@ public final class ItemDetailViewModel {
         guard detail.item.overview?.isEmpty ?? true else { return }
         detail.item.overview = text
         state = .loaded(detail)
+    }
+
+    /// Confirms E-AC-3 JOC by decoding one bounded audio frame in the background.
+    /// Initial detail rendering and playback never await this; a confirmed result
+    /// only upgrades the already-visible audio badge and persisted snapshot.
+    private func enrichSupplementalStreamFacts(
+        for item: MediaItem,
+        provider: any MediaProvider,
+        sourceGeneration: UInt64
+    ) async {
+        guard item.mediaInfo?.audio?.codec?.lowercased() == "eac3",
+              item.mediaInfo?.audio?.profile?.localizedCaseInsensitiveContains("atmos") != true,
+              let provider = provider as? any SupplementalStreamFactsProviding else {
+            return
+        }
+        if Self.streamProbeDwellNanos > 0 {
+            try? await Task.sleep(nanoseconds: Self.streamProbeDwellNanos)
+            guard !Task.isCancelled else { return }
+        }
+        guard let facts = await provider.supplementalStreamFacts(for: item),
+              facts.audioIsAtmos,
+              !Task.isCancelled,
+              self.sourceGeneration == sourceGeneration,
+              case var .loaded(detail) = state,
+              detail.item.id == item.id else {
+            return
+        }
+
+        detail.item = Self.applyingConfirmedAtmos(to: detail.item)
+        state = .loaded(detail)
+        persistSnapshot()
+    }
+
+    private static func applyingConfirmedAtmos(to item: MediaItem) -> MediaItem {
+        var copy = item
+        if var mediaInfo = copy.mediaInfo, var audio = mediaInfo.audio {
+            audio.profile = "Dolby Atmos"
+            mediaInfo.audio = audio
+            copy.mediaInfo = mediaInfo
+        }
+        copy.versions = copy.versions.map { version in
+            var version = version
+            guard version.isDefault else { return version }
+            version.audioProfile = "Dolby Atmos"
+            if var sourceMetadata = version.sourceMetadata,
+               var audio = sourceMetadata.audio {
+                audio.profile = "Dolby Atmos"
+                sourceMetadata.audio = audio
+                version.sourceMetadata = sourceMetadata
+            }
+            return version
+        }
+        return copy
+    }
+
+    /// Retains a previously confirmed Atmos result only for the exact same
+    /// provider source revision; a replaced file automatically loses the cached
+    /// enrichment and is probed again.
+    private static func preservingConfirmedAtmos(
+        in fresh: MediaItem,
+        from cached: MediaItem?
+    ) -> MediaItem {
+        guard let cached,
+              fresh.id == cached.id,
+              let revision = fresh.mediaInfo?.sourceRevision,
+              revision == cached.mediaInfo?.sourceRevision,
+              fresh.mediaInfo?.audio?.codec?.lowercased() == "eac3",
+              cached.mediaInfo?.audio?.profile?.localizedCaseInsensitiveContains("atmos") == true else {
+            return fresh
+        }
+        return applyingConfirmedAtmos(to: fresh)
     }
 
     /// Seeds ``sources`` from the merged card's references, stamping the *primary*

@@ -31,6 +31,135 @@ final class ItemDetailViewModelTests: XCTestCase {
         XCTAssertEqual(vm.state.value?.children.map(\.id), ["s1", "s2"])
     }
 
+    func testAtmosProbeUpdatesBadgeAfterFirstPaint() async {
+        let item = MediaItem(
+            id: "movie",
+            title: "Movie",
+            kind: .movie,
+            mediaInfo: MediaSourceMetadata(
+                container: "mkv",
+                sourceRevision: "rev-1",
+                audio: .init(codec: "eac3", channels: 6, channelLayout: "5.1")
+            )
+        )
+        let provider = FakeMediaProvider(allItems: [item])
+        let probeGate = AsyncGate()
+        provider.supplementalFactsGate = { await probeGate.wait() }
+        provider.supplementalFactsByItem["movie"] = ProbedStreamFacts(
+            audioCodec: "eac3",
+            audioChannels: 6,
+            audioIsAtmos: true
+        )
+        let vm = ItemDetailViewModel(
+            provider: provider,
+            itemID: "movie",
+            onlineTrailerResolver: { _ in [] },
+            playableVideoIDResolver: { _ in nil },
+            trailerCache: TrailerResolutionCache()
+        )
+
+        await vm.load()
+        XCTAssertEqual(vm.state.value?.item.mediaInfo?.audio?.profile, nil)
+
+        probeGate.open()
+        await waitUntil {
+            vm.state.value?.item.mediaInfo?.audio?.profile == "Dolby Atmos"
+        }
+
+        XCTAssertEqual(provider.supplementalProbeCount, 1)
+        XCTAssertEqual(
+            vm.state.value?.item.technicalBadges.map(\.label),
+            ["Dolby Atmos"]
+        )
+    }
+
+    func testAtmosProbeDoesNotRunWhenServerAlreadyReportsAtmos() async {
+        let item = MediaItem(
+            id: "movie",
+            title: "Movie",
+            kind: .movie,
+            mediaInfo: MediaSourceMetadata(
+                container: "mkv",
+                sourceRevision: "rev-1",
+                audio: .init(codec: "eac3", profile: "Dolby Atmos", channels: 6)
+            )
+        )
+        let provider = FakeMediaProvider(allItems: [item])
+        let vm = ItemDetailViewModel(
+            provider: provider,
+            itemID: "movie",
+            onlineTrailerResolver: { _ in [] },
+            playableVideoIDResolver: { _ in nil },
+            trailerCache: TrailerResolutionCache()
+        )
+
+        await vm.load()
+        for _ in 0..<20 { await Task.yield() }
+
+        XCTAssertEqual(provider.supplementalProbeCount, 0)
+        XCTAssertEqual(vm.state.value?.item.mediaInfo?.audio?.profile, "Dolby Atmos")
+    }
+
+    func testConfirmedAtmosSurvivesRefreshForSameSourceRevision() async {
+        let fresh = MediaItem(
+            id: "movie",
+            title: "Movie",
+            kind: .movie,
+            mediaInfo: MediaSourceMetadata(
+                container: "mkv",
+                sourceRevision: "rev-1",
+                audio: .init(codec: "eac3", channels: 6)
+            )
+        )
+        var cached = fresh
+        cached.mediaInfo?.audio?.profile = "Dolby Atmos"
+        let provider = FakeMediaProvider(allItems: [fresh])
+        let vm = ItemDetailViewModel(
+            provider: provider,
+            itemID: "movie",
+            initialItem: cached,
+            onlineTrailerResolver: { _ in [] },
+            playableVideoIDResolver: { _ in nil },
+            trailerCache: TrailerResolutionCache()
+        )
+
+        await vm.load()
+        for _ in 0..<20 { await Task.yield() }
+
+        XCTAssertEqual(vm.state.value?.item.mediaInfo?.audio?.profile, "Dolby Atmos")
+        XCTAssertEqual(provider.supplementalProbeCount, 0)
+    }
+
+    func testConfirmedAtmosIsDroppedWhenSourceRevisionChanges() async {
+        let fresh = MediaItem(
+            id: "movie",
+            title: "Movie",
+            kind: .movie,
+            mediaInfo: MediaSourceMetadata(
+                container: "mkv",
+                sourceRevision: "rev-2",
+                audio: .init(codec: "eac3", channels: 6)
+            )
+        )
+        var cached = fresh
+        cached.mediaInfo?.sourceRevision = "rev-1"
+        cached.mediaInfo?.audio?.profile = "Dolby Atmos"
+        let provider = FakeMediaProvider(allItems: [fresh])
+        let vm = ItemDetailViewModel(
+            provider: provider,
+            itemID: "movie",
+            initialItem: cached,
+            onlineTrailerResolver: { _ in [] },
+            playableVideoIDResolver: { _ in nil },
+            trailerCache: TrailerResolutionCache()
+        )
+
+        await vm.load()
+        await waitUntil { provider.supplementalProbeCount == 1 }
+
+        XCTAssertNil(vm.state.value?.item.mediaInfo?.audio?.profile)
+    }
+
     func testEnrichesAlternateSourcesAndUnifiesWatchState() async {
         let primary = MediaItem(id: "p1", title: "Dune", kind: .movie, productionYear: 2021,
                                 sourceAccountID: "plex",
@@ -1273,13 +1402,10 @@ final class ItemDetailViewModelTests: XCTestCase {
         XCTAssertEqual(vm.state.value?.children, [])
     }
 
-    func testSeriesWaitsForChildrenBeforePublishingLoadedState() async {
-        // Regression guard: a series page must NOT publish a `.loaded` hero with
-        // an empty children list, because SeriesDetailView latches its @State
-        // (selected season + hero/Play target) from the children it first sees —
-        // a childless intermediate state strands it with no seasons, no episodes
-        // and no Play button. The series load must therefore stay non-loaded
-        // until its children resolve, then publish once, complete.
+    func testSeriesPublishesHeroThenFillsChildren() async {
+        // Current detail loading intentionally paints the full series hero before
+        // a potentially slow remote children request. SeriesDetailView observes the
+        // season-id list and re-latches selection/Play when children arrive.
         let provider = FakeMediaProvider(allItems: [series("show")])
         provider.childrenByParent = [
             "show": [season("s1", "Book One"), season("s2", "Book Two")]
@@ -1297,15 +1423,12 @@ final class ItemDetailViewModelTests: XCTestCase {
 
         let loadTask = Task { await vm.load() }
 
-        // While the children fetch is suspended, the series must NOT be published
-        // in a loaded-but-childless state.
-        await waitUntil { vm.state.isLoading || vm.state.value != nil }
-        if let published = vm.state.value {
-            XCTAssertEqual(published.item.id, "show")
-            XCTAssertFalse(published.children.isEmpty, "Series must never publish a loaded state with empty children")
-        }
+        await waitUntil { vm.state.value?.item.id == "show" }
+        XCTAssertEqual(vm.state.value?.item.id, "show")
+        XCTAssertTrue(vm.state.value?.children.isEmpty ?? false)
+        XCTAssertEqual(vm.state.value?.childrenLoaded, false)
 
-        // Release the gate; load completes with the full children list in one shot.
+        // Release the gate; the same page fills its season list in place.
         gate.open()
         await loadTask.value
         XCTAssertEqual(vm.state.value?.children.map(\.id), ["s1", "s2"])

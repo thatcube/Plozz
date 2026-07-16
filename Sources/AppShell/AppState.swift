@@ -1119,12 +1119,15 @@ public final class AppState {
             ?? ShareCatalogCoordinator()
         self.shareCatalogCoordinator = resolvedShareCatalogCoordinator
         let defaultAuthenticatedHTTPResolver: AppAuthenticatedHTTPResourceResolver?
+        let resolvedAuthenticatedHTTPResolver: any AuthenticatedHTTPResourceResolving
         if let authenticatedHTTPResolver {
             self.authenticatedHTTPResolver = authenticatedHTTPResolver
+            resolvedAuthenticatedHTTPResolver = authenticatedHTTPResolver
             defaultAuthenticatedHTTPResolver = nil
         } else {
             let resolver = AppAuthenticatedHTTPResourceResolver()
             self.authenticatedHTTPResolver = resolver
+            resolvedAuthenticatedHTTPResolver = resolver
             defaultAuthenticatedHTTPResolver = resolver
         }
         let resolvedNetworkFileResolver: any MediaTransportNetworkFileResolving
@@ -1143,6 +1146,7 @@ public final class AppState {
         self.registry = registry ?? Self.makeDefaultRegistry(
             accountStore: resolvedAccountStore,
             networkFileResolver: resolvedNetworkFileResolver,
+            authenticatedHTTPResolver: resolvedAuthenticatedHTTPResolver,
             shareCatalogCoordinator: resolvedShareCatalogCoordinator,
             durableLocalStateStore: resolvedDurableLocalStateStore
         )
@@ -1344,6 +1348,7 @@ public final class AppState {
     private static func makeDefaultRegistry(
         accountStore: any AccountPersisting,
         networkFileResolver: any MediaTransportNetworkFileResolving,
+        authenticatedHTTPResolver: any AuthenticatedHTTPResourceResolving,
         shareCatalogCoordinator: ShareCatalogCoordinator,
         durableLocalStateStore: DurableLocalStateStore?
     ) -> ProviderRegistry {
@@ -1370,7 +1375,10 @@ public final class AppState {
                 accountID: context.accountID,
                 credentialRevision: context.credentialRevision,
                 interactiveHTTP: URLSessionHTTPClient(session: .plozzInteractive),
-                hybridEngineEnabled: HybridPlayback.enabled
+                hybridEngineEnabled: HybridPlayback.enabled,
+                authenticatedStreamProber: PlozzigenAuthenticatedHTTPStreamProber(
+                    resolver: authenticatedHTTPResolver
+                )
             )
         }
         registry.register(.plex) { context in

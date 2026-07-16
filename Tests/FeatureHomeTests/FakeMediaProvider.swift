@@ -15,7 +15,8 @@ import CoreModels
 /// `stateLock`. (Production resolves a *distinct* provider per account, so this
 /// sharing — and the race it exposes — is unique to the tests.) The lock is
 /// never held across an `await`.
-final class FakeMediaProvider: MediaProvider, InteractiveBrowseActivityReporting, @unchecked Sendable {
+final class FakeMediaProvider: MediaProvider, InteractiveBrowseActivityReporting,
+    SupplementalStreamFactsProviding, @unchecked Sendable {
     let kind: ProviderKind = .jellyfin
     let session: UserSession
 
@@ -62,9 +63,19 @@ final class FakeMediaProvider: MediaProvider, InteractiveBrowseActivityReporting
     /// Optional per-page async hook that runs before the page response is returned.
     /// Useful for tests that need to hold/cancel a page load while it is in-flight.
     var pageHooks: [Int: @Sendable () async throws -> Void] = [:]
+    var supplementalFactsByItem: [String: ProbedStreamFacts] = [:]
+    var supplementalFactsGate: (@Sendable () async -> Void)?
+    private var _supplementalProbeCount = 0
+    var supplementalProbeCount: Int { withLock { _supplementalProbeCount } }
 
     func noteInteractiveBrowseActivity() async {
         withLock { _interactiveBrowseActivityCount += 1 }
+    }
+
+    func supplementalStreamFacts(for item: MediaItem) async -> ProbedStreamFacts? {
+        withLock { _supplementalProbeCount += 1 }
+        await supplementalFactsGate?()
+        return supplementalFactsByItem[item.id]
     }
     /// Start indices whose page request was cancelled while awaiting `pageHooks`.
     private var _cancelledPageStartIndices: [Int] = []

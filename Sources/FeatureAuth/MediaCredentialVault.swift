@@ -311,18 +311,18 @@ public final class MediaCredentialVault: @unchecked Sendable {
         let encoded = try MediaShareCredentialCodec.encode(envelope)
         lock.lock()
         defer { lock.unlock() }
-        if let existing = secureStore.string(for: key) {
+        if let existing = try secureStore.readString(for: key) {
             guard existing == encoded else {
                 throw MediaCredentialError.revisionAlreadyExists
             }
             return
         }
         if case .generatedKey(_, let keyID) = envelope.authentication,
-           !hasActivePrivateKey(keyID) {
+           !(try hasActivePrivateKey(keyID)) {
             throw MediaCredentialError.credentialNotFound
         }
         guard try secureStore.insertStringIfAbsent(encoded, for: key) else {
-            guard secureStore.string(for: key) == encoded else {
+            guard try secureStore.readString(for: key) == encoded else {
                 throw MediaCredentialError.revisionAlreadyExists
             }
             return
@@ -334,21 +334,57 @@ public final class MediaCredentialVault: @unchecked Sendable {
         revision: CredentialRevision,
         expectedTransport: MediaShareTransportKind
     ) throws -> MediaShareCredentialEnvelope {
-        let key = try credentialKey(accountID: accountID, revision: revision)
-        lock.lock()
-        defer { lock.unlock() }
-        guard let encoded = secureStore.string(for: key) else {
-            throw MediaCredentialError.credentialNotFound
-        }
-        let envelope = try MediaShareCredentialCodec.decode(
-            encoded,
+        let envelope = try credentialMetadata(
+            accountID: accountID,
+            revision: revision,
             expectedTransport: expectedTransport
         )
+        lock.lock()
+        defer { lock.unlock() }
         if case .generatedKey(_, let keyID) = envelope.authentication,
-           !hasActivePrivateKey(keyID) {
+           !(try hasActivePrivateKey(keyID)) {
             throw MediaCredentialError.credentialNotFound
         }
         return envelope
+    }
+
+    /// Decodes the credential envelope without requiring a generated private-key
+    /// child item to be present. Replacement logic uses this to reject key-ID reuse
+    /// even when the old child key was lost.
+    public func credentialMetadata(
+        accountID: String,
+        revision: CredentialRevision,
+        expectedTransport: MediaShareTransportKind
+    ) throws -> MediaShareCredentialEnvelope {
+        let envelope = try credentialMetadata(
+            accountID: accountID,
+            revision: revision
+        )
+        guard envelope.transport == expectedTransport else {
+            throw MediaCredentialError.transportMismatch
+        }
+        return envelope
+    }
+
+    public func credentialMetadata(
+        accountID: String,
+        revision: CredentialRevision
+    ) throws -> MediaShareCredentialEnvelope {
+        let key = try credentialKey(accountID: accountID, revision: revision)
+        lock.lock()
+        defer { lock.unlock() }
+        guard let encoded = try secureStore.readString(for: key) else {
+            throw MediaCredentialError.credentialNotFound
+        }
+        do {
+            return try MediaShareCredentialCodec.decodeVersioned(encoded)
+        } catch let error as MediaCredentialError
+            where error == .invalidIdentifier {
+            // The account/revision lookup key was validated before reading. An
+            // invalid identifier here therefore came from fields inside the stored
+            // envelope and is malformed persisted data, not a caller-key error.
+            throw MediaCredentialError.malformedEnvelope
+        }
     }
 
     public func remove(accountID: String, revision: CredentialRevision) throws {
@@ -369,12 +405,25 @@ public final class MediaCredentialVault: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
 
-        guard let encoded = secureStore.string(for: key) else { return }
+        guard let encoded = try secureStore.readString(for: key) else { return }
         let envelope = try MediaShareCredentialCodec.decodeVersioned(encoded)
         if case .generatedKey(_, let keyID) = envelope.authentication {
             _ = try secureStore.insertStringIfAbsent("retired", for: retiredChildKey(keyID))
             try secureStore.removeValue(for: childKey(keyID))
         }
+        try secureStore.removeValue(for: key)
+    }
+
+    /// Removes one unjournaled credential item without decoding it. This is only
+    /// used to repair an already-hidden account whose active pointer is missing,
+    /// and only for transports that cannot own generated private-key child items.
+    public func discardCredential(
+        accountID: String,
+        revision: CredentialRevision
+    ) throws {
+        let key = try credentialKey(accountID: accountID, revision: revision)
+        lock.lock()
+        defer { lock.unlock() }
         try secureStore.removeValue(for: key)
     }
 
@@ -387,22 +436,22 @@ public final class MediaCredentialVault: @unchecked Sendable {
         let key = childKey(id)
         lock.lock()
         defer { lock.unlock() }
-        guard secureStore.string(for: retiredChildKey(id)) == nil else {
+        guard try secureStore.readString(for: retiredChildKey(id)) == nil else {
             throw MediaCredentialError.childItemRetired
         }
-        if let existing = secureStore.string(for: key) {
+        if let existing = try secureStore.readString(for: key) {
             guard existing == privateKey else {
                 throw MediaCredentialError.childItemAlreadyExists
             }
             return
         }
         guard try secureStore.insertStringIfAbsent(privateKey, for: key) else {
-            guard secureStore.string(for: key) == privateKey else {
+            guard try secureStore.readString(for: key) == privateKey else {
                 throw MediaCredentialError.childItemAlreadyExists
             }
             return
         }
-        if secureStore.string(for: retiredChildKey(id)) != nil {
+        if try secureStore.readString(for: retiredChildKey(id)) != nil {
             try secureStore.removeValue(for: key)
             throw MediaCredentialError.childItemRetired
         }
@@ -411,10 +460,10 @@ public final class MediaCredentialVault: @unchecked Sendable {
     public func privateKey(id: CredentialChildItemID) throws -> String {
         lock.lock()
         defer { lock.unlock() }
-        guard secureStore.string(for: retiredChildKey(id)) == nil else {
+        guard try secureStore.readString(for: retiredChildKey(id)) == nil else {
             throw MediaCredentialError.credentialNotFound
         }
-        guard let value = secureStore.string(for: childKey(id)) else {
+        guard let value = try secureStore.readString(for: childKey(id)) else {
             throw MediaCredentialError.credentialNotFound
         }
         guard !value.isEmpty, value.utf8.count <= 128 * 1024 else {
@@ -446,9 +495,9 @@ public final class MediaCredentialVault: @unchecked Sendable {
         retiredChildPrefix + Data(id.rawValue.utf8).base64URLEncodedString()
     }
 
-    private func hasActivePrivateKey(_ id: CredentialChildItemID) -> Bool {
-        secureStore.string(for: retiredChildKey(id)) == nil
-            && secureStore.string(for: childKey(id)) != nil
+    private func hasActivePrivateKey(_ id: CredentialChildItemID) throws -> Bool {
+        try secureStore.readString(for: retiredChildKey(id)) == nil
+            && secureStore.readString(for: childKey(id)) != nil
     }
 
     private func encodedKeyComponent(_ value: String) throws -> String {

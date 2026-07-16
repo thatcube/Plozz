@@ -33,8 +33,10 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
     private var invalidationTaskIDs: [String: UUID] = [:]
     private var restartingScans: Set<String> = []
     private var arbiters: [String: MediaIOArbiter] = [:]
+    private let metadataScheduler = ShareMetadataWorkScheduler()
+    private var preferredAccountRevision: UInt64 = 0
     private let arbiterFactory: ArbiterFactory
-    /// When each share last COMPLETED a background (non-forced) scan+enrich cycle.
+    /// When each share last completed a background (non-forced) scan.
     /// `catalog` is a computed property queried on every Home/browse access, and
     /// each access calls `ensureScanning`; without this, a share whose real walk
     /// finished (e.g. a small WebDAV root in ~20ms) would re-spawn a fresh no-op
@@ -69,6 +71,17 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
         self.reporter = reporter
         for scanner in scanners.values { await scanner.setReporter(reporter) }
         for enricher in enrichers.values { await enricher.setReporter(reporter) }
+    }
+
+    /// Gives the scheduler the current profile's media-share account ids. Their
+    /// passive backlog drains before work retained for other profiles.
+    public func setPreferredAccountKeys(
+        _ accountKeys: Set<String>,
+        revision: UInt64
+    ) async {
+        guard revision >= preferredAccountRevision else { return }
+        preferredAccountRevision = revision
+        await metadataScheduler.setPreferredAccountKeys(accountKeys)
     }
 
     /// Return the shared catalog store for a share, creating it (and a dedicated
@@ -108,6 +121,10 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
             }
 
             if scanners[accountKey] == nil {
+                // Any prior instance with this deterministic account id has fully
+                // invalidated above. Open the replacement status lifecycle before
+                // its scanner can report, preserving ordered late-event fencing.
+                reporter.shareRegistered(accountKey)
                 // A factory of independent scan connections: the SMB library is serial
                 // per connection, so parallelism comes from N separate transport sessions
                 // (each its own socket), dedicated to scanning so a walk never starves
@@ -140,7 +157,44 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
                 } else {
                     resolver = KeylessShareResolver()
                 }
-                enrichers[accountKey] = ShareEnricher(store: store, resolver: resolver, shareID: accountKey, reporter: reporter)
+                let enricher = ShareEnricher(
+                    store: store,
+                    resolver: resolver,
+                    shareID: accountKey,
+                    reporter: reporter
+                )
+                enrichers[accountKey] = enricher
+                let arbiter = arbiter(for: accountKey)
+                await metadataScheduler.register(
+                    accountKey: accountKey,
+                    mayRun: { await arbiter.permitsBackgroundWork() },
+                    runSlice: { maxItems, maxDuration in
+                        ShareBackgroundActivity.enrichStarted()
+                        BrowseDiagnostics.event("enrich-slice+ \(accountKey)")
+                        let result = await enricher.enrichPendingSlice(
+                            maxItems: maxItems,
+                            maxDuration: maxDuration
+                        )
+                        BrowseDiagnostics.event(
+                            "enrich-slice- \(accountKey) attempted=\(result.attempted) more=\(result.hasMore)"
+                        )
+                        ShareBackgroundActivity.enrichFinished()
+                        return result
+                    },
+                    runItem: { itemID in
+                        ShareBackgroundActivity.enrichStarted()
+                        BrowseDiagnostics.event("enrich-item+ \(accountKey)")
+                        await enricher.enrichOne(itemID: itemID)
+                        BrowseDiagnostics.event("enrich-item- \(accountKey)")
+                        ShareBackgroundActivity.enrichFinished()
+                    },
+                    pausePass: {
+                        await enricher.pauseScheduledPass()
+                    },
+                    finishPass: {
+                        await enricher.finishLogicalPass()
+                    }
+                )
             }
             await ensureScanning(accountKey)
             return store
@@ -208,7 +262,15 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
     }
 
     public func acquirePlayback(accountKey: String) async throws -> MediaIOPlaybackLease {
-        try await arbiter(for: accountKey).acquirePlayback()
+        await metadataScheduler.suspend(accountKey: accountKey)
+        do {
+            let lease = try await arbiter(for: accountKey).acquirePlayback()
+            await metadataScheduler.resume(accountKey: accountKey)
+            return lease
+        } catch {
+            await metadataScheduler.resume(accountKey: accountKey)
+            throw error
+        }
     }
 
     private func arbiter(for accountKey: String) -> MediaIOArbiter {
@@ -226,9 +288,9 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
     /// background task and returns immediately — callers on the detail hot path add
     /// no latency. No-op if the share was never registered or the item is already
     /// enriched.
-    func enrichItem(accountKey: String, itemID: String) {
-        guard let enricher = enrichers[accountKey] else { return }
-        Task { await enricher.enrichOne(itemID: itemID) }
+    func enrichItem(accountKey: String, itemID: String) async {
+        guard enrichers[accountKey] != nil else { return }
+        await metadataScheduler.enqueueItem(accountKey: accountKey, itemID: itemID)
     }
 
     func noteInteractiveActivity(accountKey: String) async {
@@ -238,9 +300,10 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
             return created
         }()
         await pacer.noteInteractiveActivity()
+        await metadataScheduler.noteInteractiveActivity(accountKey: accountKey)
     }
 
-    /// Spawn a throttled scan attempt (then an enrichment pass) unless one is
+    /// Spawn a throttled scan attempt (then enqueue passive enrichment) unless one is
     /// already in flight for this share, or one completed within the coalesce
     /// window. `catalog` is queried on every Home/browse access, so without the
     /// completion cooldown a share whose walk already finished would re-spawn a
@@ -262,15 +325,18 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
         scanner: ShareScanner,
         force: Bool
     ) async {
-        guard let enricher = enrichers[accountKey],
+        guard enrichers[accountKey] != nil,
               let store = stores[accountKey] else { return }
+        await metadataScheduler.suspend(accountKey: accountKey)
         let resource = ShareScannerResource(scanner: scanner, store: store)
         let scannerLease: MediaIOScannerLease
         do {
             scannerLease = try await arbiter(for: accountKey).acquireScanner(resource: resource)
         } catch {
+            await metadataScheduler.resume(accountKey: accountKey)
             return
         }
+        await metadataScheduler.resume(accountKey: accountKey)
         let taskID = UUID()
         let startGate = ShareScanStartGate()
         let task = Task(priority: .utility) { [weak self] in
@@ -292,16 +358,10 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
             BrowseDiagnostics.event("scan- \(accountKey)")
             resource.markDrained()
             await scannerLease.finishAndWait()
-            // Enrich whatever the scan (and prior scans) indexed. Cheap no-op when
-            // nothing is pending.
             if !Task.isCancelled {
-                ShareBackgroundActivity.enrichStarted()
-                BrowseDiagnostics.event("enrich+ \(accountKey)")
-                await enricher.enrichPending()
-                ShareBackgroundActivity.enrichFinished()
-                BrowseDiagnostics.event("enrich- \(accountKey)")
+                await self?.metadataScheduler.enqueueBacklog(accountKey: accountKey)
             }
-            // Record completion so `ensureScanning` coalesces the frequent
+            // Record scan completion so `ensureScanning` coalesces the frequent
             // per-render re-triggers into at most one cycle per window. A forced
             // "Scan now" also resets it, so a manual scan doesn't immediately
             // re-thrash on the next Home render.
@@ -398,6 +458,7 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
             stores[accountKey] = nil
             enrichers[accountKey] = nil
             pacers[accountKey] = nil
+            await metadataScheduler.remove(accountKey: accountKey)
             reporter.shareRemoved(accountKey)
         }
         restartingScans.remove(accountKey)

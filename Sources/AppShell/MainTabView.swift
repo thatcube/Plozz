@@ -77,6 +77,9 @@ struct MainTabView: View {
     }
 
     let accounts: [ResolvedAccount]
+    /// Resolves the active accounts at action time for retained Settings
+    /// destinations whose render-time `accounts` snapshot may be stale.
+    let currentAccounts: @MainActor () -> [ResolvedAccount]
     let networkFileResolver: any MediaTransportNetworkFileResolving
     let authenticatedHTTPResolver: any AuthenticatedHTTPResourceResolving
     /// Subtitle behaviour (mode / language / auto-download) and appearance
@@ -211,6 +214,7 @@ struct MainTabView: View {
     /// ROOT list. Threading the raw `LoadState` value through `SettingsView`
     /// instead rebuilt the root rows mid-flip → `setToViewXFlippedScreenShot:` UAF.
     @State private var librariesStore = DiscoveredLibrariesStore()
+    @State private var libraryReloadRevision = 0
     @State private var musicAvailability = MusicAvailabilityModel()
     @State private var themeMusicController = ThemeMusicController()
     /// Retains loaded Hero content across tvOS tab subtree recreation.
@@ -254,6 +258,10 @@ struct MainTabView: View {
         ThemePalette.palette(for: themeModel.theme, systemColorScheme: systemColorScheme)
     }
 
+    private var accountScopeKey: String {
+        HomeRuntimeScope.accountScopeKey(accounts.map(\.account))
+    }
+
     var body: some View {
         TabView(selection: selectedTab) {
             Tab("Home", systemImage: "house.fill", value: MainTab.home) {
@@ -293,6 +301,7 @@ struct MainTabView: View {
                 playRequest: $playRequest,
                 resumePrompt: $resumePrompt
             )
+            .id(accountScopeKey)
             }
 
             Tab("Search", systemImage: "magnifyingglass", value: MainTab.search) {
@@ -321,6 +330,7 @@ struct MainTabView: View {
                 playRequest: $playRequest,
                 resumePrompt: $resumePrompt
             )
+            .id(accountScopeKey)
             }
 
             // Conditional Music tab: present only when at least one signed-in
@@ -362,14 +372,7 @@ struct MainTabView: View {
                 lastfm: lastfm,
                 librariesStore: librariesStore,
                 reloadLibraries: {
-                    // Load OFF the model's own published state (used elsewhere by
-                    // SelectLibrariesView) and write results into the store the
-                    // Settings detail pages observe. MainTabView never READS
-                    // `librariesStore.state`, so this reload can't re-render the
-                    // Settings root list during the tab focus-flip.
-                    librariesStore.state = .loading
-                    let libraries = await discovery.libraries(from: accounts)
-                    librariesStore.state = libraries.isEmpty ? .empty : .loaded(libraries)
+                    await reloadLibrariesFromCurrentScope()
                 },
                 accounts: displayAccounts,
                 activeAccountID: activeAccountID,
@@ -381,7 +384,10 @@ struct MainTabView: View {
                 appBuild: AppInfo.build,
                 repoURL: AppInfo.repoURLString,
                 isAccountIncludedInActiveProfile: isAccountIncludedInActiveProfile,
-                onSetAccountIncluded: onSetAccountIncluded,
+                onSetAccountIncluded: { accountID, included in
+                    onSetAccountIncluded(accountID, included)
+                    scheduleLibraryReloadFromCurrentScope(changedAccountID: accountID)
+                },
                 onSetAskProfileOnStartup: onSetAskProfileOnStartup,
                 onEnableProfiles: onEnableProfiles,
                 onDisableProfiles: onDisableProfiles,
@@ -403,6 +409,10 @@ struct MainTabView: View {
         .plozzTabStyle(navigationStyle)
         .onChange(of: selectedTabRaw, initial: true) { _, tab in
             BrowseDiagnostics.event("screen tab=\(tab)")
+        }
+        .onChange(of: accountScopeKey) {
+            homeHeroRuntime.resetForSourceScopeChange()
+            onWarmIdentityIndex()
         }
         // Host the full-screen Now Playing player here, on the root TabView, so it
         // presents reliably on the first trigger under both tab styles. Hosting it
@@ -494,6 +504,33 @@ struct MainTabView: View {
             )
         }
         .mediaItemActionHandler(mediaItemActionHandler)
+    }
+
+    @MainActor
+    private func reloadLibrariesFromCurrentScope() async {
+        libraryReloadRevision += 1
+        let revision = libraryReloadRevision
+        let scopedAccounts = currentAccounts()
+        librariesStore.beginRefresh(
+            accountIDs: Set(scopedAccounts.map(\.account.id))
+        )
+        await Task.yield()
+        let libraries = await discovery.libraries(from: scopedAccounts)
+        guard revision == libraryReloadRevision else { return }
+        librariesStore.finishRefresh(with: libraries)
+    }
+
+    @MainActor
+    private func scheduleLibraryReloadFromCurrentScope(changedAccountID: String) {
+        libraryReloadRevision += 1
+        let revision = libraryReloadRevision
+        librariesStore.beginRefresh(accountIDs: [changedAccountID])
+        Task { @MainActor in
+            await Task.yield()
+            let libraries = await discovery.libraries(from: currentAccounts())
+            guard revision == libraryReloadRevision else { return }
+            librariesStore.finishRefresh(with: libraries)
+        }
     }
 
     /// Restarts the music probe whenever the signed-in accounts or the per-profile
@@ -1688,6 +1725,11 @@ private struct HomeTab: View {
                     recentlyAppliedRecency: appliedWatchRecency
                 ),
                 visibility: homeVisibility,
+                activeShareIDs: Set(
+                    accounts
+                        .filter { $0.account.server.provider == .mediaShare }
+                        .map(\.account.id)
+                ),
                 spoilerSettings: spoilerSettings,
                 heroSettings: heroSettings,
                 heroRuntime: heroRuntime,

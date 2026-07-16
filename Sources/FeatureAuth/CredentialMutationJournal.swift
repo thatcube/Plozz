@@ -25,6 +25,9 @@ public struct CredentialMutationEntry: Codable, Equatable, Sendable {
     public let previousRevision: CredentialRevision?
     public let pendingRevision: CredentialRevision?
     public let pendingChildItemIDs: [CredentialChildItemID]
+    /// A previous credential known to be undecodable by this build. Once the new
+    /// pointer commits, recovery may delete its raw vault item without decoding it.
+    public let rawCredentialRevisionToDiscard: CredentialRevision?
     public let createdAt: Date
     public var phase: CredentialMutationPhase
 }
@@ -115,6 +118,7 @@ public final class CredentialMutationJournal: @unchecked Sendable {
         previousRevision: CredentialRevision?,
         pendingRevision: CredentialRevision?,
         pendingChildItemIDs: [CredentialChildItemID] = [],
+        rawCredentialRevisionToDiscard: CredentialRevision? = nil,
         mutationID: UUID = UUID(),
         createdAt: Date = Date()
     ) throws -> CredentialMutationEntry {
@@ -124,14 +128,18 @@ public final class CredentialMutationJournal: @unchecked Sendable {
                 kind: kind,
                 previousRevision: previousRevision,
                 pendingRevision: pendingRevision,
-                pendingChildItemIDs: pendingChildItemIDs
+                pendingChildItemIDs: pendingChildItemIDs,
+                rawCredentialRevisionToDiscard:
+                    rawCredentialRevisionToDiscard
             )
             if let existing = state.mutations.first(where: { $0.id == mutationID }) {
                 guard existing.kind == kind,
                       existing.accountID == accountID,
                       existing.previousRevision == previousRevision,
                       existing.pendingRevision == pendingRevision,
-                      existing.pendingChildItemIDs == pendingChildItemIDs else {
+                      existing.pendingChildItemIDs == pendingChildItemIDs,
+                      existing.rawCredentialRevisionToDiscard
+                        == rawCredentialRevisionToDiscard else {
                     throw CredentialMutationJournalError.invalidMutation
                 }
                 return existing
@@ -153,6 +161,7 @@ public final class CredentialMutationJournal: @unchecked Sendable {
                 previousRevision: previousRevision,
                 pendingRevision: pendingRevision,
                 pendingChildItemIDs: pendingChildItemIDs,
+                rawCredentialRevisionToDiscard: rawCredentialRevisionToDiscard,
                 createdAt: createdAt,
                 phase: .staged
             )
@@ -303,7 +312,9 @@ public final class CredentialMutationJournal: @unchecked Sendable {
                 kind: entry.kind,
                 previousRevision: entry.previousRevision,
                 pendingRevision: entry.pendingRevision,
-                pendingChildItemIDs: entry.pendingChildItemIDs
+                pendingChildItemIDs: entry.pendingChildItemIDs,
+                rawCredentialRevisionToDiscard:
+                    entry.rawCredentialRevisionToDiscard
             )
             let active = state.activeRevisions[entry.accountID]
             switch entry.phase {
@@ -323,10 +334,13 @@ public final class CredentialMutationJournal: @unchecked Sendable {
         kind: CredentialMutationKind,
         previousRevision: CredentialRevision?,
         pendingRevision: CredentialRevision?,
-        pendingChildItemIDs: [CredentialChildItemID]
+        pendingChildItemIDs: [CredentialChildItemID],
+        rawCredentialRevisionToDiscard: CredentialRevision? = nil
     ) throws {
         guard pendingChildItemIDs.count <= maximumChildItemCount,
-              Set(pendingChildItemIDs).count == pendingChildItemIDs.count else {
+              Set(pendingChildItemIDs).count == pendingChildItemIDs.count,
+              rawCredentialRevisionToDiscard == nil
+                || rawCredentialRevisionToDiscard == previousRevision else {
             throw CredentialMutationJournalError.invalidMutation
         }
         switch kind {

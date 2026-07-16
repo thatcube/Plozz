@@ -29,6 +29,11 @@
 #                    still skipped.
 #
 # FLAGS
+#   --stale-days N   In the default (orphans) mode, ALSO remove DerivedData whose
+#                    worktree still exists but whose SOURCE has not been modified
+#                    in >= N days (i.e. the branch is idle — deleting just forces a
+#                    cold rebuild if you ever return to it). Never deletes source,
+#                    only the rebuildable build cache. 0 (default) disables this.
 #   --module-cache   Also delete ModuleCache.noindex if it exceeds
 #                    ${MODULE_CACHE_LIMIT_GB} GB (it rebuilds on next compile).
 #   --dry-run        Print what would be deleted; delete nothing.
@@ -50,8 +55,9 @@ MODE="orphans"
 TARGET=""
 DRY=0
 TRIM_MODULE_CACHE=0
+STALE_DAYS="${STALE_DAYS:-0}"                        # >0: also prune idle live worktrees
 
-usage() { sed -n '2,46p' "$0"; }
+usage() { sed -n '2,52p' "$0"; }
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -59,6 +65,7 @@ while [ $# -gt 0 ]; do
     --worktree)    MODE="worktree"; TARGET="${2:?--worktree needs a PATH}"; shift ;;
     --all)         MODE="all" ;;
     --orphans)     MODE="orphans" ;;
+    --stale-days)  STALE_DAYS="${2:?--stale-days needs a number}"; shift ;;
     --module-cache) TRIM_MODULE_CACHE=1 ;;
     --dry-run)     DRY=1 ;;
     -h|--help)     usage; exit 0 ;;
@@ -79,6 +86,30 @@ workspace_path_of() {  # echo the WorkspacePath recorded inside a DerivedData di
 
 dir_recently_active() {  # 0 (true) if modified within ACTIVE_MIN minutes
   [ -n "$(find "$1" -maxdepth 0 -mmin -"$ACTIVE_MIN" 2>/dev/null)" ]
+}
+
+# --- idle-worktree detection (for --stale-days) --------------------------------
+STALE_REF=""
+cleanup_stale_ref() { [ -n "$STALE_REF" ] && rm -f "$STALE_REF"; }
+trap cleanup_stale_ref EXIT
+ensure_stale_ref() {  # a marker file stamped exactly STALE_DAYS days ago
+  [ -n "$STALE_REF" ] && return
+  STALE_REF="$(mktemp -t ddprune)"
+  local stamp
+  stamp="$(date -v-"${STALE_DAYS}"d +%Y%m%d%H%M.%S 2>/dev/null \
+        || date -d "-${STALE_DAYS} days" +%Y%m%d%H%M.%S 2>/dev/null)"
+  touch -t "$stamp" "$STALE_REF"
+}
+worktree_active() {  # 0 (true) if any SOURCE file under $1 is newer than the ref
+  local wt="$1"
+  [ -d "$wt" ] || return 1
+  ensure_stale_ref
+  local hit
+  hit="$(find "$wt" -type f \
+           -not -path '*/.build/*' -not -path '*/.git/*' \
+           -not -path '*/DerivedData/*' -not -path '*/.swiftpm/*' \
+           -newer "$STALE_REF" -print 2>/dev/null | head -n1)"
+  [ -n "$hit" ]
 }
 
 human() { du -sh "$1" 2>/dev/null | awk '{print $1}'; }
@@ -115,6 +146,13 @@ for d in "$DD"/*/; do
     orphans)
       if [ -n "$wp" ] && [ ! -e "$wp" ]; then
         remove_dir "$d" "orphan: $wp gone"
+      elif [ "$STALE_DAYS" -gt 0 ] && [ -n "$wp" ] && [ -e "$wp" ]; then
+        # Worktree still exists — prune only if its source is idle >= STALE_DAYS
+        # days (a cold rebuild is the only cost). Source is never touched.
+        wtroot="$(dirname "$wp")"
+        if ! worktree_active "$wtroot" && ! dir_recently_active "$d"; then
+          remove_dir "$d" "stale: idle >=${STALE_DAYS}d ($(basename "$wtroot"))"
+        fi
       fi
       ;;
     worktree)

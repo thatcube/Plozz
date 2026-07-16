@@ -123,6 +123,7 @@ public final class ShareScanStatusModel {
 
     /// One reported scan/enrich event (see `reporter()`).
     enum Event: Sendable {
+        case shareRegistered(id: String)
         case scanStarted(id: String, name: String)
         case scanProgress(id: String, directories: Int, items: Int)
         case scanFinished(id: String)
@@ -135,6 +136,7 @@ public final class ShareScanStatusModel {
     /// Apply one event, in stream order, on the main actor.
     private func apply(_ event: Event) {
         switch event {
+        case let .shareRegistered(id): registerShare(shareID: id)
         case let .scanStarted(id, name): scanStarted(shareID: id, name: name)
         case let .scanProgress(id, directories, items):
             scanProgress(shareID: id, directoriesScanned: directories, itemsFound: items)
@@ -162,6 +164,14 @@ public final class ShareScanStatusModel {
         byShare.values.filter(\.isBusy).sorted { $0.name < $1.name }
     }
 
+    /// Busy states limited to a profile's active media-share account ids.
+    public func busyStates(forShareIDs shareIDs: Set<String>) -> [ShareScanState] {
+        byShare
+            .filter { shareIDs.contains($0.key) && $0.value.isBusy }
+            .map(\.value)
+            .sorted { $0.name < $1.name }
+    }
+
     public func state(forShareID shareID: String) -> ShareScanState? { byShare[shareID] }
 
     /// Whether a share with this display name is currently busy — lets a per-share
@@ -172,6 +182,12 @@ public final class ShareScanStatusModel {
     }
 
     // MARK: - Mutations (called on the main actor via the reporter)
+
+    /// Opens a fresh lifecycle for a deterministic share id after coordinator
+    /// invalidation has fully drained the removed instance.
+    public func registerShare(shareID: String) {
+        removedShareIDs.remove(shareID)
+    }
 
     public func scanStarted(shareID: String, name: String) {
         guard !removedShareIDs.contains(shareID) else { return }
@@ -244,6 +260,7 @@ public final class ShareScanStatusModel {
     public nonisolated func reporter() -> ShareScanReporter {
         let c = continuation
         return ShareScanReporter(
+            shareRegistered: { id in c.yield(.shareRegistered(id: id)) },
             scanStarted: { id, name in c.yield(.scanStarted(id: id, name: name)) },
             scanProgress: { id, items in
                 c.yield(.scanProgress(id: id, directories: 0, items: items))
@@ -264,6 +281,7 @@ public final class ShareScanStatusModel {
 /// as plain closures so `ProviderShare` needn't know about the UI model; the
 /// default is a no-op (tests / previews / no status model).
 public struct ShareScanReporter: Sendable {
+    public var shareRegistered: @Sendable (_ shareID: String) -> Void
     public var scanStarted: @Sendable (_ shareID: String, _ name: String) -> Void
     /// Source-compatible item-only progress callback.
     public var scanProgress: @Sendable (_ shareID: String, _ itemsFound: Int) -> Void
@@ -276,6 +294,7 @@ public struct ShareScanReporter: Sendable {
     public var shareRemoved: @Sendable (_ shareID: String) -> Void
 
     public init(
+        shareRegistered: @escaping @Sendable (String) -> Void = { _ in },
         scanStarted: @escaping @Sendable (String, String) -> Void,
         scanProgress: @escaping @Sendable (String, Int) -> Void,
         scanDetailedProgress: (@Sendable (String, Int, Int) -> Void)? = nil,
@@ -285,6 +304,7 @@ public struct ShareScanReporter: Sendable {
         enrichFinished: @escaping @Sendable (String) -> Void,
         shareRemoved: @escaping @Sendable (String) -> Void = { _ in }
     ) {
+        self.shareRegistered = shareRegistered
         self.scanStarted = scanStarted
         self.scanProgress = scanProgress
         self.scanDetailedProgress = scanDetailedProgress ?? { id, _, items in
@@ -299,6 +319,7 @@ public struct ShareScanReporter: Sendable {
 
     /// No-op sink (default when no status model is wired).
     public static let noop = ShareScanReporter(
+        shareRegistered: { _ in },
         scanStarted: { _, _ in }, scanProgress: { _, _ in },
         scanDetailedProgress: { _, _, _ in }, scanFinished: { _ in },
         enrichStarted: { _, _ in }, enrichProgress: { _, _ in },

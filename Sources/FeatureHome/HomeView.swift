@@ -27,6 +27,12 @@ public final class HomeHeroRuntimeState {
 
     public init() {}
 
+    public func resetForSourceScopeChange() {
+        items = []
+        completedKey = nil
+        externalRefreshRevision &+= 1
+    }
+
     /// Records a live watched/unwatched intent for hero replay, collapsing any
     /// prior intent covering the same target set. This bounds the overlay by the
     /// number of *distinct* titles toggled this session rather than every toggle,
@@ -135,10 +141,12 @@ public struct HomeView: View {
     /// App-wide media-share scan/enrich status (optional so previews/tests that
     /// don't inject it don't crash). Drives the "Updating library…" banner.
     @Environment(ShareScanStatusModel.self) private var shareScanStatus: ShareScanStatusModel?
+    private let activeShareIDs: Set<String>
 
     public init(
         viewModel: HomeViewModel,
         visibility: HomeLibraryVisibilityModel,
+        activeShareIDs: Set<String>,
         spoilerSettings: SpoilerSettings = .default,
         heroSettings: HeroSettingsModel? = nil,
         heroRuntime: HomeHeroRuntimeState,
@@ -167,6 +175,7 @@ public struct HomeView: View {
     ) {
         _viewModel = State(initialValue: viewModel)
         self.visibility = visibility
+        self.activeShareIDs = activeShareIDs
         self.spoilerSettings = spoilerSettings
         self.heroSettings = heroSettings
         self.heroRuntime = heroRuntime
@@ -524,8 +533,10 @@ public struct HomeView: View {
     /// content (no layout reflow) and scrolls away with the page. Absent when idle.
     @ViewBuilder
     private var scanBanner: some View {
-        if let status = shareScanStatus, let primary = status.busyStates.first {
-            let multi = status.busyStates.count > 1
+        if let status = shareScanStatus {
+            let activeStates = status.busyStates(forShareIDs: activeShareIDs)
+            if let primary = activeStates.first {
+            let multi = activeStates.count > 1
             HStack(spacing: 12) {
                 // Determinate ring during enrichment (we know N of M); otherwise an
                 // indeterminate spinner (the scan total is unknown as it walks).
@@ -539,7 +550,7 @@ public struct HomeView: View {
                         .controlSize(.small)
                 }
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(multi ? "\(status.busyStates.count) libraries" : Self.pillTitle(primary))
+                    Text(multi ? "\(activeStates.count) libraries" : Self.pillTitle(primary))
                         .font(.footnote.weight(.semibold))
                         .foregroundStyle(.primary)
                     if let detail = Self.pillSubtitle(primary, multi: multi) {
@@ -561,7 +572,7 @@ public struct HomeView: View {
             .transition(.move(edge: .top).combined(with: .opacity))
             .allowsHitTesting(false)
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel(Self.pillAccessibilityLabel(status))
+            .accessibilityLabel(Self.pillAccessibilityLabel(activeStates))
             // Animate ONLY on structural changes (phase, share, single↔multi), never
             // on each progress tick — otherwise every count update animates the
             // pill's width and it slides side to side. With the fixed-width digits
@@ -569,6 +580,7 @@ public struct HomeView: View {
             .animation(.easeInOut(duration: 0.25), value: primary.phase)
             .animation(.easeInOut(duration: 0.25), value: primary.name)
             .animation(.easeInOut(duration: 0.25), value: multi)
+            }
         }
     }
 
@@ -587,8 +599,7 @@ public struct HomeView: View {
     }
 
     /// A flattened, spoken description of the pill for VoiceOver.
-    private static func pillAccessibilityLabel(_ status: ShareScanStatusModel) -> String {
-        let states = status.busyStates
+    private static func pillAccessibilityLabel(_ states: [ShareScanState]) -> String {
         guard let primary = states.first else { return "" }
         if states.count > 1 { return "Updating \(states.count) libraries" }
         let sub = pillSubtitle(primary, multi: false).map { ", \($0)" } ?? ""
@@ -809,7 +820,7 @@ public struct HomeView: View {
                             aggregated: aggregated,
                             subtitle: Self.librarySubtitle(for: aggregated, in: libraries),
                             isUpdating: aggregated.providerKind == .mediaShare
-                                && (shareScanStatus?.isBusy(shareNamed: aggregated.serverName) ?? false),
+                                && (shareScanStatus?.state(forShareID: aggregated.accountID)?.isBusy ?? false),
                             action: { onSelectLibrary(aggregated.library) }
                         )
                     }

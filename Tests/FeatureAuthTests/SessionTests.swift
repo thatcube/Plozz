@@ -173,6 +173,45 @@ final class SessionStateMachineTests: XCTestCase {
 }
 
 final class AccountStoreTests: XCTestCase {
+    private final class ErrorBox: @unchecked Sendable {
+        private let lock = NSLock()
+        private var storage: [Error] = []
+        var errors: [Error] { lock.withLock { storage } }
+        func append(_ error: Error) { lock.withLock { storage.append(error) } }
+    }
+
+    private final class ReadFailingSecureStore: SecureStore, @unchecked Sendable {
+        enum Failure: Error, Equatable { case unavailable }
+        private let base = InMemorySecureStore()
+        private let lock = NSLock()
+        private var shouldFail = false
+
+        func setReadFailure(_ value: Bool) {
+            lock.withLock { shouldFail = value }
+        }
+
+        func setString(_ value: String, for key: String) throws {
+            try base.setString(value, for: key)
+        }
+
+        func insertStringIfAbsent(_ value: String, for key: String) throws -> Bool {
+            try base.insertStringIfAbsent(value, for: key)
+        }
+
+        func string(for key: String) -> String? {
+            base.string(for: key)
+        }
+
+        func readString(for key: String) throws -> String? {
+            if lock.withLock({ shouldFail }) { throw Failure.unavailable }
+            return try base.readString(for: key)
+        }
+
+        func removeValue(for key: String) throws {
+            try base.removeValue(for: key)
+        }
+    }
+
     private func makeDefaults() -> UserDefaults {
         let suite = "test.\(UUID().uuidString)"
         return UserDefaults(suiteName: suite)!
@@ -363,6 +402,34 @@ final class AccountStoreTests: XCTestCase {
         try store.add(account("a1", added: 100), token: "T1")
         XCTAssertEqual(store.loadAccounts().map(\.id), ["a1", "a2"])
         XCTAssertTrue(Set(store.activeAccountIDs()) == ["a1", "a2"])
+    }
+
+    func testConcurrentStoreInstancesDoNotDropEachOthersAccounts() throws {
+        let secure = InMemorySecureStore()
+        let first = AccountStore(secureStore: secure)
+        let second = AccountStore(secureStore: secure)
+        let queue = DispatchQueue(
+            label: "AccountStoreTests.concurrent",
+            attributes: .concurrent
+        )
+        let group = DispatchGroup()
+        let errorBox = ErrorBox()
+
+        for (store, value) in [(first, account("a1")), (second, account("a2"))] {
+            group.enter()
+            queue.async {
+                defer { group.leave() }
+                do {
+                    try store.add(value, token: "TOKEN")
+                } catch {
+                    errorBox.append(error)
+                }
+            }
+        }
+        group.wait()
+
+        XCTAssertTrue(errorBox.errors.isEmpty)
+        XCTAssertEqual(Set(first.loadAccounts().map(\.id)), ["a1", "a2"])
     }
 
     func testRemoveDeletesAccountAndToken() throws {
@@ -682,6 +749,533 @@ final class AccountStoreTests: XCTestCase {
         )
     }
 
+    func testHiddenAccountWithIntactCredentialRestoresMissingJournalPointer() throws {
+        let secure = InMemorySecureStore()
+        let stateSecure = InMemorySecureStore()
+        let stale = Account(
+            id: "webdav",
+            server: MediaServer(
+                id: "webdav",
+                name: "DAV",
+                baseURL: URL(string: "https://server.example/dav")!,
+                provider: .mediaShare
+            ),
+            userID: "alice",
+            userName: "alice",
+            deviceID: "device"
+        )
+        try persistAccounts([stale], secure: secure)
+        let setup = try makeShareStore(secure: secure, stateSecure: stateSecure)
+        let oldCredential = try MediaShareCredentialEnvelope(
+            transport: .webDAV,
+            authentication: .password(username: "alice", password: "OLD")
+        )
+        try setup.vault.store(
+            oldCredential,
+            accountID: stale.id,
+            revision: stale.credentialRevision
+        )
+        XCTAssertTrue(setup.store.loadAccounts().isEmpty)
+
+        var replacement = stale
+        replacement.credentialRevision = CredentialRevision()
+        let newCredential = try MediaShareCredentialEnvelope(
+            transport: .webDAV,
+            authentication: .password(username: "alice", password: "NEW")
+        )
+        try setup.store.addMediaShare(
+            replacement,
+            credential: newCredential,
+            generatedPrivateKey: nil
+        )
+
+        let saved = try XCTUnwrap(setup.store.loadAccounts().first)
+        XCTAssertEqual(saved.id, replacement.id)
+        XCTAssertNotEqual(saved.credentialRevision, stale.credentialRevision)
+        XCTAssertEqual(
+            try setup.journal.activeRevision(accountID: stale.id),
+            saved.credentialRevision
+        )
+        XCTAssertEqual(
+            try setup.store.mediaShareCredential(for: stale.id),
+            newCredential
+        )
+    }
+
+    func testHiddenAccountWithoutCredentialIsReplacedByVerifiedConnection() throws {
+        let secure = InMemorySecureStore()
+        let stateSecure = InMemorySecureStore()
+        let stale = Account(
+            id: "webdav",
+            server: MediaServer(
+                id: "webdav",
+                name: "DAV",
+                baseURL: URL(string: "https://server.example/dav")!,
+                provider: .mediaShare
+            ),
+            userID: "alice",
+            userName: "alice",
+            deviceID: "device"
+        )
+        try persistAccounts([stale], secure: secure)
+        let setup = try makeShareStore(secure: secure, stateSecure: stateSecure)
+        XCTAssertTrue(setup.store.loadAccounts().isEmpty)
+
+        var replacement = stale
+        replacement.credentialRevision = CredentialRevision()
+        let credential = try MediaShareCredentialEnvelope(
+            transport: .webDAV,
+            authentication: .password(username: "alice", password: "NEW")
+        )
+        try setup.store.addMediaShare(
+            replacement,
+            credential: credential,
+            generatedPrivateKey: nil
+        )
+
+        XCTAssertEqual(setup.store.loadAccounts(), [replacement])
+        XCTAssertEqual(
+            try setup.journal.activeRevision(accountID: stale.id),
+            replacement.credentialRevision
+        )
+        XCTAssertEqual(
+            try setup.store.mediaShareCredential(for: stale.id),
+            credential
+        )
+    }
+
+    func testHiddenMismatchedGeneratedCredentialRetiresItsChildKey() throws {
+        let secure = InMemorySecureStore()
+        let stateSecure = InMemorySecureStore()
+        let stale = Account(
+            id: "webdav-mismatch",
+            server: MediaServer(
+                id: "webdav-mismatch",
+                name: "DAV",
+                baseURL: URL(string: "https://server.example/dav")!,
+                provider: .mediaShare
+            ),
+            userID: "alice",
+            userName: "alice",
+            deviceID: "device"
+        )
+        try persistAccounts([stale], secure: secure)
+        let setup = try makeShareStore(secure: secure, stateSecure: stateSecure)
+        let keyID = try CredentialChildItemID(rawValue: "mismatched-key")
+        try setup.vault.storePrivateKey("PRIVATE KEY", id: keyID)
+        let mismatched = try MediaShareCredentialEnvelope(
+            transport: .sftp,
+            authentication: .generatedKey(username: "alice", keyID: keyID),
+            trust: MediaShareTrustMaterial(
+                sshHostKeySHA256: try SHA256Fingerprint(
+                    bytes: Data(repeating: 8, count: 32)
+                )
+            )
+        )
+        try setup.vault.store(
+            mismatched,
+            accountID: stale.id,
+            revision: stale.credentialRevision
+        )
+
+        var replacement = stale
+        replacement.credentialRevision = CredentialRevision()
+        let webDAV = try MediaShareCredentialEnvelope(
+            transport: .webDAV,
+            authentication: .password(username: "alice", password: "NEW")
+        )
+        try setup.store.addMediaShare(
+            replacement,
+            credential: webDAV,
+            generatedPrivateKey: nil
+        )
+
+        XCTAssertThrowsError(try setup.vault.privateKey(id: keyID))
+        XCTAssertThrowsError(
+            try setup.vault.storePrivateKey("REPLACEMENT", id: keyID)
+        ) {
+            XCTAssertEqual($0 as? MediaCredentialError, .childItemRetired)
+        }
+    }
+
+    func testActiveMismatchedGeneratedCredentialRetiresItsChildKey() throws {
+        let secure = InMemorySecureStore()
+        let stateSecure = InMemorySecureStore()
+        let stale = Account(
+            id: "active-webdav-mismatch",
+            server: MediaServer(
+                id: "active-webdav-mismatch",
+                name: "DAV",
+                baseURL: URL(string: "https://server.example/dav")!,
+                provider: .mediaShare
+            ),
+            userID: "alice",
+            userName: "alice",
+            deviceID: "device"
+        )
+        try persistAccounts([stale], secure: secure)
+        let setup = try makeShareStore(secure: secure, stateSecure: stateSecure)
+        let keyID = try CredentialChildItemID(rawValue: "active-mismatched-key")
+        try setup.vault.storePrivateKey("PRIVATE KEY", id: keyID)
+        let mismatched = try MediaShareCredentialEnvelope(
+            transport: .sftp,
+            authentication: .generatedKey(username: "alice", keyID: keyID),
+            trust: MediaShareTrustMaterial(
+                sshHostKeySHA256: try SHA256Fingerprint(
+                    bytes: Data(repeating: 9, count: 32)
+                )
+            )
+        )
+        try setup.vault.store(
+            mismatched,
+            accountID: stale.id,
+            revision: stale.credentialRevision
+        )
+        try setup.journal.seedActiveRevision(
+            stale.credentialRevision,
+            accountID: stale.id
+        )
+
+        var replacement = stale
+        replacement.credentialRevision = CredentialRevision()
+        let webDAV = try MediaShareCredentialEnvelope(
+            transport: .webDAV,
+            authentication: .password(username: "alice", password: "NEW")
+        )
+        try setup.store.addMediaShare(
+            replacement,
+            credential: webDAV,
+            generatedPrivateKey: nil
+        )
+
+        XCTAssertThrowsError(try setup.vault.privateKey(id: keyID))
+        XCTAssertThrowsError(
+            try setup.vault.storePrivateKey("REPLACEMENT", id: keyID)
+        ) {
+            XCTAssertEqual($0 as? MediaCredentialError, .childItemRetired)
+        }
+    }
+
+    func testActivePointerWithMissingCredentialCanBeReconfigured() throws {
+        let setup = try makeShareStore()
+        let original = Account(
+            id: "webdav",
+            server: MediaServer(
+                id: "webdav",
+                name: "DAV",
+                baseURL: URL(string: "https://server.example/dav")!,
+                provider: .mediaShare
+            ),
+            userID: "alice",
+            userName: "alice",
+            deviceID: "device"
+        )
+        let oldCredential = try MediaShareCredentialEnvelope(
+            transport: .webDAV,
+            authentication: .password(username: "alice", password: "OLD")
+        )
+        try setup.store.addMediaShare(
+            original,
+            credential: oldCredential,
+            generatedPrivateKey: nil
+        )
+        try setup.vault.remove(
+            accountID: original.id,
+            revision: original.credentialRevision
+        )
+        XCTAssertTrue(setup.store.loadAccounts().isEmpty)
+
+        var replacement = original
+        replacement.credentialRevision = CredentialRevision()
+        let newCredential = try MediaShareCredentialEnvelope(
+            transport: .webDAV,
+            authentication: .password(username: "alice", password: "NEW")
+        )
+        try setup.store.addMediaShare(
+            replacement,
+            credential: newCredential,
+            generatedPrivateKey: nil
+        )
+
+        let saved = try XCTUnwrap(setup.store.loadAccounts().first)
+        XCTAssertEqual(saved.id, original.id)
+        XCTAssertEqual(
+            try setup.store.mediaShareCredential(for: original.id),
+            newCredential
+        )
+    }
+
+    func testJournalAuthoritativeRevisionRepairsStaleAccountMetadata() throws {
+        let secure = InMemorySecureStore()
+        let stateSecure = InMemorySecureStore()
+        let stale = Account(
+            id: "webdav-authoritative",
+            server: MediaServer(
+                id: "webdav-authoritative",
+                name: "DAV",
+                baseURL: URL(string: "https://server.example/dav")!,
+                provider: .mediaShare
+            ),
+            userID: "alice",
+            userName: "alice",
+            deviceID: "device"
+        )
+        try persistAccounts([stale], secure: secure)
+        let setup = try makeShareStore(secure: secure, stateSecure: stateSecure)
+        let authoritativeRevision = CredentialRevision()
+        let authoritativeCredential = try MediaShareCredentialEnvelope(
+            transport: .webDAV,
+            authentication: .password(username: "alice", password: "CURRENT")
+        )
+        try setup.vault.store(
+            authoritativeCredential,
+            accountID: stale.id,
+            revision: authoritativeRevision
+        )
+        try setup.journal.seedActiveRevision(
+            authoritativeRevision,
+            accountID: stale.id
+        )
+        XCTAssertTrue(setup.store.loadAccounts().isEmpty)
+
+        var replacement = stale
+        replacement.credentialRevision = CredentialRevision()
+        let newCredential = try MediaShareCredentialEnvelope(
+            transport: .webDAV,
+            authentication: .password(username: "alice", password: "NEW")
+        )
+        try setup.store.addMediaShare(
+            replacement,
+            credential: newCredential,
+            generatedPrivateKey: nil
+        )
+
+        let saved = try XCTUnwrap(setup.store.loadAccounts().first)
+        XCTAssertEqual(saved.id, stale.id)
+        XCTAssertNotEqual(saved.credentialRevision, stale.credentialRevision)
+        XCTAssertNotEqual(saved.credentialRevision, authoritativeRevision)
+        XCTAssertEqual(
+            try setup.store.mediaShareCredential(for: stale.id),
+            newCredential
+        )
+    }
+
+    func testOrphanJournalPointerReconstructsMissingAccountMetadata() throws {
+        let setup = try makeShareStore()
+        let account = Account(
+            id: "webdav-orphan-pointer",
+            server: MediaServer(
+                id: "webdav-orphan-pointer",
+                name: "DAV",
+                baseURL: URL(string: "https://server.example/dav")!,
+                provider: .mediaShare
+            ),
+            userID: "alice",
+            userName: "alice",
+            deviceID: "device"
+        )
+        let authoritativeRevision = CredentialRevision()
+        let oldCredential = try MediaShareCredentialEnvelope(
+            transport: .webDAV,
+            authentication: .password(username: "alice", password: "OLD")
+        )
+        try setup.vault.store(
+            oldCredential,
+            accountID: account.id,
+            revision: authoritativeRevision
+        )
+        try setup.journal.seedActiveRevision(
+            authoritativeRevision,
+            accountID: account.id
+        )
+        XCTAssertTrue(setup.store.loadAccounts().isEmpty)
+
+        let newCredential = try MediaShareCredentialEnvelope(
+            transport: .webDAV,
+            authentication: .password(username: "alice", password: "NEW")
+        )
+        try setup.store.addMediaShare(
+            account,
+            credential: newCredential,
+            generatedPrivateKey: nil
+        )
+
+        let saved = try XCTUnwrap(setup.store.loadAccounts().first)
+        XCTAssertEqual(saved.id, account.id)
+        XCTAssertNotEqual(saved.credentialRevision, authoritativeRevision)
+        XCTAssertEqual(
+            try setup.store.mediaShareCredential(for: account.id),
+            newCredential
+        )
+    }
+
+    func testRepairNeverDeletesManagedAccountWithCollidingID() throws {
+        let secure = InMemorySecureStore()
+        let stateSecure = InMemorySecureStore()
+        let managed = account("collision")
+        try persistAccounts([managed], secure: secure)
+        let setup = try makeShareStore(secure: secure, stateSecure: stateSecure)
+        let webDAV = Account(
+            id: managed.id,
+            server: MediaServer(
+                id: managed.id,
+                name: "DAV",
+                baseURL: URL(string: "https://server.example/dav")!,
+                provider: .mediaShare
+            ),
+            userID: "alice",
+            userName: "alice",
+            deviceID: "device"
+        )
+        let credential = try MediaShareCredentialEnvelope(
+            transport: .webDAV,
+            authentication: .password(username: "alice", password: "PASSWORD")
+        )
+
+        XCTAssertThrowsError(
+            try setup.store.addMediaShare(
+                webDAV,
+                credential: credential,
+                generatedPrivateKey: nil
+            )
+        ) {
+            XCTAssertEqual($0 as? AccountStoreError, .invalidMediaShareAccount)
+        }
+        XCTAssertEqual(setup.store.loadAccounts(), [managed])
+    }
+
+    func testRepairNeverReplacesHiddenShareUsingDifferentTransport() throws {
+        let secure = InMemorySecureStore()
+        let stateSecure = InMemorySecureStore()
+        let staleSMB = shareAccount("collision")
+        try persistAccounts([staleSMB], secure: secure)
+        let setup = try makeShareStore(secure: secure, stateSecure: stateSecure)
+        let webDAV = Account(
+            id: staleSMB.id,
+            server: MediaServer(
+                id: staleSMB.id,
+                name: "DAV",
+                baseURL: URL(string: "https://server.example/dav")!,
+                provider: .mediaShare
+            ),
+            userID: "alice",
+            userName: "alice",
+            deviceID: "device"
+        )
+        let credential = try MediaShareCredentialEnvelope(
+            transport: .webDAV,
+            authentication: .password(username: "alice", password: "PASSWORD")
+        )
+
+        XCTAssertThrowsError(
+            try setup.store.addMediaShare(
+                webDAV,
+                credential: credential,
+                generatedPrivateKey: nil
+            )
+        ) {
+            XCTAssertEqual($0 as? AccountStoreError, .invalidMediaShareAccount)
+        }
+        let persisted = try XCTUnwrap(
+            secure.string(for: "com.plozz.accounts.v2")?.data(using: .utf8)
+        )
+        XCTAssertEqual(try JSONDecoder().decode([Account].self, from: persisted), [staleSMB])
+    }
+
+    func testTransientCredentialReadFailureDoesNotTriggerRepair() throws {
+        let secure = ReadFailingSecureStore()
+        let stale = Account(
+            id: "webdav",
+            server: MediaServer(
+                id: "webdav",
+                name: "DAV",
+                baseURL: URL(string: "https://server.example/dav")!,
+                provider: .mediaShare
+            ),
+            userID: "alice",
+            userName: "alice",
+            deviceID: "device"
+        )
+        let encodedAccounts = try JSONEncoder().encode([stale])
+        try secure.setString(
+            try XCTUnwrap(String(data: encodedAccounts, encoding: .utf8)),
+            for: "com.plozz.accounts.v2"
+        )
+        let vault = MediaCredentialVault(secureStore: secure)
+        let oldCredential = try MediaShareCredentialEnvelope(
+            transport: .webDAV,
+            authentication: .password(username: "alice", password: "OLD")
+        )
+        try vault.store(
+            oldCredential,
+            accountID: stale.id,
+            revision: stale.credentialRevision
+        )
+        let journal = try CredentialMutationJournal(
+            store: DurableLocalStateStore(secureStore: InMemorySecureStore())
+        )
+        let store = AccountStore(
+            secureStore: secure,
+            mediaCredentialVault: vault,
+            credentialJournal: journal
+        )
+        var replacement = stale
+        replacement.credentialRevision = CredentialRevision()
+        let newCredential = try MediaShareCredentialEnvelope(
+            transport: .webDAV,
+            authentication: .password(username: "alice", password: "NEW")
+        )
+
+        secure.setReadFailure(true)
+        XCTAssertThrowsError(
+            try store.addMediaShare(
+                replacement,
+                credential: newCredential,
+                generatedPrivateKey: nil
+            )
+        ) {
+            XCTAssertEqual($0 as? ReadFailingSecureStore.Failure, .unavailable)
+        }
+        secure.setReadFailure(false)
+
+        let persisted = try XCTUnwrap(
+            secure.string(for: "com.plozz.accounts.v2")?.data(using: .utf8)
+        )
+        XCTAssertEqual(try JSONDecoder().decode([Account].self, from: persisted), [stale])
+        XCTAssertEqual(
+            try vault.credential(
+                accountID: stale.id,
+                revision: stale.credentialRevision,
+                expectedTransport: .webDAV
+            ),
+            oldCredential
+        )
+    }
+
+    func testAccountMetadataReadFailureNeverOverwritesStoredAccounts() throws {
+        let secure = ReadFailingSecureStore()
+        let existing = account("existing")
+        let encoded = try JSONEncoder().encode([existing])
+        try secure.setString(
+            try XCTUnwrap(String(data: encoded, encoding: .utf8)),
+            for: "com.plozz.accounts.v2"
+        )
+        let store = AccountStore(secureStore: secure)
+
+        secure.setReadFailure(true)
+        XCTAssertThrowsError(
+            try store.add(account("new"), token: "TOKEN")
+        ) {
+            XCTAssertEqual($0 as? ReadFailingSecureStore.Failure, .unavailable)
+        }
+        secure.setReadFailure(false)
+
+        let persisted = try XCTUnwrap(
+            secure.string(for: "com.plozz.accounts.v2")?.data(using: .utf8)
+        )
+        XCTAssertEqual(try JSONDecoder().decode([Account].self, from: persisted), [existing])
+    }
+
     func testGeneratedSFTPKeyIsStagedAndRetiredWithCredential() throws {
         let setup = try makeShareStore()
         let keyID = try CredentialChildItemID(rawValue: "key-one")
@@ -763,6 +1357,158 @@ final class AccountStoreTests: XCTestCase {
             XCTAssertEqual($0 as? AccountStoreError, .generatedKeyReuse)
         }
         XCTAssertEqual(try setup.vault.privateKey(id: keyID), "PRIVATE KEY")
+    }
+
+    func testGeneratedSFTPKeyCannotBeSharedAcrossAccounts() throws {
+        let setup = try makeShareStore()
+        let keyID = try CredentialChildItemID(rawValue: "cross-account-key")
+        let fingerprint = try SHA256Fingerprint(bytes: Data(repeating: 5, count: 32))
+        func account(_ id: String) -> Account {
+            Account(
+                id: id,
+                server: MediaServer(
+                    id: id,
+                    name: "SFTP",
+                    baseURL: URL(string: "sftp://server/\(id)")!,
+                    provider: .mediaShare
+                ),
+                userID: "alice",
+                userName: "alice",
+                deviceID: "device"
+            )
+        }
+        let credential = try MediaShareCredentialEnvelope(
+            transport: .sftp,
+            authentication: .generatedKey(username: "alice", keyID: keyID),
+            trust: MediaShareTrustMaterial(sshHostKeySHA256: fingerprint)
+        )
+        try setup.store.addMediaShare(
+            account("first"),
+            credential: credential,
+            generatedPrivateKey: "PRIVATE KEY"
+        )
+
+        XCTAssertThrowsError(
+            try setup.store.addMediaShare(
+                account("second"),
+                credential: credential,
+                generatedPrivateKey: "PRIVATE KEY"
+            )
+        ) {
+            XCTAssertEqual($0 as? AccountStoreError, .generatedKeyReuse)
+        }
+        XCTAssertEqual(try setup.vault.privateKey(id: keyID), "PRIVATE KEY")
+    }
+
+    func testGeneratedSFTPKeyHeldByPreparedRemovalCannotBeReused() throws {
+        let setup = try makeShareStore()
+        let keyID = try CredentialChildItemID(rawValue: "removing-key")
+        let fingerprint = try SHA256Fingerprint(bytes: Data(repeating: 6, count: 32))
+        let first = Account(
+            id: "removing",
+            server: MediaServer(
+                id: "removing",
+                name: "SFTP",
+                baseURL: URL(string: "sftp://server/removing")!,
+                provider: .mediaShare
+            ),
+            userID: "alice",
+            userName: "alice",
+            deviceID: "device"
+        )
+        let credential = try MediaShareCredentialEnvelope(
+            transport: .sftp,
+            authentication: .generatedKey(username: "alice", keyID: keyID),
+            trust: MediaShareTrustMaterial(sshHostKeySHA256: fingerprint)
+        )
+        try setup.store.addMediaShare(
+            first,
+            credential: credential,
+            generatedPrivateKey: "PRIVATE KEY"
+        )
+        let removal = try setup.journal.begin(
+            kind: .accountRemoval,
+            accountID: first.id,
+            previousRevision: first.credentialRevision,
+            pendingRevision: nil
+        )
+        _ = try setup.journal.markPrepared(removal.id)
+        try persistAccounts([], secure: setup.secure)
+
+        let second = Account(
+            id: "second",
+            server: MediaServer(
+                id: "second",
+                name: "SFTP",
+                baseURL: URL(string: "sftp://server/second")!,
+                provider: .mediaShare
+            ),
+            userID: "alice",
+            userName: "alice",
+            deviceID: "device"
+        )
+        XCTAssertThrowsError(
+            try setup.store.addMediaShare(
+                second,
+                credential: credential,
+                generatedPrivateKey: "PRIVATE KEY"
+            )
+        ) {
+            XCTAssertEqual($0 as? AccountStoreError, .generatedKeyReuse)
+        }
+    }
+
+    func testGeneratedSFTPKeyIDCannotBeReusedAfterChildKeyLoss() throws {
+        let setup = try makeShareStore()
+        let keyID = try CredentialChildItemID(rawValue: "lost-key")
+        let firstFingerprint = try SHA256Fingerprint(
+            bytes: Data(repeating: 3, count: 32)
+        )
+        let secondFingerprint = try SHA256Fingerprint(
+            bytes: Data(repeating: 4, count: 32)
+        )
+        let account = Account(
+            id: "sftp-lost",
+            server: MediaServer(
+                id: "sftp-lost",
+                name: "SFTP",
+                baseURL: URL(string: "sftp://server/media")!,
+                provider: .mediaShare
+            ),
+            userID: "alice",
+            userName: "alice",
+            deviceID: "device"
+        )
+        let original = try MediaShareCredentialEnvelope(
+            transport: .sftp,
+            authentication: .generatedKey(username: "alice", keyID: keyID),
+            trust: MediaShareTrustMaterial(
+                sshHostKeySHA256: firstFingerprint
+            )
+        )
+        try setup.store.addMediaShare(
+            account,
+            credential: original,
+            generatedPrivateKey: "PRIVATE KEY"
+        )
+        try setup.vault.removePrivateKey(id: keyID)
+
+        let replacement = try MediaShareCredentialEnvelope(
+            transport: .sftp,
+            authentication: .generatedKey(username: "alice", keyID: keyID),
+            trust: MediaShareTrustMaterial(
+                sshHostKeySHA256: secondFingerprint
+            )
+        )
+        XCTAssertThrowsError(
+            try setup.store.addMediaShare(
+                account,
+                credential: replacement,
+                generatedPrivateKey: "REPLACEMENT KEY"
+            )
+        ) {
+            XCTAssertEqual($0 as? AccountStoreError, .generatedKeyReuse)
+        }
     }
 
     func testStagedGeneratedKeyWithoutEnvelopeIsRetiredDuringRecovery() throws {

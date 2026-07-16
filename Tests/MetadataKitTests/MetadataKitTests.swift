@@ -74,6 +74,54 @@ final class MetadataKitTests: XCTestCase {
         XCTAssertEqual(ids.anidb, 5)
     }
 
+    func testCurrentArtworkPriorityPreservesEveryExistingChain() {
+        let expected: [ContentType: [ArtworkKind: [MetadataSource]]] = [
+            .anime: [
+                .hero: [.tmdb, .anilist, .kitsu],
+                .poster: [.anilist, .kitsu, .tmdb],
+                .thumbnail: [.tmdb],
+                .logo: [.tmdb, .wikidata, .wikipedia]
+            ],
+            .tvShow: [
+                .hero: [.tvdb, .tmdb, .wikidata, .wikipedia],
+                .poster: [.tmdb, .tvmaze, .tvdb, .wikidata, .wikipedia],
+                .thumbnail: [.tmdb, .tvmaze],
+                .logo: [.tmdb, .wikidata, .wikipedia]
+            ],
+            .movie: [
+                .hero: [.tvdb, .tmdb, .wikidata, .wikipedia],
+                .poster: [.tmdb, .tvdb, .wikidata, .wikipedia],
+                .thumbnail: [.tmdb],
+                .logo: [.tmdb, .wikidata, .wikipedia]
+            ],
+            .unknown: [
+                .hero: [.tvdb, .tmdb, .wikidata, .wikipedia],
+                .poster: [.tmdb, .tvdb, .wikidata, .wikipedia],
+                .thumbnail: [.tmdb],
+                .logo: [.tmdb, .wikidata, .wikipedia]
+            ],
+            .music: [:]
+        ]
+
+        for (type, chains) in expected {
+            for kind in [ArtworkKind.hero, .poster, .thumbnail, .logo] {
+                XCTAssertEqual(
+                    CurrentMetadataPriority.artworkSources(for: type, kind: kind),
+                    chains[kind] ?? [],
+                    "\(type.rawValue) \(kind.rawValue)"
+                )
+            }
+        }
+    }
+
+    func testCurrentOverviewPriorityPreservesExistingRouting() {
+        XCTAssertEqual(CurrentMetadataPriority.overviewSources(for: .anime), [.wikipedia])
+        XCTAssertEqual(CurrentMetadataPriority.overviewSources(for: .movie), [.wikipedia])
+        XCTAssertEqual(CurrentMetadataPriority.overviewSources(for: .tvShow), [.tvmaze])
+        XCTAssertEqual(CurrentMetadataPriority.overviewSources(for: .unknown), [.wikipedia])
+        XCTAssertEqual(CurrentMetadataPriority.overviewSources(for: .music), [])
+    }
+
     // MARK: - Query normalization
 
     func testEpisodeQueryUsesSeriesTitleAndNoYear() {

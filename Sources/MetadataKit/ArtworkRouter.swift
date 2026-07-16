@@ -55,15 +55,37 @@ public actor ArtworkRouter {
         return await artworkURL(kind, for: query)
     }
 
+    public func sourcedArtworkURL(
+        _ kind: ArtworkKind,
+        for item: MediaItem
+    ) async -> SourcedValue<URL>? {
+        await sourcedArtworkURL(kind, for: MetadataQuery(item))
+    }
+
     /// Lower-level entry point taking a prebuilt ``MetadataQuery``.
     public func artworkURL(_ kind: ArtworkKind, for query: MetadataQuery) async -> URL? {
+        await sourcedArtworkURL(kind, for: query)?.value
+    }
+
+    /// Resolves artwork together with the provider that supplied it.
+    public func sourcedArtworkURL(
+        _ kind: ArtworkKind,
+        for query: MetadataQuery
+    ) async -> SourcedValue<URL>? {
         let key = query.cacheKey(for: kind)
-        if let hit = await cache.cached(key) { return hit }
+        if let hit = await cache.cached(key) {
+            guard let hit else { return nil }
+            // The pre-provenance URL cache does not retain which provider won.
+            return SourcedValue(value: hit, source: .legacyUnknown)
+        }
 
         for provider in chain(for: query.contentType, kind: kind) {
             if let url = await provider.artworkURL(kind, for: query) {
                 await cache.store(url, for: key)
-                return url
+                return SourcedValue(
+                    value: url,
+                    source: MetadataSource(rawValue: provider.id)
+                )
             }
         }
         await cache.store(nil, for: key)
@@ -74,37 +96,21 @@ public actor ArtworkRouter {
     /// per-IP providers come first (they scale infinitely and cover anime/episodes
     /// best); the optional TMDb tier backs them up for heroes/logos/stills.
     private func chain(for type: ContentType, kind: ArtworkKind) -> [any ArtworkProvider] {
-        switch type {
-        case .anime:
-            switch kind {
-            case .hero: return [tmdb, anilist, kitsu]
-            case .poster: return [anilist, kitsu, tmdb]
-            case .thumbnail: return [tmdb] // real anime stills; series-backdrop fallback handled by callers
-            case .logo: return [tmdb, wikidata, wikipedia]
-            }
-        case .tvShow:
-            switch kind {
-            case .hero: return [tvdb, tmdb, wikidata, wikipedia]
-            case .poster: return [tmdb, tvmaze, tvdb, wikidata, wikipedia]
-            case .thumbnail: return [tmdb, tvmaze]
-            case .logo: return [tmdb, wikidata, wikipedia]
-            }
-        case .movie:
-            switch kind {
-            case .hero: return [tvdb, tmdb, wikidata, wikipedia]
-            case .poster: return [tmdb, tvdb, wikidata, wikipedia]
-            case .thumbnail: return [tmdb]
-            case .logo: return [tmdb, wikidata, wikipedia]
-            }
-        case .unknown:
-            switch kind {
-            case .hero: return [tvdb, tmdb, wikidata, wikipedia]
-            case .poster: return [tmdb, tvdb, wikidata, wikipedia]
-            case .thumbnail: return [tmdb]
-            case .logo: return [tmdb, wikidata, wikipedia]
-            }
-        case .music:
-            return []
+        CurrentMetadataPriority.artworkSources(for: type, kind: kind).compactMap {
+            provider(for: $0)
+        }
+    }
+
+    private func provider(for source: MetadataSource) -> (any ArtworkProvider)? {
+        switch source {
+        case .anilist: anilist
+        case .kitsu: kitsu
+        case .tvmaze: tvmaze
+        case .wikidata: wikidata
+        case .wikipedia: wikipedia
+        case .tmdb: tmdb
+        case .tvdb: tvdb
+        default: nil
         }
     }
 

@@ -177,6 +177,8 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
     /// External database identifiers (e.g. `["Imdb": "tt0111161", "Tmdb": "278"]`),
     /// used by enrichment services to look up additional ratings/metadata.
     public var providerIDs: [String: String]
+    /// Field-level origin and optional attribution URL for metadata values.
+    public var metadataProvenance: MetadataProvenance
 
     /// Library-availability of this title as reported by a discovery backend
     /// (Seerr/Overseerr's `mediaInfo.status`). `nil` for ordinary library items
@@ -332,6 +334,7 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         logoURL: URL? = nil,
         ratings: [ExternalRating] = [],
         providerIDs: [String: String] = [:],
+        metadataProvenance: MetadataProvenance = MetadataProvenance(),
         availability: MediaAvailabilityStatus? = nil,
         downloadProgress: Double? = nil,
         mediaInfo: MediaSourceMetadata? = nil,
@@ -376,6 +379,7 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         self.logoURL = logoURL
         self.ratings = ratings
         self.providerIDs = providerIDs
+        self.metadataProvenance = metadataProvenance
         self.availability = availability
         self.downloadProgress = downloadProgress
         self.mediaInfo = mediaInfo
@@ -401,7 +405,7 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         case productionYear, officialRating, genres, people, studios, tags, taglines
         case seriesID, seasonID, runtime, resumePosition, playedPercentage, isPlayed, hasBeenPlayed
         case posterURL, seriesPosterURL, backdropURL, heroBackdropURL
-        case fallbackArtworkURL, logoURL, ratings, providerIDs, mediaInfo
+        case fallbackArtworkURL, logoURL, ratings, providerIDs, metadataProvenance, mediaInfo
         case availability
         case downloadProgress
         case sourceAccountID, additionalSourceAccountIDs, versions, isFavorite
@@ -443,6 +447,10 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         logoURL = try container.decodeIfPresent(URL.self, forKey: .logoURL)
         ratings = try container.decodeIfPresent([ExternalRating].self, forKey: .ratings) ?? []
         providerIDs = try container.decodeIfPresent([String: String].self, forKey: .providerIDs) ?? [:]
+        metadataProvenance = (try? container.decodeIfPresent(
+            MetadataProvenance.self,
+            forKey: .metadataProvenance
+        )) ?? MetadataProvenance()
         availability = try container.decodeIfPresent(MediaAvailabilityStatus.self, forKey: .availability)
         downloadProgress = try container.decodeIfPresent(Double.self, forKey: .downloadProgress)
         mediaInfo = try container.decodeIfPresent(MediaSourceMetadata.self, forKey: .mediaInfo)

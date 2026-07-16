@@ -22,6 +22,13 @@ enum HomeRuntimeScope {
     static func identityKey(profileID: String, plexIdentityGeneration: Int) -> String {
         "\(profileID)#\(plexIdentityGeneration)"
     }
+
+    static func accountScopeKey(_ accounts: [Account]) -> String {
+        accounts
+            .map { "\($0.id)#\($0.credentialRevision.rawValue.uuidString)" }
+            .sorted()
+            .joined(separator: "|")
+    }
 }
 
 /// Top-level view that renders one screen per `SessionState`.
@@ -124,6 +131,7 @@ public struct RootView: View {
                     if !accounts.isEmpty {
                     MainTabView(
                         accounts: accounts,
+                        currentAccounts: { appState.homeAccounts },
                         networkFileResolver: appState.networkFileResolver,
                         authenticatedHTTPResolver: appState.authenticatedHTTPResolver,
                         subtitleBehaviorModel: appState.subtitleBehaviorModel,

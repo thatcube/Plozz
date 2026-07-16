@@ -78,6 +78,11 @@ final class ShareScanStatusModelTests: XCTestCase {
         XCTAssertTrue(model.isBusy(shareNamed: "Brando NAS"))
         XCTAssertFalse(model.isBusy(shareNamed: "Other"))
         XCTAssertFalse(model.isBusy(shareNamed: ""), "an empty name never matches")
+        XCTAssertEqual(
+            model.busyStates(forShareIDs: ["s1"]).map(\.name),
+            ["Brando NAS"]
+        )
+        XCTAssertTrue(model.busyStates(forShareIDs: ["inactive"]).isEmpty)
 
         model.scanFinished(shareID: "s1")
         XCTAssertFalse(model.isBusy(shareNamed: "Brando NAS"), "no longer busy once the scan finishes")
@@ -163,7 +168,20 @@ final class ShareScanStatusModelTests: XCTestCase {
         model.enrichStarted(shareID: "s1", total: 10)
 
         XCTAssertNil(model.state(forShareID: "s1"))
-        XCTAssertFalse(model.isAnyBusy)
+    }
+
+    func testRegisteredReplacementAcceptsEventsAfterRemovalFence() {
+        let model = ShareScanStatusModel()
+        model.scanStarted(shareID: "s1", name: "NAS")
+        model.removeShare(shareID: "s1")
+
+        model.registerShare(shareID: "s1")
+        model.scanStarted(shareID: "s1", name: "NAS")
+        model.enrichStarted(shareID: "s1", total: 4)
+
+        XCTAssertTrue(model.state(forShareID: "s1")?.isScanning == true)
+        XCTAssertTrue(model.state(forShareID: "s1")?.isEnriching == true)
+        XCTAssertTrue(model.isAnyBusy)
     }
 
     func testLegacyReporterReceivesDetailedScannerProgress() {

@@ -98,6 +98,7 @@ actor ShareMetadataWorkScheduler {
     private var admissionGenerations: [String: UInt64] = [:]
     private var registrationGenerations: [String: UInt64] = [:]
     private var suspensionCounts: [String: Int] = [:]
+    private var preferredAccountKeys: Set<String> = []
     private var worker: Task<Void, Never>?
     private var running: Running?
 
@@ -144,6 +145,19 @@ actor ShareMetadataWorkScheduler {
         let key = urgentKey(urgent)
         guard queuedUrgentKeys.insert(key).inserted else { return }
         urgentQueue.append(urgent)
+        ensureWorker()
+    }
+
+    /// Prioritizes the active profile's shares ahead of passive work retained for
+    /// other profiles. Urgent opened-item work remains globally first.
+    func setPreferredAccountKeys(_ accountKeys: Set<String>) {
+        preferredAccountKeys = accountKeys
+        if let running,
+           running.work.isBacklog,
+           !accountKeys.contains(running.work.accountKey),
+           backlogQueue.contains(where: { accountKeys.contains($0) }) {
+            running.task.cancel()
+        }
         ensureWorker()
     }
 
@@ -306,22 +320,24 @@ actor ShareMetadataWorkScheduler {
     /// Tries every currently queued item once so one playback-blocked share cannot
     /// starve runnable work from other accounts.
     private func dequeueRunnableWork() async -> (Work, Job)? {
-        let attempts = urgentQueue.count + backlogQueue.count
-        guard attempts > 0 else { return nil }
-        var deferred: [Work] = []
-        for _ in 0..<attempts {
-            guard let work = dequeueNextWork(),
-                  let job = jobs[work.accountKey] else {
-                continue
-            }
+        let candidates =
+            urgentQueue.map(Work.item)
+            + backlogQueue
+                .filter { preferredAccountKeys.contains($0) }
+                .map { Work.backlog(accountKey: $0) }
+            + backlogQueue
+                .filter { !preferredAccountKeys.contains($0) }
+                .map { Work.backlog(accountKey: $0) }
+        for work in candidates {
+            guard takeQueued(work), let job = jobs[work.accountKey] else { continue }
             if suspensionCounts[work.accountKey, default: 0] > 0 {
-                deferred.append(work)
+                requeue(work)
                 continue
             }
             if work.isBacklog,
                let notBefore = job.notBefore,
                clock.now < notBefore {
-                deferred.append(work)
+                requeue(work)
                 continue
             }
             let admissionGeneration = admissionGenerations[work.accountKey, default: 0]
@@ -329,25 +345,33 @@ actor ShareMetadataWorkScheduler {
                jobs[work.accountKey] != nil,
                admissionGenerations[work.accountKey, default: 0] == admissionGeneration,
                suspensionCounts[work.accountKey, default: 0] == 0 {
-                for work in deferred { requeue(work) }
+                // An enqueue may have landed while `mayRun` yielded the actor.
+                // Consume that duplicate before returning the admitted work.
+                _ = takeQueued(work)
                 return (work, job)
             }
-            deferred.append(work)
+            requeue(work)
         }
-        for work in deferred { requeue(work) }
         return nil
     }
 
-    private func dequeueNextWork() -> Work? {
-        if !urgentQueue.isEmpty {
-            let urgent = urgentQueue.removeFirst()
+    private func takeQueued(_ work: Work) -> Bool {
+        switch work {
+        case .item(let urgent):
+            guard let index = urgentQueue.firstIndex(of: urgent) else {
+                return false
+            }
+            urgentQueue.remove(at: index)
             queuedUrgentKeys.remove(urgentKey(urgent))
-            return .item(urgent)
+            return true
+        case .backlog(let accountKey):
+            guard let index = backlogQueue.firstIndex(of: accountKey) else {
+                return false
+            }
+            backlogQueue.remove(at: index)
+            queuedBacklogs.remove(accountKey)
+            return true
         }
-        guard !backlogQueue.isEmpty else { return nil }
-        let accountKey = backlogQueue.removeFirst()
-        queuedBacklogs.remove(accountKey)
-        return .backlog(accountKey: accountKey)
     }
 
     private func requeue(_ work: Work) {

@@ -996,6 +996,7 @@ public final class AppState {
     public let authenticatedHTTPResolver: any AuthenticatedHTTPResourceResolving
     private let networkFileResolverRegistry: MediaTransportResolverRegistry?
     private let shareCatalogCoordinator: ShareCatalogCoordinator
+    private var sharePriorityRevision: UInt64 = 0
     private let durableLocalStateStore: DurableLocalStateStore?
     /// Optional tvOS system-user seam (default app-owned no-op). See
     /// `SystemProfileBridging`.
@@ -3430,6 +3431,22 @@ public final class AppState {
             resolved = Set(globalActive.filter { known.contains($0) })
         }
         activeAccountIDs = resolved
+        sharePriorityRevision &+= 1
+        let priorityRevision = sharePriorityRevision
+        let preferredShareIDs = Set(
+            accounts
+                .filter {
+                    resolved.contains($0.id)
+                        && $0.server.provider == .mediaShare
+                }
+                .map(\.id)
+        )
+        Task { [shareCatalogCoordinator] in
+            await shareCatalogCoordinator.setPreferredAccountKeys(
+                preferredShareIDs,
+                revision: priorityRevision
+            )
+        }
     }
 
     /// Rebuilds the settings models scoped to the active profile's

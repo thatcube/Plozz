@@ -34,6 +34,7 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
     private var restartingScans: Set<String> = []
     private var arbiters: [String: MediaIOArbiter] = [:]
     private let metadataScheduler = ShareMetadataWorkScheduler()
+    private var preferredAccountRevision: UInt64 = 0
     private let arbiterFactory: ArbiterFactory
     /// When each share last completed a background (non-forced) scan.
     /// `catalog` is a computed property queried on every Home/browse access, and
@@ -70,6 +71,17 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
         self.reporter = reporter
         for scanner in scanners.values { await scanner.setReporter(reporter) }
         for enricher in enrichers.values { await enricher.setReporter(reporter) }
+    }
+
+    /// Gives the scheduler the current profile's media-share account ids. Their
+    /// passive backlog drains before work retained for other profiles.
+    public func setPreferredAccountKeys(
+        _ accountKeys: Set<String>,
+        revision: UInt64
+    ) async {
+        guard revision >= preferredAccountRevision else { return }
+        preferredAccountRevision = revision
+        await metadataScheduler.setPreferredAccountKeys(accountKeys)
     }
 
     /// Return the shared catalog store for a share, creating it (and a dedicated
@@ -109,6 +121,10 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
             }
 
             if scanners[accountKey] == nil {
+                // Any prior instance with this deterministic account id has fully
+                // invalidated above. Open the replacement status lifecycle before
+                // its scanner can report, preserving ordered late-event fencing.
+                reporter.shareRegistered(accountKey)
                 // A factory of independent scan connections: the SMB library is serial
                 // per connection, so parallelism comes from N separate transport sessions
                 // (each its own socket), dedicated to scanning so a walk never starves

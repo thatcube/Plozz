@@ -1,4 +1,5 @@
 import XCTest
+import CoreModels
 @testable import AppShell
 
 /// Locks the profile-isolation invariant behind the Home tab's `.id`: the
@@ -23,6 +24,44 @@ final class HomeRuntimeScopeTests: XCTestCase {
         XCTAssertEqual(
             HomeRuntimeScope.identityKey(profileID: "alice", plexIdentityGeneration: 2),
             HomeRuntimeScope.identityKey(profileID: "alice", plexIdentityGeneration: 2)
+        )
+    }
+
+    func testAccountScopeChangesWhenAServerIsToggled() {
+        XCTAssertNotEqual(
+            HomeRuntimeScope.accountScopeKey([account(id: "a")]),
+            HomeRuntimeScope.accountScopeKey([account(id: "a"), account(id: "b")])
+        )
+    }
+
+    func testAccountScopeIsOrderIndependentAndRevisionSensitive() {
+        let first = account(id: "a")
+        var rotated = first
+        rotated.credentialRevision = CredentialRevision()
+        let second = account(id: "b")
+
+        XCTAssertEqual(
+            HomeRuntimeScope.accountScopeKey([first, second]),
+            HomeRuntimeScope.accountScopeKey([second, first])
+        )
+        XCTAssertNotEqual(
+            HomeRuntimeScope.accountScopeKey([first]),
+            HomeRuntimeScope.accountScopeKey([rotated])
+        )
+    }
+
+    private func account(id: String) -> Account {
+        Account(
+            id: id,
+            server: MediaServer(
+                id: "server-\(id)",
+                name: id,
+                baseURL: URL(string: "https://\(id).example.test")!,
+                provider: .jellyfin
+            ),
+            userID: "user-\(id)",
+            userName: id,
+            deviceID: "device"
         )
     }
 }

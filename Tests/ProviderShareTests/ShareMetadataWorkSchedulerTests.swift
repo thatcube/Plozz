@@ -152,6 +152,89 @@ final class ShareMetadataWorkSchedulerTests: XCTestCase {
         XCTAssertEqual(maxActive, 1)
     }
 
+    func testPreferredBacklogRunsFirstAndOtherProfilesEventuallyRun() async {
+        let recorder = Recorder()
+        let gate = Gate()
+        let scheduler = ShareMetadataWorkScheduler(configuration: .init(
+            maxItemsPerSlice: 1,
+            maxSliceDuration: .seconds(1),
+            delayBetweenSlices: .milliseconds(1),
+            interactiveIdleDelay: .milliseconds(1),
+            blockedPollDelay: .milliseconds(1)
+        ))
+        await scheduler.setPreferredAccountKeys(["active"])
+
+        for account in ["inactive", "active"] {
+            await scheduler.register(
+                accountKey: account,
+                mayRun: { await gate.isOpen },
+                runSlice: { _, _ in
+                    await recorder.begin(account)
+                    await recorder.end()
+                    let call = await recorder.nextSlice(account)
+                    return ShareEnrichmentSliceResult(
+                        attempted: 1,
+                        hasMore: account == "active" && call < 2
+                    )
+                },
+                runItem: { _ in }
+            )
+        }
+
+        await scheduler.enqueueBacklog(accountKey: "inactive")
+        await scheduler.enqueueBacklog(accountKey: "active")
+        await gate.open()
+
+        let finished = await waitUntil {
+            (await recorder.events).count == 3
+        }
+        XCTAssertTrue(finished)
+        let events = await recorder.events
+        XCTAssertEqual(events.first, "active")
+        XCTAssertEqual(events.filter { $0 == "active" }.count, 2)
+        XCTAssertEqual(events.filter { $0 == "inactive" }.count, 1)
+    }
+
+    func testBlockedPreferredBacklogFallsBackToOtherProfile() async {
+        let recorder = Recorder()
+        let scheduler = ShareMetadataWorkScheduler(configuration: .init(
+            maxItemsPerSlice: 1,
+            maxSliceDuration: .seconds(1),
+            delayBetweenSlices: .milliseconds(1),
+            interactiveIdleDelay: .milliseconds(1),
+            blockedPollDelay: .milliseconds(1)
+        ))
+        await scheduler.setPreferredAccountKeys(["active"])
+        await scheduler.register(
+            accountKey: "active",
+            mayRun: { false },
+            runSlice: { _, _ in
+                await recorder.begin("active")
+                await recorder.end()
+                return ShareEnrichmentSliceResult(attempted: 1, hasMore: false)
+            },
+            runItem: { _ in }
+        )
+        await scheduler.register(
+            accountKey: "inactive",
+            mayRun: { true },
+            runSlice: { _, _ in
+                await recorder.begin("inactive")
+                await recorder.end()
+                return ShareEnrichmentSliceResult(attempted: 1, hasMore: false)
+            },
+            runItem: { _ in }
+        )
+
+        await scheduler.enqueueBacklog(accountKey: "active")
+        await scheduler.enqueueBacklog(accountKey: "inactive")
+
+        let finished = await waitUntil {
+            (await recorder.events) == ["inactive"]
+        }
+        XCTAssertTrue(finished)
+    }
+
     func testOpenedItemJumpsAheadOfBlockedBacklog() async {
         let recorder = Recorder()
         let gate = Gate()

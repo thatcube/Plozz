@@ -267,6 +267,63 @@ final class ItemDetailViewModelTests: XCTestCase {
         )
     }
 
+    func testSwitchingBetweenShareAccountsRunsEachSourceProbe() async {
+        let smbItem = MediaItem(
+            id: "movie",
+            title: "Movie",
+            kind: .movie,
+            sourceAccountID: "smb"
+        )
+        let webDAVItem = MediaItem(
+            id: "movie",
+            title: "Movie",
+            kind: .movie,
+            sourceAccountID: "webdav"
+        )
+        let smb = FakeMediaProvider(
+            allItems: [smbItem],
+            kind: .mediaShare,
+            accountID: "smb"
+        )
+        let webDAV = FakeMediaProvider(
+            allItems: [webDAVItem],
+            kind: .mediaShare,
+            accountID: "webdav"
+        )
+        smb.supplementalFactsByItem["movie"] = ProbedStreamFacts(
+            audioCodec: "eac3",
+            audioChannels: 6
+        )
+        webDAV.supplementalFactsByItem["movie"] = ProbedStreamFacts(
+            audioCodec: "eac3",
+            audioChannels: 6,
+            audioIsAtmos: true
+        )
+        let vm = ItemDetailViewModel(
+            provider: smb,
+            itemID: "movie",
+            sourceAccountID: "smb",
+            onlineTrailerResolver: { _ in [] },
+            playableVideoIDResolver: { _ in nil },
+            trailerCache: TrailerResolutionCache(),
+            initialSources: [
+                MediaSourceRef(accountID: "smb", itemID: "movie"),
+                MediaSourceRef(accountID: "webdav", itemID: "movie")
+            ],
+            alternateProviderResolver: { $0 == "webdav" ? webDAV : smb }
+        )
+
+        await vm.load()
+        await waitUntil { smb.supplementalProbeCount == 1 }
+        await vm.switchToSource(accountID: "webdav")
+        await waitUntil {
+            vm.state.value?.item.mediaInfo?.audio?.profile == "Dolby Atmos"
+        }
+
+        XCTAssertEqual(smb.supplementalProbeCount, 1)
+        XCTAssertEqual(webDAV.supplementalProbeCount, 1)
+    }
+
     func testEnrichesAlternateSourcesAndUnifiesWatchState() async {
         let primary = MediaItem(id: "p1", title: "Dune", kind: .movie, productionYear: 2021,
                                 sourceAccountID: "plex",

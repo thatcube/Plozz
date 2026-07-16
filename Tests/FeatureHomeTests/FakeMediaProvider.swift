@@ -81,12 +81,16 @@ final class FakeMediaProvider: MediaProvider, InteractiveBrowseActivityReporting
     private var _cancelledPageStartIndices: [Int] = []
     var cancelledPageStartIndices: [Int] { withLock { _cancelledPageStartIndices } }
 
-    init(allItems: [MediaItem], kind: ProviderKind = .jellyfin) {
+    init(
+        allItems: [MediaItem],
+        kind: ProviderKind = .jellyfin,
+        accountID: String = "s"
+    ) {
         self.allItems = allItems
         self.kind = kind
         self.session = UserSession(
             server: MediaServer(
-                id: "s",
+                id: accountID,
                 name: "Home",
                 baseURL: URL(string: "http://host:8096")!,
                 provider: kind

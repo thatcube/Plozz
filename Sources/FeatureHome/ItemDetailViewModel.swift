@@ -1593,6 +1593,7 @@ public final class ItemDetailViewModel {
     ) {
         let key = [
             provider.kind.rawValue,
+            provider.session.server.id,
             item.id,
             item.mediaInfo?.sourceRevision ?? "-"
         ].joined(separator: "|")

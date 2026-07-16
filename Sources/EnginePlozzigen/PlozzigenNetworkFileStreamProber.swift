@@ -16,7 +16,10 @@ public struct PlozzigenNetworkFileStreamProber: NetworkFileStreamProbing {
     }
 
     public func probe(locator: NetworkFileLocator) async -> ProbedStreamFacts? {
-        guard let resolved = try? await resolver.resolve(locator) else { return nil }
+        guard let resolved = try? await resolver.resolve(locator) else {
+            HandoffDiagnostics.emit("shareProbe FAILED stage=resolve")
+            return nil
+        }
         let reader = TransportIOReader(resolvedSource: resolved)
         let source = MediaSource.custom(
             reader,
@@ -25,14 +28,24 @@ public struct PlozzigenNetworkFileStreamProber: NetworkFileStreamProbing {
 
         // find_stream_info is a BLOCKING call; run it on a dedicated serial thread so
         // it never occupies (and exhausts) the Swift concurrency pool.
+        let started = Date()
         let probe = await PlozzigenStreamProbeExecutor.runAtmosProbe {
             try? AetherEngine.probeDetectingAtmos(source: source)
         }
+        let elapsedMs = Int(Date().timeIntervalSince(started) * 1_000)
         reader.close()
         await reader.waitForFinalShutdown()
 
-        guard let probe else { return nil }
-        return Self.facts(from: probe)
+        guard let probe else {
+            HandoffDiagnostics.emit("shareProbe FAILED stage=probe elapsed=\(elapsedMs)ms")
+            return nil
+        }
+        let facts = Self.facts(from: probe)
+        HandoffDiagnostics.emit(
+            "shareProbe elapsed=\(elapsedMs)ms range=\(facts.videoRangeType ?? "-") "
+                + "codec=\(facts.audioCodec ?? "-") atmos=\(facts.audioIsAtmos)"
+        )
+        return facts
     }
 
     static func facts(from probe: SourceProbe) -> ProbedStreamFacts {

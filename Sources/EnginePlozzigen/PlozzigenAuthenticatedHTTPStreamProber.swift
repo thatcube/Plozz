@@ -13,8 +13,16 @@ public struct PlozzigenAuthenticatedHTTPStreamProber: AuthenticatedHTTPStreamPro
     public func probe(
         locator: AuthenticatedHTTPPlaybackLocator
     ) async -> ProbedStreamFacts? {
-        guard locator.deliveryMode == .directFile,
-              let url = try? await resolver.resolve(locator) else {
+        guard locator.deliveryMode == .directFile else {
+            HandoffDiagnostics.emit(
+                "atmosProbe SKIP item=\(locator.itemID) reason=notDirectFile"
+            )
+            return nil
+        }
+        guard let url = try? await resolver.resolve(locator) else {
+            HandoffDiagnostics.emit(
+                "atmosProbe FAILED item=\(locator.itemID) stage=resolve"
+            )
             return nil
         }
 

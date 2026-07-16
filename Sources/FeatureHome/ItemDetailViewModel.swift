@@ -322,11 +322,11 @@ public final class ItemDetailViewModel {
     /// pays zero speculative cost. Zero under tests. (Trailer extraction has its
     /// own dwell on the awaited path — see ``trailerExtractionDwellNanos``.)
     private static var enrichmentDwellNanos: UInt64 { isRunningUnderTests ? 0 : 800_000_000 }
-    /// Additional settle time before a bounded one-frame stream probe. This keeps
-    /// the probe entirely behind first paint and lets a quick Play/back cancel it
-    /// before any media bytes are requested.
+    /// Settle time before a bounded one-frame stream probe. This task is separate
+    /// from cross-server discovery so an explicit source switch restarts it for
+    /// the newly selected provider without rerunning unrelated fan-out.
     private static var streamProbeDwellNanos: UInt64 {
-        isRunningUnderTests ? 0 : 1_500_000_000
+        isRunningUnderTests ? 0 : 2_300_000_000
     }
 
     /// Further dwell before the authoritative YouTubeKit/JavaScriptCore trailer
@@ -343,6 +343,8 @@ public final class ItemDetailViewModel {
     /// after tapping through several titles. Trailers + ratings, by contrast, are
     /// awaited on the `load()` path (see ``runTrailersAndRatings(for:)``).
     private nonisolated(unsafe) var enrichmentTask: Task<Void, Never>?
+    private nonisolated(unsafe) var streamProbeTask: Task<Void, Never>?
+    private var completedStreamProbeKey: String?
     /// The fully-loaded item enrichment is keyed to, so a page returned to (popped
     /// back onto) can resume the speculative discovery that was suspended on
     /// disappear.
@@ -446,6 +448,7 @@ public final class ItemDetailViewModel {
     /// watchdog. `Task.cancel()` is safe to call from this non-isolated `deinit`.
     deinit {
         enrichmentTask?.cancel()
+        streamProbeTask?.cancel()
         crossServerDiscoveryTask?.cancel()
         alternateSourceEnrichmentTask?.cancel()
         snapshotRestoreTask?.cancel()
@@ -565,6 +568,11 @@ public final class ItemDetailViewModel {
                 state = .loaded(Detail(item: taggedItem, children: seededChildren, childrenLoaded: state.value?.childrenLoaded ?? false))
                 hasPaintedFreshDetail = true
                 seedSources(from: taggedItem)
+                startStreamProbeEnrichment(
+                    for: item,
+                    provider: loadProvider,
+                    sourceGeneration: loadSourceGeneration
+                )
                 // Speculative discovery (cross-server picker + alternate-source
                 // watch-state) runs as a CANCELLABLE unit that `load()` does NOT
                 // await — so navigating away cancels it instead of letting the
@@ -591,6 +599,11 @@ public final class ItemDetailViewModel {
                 state = .loaded(Detail(item: taggedItem, children: [], childrenLoaded: true))
                 hasPaintedFreshDetail = true
                 seedSources(from: taggedItem)
+                startStreamProbeEnrichment(
+                    for: item,
+                    provider: loadProvider,
+                    sourceGeneration: loadSourceGeneration
+                )
                 persistSnapshot()
                 // See container branch: speculative discovery is cancellable and
                 // NOT awaited (a navigate-away drops it), while trailers + ratings
@@ -709,11 +722,6 @@ public final class ItemDetailViewModel {
             self.enrichmentGeneration = token
             self.startAlternateSourceEnrichment(primaryID: item.id)
             self.startCrossServerDiscovery(for: taggedItem)
-            await self.enrichSupplementalStreamFacts(
-                for: item,
-                provider: self.activeProvider,
-                sourceGeneration: self.sourceGeneration
-            )
             self.enrichmentComplete = true
         }
     }
@@ -756,6 +764,7 @@ public final class ItemDetailViewModel {
     /// page's `provider.item` (the multi-second blank-detail hang).
     public func suspendEnrichment() {
         enrichmentTask?.cancel(); enrichmentTask = nil
+        streamProbeTask?.cancel(); streamProbeTask = nil
         crossServerDiscoveryTask?.cancel(); crossServerDiscoveryTask = nil
         alternateSourceEnrichmentTask?.cancel(); alternateSourceEnrichmentTask = nil
         seasonLoadingSuspended = true
@@ -770,7 +779,15 @@ public final class ItemDetailViewModel {
         if seasonLoadingResumeSourceGeneration == nil {
             seasonLoadingSuspended = false
         }
-        guard hasPaintedFreshDetail, !enrichmentComplete, enrichmentTask == nil,
+        guard hasPaintedFreshDetail else { return }
+        if let item = state.value?.item {
+            startStreamProbeEnrichment(
+                for: item,
+                provider: activeProvider,
+                sourceGeneration: sourceGeneration
+            )
+        }
+        guard !enrichmentComplete, enrichmentTask == nil,
               let item = enrichmentItem else { return }
         startSpeculativeEnrichment(for: item)
     }
@@ -993,6 +1010,11 @@ public final class ItemDetailViewModel {
         }
         guard !Task.isCancelled, isCurrent() else { return }
         state = .loaded(Detail(item: tagged(item), children: children.map(tagged), childrenLoaded: true))
+        startStreamProbeEnrichment(
+            for: item,
+            provider: provider,
+            sourceGeneration: reloadSourceGeneration
+        )
         if seasonLoadingResumeSourceGeneration == reloadSourceGeneration {
             seasonLoadingSuspended = false
             seasonLoadingResumeSourceGeneration = nil
@@ -1548,10 +1570,6 @@ public final class ItemDetailViewModel {
               let provider = provider as? any SupplementalStreamFactsProviding else {
             return
         }
-        if Self.streamProbeDwellNanos > 0 {
-            try? await Task.sleep(nanoseconds: Self.streamProbeDwellNanos)
-            guard !Task.isCancelled else { return }
-        }
         guard let facts = await provider.supplementalStreamFacts(for: item),
               facts.audioIsAtmos,
               !Task.isCancelled,
@@ -1564,6 +1582,38 @@ public final class ItemDetailViewModel {
         detail.item = Self.applyingConfirmedAtmos(to: detail.item)
         state = .loaded(detail)
         persistSnapshot()
+    }
+
+    private func startStreamProbeEnrichment(
+        for item: MediaItem,
+        provider: any MediaProvider,
+        sourceGeneration: UInt64
+    ) {
+        let key = [
+            provider.kind.rawValue,
+            item.id,
+            item.mediaInfo?.sourceRevision ?? "-"
+        ].joined(separator: "|")
+        guard completedStreamProbeKey != key else { return }
+        streamProbeTask?.cancel()
+        streamProbeTask = Task(priority: .utility) { [weak self] in
+            if Self.streamProbeDwellNanos > 0 {
+                try? await Task.sleep(nanoseconds: Self.streamProbeDwellNanos)
+                guard !Task.isCancelled else { return }
+            }
+            guard let self else { return }
+            await self.enrichSupplementalStreamFacts(
+                for: item,
+                provider: provider,
+                sourceGeneration: sourceGeneration
+            )
+            guard !Task.isCancelled,
+                  self.sourceGeneration == sourceGeneration else {
+                return
+            }
+            self.completedStreamProbeKey = key
+            self.streamProbeTask = nil
+        }
     }
 
     private static func applyingConfirmedAtmos(to item: MediaItem) -> MediaItem {

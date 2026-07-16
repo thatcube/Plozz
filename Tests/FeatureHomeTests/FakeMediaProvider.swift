@@ -17,7 +17,7 @@ import CoreModels
 /// never held across an `await`.
 final class FakeMediaProvider: MediaProvider, InteractiveBrowseActivityReporting,
     SupplementalStreamFactsProviding, @unchecked Sendable {
-    let kind: ProviderKind = .jellyfin
+    let kind: ProviderKind
     let session: UserSession
 
     /// Serializes mutation/reads of the call-counter state touched concurrently by
@@ -81,10 +81,16 @@ final class FakeMediaProvider: MediaProvider, InteractiveBrowseActivityReporting
     private var _cancelledPageStartIndices: [Int] = []
     var cancelledPageStartIndices: [Int] { withLock { _cancelledPageStartIndices } }
 
-    init(allItems: [MediaItem]) {
+    init(allItems: [MediaItem], kind: ProviderKind = .jellyfin) {
         self.allItems = allItems
+        self.kind = kind
         self.session = UserSession(
-            server: MediaServer(id: "s", name: "Home", baseURL: URL(string: "http://host:8096")!, provider: .jellyfin),
+            server: MediaServer(
+                id: "s",
+                name: "Home",
+                baseURL: URL(string: "http://host:8096")!,
+                provider: kind
+            ),
             userID: "u1", userName: "Alice", deviceID: "d1", accessToken: "TOKEN"
         )
     }

@@ -160,6 +160,61 @@ final class ItemDetailViewModelTests: XCTestCase {
         XCTAssertNil(vm.state.value?.item.mediaInfo?.audio?.profile)
     }
 
+    func testSwitchingFromPlexToEmbyStartsEmbyAtmosProbe() async {
+        let plexItem = MediaItem(
+            id: "plex-movie",
+            title: "Movie",
+            kind: .movie,
+            mediaInfo: MediaSourceMetadata(
+                container: "mkv",
+                sourceRevision: "plex-rev",
+                audio: .init(codec: "truehd", profile: "Dolby Atmos", channels: 8)
+            ),
+            sourceAccountID: "plex"
+        )
+        let embyItem = MediaItem(
+            id: "emby-movie",
+            title: "Movie",
+            kind: .movie,
+            mediaInfo: MediaSourceMetadata(
+                container: "mkv",
+                sourceRevision: "emby-rev",
+                audio: .init(codec: "eac3", channels: 6)
+            ),
+            sourceAccountID: "emby"
+        )
+        let plex = FakeMediaProvider(allItems: [plexItem], kind: .plex)
+        let emby = FakeMediaProvider(allItems: [embyItem], kind: .emby)
+        emby.supplementalFactsByItem["emby-movie"] = ProbedStreamFacts(
+            audioCodec: "eac3",
+            audioChannels: 6,
+            audioIsAtmos: true
+        )
+        let vm = ItemDetailViewModel(
+            provider: plex,
+            itemID: "plex-movie",
+            sourceAccountID: "plex",
+            onlineTrailerResolver: { _ in [] },
+            playableVideoIDResolver: { _ in nil },
+            trailerCache: TrailerResolutionCache(),
+            initialSources: [
+                MediaSourceRef(accountID: "plex", itemID: "plex-movie"),
+                MediaSourceRef(accountID: "emby", itemID: "emby-movie")
+            ],
+            alternateProviderResolver: { $0 == "emby" ? emby : nil }
+        )
+
+        await vm.load()
+        await vm.switchToSource(accountID: "emby")
+        await waitUntil {
+            vm.state.value?.item.mediaInfo?.audio?.profile == "Dolby Atmos"
+        }
+
+        XCTAssertEqual(vm.state.value?.item.id, "emby-movie")
+        XCTAssertEqual(emby.supplementalProbeCount, 1)
+        XCTAssertEqual(plex.supplementalProbeCount, 0)
+    }
+
     func testEnrichesAlternateSourcesAndUnifiesWatchState() async {
         let primary = MediaItem(id: "p1", title: "Dune", kind: .movie, productionYear: 2021,
                                 sourceAccountID: "plex",

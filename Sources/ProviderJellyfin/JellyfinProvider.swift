@@ -1210,6 +1210,12 @@ public struct JellyfinProvider: MediaProvider {
 
     private func map(item dto: BaseItemDto) -> MediaItem {
         let kind = Self.kind(forItemType: dto.`Type`)
+        if self.kind == .emby {
+            PlozzLog.playback.debug(
+                "Emby metadata item=\(dto.Id) top=[\(Self.technicalStreamSummary(dto.MediaStreams))] "
+                    + "sources=[\(Self.technicalSourceSummary(dto.MediaSources))]"
+            )
+        }
         let resumePosition = JellyfinTicks.seconds(fromTicks: dto.UserData?.PlaybackPositionTicks)
         let playedPercentage = dto.UserData?.PlayedPercentage.map { $0 / 100.0 }
         let serverPlayed = dto.UserData?.Played ?? false
@@ -1266,6 +1272,32 @@ public struct JellyfinProvider: MediaProvider {
             isFavorite: dto.UserData?.IsFavorite ?? false,
             lastPlayedAt: Self.parseDate(dto.UserData?.LastPlayedDate)
         )
+    }
+
+    private static func technicalSourceSummary(_ sources: [MediaSourceInfo]?) -> String {
+        guard let sources, !sources.isEmpty else { return "none" }
+        return sources.enumerated().map { index, source in
+            "\(index){container=\(source.Container ?? "-");streams=["
+                + technicalStreamSummary(source.MediaStreams) + "]}"
+        }.joined(separator: ",")
+    }
+
+    private static func technicalStreamSummary(_ streams: [MediaStreamDto]?) -> String {
+        guard let streams, !streams.isEmpty else { return "none" }
+        return streams.map { stream in
+            [
+                "type=\(stream.`Type`)",
+                "codec=\(stream.Codec ?? "-")",
+                "profile=\(stream.Profile ?? "-")",
+                "size=\(stream.Width.map(String.init) ?? "-")x\(stream.Height.map(String.init) ?? "-")",
+                "range=\(stream.VideoRange ?? "-")",
+                "rangeType=\(stream.VideoRangeType ?? "-")",
+                "extended=\(stream.ExtendedVideoType ?? "-")",
+                "subtype=\(stream.ExtendedVideoSubType ?? "-")",
+                "transfer=\(stream.ColorTransfer ?? "-")",
+                "default=\(stream.IsDefault.map(String.init) ?? "-")"
+            ].joined(separator: ";")
+        }.joined(separator: "|")
     }
 
     /// Maps a detail item's `MediaSources` into provider-agnostic

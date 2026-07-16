@@ -1659,22 +1659,12 @@ public struct JellyfinProvider: MediaProvider {
 extension JellyfinProvider: SupplementalStreamFactsProviding {
     public func supplementalStreamFacts(for item: MediaItem) async -> ProbedStreamFacts? {
         guard kind == .emby else { return nil }
-        guard item.mediaInfo?.audio?.codec?.lowercased() == "eac3" else {
-            PlozzLog.playback.debug(
-                "Atmos enrichment skipped item=\(item.id) reason=notEAC3"
-            )
-            return nil
-        }
+        guard item.mediaInfo?.audio?.codec?.lowercased() == "eac3" else { return nil }
         guard item.mediaInfo?.audio?.profile?
             .localizedCaseInsensitiveContains("atmos") != true else {
             return nil
         }
-        guard let authenticatedStreamProber else {
-            PlozzLog.playback.error(
-                "Atmos enrichment unavailable item=\(item.id) reason=noProber"
-            )
-            return nil
-        }
+        guard let authenticatedStreamProber else { return nil }
 
         var descriptor = await probeDescriptors.descriptor(for: item.id)
         if descriptor == nil,
@@ -1682,28 +1672,12 @@ extension JellyfinProvider: SupplementalStreamFactsProviding {
             await probeDescriptors.remember(itemID: item.id, sources: dto.MediaSources)
             descriptor = await probeDescriptors.descriptor(for: item.id)
         }
-        guard let descriptor else {
-            PlozzLog.playback.error(
-                "Atmos enrichment unavailable item=\(item.id) reason=noDescriptor"
-            )
-            return nil
-        }
+        guard let descriptor else { return nil }
         guard item.mediaInfo?.sourceRevision == nil
-                || item.mediaInfo?.sourceRevision == descriptor.revision else {
-            PlozzLog.playback.debug(
-                "Atmos enrichment skipped item=\(item.id) reason=revisionMismatch"
-            )
-            return nil
-        }
+                || item.mediaInfo?.sourceRevision == descriptor.revision else { return nil }
 
         let cached = await probeDescriptors.cachedResult(for: descriptor.revision)
-        if cached.completed {
-            PlozzLog.playback.debug(
-                "Atmos enrichment cache item=\(item.id) hit=true "
-                    + "atmos=\(cached.facts?.audioIsAtmos ?? false)"
-            )
-            return cached.facts
-        }
+        if cached.completed { return cached.facts }
 
         var queryItems = [
             try? AuthenticatedHTTPQueryItem(name: "static", value: "true"),
@@ -1730,16 +1704,8 @@ extension JellyfinProvider: SupplementalStreamFactsProviding {
             formatHint: MediaFormatHint(container: descriptor.container),
             purpose: .originalFile,
             resource: resource
-        ) else {
-            PlozzLog.playback.error(
-                "Atmos enrichment unavailable item=\(item.id) reason=invalidLocator"
-            )
-            return nil
-        }
+        ) else { return nil }
 
-        PlozzLog.playback.debug(
-            "Atmos enrichment probing item=\(item.id) source=\(descriptor.sourceID)"
-        )
         let facts = await authenticatedStreamProber.probe(locator: locator)
         await probeDescriptors.store(facts, for: descriptor.revision)
         return facts

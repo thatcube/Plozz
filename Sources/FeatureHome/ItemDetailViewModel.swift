@@ -1784,12 +1784,16 @@ public final class ItemDetailViewModel {
                 result.append(source)
             }
         }
-        // Publish when discovery expanded the server list OR refreshed a kept
-        // server's locality (result differs from the current sources).
-        guard result.count > 1, result != sources else { return }
-        sources = result
-        applyUnifiedWatchState()
-        persistSnapshot()
+        guard result.count > 1 else { return }
+        // Publish when discovery expanded the server list or refreshed locality.
+        // Even an unchanged result must continue into retargeting: the same list
+        // may already have arrived from a snapshot while the active detail provider
+        // is still the merge primary.
+        if result != sources {
+            sources = result
+            applyUnifiedWatchState()
+            persistSnapshot()
+        }
         // A library-origin copy that was not present at first paint can arrive from
         // async discovery. Prefer it before any Home/Search locality routing.
         if applyLibraryOriginPreferenceIfAvailable(in: result) {

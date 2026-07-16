@@ -1111,6 +1111,73 @@ final class ItemDetailViewModelTests: XCTestCase {
         XCTAssertEqual(Set(vm.sources.map(\.itemID)), ["p1", "p2"])
     }
 
+    func testUnchangedDiscoveryRetargetsSnapshotRestoredMovieSource() async {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("plozz-atmos-source-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        let cache = DetailSnapshotCache(directory: tempDir)
+        let remoteMovie = MediaItem(
+            id: "remote-movie",
+            title: "Movie",
+            kind: .movie,
+            sourceAccountID: "remote"
+        )
+        let localMovie = MediaItem(
+            id: "local-movie",
+            title: "Movie",
+            kind: .movie,
+            sourceAccountID: "local"
+        )
+        let restoredSources = [
+            MediaSourceRef(
+                accountID: "remote",
+                itemID: "remote-movie",
+                locality: .remote
+            ),
+            MediaSourceRef(
+                accountID: "local",
+                itemID: "local-movie",
+                locality: .local
+            )
+        ]
+        await cache.store(
+            DetailSnapshotCache.Snapshot(
+                item: remoteMovie,
+                children: [],
+                seasonEpisodes: [:],
+                sources: restoredSources
+            ),
+            for: "remote|remote-movie"
+        )
+        let remote = FakeMediaProvider(allItems: [remoteMovie])
+        remote.localityOverride = .remote
+        let local = FakeMediaProvider(allItems: [localMovie])
+        local.localityOverride = .local
+        let discoveryGate = AsyncGate()
+        let vm = ItemDetailViewModel(
+            provider: remote,
+            itemID: "remote-movie",
+            sourceAccountID: "remote",
+            initialSources: [restoredSources[0]],
+            alternateProviderResolver: { accountID in
+                accountID == "local" ? local : (accountID == "remote" ? remote : nil)
+            },
+            crossServerSourceResolver: { _ in
+                await discoveryGate.wait()
+                return restoredSources
+            },
+            snapshotCache: cache
+        )
+
+        await vm.load()
+        await waitUntil { vm.sources.count == 2 }
+        discoveryGate.open()
+        await waitUntil { vm.state.value?.item.id == "local-movie" }
+
+        XCTAssertEqual(vm.state.value?.item.sourceAccountID, "local")
+    }
+
     /// Disabling a server (its account is excluded from the active profile, so
     /// `alternateProviderResolver` returns nil for it) must drop that server from
     /// the picker even when it lingers in an on-disk snapshot persisted while the

@@ -8,10 +8,10 @@ import MetadataKit
 /// pages become rich and — crucially — carry the external ids that let a share
 /// title merge with its Plex/Jellyfin twin, pull external ratings, and scrobble.
 ///
-/// Foreground, incremental, cancellation-safe, and bounded: it processes a few
-/// items concurrently, persists each result (marking it done at the current
-/// enrichment version so it isn't re-fetched), and stops cleanly on cancel or when
-/// nothing is pending. Kicked by `ShareCatalogCoordinator` after each scan.
+/// Incremental, cancellation-safe, and bounded: the app-wide metadata scheduler
+/// feeds it short sequential slices, while an opened item can jump ahead through
+/// `enrichOne`. Results persist at the current enrichment version so work resumes
+/// from SQLite after interruption or relaunch.
 actor ShareEnricher {
     /// Bump when the resolver's output materially changes, to re-enrich everything.
     /// v2: TVDB same-name collisions now disambiguate by on-disk episode titles
@@ -59,18 +59,11 @@ actor ShareEnricher {
     private let resolver: ShareMetadataResolving
     private let shareID: String
     private var reporter: ShareScanReporter
-    /// How many items to resolve concurrently (each is a handful of small HTTP
-    /// calls to keyless APIs — keep modest so a large library doesn't burst).
-    private let concurrency: Int
-    /// Max items fetched into a single drain snapshot. Defaults to "the whole
-    /// backlog" (`.max`): a partial cap left large libraries perpetually under-
-    /// enriched — the pass only re-triggers on the next scan/Home load, so
-    /// heroes/cards stayed blank for most of the library. A pass processes a finite
-    /// snapshot exactly once, so it always terminates; usable results settle while
-    /// misses stay pending (bounded retries) for a later pass. Tests pass a small
-    /// cap to bound a single run.
+    /// Compatibility cap for the legacy/test `enrichPending` entry point. Production
+    /// passes a smaller per-slice limit through `ShareMetadataWorkScheduler`.
     private let maxPerRun: Int
     private var isRunning = false
+    private var isPassActive = false
     /// Whether this pass advertised "enriching" (had work). Lets `setReporter`
     /// replay `enrichStarted` to a reporter wired mid-pass without leaving the
     /// banner stuck when the pass was a no-op.
@@ -79,14 +72,15 @@ actor ShareEnricher {
     /// wired mid-pass can be replayed the live totals (see `setReporter`).
     private var enrichTotal = 0
     private var enrichDone = 0
+    private var advertisedAttemptedItemIDs: Set<String> = []
+    private var passStartedAt: Date?
 
     init(store: ShareCatalogStore, resolver: ShareMetadataResolving, shareID: String = "",
-         reporter: ShareScanReporter = .noop, concurrency: Int = 6, maxPerRun: Int = .max) {
+         reporter: ShareScanReporter = .noop, concurrency _: Int = 1, maxPerRun: Int = .max) {
         self.store = store
         self.resolver = resolver
         self.shareID = shareID
         self.reporter = reporter
-        self.concurrency = max(1, concurrency)
         self.maxPerRun = maxPerRun
     }
 
@@ -102,64 +96,128 @@ actor ShareEnricher {
         }
     }
 
-    /// Resolve + persist pending items until none remain (or the run cap / cancel).
+    /// Legacy/test entry point: resolves one snapshot up to `maxPerRun`, then closes
+    /// its progress report. Production uses `enrichPendingSlice`.
     func enrichPending() async {
-        if isRunning { return }
-        isRunning = true
-
-        // Fetch the snapshot up front so we know the pass total (for the progress
-        // indicator) before advertising. An empty snapshot is a no-op pass — no
-        // banner blink.
-        let snapshot = await store.pendingEnrichment(version: Self.version, limit: maxPerRun)
-        let total = snapshot.count
-        isAdvertisingEnrich = total > 0
-        enrichTotal = total
-        enrichDone = 0
-        if total > 0 { reporter.enrichStarted(shareID, total) }
-        defer {
-            isRunning = false
-            isAdvertisingEnrich = false
-            enrichTotal = 0
-            enrichDone = 0
-            if total > 0 { reporter.enrichFinished(shareID) }
+        let result = await runSlice(
+            maxItems: maxPerRun,
+            maxDuration: nil
+        )
+        if result.hasMore {
+            finishLogicalPass()
         }
-        if snapshot.isEmpty { return }
+    }
 
-        // Process the snapshot exactly once. A re-query-from-the-top loop stalls once
-        // retry-eligible misses persist at the front of the ordering (and could spin
-        // forever if a write kept failing); a finite snapshot drains cleanly and
-        // always terminates. Items scanned in later are picked up by the next pass.
+    /// Resolves one passive scheduler slice. Progress remains open across slices and
+    /// closes only when the backlog drains or the slice is interrupted.
+    func enrichPendingSlice(
+        maxItems: Int,
+        maxDuration: Duration
+    ) async -> ShareEnrichmentSliceResult {
+        await runSlice(maxItems: maxItems, maxDuration: maxDuration)
+    }
+
+    private func runSlice(
+        maxItems: Int,
+        maxDuration: Duration?
+    ) async -> ShareEnrichmentSliceResult {
+        if isRunning {
+            return ShareEnrichmentSliceResult(attempted: 0, hasMore: true)
+        }
+        isRunning = true
+        defer { isRunning = false }
+
+        if !isPassActive {
+            let startedAt = Date()
+            enrichTotal = await store.pendingEnrichmentCount(
+                version: Self.version,
+                discoveredBefore: startedAt
+            )
+            guard enrichTotal > 0 else {
+                return ShareEnrichmentSliceResult(attempted: 0, hasMore: false)
+            }
+            enrichDone = 0
+            passStartedAt = startedAt
+            isPassActive = true
+        }
+        if !isAdvertisingEnrich {
+            isAdvertisingEnrich = true
+            reporter.enrichStarted(shareID, enrichTotal)
+            if enrichDone > 0 {
+                reporter.enrichProgress(shareID, enrichDone)
+            }
+        }
+
+        let limit = min(max(1, maxItems), maxPerRun)
+        let snapshot = await store.pendingEnrichment(
+            version: Self.version,
+            limit: limit,
+            passStartedAt: passStartedAt
+        )
+        if snapshot.isEmpty {
+            finishLogicalPass()
+            return ShareEnrichmentSliceResult(attempted: 0, hasMore: false)
+        }
+
+        let clock = ContinuousClock()
+        let started = clock.now
         var processed = 0
         var attempted = 0
-        await withTaskGroup(of: (String, ShareCatalogStore.EnrichmentRecord).self) { group in
-            var iterator = snapshot.makeIterator()
-            let resolver = self.resolver
-            func addNext() -> Bool {
-                guard !Task.isCancelled, let pending = iterator.next() else { return false }
-                group.addTask { [self] in
-                    let request = await self.request(for: pending)
-                    return (pending.itemID, await resolver.resolve(request))
-                }
-                return true
+        var writeFailures = 0
+        for pending in snapshot {
+            if Task.isCancelled { break }
+            let request = await request(for: pending)
+            let record = await resolver.resolve(request)
+            if Task.isCancelled { break }
+            let ok = await store.saveEnrichment(
+                itemID: pending.itemID,
+                record,
+                version: Self.version
+            )
+            if ok {
+                processed += 1
+            } else {
+                writeFailures += 1
             }
-            for _ in 0..<concurrency { _ = addNext() }
-            while let (itemID, record) = await group.next() {
-                // Persist the (merged) result. A usable result settles the item; an
-                // unusable miss bumps its attempt counter and stays pending for the
-                // next pass, up to the retry cap — so a transient rate-limit/timeout
-                // isn't cached as a permanent blank. Count only durable writes.
-                let ok = await store.saveEnrichment(itemID: itemID, record, version: Self.version)
-                if ok { processed += 1 }
-                // Progress advances per item ATTEMPTED (misses included) so the bar
-                // reflects queue position, not just successful writes.
-                attempted += 1
-                enrichDone = attempted
-                reporter.enrichProgress(shareID, attempted)
-                if Task.isCancelled { break }
-                _ = addNext()
+            attempted += 1
+            if advertisedAttemptedItemIDs.insert(pending.itemID).inserted {
+                enrichDone += 1
+                reporter.enrichProgress(shareID, enrichDone)
+            }
+            if let maxDuration,
+               started.duration(to: clock.now) >= maxDuration {
+                break
             }
         }
-        PlozzLog.boot("share.enrich pass done processed=\(processed)/\(snapshot.count) cancelled=\(Task.isCancelled)")
+
+        let madeDurableProgress = processed > 0
+        let hasMore = Task.isCancelled
+            || writeFailures > 0
+            || (
+                madeDurableProgress
+                && (attempted < snapshot.count || snapshot.count == limit)
+            )
+        let retryAfter: Duration? = if writeFailures == 0 {
+            nil
+        } else if madeDurableProgress {
+            .seconds(5)
+        } else {
+            .seconds(30)
+        }
+        if Task.isCancelled {
+            pauseScheduledPass()
+        } else if !hasMore {
+            finishLogicalPass()
+        }
+        PlozzLog.boot(
+            "share.enrich slice done processed=\(processed)/\(snapshot.count) "
+                + "attempted=\(attempted) more=\(hasMore) cancelled=\(Task.isCancelled)"
+        )
+        return ShareEnrichmentSliceResult(
+            attempted: attempted,
+            hasMore: hasMore,
+            retryAfter: retryAfter
+        )
     }
 
     /// Resolve + persist ONE item immediately (the one a user just opened), jumping
@@ -172,7 +230,36 @@ actor ShareEnricher {
         let request = await request(for: pending)
         let record = await resolver.resolve(request)
         guard !Task.isCancelled else { return }
-        await store.saveEnrichment(itemID: pending.itemID, record, version: Self.version)
+        let saved = await store.saveEnrichment(
+            itemID: pending.itemID,
+            record,
+            version: Self.version
+        )
+        if saved,
+           isPassActive,
+           pending.discoveredAt <= (passStartedAt ?? .distantPast),
+           advertisedAttemptedItemIDs.insert(pending.itemID).inserted {
+            enrichDone += 1
+            if isAdvertisingEnrich {
+                reporter.enrichProgress(shareID, enrichDone)
+            }
+        }
+    }
+
+    func pauseScheduledPass() {
+        guard isAdvertisingEnrich else { return }
+        isAdvertisingEnrich = false
+        reporter.enrichFinished(shareID)
+    }
+
+    func finishLogicalPass() {
+        pauseScheduledPass()
+        guard isPassActive else { return }
+        isPassActive = false
+        enrichTotal = 0
+        enrichDone = 0
+        advertisedAttemptedItemIDs.removeAll(keepingCapacity: true)
+        passStartedAt = nil
     }
 
     /// Builds the resolve request for a pending item, attaching on-disk episode

@@ -24,7 +24,23 @@ import CoreModels
 @Observable
 public final class DiscoveredLibrariesStore {
     public var state: LoadState<[AggregatedLibrary]> = .idle
+    /// Accounts whose libraries are being refreshed after a profile toggle.
+    /// Existing loaded rows remain visible while this is non-empty so unrelated
+    /// server cards do not collapse and disturb tvOS focus/scroll geometry.
+    public var refreshingAccountIDs: Set<String> = []
 
     public init() {}
+
+    public func beginRefresh(accountIDs: Set<String>) {
+        refreshingAccountIDs.formUnion(accountIDs)
+        if state.value == nil {
+            state = .loading
+        }
+    }
+
+    public func finishRefresh(with libraries: [AggregatedLibrary]) {
+        state = libraries.isEmpty ? .empty : .loaded(libraries)
+        refreshingAccountIDs.removeAll()
+    }
 }
 #endif

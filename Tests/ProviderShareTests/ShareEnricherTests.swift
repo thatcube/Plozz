@@ -97,6 +97,273 @@ final class ShareEnricherTests: XCTestCase {
         XCTAssertEqual(cap.finished, 1, "finished once")
     }
 
+    func testPassiveSlicesBoundWorkAndDrainSequentially() async {
+        let store = ShareCatalogStore(accountKey: "sliced", directory: tempDir())
+        let assets = (0..<25).map {
+            movie("Movies/M\($0) (2000).mkv", "M\($0)", 2000)
+        }
+        await store.upsert(assets, scanID: 1)
+
+        actor Counter {
+            var value = 0
+            func bump() { value += 1 }
+        }
+        let counter = Counter()
+        struct Resolver: ShareMetadataResolving {
+            let counter: Counter
+            func resolve(_ request: ShareEnrichRequest) async -> ShareCatalogStore.EnrichmentRecord {
+                await counter.bump()
+                return .init(providerIDs: ["Tmdb": request.itemID])
+            }
+        }
+        let enricher = ShareEnricher(store: store, resolver: Resolver(counter: counter))
+
+        let first = await enricher.enrichPendingSlice(
+            maxItems: 10,
+            maxDuration: .seconds(10)
+        )
+        XCTAssertEqual(first, .init(attempted: 10, hasMore: true))
+        let afterFirst = await counter.value
+        XCTAssertEqual(afterFirst, 10)
+
+        let second = await enricher.enrichPendingSlice(
+            maxItems: 10,
+            maxDuration: .seconds(10)
+        )
+        XCTAssertEqual(second, .init(attempted: 10, hasMore: true))
+        let afterSecond = await counter.value
+        XCTAssertEqual(afterSecond, 20)
+
+        let third = await enricher.enrichPendingSlice(
+            maxItems: 10,
+            maxDuration: .seconds(10)
+        )
+        XCTAssertEqual(third, .init(attempted: 5, hasMore: false))
+        let afterThird = await counter.value
+        let remaining = await store.pendingEnrichmentCount(version: ShareEnricher.version)
+        XCTAssertEqual(afterThird, 25)
+        XCTAssertEqual(remaining, 0)
+    }
+
+    func testSlicedRetryProgressNeverExceedsLogicalTotal() async {
+        final class Captured: @unchecked Sendable {
+            private let lock = NSLock()
+            private(set) var total = 0
+            private(set) var maxDone = 0
+            private(set) var starts = 0
+            private(set) var finishes = 0
+            func start(_ value: Int) {
+                lock.lock(); starts += 1; total = value; lock.unlock()
+            }
+            func progress(_ value: Int) {
+                lock.lock(); maxDone = max(maxDone, value); lock.unlock()
+            }
+            func finish() {
+                lock.lock(); finishes += 1; lock.unlock()
+            }
+        }
+        let captured = Captured()
+        let reporter = ShareScanReporter(
+            scanStarted: { _, _ in },
+            scanProgress: { _, _ in },
+            scanFinished: { _ in },
+            enrichStarted: { _, total in captured.start(total) },
+            enrichProgress: { _, done in captured.progress(done) },
+            enrichFinished: { _ in captured.finish() }
+        )
+        let store = ShareCatalogStore(accountKey: "retry-progress", directory: tempDir())
+        await store.upsert([
+            movie("Movies/A (2000).mkv", "A", 2000),
+            movie("Movies/B (2000).mkv", "B", 2000),
+        ], scanID: 1)
+        let enricher = ShareEnricher(
+            store: store,
+            resolver: FakeResolver(byTitle: [:]),
+            reporter: reporter
+        )
+
+        for _ in 0..<2 {
+            _ = await enricher.enrichPendingSlice(
+                maxItems: 2,
+                maxDuration: .seconds(10)
+            )
+        }
+
+        XCTAssertEqual(captured.starts, 1)
+        XCTAssertEqual(captured.total, 2)
+        XCTAssertEqual(captured.maxDone, 2)
+        XCTAssertEqual(captured.finishes, 1)
+    }
+
+    func testRetryableMissesAreAttemptedOncePerLogicalPass() async {
+        let store = ShareCatalogStore(accountKey: "retry-pass", directory: tempDir())
+        await store.upsert((0..<12).map {
+            movie("Movies/M\($0) (2000).mkv", "M\($0)", 2000)
+        }, scanID: 1)
+
+        actor Counter {
+            var value = 0
+            func bump() { value += 1 }
+        }
+        let counter = Counter()
+        struct Resolver: ShareMetadataResolving {
+            let counter: Counter
+            func resolve(_ request: ShareEnrichRequest) async -> ShareCatalogStore.EnrichmentRecord {
+                await counter.bump()
+                return .init()
+            }
+        }
+        let enricher = ShareEnricher(store: store, resolver: Resolver(counter: counter))
+
+        let first = await enricher.enrichPendingSlice(
+            maxItems: 10,
+            maxDuration: .seconds(10)
+        )
+        let second = await enricher.enrichPendingSlice(
+            maxItems: 10,
+            maxDuration: .seconds(10)
+        )
+        let attemptsAfterOnePass = await counter.value
+
+        XCTAssertEqual(first.attempted, 10)
+        XCTAssertEqual(second, .init(attempted: 2, hasMore: false))
+        XCTAssertEqual(attemptsAfterOnePass, 12)
+
+        _ = await enricher.enrichPendingSlice(
+            maxItems: 10,
+            maxDuration: .seconds(10)
+        )
+        let attemptsAfterStartingNextPass = await counter.value
+        XCTAssertEqual(attemptsAfterStartingNextPass, 22)
+    }
+
+    func testInteractivePausePreservesLogicalPassCutoff() async {
+        let store = ShareCatalogStore(accountKey: "pause-pass", directory: tempDir())
+        await store.upsert((0..<12).map {
+            movie("Movies/P\($0) (2000).mkv", "P\($0)", 2000)
+        }, scanID: 1)
+
+        actor Counter {
+            var value = 0
+            func bump() { value += 1 }
+        }
+        let counter = Counter()
+        struct Resolver: ShareMetadataResolving {
+            let counter: Counter
+            func resolve(_ request: ShareEnrichRequest) async -> ShareCatalogStore.EnrichmentRecord {
+                await counter.bump()
+                return .init()
+            }
+        }
+        let enricher = ShareEnricher(store: store, resolver: Resolver(counter: counter))
+
+        _ = await enricher.enrichPendingSlice(
+            maxItems: 10,
+            maxDuration: .seconds(10)
+        )
+        await enricher.pauseScheduledPass()
+        let afterPause = await enricher.enrichPendingSlice(
+            maxItems: 10,
+            maxDuration: .seconds(10)
+        )
+        let attempts = await counter.value
+
+        XCTAssertEqual(afterPause, .init(attempted: 2, hasMore: false))
+        XCTAssertEqual(attempts, 12)
+    }
+
+    func testFastTrackedItemAdvancesActivePassProgress() async {
+        final class Captured: @unchecked Sendable {
+            private let lock = NSLock()
+            private(set) var total = 0
+            private(set) var maxDone = 0
+            func start(_ value: Int) { lock.lock(); total = value; lock.unlock() }
+            func progress(_ value: Int) {
+                lock.lock(); maxDone = max(maxDone, value); lock.unlock()
+            }
+        }
+        let captured = Captured()
+        let reporter = ShareScanReporter(
+            scanStarted: { _, _ in },
+            scanProgress: { _, _ in },
+            scanFinished: { _ in },
+            enrichStarted: { _, total in captured.start(total) },
+            enrichProgress: { _, done in captured.progress(done) },
+            enrichFinished: { _ in }
+        )
+        let store = ShareCatalogStore(accountKey: "fast-progress", directory: tempDir())
+        await store.upsert([
+            movie("Movies/A (2000).mkv", "A", 2000),
+            movie("Movies/B (2000).mkv", "B", 2000),
+        ], scanID: 1)
+        let record = ShareCatalogStore.EnrichmentRecord(providerIDs: ["Tmdb": "1"])
+        let enricher = ShareEnricher(
+            store: store,
+            resolver: FakeResolver(byTitle: ["A": record, "B": record]),
+            reporter: reporter
+        )
+
+        _ = await enricher.enrichPendingSlice(
+            maxItems: 1,
+            maxDuration: .seconds(10)
+        )
+        await enricher.pauseScheduledPass()
+        await enricher.enrichOne(itemID: ShareCatalogID.file("Movies/B (2000).mkv"))
+        _ = await enricher.enrichPendingSlice(
+            maxItems: 1,
+            maxDuration: .seconds(10)
+        )
+
+        XCTAssertEqual(captured.total, 2)
+        XCTAssertEqual(captured.maxDone, 2)
+    }
+
+    func testItemsDiscoveredMidPassWaitForNextLogicalPass() async {
+        let store = ShareCatalogStore(accountKey: "new-mid-pass", directory: tempDir())
+        await store.upsert([
+            movie("Movies/A (2000).mkv", "A", 2000),
+        ], scanID: 1)
+
+        actor Counter {
+            var value = 0
+            func bump() { value += 1 }
+        }
+        let counter = Counter()
+        struct Resolver: ShareMetadataResolving {
+            let counter: Counter
+            func resolve(_ request: ShareEnrichRequest) async -> ShareCatalogStore.EnrichmentRecord {
+                await counter.bump()
+                return .init()
+            }
+        }
+        let enricher = ShareEnricher(store: store, resolver: Resolver(counter: counter))
+
+        _ = await enricher.enrichPendingSlice(
+            maxItems: 1,
+            maxDuration: .seconds(10)
+        )
+        await enricher.pauseScheduledPass()
+        try? await Task.sleep(for: .milliseconds(10))
+        await store.upsert([
+            movie("Movies/B (2000).mkv", "B", 2000),
+        ], scanID: 2)
+        let endOfFirstPass = await enricher.enrichPendingSlice(
+            maxItems: 10,
+            maxDuration: .seconds(10)
+        )
+        let afterFirstPass = await counter.value
+
+        XCTAssertEqual(endOfFirstPass, .init(attempted: 0, hasMore: false))
+        XCTAssertEqual(afterFirstPass, 1)
+
+        _ = await enricher.enrichPendingSlice(
+            maxItems: 10,
+            maxDuration: .seconds(10)
+        )
+        let afterNextPass = await counter.value
+        XCTAssertEqual(afterNextPass, 3)
+    }
+
     func testProviderIDsEnableCrossServerIdentity() async {
         // The whole point: a share item that gains a TMDb id now produces the same
         // MediaItemIdentity a Plex/Jellyfin twin would, so the merge engine fuses them.

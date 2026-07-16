@@ -28,6 +28,7 @@ public protocol AccountPersisting: Sendable {
 
 public enum AccountStoreError: Error, Equatable, Sendable {
     case encodingFailed
+    case decodingFailed
     case invalidMediaShareAccount
     case generatedKeyReuse
     case generatedPrivateKeyRequired
@@ -48,6 +49,10 @@ public final class AccountStore: AccountPersisting, @unchecked Sendable {
     private let mediaCredentialVault: MediaCredentialVault?
     private let credentialJournal: CredentialMutationJournal?
     private let lock = NSLock()
+    /// Account metadata is one shared JSON value. Serialize complete mutations
+    /// across AccountStore instances so two successful transactions cannot replace
+    /// that value from stale snapshots and silently drop each other's accounts.
+    private static let processMutationLock = NSLock()
 
     // This is intentionally a new, migration-free schema. The app is still in
     // tester-only distribution, so old account records are ignored and users
@@ -80,6 +85,8 @@ public final class AccountStore: AccountPersisting, @unchecked Sendable {
     #endif
 
     public func deviceID() -> String {
+        Self.processMutationLock.lock()
+        defer { Self.processMutationLock.unlock() }
         lock.lock()
         defer { lock.unlock() }
         if let existing = secureStore.string(for: deviceIDKey) {
@@ -112,6 +119,8 @@ public final class AccountStore: AccountPersisting, @unchecked Sendable {
     }
 
     public func setActiveAccountIDs(_ ids: [String]) {
+        Self.processMutationLock.lock()
+        defer { Self.processMutationLock.unlock() }
         lock.lock()
         defer { lock.unlock() }
         let known = Set(visibleAccountsLocked().map(\.id))
@@ -147,7 +156,7 @@ public final class AccountStore: AccountPersisting, @unchecked Sendable {
     ) throws -> MediaShareCredentialEnvelope {
         lock.lock()
         defer { lock.unlock() }
-        guard let account = persistedAccountsLocked().first(where: { $0.id == accountID }),
+        guard let account = try persistedAccountsLockedThrowing().first(where: { $0.id == accountID }),
               account.server.provider == .mediaShare else {
             throw AccountStoreError.invalidMediaShareAccount
         }
@@ -160,7 +169,7 @@ public final class AccountStore: AccountPersisting, @unchecked Sendable {
     ) throws -> MediaShareCredentialEnvelope {
         lock.lock()
         defer { lock.unlock() }
-        guard let account = persistedAccountsLocked().first(where: { $0.id == accountID }),
+        guard let account = try persistedAccountsLockedThrowing().first(where: { $0.id == accountID }),
               account.server.provider == .mediaShare else {
             throw AccountStoreError.invalidMediaShareAccount
         }
@@ -171,6 +180,8 @@ public final class AccountStore: AccountPersisting, @unchecked Sendable {
     }
 
     public func add(_ account: Account, token: String) throws {
+        Self.processMutationLock.lock()
+        defer { Self.processMutationLock.unlock() }
         lock.lock()
         defer { lock.unlock() }
         if account.server.provider == .mediaShare {
@@ -190,6 +201,8 @@ public final class AccountStore: AccountPersisting, @unchecked Sendable {
         credential: MediaShareCredentialEnvelope,
         generatedPrivateKey: String? = nil
     ) throws {
+        Self.processMutationLock.lock()
+        defer { Self.processMutationLock.unlock() }
         lock.lock()
         defer { lock.unlock() }
         try addMediaShareLocked(
@@ -200,15 +213,19 @@ public final class AccountStore: AccountPersisting, @unchecked Sendable {
     }
 
     public func remove(id: String) throws {
+        Self.processMutationLock.lock()
+        defer { Self.processMutationLock.unlock() }
         lock.lock()
         defer { lock.unlock() }
         try removeLocked(id: id)
     }
 
     public func clearAll() throws {
+        Self.processMutationLock.lock()
+        defer { Self.processMutationLock.unlock() }
         lock.lock()
         defer { lock.unlock() }
-        for account in persistedAccountsLocked() {
+        for account in try persistedAccountsLockedThrowing() {
             try removeLocked(id: account.id)
         }
         try secureStore.removeValue(for: accountsKey)
@@ -217,6 +234,8 @@ public final class AccountStore: AccountPersisting, @unchecked Sendable {
     }
 
     public func recoverCredentialMutations() throws {
+        Self.processMutationLock.lock()
+        defer { Self.processMutationLock.unlock() }
         lock.lock()
         defer { lock.unlock() }
         if mediaCredentialVault == nil, credentialJournal == nil {
@@ -226,7 +245,7 @@ public final class AccountStore: AccountPersisting, @unchecked Sendable {
     }
 
     private func addManagedAccountLocked(_ account: Account, token: String) throws {
-        var accounts = persistedAccountsLocked()
+        var accounts = try persistedAccountsLockedThrowing()
         var persistedAccount = account
         if let index = accounts.firstIndex(where: { $0.id == account.id }) {
             let existing = accounts[index]
@@ -258,27 +277,238 @@ public final class AccountStore: AccountPersisting, @unchecked Sendable {
         }
         try validateCredentialBinding(credential, account: account)
         let infrastructure = try mediaShareInfrastructure()
-        var accounts = persistedAccountsLocked()
-        let existingIndex = accounts.firstIndex(where: { $0.id == account.id })
-        let existing = existingIndex.map { accounts[$0] }
-        let previousRevision = existing?.credentialRevision
+        var accounts = try persistedAccountsLockedThrowing()
+        var existingIndex = accounts.firstIndex(where: { $0.id == account.id })
+        var existing = existingIndex.map { accounts[$0] }
+        var previousRevision = existing?.credentialRevision
+        var staleIndexToReplace: Int?
+        var staleRevisionToRetire: CredentialRevision?
+        var staleRevisionRequiresRawDiscard = false
+        var reconcileExistingToActiveRevision = false
+        var activeRevision = try infrastructure.journal.activeRevision(
+            accountID: account.id
+        )
+        let accountMutations = try infrastructure.journal.mutations().filter {
+            $0.accountID == account.id
+        }
 
-        guard try infrastructure.journal.activeRevision(accountID: account.id)
-                == previousRevision else {
+        if activeRevision != previousRevision,
+           activeRevision == nil,
+           let staleAccount = existing,
+           let staleIndex = existingIndex {
+            // The account is already invisible because it has no active journal
+            // pointer. This can be left behind if an earlier transaction persisted
+            // account metadata but its pointer/recovery state did not survive.
+            // Never overwrite an in-progress mutation or a different active pointer.
+            guard accountMutations.isEmpty else {
+                emitRevisionConflictDiagnostic(
+                    reason: "missing-pointer-mutation",
+                    activeRevision: activeRevision,
+                    previousRevision: previousRevision,
+                    mutations: accountMutations
+                )
+                throw CredentialMutationJournalError.activeRevisionConflict
+            }
+            guard staleAccount.server.provider == .mediaShare,
+                  try transportKind(for: staleAccount) == transport else {
+                throw AccountStoreError.invalidMediaShareAccount
+            }
+
+            let storedCredential: MediaShareCredentialEnvelope?
+            do {
+                storedCredential = try infrastructure.vault.credential(
+                    accountID: account.id,
+                    revision: staleAccount.credentialRevision,
+                    expectedTransport: transport
+                )
+            } catch let error as MediaCredentialError {
+                switch error {
+                case .credentialNotFound:
+                    guard transport != .sftp else { throw error }
+                    storedCredential = nil
+                    staleRevisionRequiresRawDiscard = true
+                case .transportMismatch:
+                    // Decode without enforcing the stale account's transport so a
+                    // valid generated-key envelope can retire its child key.
+                    storedCredential = try infrastructure.vault.credentialMetadata(
+                        accountID: account.id,
+                        revision: staleAccount.credentialRevision
+                    )
+                case .malformedEnvelope, .unsupportedVersion,
+                     .unversionedCredentialNotSupported, .incompatibleAuthentication,
+                     .incompatibleTrust, .invalidFingerprint, .payloadTooLarge,
+                     .invalidIdentifier, .revisionAlreadyExists,
+                     .childItemAlreadyExists, .childItemRetired:
+                    throw error
+                }
+            } catch {
+                // Keychain/storage failures are not evidence that a credential is
+                // absent. Abort without changing metadata or vault state.
+                throw error
+            }
+            if let storedCredential,
+               storedCredential.transport == transport,
+               (try? validateCredentialBinding(
+                   storedCredential,
+                   account: staleAccount
+               )) != nil {
+                // Both durable halves still exist; restore the missing pointer and
+                // continue through the normal replacement transaction.
+                try infrastructure.journal.seedActiveRevision(
+                    staleAccount.credentialRevision,
+                    accountID: account.id
+                )
+                activeRevision = staleAccount.credentialRevision
+            } else {
+                // No credential can make this hidden record usable. Reserve the
+                // account through the normal new-credential journal entry below
+                // before touching metadata, then replace only this invisible row.
+                staleIndexToReplace = staleIndex
+                staleRevisionToRetire = staleAccount.credentialRevision
+                existingIndex = nil
+                existing = nil
+                previousRevision = nil
+            }
+        } else if activeRevision != previousRevision,
+                  let authoritativeRevision = activeRevision,
+                  let staleAccount = existing {
+            guard accountMutations.isEmpty else {
+                emitRevisionConflictDiagnostic(
+                    reason: "authoritative-pointer-mutation",
+                    activeRevision: activeRevision,
+                    previousRevision: previousRevision,
+                    mutations: accountMutations
+                )
+                throw CredentialMutationJournalError.activeRevisionConflict
+            }
+            guard staleAccount.server.provider == .mediaShare,
+                  try transportKind(for: staleAccount) == transport else {
+                throw AccountStoreError.invalidMediaShareAccount
+            }
+
+            do {
+                let authoritativeCredential =
+                    try infrastructure.vault.credential(
+                        accountID: account.id,
+                        revision: authoritativeRevision,
+                        expectedTransport: transport
+                    )
+                try validateCredentialBinding(
+                    authoritativeCredential,
+                    account: staleAccount
+                )
+            } catch let error as MediaCredentialError
+                where error == .credentialNotFound && transport != .sftp {
+                // A missing non-generated credential can be replaced by the newly
+                // verified connection. Other storage/decoding errors remain closed.
+            }
+
+            if staleAccount.credentialRevision != authoritativeRevision {
+                do {
+                    _ = try infrastructure.vault.credentialMetadata(
+                        accountID: account.id,
+                        revision: staleAccount.credentialRevision
+                    )
+                    staleRevisionRequiresRawDiscard = false
+                } catch let error as MediaCredentialError
+                    where error == .credentialNotFound {
+                    staleRevisionRequiresRawDiscard = true
+                }
+                staleRevisionToRetire = staleAccount.credentialRevision
+            }
+
+            var reconciled = staleAccount
+            reconciled.credentialRevision = authoritativeRevision
+            existing = reconciled
+            previousRevision = authoritativeRevision
+            reconcileExistingToActiveRevision = true
+        } else if previousRevision == nil,
+                  existing == nil,
+                  let authoritativeRevision = activeRevision {
+            guard accountMutations.isEmpty else {
+                emitRevisionConflictDiagnostic(
+                    reason: "orphan-pointer-mutation",
+                    activeRevision: activeRevision,
+                    previousRevision: previousRevision,
+                    mutations: accountMutations
+                )
+                throw CredentialMutationJournalError.activeRevisionConflict
+            }
+            // The journal pointer is durable but its non-secret account metadata is
+            // absent. Reconstruct only from the newly verified connection, preserving
+            // the authoritative revision as the previous side of replacement.
+            var reconstructed = account
+            reconstructed.credentialRevision = authoritativeRevision
+            existing = reconstructed
+            previousRevision = authoritativeRevision
+        }
+
+        guard activeRevision == previousRevision else {
+            emitRevisionConflictDiagnostic(
+                reason: "unhandled-pointer-mismatch",
+                activeRevision: activeRevision,
+                previousRevision: previousRevision,
+                mutations: accountMutations
+            )
             throw CredentialMutationJournalError.activeRevisionConflict
         }
 
-        let currentCredential = existing.flatMap {
-            try? infrastructure.vault.credential(
-               accountID: account.id,
-               revision: $0.credentialRevision,
-               expectedTransport: transport
-           )
+        var previousCredentialMetadata: MediaShareCredentialEnvelope?
+        var discardPreviousCredentialRaw = false
+        let currentCredential: MediaShareCredentialEnvelope?
+        if let existing {
+            do {
+                previousCredentialMetadata = try infrastructure.vault.credentialMetadata(
+                    accountID: account.id,
+                    revision: existing.credentialRevision,
+                    expectedTransport: transport
+                )
+            } catch let error as MediaCredentialError {
+                switch error {
+                case .credentialNotFound:
+                    guard transport != .sftp else { throw error }
+                    previousCredentialMetadata = nil
+                    discardPreviousCredentialRaw = true
+                case .transportMismatch:
+                    previousCredentialMetadata =
+                        try infrastructure.vault.credentialMetadata(
+                            accountID: account.id,
+                            revision: existing.credentialRevision
+                        )
+                case .malformedEnvelope, .unsupportedVersion,
+                     .unversionedCredentialNotSupported, .incompatibleAuthentication,
+                     .incompatibleTrust, .invalidFingerprint, .payloadTooLarge,
+                     .invalidIdentifier, .revisionAlreadyExists,
+                     .childItemAlreadyExists, .childItemRetired:
+                    throw error
+                }
+            }
+            if previousCredentialMetadata?.transport == transport {
+                do {
+                    currentCredential = try infrastructure.vault.credential(
+                        accountID: account.id,
+                        revision: existing.credentialRevision,
+                        expectedTransport: transport
+                    )
+                } catch let error as MediaCredentialError
+                    where error == .credentialNotFound {
+                    currentCredential = nil
+                }
+            } else {
+                currentCredential = nil
+            }
+        } else {
+            previousCredentialMetadata = nil
+            currentCredential = nil
         }
         if let existing, currentCredential == credential {
             var updated = account
             updated.credentialRevision = existing.credentialRevision
-            accounts[existingIndex!] = updated
+            if let existingIndex {
+                accounts[existingIndex] = updated
+            } else {
+                accounts.append(updated)
+            }
             try saveAccountsLocked(accounts)
             addToActiveSetLocked(account.id, within: accounts)
             return
@@ -290,7 +520,14 @@ public final class AccountStore: AccountPersisting, @unchecked Sendable {
             guard generatedPrivateKey != nil else {
                 throw AccountStoreError.generatedPrivateKeyRequired
             }
-            if case .generatedKey(_, let currentKeyID)? = currentCredential?.authentication,
+            try ensureGeneratedKeyIsExclusive(
+                keyID,
+                accountID: account.id,
+                accounts: accounts,
+                infrastructure: infrastructure
+            )
+            if case .generatedKey(_, let currentKeyID)?
+                = previousCredentialMetadata?.authentication,
                currentKeyID == keyID {
                 throw AccountStoreError.generatedKeyReuse
             }
@@ -309,15 +546,60 @@ public final class AccountStore: AccountPersisting, @unchecked Sendable {
             ? account.credentialRevision
             : CredentialRevision()
         let pendingRevision = persistedAccount.credentialRevision
-        let entry = try infrastructure.journal.begin(
-            kind: mutationKind,
-            accountID: account.id,
-            previousRevision: previousRevision,
-            pendingRevision: pendingRevision,
-            pendingChildItemIDs: pendingChildItemIDs
-        )
+        let entry: CredentialMutationEntry
+        do {
+            entry = try infrastructure.journal.begin(
+                kind: mutationKind,
+                accountID: account.id,
+                previousRevision: previousRevision,
+                pendingRevision: pendingRevision,
+                pendingChildItemIDs: pendingChildItemIDs,
+                rawCredentialRevisionToDiscard: discardPreviousCredentialRaw
+                    ? previousRevision
+                    : nil
+            )
+        } catch let error as CredentialMutationJournalError
+            where error == .activeRevisionConflict {
+            emitRevisionConflictDiagnostic(
+                reason: "begin-pointer-changed",
+                activeRevision: try infrastructure.journal.activeRevision(
+                    accountID: account.id
+                ),
+                previousRevision: previousRevision,
+                mutations: try infrastructure.journal.mutations().filter {
+                    $0.accountID == account.id
+                }
+            )
+            throw error
+        }
 
         do {
+            if reconcileExistingToActiveRevision,
+               let existingIndex,
+               let existing {
+                accounts[existingIndex] = existing
+                try saveAccountsLocked(accounts)
+            }
+            if let staleRevisionToRetire {
+                // This repair is limited to transports that cannot own generated
+                // private-key child items. Discard while the new transaction is
+                // still staged so a crash remains recoverable as a clean retry.
+                if staleRevisionRequiresRawDiscard {
+                    try infrastructure.vault.discardCredential(
+                        accountID: account.id,
+                        revision: staleRevisionToRetire
+                    )
+                } else {
+                    try infrastructure.vault.retire(
+                        accountID: account.id,
+                        revision: staleRevisionToRetire
+                    )
+                }
+            }
+            if let staleIndexToReplace {
+                accounts.remove(at: staleIndexToReplace)
+                try saveAccountsLocked(accounts)
+            }
             if let generatedPrivateKey,
                case .generatedKey(_, let keyID) = credential.authentication {
                 try infrastructure.vault.storePrivateKey(
@@ -339,10 +621,17 @@ public final class AccountStore: AccountPersisting, @unchecked Sendable {
             _ = try infrastructure.journal.markPrepared(entry.id)
             _ = try infrastructure.journal.markCommitted(entry.id)
             if let previousRevision {
-                try infrastructure.vault.retire(
-                    accountID: account.id,
-                    revision: previousRevision
-                )
+                if discardPreviousCredentialRaw {
+                    try infrastructure.vault.discardCredential(
+                        accountID: account.id,
+                        revision: previousRevision
+                    )
+                } else {
+                    try infrastructure.vault.retire(
+                        accountID: account.id,
+                        revision: previousRevision
+                    )
+                }
             }
             try infrastructure.journal.finishCommitted(entry.id)
             addToActiveSetLocked(account.id, within: accounts)
@@ -354,7 +643,10 @@ public final class AccountStore: AccountPersisting, @unchecked Sendable {
                 accountID: account.id,
                 revision: pendingRevision
             ) {
-                addToActiveSetLocked(account.id, within: persistedAccountsLocked())
+                addToActiveSetLocked(
+                    account.id,
+                    within: try persistedAccountsLockedThrowing()
+                )
                 return
             }
             throw originalError
@@ -362,7 +654,7 @@ public final class AccountStore: AccountPersisting, @unchecked Sendable {
     }
 
     private func removeLocked(id: String) throws {
-        var accounts = persistedAccountsLocked()
+        var accounts = try persistedAccountsLockedThrowing()
         guard let account = accounts.first(where: { $0.id == id }) else { return }
 
         if account.server.provider == .mediaShare {
@@ -371,28 +663,43 @@ public final class AccountStore: AccountPersisting, @unchecked Sendable {
                     == account.credentialRevision else {
                 throw CredentialMutationJournalError.activeRevisionConflict
             }
+            let rawDiscard = try rawCredentialRevisionToDiscardIfNeeded(
+                account,
+                infrastructure: infrastructure
+            )
             let entry = try infrastructure.journal.begin(
                 kind: .accountRemoval,
                 accountID: id,
                 previousRevision: account.credentialRevision,
-                pendingRevision: nil
+                pendingRevision: nil,
+                rawCredentialRevisionToDiscard: rawDiscard
             )
             do {
                 _ = try infrastructure.journal.markPrepared(entry.id)
                 accounts.removeAll { $0.id == id }
                 try saveAccountsLocked(accounts)
                 _ = try infrastructure.journal.markCommitted(entry.id)
-                try infrastructure.vault.retire(
-                    accountID: id,
-                    revision: account.credentialRevision
-                )
+                if rawDiscard != nil {
+                    try infrastructure.vault.discardCredential(
+                        accountID: id,
+                        revision: account.credentialRevision
+                    )
+                } else {
+                    try infrastructure.vault.retire(
+                        accountID: id,
+                        revision: account.credentialRevision
+                    )
+                }
                 try infrastructure.journal.finishCommitted(entry.id)
             } catch {
                 let originalError = error
                 try recoverCredentialMutationsLocked()
                 if try infrastructure.journal.activeRevision(accountID: id) == nil,
-                   !persistedAccountsLocked().contains(where: { $0.id == id }) {
-                    removeFromActiveSetLocked(id, within: persistedAccountsLocked())
+                   !(try persistedAccountsLockedThrowing()).contains(where: { $0.id == id }) {
+                    removeFromActiveSetLocked(
+                        id,
+                        within: try persistedAccountsLockedThrowing()
+                    )
                     return
                 }
                 throw originalError
@@ -423,7 +730,7 @@ public final class AccountStore: AccountPersisting, @unchecked Sendable {
         _ entry: CredentialMutationEntry,
         infrastructure: MediaShareInfrastructure
     ) throws {
-        var accounts = persistedAccountsLocked()
+        var accounts = try persistedAccountsLockedThrowing()
         if entry.kind != .accountRemoval,
            let pendingRevision = entry.pendingRevision,
            let index = accounts.firstIndex(where: {
@@ -453,7 +760,7 @@ public final class AccountStore: AccountPersisting, @unchecked Sendable {
         _ entry: CredentialMutationEntry,
         infrastructure: MediaShareInfrastructure
     ) throws {
-        var accounts = persistedAccountsLocked()
+        var accounts = try persistedAccountsLockedThrowing()
 
         if entry.kind == .accountRemoval {
             if let account = accounts.first(where: { $0.id == entry.accountID }),
@@ -476,12 +783,120 @@ public final class AccountStore: AccountPersisting, @unchecked Sendable {
             _ = try infrastructure.journal.markCommitted(entry.id)
         }
         if let previousRevision = entry.previousRevision {
-            try infrastructure.vault.retire(
-                accountID: entry.accountID,
-                revision: previousRevision
-            )
+            if entry.rawCredentialRevisionToDiscard == previousRevision {
+                try infrastructure.vault.discardCredential(
+                    accountID: entry.accountID,
+                    revision: previousRevision
+                )
+            } else {
+                try infrastructure.vault.retire(
+                    accountID: entry.accountID,
+                    revision: previousRevision
+                )
+            }
         }
         try infrastructure.journal.finishCommitted(entry.id)
+    }
+
+    private func rawCredentialRevisionToDiscardIfNeeded(
+        _ account: Account,
+        infrastructure: MediaShareInfrastructure
+    ) throws -> CredentialRevision? {
+        let transport = try transportKind(for: account)
+        do {
+            _ = try infrastructure.vault.credentialMetadata(
+                accountID: account.id,
+                revision: account.credentialRevision,
+                expectedTransport: transport
+            )
+            return nil
+        } catch let error as MediaCredentialError {
+            switch error {
+            case .credentialNotFound:
+                guard transport != .sftp else { throw error }
+                return account.credentialRevision
+            case .transportMismatch:
+                _ = try infrastructure.vault.credentialMetadata(
+                    accountID: account.id,
+                    revision: account.credentialRevision
+                )
+                return nil
+            case .malformedEnvelope, .unsupportedVersion,
+                 .unversionedCredentialNotSupported, .incompatibleAuthentication,
+                 .incompatibleTrust, .invalidFingerprint, .payloadTooLarge,
+                 .invalidIdentifier, .revisionAlreadyExists,
+                 .childItemAlreadyExists, .childItemRetired:
+                throw error
+            }
+        }
+    }
+
+    private func ensureGeneratedKeyIsExclusive(
+        _ keyID: CredentialChildItemID,
+        accountID: String,
+        accounts: [Account],
+        infrastructure: MediaShareInfrastructure
+    ) throws {
+        for mutation in try infrastructure.journal.mutations()
+            where mutation.accountID != accountID {
+            if mutation.pendingChildItemIDs.contains(keyID) {
+                throw AccountStoreError.generatedKeyReuse
+            }
+            if let previousRevision = mutation.previousRevision {
+                do {
+                    let previous = try infrastructure.vault.credentialMetadata(
+                        accountID: mutation.accountID,
+                        revision: previousRevision
+                    )
+                    if case .generatedKey(_, let previousKeyID)
+                        = previous.authentication,
+                       previousKeyID == keyID {
+                        throw AccountStoreError.generatedKeyReuse
+                    }
+                } catch let error as MediaCredentialError
+                    where error == .credentialNotFound {
+                    continue
+                }
+            }
+
+        }
+        for other in accounts where other.id != accountID
+            && other.server.provider == .mediaShare {
+            let otherTransport = try transportKind(for: other)
+            let envelope: MediaShareCredentialEnvelope
+            do {
+                envelope = try infrastructure.vault.credentialMetadata(
+                    accountID: other.id,
+                    revision: other.credentialRevision,
+                    expectedTransport: otherTransport
+                )
+            } catch let error as MediaCredentialError
+                where error == .credentialNotFound {
+                continue
+            }
+            if case .generatedKey(_, let otherKeyID) = envelope.authentication,
+               otherKeyID == keyID {
+                throw AccountStoreError.generatedKeyReuse
+            }
+        }
+    }
+
+    private func emitRevisionConflictDiagnostic(
+        reason: String,
+        activeRevision: CredentialRevision?,
+        previousRevision: CredentialRevision?,
+        mutations: [CredentialMutationEntry]
+    ) {
+        let mutationSummary = mutations
+            .map { "\($0.kind.rawValue):\($0.phase.rawValue)" }
+            .joined(separator: ",")
+        BrowseDiagnostics.emit(
+            "mediaShareRevisionConflict reason=\(reason) "
+                + "activePresent=\(activeRevision != nil) "
+                + "previousPresent=\(previousRevision != nil) "
+                + "same=\(activeRevision == previousRevision) "
+                + "mutations=\(mutationSummary.isEmpty ? "none" : mutationSummary)"
+        )
     }
 
     private func mediaShareCredentialLocked(
@@ -512,7 +927,7 @@ public final class AccountStore: AccountPersisting, @unchecked Sendable {
         accountID: String,
         revision: CredentialRevision
     ) throws -> Bool {
-        guard let account = persistedAccountsLocked().first(where: {
+        guard let account = try persistedAccountsLockedThrowing().first(where: {
             $0.id == accountID && $0.credentialRevision == revision
         }) else {
             return false
@@ -522,9 +937,26 @@ public final class AccountStore: AccountPersisting, @unchecked Sendable {
     }
 
     private func persistedAccountsLocked() -> [Account] {
-        guard let data = secureStore.string(for: accountsKey)?.data(using: .utf8),
-              let accounts = try? JSONDecoder().decode([Account].self, from: data) else {
+        do {
+            return try persistedAccountsLockedThrowing()
+        } catch {
+            PlozzLog.auth.error("Account metadata unavailable; preserving stored value")
             return []
+        }
+    }
+
+    private func persistedAccountsLockedThrowing() throws -> [Account] {
+        guard let stored = try secureStore.readString(for: accountsKey) else {
+            return []
+        }
+        guard let data = stored.data(using: .utf8) else {
+            throw AccountStoreError.decodingFailed
+        }
+        let accounts: [Account]
+        do {
+            accounts = try JSONDecoder().decode([Account].self, from: data)
+        } catch {
+            throw AccountStoreError.decodingFailed
         }
         return accounts.sorted { $0.addedAt < $1.addedAt }
     }

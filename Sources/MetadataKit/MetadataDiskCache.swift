@@ -24,6 +24,7 @@ public actor MetadataDiskCache {
     private let fileURL: URL?
     private let positiveTTL: TimeInterval
     private let negativeTTL: TimeInterval
+    private let maxBytes: Int
     private var loaded = false
     private var dirty = false
 
@@ -45,11 +46,13 @@ public actor MetadataDiskCache {
     public init(
         directory: URL? = MetadataDiskCache.defaultDirectory(),
         positiveTTL: TimeInterval = 60 * 60 * 24 * 30,
-        negativeTTL: TimeInterval = 60 * 60 * 24 * 3
+        negativeTTL: TimeInterval = 60 * 60 * 24 * 3,
+        maxBytes: Int = 16 * 1024 * 1024
     ) {
         self.fileURL = directory?.appendingPathComponent(Self.cacheFileName)
         self.positiveTTL = positiveTTL
         self.negativeTTL = negativeTTL
+        self.maxBytes = max(0, maxBytes)
         if let directory { Self.removeSupersededCaches(in: directory) }
     }
 
@@ -96,13 +99,38 @@ public actor MetadataDiskCache {
         // Drop already-expired entries on load so the file doesn't grow unbounded.
         let now = Date()
         entries = decoded.filter { $0.value.expires > now }
+        if data.count > maxBytes {
+            dirty = true
+            persist()
+        }
     }
 
     private func persist() {
         guard dirty, let fileURL else { return }
         dirty = false
-        guard let data = try? JSONEncoder().encode(entries) else { return }
+        guard let data = encodedDataPruningToBudget() else { return }
         try? data.write(to: fileURL, options: .atomic)
+    }
+
+    private func encodedDataPruningToBudget() -> Data? {
+        let encoder = JSONEncoder()
+        guard var data = try? encoder.encode(entries) else { return nil }
+        guard data.count > maxBytes else { return data }
+        let oldestFirst = entries.sorted { $0.value.expires < $1.value.expires }
+        var index = 0
+        while data.count > maxBytes, index < oldestFirst.count {
+            let batchEnd = min(
+                oldestFirst.count,
+                index + max(1, oldestFirst.count / 10)
+            )
+            for entry in oldestFirst[index..<batchEnd] {
+                entries[entry.key] = nil
+            }
+            index = batchEnd
+            guard let encoded = try? encoder.encode(entries) else { return nil }
+            data = encoded
+        }
+        return data
     }
 
     public static func defaultDirectory() -> URL? {

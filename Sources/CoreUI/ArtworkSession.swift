@@ -16,12 +16,30 @@ import CoreModels
 /// external-metadata CDN URL) can't hold one of the ~6 per-host connections for a
 /// full minute and poison subsequent loads as the session ages.
 public enum ArtworkSession {
+    public static let memoryCapacityBytes = 64 * 1024 * 1024
+    public static let diskCapacityBytes = 384 * 1024 * 1024
+
+    public struct CacheUsage: Sendable {
+        public let memoryBytes: Int
+        public let diskBytes: Int
+        public let memoryCapacityBytes: Int
+        public let diskCapacityBytes: Int
+    }
+
+    private static let byteCache = URLCache(
+        memoryCapacity: memoryCapacityBytes,
+        diskCapacity: diskCapacityBytes,
+        diskPath: "plozz-artwork"
+    )
+
     public static let shared: URLSession = {
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 15
         config.timeoutIntervalForResource = 30
         config.httpMaximumConnectionsPerHost = 6
-        // A generous, dedicated *byte* cache. Decoded images live in a capped
+        // A bounded, dedicated *byte* cache. Foundation owns per-entry eviction;
+        // Plozz owns the enforceable capacity and reports current usage.
+        // Decoded images live in a capped
         // NSCache that evicts under memory pressure, so during fast horizontal
         // scroll on a large multi-server Home a card's decoded image can be
         // evicted; when the card scrolls back its art would otherwise re-fetch
@@ -29,12 +47,19 @@ public enum ArtworkSession {
         // default URLCache (~512KB on tvOS) made that re-fetch hit the network
         // almost every time. A large disk-backed byte cache lets the evicted image
         // re-decode from cached bytes instantly instead — no network, no gray flash.
-        config.urlCache = URLCache(memoryCapacity: 64 * 1024 * 1024,
-                                   diskCapacity: 512 * 1024 * 1024,
-                                   diskPath: "plozz-artwork")
+        config.urlCache = byteCache
         config.requestCachePolicy = .returnCacheDataElseLoad
         return URLSession(configuration: config)
     }()
+
+    public static func cacheUsage() -> CacheUsage {
+        CacheUsage(
+            memoryBytes: byteCache.currentMemoryUsage,
+            diskBytes: byteCache.currentDiskUsage,
+            memoryCapacityBytes: byteCache.memoryCapacity,
+            diskCapacityBytes: byteCache.diskCapacity
+        )
+    }
 
     /// Global cap on *concurrent background* artwork warms (season prewarm,
     /// loose-thumbnail prefetch). Foreground, on-screen artwork (`image(for:)`

@@ -48,25 +48,29 @@ struct MyLibrariesDetailView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 28) {
-                SettingsPageHeader(
-                    "Your Servers & Libraries",
-                    subtitle: "Turn servers and libraries on or off, and pick who you watch as."
-                )
-                if allGroups.isEmpty {
-                    emptyInventoryState
-                } else {
-                    ForEach(allGroups, id: \.serverKey) { serverCard($0) }
+        ScrollViewReader { scrollProxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 28) {
+                    SettingsPageHeader(
+                        "Your Servers & Libraries",
+                        subtitle: "Turn servers and libraries on or off, and pick who you watch as."
+                    )
+                    if allGroups.isEmpty {
+                        emptyInventoryState
+                    } else {
+                        ForEach(allGroups, id: \.serverKey) {
+                            serverCard($0, scrollProxy: scrollProxy)
+                        }
+                    }
+                    addServerSection
                 }
-                addServerSection
+                .frame(maxWidth: PlozzTheme.Metrics.settingsContentMaxWidth, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
+                .padding(.vertical, 24)
             }
-            .frame(maxWidth: PlozzTheme.Metrics.settingsContentMaxWidth, alignment: .leading)
-            .frame(maxWidth: .infinity, alignment: .center)
-            .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
-            .padding(.vertical, 24)
+            .scrollClipDisabled()
         }
-        .scrollClipDisabled()
         .task { await context.reloadLibraries() }
     }
 
@@ -85,7 +89,10 @@ struct MyLibrariesDetailView: View {
     /// One server, toggled on/off for this profile by its header switch. When on,
     /// the card expands to who you watch as + its libraries; when off it collapses
     /// to just the header, staying in the list so nothing reads as "removed".
-    private func serverCard(_ group: ServerAccountGroup) -> some View {
+    private func serverCard(
+        _ group: ServerAccountGroup,
+        scrollProxy: ScrollViewProxy
+    ) -> some View {
         // `rowContentPadding` + `flushLeading: false` rows make every focus card
         // inside nest concentrically with this panel's border.
         SettingsPanel(contentPadding: .settingsPanelRowContent) {
@@ -97,7 +104,10 @@ struct MyLibrariesDetailView: View {
                 SettingsSwitchButton(
                     isOn: isWatching(group),
                     flushLeading: false,
-                    action: { toggleWatching(group) }
+                    action: {
+                        toggleWatching(group)
+                        keepServerHeaderVisible(group, using: scrollProxy)
+                    }
                 ) {
                     HStack(spacing: 16) {
                         ProviderBrandMark(provider: group.providerKind, size: 48, mediaShareTransport: group.transportKind)
@@ -105,6 +115,7 @@ struct MyLibrariesDetailView: View {
                         Text(group.serverName)
                     }
                 }
+                .id(serverHeaderID(group))
 
                 if isWatching(group) {
                     // A media share has no watcher identity, so it skips "Watching
@@ -123,6 +134,25 @@ struct MyLibrariesDetailView: View {
                         librarySection(for: group)
                     }
                 }
+
+            }
+        }
+    }
+
+    private func serverHeaderID(_ group: ServerAccountGroup) -> String {
+        "server-header:\(group.serverKey)"
+    }
+
+    private func keepServerHeaderVisible(
+        _ group: ServerAccountGroup,
+        using scrollProxy: ScrollViewProxy
+    ) {
+        Task { @MainActor in
+            await Task.yield()
+            var transaction = Transaction()
+            transaction.animation = nil
+            withTransaction(transaction) {
+                scrollProxy.scrollTo(serverHeaderID(group), anchor: .center)
             }
         }
     }
@@ -293,7 +323,11 @@ struct MyLibrariesDetailView: View {
         case let .loaded(all):
             let libs = libraries(for: group, in: all)
             if libs.isEmpty {
-                Text("No libraries found on this server.").font(.footnote).foregroundStyle(.secondary)
+                if isRefreshingLibraries(for: group) {
+                    discoveringLibraries
+                } else {
+                    Text("No libraries found on this server.").font(.footnote).foregroundStyle(.secondary)
+                }
             } else {
                 // The shared multi-select checklist (same `SettingsCheckableRow` +
                 // trailing checkmark as Customize Home / Theme / Display Size), so
@@ -311,6 +345,19 @@ struct MyLibrariesDetailView: View {
                     }
                 )
             }
+        }
+    }
+
+    private var discoveringLibraries: some View {
+        HStack(spacing: 12) {
+            ProgressView()
+            Text("Discovering libraries…").font(.footnote).foregroundStyle(.secondary)
+        }
+    }
+
+    private func isRefreshingLibraries(for group: ServerAccountGroup) -> Bool {
+        group.accounts.contains {
+            context.refreshingLibraryAccountIDs.contains($0.id)
         }
     }
 

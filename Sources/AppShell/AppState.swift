@@ -996,6 +996,7 @@ public final class AppState {
     public let authenticatedHTTPResolver: any AuthenticatedHTTPResourceResolving
     private let networkFileResolverRegistry: MediaTransportResolverRegistry?
     private let shareCatalogCoordinator: ShareCatalogCoordinator
+    private var sharePriorityRevision: UInt64 = 0
     private let durableLocalStateStore: DurableLocalStateStore?
     /// Optional tvOS system-user seam (default app-owned no-op). See
     /// `SystemProfileBridging`.
@@ -1291,7 +1292,10 @@ public final class AppState {
                 credentialJournal: try CredentialMutationJournal(store: localStateStore)
             )
         } catch {
-            PlozzLog.auth.error("Media-share credential infrastructure unavailable")
+            reportMediaSharePersistenceFailure(
+                error,
+                operation: "credential-infrastructure-init"
+            )
             return AccountStore(secureStore: secureStore)
         }
         #else
@@ -2604,6 +2608,47 @@ public final class AppState {
         return "share:\(normalizedScheme)://\(host.lowercased())\(portKey)\(normalizedPath)#\(principal)"
     }
 
+    /// Secret-safe persistence failure identity for device diagnostics. Never
+    /// includes URLs, account ids, usernames, or credential values.
+    static func mediaSharePersistenceDiagnostic(_ error: any Error) -> String {
+        if let error = error as? AccountStoreError {
+            return "AccountStoreError.\(error)"
+        }
+        if let error = error as? CredentialMutationJournalError {
+            return "CredentialMutationJournalError.\(error)"
+        }
+        if let error = error as? MediaCredentialError {
+            return "MediaCredentialError.\(error)"
+        }
+        if let error = error as? DurableLocalStateError {
+            return "DurableLocalStateError.\(error)"
+        }
+        #if canImport(Security)
+        if let error = error as? KeychainError {
+            switch error {
+            case .unexpectedStatus(let status):
+                return "KeychainError.unexpectedStatus(\(status))"
+            case .encodingFailed:
+                return "KeychainError.encodingFailed"
+            }
+        }
+        #endif
+        return "Error.\(String(reflecting: type(of: error)))"
+    }
+
+    private static func reportMediaSharePersistenceFailure(
+        _ error: any Error,
+        operation: String
+    ) {
+        let diagnostic = mediaSharePersistenceDiagnostic(error)
+        PlozzLog.auth.error(
+            "Media-share persistence failed operation=\(operation) error=\(diagnostic)"
+        )
+        BrowseDiagnostics.emit(
+            "mediaSharePersistenceFailed operation=\(operation) error=\(diagnostic)"
+        )
+    }
+
     /// Adds (or updates in place) a WebDAV media share. Persists through the
     /// credential-envelope path — NOT the SMB token path — because a single
     /// access-token string can't carry a bearer token plus a TLS leaf pin, and
@@ -2694,6 +2739,7 @@ public final class AppState {
         do {
             try accountStore.addMediaShare(account, credential: envelope, generatedPrivateKey: nil)
         } catch {
+            Self.reportMediaSharePersistenceFailure(error, operation: "webdav-save")
             apply(.authenticationFailed(.unknown("Couldn’t save this WebDAV share")))
             return
         }
@@ -2994,6 +3040,10 @@ public final class AppState {
         do {
             try accountStore.addMediaShare(account, credential: envelope, generatedPrivateKey: nil)
         } catch {
+            Self.reportMediaSharePersistenceFailure(
+                error,
+                operation: "media-share-save"
+            )
             apply(.authenticationFailed(.unknown(invalidMessage)))
             return
         }
@@ -3381,6 +3431,22 @@ public final class AppState {
             resolved = Set(globalActive.filter { known.contains($0) })
         }
         activeAccountIDs = resolved
+        sharePriorityRevision &+= 1
+        let priorityRevision = sharePriorityRevision
+        let preferredShareIDs = Set(
+            accounts
+                .filter {
+                    resolved.contains($0.id)
+                        && $0.server.provider == .mediaShare
+                }
+                .map(\.id)
+        )
+        Task { [shareCatalogCoordinator] in
+            await shareCatalogCoordinator.setPreferredAccountKeys(
+                preferredShareIDs,
+                revision: priorityRevision
+            )
+        }
     }
 
     /// Rebuilds the settings models scoped to the active profile's

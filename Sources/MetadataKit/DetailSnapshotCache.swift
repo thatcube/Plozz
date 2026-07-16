@@ -68,6 +68,7 @@ public final class DetailSnapshotCache: Sendable {
 
     private let directory: URL?
     private let maxEntries: Int
+    private let maxBytes: Int
     private let maxAge: TimeInterval
 
     /// Concurrent queue for snapshot reads/writes: independent titles run in
@@ -89,12 +90,17 @@ public final class DetailSnapshotCache: Sendable {
     public init(
         directory: URL? = DetailSnapshotCache.defaultDirectory(),
         maxEntries: Int = 800,
+        maxBytes: Int = 48 * 1024 * 1024,
         maxAge: TimeInterval = 60 * 60 * 24 * 30
     ) {
         self.directory = directory.map { $0.appendingPathComponent(Self.schemaDirName, isDirectory: true) }
         self.maxEntries = maxEntries
+        self.maxBytes = max(0, maxBytes)
         self.maxAge = maxAge
         if let directory { Self.removeSupersededCaches(in: directory) }
+        if self.directory != nil {
+            pruneQueue.async { self.pruneIfNeeded() }
+        }
     }
 
     /// The cached snapshot for `key`, or `nil` when there is no fresh entry (the
@@ -192,17 +198,26 @@ public final class DetailSnapshotCache: Sendable {
 
     private func pruneIfNeeded() {
         guard let directory else { return }
-        let keys: [URLResourceKey] = [.contentModificationDateKey]
+        let keys: [URLResourceKey] = [.contentModificationDateKey, .fileSizeKey]
         guard let files = try? FileManager.default.contentsOfDirectory(
             at: directory, includingPropertiesForKeys: keys
-        ), files.count > maxEntries else { return }
-        let sorted = files.sorted { lhs, rhs in
-            let l = (try? lhs.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
-            let r = (try? rhs.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
-            return l < r
+        ) else { return }
+        var entries = files.map { url -> (url: URL, date: Date, bytes: Int) in
+            let values = try? url.resourceValues(forKeys: Set(keys))
+            return (
+                url,
+                values?.contentModificationDate ?? .distantPast,
+                values?.fileSize ?? 0
+            )
         }
-        for file in sorted.prefix(files.count - maxEntries) {
-            try? FileManager.default.removeItem(at: file)
+        var totalBytes = entries.reduce(0) { $0 + $1.bytes }
+        guard entries.count > maxEntries || totalBytes > maxBytes else { return }
+        entries.sort { $0.date < $1.date }
+        var remainingCount = entries.count
+        for entry in entries where remainingCount > maxEntries || totalBytes > maxBytes {
+            try? FileManager.default.removeItem(at: entry.url)
+            remainingCount -= 1
+            totalBytes = max(0, totalBytes - entry.bytes)
         }
     }
 

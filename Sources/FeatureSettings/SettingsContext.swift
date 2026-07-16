@@ -14,6 +14,7 @@ struct SettingsContext {
     let theme: ThemeSettingsModel
     let homeVisibility: HomeLibraryVisibilityModel
     let discoveredLibraries: LoadState<[AggregatedLibrary]>
+    let refreshingLibraryAccountIDs: Set<String>
     let reloadLibraries: () async -> Void
     let accounts: [Account]
     let activeAccountID: String?

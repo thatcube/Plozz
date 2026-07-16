@@ -221,6 +221,7 @@ public struct SettingsView: View {
             theme: theme,
             homeVisibility: homeVisibility,
             discoveredLibraries: librariesStore.state,
+            refreshingLibraryAccountIDs: librariesStore.refreshingAccountIDs,
             reloadLibraries: reloadLibraries,
             accounts: accounts,
             activeAccountID: activeAccountID,

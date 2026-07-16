@@ -164,6 +164,27 @@ final class WebDAVShareOnboardingTests: XCTestCase {
                       "a base URL with userinfo/query/fragment must be refused")
     }
 
+    func testPersistenceDiagnosticsClassifyErrorsWithoutContextValues() {
+        XCTAssertEqual(
+            AppState.mediaSharePersistenceDiagnostic(
+                AccountStoreError.mediaShareCredentialInfrastructureUnavailable
+            ),
+            "AccountStoreError.mediaShareCredentialInfrastructureUnavailable"
+        )
+        XCTAssertEqual(
+            AppState.mediaSharePersistenceDiagnostic(
+                CredentialMutationJournalError.activeRevisionConflict
+            ),
+            "CredentialMutationJournalError.activeRevisionConflict"
+        )
+        XCTAssertEqual(
+            AppState.mediaSharePersistenceDiagnostic(
+                MediaCredentialError.transportMismatch
+            ),
+            "MediaCredentialError.transportMismatch"
+        )
+    }
+
     // MARK: - Harness
 
     private struct Harness {

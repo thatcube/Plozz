@@ -510,6 +510,7 @@ actor ShareCatalogStore {
         var year: Int?
         var isMovie: Bool
         var isAnime: Bool
+        var discoveredAt: Date
     }
 
     /// Resolved metadata to persist for one logical item.
@@ -552,30 +553,43 @@ actor ShareCatalogStore {
 
     /// Logical items (movies + series) with no enrichment row at `version` yet,
     /// oldest-discovered first so a fresh library fills in a sensible order.
-    func pendingEnrichment(version: Int, limit: Int) -> [PendingEnrichment] {
+    func pendingEnrichment(
+        version: Int,
+        limit: Int,
+        passStartedAt: Date? = nil
+    ) -> [PendingEnrichment] {
         ensureOpen()
         guard db != nil, limit > 0 else { return [] }
         var out: [PendingEnrichment] = []
+        let cutoff = (passStartedAt ?? .distantFuture).timeIntervalSince1970
 
         // Movies: a movie asset is pending when it has no current-version enrichment
-        // row, OR its row is an unusable miss still under the retry cap.
+        // row, OR its row is an unusable miss still under the retry cap that wasn't
+        // already attempted during this logical pass.
         query("""
-        SELECT a.rel_path, a.title, a.year FROM assets a
+        SELECT a.rel_path, a.title, a.year, a.first_seen_at FROM assets a
         LEFT JOIN enrichment e ON e.item_id = 'f:' || a.rel_path AND e.enrich_version = ?
         WHERE a.library='movies' AND a.kind='movie'
-          AND (e.item_id IS NULL OR (\(Self.unusableEnrichmentPredicate) AND e.attempts < ?))
+          AND a.first_seen_at <= ?
+          AND (e.item_id IS NULL OR (
+            \(Self.unusableEnrichmentPredicate) AND e.attempts < ?
+            AND COALESCE(e.enriched_at, 0) < ?
+          ))
         ORDER BY a.first_seen_at LIMIT ?;
         """, bind: {
             sqlite3_bind_int64($0, 1, Int64(version))
-            sqlite3_bind_int64($0, 2, Int64(Self.maxEnrichAttempts))
-            sqlite3_bind_int64($0, 3, Int64(limit))
+            sqlite3_bind_double($0, 2, cutoff)
+            sqlite3_bind_int64($0, 3, Int64(Self.maxEnrichAttempts))
+            sqlite3_bind_double($0, 4, cutoff)
+            sqlite3_bind_int64($0, 5, Int64(limit))
         }) { stmt in
             let relPath = self.columnText(stmt, 0) ?? ""
             out.append(PendingEnrichment(
                 itemID: ShareCatalogID.file(relPath),
                 title: self.columnText(stmt, 1) ?? relPath,
                 year: self.columnOptInt(stmt, 2),
-                isMovie: true, isAnime: false
+                isMovie: true, isAnime: false,
+                discoveredAt: Date(timeIntervalSince1970: sqlite3_column_double(stmt, 3))
             ))
         }
 
@@ -587,15 +601,20 @@ actor ShareCatalogStore {
                 SELECT b.year FROM assets b
                 WHERE b.series_key = a.series_key AND b.kind='episode' AND b.year IS NOT NULL
                 GROUP BY b.year ORDER BY COUNT(*) DESC, b.year ASC LIMIT 1
-            ) FROM assets a
+            ), MIN(a.first_seen_at) FROM assets a
             LEFT JOIN enrichment e ON e.item_id = 'series:' || a.series_key AND e.enrich_version = ?
-            WHERE a.kind='episode' AND a.series_key IS NOT NULL
-              AND (e.item_id IS NULL OR (\(Self.unusableEnrichmentPredicate) AND e.attempts < ?))
+            WHERE a.kind='episode' AND a.series_key IS NOT NULL AND a.first_seen_at <= ?
+              AND (e.item_id IS NULL OR (
+                \(Self.unusableEnrichmentPredicate) AND e.attempts < ?
+                AND COALESCE(e.enriched_at, 0) < ?
+              ))
             GROUP BY a.series_key ORDER BY MIN(a.first_seen_at) LIMIT ?;
             """, bind: {
                 sqlite3_bind_int64($0, 1, Int64(version))
-                sqlite3_bind_int64($0, 2, Int64(Self.maxEnrichAttempts))
-                sqlite3_bind_int64($0, 3, Int64(remaining))
+                sqlite3_bind_double($0, 2, cutoff)
+                sqlite3_bind_int64($0, 3, Int64(Self.maxEnrichAttempts))
+                sqlite3_bind_double($0, 4, cutoff)
+                sqlite3_bind_int64($0, 5, Int64(remaining))
             }) { stmt in
                 guard let key = self.columnText(stmt, 0) else { return }
                 let lib = self.columnText(stmt, 2) ?? "tv"
@@ -603,11 +622,56 @@ actor ShareCatalogStore {
                     itemID: ShareCatalogID.series(key),
                     title: self.columnText(stmt, 1) ?? key,
                     year: self.columnOptInt(stmt, 3),
-                    isMovie: false, isAnime: lib == "anime"
+                    isMovie: false, isAnime: lib == "anime",
+                    discoveredAt: Date(timeIntervalSince1970: sqlite3_column_double(stmt, 4))
                 ))
             }
         }
         return out
+    }
+
+    /// Total logical movies + series currently eligible for enrichment. Used only
+    /// when a sliced pass begins so progress can retain one stable total across
+    /// several short scheduler slices without loading the whole backlog into memory.
+    func pendingEnrichmentCount(
+        version: Int,
+        discoveredBefore: Date? = nil
+    ) -> Int {
+        ensureOpen()
+        guard db != nil else { return 0 }
+        let cutoff = (discoveredBefore ?? .distantFuture).timeIntervalSince1970
+        var movies = 0
+        query("""
+        SELECT COUNT(*) FROM assets a
+        LEFT JOIN enrichment e ON e.item_id = 'f:' || a.rel_path AND e.enrich_version = ?
+        WHERE a.library='movies' AND a.kind='movie'
+          AND a.first_seen_at <= ?
+          AND (e.item_id IS NULL OR (\(Self.unusableEnrichmentPredicate) AND e.attempts < ?));
+        """, bind: {
+            sqlite3_bind_int64($0, 1, Int64(version))
+            sqlite3_bind_double($0, 2, cutoff)
+            sqlite3_bind_int64($0, 3, Int64(Self.maxEnrichAttempts))
+        }) { stmt in
+            movies = Int(sqlite3_column_int64(stmt, 0))
+        }
+
+        var series = 0
+        query("""
+        SELECT COUNT(*) FROM (
+          SELECT a.series_key FROM assets a
+          LEFT JOIN enrichment e ON e.item_id = 'series:' || a.series_key AND e.enrich_version = ?
+          WHERE a.kind='episode' AND a.series_key IS NOT NULL AND a.first_seen_at <= ?
+            AND (e.item_id IS NULL OR (\(Self.unusableEnrichmentPredicate) AND e.attempts < ?))
+          GROUP BY a.series_key
+        );
+        """, bind: {
+            sqlite3_bind_int64($0, 1, Int64(version))
+            sqlite3_bind_double($0, 2, cutoff)
+            sqlite3_bind_int64($0, 3, Int64(Self.maxEnrichAttempts))
+        }) { stmt in
+            series = Int(sqlite3_column_int64(stmt, 0))
+        }
+        return movies + series
     }
 
     /// The pending-enrichment request for a SINGLE catalog id (the item a user just
@@ -643,7 +707,7 @@ actor ShareCatalogStore {
                 SELECT b.year FROM assets b
                 WHERE b.series_key = ?1 AND b.kind='episode' AND b.year IS NOT NULL
                 GROUP BY b.year ORDER BY COUNT(*) DESC, b.year ASC LIMIT 1
-            ) FROM assets WHERE series_key=?1 AND kind='episode' LIMIT 1;
+            ), MIN(first_seen_at) FROM assets WHERE series_key=?1 AND kind='episode' LIMIT 1;
             """,
                   bind: { self.bindText($0, 1, key) }) { stmt in
                 guard sqlite3_column_type(stmt, 0) != SQLITE_NULL else { return }
@@ -652,7 +716,8 @@ actor ShareCatalogStore {
                     itemID: itemID,
                     title: self.columnText(stmt, 0) ?? key,
                     year: self.columnOptInt(stmt, 2),
-                    isMovie: false, isAnime: lib == "anime"
+                    isMovie: false, isAnime: lib == "anime",
+                    discoveredAt: Date(timeIntervalSince1970: sqlite3_column_double(stmt, 3))
                 )
             }
             return out
@@ -664,14 +729,15 @@ actor ShareCatalogStore {
             let itemID = ShareCatalogID.file(relPath)
             if hasUsableEnrichment(itemID: itemID, version: version) { return nil }
             var out: PendingEnrichment?
-            query("SELECT title, year, kind FROM assets WHERE rel_path=?;",
+            query("SELECT title, year, kind, first_seen_at FROM assets WHERE rel_path=?;",
                   bind: { self.bindText($0, 1, relPath) }) { stmt in
                 guard (self.columnText(stmt, 2) ?? "movie") == "movie" else { return }
                 out = PendingEnrichment(
                     itemID: itemID,
                     title: self.columnText(stmt, 0) ?? relPath,
                     year: self.columnOptInt(stmt, 1),
-                    isMovie: true, isAnime: false
+                    isMovie: true, isAnime: false,
+                    discoveredAt: Date(timeIntervalSince1970: sqlite3_column_double(stmt, 3))
                 )
             }
             return out

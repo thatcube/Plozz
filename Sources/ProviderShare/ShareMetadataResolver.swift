@@ -39,12 +39,13 @@ protocol ShareMetadataResolving: Sendable {
 /// resolution, so the routers can match by id (accurate) rather than title alone.
 struct KeylessShareResolver: ShareMetadataResolving {
     func resolve(_ request: ShareEnrichRequest) async -> ShareCatalogStore.EnrichmentRecord {
-        let ids = await KeylessIDResolver().externalIDs(
+        let sourcedIDs = await KeylessIDResolver().sourcedExternalIDs(
             title: request.title,
             year: request.year,
             isAnime: request.isAnime,
             isTV: !request.isMovie
         )
+        let ids = sourcedIDs.mapValues(\.value)
 
         // Synthetic item so the keyless routers can resolve art/overview. Stamping
         // the resolved ids + an "Anime" genre routes ContentClassifier correctly.
@@ -57,16 +58,14 @@ struct KeylessShareResolver: ShareMetadataResolving {
             providerIDs: ids
         )
 
-        async let poster = ArtworkRouter.shared.artworkURL(.poster, for: item)
-        async let hero = ArtworkRouter.shared.artworkURL(.hero, for: item)
-        async let logo = ArtworkRouter.shared.artworkURL(.logo, for: item)
-        async let overview = OverviewRouter.shared.overview(for: item)
+        async let poster = ArtworkRouter.shared.sourcedArtworkURL(.poster, for: item)
+        async let hero = ArtworkRouter.shared.sourcedArtworkURL(.hero, for: item)
+        async let logo = ArtworkRouter.shared.sourcedArtworkURL(.logo, for: item)
+        async let overview = OverviewRouter.shared.sourcedOverview(for: item)
 
-        return ShareCatalogStore.EnrichmentRecord(
-            providerIDs: ids,
+        return ShareCatalogStore.EnrichmentRecord.sourced(
+            providerIDs: sourcedIDs,
             overview: await overview,
-            genres: [],
-            runtime: nil,
             posterURL: await poster,
             backdropURL: await hero,
             logoURL: await logo
@@ -86,7 +85,7 @@ struct TVDBShareResolver: ShareMetadataResolving {
     func resolve(_ request: ShareEnrichRequest) async -> ShareCatalogStore.EnrichmentRecord {
         // Keyless ids: for anime these add AniList/MAL (TheTVDB doesn't carry them);
         // for TV they add IMDb/TVDB but TheTVDB supersedes those below.
-        async let keylessIDsTask = KeylessIDResolver().externalIDs(
+        async let keylessIDsTask = KeylessIDResolver().sourcedExternalIDs(
             title: request.title, year: request.year, isAnime: request.isAnime, isTV: !request.isMovie
         )
         // TheTVDB metadata: when the folder declared an explicit [tvdb-####] id,
@@ -109,12 +108,34 @@ struct TVDBShareResolver: ShareMetadataResolving {
                                       year: request.year,
                                       isMovie: request.isMovie, episodeHints: request.episodeHints)
         }
-        var ids = await keylessIDsTask
-        if let meta {
-            if let t = meta.tvdbID, !t.isEmpty { ids["Tvdb"] = t }
-            if let i = meta.imdbID, !i.isEmpty { ids["Imdb"] = i }
-            if let t = meta.tmdbID, !t.isEmpty { ids["Tmdb"] = t }
+        var sourcedIDs = await keylessIDsTask
+        let tvdbSourceURL = meta.flatMap {
+            Self.sourceURL(tvdbID: $0.tvdbID, isMovie: request.isMovie)
         }
+        if let meta {
+            if let t = meta.tvdbID, !t.isEmpty {
+                sourcedIDs["Tvdb"] = SourcedValue(
+                    value: t,
+                    source: .tvdb,
+                    sourceURL: tvdbSourceURL
+                )
+            }
+            if let i = meta.imdbID, !i.isEmpty {
+                sourcedIDs["Imdb"] = SourcedValue(
+                    value: i,
+                    source: .tvdb,
+                    sourceURL: tvdbSourceURL
+                )
+            }
+            if let t = meta.tmdbID, !t.isEmpty {
+                sourcedIDs["Tmdb"] = SourcedValue(
+                    value: t,
+                    source: .tvdb,
+                    sourceURL: tvdbSourceURL
+                )
+            }
+        }
+        let ids = sourcedIDs.mapValues(\.value)
 
         // The best display title: TheTVDB's canonical name (which upgrades a generic
         // folder title like "Avatar" → "Avatar: The Last Airbender") else the stored
@@ -133,33 +154,57 @@ struct TVDBShareResolver: ShareMetadataResolving {
             providerIDs: ids
         )
 
-        async let hero = ArtworkRouter.shared.artworkURL(.hero, for: item)
-        async let logo = ArtworkRouter.shared.artworkURL(.logo, for: item)
+        async let hero = ArtworkRouter.shared.sourcedArtworkURL(.hero, for: item)
+        async let logo = ArtworkRouter.shared.sourcedArtworkURL(.logo, for: item)
         // Poster: prefer TheTVDB's (real, high-quality, and the only source for
         // movie posters), else the keyless router.
-        let poster: URL?
+        let poster: SourcedValue<URL>?
         if let tvdbPoster = meta?.posterURL {
-            poster = tvdbPoster
+            poster = SourcedValue(
+                value: tvdbPoster,
+                source: .tvdb,
+                sourceURL: tvdbSourceURL
+            )
         } else {
-            poster = await ArtworkRouter.shared.artworkURL(.poster, for: item)
+            poster = await ArtworkRouter.shared.sourcedArtworkURL(.poster, for: item)
         }
-        let overview: String?
+        let overview: SourcedValue<String>?
         if let tvdbOverview = meta?.overview {
-            overview = tvdbOverview
+            overview = SourcedValue(
+                value: tvdbOverview,
+                source: .tvdb,
+                sourceURL: tvdbSourceURL
+            )
         } else {
-            overview = await OverviewRouter.shared.overview(for: item)
+            overview = await OverviewRouter.shared.sourcedOverview(for: item)
+        }
+        let genres = meta.flatMap { metadata -> SourcedValue<[String]>? in
+            guard !metadata.genres.isEmpty else { return nil }
+            return SourcedValue(
+                value: metadata.genres,
+                source: .tvdb,
+                sourceURL: tvdbSourceURL
+            )
+        }
+        let title = resolvedTitle.map {
+            SourcedValue(value: $0, source: .tvdb, sourceURL: tvdbSourceURL)
         }
 
-        return ShareCatalogStore.EnrichmentRecord(
-            providerIDs: ids,
+        return ShareCatalogStore.EnrichmentRecord.sourced(
+            providerIDs: sourcedIDs,
             overview: overview,
-            genres: meta?.genres ?? [],
-            runtime: nil,
+            genres: genres,
             posterURL: poster,
             backdropURL: await hero,
             logoURL: await logo,
-            title: resolvedTitle
+            title: title
         )
+    }
+
+    private static func sourceURL(tvdbID: String?, isMovie: Bool) -> URL? {
+        guard let tvdbID, !tvdbID.isEmpty else { return nil }
+        let resource = isMovie ? "movies" : "series"
+        return URL(string: "https://api4.thetvdb.com/v4/\(resource)/\(tvdbID)/extended")
     }
 }
 

@@ -72,12 +72,10 @@ let package = Package(
         // bounded stalled-seek / sparse-cache fix. Lineage (verified in the fork
         // history): upstream 5.0.7 (includes the merged Dolby Vision startup fix,
         // PR #118, and the seek-reset subtitle dedupe fix, #121) → `94235fc`
-        // re-applies "Carry Plozz's local patches on top of AetherEngine 5.0.1"
-        // (public `stop(resetDisplayCriteria:)` + the SDR pre-play settle gate that
-        // skips the ~1000ms waitForSwitch for SDR/non-switching loads; DV/HDR
-        // behavior remains upstream-identical) → `127033b` re-applies the bounded
-        // seek/sparse-cache recovery. This supersedes the 5.0.1-based `d97fad24`
-        // pin without dropping either Plozz-specific patch.
+        // exposes `stop(resetDisplayCriteria:)` for same-range episode handoff →
+        // `127033b` adds bounded seek/sparse-cache recovery → `a9e1dac` hardens
+        // late seek landing, transport reconciliation, clock settlement, and
+        // exactly-once subtitle re-anchoring after independent review.
         //
         // SMB enters AetherEngine only through Plozz's protocol-neutral custom-source
         // bridge; the engine's legacy SMB URL product is not linked. PR #94's
@@ -85,7 +83,7 @@ let package = Package(
         // muxer needs a PARSED audio packet to build the AC-3/E-AC-3/TrueHD sample
         // entry, else a mid-file backward seek wedged the muxer. See
         // docs/media-share-proposal.md § 5.1.
-        .package(url: "https://github.com/thatcube/AetherEngine", revision: "127033b681a5fe8287f19ea53b43cfacf19b0542"),
+        .package(url: "https://github.com/thatcube/AetherEngine", revision: "a9e1dac4009836a036215bf8121522a663f38db5"),
         // NOTE: FFmpegBuild (FFmpeg n8.1.x decode-only) and LibDovi (Dolby Vision
         // RPU parser) are pulled in TRANSITIVELY by AetherEngine — its own manifest
         // declares and consumes them. Plozz used to declare them directly only for

@@ -681,10 +681,35 @@ public struct JellyfinProvider: MediaProvider {
             playSessionID: info.PlaySessionId,
             didRemux: didRemux
         )
-        let mappedItem = map(item: detail)
+        let sourceRevision = Self.sourceRevision(itemID: itemID, source: originalSource)
+        let cachedProbe = kind == .emby
+            ? await probeDescriptors.cachedResult(for: sourceRevision)
+            : (completed: false, facts: nil)
+        let confirmsAtmos = cachedProbe.completed
+            && cachedProbe.facts?.audioIsAtmos == true
+        var mappedItem = map(item: detail)
 
         let streams = source.MediaStreams ?? detail.MediaStreams ?? []
-        let audio = streams.filter { $0.`Type` == "Audio" }.map(map(stream:))
+        var audio = streams.filter { $0.`Type` == "Audio" }.map(map(stream:))
+        var mappedSourceMetadata = Self.sourceMetadata(
+            container: originalContainer,
+            streams: originalStreams,
+            sourceRevision: sourceRevision
+        )
+        if confirmsAtmos {
+            mappedItem = mappedItem.confirmingAtmos()
+            if let metadata = mappedSourceMetadata {
+                mappedSourceMetadata = metadata.confirmingAtmos()
+            }
+            let targetIndex = audio.firstIndex {
+                $0.isDefault && $0.codec?.lowercased() == "eac3"
+            } ?? audio.firstIndex {
+                $0.codec?.lowercased() == "eac3"
+            }
+            if let targetIndex {
+                audio[targetIndex].isAtmos = true
+            }
+        }
         let sourceID = source.Id ?? itemID
         let subs = try streams.filter { $0.`Type` == "Subtitle" }.map { stream in
             try map(subtitleStream: stream, itemID: itemID, sourceID: sourceID)
@@ -708,11 +733,7 @@ public struct JellyfinProvider: MediaProvider {
             startPosition: mappedItem.resumePosition ?? 0,
             isTranscoding: source.TranscodingUrl != nil,
             deliveryMode: Self.deliveryMode(transcoding: source.TranscodingUrl != nil, didRemux: didRemux),
-            sourceMetadata: Self.sourceMetadata(
-                container: originalContainer,
-                streams: originalStreams,
-                sourceRevision: Self.sourceRevision(itemID: itemID, source: originalSource)
-            ),
+            sourceMetadata: mappedSourceMetadata,
             localRemuxSource: localRemuxSource,
             scrubPreview: scrubPreview(itemID: itemID, source: source, trickplay: detail.Trickplay),
             sourceProvider: kind,

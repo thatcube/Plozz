@@ -44,6 +44,40 @@ public struct ProbedStreamFacts: Codable, Hashable, Sendable {
     }
 }
 
+public extension MediaSourceMetadata {
+    /// Additively records an authoritative Atmos confirmation without changing
+    /// any other provider-supplied stream facts.
+    func confirmingAtmos() -> MediaSourceMetadata {
+        var copy = self
+        if var audio = copy.audio {
+            audio.profile = "Dolby Atmos"
+            copy.audio = audio
+        }
+        return copy
+    }
+}
+
+public extension MediaItem {
+    /// Additively records an authoritative Atmos confirmation on the item and
+    /// its default version so detail, picker, and playback surfaces agree.
+    func confirmingAtmos() -> MediaItem {
+        var copy = self
+        if let mediaInfo = copy.mediaInfo {
+            copy.mediaInfo = mediaInfo.confirmingAtmos()
+        }
+        copy.versions = copy.versions.map { version in
+            var version = version
+            guard version.isDefault else { return version }
+            version.audioProfile = "Dolby Atmos"
+            if let sourceMetadata = version.sourceMetadata {
+                version.sourceMetadata = sourceMetadata.confirmingAtmos()
+            }
+            return version
+        }
+        return copy
+    }
+}
+
 /// Probes a credential-free network file's headers for real stream facts.
 /// Implemented by the engine layer and injected into providers so transport
 /// packages never depend on the demuxer. Must run off the main actor.

@@ -568,6 +568,54 @@ final class ItemDetailViewModelTests: XCTestCase {
                        "A subsequent load() must not re-apply the local-first preference over the user's pick")
     }
 
+    func testMovieRetargetsToPreferredSourceAfterAsyncDiscovery() async {
+        let remoteMovie = MediaItem(
+            id: "remote-movie",
+            title: "Movie",
+            kind: .movie,
+            sourceAccountID: "remote"
+        )
+        let localMovie = MediaItem(
+            id: "local-movie",
+            title: "Movie",
+            kind: .movie,
+            sourceAccountID: "local"
+        )
+        let remote = FakeMediaProvider(allItems: [remoteMovie])
+        remote.localityOverride = .remote
+        let local = FakeMediaProvider(allItems: [localMovie])
+        local.localityOverride = .local
+        let discovered = [
+            MediaSourceRef(
+                accountID: "remote",
+                itemID: "remote-movie",
+                locality: .remote
+            ),
+            MediaSourceRef(
+                accountID: "local",
+                itemID: "local-movie",
+                locality: .local
+            )
+        ]
+        let vm = ItemDetailViewModel(
+            provider: remote,
+            itemID: "remote-movie",
+            sourceAccountID: "remote",
+            initialSources: [discovered[0]],
+            alternateProviderResolver: { accountID in
+                accountID == "local" ? local : (accountID == "remote" ? remote : nil)
+            },
+            crossServerSourceResolver: { _ in discovered }
+        )
+
+        await vm.load()
+        await waitUntil {
+            vm.state.value?.item.id == "local-movie"
+        }
+
+        XCTAssertEqual(vm.state.value?.item.sourceAccountID, "local")
+    }
+
     func testLoadEpisodesFetchesAndCachesPerSeason() async {
         let provider = FakeMediaProvider(allItems: [series("show")])
         provider.childrenByParent = [

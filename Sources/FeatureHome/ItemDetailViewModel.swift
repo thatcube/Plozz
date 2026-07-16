@@ -1126,7 +1126,7 @@ public final class ItemDetailViewModel {
     }
 
     /// Deferred twin of ``applyInitialLocalityPreferenceIfNeeded`` for the common
-    /// case where a series cold-loads with a SINGLE source and its local copy is
+    /// case where a title cold-loads with a SINGLE source and its preferred copy is
     /// only discovered later (async cross-server discovery).
     ///
     /// The initial pass can only choose among the sources known at first paint. A
@@ -1140,13 +1140,14 @@ public final class ItemDetailViewModel {
     /// also refreshes the retarget against LIVE locality, so it doubles as the
     /// detail page's fix for a stale synchronous locality read.
     ///
-    /// Series only (a movie re-selects its best copy at play time via
-    /// `bestSourcePlayItem`). Never overrides an explicit user pick
-    /// (``switchToSource``) or an origin-pinned detail page, and reloads in place so
-    /// the local server's episode tree loads. Returns `true` when it retargeted.
+    /// Movies also retarget now that provider-specific delayed enrichment updates
+    /// their detail badges; the picker must never highlight one server while the
+    /// detail model remains loaded from another. Never overrides an explicit user
+    /// pick (``switchToSource``) or an origin-pinned detail page. Returns `true`
+    /// when it retargeted.
     @discardableResult
     private func retargetToMostLocalSourceAfterDiscovery(kind: MediaItemKind) async -> Bool {
-        guard kind == .series,
+        guard kind == .series || kind == .movie || kind == .episode || kind == .video,
               originSourceAccountID == nil,
               !userDidSwitchSource,
               sources.count > 1 else { return false }
@@ -1579,7 +1580,7 @@ public final class ItemDetailViewModel {
             return
         }
 
-        let enrichedItem = Self.applyingConfirmedAtmos(to: detail.item)
+        let enrichedItem = detail.item.confirmingAtmos()
         detail.item = enrichedItem
         state = .loaded(detail)
         sources = sources.map { stampedPrimarySource($0, from: enrichedItem) }
@@ -1618,28 +1619,6 @@ public final class ItemDetailViewModel {
         }
     }
 
-    private static func applyingConfirmedAtmos(to item: MediaItem) -> MediaItem {
-        var copy = item
-        if var mediaInfo = copy.mediaInfo, var audio = mediaInfo.audio {
-            audio.profile = "Dolby Atmos"
-            mediaInfo.audio = audio
-            copy.mediaInfo = mediaInfo
-        }
-        copy.versions = copy.versions.map { version in
-            var version = version
-            guard version.isDefault else { return version }
-            version.audioProfile = "Dolby Atmos"
-            if var sourceMetadata = version.sourceMetadata,
-               var audio = sourceMetadata.audio {
-                audio.profile = "Dolby Atmos"
-                sourceMetadata.audio = audio
-                version.sourceMetadata = sourceMetadata
-            }
-            return version
-        }
-        return copy
-    }
-
     /// Retains a previously confirmed Atmos result only for the exact same
     /// provider source revision; a replaced file automatically loses the cached
     /// enrichment and is probed again.
@@ -1655,7 +1634,7 @@ public final class ItemDetailViewModel {
               cached.mediaInfo?.audio?.profile?.localizedCaseInsensitiveContains("atmos") == true else {
             return fresh
         }
-        return applyingConfirmedAtmos(to: fresh)
+        return fresh.confirmingAtmos()
     }
 
     /// Seeds ``sources`` from the merged card's references, stamping the *primary*
@@ -1818,11 +1797,10 @@ public final class ItemDetailViewModel {
             startAlternateSourceEnrichment(primaryID: activeItemID)
             return
         }
-        // If discovery surfaced a more-local copy of a SERIES, route there now so
-        // its episode tree loads from the local (same-LAN) server — the initial
-        // pass couldn't pick it because the twin wasn't known at first paint. The
-        // reload inside re-drives detail AND re-establishes alternate enrichment for
-        // the new active server, so return before kicking the old server's pass.
+        // If discovery surfaced a preferred copy, route there now so the detail
+        // provider matches the server highlighted by the picker. The reload inside
+        // re-drives detail and re-establishes alternate enrichment for the new
+        // active server, so return before kicking the old server's pass.
         if await retargetToMostLocalSourceAfterDiscovery(kind: primary.kind) { return }
         startAlternateSourceEnrichment(primaryID: primary.id)
     }

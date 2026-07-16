@@ -169,6 +169,16 @@ final class EmbyProviderParityTests: XCTestCase {
             ]}
          ]}
         """)
+        stub.stub(pathSuffix: "/Items/atmos/PlaybackInfo", json: """
+        {"MediaSources":[
+          {"Id":"source-1","ETag":"etag-1","Container":"mkv","Size":123456,
+           "SupportsDirectPlay":true,
+           "MediaStreams":[
+             {"Index":0,"Type":"Video","Codec":"hevc"},
+             {"Index":1,"Type":"Audio","Codec":"eac3","Channels":6,"IsDefault":true}
+           ]}
+        ],"PlaySessionId":"play-atmos"}
+        """)
         let prober = StubAuthenticatedStreamProber(
             facts: ProbedStreamFacts(
                 audioCodec: "eac3",
@@ -200,6 +210,16 @@ final class EmbyProviderParityTests: XCTestCase {
         _ = await provider.supplementalStreamFacts(for: item)
         let cachedLocators = await prober.locators
         XCTAssertEqual(cachedLocators.count, 1, "same revision should reuse the cached probe")
+
+        let request = try await provider.playbackInfo(
+            for: "atmos",
+            mediaSourceID: "source-1",
+            forceTranscode: false
+        )
+        XCTAssertEqual(request.item.mediaInfo?.audio?.profile, "Dolby Atmos")
+        XCTAssertEqual(request.sourceMetadata?.audio?.profile, "Dolby Atmos")
+        XCTAssertTrue(request.audioTracks.first { $0.isDefault }?.isAtmos ?? false)
+        XCTAssertTrue(request.item.technicalBadges.map(\.label).contains("Dolby Atmos"))
     }
 
     func testAtmosProbeCapabilityIsEmbyOnly() async throws {

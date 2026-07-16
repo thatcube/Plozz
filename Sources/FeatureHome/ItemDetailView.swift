@@ -714,6 +714,9 @@ public struct ItemDetailView: View {
     private func selectSource(_ accountID: String) {
         sourceOverride = accountID
         versionOverride = nil
+        Task {
+            await viewModel.switchToSource(accountID: accountID)
+        }
     }
 
     /// Records the user's version choice for this visit and remembers it for next

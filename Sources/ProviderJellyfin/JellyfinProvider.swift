@@ -1326,12 +1326,14 @@ public struct JellyfinProvider: MediaProvider {
                 "type=\(stream.`Type`)",
                 "codec=\(stream.Codec ?? "-")",
                 "profile=\(stream.Profile ?? "-")",
+                "title=\(stream.DisplayTitle ?? "-")",
                 "size=\(stream.Width.map(String.init) ?? "-")x\(stream.Height.map(String.init) ?? "-")",
                 "range=\(stream.VideoRange ?? "-")",
                 "rangeType=\(stream.VideoRangeType ?? "-")",
                 "extended=\(stream.ExtendedVideoType ?? "-")",
                 "subtype=\(stream.ExtendedVideoSubType ?? "-")",
                 "transfer=\(stream.ColorTransfer ?? "-")",
+                "layout=\(stream.ChannelLayout ?? "-")",
                 "default=\(stream.IsDefault.map(String.init) ?? "-")"
             ].joined(separator: ";")
         }.joined(separator: "|")

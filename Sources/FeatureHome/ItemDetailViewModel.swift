@@ -1579,8 +1579,10 @@ public final class ItemDetailViewModel {
             return
         }
 
-        detail.item = Self.applyingConfirmedAtmos(to: detail.item)
+        let enrichedItem = Self.applyingConfirmedAtmos(to: detail.item)
+        detail.item = enrichedItem
         state = .loaded(detail)
+        sources = sources.map { stampedPrimarySource($0, from: enrichedItem) }
         persistSnapshot()
     }
 

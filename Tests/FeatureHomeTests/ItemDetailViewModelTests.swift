@@ -213,6 +213,10 @@ final class ItemDetailViewModelTests: XCTestCase {
         XCTAssertEqual(vm.state.value?.item.id, "emby-movie")
         XCTAssertEqual(emby.supplementalProbeCount, 1)
         XCTAssertEqual(plex.supplementalProbeCount, 0)
+        XCTAssertEqual(
+            vm.sources.first { $0.accountID == "emby" }?.versions.first?.audioProfile,
+            "Dolby Atmos"
+        )
     }
 
     func testEnrichesAlternateSourcesAndUnifiesWatchState() async {

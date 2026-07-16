@@ -180,8 +180,102 @@ final class AccountStoreTests: XCTestCase {
 
     private let server = MediaServer(id: "s", name: "Home", baseURL: URL(string: "http://h")!, provider: .jellyfin)
 
+    private let preEmbyAccountJSON = """
+    [
+      {
+        "id":"jellyfin-account",
+        "server":{
+          "id":"jf-server",
+          "name":"Jellyfin Home",
+          "baseURL":"http://jellyfin.local:8096",
+          "provider":"jellyfin"
+        },
+        "userID":"jf-user",
+        "userName":"Alice",
+        "deviceID":"device",
+        "credentialRevision":{"rawValue":"11111111-1111-1111-1111-111111111111"},
+        "addedAt":0
+      },
+      {
+        "id":"plex-account",
+        "server":{
+          "id":"plex-server",
+          "name":"Plex Home",
+          "baseURL":"https://plex.example.com",
+          "provider":"plex"
+        },
+        "userID":"plex-user",
+        "userName":"Bob",
+        "deviceID":"device",
+        "credentialRevision":{"rawValue":"22222222-2222-2222-2222-222222222222"},
+        "addedAt":1
+      },
+      {
+        "id":"share-account",
+        "server":{
+          "id":"share:server/media",
+          "name":"Media Share",
+          "baseURL":"smb://server/media",
+          "provider":"mediaShare"
+        },
+        "userID":"guest",
+        "userName":"",
+        "deviceID":"device",
+        "credentialRevision":{"rawValue":"33333333-3333-3333-3333-333333333333"},
+        "addedAt":2
+      }
+    ]
+    """
+
     private func account(_ id: String, user: String = "Alice", added: TimeInterval = 0) -> Account {
         Account(id: id, server: server, userID: "u-\(id)", userName: user, deviceID: "dev", addedAt: Date(timeIntervalSince1970: added))
+    }
+
+    func testPreEmbyAccountPayloadStillDecodesEveryExistingProvider() throws {
+        let accounts = try JSONDecoder().decode(
+            [Account].self,
+            from: Data(preEmbyAccountJSON.utf8)
+        )
+
+        XCTAssertEqual(accounts.map(\.id), [
+            "jellyfin-account",
+            "plex-account",
+            "share-account"
+        ])
+        XCTAssertEqual(accounts.map(\.server.provider), [
+            .jellyfin,
+            .plex,
+            .mediaShare
+        ])
+    }
+
+    func testPreEmbyServerTokensRemainKeyedByStableAccountID() throws {
+        let accounts = try JSONDecoder().decode(
+            [Account].self,
+            from: Data(preEmbyAccountJSON.utf8)
+        ).filter { $0.server.provider != .mediaShare }
+        let encoded = try JSONEncoder().encode(accounts)
+        let secure = InMemorySecureStore()
+        try secure.setString(
+            try XCTUnwrap(String(data: encoded, encoding: .utf8)),
+            for: "com.plozz.accounts.v2"
+        )
+        try secure.setString(
+            "JF_TOKEN",
+            for: "com.plozz.account.token.jellyfin-account"
+        )
+        try secure.setString(
+            "PLEX_TOKEN",
+            for: "com.plozz.account.token.plex-account"
+        )
+        let store = AccountStore(secureStore: secure)
+
+        XCTAssertEqual(store.loadAccounts().map(\.id), [
+            "jellyfin-account",
+            "plex-account"
+        ])
+        XCTAssertEqual(store.token(for: "jellyfin-account"), "JF_TOKEN")
+        XCTAssertEqual(store.token(for: "plex-account"), "PLEX_TOKEN")
     }
 
     private func shareAccount(

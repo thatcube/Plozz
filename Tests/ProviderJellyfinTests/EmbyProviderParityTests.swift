@@ -63,6 +63,19 @@ final class EmbyProviderParityTests: XCTestCase {
             "VideoRange":"SDR","ExtendedVideoType":"DolbyVision",
             "ExtendedVideoSubType":"DoviProfile81"},
            {"Index":1,"Type":"Audio","Codec":"truehd","Channels":8,"IsDefault":true}
+         ],
+         "MediaSources":[
+           {"Id":"src1","Name":"4K Remux","Container":"mkv",
+            "MediaStreams":[
+              {"Index":0,"Type":"Video","Codec":"hevc","Width":3840,"Height":2160,
+               "VideoRange":"SDR"},
+              {"Index":1,"Type":"Audio","Codec":"truehd","Channels":8,"IsDefault":true}
+            ]},
+           {"Id":"src2","Name":"1080p","Container":"mp4",
+            "MediaStreams":[
+              {"Index":0,"Type":"Video","Codec":"h264","Width":1920,"Height":1080,
+               "VideoRange":"SDR"}
+            ]}
          ]}
         """)
         stub.stub(pathSuffix: "/Items/movie1/PlaybackInfo", json: """
@@ -85,6 +98,14 @@ final class EmbyProviderParityTests: XCTestCase {
         )
         XCTAssertEqual(request.sourceMetadata?.video?.dolbyVisionProfile, 8)
         XCTAssertEqual(request.sourceMetadata?.video?.videoRangeType, "DOVIWithHDR10")
+        XCTAssertEqual(
+            request.item.versions.first?.technicalBadges.map(\.label),
+            ["4K", "Dolby Vision", "Dolby TrueHD", "HDR10"]
+        )
+        XCTAssertEqual(
+            request.item.versions.last?.technicalBadges.map(\.label),
+            ["1080p", "SDR"]
+        )
         guard case .some(.authenticatedHTTP(let locator)) = request.scrubPreview?.plexBIFResource else {
             return XCTFail("expected authenticated Emby BIF resource")
         }

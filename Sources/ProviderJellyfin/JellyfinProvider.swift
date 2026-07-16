@@ -1259,7 +1259,10 @@ public struct JellyfinProvider: MediaProvider {
                 container: dto.MediaSources?.first?.Container,
                 streams: dto.MediaStreams ?? dto.MediaSources?.first?.MediaStreams ?? []
             ),
-            versions: Self.versions(from: dto.MediaSources),
+            versions: Self.versions(
+                from: dto.MediaSources,
+                defaultStreams: dto.MediaStreams
+            ),
             isFavorite: dto.UserData?.IsFavorite ?? false,
             lastPlayedAt: Self.parseDate(dto.UserData?.LastPlayedDate)
         )
@@ -1271,10 +1274,19 @@ public struct JellyfinProvider: MediaProvider {
     /// without source info (rows/cards) or with a single source, so the picker
     /// only appears when there's a genuine choice. The server's first source is
     /// flagged `isDefault`.
-    static func versions(from sources: [MediaSourceInfo]?) -> [MediaVersion] {
+    static func versions(
+        from sources: [MediaSourceInfo]?,
+        defaultStreams: [MediaStreamDto]? = nil
+    ) -> [MediaVersion] {
         guard let sources, sources.count > 1 else { return [] }
         return sources.enumerated().map { index, source in
-            let streams = source.MediaStreams ?? []
+            // Emby's item-level `MediaStreams` is the authoritative metadata for
+            // the primary/default source; its nested source stream can be trimmed
+            // and omit ExtendedVideoType, which made a Dolby Vision version read
+            // as SDR in the detail hero. Non-default versions remain source-local.
+            let streams = index == 0 && !(defaultStreams ?? []).isEmpty
+                ? defaultStreams ?? []
+                : source.MediaStreams ?? []
             let video = streams.first { $0.`Type` == "Video" }
             let audio = streams.first { $0.`Type` == "Audio" }
             return MediaVersion(
@@ -1286,7 +1298,8 @@ public struct JellyfinProvider: MediaProvider {
                 sizeBytes: source.Size,
                 isDefault: index == 0,
                 videoCodec: video?.Codec,
-                videoRange: video?.VideoRangeType ?? video?.VideoRange,
+                videoRange: video.flatMap(Self.normalizedVideoRangeType(for:))
+                    ?? video?.VideoRange,
                 audioCodec: audio?.Codec,
                 audioChannels: audio?.Channels,
                 audioProfile: audio?.Profile,

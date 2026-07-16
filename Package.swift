@@ -68,14 +68,12 @@ let package = Package(
         // decodes cleanly (#92), software-path seek holds last frame (#90). See
         // AGENTS.local.md › "Playback engine (AetherEngine / Plozzigen)".
         //
-        // Pinned to AetherEngine 5.0.7 + Plozz's re-applied local patches + the
+        // Pinned to AetherEngine 5.3.1 + Plozz's re-applied local patches + the
         // bounded stalled-seek / sparse-cache fix. Lineage (verified in the fork
-        // history): upstream 5.0.7 (includes the merged Dolby Vision startup fix,
-        // PR #118, and the seek-reset subtitle dedupe fix, #121) → `94235fc`
-        // exposes `stop(resetDisplayCriteria:)` for same-range episode handoff →
-        // `127033b` adds bounded seek/sparse-cache recovery → `a9e1dac` hardens
-        // late seek landing, transport reconciliation, clock settlement, and
-        // exactly-once subtitle re-anchoring after independent review.
+        // history): upstream 5.3.1 → `07814d8` applies bounded seek/sparse-cache
+        // recovery and the reviewed late-landing/transport/subtitle hardening →
+        // `126f020` exposes `stop(resetDisplayCriteria:)` for same-range episode
+        // handoff. The two changes are also proposed upstream as PRs #129 and #128.
         //
         // SMB enters AetherEngine only through Plozz's protocol-neutral custom-source
         // bridge; the engine's legacy SMB URL product is not linked. PR #94's
@@ -83,7 +81,7 @@ let package = Package(
         // muxer needs a PARSED audio packet to build the AC-3/E-AC-3/TrueHD sample
         // entry, else a mid-file backward seek wedged the muxer. See
         // docs/media-share-proposal.md § 5.1.
-        .package(url: "https://github.com/thatcube/AetherEngine", revision: "a9e1dac4009836a036215bf8121522a663f38db5"),
+        .package(url: "https://github.com/thatcube/AetherEngine", revision: "126f020362453548189446132dc2619f2c1e9e4e"),
         // NOTE: FFmpegBuild (FFmpeg n8.1.x decode-only) and LibDovi (Dolby Vision
         // RPU parser) are pulled in TRANSITIVELY by AetherEngine — its own manifest
         // declares and consumes them. Plozz used to declare them directly only for

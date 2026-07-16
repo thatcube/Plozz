@@ -22,7 +22,7 @@ public actor OverviewRouter {
 
     /// Positive + negative cache. A cached `nil` (`.some(nil)`) means "we looked and
     /// found nothing" so a miss is never re-fetched within a run.
-    private var cache: [String: String?] = [:]
+    private var cache: [String: SourcedValue<String>?] = [:]
 
     public init() {}
 
@@ -32,8 +32,17 @@ public actor OverviewRouter {
         await overview(for: MetadataQuery(item))
     }
 
+    public func sourcedOverview(for item: MediaItem) async -> SourcedValue<String>? {
+        await sourcedOverview(for: MetadataQuery(item))
+    }
+
     /// Lower-level entry point taking a prebuilt ``MetadataQuery``.
     public func overview(for query: MetadataQuery) async -> String? {
+        await sourcedOverview(for: query)?.value
+    }
+
+    /// Resolves overview text together with its provider attribution.
+    public func sourcedOverview(for query: MetadataQuery) async -> SourcedValue<String>? {
         let key = cacheKey(for: query)
         if let hit = cache[key] { return hit }
         let text = await resolve(query)
@@ -43,17 +52,22 @@ public actor OverviewRouter {
 
     // MARK: - Routing
 
-    private func resolve(_ query: MetadataQuery) async -> String? {
+    private func resolve(_ query: MetadataQuery) async -> SourcedValue<String>? {
         let title = query.title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !title.isEmpty else { return nil }
-        switch query.contentType {
-        case .music:
-            return nil
-        case .tvShow:
-            return await Self.tvmazeOverview(for: query)
-        case .anime, .movie, .unknown:
-            return await Self.wikipediaOverview(for: query)
+        for source in CurrentMetadataPriority.overviewSources(for: query.contentType) {
+            switch source {
+            case .tvmaze:
+                if let value = await Self.tvmazeOverview(for: query) { return value }
+            case .wikipedia:
+                if let value = await Self.wikipediaOverview(for: query) {
+                    return SourcedValue(value: value, source: .wikipedia)
+                }
+            default:
+                continue
+            }
         }
+        return nil
     }
 
     /// A stable cache identity: prefers a concrete external id (so every episode of
@@ -78,15 +92,22 @@ public actor OverviewRouter {
 
     /// The episode summary (real per-episode synopsis) when a season+episode is
     /// known, falling back to the show summary; both keyless, one request each.
-    private static func tvmazeOverview(for query: MetadataQuery) async -> String? {
+    private static func tvmazeOverview(
+        for query: MetadataQuery
+    ) async -> SourcedValue<String>? {
         guard let show = await tvmazeShow(for: query) else { return nil }
         if let season = query.seasonNumber, let episode = query.episodeNumber,
            let url = URL(string: "https://api.tvmaze.com/shows/\(show.id)/episodebynumber?season=\(season)&number=\(episode)"),
            let ep = await MetadataHTTP.get(TVmazeEpisode.self, url: url),
            let text = strippedHTML(ep.summary) {
-            return text
+            return SourcedValue(value: text, source: .tvmaze, sourceURL: url)
         }
-        return strippedHTML(show.summary)
+        guard let text = strippedHTML(show.summary) else { return nil }
+        return SourcedValue(
+            value: text,
+            source: .tvmaze,
+            sourceURL: URL(string: "https://api.tvmaze.com/shows/\(show.id)")
+        )
     }
 
     private static func tvmazeShow(for query: MetadataQuery) async -> TVmazeShow? {

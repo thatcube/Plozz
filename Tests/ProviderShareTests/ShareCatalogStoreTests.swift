@@ -1,6 +1,7 @@
 import XCTest
 @testable import ProviderShare
 import CoreModels
+import SQLite3
 
 /// Coverage for the SQLite-backed share catalog — the index that makes a share's
 /// Recently Added / Search / Movies-TV-Anime libraries work without a live SMB
@@ -27,6 +28,308 @@ final class ShareCatalogStoreTests: XCTestCase {
                      title: "Episode \(episode)", year: nil,
                      seriesTitle: series, seriesKey: ShareCatalogID.seriesKey(fromTitle: series),
                      season: season, episode: episode)
+    }
+
+    private func catalogURL(accountKey: String, in directory: URL) -> URL {
+        let allowed = CharacterSet.alphanumerics
+        let mapped = String(accountKey.unicodeScalars.map {
+            allowed.contains($0) ? Character($0) : "-"
+        })
+        var hash: UInt64 = 0xcbf29ce484222325
+        for byte in accountKey.utf8 {
+            hash = (hash ^ UInt64(byte)) &* 0x100000001b3
+        }
+        return directory.appendingPathComponent(
+            "share-catalog-\(mapped.prefix(80))-\(String(hash, radix: 16)).sqlite"
+        )
+    }
+
+    private func createLegacyCatalog(
+        in directory: URL,
+        withPartialNormalizedTables: Bool = false
+    ) throws -> URL {
+        let url = catalogURL(accountKey: "legacy", in: directory)
+        var db: OpaquePointer?
+        guard sqlite3_open(url.path, &db) == SQLITE_OK, let db else {
+            throw NSError(domain: "ShareCatalogStoreTests", code: 1)
+        }
+        defer { sqlite3_close(db) }
+        let sql = """
+        CREATE TABLE assets(
+          rel_path TEXT PRIMARY KEY, basename TEXT NOT NULL, size INTEGER NOT NULL,
+          modified_at REAL NOT NULL, first_seen_at REAL NOT NULL, last_scan INTEGER NOT NULL,
+          kind TEXT NOT NULL, library TEXT NOT NULL, title TEXT NOT NULL,
+          sort_title TEXT NOT NULL, year INTEGER, series_title TEXT, series_key TEXT,
+          season INTEGER, episode INTEGER
+        );
+        CREATE TABLE enrichment(
+          item_id TEXT PRIMARY KEY, provider_ids_json TEXT, overview TEXT,
+          genres_json TEXT, runtime REAL, poster_url TEXT, backdrop_url TEXT,
+          logo_url TEXT, enriched_at REAL NOT NULL, enrich_version INTEGER NOT NULL,
+          attempts INTEGER NOT NULL DEFAULT 0, title TEXT
+        );
+        CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT);
+        INSERT INTO assets VALUES
+          ('Movies/Rich.mkv','Rich.mkv',100,10,10,1,'movie','movies','Rich','rich',2001,NULL,NULL,NULL,NULL),
+          ('Movies/Sparse.mkv','Sparse.mkv',100,20,20,1,'movie','movies','Sparse','sparse',2002,NULL,NULL,NULL,NULL),
+          ('Movies/Exhausted.mkv','Exhausted.mkv',100,30,30,1,'movie','movies','Exhausted','exhausted',2003,NULL,NULL,NULL,NULL),
+          ('Movies/Retry.mkv','Retry.mkv',100,40,40,1,'movie','movies','Retry','retry',2004,NULL,NULL,NULL,NULL),
+          ('TV/Anime Show/S01E01.mkv','S01E01.mkv',100,50,50,1,'episode','tv','Episode 1','episode 1',NULL,'Anime Show','anime-show',1,1);
+        INSERT INTO enrichment VALUES
+          ('f:Movies/Rich.mkv','{"Tvdb":"42","Imdb":"tt0042","AniList":"84"}',
+           'Rich overview','["Drama","Mystery"]',7200,
+           'https://example.com/poster.jpg','https://example.com/backdrop.jpg',
+           'https://example.com/logo.png',1234,7,0,'Rich Show'),
+          ('f:Movies/Sparse.mkv',NULL,'Sparse overview',NULL,NULL,NULL,NULL,NULL,2345,7,0,NULL),
+          ('f:Movies/Exhausted.mkv',NULL,NULL,NULL,NULL,NULL,NULL,NULL,3456,7,3,NULL),
+          ('f:Movies/Retry.mkv',NULL,NULL,NULL,NULL,NULL,NULL,NULL,4567,7,2,NULL),
+          ('series:anime-show','{"AniList":"100","Tvdb":"200"}',NULL,NULL,NULL,NULL,NULL,NULL,5678,7,0,'Anime Show');
+        """
+        guard sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK else {
+            throw NSError(
+                domain: "ShareCatalogStoreTests",
+                code: 2,
+                userInfo: [NSLocalizedDescriptionKey: String(cString: sqlite3_errmsg(db))]
+            )
+        }
+        if withPartialNormalizedTables {
+            let partialSQL = """
+            CREATE TABLE metadata_values(
+              item_id TEXT NOT NULL, field TEXT NOT NULL, source TEXT NOT NULL,
+              value_json TEXT NOT NULL, source_url TEXT, source_revision TEXT,
+              refreshed_at REAL, expires_at REAL,
+              PRIMARY KEY(item_id, field, source)
+            );
+            CREATE TABLE metadata_enrichment_state(
+              item_id TEXT PRIMARY KEY, local_version INTEGER, external_version INTEGER,
+              local_attempts INTEGER NOT NULL DEFAULT 0,
+              external_attempts INTEGER NOT NULL DEFAULT 0
+            );
+            INSERT INTO metadata_values VALUES
+              ('f:Movies/Rich.mkv','overview','futureProvider','"Rich overview"',
+               'https://metadata.example/rich',NULL,9999,NULL),
+              ('f:Movies/Rich.mkv','posterURL','futureProvider','{',
+               NULL,NULL,9999,NULL);
+            INSERT INTO metadata_enrichment_state VALUES
+              ('f:Movies/Rich.mkv',NULL,NULL,0,0);
+            """
+            guard sqlite3_exec(db, partialSQL, nil, nil, nil) == SQLITE_OK else {
+                throw NSError(
+                    domain: "ShareCatalogStoreTests",
+                    code: 3,
+                    userInfo: [NSLocalizedDescriptionKey: String(cString: sqlite3_errmsg(db))]
+                )
+            }
+        }
+        return url
+    }
+
+    private struct MigrationState {
+        var userVersion: Int
+        var metadataValueCount: Int
+        var enrichmentStateCount: Int
+        var richLegacyValueCount: Int
+        var enrichedAt: Double
+        var enrichVersion: Int
+        var attempts: Int
+        var externalVersion: Int
+        var externalAttempts: Int
+    }
+
+    private func queryMigrationState(at url: URL) throws -> MigrationState {
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(url.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let db else {
+            throw NSError(domain: "ShareCatalogStoreTests", code: 3)
+        }
+        defer { sqlite3_close(db) }
+
+        func integer(_ sql: String) -> Int {
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return -1 }
+            defer { sqlite3_finalize(stmt) }
+            return sqlite3_step(stmt) == SQLITE_ROW ? Int(sqlite3_column_int64(stmt, 0)) : -1
+        }
+
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, """
+        SELECT e.enriched_at, e.enrich_version, e.attempts,
+               s.external_version, s.external_attempts
+        FROM enrichment e
+        JOIN metadata_enrichment_state s ON s.item_id=e.item_id
+        WHERE e.item_id='f:Movies/Rich.mkv';
+        """, -1, &stmt, nil) == SQLITE_OK, sqlite3_step(stmt) == SQLITE_ROW else {
+            sqlite3_finalize(stmt)
+            throw NSError(domain: "ShareCatalogStoreTests", code: 4)
+        }
+        defer { sqlite3_finalize(stmt) }
+        return MigrationState(
+            userVersion: integer("PRAGMA user_version;"),
+            metadataValueCount: integer("SELECT COUNT(*) FROM metadata_values;"),
+            enrichmentStateCount: integer("SELECT COUNT(*) FROM metadata_enrichment_state;"),
+            richLegacyValueCount: integer("""
+                SELECT COUNT(*) FROM metadata_values
+                WHERE item_id='f:Movies/Rich.mkv' AND source='legacyUnknown';
+                """),
+            enrichedAt: sqlite3_column_double(stmt, 0),
+            enrichVersion: Int(sqlite3_column_int64(stmt, 1)),
+            attempts: Int(sqlite3_column_int64(stmt, 2)),
+            externalVersion: Int(sqlite3_column_int64(stmt, 3)),
+            externalAttempts: Int(sqlite3_column_int64(stmt, 4))
+        )
+    }
+
+    func testLegacyCatalogMigrationPreservesMetadataAndPendingState() async throws {
+        let directory = tempDir()
+        let url = try createLegacyCatalog(in: directory)
+        let store = ShareCatalogStore(accountKey: "legacy", directory: directory)
+
+        let loadedRich = await store.item(id: "f:Movies/Rich.mkv")
+        let rich = try XCTUnwrap(loadedRich)
+        XCTAssertEqual(rich.title, "Rich Show")
+        XCTAssertEqual(rich.overview, "Rich overview")
+        XCTAssertEqual(rich.genres, ["Drama", "Mystery"])
+        XCTAssertEqual(rich.runtime, 7_200)
+        XCTAssertEqual(rich.providerIDs, ["Tvdb": "42", "Imdb": "tt0042", "AniList": "84"])
+        XCTAssertEqual(rich.metadataProvenance[.overview]?.source, .legacyUnknown)
+        XCTAssertEqual(rich.metadataProvenance[.providerID("Tvdb")]?.source, .legacyUnknown)
+        XCTAssertEqual(rich.metadataProvenance[.posterURL]?.source, .legacyUnknown)
+        let anime = await store.item(id: "series:anime-show")
+        XCTAssertEqual(anime?.providerIDs, ["AniList": "100", "Tvdb": "200"])
+        XCTAssertEqual(
+            anime?.metadataProvenance[.providerID("AniList")]?.source,
+            .legacyUnknown
+        )
+
+        let pending = await store.pendingEnrichment(version: 7, limit: 20)
+        XCTAssertEqual(pending.map(\.itemID), ["f:Movies/Retry.mkv"])
+
+        let state = try queryMigrationState(at: url)
+        XCTAssertEqual(state.userVersion, 1)
+        XCTAssertEqual(state.metadataValueCount, 14)
+        XCTAssertEqual(state.enrichmentStateCount, 5)
+        XCTAssertEqual(state.richLegacyValueCount, 10)
+        XCTAssertEqual(state.enrichedAt, 1_234)
+        XCTAssertEqual(state.enrichVersion, 7)
+        XCTAssertEqual(state.attempts, 0)
+        XCTAssertEqual(state.externalVersion, 7)
+        XCTAssertEqual(state.externalAttempts, 0)
+
+        let reopened = ShareCatalogStore(accountKey: "legacy", directory: directory)
+        let reopenedPending = await reopened.pendingEnrichment(version: 7, limit: 20)
+        XCTAssertEqual(reopenedPending.map(\.itemID), [
+            "f:Movies/Retry.mkv"
+        ])
+        XCTAssertEqual(try queryMigrationState(at: url).userVersion, 1)
+    }
+
+    func testPartiallyMigratedCatalogDecodesValidProvenanceAndInfersMissingEntries() async throws {
+        let directory = tempDir()
+        _ = try createLegacyCatalog(in: directory, withPartialNormalizedTables: true)
+        let store = ShareCatalogStore(accountKey: "legacy", directory: directory)
+
+        let loadedRich = await store.item(id: "f:Movies/Rich.mkv")
+        let rich = try XCTUnwrap(loadedRich)
+        XCTAssertEqual(
+            rich.metadataProvenance[.overview]?.source,
+            MetadataSource(rawValue: "futureProvider")
+        )
+        XCTAssertEqual(rich.metadataProvenance[.posterURL]?.source, .legacyUnknown)
+        XCTAssertEqual(rich.metadataProvenance[.providerID("Imdb")]?.source, .legacyUnknown)
+        XCTAssertEqual(rich.overview, "Rich overview")
+        XCTAssertEqual(rich.posterURL, URL(string: "https://example.com/poster.jpg"))
+    }
+
+    func testFailedNormalizedMigrationKeepsFlatCatalogReadableAndRejectsWrites() async throws {
+        let directory = tempDir()
+        let url = try createLegacyCatalog(in: directory)
+        var db: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(url.path, &db), SQLITE_OK)
+        XCTAssertEqual(
+            sqlite3_exec(
+                db,
+                "CREATE TABLE metadata_values(item_id TEXT PRIMARY KEY);",
+                nil,
+                nil,
+                nil
+            ),
+            SQLITE_OK
+        )
+        sqlite3_close(db)
+
+        let store = ShareCatalogStore(accountKey: "legacy", directory: directory)
+        let loaded = await store.item(id: "f:Movies/Rich.mkv")
+        let rich = try XCTUnwrap(loaded)
+        XCTAssertEqual(rich.title, "Rich Show")
+        XCTAssertEqual(rich.overview, "Rich overview")
+        XCTAssertEqual(rich.providerIDs["Tvdb"], "42")
+        XCTAssertEqual(rich.metadataProvenance[.overview]?.source, .legacyUnknown)
+        let pending = await store.pendingEnrichment(version: 7, limit: 20)
+        XCTAssertEqual(pending.map(\.itemID), ["f:Movies/Retry.mkv"])
+
+        let writeAccepted = await store.saveEnrichment(
+            itemID: "f:Movies/Rich.mkv",
+            .init(overview: "Must not split the projection"),
+            version: 7
+        )
+        XCTAssertFalse(writeAccepted)
+        let unchanged = await store.item(id: "f:Movies/Rich.mkv")
+        XCTAssertEqual(unchanged?.overview, "Rich overview")
+    }
+
+    func testSourcedEnrichmentDualWritesAndRoundTripsExactAttribution() async throws {
+        let directory = tempDir()
+        let store = ShareCatalogStore(accountKey: "sourced", directory: directory)
+        await store.upsert([
+            movie("Movies/Sourced (2020).mkv", title: "Sourced", year: 2020)
+        ], scanID: 1)
+        let sourceURL = try XCTUnwrap(URL(string: "https://metadata.example/sourced"))
+        let saved = await store.saveEnrichment(
+            itemID: "f:Movies/Sourced (2020).mkv",
+            .sourced(
+                providerIDs: [
+                    "Tvdb": SourcedValue(
+                        value: "900",
+                        source: .tvdb,
+                        sourceURL: sourceURL
+                    ),
+                    "AniList": SourcedValue(
+                        value: "901",
+                        source: .anilist,
+                        sourceURL: URL(string: "https://anilist.co/anime/901")
+                    )
+                ],
+                overview: SourcedValue(
+                    value: "Exact overview",
+                    source: .tvmaze,
+                    sourceURL: sourceURL
+                ),
+                posterURL: SourcedValue(
+                    value: try XCTUnwrap(URL(string: "https://example.com/sourced.jpg")),
+                    source: .tmdb,
+                    sourceURL: sourceURL
+                ),
+                title: SourcedValue(
+                    value: "Sourced Show",
+                    source: .tvdb,
+                    sourceURL: sourceURL
+                )
+            ),
+            version: 7,
+            now: Date(timeIntervalSince1970: 8_000)
+        )
+        XCTAssertTrue(saved)
+
+        let reopened = ShareCatalogStore(accountKey: "sourced", directory: directory)
+        let loaded = await reopened.item(id: "f:Movies/Sourced (2020).mkv")
+        let item = try XCTUnwrap(loaded)
+        XCTAssertEqual(item.title, "Sourced Show")
+        XCTAssertEqual(item.overview, "Exact overview")
+        XCTAssertEqual(item.providerIDs["Tvdb"], "900")
+        XCTAssertEqual(item.metadataProvenance[.title]?.source, .tvdb)
+        XCTAssertEqual(item.metadataProvenance[.overview]?.source, .tvmaze)
+        XCTAssertEqual(item.metadataProvenance[.posterURL]?.source, .tmdb)
+        XCTAssertEqual(item.metadataProvenance[.providerID("AniList")]?.source, .anilist)
+        XCTAssertEqual(item.metadataProvenance[.title]?.sourceURL, sourceURL)
     }
 
     /// A large first-time regroup may take a few hundred milliseconds overall,

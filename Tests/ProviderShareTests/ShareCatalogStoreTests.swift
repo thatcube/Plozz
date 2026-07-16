@@ -44,6 +44,41 @@ final class ShareCatalogStoreTests: XCTestCase {
         )
     }
 
+    private func sqliteInt(at url: URL, _ sql: String) throws -> Int {
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(url.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK,
+              let db else {
+            throw NSError(domain: "ShareCatalogStoreTests", code: 10)
+        }
+        defer { sqlite3_close(db) }
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw NSError(domain: "ShareCatalogStoreTests", code: 11)
+        }
+        defer { sqlite3_finalize(stmt) }
+        guard sqlite3_step(stmt) == SQLITE_ROW else {
+            throw NSError(domain: "ShareCatalogStoreTests", code: 12)
+        }
+        return Int(sqlite3_column_int64(stmt, 0))
+    }
+
+    private func sqliteText(at url: URL, _ sql: String) throws -> String? {
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(url.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK,
+              let db else {
+            throw NSError(domain: "ShareCatalogStoreTests", code: 13)
+        }
+        defer { sqlite3_close(db) }
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw NSError(domain: "ShareCatalogStoreTests", code: 14)
+        }
+        defer { sqlite3_finalize(stmt) }
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
+        guard let text = sqlite3_column_text(stmt, 0) else { return nil }
+        return String(cString: text)
+    }
+
     private func createLegacyCatalog(
         in directory: URL,
         withPartialNormalizedTables: Bool = false
@@ -330,6 +365,149 @@ final class ShareCatalogStoreTests: XCTestCase {
         XCTAssertEqual(item.metadataProvenance[.posterURL]?.source, .tmdb)
         XCTAssertEqual(item.metadataProvenance[.providerID("AniList")]?.source, .anilist)
         XCTAssertEqual(item.metadataProvenance[.title]?.sourceURL, sourceURL)
+    }
+
+    func testAnimeClassificationCommitsWithFlatAndNormalizedEnrichment() async throws {
+        let accountKey = "atomic-anime"
+        let directory = tempDir()
+        let store = ShareCatalogStore(accountKey: accountKey, directory: directory)
+        let series = "Atomic Anime"
+        let seriesKey = ShareCatalogID.seriesKey(fromTitle: series)
+        let seriesID = ShareCatalogID.series(seriesKey)
+        await store.upsert([
+            episode("TV/Atomic Anime/S01E01.mkv", series: series, season: 1, episode: 1)
+        ], scanID: 1)
+
+        let saved = await store.saveEnrichment(
+            itemID: seriesID,
+            .init(providerIDs: ["AniList": "100"]),
+            version: 7
+        )
+        XCTAssertTrue(saved)
+        let tvSeries = await store.series(in: .tv, offset: 0, limit: 10)
+        let animeSeries = await store.series(in: .anime, offset: 0, limit: 10)
+        XCTAssertTrue(tvSeries.isEmpty)
+        XCTAssertEqual(animeSeries.count, 1)
+
+        let url = catalogURL(accountKey: accountKey, in: directory)
+        XCTAssertEqual(try sqliteInt(at: url, """
+            SELECT COUNT(*) FROM assets
+            WHERE series_key='\(seriesKey)' AND library='anime';
+            """), 1)
+        XCTAssertEqual(try sqliteInt(at: url, """
+            SELECT COUNT(*) FROM enrichment WHERE item_id='\(seriesID)';
+            """), 1)
+        XCTAssertEqual(try sqliteInt(at: url, """
+            SELECT COUNT(*) FROM metadata_values WHERE item_id='\(seriesID)';
+            """), 1)
+        XCTAssertEqual(try sqliteInt(at: url, """
+            SELECT COUNT(*) FROM metadata_enrichment_state WHERE item_id='\(seriesID)';
+            """), 1)
+    }
+
+    func testStrongIDReconciliationDeletesLoserFromEveryMetadataTable() async throws {
+        let accountKey = "atomic-merge"
+        let directory = tempDir()
+        let store = ShareCatalogStore(accountKey: accountKey, directory: directory)
+        let loserKey = ShareCatalogID.seriesKey(fromTitle: "Peaky Blinder")
+        let canonicalKey = ShareCatalogID.seriesKey(fromTitle: "Peaky Blinders")
+        await store.upsert([
+            episode("TV/Peaky Blinder/S01E01.mkv", series: "Peaky Blinder", season: 1, episode: 1),
+            episode("TV/Peaky Blinders/S01E01.mkv", series: "Peaky Blinders", season: 1, episode: 1)
+        ], scanID: 1)
+
+        let loserSaved = await store.saveEnrichment(
+            itemID: ShareCatalogID.series(loserKey),
+            .init(providerIDs: ["Tvdb": "270261"], title: "Peaky Blinders"),
+            version: 7
+        )
+        let canonicalSaved = await store.saveEnrichment(
+            itemID: ShareCatalogID.series(canonicalKey),
+            .init(providerIDs: ["Tvdb": "270261"], title: "Peaky Blinders"),
+            version: 7
+        )
+        XCTAssertTrue(loserSaved)
+        XCTAssertTrue(canonicalSaved)
+
+        let url = catalogURL(accountKey: accountKey, in: directory)
+        let loserID = ShareCatalogID.series(loserKey)
+        let canonicalID = ShareCatalogID.series(canonicalKey)
+        let series = await store.series(in: .tv, offset: 0, limit: 10)
+        XCTAssertEqual(series.count, 1)
+        XCTAssertEqual(try sqliteInt(at: url, """
+            SELECT COUNT(*) FROM assets WHERE series_key='\(canonicalKey)';
+            """), 2)
+        XCTAssertEqual(try sqliteText(at: url, """
+            SELECT canonical_key FROM series_merge WHERE alias_key='\(loserKey)';
+            """), canonicalKey)
+        for table in ["enrichment", "metadata_values", "metadata_enrichment_state"] {
+            XCTAssertEqual(try sqliteInt(at: url, """
+                SELECT COUNT(*) FROM \(table) WHERE item_id='\(loserID)';
+                """), 0, "\(table) must not retain loser rows")
+            XCTAssertGreaterThan(try sqliteInt(at: url, """
+                SELECT COUNT(*) FROM \(table) WHERE item_id='\(canonicalID)';
+                """), 0, "\(table) must retain the canonical row")
+        }
+    }
+
+    func testDerivedMutationFailureRollsBackProjectionMetadataAssetsAndAliases() async throws {
+        let accountKey = "atomic-rollback"
+        let directory = tempDir()
+        let initialStore = ShareCatalogStore(accountKey: accountKey, directory: directory)
+        let loserKey = ShareCatalogID.seriesKey(fromTitle: "Peaky Blinder")
+        let canonicalKey = ShareCatalogID.seriesKey(fromTitle: "Peaky Blinders")
+        let loserID = ShareCatalogID.series(loserKey)
+        await initialStore.upsert([
+            episode("TV/Peaky Blinder/S01E01.mkv", series: "Peaky Blinder", season: 1, episode: 1),
+            episode("TV/Peaky Blinders/S01E01.mkv", series: "Peaky Blinders", season: 1, episode: 1)
+        ], scanID: 1)
+        let canonicalSaved = await initialStore.saveEnrichment(
+            itemID: ShareCatalogID.series(canonicalKey),
+            .init(providerIDs: ["Tvdb": "270261"], title: "Peaky Blinders"),
+            version: 7
+        )
+        let loserSaved = await initialStore.saveEnrichment(
+            itemID: loserID,
+            .init(providerIDs: ["Tvdb": "999"], title: "Peaky Blinder"),
+            version: 7
+        )
+        XCTAssertTrue(canonicalSaved)
+        XCTAssertTrue(loserSaved)
+
+        let failingStore = ShareCatalogStore(
+            accountKey: accountKey,
+            directory: directory,
+            enrichmentSaveFailurePoint: .afterDerivedCatalogMutations
+        )
+        let saved = await failingStore.saveEnrichment(
+            itemID: loserID,
+            .init(
+                providerIDs: ["Tvdb": "270261", "AniList": "100"],
+                title: "Peaky Blinders"
+            ),
+            version: 8
+        )
+        XCTAssertFalse(saved)
+
+        let url = catalogURL(accountKey: accountKey, in: directory)
+        let tvSeries = await failingStore.series(in: .tv, offset: 0, limit: 10)
+        let animeSeries = await failingStore.series(in: .anime, offset: 0, limit: 10)
+        XCTAssertEqual(tvSeries.count, 2)
+        XCTAssertTrue(animeSeries.isEmpty)
+        XCTAssertEqual(try sqliteInt(at: url, "SELECT COUNT(*) FROM series_merge;"), 0)
+        XCTAssertEqual(try sqliteInt(at: url, """
+            SELECT COUNT(*) FROM assets WHERE series_key='\(loserKey)' AND library='tv';
+            """), 1)
+        XCTAssertEqual(try sqliteText(at: url, """
+            SELECT provider_ids_json FROM enrichment WHERE item_id='\(loserID)';
+            """), "{\"Tvdb\":\"999\"}")
+        XCTAssertEqual(try sqliteText(at: url, """
+            SELECT value_json FROM metadata_values
+            WHERE item_id='\(loserID)' AND field='providerID.tvdb';
+            """), "\"999\"")
+        XCTAssertEqual(try sqliteInt(at: url, """
+            SELECT external_version FROM metadata_enrichment_state WHERE item_id='\(loserID)';
+            """), 7)
     }
 
     /// A large first-time regroup may take a few hundred milliseconds overall,

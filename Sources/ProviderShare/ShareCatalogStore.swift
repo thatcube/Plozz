@@ -21,7 +21,12 @@ import CoreNetworking
 /// An `actor` so the single SQLite connection is only ever touched from one task
 /// at a time (the connection is used single-threaded).
 actor ShareCatalogStore {
+    enum EnrichmentSaveFailurePoint: Sendable, Equatable {
+        case afterDerivedCatalogMutations
+    }
+
     private let url: URL
+    private let enrichmentSaveFailurePoint: EnrichmentSaveFailurePoint?
     private var db: OpaquePointer?
     private var didOpen = false
     private var normalizedMetadataReady = false
@@ -58,10 +63,15 @@ actor ShareCatalogStore {
     ///   - accountKey: stable per-share id (`server.id`) — names the DB file so two
     ///     shares keep separate catalogs. Shares the key with `ShareWatchStore`.
     ///   - directory: container dir (defaults to `Library/Caches/Plozz`).
-    init(accountKey: String, directory: URL? = nil) {
+    init(
+        accountKey: String,
+        directory: URL? = nil,
+        enrichmentSaveFailurePoint: EnrichmentSaveFailurePoint? = nil
+    ) {
         let base = directory ?? Self.defaultDirectory()
         try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
         self.url = base.appendingPathComponent("share-catalog-\(Self.sanitize(accountKey)).sqlite")
+        self.enrichmentSaveFailurePoint = enrichmentSaveFailurePoint
     }
 
     deinit {
@@ -1140,23 +1150,29 @@ actor ShareCatalogStore {
             attempts: attempts,
             replaceExisting: true
         )
-        let ok = stateWritten && exec("COMMIT;")
-        if !ok { _ = exec("ROLLBACK;") }
-
-        // Anime confirmation: an AniList/MAL id (from either the new or existing
-        // record) proves this series is anime.
-        if ok, ShareCatalogID.isSeries(itemID),
-           let key = ShareCatalogID.seriesKey(forSeriesID: itemID),
-           merged.providerIDs.keys.contains(where: { ["anilist", "mal", "myanimelist"].contains($0.lowercased()) }) {
-            reclassifySeriesToAnime(seriesKey: key)
-        }
-        // Id-corroborated reconciliation: if this series shares an authoritative
-        // external id with another near-identically-titled series (a typo'd folder
-        // like "Peaky Blinder" vs "Peaky Blinders"), fold them into one card.
-        if ok, ShareCatalogID.isSeries(itemID),
+        var derivedCatalogWritten = stateWritten
+        if derivedCatalogWritten,
+           ShareCatalogID.isSeries(itemID),
            let key = ShareCatalogID.seriesKey(forSeriesID: itemID) {
-            reconcileSeriesByStrongID(key: key, ids: merged.providerIDs, resolvedTitle: merged.title)
+            if merged.providerIDs.keys.contains(where: {
+                ["anilist", "mal", "myanimelist"].contains($0.lowercased())
+            }) {
+                derivedCatalogWritten = reclassifySeriesToAnime(seriesKey: key)
+            }
+            if derivedCatalogWritten {
+                derivedCatalogWritten = reconcileSeriesByStrongID(
+                    key: key,
+                    ids: merged.providerIDs,
+                    resolvedTitle: merged.title
+                )
+            }
+            if derivedCatalogWritten,
+               enrichmentSaveFailurePoint == .afterDerivedCatalogMutations {
+                derivedCatalogWritten = false
+            }
         }
+        let ok = derivedCatalogWritten && exec("COMMIT;")
+        if !ok { _ = exec("ROLLBACK;") }
         return ok
     }
 
@@ -1218,12 +1234,12 @@ actor ShareCatalogStore {
         return out
     }
 
-    private func reclassifySeriesToAnime(seriesKey: String) {
+    private func reclassifySeriesToAnime(seriesKey: String) -> Bool {
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, "UPDATE assets SET library='anime' WHERE series_key=? AND kind='episode' AND library<>'anime';", -1, &stmt, nil) == SQLITE_OK else { return }
+        guard sqlite3_prepare_v2(db, "UPDATE assets SET library='anime' WHERE series_key=? AND kind='episode' AND library<>'anime';", -1, &stmt, nil) == SQLITE_OK else { return false }
         defer { sqlite3_finalize(stmt) }
         bindText(stmt, 1, seriesKey)
-        _ = sqlite3_step(stmt)
+        return sqlite3_step(stmt) == SQLITE_DONE
     }
 
     // MARK: - Id-corroborated series reconciliation
@@ -1237,13 +1253,17 @@ actor ShareCatalogStore {
     /// like "Peaky Blinder" vs "Peaky Blinders"). The shared id is the authoritative
     /// signal; the title check is a conservative guard so a provider mis-id can never
     /// collapse two genuinely different shows.
-    private func reconcileSeriesByStrongID(key: String, ids: [String: String], resolvedTitle: String?) {
-        guard db != nil else { return }
+    private func reconcileSeriesByStrongID(
+        key: String,
+        ids: [String: String],
+        resolvedTitle: String?
+    ) -> Bool {
+        guard db != nil else { return false }
         let myStrong = Self.strongIDNamespaces.compactMap { ns -> (String, String)? in
             guard let v = ids[ns], !v.isEmpty else { return nil }
             return (ns.lowercased(), v.lowercased())
         }
-        guard !myStrong.isEmpty else { return }
+        guard !myStrong.isEmpty else { return true }
         let mySet = Set(myStrong.map { "\($0.0):\($0.1)" })
 
         // Candidate other series carrying at least one of the same strong ids.
@@ -1259,15 +1279,16 @@ actor ShareCatalogStore {
             })
             if !mySet.isDisjoint(with: otherSet) { candidates.append(k) }
         }
-        guard !candidates.isEmpty else { return }
+        guard !candidates.isEmpty else { return true }
 
         let myTitle = seriesDisplayTitle(forKey: key)
         for other in candidates {
             let otherTitle = seriesDisplayTitle(forKey: other)
             guard Self.titlesNearlyIdentical(myTitle, otherTitle) else { continue }
             let (canonical, loser) = chooseCanonicalSeries(key, other, resolvedTitle: resolvedTitle)
-            mergeSeries(loser: loser, into: canonical)
+            guard mergeSeries(loser: loser, into: canonical) else { return false }
         }
+        return true
     }
 
     /// A representative display title for a series key (any episode's `series_title`).
@@ -1306,23 +1327,36 @@ actor ShareCatalogStore {
     /// Physically fold `loser` into `canonical`: re-key its assets, record the alias
     /// (so a re-scan re-applies it), retarget any aliases that pointed at `loser`,
     /// and drop the loser's now-redundant enrichment row.
-    private func mergeSeries(loser: String, into canonical: String) {
-        guard loser != canonical else { return }
-        exec("BEGIN IMMEDIATE;")
-        runUpdate("UPDATE assets SET series_key=? WHERE series_key=?;") { self.bindText($0, 1, canonical); self.bindText($0, 2, loser) }
-        runUpdate("INSERT OR REPLACE INTO series_merge(alias_key, canonical_key) VALUES (?,?);") { self.bindText($0, 1, loser); self.bindText($0, 2, canonical) }
-        runUpdate("UPDATE series_merge SET canonical_key=? WHERE canonical_key=?;") { self.bindText($0, 1, canonical); self.bindText($0, 2, loser) }
-        runUpdate("DELETE FROM enrichment WHERE item_id=?;") { self.bindText($0, 1, ShareCatalogID.series(loser)) }
-        exec("COMMIT;")
+    private func mergeSeries(loser: String, into canonical: String) -> Bool {
+        guard loser != canonical else { return true }
+        let loserID = ShareCatalogID.series(loser)
+        return runUpdate("UPDATE assets SET series_key=? WHERE series_key=?;") {
+            self.bindText($0, 1, canonical)
+            self.bindText($0, 2, loser)
+        } && runUpdate("INSERT OR REPLACE INTO series_merge(alias_key, canonical_key) VALUES (?,?);") {
+            self.bindText($0, 1, loser)
+            self.bindText($0, 2, canonical)
+        } && runUpdate("UPDATE series_merge SET canonical_key=? WHERE canonical_key=?;") {
+            self.bindText($0, 1, canonical)
+            self.bindText($0, 2, loser)
+        } && runUpdate("DELETE FROM enrichment WHERE item_id=?;") {
+            self.bindText($0, 1, loserID)
+        } && runUpdate("DELETE FROM metadata_values WHERE item_id=?;") {
+            self.bindText($0, 1, loserID)
+        } && runUpdate("DELETE FROM metadata_enrichment_state WHERE item_id=?;") {
+            self.bindText($0, 1, loserID)
+        }
     }
 
     /// Run a parameterized write statement with a binder; finalizes cleanly.
-    private func runUpdate(_ sql: String, bind: (OpaquePointer) -> Void) {
+    private func runUpdate(_ sql: String, bind: (OpaquePointer) -> Void) -> Bool {
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else { return }
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else {
+            return false
+        }
         defer { sqlite3_finalize(stmt) }
         bind(stmt)
-        _ = sqlite3_step(stmt)
+        return sqlite3_step(stmt) == SQLITE_DONE
     }
 
     /// All alias→canonical series-merge rows as a map, for in-memory resolution.

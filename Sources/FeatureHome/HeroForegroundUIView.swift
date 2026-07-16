@@ -438,7 +438,11 @@ final class HeroForegroundUIView: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         guard bounds.width > 0 else { return }
-        let leading = HomeHeroLayout.contentLeadingPadding
+        // `HomeHeroView.uikitContent` already applies the shared Hero/card leading
+        // padding to this representable's host. Applying it again here shifted the
+        // UIKit foreground one full gutter to the right of the rows and SwiftUI
+        // fallback. Layout in host-local coordinates so physical x matches cards.
+        let leading: CGFloat = 0
         let trailing: CGFloat = 60
         let maxWidth = max(1, min(bounds.width - leading - trailing, contentMaxWidth))
 

@@ -27,8 +27,17 @@ actor ShareCatalogStore {
 
     private let url: URL
     private let enrichmentSaveFailurePoint: EnrichmentSaveFailurePoint?
-    private var db: OpaquePointer?
-    private var didOpen = false
+    /// The actor-confined SQLite handle owner. Never escapes this actor and is only
+    /// ever touched under the store's isolation, preserving the single-connection,
+    /// single-threaded invariant. See `CatalogConnection`.
+    private let connection: CatalogConnection
+    /// Bridge so the store's existing raw `sqlite3_*` call sites read the connection's
+    /// handle unchanged; the connection owns its lifetime (open/close).
+    private var db: OpaquePointer? { connection.db }
+    /// Transaction-bound series reconciler over the same actor-confined connection.
+    /// A cheap value type constructed on demand; it holds no state of its own and
+    /// only runs while the store's actor is executing a catalog transaction.
+    private var reconciler: ShareSeriesReconciler { ShareSeriesReconciler(connection: connection) }
     private var normalizedMetadataReady = false
     /// Cached "does ANY local (NFO/filename) metadata_values row exist" check —
     /// avoids a real query on every read-path call (`withLocalOverlay`/grid sort
@@ -41,9 +50,6 @@ actor ShareCatalogStore {
     private var activeScanGeneration: UUID?
     private var pendingMergedSeriesLocalRepairs = Set<String>()
 
-    // SQLite wants a destructor sentinel for transient (copied) bound text; not
-    // exported into Swift, so reconstruct it.
-    private static let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
     /// Bounded catalog writes keep the actor cooperative with Home/grid/search
     /// reads while a large share is scanning.
     private static let writeChunkSize = 200
@@ -79,236 +85,36 @@ actor ShareCatalogStore {
     ) {
         let base = directory ?? Self.defaultDirectory()
         try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
-        self.url = base.appendingPathComponent("share-catalog-\(Self.sanitize(accountKey)).sqlite")
+        let fileURL = base.appendingPathComponent("share-catalog-\(Self.sanitize(accountKey)).sqlite")
+        self.url = fileURL
+        self.connection = CatalogConnection(url: fileURL)
         self.enrichmentSaveFailurePoint = enrichmentSaveFailurePoint
-    }
-
-    deinit {
-        if let db { sqlite3_close(db) }
     }
 
     // MARK: - Open / schema
 
+    /// Opens the connection and migrates schema (idempotent), then runs the one-time
+    /// post-open local-projection repairs exactly once, on the transition where the
+    /// schema was just committed ready. All raw SQLite mechanics — open, pragmas,
+    /// transaction scope, and DDL — live in `CatalogConnection`; the legacy
+    /// metadata-values migration (a store-owned data concern) runs inside that same
+    /// transaction via the supplied closure at its original point.
     private func ensureOpen() {
-        guard !didOpen else { return }
-        didOpen = true
-        var handle: OpaquePointer?
-        let flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX
-        guard sqlite3_open_v2(url.path, &handle, flags, nil) == SQLITE_OK, let handle else {
-            PlozzLog.boot("share.catalog OPEN FAILED file=\(url.lastPathComponent)")
-            if let handle { sqlite3_close(handle) }
-            return
-        }
-        db = handle
-        _ = exec("PRAGMA journal_mode=WAL;")
-        _ = exec("PRAGMA synchronous=NORMAL;")
-        guard exec("BEGIN IMMEDIATE;") else {
-            sqlite3_close(handle)
-            db = nil
-            didOpen = false
-            return
-        }
-        var migrationSucceeded = true
-        func apply(_ sql: String) {
-            if !exec(sql) { migrationSucceeded = false }
-        }
-        apply("""
-        CREATE TABLE IF NOT EXISTS assets(
-            rel_path    TEXT PRIMARY KEY,
-            basename    TEXT NOT NULL,
-            size        INTEGER NOT NULL,
-            modified_at REAL NOT NULL,
-            first_seen_at REAL NOT NULL,
-            last_scan   INTEGER NOT NULL,
-            kind        TEXT NOT NULL,
-            library     TEXT NOT NULL,
-            title       TEXT NOT NULL,
-            sort_title  TEXT NOT NULL,
-            year        INTEGER,
-            series_title TEXT,
-            series_key  TEXT,
-            season      INTEGER,
-            episode     INTEGER,
-            movie_key   TEXT,
-            movie_title_key TEXT,
-            movie_group_key TEXT
-        );
-        """)
-        apply("CREATE INDEX IF NOT EXISTS idx_assets_lib ON assets(library, kind);")
-        apply("CREATE INDEX IF NOT EXISTS idx_assets_series ON assets(series_key, season, episode);")
-        apply("CREATE INDEX IF NOT EXISTS idx_assets_added ON assets(first_seen_at DESC);")
-        // Covers the Movies grid query (WHERE library, kind ORDER BY sort_title) so
-        // the sort is index-provided instead of a per-page temp B-tree sort.
-        apply("CREATE INDEX IF NOT EXISTS idx_assets_movies_sort ON assets(library, kind, sort_title);")
-        apply("CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT);")
-        // Per-logical-item enrichment (resolved at scan time by ShareEnricher and
-        // persisted): external ids for merge/ratings/Trakt, plus overview + artwork
-        // URLs so detail/cards are rich without a live lookup. Keyed by the item's
-        // catalog id ("f:<relpath>" for movies, "series:<key>" for series).
-        apply("""
-        CREATE TABLE IF NOT EXISTS enrichment(
-            item_id     TEXT PRIMARY KEY,
-            provider_ids_json TEXT,
-            overview    TEXT,
-            genres_json TEXT,
-            runtime     REAL,
-            poster_url  TEXT,
-            backdrop_url TEXT,
-            logo_url    TEXT,
-            enriched_at REAL NOT NULL,
-            enrich_version INTEGER NOT NULL,
-            attempts INTEGER NOT NULL DEFAULT 0,
-            title TEXT
-        );
-        """)
-        // Migration: bounded-retry attempt counter (added after first ship). Guarded
-        // so it runs at most once; `exec` ignores the "duplicate column" error too.
-        if !hasColumn(table: "enrichment", column: "attempts") {
-            apply("ALTER TABLE enrichment ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0;")
-        }
-        // Migration: the resolved canonical title (e.g. "Avatar: The Last Airbender"),
-        // applied over a generic folder-derived display title at READ time — durable
-        // across re-scans (which overwrite `assets.series_title`), unlike a direct
-        // assets mutation.
-        if !hasColumn(table: "enrichment", column: "title") {
-            apply("ALTER TABLE enrichment ADD COLUMN title TEXT;")
-        }
-        // Source-addressable metadata lives beside the unchanged flat winning
-        // projection. The old table stays readable through this schema transition.
-        apply("""
-        CREATE TABLE IF NOT EXISTS metadata_values(
-            item_id TEXT NOT NULL,
-            field TEXT NOT NULL,
-            source TEXT NOT NULL,
-            value_json TEXT NOT NULL,
-            source_url TEXT,
-            source_revision TEXT,
-            refreshed_at REAL,
-            expires_at REAL,
-            PRIMARY KEY(item_id, field, source)
-        );
-        """)
-        apply("CREATE INDEX IF NOT EXISTS idx_metadata_values_item ON metadata_values(item_id);")
-        apply("""
-        CREATE TABLE IF NOT EXISTS metadata_enrichment_state(
-            item_id TEXT PRIMARY KEY,
-            local_version INTEGER,
-            external_version INTEGER,
-            local_attempts INTEGER NOT NULL DEFAULT 0,
-            external_attempts INTEGER NOT NULL DEFAULT 0
-        );
-        """)
-        // Migration: movie grouping key (added with within-share version dedup). NULL
-        // for rows indexed before it existed; a classifier-version reparse backfills
-        // it, and grouped queries `COALESCE(movie_key, rel_path)` so pre-reparse rows
-        // each stand alone rather than collapsing into one NULL bucket.
-        if !hasColumn(table: "assets", column: "movie_key") {
-            apply("ALTER TABLE assets ADD COLUMN movie_key TEXT;")
-        }
-        if !hasColumn(table: "assets", column: "movie_title_key") {
-            apply("ALTER TABLE assets ADD COLUMN movie_title_key TEXT;")
-        }
-        if !hasColumn(table: "assets", column: "movie_group_key") {
-            apply("ALTER TABLE assets ADD COLUMN movie_group_key TEXT;")
-        }
-        apply("CREATE INDEX IF NOT EXISTS idx_assets_movie_key ON assets(library, kind, movie_key);")
-        apply("CREATE INDEX IF NOT EXISTS idx_assets_movie_group ON assets(library, kind, movie_group_key);")
-        apply("CREATE INDEX IF NOT EXISTS idx_assets_movie_key_direct ON assets(movie_key);")
-        apply("CREATE INDEX IF NOT EXISTS idx_assets_movie_group_direct ON assets(movie_group_key);")
-        apply("""
-        CREATE TABLE IF NOT EXISTS movie_alias(
-            alias_id  TEXT PRIMARY KEY,
-            group_key TEXT NOT NULL
-        );
-        """)
-        apply("CREATE INDEX IF NOT EXISTS idx_movie_alias_group ON movie_alias(group_key);")
-        // Durable series reconciliation: maps a redundant series key (e.g. a typo'd
-        // folder "peaky-blinder") to a canonical one ("peaky-blinders") once BOTH
-        // were proven the same show by a shared authoritative external id. Applied at
-        // upsert so a re-scan can't undo the merge.
-        apply("""
-        CREATE TABLE IF NOT EXISTS series_merge(
-            alias_key     TEXT PRIMARY KEY,
-            canonical_key TEXT NOT NULL
-        );
-        """)
-        apply("CREATE INDEX IF NOT EXISTS idx_series_merge_canonical ON series_merge(canonical_key);")
-        apply("""
-        CREATE INDEX IF NOT EXISTS idx_assets_movie_logical_sort
-        ON assets(
-          library, kind,
-          COALESCE(movie_group_key, movie_key, rel_path),
-          sort_title
-        );
-        """)
-        if migrationSucceeded, !metadataMigrationComplete() {
-            if !migrateLegacyEnrichmentMetadata()
-                || !exec("""
-                    INSERT INTO meta(key, value) VALUES('metadata_values_migrated_v1', '1')
-                    ON CONFLICT(key) DO UPDATE SET value=excluded.value;
-                    """) {
-                migrationSucceeded = false
-            }
-        }
-
-        // MARK: Step 3 — NFO / explicit-id schema (v2)
-        //
-        // Transport-neutral sidecar + explicit-id inventory. Only listing facts —
-        // no parsed field data lives here; `local_metadata_file_values` below holds
-        // the per-sidecar parse CACHE. All additive/nullable so an existing v1
-        // catalog upgrades in place without discarding anything.
-        apply("""
-        CREATE TABLE IF NOT EXISTS local_metadata_files(
-            rel_path TEXT PRIMARY KEY,
-            parent_dir TEXT NOT NULL,
-            basename TEXT NOT NULL,
-            kind TEXT NOT NULL,
-            size INTEGER NOT NULL,
-            modified_at REAL NOT NULL,
-            stable_file_id TEXT,
-            strong_etag TEXT,
-            change_token TEXT,
-            associated_video_rel_path TEXT,
-            last_scan INTEGER NOT NULL,
-            fingerprint TEXT,
-            scan_generation_bound INTEGER NOT NULL DEFAULT 0,
-            processed_fingerprint TEXT,
-            status TEXT NOT NULL DEFAULT 'pending',
-            local_attempts INTEGER NOT NULL DEFAULT 0,
-            parser_version INTEGER,
-            associated_item_id TEXT,
-            updated_at REAL
-        );
-        """)
-        apply("CREATE INDEX IF NOT EXISTS idx_local_metadata_files_status ON local_metadata_files(status);")
-        apply("CREATE INDEX IF NOT EXISTS idx_local_metadata_files_parent ON local_metadata_files(parent_dir);")
-        apply("CREATE INDEX IF NOT EXISTS idx_local_metadata_files_item ON local_metadata_files(associated_item_id);")
-        // Per-sidecar parsed-value CACHE, keyed by sidecar path + field. Lets an
-        // association recompute (e.g. after a SIBLING sidecar is deleted) reuse an
-        // unchanged file's already-parsed values without rereading it.
-        apply("""
-        CREATE TABLE IF NOT EXISTS local_metadata_file_values(
-            rel_path TEXT NOT NULL,
-            field TEXT NOT NULL,
-            value_json TEXT NOT NULL,
-            PRIMARY KEY(rel_path, field)
-        );
-        """)
-        if !hasColumn(table: "assets", column: "metadata_root") {
-            apply("ALTER TABLE assets ADD COLUMN metadata_root TEXT;")
-        }
-        if !hasColumn(table: "assets", column: "explicit_ids_json") {
-            apply("ALTER TABLE assets ADD COLUMN explicit_ids_json TEXT;")
-        }
-        apply("PRAGMA user_version=2;")
-        if migrationSucceeded, exec("COMMIT;") {
+        let becameReady = connection.ensureOpen(legacyMetadataMigration: { conn in
+            guard !self.metadataMigrationComplete() else { return true }
+            guard self.migrateLegacyEnrichmentMetadata(),
+                  conn.exec("""
+                      INSERT INTO meta(key, value) VALUES('metadata_values_migrated_v1', '1')
+                      ON CONFLICT(key) DO UPDATE SET value=excluded.value;
+                      """)
+            else { return false }
+            return true
+        })
+        if becameReady {
             normalizedMetadataReady = true
             repairAllLocalMetadataProjections()
             repairFilenameProviderIDs()
-            return
         }
-        _ = exec("ROLLBACK;")
-        PlozzLog.boot("share.catalog MIGRATION FAILED file=\(url.lastPathComponent)")
     }
 
     // MARK: - Scan write path
@@ -371,7 +177,7 @@ actor ShareCatalogStore {
 
         // Preload the series-merge alias map once so a reconciled typo key stays
         // folded across re-scans without a per-row lookup in the hot write loop.
-        let seriesAliases = seriesMergeMap()
+        let seriesAliases = reconciler.seriesMergeMap()
 
         var index = 0
         while index < assets.count {
@@ -394,7 +200,7 @@ actor ShareCatalogStore {
                 bindText(stmt, 10, ShareCatalogID.sortTitle(from: libraryTitle))
                 bindOptInt(stmt, 11, a.year)
                 bindOptText(stmt, 12, a.seriesTitle)
-                bindOptText(stmt, 13, a.seriesKey.map { Self.resolveAlias($0, in: seriesAliases) })
+                bindOptText(stmt, 13, a.seriesKey.map { ShareSeriesReconciler.resolveAlias($0, in: seriesAliases) })
                 bindOptInt(stmt, 14, a.season)
                 bindOptInt(stmt, 15, a.episode)
                 bindOptText(stmt, 16, a.movieKey)
@@ -2189,11 +1995,13 @@ actor ShareCatalogStore {
                 derivedCatalogWritten = reclassifySeriesToAnime(seriesKey: key)
             }
             if derivedCatalogWritten {
-                derivedCatalogWritten = reconcileSeriesByStrongID(
+                let outcome = reconciler.reconcileSeriesByStrongID(
                     key: key,
                     ids: merged.providerIDs,
                     resolvedTitle: merged.title
                 )
+                derivedCatalogWritten = outcome.ok
+                pendingMergedSeriesLocalRepairs.formUnion(outcome.mergedCanonicalIDs)
             }
             if derivedCatalogWritten,
                enrichmentSaveFailurePoint == .afterDerivedCatalogMutations {
@@ -2283,248 +2091,6 @@ actor ShareCatalogStore {
         return sqlite3_step(stmt) == SQLITE_DONE
     }
 
-    // MARK: - Id-corroborated series reconciliation
-
-    /// The strong (authoritative) external-id namespaces, in preference order, that
-    /// are trustworthy enough to prove two series are the SAME show.
-    private static let strongIDNamespaces = ["Tvdb", "Imdb", "Tmdb"]
-
-    /// Fold `key` together with any OTHER already-enriched series that shares one of
-    /// its strong external ids AND is near-identically titled (a typo/plural folder
-    /// like "Peaky Blinder" vs "Peaky Blinders"). The shared id is the authoritative
-    /// signal; the title check is a conservative guard so a provider mis-id can never
-    /// collapse two genuinely different shows.
-    private func reconcileSeriesByStrongID(
-        key: String,
-        ids: [String: String],
-        resolvedTitle: String?
-    ) -> Bool {
-        guard db != nil else { return false }
-        let myStrong = Self.strongIDNamespaces.compactMap { ns -> (String, String)? in
-            guard let v = ids[ns], !v.isEmpty else { return nil }
-            return (ns.lowercased(), v.lowercased())
-        }
-        guard !myStrong.isEmpty else { return true }
-        let mySet = Set(myStrong.map { "\($0.0):\($0.1)" })
-
-        // Candidate other series carrying at least one of the same strong ids.
-        var candidates: [String] = []
-        query("SELECT item_id, provider_ids_json FROM enrichment WHERE item_id LIKE 'series:%';") { stmt in
-            guard let itemID = self.columnText(stmt, 0),
-                  let k = ShareCatalogID.seriesKey(forSeriesID: itemID), k != key,
-                  let json = self.columnText(stmt, 1),
-                  let other = self.decodeJSON([String: String].self, json) else { return }
-            let otherSet = Set(Self.strongIDNamespaces.compactMap { ns -> String? in
-                guard let v = other[ns], !v.isEmpty else { return nil }
-                return "\(ns.lowercased()):\(v.lowercased())"
-            })
-            if !mySet.isDisjoint(with: otherSet) { candidates.append(k) }
-        }
-        guard !candidates.isEmpty else { return true }
-
-        let myTitle = seriesDisplayTitle(forKey: key)
-        for other in candidates {
-            let otherTitle = seriesDisplayTitle(forKey: other)
-            guard Self.titlesNearlyIdentical(myTitle, otherTitle) else { continue }
-            let (canonical, loser) = chooseCanonicalSeries(key, other, resolvedTitle: resolvedTitle)
-            guard mergeSeries(loser: loser, into: canonical) else { return false }
-        }
-        return true
-    }
-
-    /// A representative display title for a series key (any episode's `series_title`).
-    private func seriesDisplayTitle(forKey key: String) -> String {
-        var title = key
-        query("""
-        SELECT series_title FROM assets
-        WHERE series_key=? AND kind='episode' AND series_title IS NOT NULL AND series_title <> ''
-        LIMIT 1;
-        """, bind: { self.bindText($0, 1, key) }) { stmt in title = self.columnText(stmt, 0) ?? key }
-        return title
-    }
-
-    /// Which of two same-id series is canonical: prefer the one whose title matches
-    /// the resolved canonical name; else more episodes; else the lexicographically
-    /// smaller key (stable). Returns `(canonical, loser)`.
-    private func chooseCanonicalSeries(_ a: String, _ b: String, resolvedTitle: String?) -> (String, String) {
-        if let resolved = resolvedTitle.map({ MediaItemIdentity.normalizedTitle($0) }), !resolved.isEmpty {
-            let na = MediaItemIdentity.normalizedTitle(seriesDisplayTitle(forKey: a))
-            let nb = MediaItemIdentity.normalizedTitle(seriesDisplayTitle(forKey: b))
-            if na == resolved, nb != resolved { return (a, b) }
-            if nb == resolved, na != resolved { return (b, a) }
-        }
-        let ea = seriesEpisodeCount(a), eb = seriesEpisodeCount(b)
-        if ea != eb { return ea > eb ? (a, b) : (b, a) }
-        return a <= b ? (a, b) : (b, a)
-    }
-
-    private func seriesEpisodeCount(_ key: String) -> Int {
-        var n = 0
-        query("SELECT COUNT(*) FROM assets WHERE series_key=? AND kind='episode';",
-              bind: { self.bindText($0, 1, key) }) { stmt in n = Int(sqlite3_column_int64(stmt, 0)) }
-        return n
-    }
-
-    /// Physically fold `loser` into `canonical`: re-key its assets, record the alias
-    /// (so a re-scan re-applies it), retarget any aliases that pointed at `loser`,
-    /// and drop the loser's now-redundant enrichment row.
-    private func mergeSeries(loser: String, into canonical: String) -> Bool {
-        guard loser != canonical else { return true }
-        let loserID = ShareCatalogID.series(loser)
-        let merged = runUpdate("UPDATE assets SET series_key=? WHERE series_key=?;") {
-            self.bindText($0, 1, canonical)
-            self.bindText($0, 2, loser)
-        } && runUpdate("INSERT OR REPLACE INTO series_merge(alias_key, canonical_key) VALUES (?,?);") {
-            self.bindText($0, 1, loser)
-            self.bindText($0, 2, canonical)
-        } && runUpdate("UPDATE series_merge SET canonical_key=? WHERE canonical_key=?;") {
-            self.bindText($0, 1, canonical)
-            self.bindText($0, 2, loser)
-        } && runUpdate("""
-            INSERT OR IGNORE INTO metadata_values(
-              item_id, field, source, value_json, source_url,
-              source_revision, refreshed_at, expires_at
-            )
-            SELECT ?, field, source, value_json, source_url,
-                   source_revision, refreshed_at, expires_at
-            FROM metadata_values
-            WHERE item_id=? AND source IN ('localNFO','filename');
-            """) {
-            self.bindText($0, 1, ShareCatalogID.series(canonical))
-            self.bindText($0, 2, loserID)
-        } && runUpdate("""
-            UPDATE local_metadata_files SET associated_item_id=?
-            WHERE associated_item_id=?;
-            """) {
-            self.bindText($0, 1, ShareCatalogID.series(canonical))
-            self.bindText($0, 2, loserID)
-        } && runUpdate("DELETE FROM enrichment WHERE item_id=?;") {
-            self.bindText($0, 1, loserID)
-        } && runUpdate("DELETE FROM metadata_values WHERE item_id=?;") {
-            self.bindText($0, 1, loserID)
-        } && runUpdate("DELETE FROM metadata_enrichment_state WHERE item_id=?;") {
-            self.bindText($0, 1, loserID)
-        }
-        if merged {
-            pendingMergedSeriesLocalRepairs.insert(ShareCatalogID.series(canonical))
-        }
-        return merged
-    }
-
-    /// Run a parameterized write statement with a binder; finalizes cleanly.
-    private func runUpdate(_ sql: String, bind: (OpaquePointer) -> Void) -> Bool {
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else {
-            return false
-        }
-        defer { sqlite3_finalize(stmt) }
-        bind(stmt)
-        return sqlite3_step(stmt) == SQLITE_DONE
-    }
-
-    /// All alias→canonical series-merge rows as a map, for in-memory resolution.
-    private func seriesMergeMap() -> [String: String] {
-        var map: [String: String] = [:]
-        query("SELECT alias_key, canonical_key FROM series_merge;") { stmt in
-            guard let a = self.columnText(stmt, 0), let c = self.columnText(stmt, 1) else { return }
-            map[a] = c
-        }
-        return map
-    }
-
-    /// Resolve a series key through the alias map, following chains (bounded) so a
-    /// transitively-merged key still lands on the final canonical.
-    static func resolveAlias(_ key: String, in map: [String: String]) -> String {
-        var current = key
-        var seen = Set<String>()
-        while let next = map[current], next != current, seen.insert(current).inserted {
-            current = next
-        }
-        return current
-    }
-
-    /// Non-canonical "variant" words that must never be introduced by a display-title
-    /// upgrade: a base show ("Sword Art Online") must not become a parody/recap
-    /// ("Sword Art Online: Abridged") even if a bad match slips through.
-    private static let variantWords: Set<String> = [
-        "abridged", "recap", "parody", "condensed", "compilation", "fandub", "gagdub", "reaction",
-    ]
-
-    /// Whether `extended` (a normalized word-prefix-extension of `base`) adds a
-    /// variant word not present in `base`.
-    static func addsVariantWord(base: String, extended: String) -> Bool {
-        let baseTokens = Set(base.split(separator: " ").map(String.init))
-        let addedTokens = Set(extended.split(separator: " ").map(String.init)).subtracting(baseTokens)
-        return !addedTokens.isDisjoint(with: variantWords)
-    }
-
-    /// Whether two series titles are near-identical enough to be a typo/plural of
-    /// one show (Levenshtein ≤ 2 on the normalized forms, no DIGIT difference, and
-    /// long enough that a couple of edits isn't most of the title). Combined with a
-    /// shared strong id this is a very tight merge gate.
-    static func titlesNearlyIdentical(_ a: String, _ b: String) -> Bool {
-        let na = MediaItemIdentity.normalizedTitle(a)
-        let nb = MediaItemIdentity.normalizedTitle(b)
-        guard !na.isEmpty, !nb.isEmpty, na != nb else { return na == nb && !na.isEmpty }
-        // A digit difference marks a deliberate distinction (1883 vs 1923, sequels).
-        let digitsA = na.filter { $0.isNumber }, digitsB = nb.filter { $0.isNumber }
-        guard digitsA == digitsB else { return false }
-        let dist = levenshtein(na, nb)
-        let shorter = min(na.count, nb.count)
-        // Long enough that a couple of edits isn't a big fraction of the title — a
-        // 5-letter word like "Fargo"/"Cargo" is one edit apart yet distinct.
-        return dist <= 2 && shorter >= 8 && dist * 6 <= shorter
-    }
-
-    /// Classic Levenshtein edit distance (two-row DP).
-    static func levenshtein(_ a: String, _ b: String) -> Int {
-        let s = Array(a), t = Array(b)
-        if s.isEmpty { return t.count }
-        if t.isEmpty { return s.count }
-        var prev = Array(0...t.count)
-        var curr = [Int](repeating: 0, count: t.count + 1)
-        for i in 1...s.count {
-            curr[0] = i
-            for j in 1...t.count {
-                let cost = s[i - 1] == t[j - 1] ? 0 : 1
-                curr[j] = min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost)
-            }
-            swap(&prev, &curr)
-        }
-        return prev[t.count]
-    }
-
-    private func metadataValueMatches(
-        field: MetadataField,
-        valueJSON: String,
-        record: EnrichmentRecord
-    ) -> Bool {
-        switch field {
-        case .title:
-            return decodeJSON(String.self, valueJSON) == record.title
-        case .overview:
-            return decodeJSON(String.self, valueJSON) == record.overview
-        case .genres:
-            return decodeJSON([String].self, valueJSON) == record.genres
-        case .runtime:
-            return decodeJSON(TimeInterval.self, valueJSON) == record.runtime
-        case .posterURL:
-            return decodeJSON(URL.self, valueJSON) == record.posterURL
-        case .backdropURL:
-            return decodeJSON(URL.self, valueJSON) == record.backdropURL
-        case .logoURL:
-            return decodeJSON(URL.self, valueJSON) == record.logoURL
-        default:
-            let prefix = "providerID."
-            guard field.rawValue.hasPrefix(prefix) else { return false }
-            let namespace = String(field.rawValue.dropFirst(prefix.count))
-            guard let value = record.providerIDs.first(where: {
-                $0.key.lowercased() == namespace
-            })?.value else { return false }
-            return decodeJSON(String.self, valueJSON) == value
-        }
-    }
-
     /// Load provenance for a page in one query. The flat row remains authoritative:
     /// malformed/stale normalized values are ignored and receive legacy attribution.
     private func hydratedEnrichmentRecords(
@@ -2564,7 +2130,7 @@ actor ShareCatalogStore {
                 let field = MetadataField(rawValue: fieldRaw)
                 var provenance = provenanceByItem[itemID] ?? MetadataProvenance()
                 guard provenance[field] == nil,
-                      metadataValueMatches(
+                      ShareCatalogReadProjection.metadataValueMatches(
                           field: field,
                           valueJSON: valueJSON,
                           record: record
@@ -2598,30 +2164,8 @@ actor ShareCatalogStore {
         defer { sqlite3_finalize(stmt) }
         bindText(stmt, 1, itemID)
         guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
-        guard let record = enrichmentRecord(fromColumns: stmt, startingAt: 0) else { return nil }
+        guard let record = ShareCatalogReadProjection.enrichmentRecord(fromColumns: stmt, startingAt: 0) else { return nil }
         return hydratedEnrichmentRecords([itemID: record])[itemID]
-    }
-
-    /// Decode the enrichment columns (provider_ids_json, overview, genres_json,
-    /// runtime, poster_url, backdrop_url, logo_url, title) starting at `startingAt`
-    /// into a record. Shared by the standalone `enrichmentRow` lookup and the JOINed
-    /// grid queries (movies/series), so a page fetch reads enrichment in ONE query
-    /// instead of N+1 per-row lookups. Returns nil when the core columns are all NULL
-    /// (no enrichment row matched the LEFT JOIN); `title` is a supplementary 8th
-    /// column not counted in that emptiness check.
-    private func enrichmentRecord(fromColumns stmt: OpaquePointer?, startingAt base: Int32) -> EnrichmentRecord? {
-        let allNull = (0..<7).allSatisfy { sqlite3_column_type(stmt, base + $0) == SQLITE_NULL }
-        if allNull { return nil }
-        var rec = EnrichmentRecord()
-        rec.providerIDs = decodeJSON([String: String].self, columnText(stmt, base + 0)) ?? [:]
-        rec.overview = columnText(stmt, base + 1)
-        rec.genres = decodeJSON([String].self, columnText(stmt, base + 2)) ?? []
-        if sqlite3_column_type(stmt, base + 3) != SQLITE_NULL { rec.runtime = sqlite3_column_double(stmt, base + 3) }
-        rec.posterURL = columnText(stmt, base + 4).flatMap(URL.init(string:))
-        rec.backdropURL = columnText(stmt, base + 5).flatMap(URL.init(string:))
-        rec.logoURL = columnText(stmt, base + 6).flatMap(URL.init(string:))
-        rec.title = columnText(stmt, base + 7)
-        return rec
     }
 
     /// Overlay persisted enrichment onto a freshly-built item. Movies/series use
@@ -2665,7 +2209,7 @@ actor ShareCatalogStore {
         var records: [String: EnrichmentRecord] = [:]
         while sqlite3_step(stmt) == SQLITE_ROW {
             guard let itemID = columnText(stmt, 0),
-                  let record = enrichmentRecord(fromColumns: stmt, startingAt: 1) else {
+                  let record = ShareCatalogReadProjection.enrichmentRecord(fromColumns: stmt, startingAt: 1) else {
                 continue
             }
             records[itemID] = record
@@ -2674,7 +2218,7 @@ actor ShareCatalogStore {
         let hydrated = hydratedEnrichmentRecords(records)
         return withLocalOverlay(keyed.map { item, itemID in
             guard let itemID, let record = hydrated[itemID] else { return item }
-            return applyEnrichment(item, record)
+            return ShareCatalogReadProjection.applyEnrichment(item, record)
         })
     }
 
@@ -2697,7 +2241,7 @@ actor ShareCatalogStore {
         guard !rows.isEmpty else { return items }
         return keyed.map { item, key in
             guard let key, let fields = rows[key], !fields.isEmpty else { return item }
-            return applyLocalMetadata(item, fields)
+            return ShareCatalogReadProjection.applyLocalMetadata(item, fields)
         }
     }
 
@@ -2725,12 +2269,7 @@ actor ShareCatalogStore {
         }
     }
 
-    private struct LocalFieldRow {
-        var source: MetadataSource
-        var valueJSON: String
-    }
-
-    private func localMetadataRows(itemIDs: [String]) -> [String: [MetadataField: LocalFieldRow]] {
+    private func localMetadataRows(itemIDs: [String]) -> [String: [MetadataField: ShareCatalogReadProjection.LocalFieldRow]] {
         guard !itemIDs.isEmpty, db != nil else { return [:] }
         let placeholders = Array(repeating: "?", count: itemIDs.count).joined(separator: ",")
         var stmt: OpaquePointer?
@@ -2741,7 +2280,7 @@ actor ShareCatalogStore {
         """, -1, &stmt, nil) == SQLITE_OK else { return [:] }
         defer { sqlite3_finalize(stmt) }
         for (offset, itemID) in itemIDs.enumerated() { bindText(stmt, Int32(offset + 1), itemID) }
-        var out: [String: [MetadataField: LocalFieldRow]] = [:]
+        var out: [String: [MetadataField: ShareCatalogReadProjection.LocalFieldRow]] = [:]
         while sqlite3_step(stmt) == SQLITE_ROW {
             guard let itemID = columnText(stmt, 0),
                   let fieldRaw = columnText(stmt, 1),
@@ -2750,96 +2289,12 @@ actor ShareCatalogStore {
             let field = MetadataField(rawValue: fieldRaw)
             var perItem = out[itemID] ?? [:]
             guard perItem[field] == nil else { continue } // First row per field wins (localNFO ordered first).
-            perItem[field] = LocalFieldRow(source: MetadataSource(rawValue: sourceRaw), valueJSON: valueJSON)
+            perItem[field] = ShareCatalogReadProjection.LocalFieldRow(source: MetadataSource(rawValue: sourceRaw), valueJSON: valueJSON)
             out[itemID] = perItem
         }
         return out
     }
 
-    /// Recognized rating-source aliases mapped onto `RatingSource` for the
-    /// `MediaItem.ratings` projection. Unrecognized sources stay losslessly in
-    /// the persisted `metadata_values` payload but don't project here.
-    private static func recognizedRatingSource(_ raw: String) -> RatingSource? {
-        switch raw.lowercased() {
-        case "imdb": return .imdb
-        case "tmdb", "themoviedb": return .tmdb
-        default: return nil
-        }
-    }
-
-    private static func ratingScale(forMax max: Double) -> RatingScale {
-        if abs(max - 100) < 0.001 { return .outOfHundred }
-        if abs(max - 5) < 0.001 { return .outOfFive }
-        return .outOfTen
-    }
-
-    private func applyLocalMetadata(_ item: MediaItem, _ fields: [MetadataField: LocalFieldRow]) -> MediaItem {
-        var copy = item
-        func attribution(for field: MetadataField) -> MetadataAttribution? {
-            fields[field].map { MetadataAttribution(source: $0.source, sourceURL: nil) }
-        }
-        if let row = fields[.title], let value = decodeJSON(String.self, row.valueJSON), !value.isEmpty {
-            copy.title = value
-            copy.metadataProvenance[.title] = attribution(for: .title)
-        }
-        if let row = fields[.originalTitle], let value = decodeJSON(String.self, row.valueJSON), !value.isEmpty {
-            copy.originalTitle = value
-            copy.metadataProvenance[.originalTitle] = attribution(for: .originalTitle)
-        }
-        if let row = fields[.overview], let value = decodeJSON(String.self, row.valueJSON), !value.isEmpty {
-            copy.overview = value
-            copy.metadataProvenance[.overview] = attribution(for: .overview)
-        }
-        if let row = fields[.genres], let value = decodeJSON([String].self, row.valueJSON), !value.isEmpty {
-            copy.genres = value
-            copy.metadataProvenance[.genres] = attribution(for: .genres)
-        }
-        if let row = fields[.studios], let value = decodeJSON([String].self, row.valueJSON), !value.isEmpty {
-            copy.studios = value
-            copy.metadataProvenance[.studios] = attribution(for: .studios)
-        }
-        if let row = fields[.tags], let value = decodeJSON([String].self, row.valueJSON), !value.isEmpty {
-            copy.tags = value
-            copy.metadataProvenance[.tags] = attribution(for: .tags)
-        }
-        if let row = fields[.runtime], let value = decodeJSON(TimeInterval.self, row.valueJSON), value > 0 {
-            copy.runtime = value
-            copy.metadataProvenance[.runtime] = attribution(for: .runtime)
-        }
-        if let row = fields[.productionYear], let value = decodeJSON(Int.self, row.valueJSON) {
-            copy.productionYear = value
-            copy.metadataProvenance[.productionYear] = attribution(for: .productionYear)
-        }
-        if let row = fields[.seasonNumber], let value = decodeJSON(Int.self, row.valueJSON) {
-            copy.seasonNumber = value
-            copy.metadataProvenance[.seasonNumber] = attribution(for: .seasonNumber)
-        }
-        if let row = fields[.episodeNumber], let value = decodeJSON(Int.self, row.valueJSON) {
-            copy.episodeNumber = value
-            copy.metadataProvenance[.episodeNumber] = attribution(for: .episodeNumber)
-        }
-        if let row = fields[.ratings], let value = decodeJSON([ParsedNFORating].self, row.valueJSON), !value.isEmpty {
-            let recognized: [ExternalRating] = value.compactMap { rating in
-                guard let source = Self.recognizedRatingSource(rating.source), rating.max > 0 else { return nil }
-                return ExternalRating(source: source, value: rating.value, scale: Self.ratingScale(forMax: rating.max))
-            }
-            if !recognized.isEmpty {
-                copy.ratings = copy.ratings.mergedWithAuthoritative(recognized)
-                copy.metadataProvenance[.ratings] = attribution(for: .ratings)
-            }
-        }
-        // Provider ids: local wins per-namespace over whatever's already present.
-        for (field, row) in fields where field.rawValue.hasPrefix("providerID.") {
-            guard let value = decodeJSON(String.self, row.valueJSON), !value.isEmpty else { continue }
-            let namespace = String(field.rawValue.dropFirst("providerID.".count))
-            copy.providerIDs = copy.providerIDs.filter {
-                ShareExplicitIDPolicy.canonicalNamespace($0.key) != namespace
-            }
-            copy.providerIDs[ShareExplicitIDPolicy.projectedKey(namespace: namespace)] = value
-            copy.metadataProvenance[field] = attribution(for: field)
-        }
-        return copy
-    }
 
 
     /// The enrichment row id for a movie item: the group's representative file id
@@ -2859,91 +2314,11 @@ actor ShareCatalogStore {
 
     /// Merge an already-fetched enrichment record onto an item. Extracted from
     /// `withEnrichment` so the JOINed grid queries can reuse the exact same merge.
-    private func applyEnrichment(_ item: MediaItem, _ rec: EnrichmentRecord) -> MediaItem {
-        var copy = item
-        if copy.metadataProvenance[.title] == nil {
-            copy.metadataProvenance[.title] = MetadataAttribution(source: .filename)
-        }
-        func adopt(_ field: MetadataField) {
-            if let attribution = rec.provenance[field] {
-                copy.metadataProvenance[field] = attribution
-            }
-        }
-        // Merge ids (don't clobber any already present).
-        if !rec.providerIDs.isEmpty {
-            var ids = copy.providerIDs
-            for (k, v) in rec.providerIDs where ids[k] == nil {
-                ids[k] = v
-                adopt(.providerID(k))
-            }
-            copy.providerIDs = ids
-        }
-        if (copy.overview?.isEmpty ?? true), item.kind != .episode, let overview = rec.overview {
-            copy.overview = overview
-            adopt(.overview)
-        }
-        if copy.genres.isEmpty, !rec.genres.isEmpty {
-            copy.genres = rec.genres
-            adopt(.genres)
-        }
-        if copy.runtime == nil, let rt = rec.runtime, item.kind == .movie {
-            copy.runtime = rt
-            adopt(.runtime)
-        }
-        if copy.posterURL == nil, let poster = rec.posterURL {
-            copy.posterURL = poster
-            adopt(.posterURL)
-        }
-        if copy.backdropURL == nil, let backdrop = rec.backdropURL {
-            copy.backdropURL = backdrop
-            adopt(.backdropURL)
-        }
-        if copy.heroBackdropURL == nil, let backdrop = rec.backdropURL {
-            copy.heroBackdropURL = backdrop
-            adopt(.backdropURL)
-        }
-        if copy.logoURL == nil, let logo = rec.logoURL {
-            copy.logoURL = logo
-            adopt(.logoURL)
-        }
-        // Display-title upgrade (series/movies only, never episodes): overlay the
-        // resolved canonical name when it's IDENTICAL, MORE SPECIFIC (current is a
-        // word-prefix of resolved), or a NEAR-IDENTICAL typo/plural of the current
-        // ("Peaky Blinder" → "Peaky Blinders") — so a generic or misspelled folder
-        // shows the real name, but a spinoff that wrongly matched its parent is never
-        // renamed DOWN. A more-specific upgrade must NOT add a non-canonical variant
-        // word (abridged/recap/…): "Sword Art Online" must never become "Sword Art
-        // Online: Abridged" even if a bad match slips through. Applied at READ time
-        // so it's durable across re-scans.
-        if item.kind == .series || item.kind == .movie,
-           let resolved = rec.title, !resolved.isEmpty, resolved != copy.title {
-            let a = MediaItemIdentity.normalizedTitle(copy.title)
-            let b = MediaItemIdentity.normalizedTitle(resolved)
-            let moreSpecific = b.hasPrefix(a + " ") && !Self.addsVariantWord(base: a, extended: b)
-            if b == a || moreSpecific || Self.titlesNearlyIdentical(copy.title, resolved) {
-                copy.title = resolved
-                adopt(.title)
-            }
-        }
-        // Episodes get the series art as a fallback, not as their own poster.
-        if item.kind == .episode {
-            if copy.seriesPosterURL == nil, let poster = rec.posterURL {
-                copy.seriesPosterURL = poster
-                adopt(.posterURL)
-            }
-            copy.posterURL = item.posterURL // keep episode's own (none yet) — series art via fallback field
-        }
-        return copy
-    }
-
     private func encodeJSON<T: Encodable>(_ value: T?) -> String? {
-        guard let value else { return nil }
-        guard let data = try? JSONEncoder().encode(value) else { return nil }
-        return String(data: data, encoding: .utf8)
+        CatalogJSON.encode(value)
     }
     private func decodeJSON<T: Decodable>(_ type: T.Type, _ json: String?) -> T? {
-        guard let json, let data = json.data(using: .utf8) else { return nil }
-        return try? JSONDecoder().decode(type, from: data)
+        CatalogJSON.decode(type, json)
     }
 
     // MARK: - Read path (build MediaItems)
@@ -2999,7 +2374,7 @@ actor ShareCatalogStore {
         """, bind: { sqlite3_bind_int64($0, 1, Int64(limit)) }) { stmt in
             guard let key = self.columnText(stmt, 0) else { return }
             let lib = CatalogLibrary(rawValue: self.columnText(stmt, 2) ?? "tv") ?? .tv
-            out.append((self.columnDouble(stmt, 3), self.seriesItem(key: key, title: self.columnText(stmt, 1) ?? key, library: lib, year: self.columnOptInt(stmt, 4))))
+            out.append((self.columnDouble(stmt, 3), ShareCatalogReadProjection.seriesItem(key: key, title: self.columnText(stmt, 1) ?? key, library: lib, year: self.columnOptInt(stmt, 4))))
         }
 
         return withEnrichment(
@@ -3046,7 +2421,7 @@ actor ShareCatalogStore {
         }) { stmt in
             guard let key = self.columnText(stmt, 0) else { return }
             let lib = CatalogLibrary(rawValue: self.columnText(stmt, 2) ?? "tv") ?? .tv
-            out.append(self.seriesItem(key: key, title: self.columnText(stmt, 1) ?? key, library: lib, year: self.columnOptInt(stmt, 3)))
+            out.append(ShareCatalogReadProjection.seriesItem(key: key, title: self.columnText(stmt, 1) ?? key, library: lib, year: self.columnOptInt(stmt, 3)))
         }
 
         return withEnrichment(Array(out.prefix(limit)))
@@ -3096,7 +2471,7 @@ actor ShareCatalogStore {
             rows.append((
                 item,
                 self.columnText(stmt, 3) ?? item.id,
-                self.enrichmentRecord(fromColumns: stmt, startingAt: 4)
+                ShareCatalogReadProjection.enrichmentRecord(fromColumns: stmt, startingAt: 4)
             ))
         }
         let records = Dictionary(uniqueKeysWithValues: rows.compactMap { row in
@@ -3104,7 +2479,7 @@ actor ShareCatalogStore {
         })
         let hydrated = hydratedEnrichmentRecords(records)
         return withLocalOverlay(rows.map { row in
-            hydrated[row.enrichmentID].map { applyEnrichment(row.item, $0) } ?? row.item
+            hydrated[row.enrichmentID].map { ShareCatalogReadProjection.applyEnrichment(row.item, $0) } ?? row.item
         })
     }
 
@@ -3133,11 +2508,11 @@ actor ShareCatalogStore {
             sqlite3_bind_int64($0, 2, Int64(limit)); sqlite3_bind_int64($0, 3, Int64(offset))
         }) { stmt in
             guard let key = self.columnText(stmt, 0) else { return }
-            let item = self.seriesItem(key: key, title: self.columnText(stmt, 1) ?? key, library: library, year: self.columnOptInt(stmt, 2))
+            let item = ShareCatalogReadProjection.seriesItem(key: key, title: self.columnText(stmt, 1) ?? key, library: library, year: self.columnOptInt(stmt, 2))
             rows.append((
                 item,
                 ShareCatalogID.series(key),
-                self.enrichmentRecord(fromColumns: stmt, startingAt: 4)
+                ShareCatalogReadProjection.enrichmentRecord(fromColumns: stmt, startingAt: 4)
             ))
         }
         let records = Dictionary(uniqueKeysWithValues: rows.compactMap { row in
@@ -3145,7 +2520,7 @@ actor ShareCatalogStore {
         })
         let hydrated = hydratedEnrichmentRecords(records)
         return withLocalOverlay(rows.map { row in
-            hydrated[row.enrichmentID].map { applyEnrichment(row.item, $0) } ?? row.item
+            hydrated[row.enrichmentID].map { ShareCatalogReadProjection.applyEnrichment(row.item, $0) } ?? row.item
         })
     }
 
@@ -3305,7 +2680,7 @@ actor ShareCatalogStore {
         WHERE series_key=? AND kind='episode' AND COALESCE(season,1)=?
         ORDER BY COALESCE(episode, 999999), sort_title, rel_path;
         """, bind: { self.bindText($0, 1, seriesKey); sqlite3_bind_int64($0, 2, Int64(season)) }) { stmt in
-            out.append(self.episodeItem(from: stmt, seriesKey: seriesKey))
+            out.append(ShareCatalogReadProjection.episodeItem(from: stmt, seriesKey: seriesKey))
         }
         return withEnrichment(out)
     }
@@ -3335,7 +2710,7 @@ actor ShareCatalogStore {
                 library = CatalogLibrary(rawValue: self.columnText(stmt, 1) ?? "tv") ?? .tv
                 year = self.columnOptInt(stmt, 2)
             }
-            return found ? withEnrichment(seriesItem(key: key, title: title, library: library, year: year)) : nil
+            return found ? withEnrichment(ShareCatalogReadProjection.seriesItem(key: key, title: title, library: library, year: year)) : nil
         }
         if let (key, season) = ShareCatalogID.seasonComponents(forSeasonID: id) {
             return seasons(seriesKey: key).first { $0.seasonNumber == season }
@@ -3349,7 +2724,7 @@ actor ShareCatalogStore {
             """, bind: { self.bindText($0, 1, relPath) }) { stmt in
                 let kind = self.columnText(stmt, 2) ?? "movie"
                 if kind == "episode" {
-                    result = self.episodeItem(from: stmt, seriesKey: self.columnText(stmt, 6) ?? "")
+                    result = ShareCatalogReadProjection.episodeItem(from: stmt, seriesKey: self.columnText(stmt, 6) ?? "")
                 } else {
                     result = MediaItem(
                         id: ShareCatalogID.file(relPath),
@@ -3587,66 +2962,12 @@ actor ShareCatalogStore {
         return nil
     }
 
-    private func seriesItem(key: String, title: String, library: CatalogLibrary, year: Int?) -> MediaItem {
-        MediaItem(
-            id: ShareCatalogID.series(key),
-            title: title,
-            kind: .series,
-            productionYear: year,
-            seriesID: ShareCatalogID.series(key),
-            libraryID: ShareCatalogID.library(library)
-        )
-    }
-
-    /// Build an episode item from a row selecting
-    /// `rel_path, title, [kind|series_title], ...` — the two episode query shapes
-    /// share column *names*, so read episode fields by a fixed layout:
-    /// col0 rel_path, col1 title, col2 series_title, col3 season, col4 episode,
-    /// col5 library, col6 year (used by `episodes(...)`), OR the `item(id:)` layout.
-    private func episodeItem(from stmt: OpaquePointer?, seriesKey: String) -> MediaItem {
-        // Read by name-agnostic positions used by the two callers. To stay robust,
-        // pull values via helper that tolerates either layout is overkill; instead
-        // both callers pass compatible column orders. `episodes(...)`:
-        //   0 rel_path,1 title,2 series_title,3 season,4 episode,5 library,6 year
-        // `item(id:)`:
-        //   0 rel_path,1 title,2 kind,3 library,4 year,5 series_title,6 series_key,7 season,8 episode
-        let colCount = sqlite3_column_count(stmt)
-        let relPath = columnText(stmt, 0) ?? ""
-        let title = columnText(stmt, 1) ?? relPath
-        var seriesTitle: String?
-        var season: Int?
-        var episode: Int?
-        var library: CatalogLibrary = .tv
-        if colCount <= 7 {
-            seriesTitle = columnText(stmt, 2)
-            season = columnOptInt(stmt, 3)
-            episode = columnOptInt(stmt, 4)
-            library = CatalogLibrary(rawValue: columnText(stmt, 5) ?? "tv") ?? .tv
-        } else {
-            library = CatalogLibrary(rawValue: columnText(stmt, 3) ?? "tv") ?? .tv
-            seriesTitle = columnText(stmt, 5)
-            season = columnOptInt(stmt, 7)
-            episode = columnOptInt(stmt, 8)
-        }
-        return MediaItem(
-            id: ShareCatalogID.file(relPath),
-            title: title,
-            kind: .episode,
-            parentTitle: seriesTitle,
-            seasonNumber: season,
-            episodeNumber: episode,
-            seriesID: ShareCatalogID.series(seriesKey),
-            // Give the episode its season id (the provider's own `season:key:N`
-            // scheme that `children(of:)` decodes) so the player's neighbour
-            // resolver — gated on `kind == .episode && seasonID != nil` — engages
-            // for SMB shares too, enabling auto-advance, the Up Next card, and the
-            // next-episode prefetch. Without it SMB episodes never hand off.
-            seasonID: season.map { ShareCatalogID.season(seriesKey, $0) },
-            libraryID: ShareCatalogID.library(library)
-        )
-    }
-
     // MARK: - Small SQLite helpers
+    //
+    // Thin forwarders onto the actor-confined `CatalogConnection`, kept so the store's
+    // existing call sites stay unchanged while the raw SQLite mechanics live on the
+    // connection. `count`/`distinctSeriesCount` remain here — they are assets-table
+    // query intent, not generic primitives.
 
     private func count(where clause: String?) -> Int {
         ensureOpen()
@@ -3669,49 +2990,33 @@ actor ShareCatalogStore {
     }
 
     @discardableResult
-    private func exec(_ sql: String) -> Bool {
-        guard let db else { return false }
-        return sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK
-    }
+    private func exec(_ sql: String) -> Bool { connection.exec(sql) }
 
-    /// Whether `table` already has `column` — drives one-shot column migrations.
-    /// `table`/`column` are compile-time literals at every call site, so the
-    /// interpolation into the PRAGMA carries no injection risk.
     private func hasColumn(table: String, column: String) -> Bool {
-        var found = false
-        query("PRAGMA table_info(\(table));") { stmt in
-            if self.columnText(stmt, 1) == column { found = true }
-        }
-        return found
+        connection.hasColumn(table: table, column: column)
     }
 
     private func query(_ sql: String, bind: (OpaquePointer?) -> Void = { _ in }, row: (OpaquePointer?) -> Void) {
-        guard let db else { return }
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
-        defer { sqlite3_finalize(stmt) }
-        bind(stmt)
-        while sqlite3_step(stmt) == SQLITE_ROW { row(stmt) }
+        connection.query(sql, bind: bind, row: row)
     }
 
     private func bindText(_ stmt: OpaquePointer?, _ idx: Int32, _ value: String) {
-        sqlite3_bind_text(stmt, idx, value, -1, Self.transient)
+        CatalogConnection.bindText(stmt, idx, value)
     }
     private func bindOptText(_ stmt: OpaquePointer?, _ idx: Int32, _ value: String?) {
-        if let value { bindText(stmt, idx, value) } else { sqlite3_bind_null(stmt, idx) }
+        CatalogConnection.bindOptText(stmt, idx, value)
     }
     private func bindOptInt(_ stmt: OpaquePointer?, _ idx: Int32, _ value: Int?) {
-        if let value { sqlite3_bind_int64(stmt, idx, Int64(value)) } else { sqlite3_bind_null(stmt, idx) }
+        CatalogConnection.bindOptInt(stmt, idx, value)
     }
     private func columnText(_ stmt: OpaquePointer?, _ idx: Int32) -> String? {
-        guard sqlite3_column_type(stmt, idx) != SQLITE_NULL, let c = sqlite3_column_text(stmt, idx) else { return nil }
-        return String(cString: c)
+        CatalogConnection.columnText(stmt, idx)
     }
     private func columnDouble(_ stmt: OpaquePointer?, _ idx: Int32) -> Double {
-        sqlite3_column_double(stmt, idx)
+        CatalogConnection.columnDouble(stmt, idx)
     }
     private func columnOptInt(_ stmt: OpaquePointer?, _ idx: Int32) -> Int? {
-        sqlite3_column_type(stmt, idx) == SQLITE_NULL ? nil : Int(sqlite3_column_int64(stmt, idx))
+        CatalogConnection.columnOptInt(stmt, idx)
     }
 
     // MARK: - Location / naming (mirrors ShareWatchStore)

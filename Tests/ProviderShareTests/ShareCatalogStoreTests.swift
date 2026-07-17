@@ -828,39 +828,39 @@ final class ShareCatalogStoreTests: XCTestCase {
     // MARK: - Reconciliation primitives
 
     func testLevenshtein() {
-        XCTAssertEqual(ShareCatalogStore.levenshtein("peaky blinder", "peaky blinders"), 1)
-        XCTAssertEqual(ShareCatalogStore.levenshtein("kitten", "sitting"), 3)
-        XCTAssertEqual(ShareCatalogStore.levenshtein("same", "same"), 0)
-        XCTAssertEqual(ShareCatalogStore.levenshtein("", "abc"), 3)
+        XCTAssertEqual(ShareTitleSimilarity.levenshtein("peaky blinder", "peaky blinders"), 1)
+        XCTAssertEqual(ShareTitleSimilarity.levenshtein("kitten", "sitting"), 3)
+        XCTAssertEqual(ShareTitleSimilarity.levenshtein("same", "same"), 0)
+        XCTAssertEqual(ShareTitleSimilarity.levenshtein("", "abc"), 3)
     }
 
     func testTitlesNearlyIdentical() {
         // Typo / plural of one show.
-        XCTAssertTrue(ShareCatalogStore.titlesNearlyIdentical("Peaky Blinder", "Peaky Blinders"))
-        XCTAssertTrue(ShareCatalogStore.titlesNearlyIdentical("The Handmaids Tale", "The Handmaid's Tale"))
+        XCTAssertTrue(ShareTitleSimilarity.titlesNearlyIdentical("Peaky Blinder", "Peaky Blinders"))
+        XCTAssertTrue(ShareTitleSimilarity.titlesNearlyIdentical("The Handmaids Tale", "The Handmaid's Tale"))
         // A digit difference is a deliberate distinction — never "nearly identical".
-        XCTAssertFalse(ShareCatalogStore.titlesNearlyIdentical("1883", "1923"))
+        XCTAssertFalse(ShareTitleSimilarity.titlesNearlyIdentical("1883", "1923"))
         // Too short / too different.
-        XCTAssertFalse(ShareCatalogStore.titlesNearlyIdentical("Fargo", "Cargo"))
-        XCTAssertFalse(ShareCatalogStore.titlesNearlyIdentical("Lost", "Loki"))
-        XCTAssertFalse(ShareCatalogStore.titlesNearlyIdentical("The Office", "The Wire"))
+        XCTAssertFalse(ShareTitleSimilarity.titlesNearlyIdentical("Fargo", "Cargo"))
+        XCTAssertFalse(ShareTitleSimilarity.titlesNearlyIdentical("Lost", "Loki"))
+        XCTAssertFalse(ShareTitleSimilarity.titlesNearlyIdentical("The Office", "The Wire"))
     }
 
     func testResolveAliasFollowsChains() {
         let map = ["a": "b", "b": "c", "x": "y"]
-        XCTAssertEqual(ShareCatalogStore.resolveAlias("a", in: map), "c")
-        XCTAssertEqual(ShareCatalogStore.resolveAlias("b", in: map), "c")
-        XCTAssertEqual(ShareCatalogStore.resolveAlias("x", in: map), "y")
-        XCTAssertEqual(ShareCatalogStore.resolveAlias("z", in: map), "z")
+        XCTAssertEqual(ShareSeriesReconciler.resolveAlias("a", in: map), "c")
+        XCTAssertEqual(ShareSeriesReconciler.resolveAlias("b", in: map), "c")
+        XCTAssertEqual(ShareSeriesReconciler.resolveAlias("x", in: map), "y")
+        XCTAssertEqual(ShareSeriesReconciler.resolveAlias("z", in: map), "z")
         // A cycle terminates (rather than looping forever) at a cycle member.
-        XCTAssertTrue(["a", "b"].contains(ShareCatalogStore.resolveAlias("a", in: ["a": "b", "b": "a"])))
+        XCTAssertTrue(["a", "b"].contains(ShareSeriesReconciler.resolveAlias("a", in: ["a": "b", "b": "a"])))
     }
 
     func testAddsVariantWordBlocksParodyUpgrade() {
         // "sword art online" must never upgrade to "sword art online abridged".
-        XCTAssertTrue(ShareCatalogStore.addsVariantWord(base: "sword art online", extended: "sword art online abridged"))
+        XCTAssertTrue(ShareTitleSimilarity.addsVariantWord(base: "sword art online", extended: "sword art online abridged"))
         // A genuine subtitle extension is allowed ("avatar" → "avatar the last airbender").
-        XCTAssertFalse(ShareCatalogStore.addsVariantWord(base: "avatar", extended: "avatar the last airbender"))
+        XCTAssertFalse(ShareTitleSimilarity.addsVariantWord(base: "avatar", extended: "avatar the last airbender"))
     }
 
     func testEpisodeHintsSkipSyntheticPlaceholders() async {

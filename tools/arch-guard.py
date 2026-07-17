@@ -82,7 +82,72 @@ _IMPORT_KINDS = {
     "struct", "class", "enum", "protocol", "func", "var", "let",
     "typealias", "actor",
 }
-_IMPORT_RE = re.compile(r"^\s*(?:@_exported\s+|@_implementationOnly\s+)?import\s+(.+)$")
+_IMPORT_RE = re.compile(
+    r"^\s*(?:@[A-Za-z_][A-Za-z0-9_]*(?:\([^)]*\))?\s+)*import\s+(.+)$"
+)
+
+
+def _strip_comments_and_strings(lines: list[str]) -> list[str]:
+    """Blank out block comments (nesting-aware), triple-quoted multiline
+    strings, `//` line comments, and inline double-quoted string literals, so the
+    import scanner never matches an `import`-looking line that is actually inside
+    a comment or a string. Returns a same-length list (line numbers preserved).
+
+    This is a deliberately small lexer: it doesn't need to be a full Swift
+    tokenizer, only good enough that a stray `import Foo` inside a doc comment or
+    a code-snippet string literal can't produce a false CI failure.
+    """
+    out: list[str] = []
+    in_block = 0          # /* */ nesting depth
+    in_multiline_str = False  # inside a """ ... """ literal
+    for raw in lines:
+        buf: list[str] = []
+        i, n = 0, len(raw)
+        while i < n:
+            two = raw[i:i + 2]
+            three = raw[i:i + 3]
+            if in_multiline_str:
+                if three == '"""':
+                    in_multiline_str = False
+                    i += 3
+                else:
+                    i += 1
+                continue
+            if in_block:
+                if two == "*/":
+                    in_block -= 1
+                    i += 2
+                elif two == "/*":
+                    in_block += 1
+                    i += 2
+                else:
+                    i += 1
+                continue
+            # Not currently inside a block comment or multiline string.
+            if three == '"""':
+                in_multiline_str = True
+                i += 3
+                continue
+            if two == "/*":
+                in_block += 1
+                i += 2
+                continue
+            if two == "//":
+                break  # rest of line is a comment
+            if raw[i] == '"':
+                # Skip a single-line string literal (handles \" escapes).
+                i += 1
+                while i < n and raw[i] != '"':
+                    if raw[i] == "\\":
+                        i += 2
+                    else:
+                        i += 1
+                i += 1
+                continue
+            buf.append(raw[i])
+            i += 1
+        out.append("".join(buf))
+    return out
 
 
 # --- Name-based layer classification -----------------------------------------
@@ -268,7 +333,10 @@ def check_imports(pkg: Package, sources_root: str) -> list[str]:
                         lines = fh.readlines()
                 except (OSError, UnicodeDecodeError):
                     continue
-                for lineno, line in enumerate(lines, 1):
+                # Neutralise comments/strings so an `import`-looking line inside
+                # a comment or string literal can't be misread as a real import.
+                scan = _strip_comments_and_strings(lines)
+                for lineno, line in enumerate(scan, 1):
                     m = _IMPORT_RE.match(line)
                     if not m:
                         continue

@@ -2,6 +2,21 @@ import XCTest
 import CoreModels
 @testable import MetadataKit
 
+private final class DirectoryEnumerationSpy: @unchecked Sendable {
+    private let lock = NSLock()
+    private var countStorage = 0
+
+    var count: Int { lock.withLock { countStorage } }
+
+    func contents(at directory: URL, keys: [URLResourceKey]) -> [URL]? {
+        lock.withLock { countStorage += 1 }
+        return try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: keys
+        )
+    }
+}
+
 final class DetailSnapshotCacheTests: XCTestCase {
     private func makeTempDirectory() -> URL {
         let url = FileManager.default.temporaryDirectory
@@ -46,6 +61,37 @@ final class DetailSnapshotCacheTests: XCTestCase {
         let cache = DetailSnapshotCache(directory: dir)
         let restored = await cache.snapshot(for: "acct|unknown")
         XCTAssertNil(restored)
+    }
+
+    func testDirectoryEnumerationSeamObservesStartupAndPerWritePrunes() async {
+        let dir = makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let spy = DirectoryEnumerationSpy()
+        let cache = DetailSnapshotCache(
+            directory: dir,
+            maxEntries: 100,
+            directoryContents: spy.contents
+        )
+        await cache.awaitPendingPrune()
+        let startupCount = spy.count
+        XCTAssertEqual(startupCount, 1)
+
+        for index in 0..<3 {
+            await cache.store(
+                .init(
+                    item: MediaItem(id: "m\(index)", title: "Movie \(index)", kind: .movie),
+                    children: []
+                ),
+                for: "key-\(index)"
+            )
+        }
+        await cache.awaitPendingPrune()
+
+        XCTAssertEqual(
+            spy.count,
+            startupCount + 3,
+            "current behavior schedules one directory scan per successful write"
+        )
     }
 
     func testExpiredSnapshotIsDropped() async {

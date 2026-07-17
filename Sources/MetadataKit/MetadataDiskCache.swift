@@ -14,10 +14,60 @@ import Foundation
 public actor MetadataDiskCache {
     public static let shared = MetadataDiskCache()
 
-    private struct Entry: Codable {
+    struct Entry: Codable, Sendable {
         /// `nil` is a remembered negative result.
         let url: String?
         let expires: Date
+    }
+
+    protocol FileIO: Sendable {
+        func removeSupersededCaches(
+            in directory: URL,
+            currentFileName: String,
+            filePrefix: String
+        )
+        func read(from url: URL) -> Data?
+        func write(_ data: Data, to url: URL)
+    }
+
+    protocol Coding: Sendable {
+        func decode(_ data: Data) -> [String: Entry]?
+        func encode(_ entries: [String: Entry]) -> Data?
+    }
+
+    private struct FoundationFileIO: FileIO {
+        func removeSupersededCaches(
+            in directory: URL,
+            currentFileName: String,
+            filePrefix: String
+        ) {
+            guard let files = try? FileManager.default.contentsOfDirectory(
+                at: directory, includingPropertiesForKeys: nil
+            ) else { return }
+            for file in files where file.lastPathComponent != currentFileName
+                && file.lastPathComponent.hasPrefix(filePrefix)
+                && file.pathExtension == "json" {
+                try? FileManager.default.removeItem(at: file)
+            }
+        }
+
+        func read(from url: URL) -> Data? {
+            try? Data(contentsOf: url)
+        }
+
+        func write(_ data: Data, to url: URL) {
+            try? data.write(to: url, options: .atomic)
+        }
+    }
+
+    private struct JSONCoding: Coding {
+        func decode(_ data: Data) -> [String: Entry]? {
+            try? JSONDecoder().decode([String: Entry].self, from: data)
+        }
+
+        func encode(_ entries: [String: Entry]) -> Data? {
+            try? JSONEncoder().encode(entries)
+        }
     }
 
     private var entries: [String: Entry] = [:]
@@ -25,6 +75,8 @@ public actor MetadataDiskCache {
     private let positiveTTL: TimeInterval
     private let negativeTTL: TimeInterval
     private let maxBytes: Int
+    private let fileIO: any FileIO
+    private let coding: any Coding
     private var loaded = false
     private var dirty = false
 
@@ -53,19 +105,37 @@ public actor MetadataDiskCache {
         self.positiveTTL = positiveTTL
         self.negativeTTL = negativeTTL
         self.maxBytes = max(0, maxBytes)
-        if let directory { Self.removeSupersededCaches(in: directory) }
+        self.fileIO = FoundationFileIO()
+        self.coding = JSONCoding()
+        if let directory {
+            fileIO.removeSupersededCaches(
+                in: directory,
+                currentFileName: Self.cacheFileName,
+                filePrefix: Self.cacheFilePrefix
+            )
+        }
     }
 
-    /// Deletes any older-versioned cache files so each schema bump self-cleans its
-    /// predecessor rather than leaving small orphans for the OS to reclaim.
-    private static func removeSupersededCaches(in directory: URL) {
-        guard let files = try? FileManager.default.contentsOfDirectory(
-            at: directory, includingPropertiesForKeys: nil
-        ) else { return }
-        for file in files where file.lastPathComponent != cacheFileName
-            && file.lastPathComponent.hasPrefix(cacheFilePrefix)
-            && file.pathExtension == "json" {
-            try? FileManager.default.removeItem(at: file)
+    init(
+        directory: URL?,
+        positiveTTL: TimeInterval = 60 * 60 * 24 * 30,
+        negativeTTL: TimeInterval = 60 * 60 * 24 * 3,
+        maxBytes: Int = 16 * 1024 * 1024,
+        fileIO: any FileIO,
+        coding: any Coding
+    ) {
+        self.fileURL = directory?.appendingPathComponent(Self.cacheFileName)
+        self.positiveTTL = positiveTTL
+        self.negativeTTL = negativeTTL
+        self.maxBytes = max(0, maxBytes)
+        self.fileIO = fileIO
+        self.coding = coding
+        if let directory {
+            fileIO.removeSupersededCaches(
+                in: directory,
+                currentFileName: Self.cacheFileName,
+                filePrefix: Self.cacheFilePrefix
+            )
         }
     }
 
@@ -92,8 +162,8 @@ public actor MetadataDiskCache {
     private func loadIfNeeded() {
         guard !loaded else { return }
         loaded = true
-        guard let fileURL, let data = try? Data(contentsOf: fileURL),
-              let decoded = try? JSONDecoder().decode([String: Entry].self, from: data) else {
+        guard let fileURL, let data = fileIO.read(from: fileURL),
+              let decoded = coding.decode(data) else {
             return
         }
         // Drop already-expired entries on load so the file doesn't grow unbounded.
@@ -109,12 +179,11 @@ public actor MetadataDiskCache {
         guard dirty, let fileURL else { return }
         dirty = false
         guard let data = encodedDataPruningToBudget() else { return }
-        try? data.write(to: fileURL, options: .atomic)
+        fileIO.write(data, to: fileURL)
     }
 
     private func encodedDataPruningToBudget() -> Data? {
-        let encoder = JSONEncoder()
-        guard var data = try? encoder.encode(entries) else { return nil }
+        guard var data = coding.encode(entries) else { return nil }
         guard data.count > maxBytes else { return data }
         let oldestFirst = entries.sorted { $0.value.expires < $1.value.expires }
         var index = 0
@@ -127,7 +196,7 @@ public actor MetadataDiskCache {
                 entries[entry.key] = nil
             }
             index = batchEnd
-            guard let encoded = try? encoder.encode(entries) else { return nil }
+            guard let encoded = coding.encode(entries) else { return nil }
             data = encoded
         }
         return data

@@ -20,6 +20,7 @@ protocol ShareCatalogCoordinating: Sendable {
 /// constantly, so this state is injected from the composition root.
 public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
     public typealias ArbiterFactory = @Sendable (String) -> MediaIOArbiter
+    typealias MetadataResolverFactory = @Sendable () -> any ShareMetadataResolving
 
     private var stores: [String: ShareCatalogStore] = [:]
     private var scanners: [String: ShareScanner] = [:]
@@ -37,6 +38,7 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
     private let metadataScheduler = ShareMetadataWorkScheduler()
     private var preferredAccountRevision: UInt64 = 0
     private let arbiterFactory: ArbiterFactory
+    private let metadataResolverFactory: MetadataResolverFactory
     /// When each share last completed a background (non-forced) scan.
     /// `catalog` is a computed property queried on every Home/browse access, and
     /// each access calls `ensureScanning`; without this, a share whose real walk
@@ -61,6 +63,17 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
         arbiterFactory: @escaping ArbiterFactory = { MediaIOArbiter(accountID: $0) }
     ) {
         self.arbiterFactory = arbiterFactory
+        self.metadataResolverFactory = {
+            ShareExternalResolverSelection.make(for: TVDBConfig.resolved())
+        }
+    }
+
+    init(
+        arbiterFactory: @escaping ArbiterFactory = { MediaIOArbiter(accountID: $0) },
+        metadataResolverFactory: @escaping MetadataResolverFactory
+    ) {
+        self.arbiterFactory = arbiterFactory
+        self.metadataResolverFactory = metadataResolverFactory
     }
 
     /// Inject the app's scan-status reporter (call once at startup). Applies to
@@ -153,16 +166,10 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
                 scannerRevisions[accountKey] = credentialRevision
             }
             if enrichers[accountKey] == nil {
-                // Use the bundled TheTVDB tier when a key is configured (adds movie ids
-                // + posters that the keyless sources can't provide); otherwise the
-                // keyless base carries enrichment on its own.
-                let resolver: ShareMetadataResolving
-                let tvdbConfig = TVDBConfig.resolved()
-                if tvdbConfig.isConfigured {
-                    resolver = TVDBShareResolver(tvdb: TVDBClient(config: tvdbConfig))
-                } else {
-                    resolver = KeylessShareResolver()
-                }
+                // Resolver construction is injected for deterministic lifecycle tests.
+                // The production factory preserves the existing TVDB-when-configured,
+                // keyless-otherwise selection.
+                let resolver = metadataResolverFactory()
                 let enricher = ShareEnricher(
                     store: store,
                     resolver: resolver,

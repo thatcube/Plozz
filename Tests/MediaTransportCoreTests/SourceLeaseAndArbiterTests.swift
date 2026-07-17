@@ -2,55 +2,8 @@ import Foundation
 import XCTest
 @testable import MediaTransportCore
 
-private final class ReadGate: @unchecked Sendable {
-    private let lock = NSLock()
-    private var started = false
-    private var opened = false
-    private var startWaiters: [CheckedContinuation<Void, Never>] = []
-    private var openWaiters: [CheckedContinuation<Void, Never>] = []
-
-    func wait() async {
-        let starts = lock.withLock {
-            started = true
-            let waiters = startWaiters
-            startWaiters.removeAll()
-            return waiters
-        }
-        starts.forEach { $0.resume() }
-        await withCheckedContinuation { continuation in
-            let open = lock.withLock {
-                guard !opened else { return true }
-                openWaiters.append(continuation)
-                return false
-            }
-            if open { continuation.resume() }
-        }
-    }
-
-    func waitUntilStarted() async {
-        await withCheckedContinuation { continuation in
-            let started = lock.withLock {
-                guard !self.started else { return true }
-                startWaiters.append(continuation)
-                return false
-            }
-            if started { continuation.resume() }
-        }
-    }
-
-    func open() {
-        let waiters = lock.withLock {
-            opened = true
-            let waiters = openWaiters
-            openWaiters.removeAll()
-            return waiters
-        }
-        waiters.forEach { $0.resume() }
-    }
-}
-
 private final class BlockingByteSource: MediaTransportByteSource, @unchecked Sendable {
-    let gate = ReadGate()
+    let gate = AsyncTestGate()
     private let lock = NSLock()
     private var shutdownCountStorage = 0
     let byteSize: Int64 = 1
@@ -67,7 +20,7 @@ private final class BlockingByteSource: MediaTransportByteSource, @unchecked Sen
 }
 
 private final class BlockingCancelScannerResource: MediaIOScannerResource, @unchecked Sendable {
-    let cancelGate = ReadGate()
+    let cancelGate = AsyncTestGate()
     private let lock = NSLock()
     private var cancelCountStorage = 0
 
@@ -109,7 +62,7 @@ private final class RetryingDrainScannerResource: MediaIOScannerResource, @unche
 private final class BlockingForceCloseScannerResource: MediaIOScannerResource, @unchecked Sendable {
     enum FakeError: Error { case closeFailed }
 
-    let forceCloseGate = ReadGate()
+    let forceCloseGate = AsyncTestGate()
     var isDrained: Bool { false }
 
     func cancel() async {}
@@ -173,7 +126,7 @@ final class SourceLeaseAndArbiterTests: XCTestCase {
         let lease = MediaTransportSourceLease(source: source)
         let cursor = try XCTUnwrap(lease.makeCursor())
         let read = Task { try await cursor.read(at: 0, length: 1) }
-        await source.gate.waitUntilStarted()
+        await source.gate.waitUntilEntered()
 
         cursor.cancel()
         cursor.close()
@@ -303,7 +256,7 @@ final class SourceLeaseAndArbiterTests: XCTestCase {
         let replacement = Task {
             try await arbiter.acquireScanner(resource: secondResource)
         }
-        await firstResource.cancelGate.waitUntilStarted()
+        await firstResource.cancelGate.waitUntilEntered()
 
         do {
             _ = try await arbiter.acquirePlayback()
@@ -362,7 +315,7 @@ final class SourceLeaseAndArbiterTests: XCTestCase {
         let playbackRequest = Task {
             try await arbiter.acquirePlayback()
         }
-        await resource.forceCloseGate.waitUntilStarted()
+        await resource.forceCloseGate.waitUntilEntered()
 
         await scanner.finishAndWait()
         resource.forceCloseGate.open()

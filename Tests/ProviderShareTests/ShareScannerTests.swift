@@ -486,6 +486,7 @@ final class ShareScannerTests: XCTestCase {
         let before = await store.libraryCounts()
         XCTAssertEqual(before.movies, 1)
         XCTAssertEqual(before.tvSeries, 1)
+        await store.setMeta("last_full_scan_at", "0")
 
         // Second scan: listing the Movies folder throws (a transient SMB error). The
         // walk must NOT prune, so the still-present Inception survives rather than
@@ -505,6 +506,21 @@ final class ShareScannerTests: XCTestCase {
         let after = await store.libraryCounts()
         XCTAssertEqual(after.movies, 1, "a transient listing failure must not prune still-present content")
         XCTAssertEqual(after.tvSeries, 1)
+        let afterPartial = await fake.listCount
+        let completedAt = await store.meta("last_full_scan_at")
+        XCTAssertNotEqual(
+            completedAt,
+            "0",
+            "a completed partial pass retains the deliberate persistent throttle"
+        )
+
+        await scanner.scanIfStale(minInterval: 600)
+        let afterThrottled = await fake.listCount
+        XCTAssertEqual(
+            afterThrottled,
+            afterPartial,
+            "completed partial scans are currently throttled to avoid inaccessible-folder scan storms"
+        )
     }
 
     func testFailedConnectionIsRecycledAndWalkStillCompletes() async {

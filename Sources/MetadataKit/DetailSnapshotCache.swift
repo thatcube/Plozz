@@ -70,6 +70,8 @@ public final class DetailSnapshotCache: Sendable {
     private let maxEntries: Int
     private let maxBytes: Int
     private let maxAge: TimeInterval
+    typealias DirectoryContents = @Sendable (URL, [URLResourceKey]) -> [URL]?
+    private let directoryContents: DirectoryContents
 
     /// Concurrent queue for snapshot reads/writes: independent titles run in
     /// parallel, so a slow encode/write for one never blocks a read for another.
@@ -97,6 +99,32 @@ public final class DetailSnapshotCache: Sendable {
         self.maxEntries = maxEntries
         self.maxBytes = max(0, maxBytes)
         self.maxAge = maxAge
+        self.directoryContents = { directory, keys in
+            try? FileManager.default.contentsOfDirectory(
+                at: directory,
+                includingPropertiesForKeys: keys
+            )
+        }
+        if let directory { Self.removeSupersededCaches(in: directory) }
+        if self.directory != nil {
+            pruneQueue.async { self.pruneIfNeeded() }
+        }
+    }
+
+    init(
+        directory: URL?,
+        maxEntries: Int = 800,
+        maxBytes: Int = 48 * 1024 * 1024,
+        maxAge: TimeInterval = 60 * 60 * 24 * 30,
+        directoryContents: @escaping DirectoryContents
+    ) {
+        self.directory = directory.map {
+            $0.appendingPathComponent(Self.schemaDirName, isDirectory: true)
+        }
+        self.maxEntries = maxEntries
+        self.maxBytes = max(0, maxBytes)
+        self.maxAge = maxAge
+        self.directoryContents = directoryContents
         if let directory { Self.removeSupersededCaches(in: directory) }
         if self.directory != nil {
             pruneQueue.async { self.pruneIfNeeded() }
@@ -199,9 +227,7 @@ public final class DetailSnapshotCache: Sendable {
     private func pruneIfNeeded() {
         guard let directory else { return }
         let keys: [URLResourceKey] = [.contentModificationDateKey, .fileSizeKey]
-        guard let files = try? FileManager.default.contentsOfDirectory(
-            at: directory, includingPropertiesForKeys: keys
-        ) else { return }
+        guard let files = directoryContents(directory, keys) else { return }
         var entries = files.map { url -> (url: URL, date: Date, bytes: Int) in
             let values = try? url.resourceValues(forKeys: Set(keys))
             return (

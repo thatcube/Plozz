@@ -224,15 +224,10 @@ public final class PlayerViewModel {
     /// true because load auto-plays.
     private var intendsPlayback = true
 
-    /// Incremented for each real tvOS background entry. A foreground recovery
-    /// consumes exactly one generation, preventing duplicate `.active` callbacks
-    /// from rebuilding the same playback session more than once.
-    private var backgroundGeneration = 0
-    private var pendingForegroundReloadGeneration: Int?
-
     /// Keeps the existing full-screen loading indicator visible while a suspended
-    /// engine rebuilds its media pipeline at the preserved position.
-    public private(set) var isRecoveringAfterForeground = false
+    /// engine rebuilds its media pipeline at the preserved position. Owned by
+    /// ``ForegroundReloadCoordinator``; forwarded so `showBringUpSpinner` reads it.
+    public var isRecoveringAfterForeground: Bool { foregroundReload.isRecovering }
 
     /// Persisted player preferences (e.g. last-used playback speed).
     private let preferencesStore: PlaybackPreferencesStoring
@@ -317,6 +312,12 @@ public final class PlayerViewModel {
     /// spoiler-aware Up Next card, and the single bring-up first-frame gate. Set
     /// at the end of `init` (needs `self` as its host).
     private var nextEpisodeCoordinator: NextEpisodeCoordinator!
+
+    /// Owns the background → foreground lifecycle reconciliation (generation
+    /// bookkeeping + engine rebuild + paused-state restore). Set at the end of
+    /// `init` (needs `self` as its host). Not `@ObservationIgnored` so
+    /// `isRecoveringAfterForeground` observes its `isRecovering` for the spinner.
+    private var foregroundReload: ForegroundReloadCoordinator!
 
     /// Optional playback bring-up started eagerly in `init` so the (network-bound)
     /// `playbackInfo` resolution and engine warm-up overlap the SwiftUI fullscreen
@@ -420,6 +421,7 @@ public final class PlayerViewModel {
             playbackSettings: playbackSettings,
             spoilerSettings: spoilerSettings
         )
+        self.foregroundReload = ForegroundReloadCoordinator(host: self)
         // Boot the engine the hand-off already resolved (adopted prefetch) or a
         // fresh native engine. Owning this in the coordinator keeps the "know the
         // engine before it even starts" path — no mid-bring-up native→Plozzigen
@@ -1070,72 +1072,16 @@ public final class PlayerViewModel {
     /// `play()` on the empty player shell.
     public func didEnterBackground() {
         suspendForBackground()
-        backgroundGeneration += 1
-        pendingForegroundReloadGeneration = backgroundGeneration
+        foregroundReload.markEnteredBackground()
     }
 
     /// Restores an engine after a real background round-trip while preserving the
     /// user's paused state. No provider re-resolve or playback lifecycle report is
     /// emitted: Plex, Jellyfin, and file-share sources all recover through the same
-    /// engine seam at their existing position and session URL.
+    /// engine seam at their existing position and session URL. Driven by
+    /// ``ForegroundReloadCoordinator``.
     public func resumeAfterBackground() async {
-        guard let generation = pendingForegroundReloadGeneration else { return }
-
-        // Background can interrupt initial bring-up. Wait for that load to settle,
-        // then rebuild the pipeline that tvOS invalidated before returning active.
-        while phase == .loading,
-              pendingForegroundReloadGeneration == generation,
-              !didStop {
-            try? await Task.sleep(nanoseconds: 100_000_000)
-        }
-
-        guard pendingForegroundReloadGeneration == generation,
-              phase == .ready,
-              !didStop else { return }
-
-        pendingForegroundReloadGeneration = nil
-        let recoveringEngine = engine
-        let recoveringEngineToken = engineToken
-        isRecoveringAfterForeground = true
-        defer {
-            if backgroundGeneration == generation {
-                isRecoveringAfterForeground = false
-            }
-        }
-
-        do {
-            try await recoveringEngine.reloadAfterForeground()
-        } catch {
-            guard backgroundGeneration == generation,
-                  engineToken == recoveringEngineToken,
-                  !didStop else { return }
-            let appError = (error as? AppError) ?? .unknown(String(describing: error))
-            phase = .failed(appError)
-            return
-        }
-
-        guard backgroundGeneration == generation,
-              engineToken == recoveringEngineToken else { return }
-        guard !didStop else {
-            recoveringEngine.stop()
-            return
-        }
-
-        recoveringEngine.setPlaybackSpeed(controls.playbackSpeed)
-        if currentEngineKind == .plozzigen {
-            subtitleController.reapplyTrackSelections(to: recoveringEngine)
-        }
-        // A play press can arrive while the async rebuild is in flight. Reconcile
-        // last, after restoring speed/tracks that may restart AVPlayer, and avoid a
-        // duplicate pause/unpause report; the genuine user action already sent it.
-        if intendsPlayback {
-            recoveringEngine.play()
-        } else {
-            recoveringEngine.pause()
-        }
-        controls.isPaused = !intendsPlayback
-        controls.intendsPause = !intendsPlayback
-        subtitleController.loadTrackOptions()
+        await foregroundReload.resume()
     }
 
     // MARK: - Transport
@@ -1696,6 +1642,35 @@ extension PlayerViewModel: EngineHandoffCoordinatorHost {
 
     func handoffClearFirstFrameWait() {
         nextEpisodeCoordinator.clearFirstFrameWait()
+    }
+}
+
+// MARK: - ForegroundReloadCoordinatorHost
+
+extension PlayerViewModel: ForegroundReloadCoordinatorHost {
+    var reloadPhase: PlayerViewModel.Phase { phase }
+    var reloadDidStop: Bool { didStop }
+    var reloadEngine: any VideoEngine { engine }
+    var reloadEngineToken: UUID { engineToken }
+    var reloadIsPlozzigenEngine: Bool { currentEngineKind == .plozzigen }
+    var reloadIntendsPlayback: Bool { intendsPlayback }
+    var reloadPlaybackSpeed: Double { controls.playbackSpeed }
+
+    func reloadReapplyTrackSelections(to engine: any VideoEngine) {
+        subtitleController.reapplyTrackSelections(to: engine)
+    }
+
+    func reloadLoadTrackOptions() {
+        subtitleController.loadTrackOptions()
+    }
+
+    func reloadReconcilePaused(_ paused: Bool) {
+        controls.isPaused = paused
+        controls.intendsPause = paused
+    }
+
+    func reloadFail(_ error: AppError) {
+        phase = .failed(error)
     }
 }
 

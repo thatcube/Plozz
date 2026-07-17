@@ -137,12 +137,175 @@ private final class BlockingTransportByteSource: TransportByteSource, @unchecked
     }
 }
 
+private final class CountingTransportByteSource: TransportByteSource, @unchecked Sendable {
+    let data: Data
+    private let state = NSLock()
+    private var reads: [(offset: Int64, length: Int)] = []
+
+    init(_ data: Data) { self.data = data }
+
+    var byteSize: Int64 { Int64(data.count) }
+
+    var readCount: Int { state.withLock { reads.count } }
+    var readLog: [(offset: Int64, length: Int)] { state.withLock { reads } }
+
+    func read(at offset: Int64, length: Int) async throws -> Data {
+        state.withLock { reads.append((offset, length)) }
+        guard offset >= 0, offset < data.count, length > 0 else { return Data() }
+        let end = min(Int(offset) + length, data.count)
+        return data.subdata(in: Int(offset)..<end)
+    }
+
+    func shutdown() async {}
+}
+
 private func read(_ reader: IOReader, count: Int) -> (result: Int32, data: Data) {
     var bytes = [UInt8](repeating: 0, count: count)
     let result = bytes.withUnsafeMutableBufferPointer {
         reader.read($0.baseAddress, size: Int32(count))
     }
     return (result, Data(bytes.prefix(Int(max(result, 0)))))
+}
+
+private final class CappedTransportByteSource: TransportByteSource, @unchecked Sendable {
+    let data: Data
+    let perReadCap: Int
+    private let state = NSLock()
+    private var reads: [(offset: Int64, length: Int)] = []
+
+    init(_ data: Data, perReadCap: Int) {
+        self.data = data
+        self.perReadCap = perReadCap
+    }
+
+    var byteSize: Int64 { Int64(data.count) }
+    var readCount: Int { state.withLock { reads.count } }
+
+    func read(at offset: Int64, length: Int) async throws -> Data {
+        // Simulate a backend that never serves more than `perReadCap` per read.
+        let capped = min(length, perReadCap)
+        state.withLock { reads.append((offset, capped)) }
+        guard offset >= 0, offset < data.count, capped > 0 else { return Data() }
+        let end = min(Int(offset) + capped, data.count)
+        return data.subdata(in: Int(offset)..<end)
+    }
+
+    func shutdown() async {}
+}
+
+final class TransportIOReaderReadAheadTests: XCTestCase {
+    /// Many small sequential reads within one window collapse to a single
+    /// underlying transport round-trip (the cold-start latency win).
+    func testSequentialSmallReadsCoalesceIntoOneFetch() {
+        let payload = Data((0..<4096).map { UInt8($0 & 0xFF) })
+        let source = CountingTransportByteSource(payload)
+        let reader = TransportIOReader(source: source, readAheadWindow: 4096)
+
+        var assembled = Data()
+        for _ in 0..<16 { // 16 × 256B = 4096B, exactly one window
+            assembled.append(read(reader, count: 256).data)
+        }
+        XCTAssertEqual(assembled, payload, "bytes are served intact from the window")
+        XCTAssertEqual(source.readCount, 1, "one underlying fetch served all 16 demux reads")
+        XCTAssertEqual(source.readLog.first?.length, 4096, "the fetch requested a full window, not 256B")
+    }
+
+    /// A backend that caps each read below the window still fills a full window by
+    /// concatenating partial reads — the data is intact and ffmpeg sees one window.
+    func testWindowFillConcatenatesCappedBackendReads() {
+        let payload = Data((0..<4096).map { UInt8($0 & 0xFF) })
+        let source = CappedTransportByteSource(payload, perReadCap: 1000)
+        let reader = TransportIOReader(source: source, readAheadWindow: 4096)
+
+        // One 256B demux read triggers a window fill of 4096B via 1000B pieces.
+        XCTAssertEqual(read(reader, count: 256).data, Data(payload[0..<256]))
+        XCTAssertEqual(source.readCount, 5, "4096B window filled by 1000+1000+1000+1000+96")
+
+        // The rest of the window serves from cache (no more transport reads).
+        var assembled = Data(payload[0..<256])
+        for _ in 0..<15 { assembled.append(read(reader, count: 256).data) }
+        XCTAssertEqual(assembled, payload, "concatenated window bytes are intact")
+        XCTAssertEqual(source.readCount, 5, "remaining demux reads all served from cache")
+    }
+
+    /// Crossing the window boundary triggers exactly one more fetch, and the
+    /// reassembled bytes are correct across the seam.
+    func testCrossingWindowBoundaryFetchesNextWindow() {
+        let payload = Data((0..<3000).map { UInt8($0 & 0xFF) })
+        let source = CountingTransportByteSource(payload)
+        let reader = TransportIOReader(source: source, readAheadWindow: 1024)
+
+        var assembled = Data()
+        while true {
+            let (result, chunk) = read(reader, count: 256)
+            if result <= 0 { break }
+            assembled.append(chunk)
+        }
+        XCTAssertEqual(assembled, payload, "bytes are intact across window seams")
+        // 3000 bytes / 1024 window = 3 windows (1024 + 1024 + 952).
+        XCTAssertEqual(source.readCount, 3, "one fetch per window, no per-256B round-trips")
+    }
+
+    /// A seek inside the cached window serves from memory (no new fetch); a seek
+    /// outside it triggers a fresh fetch.
+    func testSeekWithinWindowServesFromCacheSeekOutsideRefetches() {
+        let payload = Data((0..<8192).map { UInt8($0 & 0xFF) })
+        let source = CountingTransportByteSource(payload)
+        let reader = TransportIOReader(source: source, readAheadWindow: 4096)
+
+        XCTAssertEqual(read(reader, count: 16).data, Data(payload[0..<16]))
+        XCTAssertEqual(source.readCount, 1)
+
+        // Seek within the [0,4096) window — still served from cache.
+        XCTAssertEqual(reader.seek(offset: 1000, whence: SEEK_SET), 1000)
+        XCTAssertEqual(read(reader, count: 16).data, Data(payload[1000..<1016]))
+        XCTAssertEqual(source.readCount, 1, "in-window seek does not hit the transport")
+
+        // Seek beyond the window — one fresh fetch.
+        XCTAssertEqual(reader.seek(offset: 6000, whence: SEEK_SET), 6000)
+        XCTAssertEqual(read(reader, count: 16).data, Data(payload[6000..<6016]))
+        XCTAssertEqual(source.readCount, 2, "out-of-window seek refetches")
+    }
+
+    /// A read whose span exceeds what remains in the already-cached window returns
+    /// only the buffered prefix (a valid short read); the next read fetches the
+    /// following window. (On a miss the window is fetched starting at the read
+    /// offset, so only reads served from an existing window can be short.)
+    func testReadPastCachedWindowTailReturnsPrefixThenRefetches() {
+        let payload = Data((0..<2048).map { UInt8($0 & 0xFF) })
+        let source = CountingTransportByteSource(payload)
+        let reader = TransportIOReader(source: source, readAheadWindow: 1024)
+
+        // Establish a window at [0,1024) with a small read.
+        XCTAssertEqual(read(reader, count: 16).data, Data(payload[0..<16]))
+        XCTAssertEqual(source.readCount, 1)
+
+        // Seek to 900 (still inside the cached window) and ask for 800: only 124
+        // bytes remain in the window, so expect a 124-byte short read from cache.
+        XCTAssertEqual(reader.seek(offset: 900, whence: SEEK_SET), 900)
+        let first = read(reader, count: 800)
+        XCTAssertEqual(first.data, Data(payload[900..<1024]))
+        XCTAssertEqual(source.readCount, 1, "the short read was served from cache, no fetch")
+
+        // Next read at 1024 refetches the following window.
+        let second = read(reader, count: 800)
+        XCTAssertEqual(second.data, Data(payload[1024..<1824]))
+        XCTAssertEqual(source.readCount, 2)
+    }
+
+    /// On a miss the fetched window starts at the read offset, so a large read is
+    /// fully served in one shot (no artificial short read at a fixed grid).
+    func testMissFetchesWindowStartingAtReadOffset() {
+        let payload = Data((0..<4096).map { UInt8($0 & 0xFF) })
+        let source = CountingTransportByteSource(payload)
+        let reader = TransportIOReader(source: source, readAheadWindow: 1024)
+
+        XCTAssertEqual(reader.seek(offset: 500, whence: SEEK_SET), 500)
+        let chunk = read(reader, count: 800) // 800 ≤ window, fully served
+        XCTAssertEqual(chunk.data, Data(payload[500..<1300]))
+        XCTAssertEqual(source.readCount, 1)
+        XCTAssertEqual(source.readLog.first?.offset, 500, "window is anchored at the read offset")
+    }
 }
 
 final class TransportIOReaderTests: XCTestCase {

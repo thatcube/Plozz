@@ -215,14 +215,10 @@ public final class PlayerViewModel {
     /// Owns manual + automatic remote-subtitle acquisition (search / download /
     /// post-download poll). Set at the end of `init` (needs `self` as its host).
     private var subtitleAcquisition: RemoteSubtitleAcquisition!
-    /// Subtitles downloaded (Jellyfin/Plex) or otherwise sourced during *this*
-    /// playback session and hot-loaded into the track menu — kept separate from
-    /// the engine's demuxed track list (which the VM can't mutate). Rendered
-    /// through Plozz's overlay via their delivery source.
-    private var hotLoadedSubtitleTracks: [MediaTrack] = []
-    /// Next synthetic id for a hot-loaded subtitle track. Starts high so it can
-    /// never collide with an engine/provider stream id.
-    private var nextHotLoadedSubtitleID = 900_000
+    /// Owns the in-player audio/subtitle **track selection** state machine (menu
+    /// building, per-pick routing across engines/id-spaces, load-time default,
+    /// dual line, hot-loaded downloads). Built at the end of `init`.
+    @ObservationIgnored private var subtitleController: SubtitleTrackController!
 
     /// Guards the cross-engine swap so it only ever fires once: a chosen engine's
     /// failure swaps to the *other* engine exactly once before escalating.
@@ -238,63 +234,6 @@ public final class PlayerViewModel {
     /// bumping `engineToken` for this first selection to prevent an unnecessary
     /// host re-build during initial SwiftUI bring-up.
     private var hasCommittedInitialEngine = false
-
-    /// Current in-player track-menu selection, so the menu can show a checkmark.
-    /// `selectedSubtitleTrackID == nil` represents "Off".
-    private var selectedAudioTrackID: Int?
-    private var selectedSubtitleTrackID: Int?
-    /// The track feeding the overlay's **second** (dual) subtitle line, or `nil`
-    /// when off. Independent of the primary: it always renders through Plozz's
-    /// overlay (never the engine's own draw), so it must be a text sidecar track.
-    private var selectedSecondarySubtitleTrackID: Int?
-
-    /// A just-requested audio track id whose engine switch is still in flight.
-    /// AetherEngine reloads to change audio, so `currentAudioTrackID` lags the
-    /// pick by a beat; we show the target optimistically until the engine
-    /// confirms it, then clear this and let engine truth govern the indicator.
-    private var pendingAudioTrackID: Int?
-
-    /// Whether the load-time *default* subtitle has been routed through the
-    /// overlay yet for the current `playResolved`. Native tracks are known
-    /// synchronously, but Plozzigen demuxes its track list asynchronously (it
-    /// arrives via `onTracksChanged` after `playResolved` has returned), so this
-    /// guards the auto-selection to run exactly once per load — on whichever of
-    /// the two moments has the tracks — without re-applying on every subsequent
-    /// `onTracksChanged` or clobbering a manual menu pick made afterwards.
-    private var initialSubtitleApplied = false
-
-    /// A provider subtitle track the viewer manually picked that turned out to be
-    /// image-based (PGS/DVB/DVD), triggering a native→Plozzigen swap so it can be
-    /// decoded and drawn on-device. The provider id-space doesn't line up with
-    /// Plozzigen's FFmpeg AVStream ids, so we can't select it until Plozzigen's
-    /// track list arrives; this holds the picked track so
-    /// `applyInitialSubtitleSelectionIfReady` can attribute-match it to the
-    /// equivalent engine track once demux completes, then clears itself.
-    private var pendingImageSubtitleMatch: MediaTrack?
-
-    /// True once the viewer manually changed the **audio** track this playback
-    /// session. Used by cross-server reconcile to decide whether the stored memory
-    /// or this session's audio pick is the newer truth (resolved per dimension so
-    /// changing only one track doesn't suppress importing the other).
-    private var viewerChangedAudioThisSession = false
-
-    /// True once the viewer manually changed the **subtitle** track this session.
-    private var viewerChangedSubtitleThisSession = false
-
-    /// A cross-server-imported audio language awaiting application — set when
-    /// reconcile finds a remembered choice from another server but the engine's
-    /// audio tracks aren't known yet (Plozzigen pre-demux). Applied on the next
-    /// `onTracksChanged`.
-    private var crossServerAudioImportLanguage: String?
-
-    /// Content-detected subtitle languages, keyed by track id. Filled
-    /// opportunistically when a *text* subtitle with no provider language tag is
-    /// parsed for the overlay: `NLLanguageRecognizer` guesses the language from
-    /// the cue text so the menu can label an otherwise-anonymous "Track 8" as
-    /// e.g. "English (auto)". Bitmap subs (PGS) can't be detected without OCR, so
-    /// they stay provider-tagged. Cached so a second selection is instant and the
-    /// menu label persists for the session.
-    private var detectedSubtitleLanguages: [Int: String] = [:]
 
     /// Seek pipeline (request coalescing, deferred commit debounce, drain loop,
     /// post-seek resume confirmation). Owned by a dedicated collaborator so the
@@ -506,6 +445,7 @@ public final class PlayerViewModel {
         self.controls.canSearchRemoteSubtitles = (provider as? CapabilityReporting)?.capabilities.contains(.remoteSubtitles) ?? false
         self.subtitleAcquisition = RemoteSubtitleAcquisition(provider: provider, itemID: itemID, host: self)
         self.subtitleOverlay = SubtitleOverlayLoader(host: self)
+        self.subtitleController = SubtitleTrackController(host: self)
         self.seekCoordinator = SeekScrubCoordinator(host: self, controls: controls)
         self.progressReporter = WatchProgressReporter(
             host: self,
@@ -573,10 +513,10 @@ public final class PlayerViewModel {
         // route its load-time default subtitle through the overlay.
         engine.onTracksChanged = { [weak self] in
             guard let self, self.engineToken == callbackEngineToken else { return }
-            self.loadTrackOptions()
-            self.applyImportedAudioIfPossible()
+            self.subtitleController.loadTrackOptions()
+            self.subtitleController.applyImportedAudioIfPossible()
             if let request = self.request {
-                self.applyInitialSubtitleSelectionIfReady(for: request)
+                self.subtitleController.applyInitialSubtitleSelectionIfReady(for: request)
             }
         }
         // Engines that decode subtitles themselves (Plozzigen) push their active
@@ -587,8 +527,8 @@ public final class PlayerViewModel {
             guard let self, self.engineToken == callbackEngineToken else { return }
             self.liveSubtitles.updateLiveCues(cues)
             #if DEBUG
-            if self.selectedSubtitleTrackID != nil {
-                self.setPrimarySubtitleDiagnostic(route: "live-feed", cues: cues.count)
+            if self.subtitleController.selectedSubtitleTrackID != nil {
+                self.subtitleController.setPrimarySubtitleDiagnostic(route: "live-feed", cues: cues.count)
             }
             #endif
         }
@@ -600,7 +540,7 @@ public final class PlayerViewModel {
         engine.onSecondarySubtitleCues = { [weak self] cues in
             guard let self, self.engineToken == callbackEngineToken else { return }
             self.liveSubtitles.updateSecondaryLiveCues(cues)
-            if self.selectedSecondarySubtitleTrackID != nil {
+            if self.subtitleController.selectedSecondarySubtitleTrackID != nil {
                 self.controls.secondarySubtitleStatus = .loaded(cueCount: cues.count)
             }
         }
@@ -1006,38 +946,18 @@ public final class PlayerViewModel {
         guard let item = request?.item else { return }
         let outcome = seriesMemory.reconcile(
             item: item,
-            viewerChangedAudio: viewerChangedAudioThisSession,
-            viewerChangedSubtitle: viewerChangedSubtitleThisSession
+            viewerChangedAudio: subtitleController.viewerChangedAudioThisSession,
+            viewerChangedSubtitle: subtitleController.viewerChangedSubtitleThisSession
         )
         if let language = outcome.importedAudioLanguage {
-            crossServerAudioImportLanguage = language
-            applyImportedAudioIfPossible()
+            subtitleController.queueImportedAudio(language: language)
         }
         if outcome.shouldReapplyInitialSubtitle {
             // Re-route the load-time subtitle now that the remembered value
             // resolves. Works for native (tracks present → applies now) and
             // Plozzigen (tracks arrive later → onTracksChanged re-applies).
-            initialSubtitleApplied = false
-            if let request { applyInitialSubtitleSelectionIfReady(for: request) }
+            if let request { subtitleController.applyInitialSubtitleForNewLoad(for: request) }
         }
-    }
-
-    /// Applies a pending cross-server audio import once the engine's audio tracks
-    /// are known. Retried from `onTracksChanged` (Plozzigen's async arrival) and at
-    /// the end of `playResolved` (native, which never fires `onTracksChanged` and
-    /// only populates `audioTracks` after `engine.load`). No-ops when the matching
-    /// track is already active or no pending import is set.
-    private func applyImportedAudioIfPossible() {
-        guard let language = crossServerAudioImportLanguage else { return }
-        guard let track = engine.audioTracks.first(where: {
-            LanguageMatch.matches($0.language, language)
-        }) else { return }
-        crossServerAudioImportLanguage = nil
-        guard track.id != engine.currentAudioTrackID, track.id != pendingAudioTrackID else { return }
-        engine.selectAudioTrack(track)
-        pendingAudioTrackID = track.id
-        selectedAudioTrackID = track.id
-        loadTrackOptions()
     }
 
     /// Loads an already-resolved request on the routed engine and finishes the
@@ -1120,7 +1040,7 @@ public final class PlayerViewModel {
 
         // Seed the in-player track menu from the engine's track lists (the
         // engine has already applied the user's default subtitle selection).
-        loadTrackOptions()
+        subtitleController.loadTrackOptions()
 
         // Reflect what the new engine supports + apply persisted/initial tunable
         // state through it, so the options menu opens with accurate rows and the
@@ -1143,11 +1063,7 @@ public final class PlayerViewModel {
         // offset; a fresh selection re-seeds them. This is a full reset (new media
         // or engine), so the dual-subtitle selection is dropped too.
         subtitleOverlay.cancelAll()
-        selectedSecondarySubtitleTrackID = nil
-        controls.secondarySubtitleStatus = .idle
-        #if DEBUG
-        controls.primarySubtitleDiagnostic = ""
-        #endif
+        subtitleController.resetForNewLoad()
         liveSubtitles.offset = 0
         liveSubtitles.clear()
         refreshSubtitleDelayAvailability()
@@ -1157,17 +1073,16 @@ public final class PlayerViewModel {
         // the default lane gets identical HDR-safe styling + live offset. Native
         // tracks are ready now; Plozzigen's arrive later via `onTracksChanged`,
         // which calls this again. The per-load flag makes it fire exactly once.
-        // (selectedSubtitleTrackID is intentionally NOT reset here: the image-sub
-        // resolve path seeds it before playResolved so the menu reflects the
-        // bitmap track Plozzigen draws; the routing below sets it for native/Plozzigen.)
-        initialSubtitleApplied = false
-        applyInitialSubtitleSelectionIfReady(for: request)
+        // (the primary selection id is intentionally NOT reset in the controller:
+        // the image-sub resolve path seeds it before playResolved so the menu
+        // reflects the bitmap track Plozzigen draws; routing sets it otherwise.)
+        subtitleController.applyInitialSubtitleForNewLoad(for: request)
 
         // Apply any cross-server audio import that reconcile queued before the
         // engine's audio tracks were known. Native populates `audioTracks` only
         // after `engine.load` (here) and never fires `onTracksChanged`, so this is
         // its retry point; a no-op when nothing is pending or already correct.
-        applyImportedAudioIfPossible()
+        subtitleController.applyImportedAudioIfPossible()
 
         // Load skip markers once playback is live (opt-in, best-effort).
         loadSkipSegmentsIfEnabled()
@@ -1481,25 +1396,7 @@ public final class PlayerViewModel {
 
         recoveringEngine.setPlaybackSpeed(controls.playbackSpeed)
         if currentEngineKind == .plozzigen {
-            if let selectedAudioTrackID,
-               selectedAudioTrackID != recoveringEngine.currentAudioTrackID,
-               let track = recoveringEngine.audioTracks.first(where: { $0.id == selectedAudioTrackID }) {
-                recoveringEngine.selectAudioTrack(track)
-            }
-            if let selectedSubtitleTrackID,
-               let track = recoveringEngine.subtitleTracks.first(where: { $0.id == selectedSubtitleTrackID }) {
-                recoveringEngine.selectSubtitleTrack(track)
-            } else {
-                recoveringEngine.selectSubtitleTrack(nil)
-            }
-            if let selectedSecondarySubtitleTrackID,
-               let track = recoveringEngine.subtitleTracks.first(where: {
-                   $0.id == selectedSecondarySubtitleTrackID
-               }) {
-                recoveringEngine.selectSecondarySubtitleTrack(track)
-            } else {
-                recoveringEngine.selectSecondarySubtitleTrack(nil)
-            }
+            subtitleController.reapplyTrackSelections(to: recoveringEngine)
         }
         // A play press can arrive while the async rebuild is in flight. Reconcile
         // last, after restoring speed/tracks that may restart AVPlayer, and avoid a
@@ -1511,7 +1408,7 @@ public final class PlayerViewModel {
         }
         controls.isPaused = !intendsPlayback
         controls.intendsPause = !intendsPlayback
-        loadTrackOptions()
+        subtitleController.loadTrackOptions()
     }
 
     // MARK: - Transport
@@ -1827,422 +1724,25 @@ public final class PlayerViewModel {
 
     // MARK: - Track selection (custom player menu)
 
-    /// Publishes the engine's audio/subtitle track lists into `controls` for the
-    /// in-player track menu. Switching is routed back through the engine so the
-    /// menu behaves identically across engines.
-    private func loadTrackOptions() {
-        // Enrich the engine's demuxed tracks with the provider's probe of the
-        // same file (matched by stream id), filling in any language/codec/title
-        // the demuxer dropped. For the native engine the two lists are identical,
-        // so this is a no-op there; it only adds data on the advanced engine.
-        let providerAudio = request?.audioTracks ?? []
-        let providerSubs = request?.subtitleTracks ?? []
-
-        let audio = engine.audioTracks.map { track in
-            track.enriched(withProvider: providerAudio.first { $0.id == track.id })
-        }
-        // Resolve which audio row shows as selected: an in-flight pick
-        // (optimistic) → the engine's resolved active track (ground truth) → the
-        // default-flag heuristic only before either is known. See
-        // `TrackMenuBuilder.resolveSelectedAudioTrackID`.
-        let audioResolution = TrackMenuBuilder.resolveSelectedAudioTrackID(
-            current: selectedAudioTrackID,
-            pending: pendingAudioTrackID,
-            engineActive: engine.currentAudioTrackID,
-            tracks: audio
-        )
-        selectedAudioTrackID = audioResolution.selected
-        if audioResolution.clearPending { pendingAudioTrackID = nil }
-
-        // Preferred languages, highest priority first: the viewer's explicit
-        // choice (or device language) leads, the device language backs it up.
-        let preferred: [String?] = [
-            behavior.resolvedPreferredLanguage,
-            LanguageMatch.deviceLanguageCode
-        ]
-        controls.audioOptions = TrackMenuBuilder.audioOptions(
-            tracks: audio,
-            selectedID: selectedAudioTrackID,
-            preferred: preferred
-        )
-
-        let subtitles = engine.subtitleTracks.map { track in
-            track.enriched(withProvider: providerSubs.first { $0.id == track.id })
-        } + hotLoadedSubtitleTracks
-        #if DEBUG
-        // One-line ground truth for untagged-track triage: how many subtitle
-        // tracks still lack a language after enrichment, and whether the provider
-        // had any languages to lend. If both are zero/empty the file is genuinely
-        // untagged (only OCR could do better); a gap here means an id-space miss.
-        let unresolved = subtitles.filter { $0.language == nil }.count
-        let providerWithLang = providerSubs.filter { $0.language != nil }.count
-        PlozzLog.playback.debug(
-            "Track labels: \(subtitles.count) subs, \(unresolved) still no language; provider probe had \(providerSubs.count) subs (\(providerWithLang) with a language)"
-        )
-        #endif
-        controls.subtitleOptions = TrackMenuBuilder.subtitleOptions(
-            tracks: subtitles,
-            selectedID: selectedSubtitleTrackID,
-            preferred: preferred,
-            detectedLanguages: detectedSubtitleLanguages
-        )
-
-        // Dual/second-line picker. If the current secondary is no longer eligible
-        // (e.g. it just became the primary, or the media changed), reconcile by
-        // dropping it — clearing both its cues and its styling.
-        let secondaryEligible = eligibleSecondarySubtitleTracks()
-        // Distinguish an empty dual picker caused by a bitmap PRIMARY (dual is
-        // disallowed) from one empty because the media has no other text track, so
-        // the row can explain the former ("Unavailable with PGS subtitles").
-        controls.secondarySubtitleImagePrimaryFormat = TrackMenuBuilder.imagePrimaryFormat(
-            selectedPrimaryID: selectedSubtitleTrackID,
-            engineTracks: engine.subtitleTracks,
-            providerTracks: providerSubs
-        )
-        if let sec = selectedSecondarySubtitleTrackID,
-           !secondaryEligible.contains(where: { $0.id == sec }) {
-            selectedSecondarySubtitleTrackID = nil
-            subtitleOverlay.cancelSecondary()
-            if engine.capabilities.contains(.dualSubtitleDecode) {
-                engine.selectSecondarySubtitleTrack(nil)
-            }
-            liveSubtitles.loadSecondary(nil)
-            controls.secondarySubtitleStatus = .idle
-            if style.secondary != nil {
-                var cleared = style
-                cleared.secondary = nil
-                applySubtitleStyle(cleared)
-            }
-        }
-        controls.secondarySubtitleOptions = TrackMenuBuilder.secondaryOptions(
-            eligible: secondaryEligible,
-            selectedID: selectedSecondarySubtitleTrackID,
-            preferred: preferred,
-            detectedLanguages: detectedSubtitleLanguages
-        )
-    }
-
-    /// Selects an audio track from the menu, routed through the engine.
+    /// Selects an audio track from the menu. Owned by ``SubtitleTrackController``.
     public func selectAudioOption(id: Int) {
-        guard let track = engine.audioTracks.first(where: { $0.id == id }) else { return }
-        viewerChangedAudioThisSession = true
-        engine.selectAudioTrack(track)
-        // Remember this language for the series so later episodes start here.
-        recordSeriesAudioSelection(language: track.language)
-        // Show the target immediately; the engine's reload-to-switch lags, so we
-        // hold this optimistic pick until `currentAudioTrackID` confirms it (see
-        // loadTrackOptions) to avoid the indicator snapping back to the old track.
-        pendingAudioTrackID = id
-        selectedAudioTrackID = id
-        loadTrackOptions()
-    }
-
-    /// Routes the load-time **default** subtitle through Plozz's owned overlay so
-    /// it renders identically to a manual menu pick (HDR-safe SDR overlay, full
-    /// styling, live offset) instead of being drawn by AVPlayer's legible group
-    /// or the engine. Runs once per `playResolved`:
-    /// - **native** — provider tracks are known synchronously, so it applies
-    ///   immediately from `playResolved`.
-    /// - **Plozzigen** — the engine demuxes its track list asynchronously, so
-    ///   this no-ops until the tracks arrive via `onTracksChanged`, then applies.
-    ///   When a native→Plozzigen swap was triggered by a manual image-subtitle
-    ///   pick, the picked provider track is attribute-matched to the equivalent
-    ///   engine track here instead of applying the load-time default.
-    private func applyInitialSubtitleSelectionIfReady(for request: PlaybackRequest) {
-        guard !initialSubtitleApplied else { return }
-        switch currentEngineKind {
-        case .native:
-            // engine.subtitleTracks == request.subtitleTracks for the native
-            // engine; both share the provider id space selectSubtitleOption uses.
-            initialSubtitleApplied = true
-            applyDefaultSubtitleThroughOverlay(from: request.subtitleTracks)
-        case .plozzigen:
-            // AetherEngine reports tracks (with its own index id space) only after
-            // demux; wait for them rather than applying against an empty list.
-            let tracks = engine.subtitleTracks
-            guard !tracks.isEmpty else { return }
-            initialSubtitleApplied = true
-            // A native→Plozzigen swap for a manually-picked image subtitle carries
-            // the chosen provider track here; select its engine-side equivalent
-            // (matched by language/forced/SDH) instead of the load-time default.
-            if let picked = pendingImageSubtitleMatch {
-                pendingImageSubtitleMatch = nil
-                if let match = bestEngineSubtitleMatch(for: picked, in: tracks) {
-                    selectSubtitleOption(id: match.id, userInitiated: false)
-                    return
-                }
-                // No confident match — fall through to the default rule rather
-                // than selecting a wrong-language track.
-            }
-            applyDefaultSubtitleThroughOverlay(from: tracks)
-        default:
-            initialSubtitleApplied = true
-        }
-    }
-
-    /// Finds the engine subtitle track that best corresponds to a provider track
-    /// the viewer picked, across the two disjoint id-spaces (provider stream index
-    /// vs Plozzigen FFmpeg AVStream index). Requires a language match (when the
-    /// provider track has a language) so a mismatch never silently swaps in the
-    /// wrong subtitle; breaks ties on forced / hearing-impaired / image-based
-    /// agreement. Returns `nil` when nothing confidently matches.
-    private func bestEngineSubtitleMatch(for provider: MediaTrack, in engineTracks: [MediaTrack]) -> MediaTrack? {
-        SubtitleMatchScorer.bestMatch(for: provider, in: engineTracks)
-    }
-
-    /// Picks the default subtitle for the user's mode + preferred language from
-    /// `tracks` and routes it through the overlay via `selectSubtitleOption`, or
-    /// clears subtitles when there is no default text track. Image-based defaults
-    /// are skipped here (they were routed to the hybrid engine at resolve time and
-    /// that engine draws them); routing them through the overlay arrives with the
-    /// bitmap-cue work.
-    private func applyDefaultSubtitleThroughOverlay(from tracks: [MediaTrack]) {
-        // A remembered per-series subtitle decision overrides the default rule.
-        if let remembered = request.map({ rememberedSubtitle(for: $0.item) }) ?? nil {
-            switch remembered {
-            case .off:
-                engine.selectSubtitleTrack(nil)
-                subtitleOverlay.clearPrimary()
-                selectedSubtitleTrackID = nil
-                loadTrackOptions()
-                return
-            case .language(let language):
-                // Honor the remembered language explicitly (mode `.all`, since the
-                // viewer chose to see this language for the show), but only when a
-                // matching, renderable text track exists; otherwise fall through to
-                // the default rule.
-                if tracks.hasSuitableSubtitle(forLanguage: language),
-                   let chosen = tracks.defaultSubtitleSelection(mode: .all, preferredLanguage: language),
-                   !chosen.isImageBasedSubtitle {
-                    selectSubtitleOption(id: chosen.id, userInitiated: false)
-                    return
-                }
-            }
-        }
-
-        let rule = request.map { effectiveSubtitleRule(for: $0.item) }
-        let chosen = tracks.defaultSubtitleSelection(
-            mode: rule?.mode ?? behavior.subtitleMode,
-            preferredLanguage: rule?.preferredLanguage ?? behavior.resolvedPreferredLanguage
-        )
-        guard let chosen, !chosen.isImageBasedSubtitle else {
-            engine.selectSubtitleTrack(nil)
-            subtitleOverlay.clearPrimary()
-            selectedSubtitleTrackID = nil
-            loadTrackOptions()
-            return
-        }
-        selectSubtitleOption(id: chosen.id, userInitiated: false)
+        subtitleController.selectAudioOption(id: id)
     }
 
     /// Selects a subtitle track, or turns subtitles off (`PlayerTrackOption.offID`).
-    /// `userInitiated` is `true` for a real menu pick (which is remembered for the
-    /// series) and `false` for the programmatic load-time default.
-    #if DEBUG
-    /// Composes the DEBUG primary-subtitle route readout shown at the bottom of
-    /// the Subtitles list: active engine, the routing path taken, and (when known)
-    /// the cue count. Lets us classify a non-drawing Plex track without device logs.
-    private func setPrimarySubtitleDiagnostic(route: String, cues: Int? = nil) {
-        var text = "eng \(currentEngineKind) · \(route)"
-        if let cues { text += " · \(cues) cues" }
-        controls.primarySubtitleDiagnostic = text
-    }
-    #endif
-
+    /// `userInitiated` is `true` for a real menu pick (remembered for the series)
+    /// and `false` for the programmatic load-time default. Owned by
+    /// ``SubtitleTrackController``.
     public func selectSubtitleOption(id: Int, userInitiated: Bool = true) {
-        if userInitiated { viewerChangedSubtitleThisSession = true }
-        if id == PlayerTrackOption.offID {
-            if userInitiated { recordSeriesSubtitleSelection(.off) }
-            engine.selectSubtitleTrack(nil)
-            subtitleOverlay.clearPrimary()
-            selectedSubtitleTrackID = nil
-            #if DEBUG
-            controls.primarySubtitleDiagnostic = ""
-            #endif
-            loadTrackOptions()
-            return
-        }
-        guard let track = engine.subtitleTracks.first(where: { $0.id == id }) else {
-            // Not an engine-demuxed track: it may be a subtitle we downloaded and
-            // hot-loaded this session. Those are always text sidecars with a
-            // delivery source, so render them through Plozz's overlay regardless of
-            // engine (suppressing any engine-drawn sub).
-            if let hot = hotLoadedSubtitleTracks.first(where: { $0.id == id }) {
-                if userInitiated { recordSeriesSubtitleSelection(hot.language.map(RememberedSubtitleSelection.language)) }
-                selectedSubtitleTrackID = id
-                engine.selectSubtitleTrack(nil)
-                #if DEBUG
-                setPrimarySubtitleDiagnostic(route: "overlay · hot-loaded")
-                #endif
-                subtitleOverlay.loadPrimary(hot)
-                loadTrackOptions()
-            }
-            return
-        }
-        if userInitiated { recordSeriesSubtitleSelection(track.language.map(RememberedSubtitleSelection.language)) }
-
-        // Image-based subtitles (PGS/DVB/DVD/VOBSUB) can't be rendered by AVPlayer.
-        // If the user picks one while on the native engine, swap to Plozzigen
-        // (AetherEngine) at the current position: it decodes the bitmap subtitle
-        // packets into image cues that Plozz's overlay draws at their authored
-        // position — no server burn-in. Key off `isImageBasedSubtitle` — NOT
-        // `deliverySource == nil` — so an embedded text SRT (no sidecar, but
-        // renderable) stays on the native engine.
-        if track.isImageBasedSubtitle, currentEngineKind == .native,
-           let request, !request.isTranscoding, engineFactory.plozzigenAvailable {
-            subtitleOverlay.clearPrimary()
-            selectedSubtitleTrackID = id
-            Task { await swapEngineForImageSubtitle(track) }
-            return
-        }
-
-        // Text subtitle on the native engine. With a sidecar URL we render it
-        // through Plozz's own overlay (styling, HDR luminance, live offset all
-        // apply), suppressing AVPlayer's legible draw. WITHOUT a sidecar URL
-        // (embedded text track, e.g. an MKV SRT on Plex direct-play) the overlay
-        // has no cue source, so we let AVPlayer draw the track natively rather
-        // than suppressing it and showing nothing — routing embedded text through
-        // the overlay is a later Plozzigen-extraction task.
-        if !track.isImageBasedSubtitle, currentEngineKind == .native {
-            selectedSubtitleTrackID = id
-            if track.deliverySource != nil {
-                engine.selectSubtitleTrack(nil)
-                #if DEBUG
-                setPrimarySubtitleDiagnostic(route: "overlay")
-                #endif
-                subtitleOverlay.loadPrimary(track)
-            } else {
-                subtitleOverlay.clearPrimary()
-                engine.selectSubtitleTrack(track)
-                #if DEBUG
-                setPrimarySubtitleDiagnostic(route: "avplayer-draw")
-                #endif
-            }
-            loadTrackOptions()
-            return
-        }
-
-        // Plozzigen (AetherEngine) decodes the selected subtitle and publishes its
-        // active cues; route them through Plozz's owned overlay (live-feed mode)
-        // so text *and* bitmap subs draw on the same SDR renderer as native. The
-        // `onSubtitleCues` callback (wired in configureEngineCallbacks) does the
-        // feeding. Other engines that draw their own subs (Plozzigen) get an empty live
-        // feed and keep drawing themselves — harmless.
-        subtitleOverlay.cancelPrimary()
-        liveSubtitles.beginLiveFeed()
-        refreshSubtitleDelayAvailability()
-        engine.selectSubtitleTrack(track)
-        selectedSubtitleTrackID = id
-        #if DEBUG
-        setPrimarySubtitleDiagnostic(route: "live-feed")
-        #endif
-        loadTrackOptions()
-    }
-
-    private func resolveSubtitleDeliveryURL(
-        _ track: MediaTrack
-    ) async throws -> URL? {
-        guard let source = track.deliverySource else { return nil }
-        switch source {
-        case .localFile(let url):
-            return url
-        case .authenticatedHTTP(let locator):
-            return try await authenticatedHTTPResolver?.resolve(locator)
-        }
+        subtitleController.selectSubtitleOption(id: id, userInitiated: userInitiated)
     }
 
     // MARK: - Dual (secondary) subtitle
 
-    /// The tracks a second subtitle line can show. Sourced from the PROVIDER's
-    /// subtitle probe (`request.subtitleTracks`), not the engine's demuxed tracks,
-    /// because the overlay fetches + parses the sidecar itself and only the provider
-    /// reliably carries a text sub's delivery source — the advanced engine's
-    /// embedded-text tracks have none, and their ids may not even line up with the
-    /// provider's (which is why matching by id showed "None available"). Every
-    /// non-image text track Jellyfin exposes is therefore eligible; the current
-    /// primary is dropped when its id matches.
-    ///
-    /// Bitmap (PGS/DVD/DVB/VOBSUB) tracks are **never** eligible as a second line:
-    /// the dual layout stacks two *repositionable text* lines (the secondary has an
-    /// Above/Below placement), but a bitmap cue is drawn at its own authored
-    /// on-frame position that we can't move — a PGS "second line" would collide
-    /// with the primary instead of stacking. And when the **primary** itself is a
-    /// bitmap subtitle, dual mode is disabled entirely (no eligible seconds), since
-    /// the overlay can't know where the primary bitmap will land to place a line
-    /// clear of it.
-    private func eligibleSecondarySubtitleTracks() -> [MediaTrack] {
-        TrackMenuBuilder.eligibleSecondaryTracks(
-            selectedPrimaryID: selectedSubtitleTrackID,
-            engineTracks: engine.subtitleTracks,
-            providerTracks: request?.subtitleTracks ?? [],
-            engineSupportsDualDecode: engine.capabilities.contains(.dualSubtitleDecode)
-        )
-    }
-
     /// Selects the second (dual) subtitle track, or turns the second line off
-    /// (`PlayerTrackOption.offID`). The secondary always renders through Plozz's
-    /// overlay, so only text tracks with a sidecar URL are eligible. Picking a
-    /// track also enables the secondary *styling* (`style.secondary`) so the
-    /// overlay actually draws the line; turning it off clears both.
+    /// (`PlayerTrackOption.offID`). Owned by ``SubtitleTrackController``.
     public func selectSecondarySubtitleOption(id: Int) {
-        let engineDual = engine.capabilities.contains(.dualSubtitleDecode)
-        if id == PlayerTrackOption.offID {
-            subtitleOverlay.cancelSecondary()
-            selectedSecondarySubtitleTrackID = nil
-            if engineDual {
-                // Tell the engine to stop decoding the second stream, then drop the
-                // live-fed cues. `loadSecondary(nil)` also flips the model out of
-                // secondary-live mode and empties the second line.
-                engine.selectSecondarySubtitleTrack(nil)
-            }
-            liveSubtitles.loadSecondary(nil)
-            controls.secondarySubtitleStatus = .idle
-            if style.secondary != nil {
-                var cleared = style
-                cleared.secondary = nil
-                applySubtitleStyle(cleared)
-            }
-            loadTrackOptions()
-            return
-        }
-        guard let track = eligibleSecondarySubtitleTracks().first(where: { $0.id == id }) else { return }
-        selectedSecondarySubtitleTrackID = id
-        controls.secondarySubtitleStatus = .loading
-        // The overlay only draws the second line when `style.secondary` exists;
-        // seed a default (which inherits the primary look) if the viewer hasn't
-        // styled one yet.
-        if style.secondary == nil {
-            var enabled = style
-            enabled.secondary = SubtitleStyle.Secondary()
-            applySubtitleStyle(enabled)
-        }
-        if engineDual {
-            // Engine decodes the embedded second track itself and publishes its
-            // cues via `onSecondarySubtitleCues` (wired in configureEngineCallbacks),
-            // which the model draws through secondary-live mode. This is what makes
-            // dual subtitles work for tracks with no fetchable sidecar URL (Plex
-            // direct-play MKV). Status flips to `.loaded` when the first cues land.
-            subtitleOverlay.cancelSecondary()
-            liveSubtitles.beginSecondaryLiveFeed()
-            engine.selectSecondarySubtitleTrack(track)
-        } else {
-            subtitleOverlay.loadSecondary(track)
-        }
-        loadTrackOptions()
-    }
-
-    /// Swaps from the native engine to Plozzigen (preserving position) so an
-    /// image-based subtitle the user manually selected can be decoded and drawn
-    /// on-device. Plozzigen demuxes its tracks asynchronously with its own
-    /// id-space, so the actual selection is deferred: `pendingImageSubtitleMatch`
-    /// carries the picked provider track and `applyInitialSubtitleSelectionIfReady`
-    /// attribute-matches it once the engine's track list arrives.
-    private func swapEngineForImageSubtitle(_ track: MediaTrack) async {
-        guard let request else { return }
-        let resume = max(engine.furthestObservedPosition, engine.currentTime)
-        pendingImageSubtitleMatch = track
-        await playResolved(request, engineKind: .plozzigen, startPosition: resume > 1 ? resume : 0)
-        loadTrackOptions()
+        subtitleController.selectSecondarySubtitleOption(id: id)
     }
 
     // MARK: - Subtitle search & download (manual + auto)
@@ -2271,22 +1771,6 @@ public final class PlayerViewModel {
     /// the running player so it appears immediately (no replay needed).
     public func downloadAndLoadRemoteSubtitle(_ subtitle: RemoteSubtitle) {
         subtitleAcquisition.download(subtitle, preference: behavior.searchPreference)
-    }
-
-    /// Registers a downloaded subtitle track under a fresh synthetic id (never
-    /// colliding with engine/provider stream ids) and rebuilds the menu so it
-    /// becomes a first-class, reselectable row. Returns the assigned id.
-    private func hotLoadSubtitleTrack(_ track: MediaTrack, preferredLanguage: String?, forced: Bool) -> Int {
-        var t = track
-        t.id = nextHotLoadedSubtitleID
-        nextHotLoadedSubtitleID += 1
-        if t.language == nil { t.language = preferredLanguage }
-        t.isForced = t.isForced || forced
-        t.isImageBasedSubtitle = false
-        t.isExternal = true
-        hotLoadedSubtitleTracks.append(t)
-        loadTrackOptions()
-        return t.id
     }
 
     /// If auto-download is enabled and the item lacks a suitable subtitle in the
@@ -2357,24 +1841,24 @@ extension PlayerViewModel: RemoteSubtitleAcquisitionHost {
     }
 
     func hotLoadDownloadedSubtitle(_ track: MediaTrack, preferredLanguage: String?, forced: Bool) -> Int {
-        hotLoadSubtitleTrack(track, preferredLanguage: preferredLanguage, forced: forced)
+        subtitleController.hotLoadSubtitleTrack(track, preferredLanguage: preferredLanguage, forced: forced)
     }
 
     func selectDownloadedSubtitle(id: Int, userInitiated: Bool) {
-        selectSubtitleOption(id: id, userInitiated: userInitiated)
+        subtitleController.selectSubtitleOption(id: id, userInitiated: userInitiated)
     }
 
-    var isPrimarySubtitleOff: Bool { selectedSubtitleTrackID == nil }
+    var isPrimarySubtitleOff: Bool { subtitleController.selectedSubtitleTrackID == nil }
 }
 
 // MARK: - SubtitleOverlayLoaderHost
 
 extension PlayerViewModel: SubtitleOverlayLoaderHost {
-    var primarySubtitleSelectionID: Int? { selectedSubtitleTrackID }
-    var secondarySubtitleSelectionID: Int? { selectedSecondarySubtitleTrackID }
+    var primarySubtitleSelectionID: Int? { subtitleController.selectedSubtitleTrackID }
+    var secondarySubtitleSelectionID: Int? { subtitleController.selectedSecondarySubtitleTrackID }
 
     func overlayResolveDeliveryURL(_ track: MediaTrack) async throws -> URL? {
-        try await resolveSubtitleDeliveryURL(track)
+        try await subtitleController.resolveSubtitleDeliveryURL(track)
     }
 
     func overlayApplyPrimaryCues(_ stream: SubtitleCueStream?) {
@@ -2387,15 +1871,15 @@ extension PlayerViewModel: SubtitleOverlayLoaderHost {
     }
 
     func overlayDetectedLanguage(for id: Int) -> String? {
-        detectedSubtitleLanguages[id]
+        subtitleController.detectedLanguage(for: id)
     }
 
     func overlayRecordDetectedLanguage(_ language: String, for id: Int) {
-        detectedSubtitleLanguages[id] = language
+        subtitleController.recordDetectedLanguage(language, for: id)
     }
 
     func overlayReloadTrackOptions() {
-        loadTrackOptions()
+        subtitleController.loadTrackOptions()
     }
 
     func overlaySetSecondaryStatus(_ status: SecondarySubtitleStatus) {
@@ -2404,9 +1888,56 @@ extension PlayerViewModel: SubtitleOverlayLoaderHost {
 
     #if DEBUG
     func overlaySetPrimaryDiagnostic(route: String, cues: Int?) {
-        setPrimarySubtitleDiagnostic(route: route, cues: cues)
+        subtitleController.setPrimarySubtitleDiagnostic(route: route, cues: cues)
     }
     #endif
+}
+
+// MARK: - SubtitleTrackControllerHost
+
+extension PlayerViewModel: SubtitleTrackControllerHost {
+    var trackEngine: any VideoEngine { engine }
+    var trackEngineKind: PlaybackEngineKind { currentEngineKind }
+    var trackRequest: PlaybackRequest? { request }
+    var trackBehavior: SubtitleBehavior { behavior }
+    var trackControls: PlayerControlsModel { controls }
+    var trackLiveSubtitles: LiveSubtitleModel { liveSubtitles }
+    var trackSubtitleOverlay: SubtitleOverlayLoader { subtitleOverlay }
+    var trackStyle: SubtitleStyle { style }
+    var trackPlozzigenAvailable: Bool { engineFactory.plozzigenAvailable }
+    var trackAuthenticatedHTTPResolver: (any AuthenticatedHTTPResourceResolving)? {
+        authenticatedHTTPResolver
+    }
+
+    func trackApplySubtitleStyle(_ style: SubtitleStyle) {
+        applySubtitleStyle(style)
+    }
+
+    func trackRememberedSubtitle(for item: MediaItem) -> RememberedSubtitleSelection? {
+        rememberedSubtitle(for: item)
+    }
+
+    func trackEffectiveSubtitleRule(for item: MediaItem) -> SubtitlePolicy.Rule {
+        effectiveSubtitleRule(for: item)
+    }
+
+    func trackRecordAudioSelection(language: String?) {
+        recordSeriesAudioSelection(language: language)
+    }
+
+    func trackRecordSubtitleSelection(_ selection: RememberedSubtitleSelection?) {
+        recordSeriesSubtitleSelection(selection)
+    }
+
+    func trackRefreshSubtitleDelayAvailability() {
+        refreshSubtitleDelayAvailability()
+    }
+
+    func trackPlayResolvedForImageSubtitleSwap(
+        _ request: PlaybackRequest, startPosition: TimeInterval
+    ) async {
+        await playResolved(request, engineKind: .plozzigen, startPosition: startPosition)
+    }
 }
 
 #endif

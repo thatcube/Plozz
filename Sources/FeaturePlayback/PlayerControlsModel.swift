@@ -211,6 +211,16 @@ public final class PlayerControlsModel {
     /// input controller reads this to suppress scrub gestures and the control bar
     /// reads it to take/relinquish focus.
     public var controlBarVisible: Bool = false
+    /// True while an options menu (Audio & Subtitles / Speed / A·V Sync / Info)
+    /// is open above the control bar. The input controller keeps the transport
+    /// pinned visible while a menu is open and only lets the idle auto-hide fire
+    /// once every menu is closed — navigating the bar's buttons still times out.
+    public var isPanelOpen: Bool = false
+    /// Monotonically bumped by the control bar on any focus activity (moving
+    /// between buttons, opening/closing a menu). The input controller watches it
+    /// while focus is in the bar and restarts the idle auto-hide countdown on
+    /// each change, so the transport never hides out from under an active viewer.
+    public var controlBarActivity: Int = 0
 
     // MARK: Skip hint (transient ±Ns indicator)
     /// How many seconds a left-press skips backward (per-profile setting).

@@ -209,9 +209,21 @@ struct PlayerControls: View {
             // setting @FocusState here fought the engine's own default pick and
             // briefly lit two buttons at once. Let the engine choose on entry; only
             // clear our binding when focus leaves the bar.
-            if !focused { focus = nil }
+            if !focused {
+                focus = nil
+                model.isPanelOpen = false
+            }
+        }
+        .onChange(of: focus) { _, _ in
+            // Any focus move between control-bar buttons is activity — bump so the
+            // container restarts its idle countdown instead of hiding mid-navigation.
+            model.controlBarActivity &+= 1
         }
         .onChange(of: openPanel) { _, panel in
+            // Surface whether a menu is open so the container pins the transport
+            // visible while one is up, and count the open/close as bar activity.
+            model.isPanelOpen = panel != nil
+            model.controlBarActivity &+= 1
             subtitleScreen = .tracks
             guard let panel else {
                 // Panel fully closed. Reset the measured panel height so the next

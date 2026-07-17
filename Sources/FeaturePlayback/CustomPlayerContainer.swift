@@ -195,6 +195,11 @@ final class PlayerInputViewController: UIViewController {
     private enum FocusContext { case surface, controlBar, skipButton, upNext }
     private var focusContext: FocusContext = .surface
 
+    /// Last `model.controlBarActivity` value the refresh loop acted on. While
+    /// focus is in the control bar, a change means the viewer moved between
+    /// buttons or toggled a menu, so the idle auto-hide countdown restarts.
+    private var lastControlBarActivity: Int = 0
+
     /// The always-attached, focusable bottom control bar. It only takes focus
     /// while `focusContext == .controlBar`.
     private var controlBarHost: UIHostingController<AnyView>?
@@ -490,6 +495,15 @@ final class PlayerInputViewController: UIViewController {
         if let isPaused = resolution.isPaused { model.isPaused = isPaused }
 
         if resolution.shouldEvaluateSkip { evaluateSkipPresentation() }
+
+        // While focus lives in the control bar, treat any focus/menu activity as a
+        // reason to restart the idle countdown so the transport never hides mid-
+        // navigation. Ended (or never-scheduled) auto-hide is fine to re-arm here —
+        // scheduleAutoHide() cancels any in-flight task first.
+        if focusContext == .controlBar, model.controlBarActivity != lastControlBarActivity {
+            lastControlBarActivity = model.controlBarActivity
+            scheduleAutoHide()
+        }
     }
 
     // MARK: Skip intro/credits presentation
@@ -1148,8 +1162,27 @@ final class PlayerInputViewController: UIViewController {
                     continue
                 }
                 guard let self, !Task.isCancelled else { return }
-                if !self.model.isScrubbing && !self.model.isPaused && self.focusContext == .surface {
+                // Stay pinned while the viewer is mid-interaction: a scrub in
+                // flight, paused (the controls ARE the pause UI), or an options
+                // menu open. Each of those re-arms auto-hide when it ends (a scrub
+                // commit, a resume, or the menu-close activity bump), so ending the
+                // task here is safe rather than looping.
+                if self.model.isScrubbing || self.model.isPaused || self.model.isPanelOpen {
+                    return
+                }
+                switch self.focusContext {
+                case .surface:
                     self.model.controlsVisible = false
+                case .controlBar:
+                    // Idle in the control bar with no menu open — hand focus back to
+                    // the scrub surface before hiding so we never leave a focused but
+                    // invisible bar.
+                    self.returnFocusToSurface()
+                    self.model.controlsVisible = false
+                case .skipButton, .upNext:
+                    // A focused Skip / Up Next affordance owns the screen; don't hide
+                    // the transport out from under it.
+                    break
                 }
                 return
             }
@@ -1192,11 +1225,27 @@ final class PlayerInputViewController: UIViewController {
         playerInputView?.allowsFocus = false
         setNeedsFocusUpdate()
         updateFocusIfNeeded()
+        // The control bar participates in auto-hide too: navigating its buttons
+        // restarts the countdown (see refreshFromEngine) and an open menu pins it,
+        // but once the viewer stops interacting the transport times out and focus
+        // returns to the surface — it no longer stays up forever just because focus
+        // is in the bar.
+        lastControlBarActivity = model.controlBarActivity
+        scheduleAutoHide()
     }
 
     /// Returns focus to the scrub surface (Up / Menu from the control-bar root),
     /// re-enabling scrub gestures and letting the transport auto-hide.
     private func exitToSurface() {
+        guard focusContext == .controlBar else { return }
+        returnFocusToSurface()
+        scheduleAutoHide()
+    }
+
+    /// The focus-teardown half of `exitToSurface`, without re-arming auto-hide.
+    /// Used directly when the idle timer itself is hiding the bar (it must not
+    /// schedule a fresh countdown for a transport that's about to disappear).
+    private func returnFocusToSurface() {
         guard focusContext == .controlBar else { return }
         focusContext = .surface
         model.controlBarVisible = false
@@ -1205,7 +1254,6 @@ final class PlayerInputViewController: UIViewController {
         setSurfaceRecognizers(enabled: true)
         setNeedsFocusUpdate()
         updateFocusIfNeeded()
-        scheduleAutoHide()
     }
 
     private func setSurfaceRecognizers(enabled: Bool) {

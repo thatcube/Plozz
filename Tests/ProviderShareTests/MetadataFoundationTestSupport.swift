@@ -1,6 +1,7 @@
 import CoreModels
 import Foundation
 import MediaTransportCore
+import MetadataKit
 import SQLite3
 @testable import ProviderShare
 
@@ -81,7 +82,11 @@ actor MetadataResolverSpy: ShareMetadataResolving {
     }
 }
 
-final class MetadataResolverFactorySpy: @unchecked Sendable {
+/// Records how many pipelines the coordinator builds (and the resolver identity used
+/// each time), while still returning a real ``ShareMetadataPipeline`` so lifecycle is
+/// exercised end-to-end. Replaces the old resolver-factory spy now that construction
+/// is bundled behind ``ShareMetadataPipelineFactory``.
+final class PipelineFactorySpy: ShareMetadataPipelineFactory, @unchecked Sendable {
     private let lock = NSLock()
     private let resolver: any ShareMetadataResolving
     private var makeCountStorage = 0
@@ -94,12 +99,124 @@ final class MetadataResolverFactorySpy: @unchecked Sendable {
     var makeCount: Int { lock.withLock { makeCountStorage } }
     var identities: [ObjectIdentifier] { lock.withLock { identitiesStorage } }
 
-    func make() -> any ShareMetadataResolving {
+    func makePipeline(
+        store: ShareCatalogStore,
+        accountKey: String,
+        reporter: ShareScanReporter,
+        sessionFactory: @escaping ShareTransportSessionFactory
+    ) -> ShareMetadataPipeline {
         lock.withLock {
             makeCountStorage += 1
             identitiesStorage.append(ObjectIdentifier(resolver as AnyObject))
         }
-        return resolver
+        return ShareMetadataPipeline(
+            external: ShareEnricher(
+                store: store,
+                resolver: resolver,
+                shareID: accountKey,
+                reporter: reporter
+            ),
+            local: ShareLocalMetadataEnricher(store: store, sessionFactory: sessionFactory)
+        )
+    }
+}
+
+/// A minimal factory that builds a fresh resolver (via the supplied closure) per
+/// pipeline. Convenience for coordinator lifecycle tests that don't need to count
+/// construction.
+struct TestPipelineFactory: ShareMetadataPipelineFactory {
+    let makeResolver: @Sendable () -> any ShareMetadataResolving
+
+    init(makeResolver: @escaping @Sendable () -> any ShareMetadataResolving) {
+        self.makeResolver = makeResolver
+    }
+
+    func makePipeline(
+        store: ShareCatalogStore,
+        accountKey: String,
+        reporter: ShareScanReporter,
+        sessionFactory: @escaping ShareTransportSessionFactory
+    ) -> ShareMetadataPipeline {
+        ShareMetadataPipeline(
+            external: ShareEnricher(
+                store: store,
+                resolver: makeResolver(),
+                shareID: accountKey,
+                reporter: reporter
+            ),
+            local: ShareLocalMetadataEnricher(store: store, sessionFactory: sessionFactory)
+        )
+    }
+}
+
+// MARK: - Fake external capabilities
+
+/// Fixed id resolver: proves the share resolvers consume injected ids rather than
+/// reaching `KeylessIDResolver()` internally.
+struct FakeShareExternalIDs: ShareExternalIDResolving {
+    let ids: [String: SourcedValue<String>]
+
+    init(_ ids: [String: SourcedValue<String>] = [:]) {
+        self.ids = ids
+    }
+
+    func sourcedExternalIDs(
+        title: String,
+        year: Int?,
+        isAnime: Bool,
+        isTV: Bool
+    ) async -> [String: SourcedValue<String>] {
+        ids
+    }
+}
+
+/// Artwork resolver backed by a closure keyed on ``ArtworkKind`` — proves the share
+/// resolvers consume injected artwork rather than `ArtworkRouter.shared`.
+struct FakeShareArtwork: ShareSourcedArtworkResolving {
+    let provider: @Sendable (ArtworkKind) -> SourcedValue<URL>?
+
+    init(provider: @escaping @Sendable (ArtworkKind) -> SourcedValue<URL>? = { _ in nil }) {
+        self.provider = provider
+    }
+
+    func sourcedArtworkURL(_ kind: ArtworkKind, for item: MediaItem) async -> SourcedValue<URL>? {
+        provider(kind)
+    }
+}
+
+/// Fixed overview resolver — proves injected overview instead of `OverviewRouter.shared`.
+struct FakeShareOverview: ShareSourcedOverviewResolving {
+    let overview: SourcedValue<String>?
+
+    init(_ overview: SourcedValue<String>? = nil) {
+        self.overview = overview
+    }
+
+    func sourcedOverview(for item: MediaItem) async -> SourcedValue<String>? {
+        overview
+    }
+}
+
+/// Fixed TVDB metadata resolver — proves the TVDB tier consumes an injected client
+/// instead of constructing `TVDBClient` itself.
+struct FakeTVDBMetadata: ShareTVDBMetadataResolving {
+    let metadata: TVDBMetadata?
+
+    init(_ metadata: TVDBMetadata? = nil) {
+        self.metadata = metadata
+    }
+
+    func resolve(byTVDBID id: String, isMovie: Bool) async -> TVDBMetadata? {
+        metadata
+    }
+
+    func resolve(
+        titles: [String],
+        year: Int?,
+        isMovie: Bool,
+        episodeHints: [SeriesEpisodeHint]
+    ) async -> TVDBMetadata? {
+        metadata
     }
 }
 

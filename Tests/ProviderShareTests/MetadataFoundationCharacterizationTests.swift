@@ -172,27 +172,33 @@ final class MetadataFoundationCharacterizationTests: XCTestCase {
     }
 
     func testDefaultExternalResolverSelectionPreservesConfiguredFallbackOrder() {
-        let keylessConfig = TVDBConfig(apiKey: nil)
-        XCTAssertEqual(ShareExternalResolverSelection.kind(for: keylessConfig), .keyless)
-        XCTAssertTrue(
-            ShareExternalResolverSelection.make(for: keylessConfig)
-                is KeylessShareResolver
+        let clients = ShareExternalMetadataClients(
+            ids: FakeShareExternalIDs(),
+            artwork: FakeShareArtwork(),
+            overview: FakeShareOverview(),
+            tvdbConfig: { TVDBConfig(apiKey: nil) },
+            makeTVDBClient: { _ in FakeTVDBMetadata() }
         )
+        let keylessFactory = DefaultShareMetadataPipelineFactory(clients: clients)
+        XCTAssertTrue(keylessFactory.makeExternalResolver() is KeylessShareResolver)
 
-        let configured = TVDBConfig(apiKey: "fixture-key")
-        XCTAssertEqual(ShareExternalResolverSelection.kind(for: configured), .tvdb)
-        XCTAssertTrue(
-            ShareExternalResolverSelection.make(for: configured)
-                is TVDBShareResolver
+        let configuredClients = ShareExternalMetadataClients(
+            ids: FakeShareExternalIDs(),
+            artwork: FakeShareArtwork(),
+            overview: FakeShareOverview(),
+            tvdbConfig: { TVDBConfig(apiKey: "fixture-key") },
+            makeTVDBClient: { _ in FakeTVDBMetadata() }
         )
+        let configuredFactory = DefaultShareMetadataPipelineFactory(clients: configuredClients)
+        XCTAssertTrue(configuredFactory.makeExternalResolver() is TVDBShareResolver)
     }
 
-    func testCoordinatorUsesOneInjectedResolverFactoryPerAccountGeneration() async {
+    func testCoordinatorUsesOnePipelinePerAccountGeneration() async {
         let resolver = MetadataResolverSpy()
-        let factory = MetadataResolverFactorySpy(resolver: resolver)
+        let factory = PipelineFactorySpy(resolver: resolver)
         let revision = CredentialRevision()
         let coordinator = ShareCatalogCoordinator(
-            metadataResolverFactory: factory.make
+            pipelineFactory: factory
         )
         let sessionFactory: ShareTransportSessionFactory = { role in
             MetadataTestSession(credentialRevision: revision, role: role)

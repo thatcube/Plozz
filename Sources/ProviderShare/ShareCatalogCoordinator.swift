@@ -1,7 +1,6 @@
 import Foundation
 import CoreModels
 import MediaTransportCore
-import MetadataKit
 
 protocol ShareCatalogCoordinating: Sendable {
     func store(
@@ -20,7 +19,6 @@ protocol ShareCatalogCoordinating: Sendable {
 /// constantly, so this state is injected from the composition root.
 public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
     public typealias ArbiterFactory = @Sendable (String) -> MediaIOArbiter
-    typealias MetadataResolverFactory = @Sendable () -> any ShareMetadataResolving
 
     private var stores: [String: ShareCatalogStore] = [:]
     private var scanners: [String: ShareScanner] = [:]
@@ -43,7 +41,7 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
     private let metadataScheduler = ShareMetadataWorkScheduler()
     private var preferredAccountRevision: UInt64 = 0
     private let arbiterFactory: ArbiterFactory
-    private let metadataResolverFactory: MetadataResolverFactory
+    private let pipelineFactory: any ShareMetadataPipelineFactory
     /// When each share last completed a background (non-forced) scan.
     /// `catalog` is a computed property queried on every Home/browse access, and
     /// each access calls `ensureScanning`; without this, a share whose real walk
@@ -72,19 +70,17 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
     ) {
         self.arbiterFactory = arbiterFactory
         self.diagnostics = DefaultShareScanDiagnostics()
-        self.metadataResolverFactory = {
-            ShareExternalResolverSelection.make(for: TVDBConfig.resolved())
-        }
+        self.pipelineFactory = DefaultShareMetadataPipelineFactory(clients: .production)
     }
 
     init(
         arbiterFactory: @escaping ArbiterFactory = { MediaIOArbiter(accountID: $0) },
         diagnostics: ShareScanDiagnostics = DefaultShareScanDiagnostics(),
-        metadataResolverFactory: @escaping MetadataResolverFactory
+        pipelineFactory: any ShareMetadataPipelineFactory
     ) {
         self.arbiterFactory = arbiterFactory
         self.diagnostics = diagnostics
-        self.metadataResolverFactory = metadataResolverFactory
+        self.pipelineFactory = pipelineFactory
     }
 
     /// Inject the app's scan-status reporter (call once at startup). Applies to
@@ -177,25 +173,22 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
                 scannerRevisions[accountKey] = credentialRevision
             }
             if enrichers[accountKey] == nil {
-                // Resolver construction is injected for deterministic lifecycle tests.
+                // Pipeline construction is injected for deterministic lifecycle tests.
                 // The production factory preserves the existing TVDB-when-configured,
-                // keyless-otherwise selection.
-                let resolver = metadataResolverFactory()
-                let enricher = ShareEnricher(
+                // keyless-otherwise selection and builds both workers.
+                let pipeline = pipelineFactory.makePipeline(
                     store: store,
-                    resolver: resolver,
-                    shareID: accountKey,
-                    reporter: reporter
+                    accountKey: accountKey,
+                    reporter: reporter,
+                    sessionFactory: sessionFactory
                 )
+                let enricher = pipeline.external
                 enrichers[accountKey] = enricher
                 // A dedicated `.metadata` transport session — separate from the
                 // scanner's own pooled connections and from live browsing — reads
                 // NFO sidecars. Owned alongside `enricher`; never touched from a
                 // Home/grid/detail read (only scheduler slices + the urgent path).
-                let localEnricher = ShareLocalMetadataEnricher(
-                    store: store,
-                    sessionFactory: sessionFactory
-                )
+                let localEnricher = pipeline.local
                 localEnrichers[accountKey] = localEnricher
                 let arbiter = arbiter(for: accountKey)
                 await metadataScheduler.register(

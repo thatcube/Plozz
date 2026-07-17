@@ -187,7 +187,7 @@ final class ShareScanLifecycleTests: XCTestCase {
         ShareCatalogCoordinator(
             arbiterFactory: { MediaIOArbiter(accountID: $0) },
             diagnostics: diagnostics,
-            metadataResolverFactory: { MetadataResolverSpy() }
+            pipelineFactory: TestPipelineFactory { MetadataResolverSpy() }
         )
     }
 

@@ -2059,15 +2059,8 @@ public final class PlayerViewModel {
     /// it. The container clears a stale landing once the live position leaves the
     /// segment, so a later natural re-entry behaves normally.
     private func updateSeekLanding(for target: TimeInterval) {
-        guard let segment = controls.skippableSegments.activeSkippable(at: target) else {
-            controls.seekLanding = nil
-            return
-        }
-        let offset = target - segment.start
-        controls.seekLanding = SkipSeekLanding(
-            segmentID: segment.id,
-            isWithinGrace: offset <= MediaSegment.seekGraceWindow
-        )
+        controls.seekLanding = SeekLandingClassifier.landing(
+            forTarget: target, in: controls.skippableSegments)
     }
 
     /// Schedules the deferred engine commit for `requestSeek`. Resets on each call

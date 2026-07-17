@@ -492,7 +492,7 @@ final class ShareEnricherTests: XCTestCase {
         XCTAssertEqual(afterOne.count, 2, "an empty (transient-looking) miss stays pending for retry")
 
         // Exhaust the remaining retry budget → settled as a genuine miss.
-        for _ in 1..<ShareCatalogStore.maxEnrichAttempts { await enricher.enrichPending() }
+        for _ in 1..<EnrichmentRepository.maxEnrichAttempts { await enricher.enrichPending() }
         let afterCap = await store.pendingEnrichment(version: ShareEnricher.version, limit: 10)
         XCTAssertTrue(afterCap.isEmpty, "after the attempt cap a persistent miss is settled")
     }
@@ -506,7 +506,7 @@ final class ShareEnricherTests: XCTestCase {
         let id = ShareCatalogID.file("Movies/A (2000).mkv")
 
         // Exhaust the budget at version 1 with empty (unusable) results.
-        for _ in 0..<ShareCatalogStore.maxEnrichAttempts {
+        for _ in 0..<EnrichmentRepository.maxEnrichAttempts {
             await store.saveEnrichment(itemID: id, .init(), version: 1)
         }
         let pendingV1 = await store.pendingEnrichment(version: 1, limit: 10)
@@ -520,7 +520,7 @@ final class ShareEnricherTests: XCTestCase {
                        "a version bump resets the retry budget (one v2 attempt doesn't settle it)")
 
         // And it still eventually settles at v2 after its own full budget.
-        for _ in 1..<ShareCatalogStore.maxEnrichAttempts {
+        for _ in 1..<EnrichmentRepository.maxEnrichAttempts {
             await store.saveEnrichment(itemID: id, .init(), version: 2)
         }
         let pendingV2After = await store.pendingEnrichment(version: 2, limit: 10)

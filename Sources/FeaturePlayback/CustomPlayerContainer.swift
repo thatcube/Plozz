@@ -192,7 +192,19 @@ final class PlayerInputViewController: UIViewController {
     /// Whether the Siri Remote currently drives the scrub surface or the bottom
     /// control bar. In `.controlBar` the surface gesture recognizers are disabled
     /// so the SwiftUI focus engine owns navigation.
-    private enum FocusContext { case surface, controlBar, skipButton, upNext }
+    private enum FocusContext {
+        case surface, controlBar, skipButton, upNext
+
+        /// Bridge to the pure auto-hide policy's focus mirror.
+        var policyFocus: ControlsAutoHidePolicy.Focus {
+            switch self {
+            case .surface: return .surface
+            case .controlBar: return .controlBar
+            case .skipButton: return .skipButton
+            case .upNext: return .upNext
+            }
+        }
+    }
     private var focusContext: FocusContext = .surface
 
     /// Last `model.controlBarActivity` value the refresh loop acted on. While
@@ -1152,8 +1164,7 @@ final class PlayerInputViewController: UIViewController {
                 // up, while a short load / hands-on interaction keeps it around the
                 // full 4s the viewer needs to act on the controls they summoned.
                 let loadDoneAt = Date()
-                let hideAt = max(loadDoneAt.addingTimeInterval(1.0),
-                                 inputAt.addingTimeInterval(4.0))
+                let hideAt = ControlsAutoHidePolicy.hideDate(loadDoneAt: loadDoneAt, inputAt: inputAt)
                 let wait = hideAt.timeIntervalSinceNow
                 if wait > 0 { try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000)) }
                 if Task.isCancelled { return }
@@ -1165,26 +1176,22 @@ final class PlayerInputViewController: UIViewController {
                     continue
                 }
                 guard let self, !Task.isCancelled else { return }
-                // Stay pinned while the viewer is mid-interaction: a scrub in
-                // flight, paused (the controls ARE the pause UI), or an options
-                // menu open. Each of those re-arms auto-hide when it ends (a scrub
-                // commit, a resume, or the menu-close activity bump), so ending the
-                // task here is safe rather than looping.
-                if self.model.isScrubbing || self.model.isPaused || self.model.isPanelOpen {
+                switch ControlsAutoHidePolicy.outcome(
+                    focus: self.focusContext.policyFocus,
+                    isScrubbing: self.model.isScrubbing,
+                    isPaused: self.model.isPaused,
+                    isPanelOpen: self.model.isPanelOpen
+                ) {
+                case .stayVisible:
+                    // Mid-interaction (scrub in flight, paused, or a menu open);
+                    // each re-arms auto-hide when it ends, so ending here is safe.
                     return
-                }
-                switch self.focusContext {
-                case .surface:
+                case .hide:
                     self.model.controlsVisible = false
-                case .controlBar:
-                    // Idle in the control bar with no menu open — hand focus back to
-                    // the scrub surface before hiding so we never leave a focused but
-                    // invisible bar.
+                case .returnFocusThenHide:
                     self.returnFocusToSurface()
                     self.model.controlsVisible = false
-                case .skipButton, .upNext:
-                    // A focused Skip / Up Next affordance owns the screen; don't hide
-                    // the transport out from under it.
+                case .keepForAffordance:
                     break
                 }
                 return

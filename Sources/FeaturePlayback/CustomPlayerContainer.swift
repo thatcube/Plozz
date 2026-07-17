@@ -1118,47 +1118,50 @@ final class PlayerInputViewController: UIViewController {
             // wall-clock cap keeps a stalled/paused-through load from pinning the
             // transport forever. All reads go through a weak self so a torn-down
             // container isn't retained by the loop.
-            @MainActor func awaitPlaybackPresenting() async -> (presented: Bool, sawLoading: Bool) {
+            @MainActor func awaitPlaybackPresenting() async -> Bool {
                 let deadline = Date().addingTimeInterval(45)
                 let requiredTicks = 4            // ~0.8s of confirmed forward motion
                 let tick: UInt64 = 200_000_000
                 var lastTime: TimeInterval = -1
                 var advancingTicks = 0
-                var sawLoading = false           // did we wait through a not-yet-playing stretch?
                 while !Task.isCancelled {
                     guard let sample = self.map({ ($0.engine.preventsDisplaySleep, $0.engine.currentTime) })
-                    else { return (false, sawLoading) } // container torn down
+                    else { return false } // container torn down
                     let (playing, now) = sample
                     if playing, lastTime >= 0, now > lastTime, now - lastTime < 2.0 {
                         advancingTicks += 1
-                        if advancingTicks >= requiredTicks { return (true, sawLoading) }
+                        if advancingTicks >= requiredTicks { return true }
                     } else if !playing {
                         advancingTicks = 0        // paused / stalled / buffering — reset
-                        sawLoading = true
                     }
                     lastTime = now
-                    if Date() >= deadline { return (true, sawLoading) } // safety cap
+                    if Date() >= deadline { return true } // safety cap
                     try? await Task.sleep(nanoseconds: tick)
                 }
-                return (false, sawLoading)
+                return false
             }
 
-            var result = await awaitPlaybackPresenting()
-            guard result.presented else { return }
+            // The last input is when this countdown was (re)armed — a reveal, a
+            // skip, a focus move in the control bar, etc.
+            let inputAt = Date()
+            guard await awaitPlaybackPresenting() else { return }
             while !Task.isCancelled {
-                // Hide 2s after an unattended load actually starts playing (long
-                // enough to confirm the load happened without lingering), but 4s
-                // after a hands-on interaction on already-rolling video, so the
-                // viewer has time to act on the controls they just summoned.
-                let idle: UInt64 = result.sawLoading ? 2_000_000_000 : 4_000_000_000
-                try? await Task.sleep(nanoseconds: idle)
+                // Hide 1s after the load finishes (the playhead is confirmed
+                // advancing again), but never sooner than 4s after the last input.
+                // So a long load clears the transport quickly once the picture is
+                // up, while a short load / hands-on interaction keeps it around the
+                // full 4s the viewer needs to act on the controls they summoned.
+                let loadDoneAt = Date()
+                let hideAt = max(loadDoneAt.addingTimeInterval(1.0),
+                                 inputAt.addingTimeInterval(4.0))
+                let wait = hideAt.timeIntervalSinceNow
+                if wait > 0 { try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000)) }
                 if Task.isCancelled { return }
                 // A re-resolve / transcode reload dropped frames mid-window:
                 // re-anchor to the re-presented playback rather than hiding over
                 // a spinner. Checked weakly so a torn-down container isn't held.
                 if self?.engine.preventsDisplaySleep == false, self?.engine.status == .loading {
-                    result = await awaitPlaybackPresenting()
-                    guard result.presented else { return }
+                    guard await awaitPlaybackPresenting() else { return }
                     continue
                 }
                 guard let self, !Task.isCancelled else { return }

@@ -34,6 +34,7 @@ actor ShareCatalogStore {
     /// A cheap value type constructed on demand; it holds no state of its own and
     /// only runs while the store's actor is executing a catalog transaction.
     private var reconciler: ShareSeriesReconciler { ShareSeriesReconciler(connection: connection) }
+    private var scanWriter: ScanCatalogWriter { ScanCatalogWriter(connection: connection) }
     private var normalizedMetadataReady = false
     /// Cached "does ANY local (NFO/filename) metadata_values row exist" check —
     /// avoids a real query on every read-path call (`withLocalOverlay`/grid sort
@@ -49,82 +50,6 @@ actor ShareCatalogStore {
     /// Bounded catalog writes keep the actor cooperative with Home/grid/search
     /// reads while a large share is scanning.
     private static let writeChunkSize = 200
-
-    private struct MovieGroupingRow: Sendable {
-        var relPath: String
-        var movieKey: String
-        var titleKey: String
-        var year: Int?
-        var existingGroup: String?
-    }
-    private struct MovieGroupAssignment: Sendable {
-        var relPath: String
-        var group: String
-    }
-    private struct MovieAlias: Sendable {
-        var id: String
-        var group: String
-    }
-    private struct MovieGroupingPlan: Sendable {
-        var assignments: [MovieGroupAssignment]
-        var aliases: [MovieAlias]
-    }
-
-    /// Pure movie clustering: groups movie rows by normalized title, splits into
-    /// year-adjacency clusters, folds year-less rows in, and picks each cluster's
-    /// canonical group (an existing group if any, else the highest-year/movieKey
-    /// fallback). Returns only CHANGED assignments plus the full alias set. No
-    /// SQLite/actor state — shared verbatim by the async `rebuildMovieGroups` and
-    /// the synchronous in-transaction clean-scan regroup.
-    private static func movieGroupingPlan(rows: [MovieGroupingRow]) -> MovieGroupingPlan {
-        var assignments: [MovieGroupAssignment] = []
-        var aliases: [MovieAlias] = []
-        for titleRows in Dictionary(grouping: rows, by: \.titleKey).values {
-            let known = titleRows.filter { $0.year != nil }.sorted {
-                if $0.year != $1.year { return ($0.year ?? 0) < ($1.year ?? 0) }
-                return $0.relPath < $1.relPath
-            }
-            var clusters: [[MovieGroupingRow]] = []
-            for row in known {
-                if let last = clusters.indices.last,
-                   let firstYear = clusters[last].first?.year,
-                   let year = row.year,
-                   year - firstYear <= 1 {
-                    clusters[last].append(row)
-                } else {
-                    clusters.append([row])
-                }
-            }
-
-            let unknown = titleRows.filter { $0.year == nil }
-            if !unknown.isEmpty {
-                if clusters.count == 1 {
-                    clusters[0].append(contentsOf: unknown)
-                } else {
-                    clusters.append(unknown)
-                }
-            }
-
-            for cluster in clusters {
-                let existing = cluster.compactMap(\.existingGroup).sorted().first
-                let fallback = cluster.max {
-                    if $0.year != $1.year { return ($0.year ?? 0) < ($1.year ?? 0) }
-                    return $0.movieKey > $1.movieKey
-                }?.movieKey
-                guard let group = existing ?? fallback else { continue }
-                // Re-scans usually produce zero writes. Only changed/new group
-                // members enter the bounded SQLite update phase.
-                assignments.append(contentsOf: cluster.compactMap { row in
-                    row.existingGroup == group ? nil : MovieGroupAssignment(relPath: row.relPath, group: group)
-                })
-                for row in cluster {
-                    aliases.append(MovieAlias(id: row.movieKey, group: group))
-                    aliases.append(MovieAlias(id: ShareCatalogID.file(row.relPath), group: group))
-                }
-            }
-        }
-        return MovieGroupingPlan(assignments: assignments, aliases: aliases)
-    }
 
     /// - Parameters:
     ///   - accountKey: stable per-share id (`server.id`) — names the DB file so two
@@ -283,7 +208,7 @@ actor ShareCatalogStore {
         guard admits(scanGeneration), db != nil else { return }
         let started = Date()
 
-        var rows: [MovieGroupingRow] = []
+        var rows: [ScanCatalogWriter.MovieGroupingRow] = []
         query("""
         SELECT rel_path, movie_key, movie_title_key, year, movie_group_key
         FROM assets
@@ -293,7 +218,7 @@ actor ShareCatalogStore {
             guard let relPath = self.columnText(stmt, 0),
                   let movieKey = self.columnText(stmt, 1),
                   let titleKey = self.columnText(stmt, 2) else { return }
-            rows.append(MovieGroupingRow(
+            rows.append(ScanCatalogWriter.MovieGroupingRow(
                 relPath: relPath,
                 movieKey: movieKey,
                 titleKey: titleKey,
@@ -306,8 +231,8 @@ actor ShareCatalogStore {
         // detail query can use the SQLite connection while a large catalog is
         // computing assignments.
         let computeStarted = Date()
-        let plan: MovieGroupingPlan = await Task.detached(priority: .utility) {
-            Self.movieGroupingPlan(rows: rows)
+        let plan: ScanCatalogWriter.MovieGroupingPlan = await Task.detached(priority: .utility) {
+            ScanCatalogWriter.movieGroupingPlan(rows: rows)
         }.value
         guard admits(scanGeneration) else { return }
         let computeMs = Int(Date().timeIntervalSince(computeStarted) * 1_000)
@@ -374,7 +299,7 @@ actor ShareCatalogStore {
     }
 
     private func persistMovieAliases(
-        _ aliases: [MovieAlias],
+        _ aliases: [ScanCatalogWriter.MovieAlias],
         scanGeneration: UUID?
     ) async {
         guard admits(scanGeneration), !aliases.isEmpty else { return }
@@ -619,15 +544,15 @@ actor ShareCatalogStore {
         // P0 — Preserve a soon-to-be-removed movie version's aliases (captured from
         // the pre-delete catalog) so its legacy file id still resolves to the
         // surviving logical group.
-        guard preserveMovieAliasesInTransaction() else { return rollback() }
+        guard scanWriter.preserveMovieAliasesInTransaction() else { return rollback() }
 
         // P1 — Drop assets no longer present on the share.
-        guard deleteWhereStale(table: "assets", scanID: scanID),
+        guard scanWriter.deleteWhereStale(table: "assets", scanID: scanID),
               failurePoint != .afterAssetDelete else { return rollback() }
 
         // P2 — Recompute movie group keys on the surviving assets. Association
         // resolution below reads the group representative, so this must precede it.
-        guard regroupMoviesInTransaction(),
+        guard scanWriter.regroupMoviesInTransaction(),
               failurePoint != .afterMovieRegroup else { return rollback() }
 
         // P3 — Delete orphan enrichment/metadata rows for every item id whose
@@ -641,8 +566,8 @@ actor ShareCatalogStore {
         // sidecar is about to vanish FIRST: an item whose winning sidecar was
         // deleted must be rematerialized from its surviving sidecars in P7 even
         // when no surviving sidecar's association changed.
-        let orphanedSidecarItemIDs = staleSidecarAssociatedItemIDs(scanID: scanID)
-        guard deleteWhereStale(table: "local_metadata_files", scanID: scanID) else { return rollback() }
+        let orphanedSidecarItemIDs = scanWriter.staleSidecarAssociatedItemIDs(scanID: scanID)
+        guard scanWriter.deleteWhereStale(table: "local_metadata_files", scanID: scanID) else { return rollback() }
         guard exec("""
             DELETE FROM local_metadata_file_values
             WHERE NOT EXISTS(
@@ -653,7 +578,7 @@ actor ShareCatalogStore {
 
         // P5 — Clean only alias/reconciliation rows proven to have no live logical
         // asset; aliases still backing a surviving version/group are preserved.
-        guard cleanDeadAliasesInTransaction(),
+        guard scanWriter.cleanDeadAliasesInTransaction(),
               failurePoint != .afterAliasCleanup else { return rollback() }
 
         // P6 — Recompute surviving sidecar associations from persisted assets.
@@ -677,100 +602,6 @@ actor ShareCatalogStore {
         return exec("COMMIT;")
     }
 
-    /// `DELETE FROM <table> WHERE last_scan <> scanID`, bound. `table` is a
-    /// compile-time literal at both call sites (no injection surface).
-    private func deleteWhereStale(table: String, scanID: Int64) -> Bool {
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, "DELETE FROM \(table) WHERE last_scan <> ?;", -1, &stmt, nil) == SQLITE_OK else { return false }
-        defer { sqlite3_finalize(stmt) }
-        sqlite3_bind_int64(stmt, 1, scanID)
-        return sqlite3_step(stmt) == SQLITE_DONE
-    }
-
-    /// The `associated_item_id`s of sidecars that this clean scan is about to prune
-    /// (their `last_scan` no longer matches). Captured before the P4 delete so P7
-    /// rematerializes each such item's winner from its surviving sidecars — the
-    /// item whose winning sidecar vanished must lose the deleted value even when no
-    /// surviving sidecar's association changed. Plain SELECT: no bound variable list.
-    private func staleSidecarAssociatedItemIDs(scanID: Int64) -> Set<String> {
-        var ids = Set<String>()
-        query("SELECT associated_item_id FROM local_metadata_files WHERE last_scan <> ? AND associated_item_id IS NOT NULL;",
-              bind: { sqlite3_bind_int64($0, 1, scanID) }) { stmt in
-            if let itemID = self.columnText(stmt, 0) { ids.insert(itemID) }
-        }
-        return ids
-    }
-
-    /// P0 helper: the two alias-capture INSERTs of `preserveMovieAliasesBeforePrune`
-    /// without their own transaction, so they join the clean-scan transaction.
-    private func preserveMovieAliasesInTransaction() -> Bool {
-        guard exec("""
-            INSERT INTO movie_alias(alias_id, group_key)
-            SELECT movie_key, COALESCE(movie_group_key, movie_key)
-            FROM assets
-            WHERE library='movies' AND kind='movie' AND movie_key IS NOT NULL
-            ON CONFLICT(alias_id) DO UPDATE SET group_key=excluded.group_key;
-            """) else { return false }
-        return exec("""
-            INSERT INTO movie_alias(alias_id, group_key)
-            SELECT 'f:' || rel_path, COALESCE(movie_group_key, movie_key)
-            FROM assets
-            WHERE library='movies' AND kind='movie' AND movie_key IS NOT NULL
-            ON CONFLICT(alias_id) DO UPDATE SET group_key=excluded.group_key;
-            """)
-    }
-
-    /// Synchronous, transaction-bound movie regroup: reads surviving movie rows,
-    /// runs the same pure clustering as the async `rebuildMovieGroups`, then applies
-    /// only changed group assignments plus the alias upserts inline (no nested
-    /// transaction, no off-actor hop, no yield — the clean-scan transaction owns the
-    /// serialization boundary). Behavior-identical result to `rebuildMovieGroups`
-    /// over the same surviving asset set.
-    private func regroupMoviesInTransaction() -> Bool {
-        var rows: [MovieGroupingRow] = []
-        query("""
-        SELECT rel_path, movie_key, movie_title_key, year, movie_group_key
-        FROM assets
-        WHERE library='movies' AND kind='movie'
-          AND movie_key IS NOT NULL AND movie_title_key IS NOT NULL;
-        """) { stmt in
-            guard let relPath = self.columnText(stmt, 0),
-                  let movieKey = self.columnText(stmt, 1),
-                  let titleKey = self.columnText(stmt, 2) else { return }
-            rows.append(MovieGroupingRow(
-                relPath: relPath, movieKey: movieKey, titleKey: titleKey,
-                year: self.columnOptInt(stmt, 3), existingGroup: self.columnText(stmt, 4)
-            ))
-        }
-        let plan = Self.movieGroupingPlan(rows: rows)
-        if !plan.aliases.isEmpty {
-            var stmt: OpaquePointer?
-            guard sqlite3_prepare_v2(db, """
-            INSERT INTO movie_alias(alias_id, group_key) VALUES(?,?)
-            ON CONFLICT(alias_id) DO UPDATE SET group_key=excluded.group_key;
-            """, -1, &stmt, nil) == SQLITE_OK else { return false }
-            defer { sqlite3_finalize(stmt) }
-            for alias in plan.aliases {
-                sqlite3_reset(stmt)
-                bindText(stmt, 1, alias.id)
-                bindText(stmt, 2, alias.group)
-                guard sqlite3_step(stmt) == SQLITE_DONE else { return false }
-            }
-        }
-        if !plan.assignments.isEmpty {
-            var stmt: OpaquePointer?
-            guard sqlite3_prepare_v2(db, "UPDATE assets SET movie_group_key=? WHERE rel_path=?;", -1, &stmt, nil) == SQLITE_OK else { return false }
-            defer { sqlite3_finalize(stmt) }
-            for assignment in plan.assignments {
-                sqlite3_reset(stmt)
-                bindText(stmt, 1, assignment.group)
-                bindText(stmt, 2, assignment.relPath)
-                guard sqlite3_step(stmt) == SQLITE_DONE else { return false }
-            }
-        }
-        return true
-    }
-
     /// P3 helper: delete orphaned `enrichment`/`metadata_values`/
     /// `metadata_enrichment_state` rows. The only persisted item-id shapes are
     /// `f:<rel_path>` (movie representative / episode leaf) and `series:<key>`;
@@ -788,24 +619,6 @@ actor ShareCatalogStore {
             guard exec(sql) else { return false }
         }
         return true
-    }
-
-    /// P5 helper: drop movie aliases whose group key backs no surviving movie, and
-    /// series merges whose canonical AND alias keys both back no surviving series.
-    /// Aliases/merges still needed by a surviving version/group are preserved.
-    private func cleanDeadAliasesInTransaction() -> Bool {
-        guard exec("""
-            DELETE FROM movie_alias
-            WHERE group_key NOT IN (
-              SELECT COALESCE(movie_group_key, movie_key) FROM assets
-              WHERE library='movies' AND kind='movie' AND movie_key IS NOT NULL
-            );
-            """) else { return false }
-        return exec("""
-            DELETE FROM series_merge
-            WHERE canonical_key NOT IN (SELECT series_key FROM assets WHERE series_key IS NOT NULL)
-              AND alias_key NOT IN (SELECT series_key FROM assets WHERE series_key IS NOT NULL);
-            """)
     }
 
     /// P6 helper: the association recompute of `reconcileSidecarAssociations` with

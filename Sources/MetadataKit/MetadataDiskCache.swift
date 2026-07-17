@@ -71,14 +71,20 @@ public actor MetadataDiskCache {
     }
 
     private var entries: [String: Entry] = [:]
+    private let directory: URL?
     private let fileURL: URL?
     private let positiveTTL: TimeInterval
     private let negativeTTL: TimeInterval
     private let maxBytes: Int
-    private let fileIO: any FileIO
-    private let coding: any Coding
+    private let io: MetadataCacheFileIO
     private var loaded = false
-    private var dirty = false
+    /// The single in-flight initial load. Concurrent `cached`/`store` callers all
+    /// await this one task and its result is applied to the actor exactly once.
+    private var loadTask: Task<MetadataCacheFileIO.LoadResult, Never>?
+    /// Monotonically increasing snapshot revision. Every mutation bumps it; the
+    /// I/O executor uses it to keep writes ordered and to let the actor reconcile
+    /// budget evictions only when its state has not moved on.
+    private var revision = 0
 
     /// The on-disk cache filename carries a schema version. **Bump this whenever
     /// the provider set or chain order changes**: resolved URLs (including
@@ -101,19 +107,12 @@ public actor MetadataDiskCache {
         negativeTTL: TimeInterval = 60 * 60 * 24 * 3,
         maxBytes: Int = 16 * 1024 * 1024
     ) {
+        self.directory = directory
         self.fileURL = directory?.appendingPathComponent(Self.cacheFileName)
         self.positiveTTL = positiveTTL
         self.negativeTTL = negativeTTL
         self.maxBytes = max(0, maxBytes)
-        self.fileIO = FoundationFileIO()
-        self.coding = JSONCoding()
-        if let directory {
-            fileIO.removeSupersededCaches(
-                in: directory,
-                currentFileName: Self.cacheFileName,
-                filePrefix: Self.cacheFilePrefix
-            )
-        }
+        self.io = MetadataCacheFileIO(fileIO: FoundationFileIO(), coding: JSONCoding())
     }
 
     init(
@@ -124,82 +123,87 @@ public actor MetadataDiskCache {
         fileIO: any FileIO,
         coding: any Coding
     ) {
+        self.directory = directory
         self.fileURL = directory?.appendingPathComponent(Self.cacheFileName)
         self.positiveTTL = positiveTTL
         self.negativeTTL = negativeTTL
         self.maxBytes = max(0, maxBytes)
-        self.fileIO = fileIO
-        self.coding = coding
-        if let directory {
-            fileIO.removeSupersededCaches(
-                in: directory,
-                currentFileName: Self.cacheFileName,
-                filePrefix: Self.cacheFilePrefix
-            )
-        }
+        self.io = MetadataCacheFileIO(fileIO: fileIO, coding: coding)
     }
 
     /// Looks up a cached result for `key`.
     /// - Returns: `.some(url)` for a fresh positive hit, `.some(nil)` for a fresh
     ///   remembered negative, and `nil` when there is no fresh entry (caller should
     ///   resolve from the network).
-    public func cached(_ key: String) -> URL?? {
-        loadIfNeeded()
+    public func cached(_ key: String) async -> URL?? {
+        await loadIfNeeded()
         guard let entry = entries[key], entry.expires > Date() else { return nil }
         guard let raw = entry.url else { return .some(nil) }
         return .some(URL(string: raw))
     }
 
     /// Stores a resolved result (positive or negative) for `key`.
-    public func store(_ url: URL?, for key: String) {
-        loadIfNeeded()
+    public func store(_ url: URL?, for key: String) async {
+        await loadIfNeeded()
         let ttl = url == nil ? negativeTTL : positiveTTL
         entries[key] = Entry(url: url?.absoluteString, expires: Date().addingTimeInterval(ttl))
-        dirty = true
-        persist()
+        revision += 1
+        await persist()
     }
 
-    private func loadIfNeeded() {
+    /// Performs (or joins) the one-time load off the actor executor. Cleanup and
+    /// the current-file read happen on the I/O queue; the decoded result is
+    /// applied to actor state exactly once even under concurrent callers.
+    private func loadIfNeeded() async {
+        if loaded { return }
+        let task: Task<MetadataCacheFileIO.LoadResult, Never>
+        if let existing = loadTask {
+            task = existing
+        } else {
+            let io = self.io
+            let directory = self.directory
+            let fileURL = self.fileURL
+            let maxBytes = self.maxBytes
+            let name = Self.cacheFileName
+            let prefix = Self.cacheFilePrefix
+            task = Task {
+                await io.firstLoad(
+                    directory: directory,
+                    fileURL: fileURL,
+                    currentFileName: name,
+                    filePrefix: prefix,
+                    maxBytes: maxBytes
+                )
+            }
+            loadTask = task
+        }
+        let result = await task.value
         guard !loaded else { return }
         loaded = true
-        guard let fileURL, let data = fileIO.read(from: fileURL),
-              let decoded = coding.decode(data) else {
-            return
-        }
-        // Drop already-expired entries on load so the file doesn't grow unbounded.
-        let now = Date()
-        entries = decoded.filter { $0.value.expires > now }
-        if data.count > maxBytes {
-            dirty = true
-            persist()
+        loadTask = nil
+        entries = result.entries
+        // An oversized legacy file is pruned once, immediately after load.
+        if result.wasOversized {
+            revision += 1
+            await persist()
         }
     }
 
-    private func persist() {
-        guard dirty, let fileURL else { return }
-        dirty = false
-        guard let data = encodedDataPruningToBudget() else { return }
-        fileIO.write(data, to: fileURL)
-    }
-
-    private func encodedDataPruningToBudget() -> Data? {
-        guard var data = coding.encode(entries) else { return nil }
-        guard data.count > maxBytes else { return data }
-        let oldestFirst = entries.sorted { $0.value.expires < $1.value.expires }
-        var index = 0
-        while data.count > maxBytes, index < oldestFirst.count {
-            let batchEnd = min(
-                oldestFirst.count,
-                index + max(1, oldestFirst.count / 10)
-            )
-            for entry in oldestFirst[index..<batchEnd] {
-                entries[entry.key] = nil
-            }
-            index = batchEnd
-            guard let encoded = coding.encode(entries) else { return nil }
-            data = encoded
-        }
-        return data
+    /// Submits the current snapshot to the serial I/O executor and reconciles any
+    /// budget eviction back into actor state — but only if no newer mutation has
+    /// happened since (otherwise the newer snapshot's own write owns pruning).
+    private func persist() async {
+        guard let fileURL else { return }
+        let rev = revision
+        let snapshot = entries
+        let result = await io.write(
+            snapshot: snapshot,
+            revision: rev,
+            fileURL: fileURL,
+            maxBytes: maxBytes
+        )
+        guard result.didWrite, !result.evicted.isEmpty, revision == rev else { return }
+        for key in result.evicted { entries[key] = nil }
     }
 
     public static func defaultDirectory() -> URL? {

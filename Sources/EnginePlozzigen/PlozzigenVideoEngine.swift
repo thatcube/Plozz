@@ -117,6 +117,9 @@ public final class PlozzigenVideoEngine: VideoEngine {
         let range = sourceRange(for: format)
         guard probePublicationGate.record(range, generation: generation) else { return }
         let facts = makeProbedSourceFacts(range: range)
+        HandoffDiagnostics.emit(
+            "engine probe range=\(range.rawValue) generation=\(generation)"
+        )
         onProbedSourceFactsChanged?(facts)
     }
 
@@ -318,9 +321,19 @@ public final class PlozzigenVideoEngine: VideoEngine {
                     options: options
                 )
             }
-            // Guard against stop() having run during the await above.
-            guard status == .loading,
-                  probePublicationGate.accepts(probeGeneration) else { return }
+            // Engine state can already be `.playing` by the time load returns,
+            // which advances the adapter status to `.ready`. Generation truth,
+            // not the transient status, fences stop/replacement during the await.
+            let engineHasError: Bool
+            if case .error = engine.state {
+                engineHasError = true
+            } else {
+                engineHasError = false
+            }
+            guard probePublicationGate.acceptsLoadCompletion(
+                probeGeneration,
+                engineHasError: engineHasError
+            ) else { return }
             publishProbedSourceFacts(
                 format: engine.sourceVideoFormat,
                 generation: probeGeneration

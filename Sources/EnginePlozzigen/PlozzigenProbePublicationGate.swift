@@ -33,4 +33,13 @@ struct PlozzigenProbePublicationGate {
     func accepts(_ generation: UInt) -> Bool {
         isActive && generation == currentGeneration
     }
+
+    /// Load completion may arrive after Aether has already advanced the adapter
+    /// from loading to ready. Only generation validity and engine failure matter.
+    func acceptsLoadCompletion(
+        _ generation: UInt,
+        engineHasError: Bool
+    ) -> Bool {
+        accepts(generation) && !engineHasError
+    }
 }

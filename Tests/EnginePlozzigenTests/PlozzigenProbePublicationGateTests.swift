@@ -46,6 +46,23 @@ final class PlozzigenProbePublicationGateTests: XCTestCase {
         XCTAssertEqual(gate.currentRange, .dolbyVision)
     }
 
+    func testLoadCompletionPublicationDoesNotDependOnTransientAdapterStatus() {
+        var gate = PlozzigenProbePublicationGate()
+        let active = gate.beginLoad()
+
+        XCTAssertTrue(
+            gate.acceptsLoadCompletion(active, engineHasError: false)
+        )
+        XCTAssertFalse(
+            gate.acceptsLoadCompletion(active, engineHasError: true)
+        )
+
+        gate.invalidate()
+        XCTAssertFalse(
+            gate.acceptsLoadCompletion(active, engineHasError: false)
+        )
+    }
+
     func testStaleLoadCannotReplaceCurrentRange() {
         var gate = PlozzigenProbePublicationGate()
         let stale = gate.beginLoad()

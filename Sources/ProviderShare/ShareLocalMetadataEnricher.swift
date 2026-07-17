@@ -251,9 +251,15 @@ actor ShareLocalMetadataEnricher {
         if !parsed.tags.isEmpty { put(.tags, parsed.tags) }
         if let runtime = parsed.runtimeSeconds, runtime > 0 { put(.runtime, runtime) }
         if let premiered = parsed.premiered { put(.premiereDate, premiered) }
-        if let aired = parsed.aired { put(.airDate, aired) }
-        if let season = parsed.season { put(.seasonNumber, season) }
-        if let episode = parsed.episode { put(.episodeNumber, episode) }
+        // airDate/seasonNumber/episodeNumber are EPISODE-only. Encode them only from
+        // an `episodedetails` document so a `tvshow.nfo`/movie NFO carrying stray
+        // season/episode/aired values can never persist episode-scoped fields (C1,
+        // second defense boundary — the parser already root-gates acceptance).
+        if parsed.root == .episodedetails {
+            if let aired = parsed.aired { put(.airDate, aired) }
+            if let season = parsed.season { put(.seasonNumber, season) }
+            if let episode = parsed.episode { put(.episodeNumber, episode) }
+        }
         if !parsed.ratings.isEmpty { put(.ratings, parsed.ratings) }
 
         // Provider ids: normalize + validate per namespace independently; the

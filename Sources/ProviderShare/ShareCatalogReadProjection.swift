@@ -133,13 +133,18 @@ enum ShareCatalogReadProjection {
             copy.productionYear = value
             copy.metadataProvenance[.productionYear] = attribution(for: .productionYear)
         }
-        if let row = fields[.seasonNumber], let value = CatalogJSON.decode(Int.self, row.valueJSON) {
-            copy.seasonNumber = value
-            copy.metadataProvenance[.seasonNumber] = attribution(for: .seasonNumber)
-        }
-        if let row = fields[.episodeNumber], let value = CatalogJSON.decode(Int.self, row.valueJSON) {
-            copy.episodeNumber = value
-            copy.metadataProvenance[.episodeNumber] = attribution(for: .episodeNumber)
+        // seasonNumber/episodeNumber are EPISODE-only (C1, final projection boundary):
+        // even if a stray value reached persistence, never overlay it onto a
+        // non-episode item.
+        if item.kind == .episode {
+            if let row = fields[.seasonNumber], let value = CatalogJSON.decode(Int.self, row.valueJSON) {
+                copy.seasonNumber = value
+                copy.metadataProvenance[.seasonNumber] = attribution(for: .seasonNumber)
+            }
+            if let row = fields[.episodeNumber], let value = CatalogJSON.decode(Int.self, row.valueJSON) {
+                copy.episodeNumber = value
+                copy.metadataProvenance[.episodeNumber] = attribution(for: .episodeNumber)
+            }
         }
         if let row = fields[.ratings], let value = CatalogJSON.decode([ParsedNFORating].self, row.valueJSON), !value.isEmpty {
             let recognized: [ExternalRating] = value.compactMap { rating in

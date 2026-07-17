@@ -222,6 +222,9 @@ actor ShareScanner {
         // folder, so pruning on a partial walk would delete still-present content and
         // reset its "date added" on rediscovery — skip the prune when this is set.
         var anyListingFailed = false
+        // PATH-FREE aggregate of listing failures by bounded category (C3): no dir/
+        // basename/error text is ever recorded — only per-category counts, logged once.
+        var listFailureCounts: [ShareScanListFailureCategory: Int] = [:]
 
         // Level-by-level BFS. Each level's directories are listed in parallel across
         // the pool; a plain free-list of listers (managed here on the actor) bounds
@@ -261,6 +264,7 @@ actor ShareScanner {
                         // close, since that may hang too) and swap in a FRESH
                         // connection so throughput recovers immediately.
                         anyListingFailed = true
+                        listFailureCounts[result.failureCategory ?? .other, default: 0] += 1
                         let dead = result.lister
                         Task { await dead.close() }
                         let fresh = makeLister()
@@ -371,8 +375,25 @@ actor ShareScanner {
             String(ShareMediaParser.localInventoryVersion),
             scanGeneration: scanGeneration
         )
+        // One-time reread after an NFO PARSER-RULE upgrade (root-gated episode fields,
+        // strict date rejection): mark already-processed sidecars whose stored
+        // parser_version predates the current parser as pending so the local enricher
+        // reparses each existing NFO once under the corrected rules. The UPDATE is
+        // table-wide and idempotent; a meta gate keeps it to one pass per bump. Never
+        // touches external/local-materialization version or forces a resolver call.
+        let nfoParserCurrent = String(ShareNFOParser.parserVersion)
+        if await store.meta("nfo_parser_version") != nfoParserCurrent {
+            await store.markSidecarsPendingForParserUpgrade()
+            await store.setMeta("nfo_parser_version", nfoParserCurrent, scanGeneration: scanGeneration)
+        }
+        let failureSummary = listFailureCounts.isEmpty
+            ? "none"
+            : listFailureCounts
+                .sorted { $0.key.rawValue < $1.key.rawValue }
+                .map { "\($0.key.rawValue):\($0.value)" }
+                .joined(separator: ",")
         PlozzLog.boot(
-            "share.scan done scanID=\(scanID) dirs=\(dirsWalked) files=\(filesFound) pruned=\(!anyListingFailed) elapsed=\(Int(Date().timeIntervalSince(started) * 1_000))ms"
+            "share.scan done scanID=\(scanID) dirs=\(dirsWalked) files=\(filesFound) pruned=\(!anyListingFailed) failed=\(listFailureCounts.values.reduce(0, +)) failures=[\(failureSummary)] elapsed=\(Int(Date().timeIntervalSince(started) * 1_000))ms"
         )
         await finishScan(listers: pool)
         // A completed pass earns a completion stamp. When some listing failed the pass
@@ -406,6 +427,10 @@ actor ShareScanner {
         let assets: [CatalogAsset]
         let sidecars: [LocalSidecarCandidate]
         let ok: Bool
+        /// Set only when `ok == false`: a bounded, PATH-FREE classification of the
+        /// listing failure for aggregate diagnostics (never the directory, basename,
+        /// or the error's localized description, which can embed a share path).
+        var failureCategory: ShareScanListFailureCategory?
     }
 
     /// List + classify one directory off the actor (pure I/O + parsing, no shared
@@ -419,8 +444,13 @@ actor ShareScanner {
             defer { ShareBackgroundActivity.listFinished() }
             entries = try await lister.list(dir)
         } catch {
-            PlozzLog.boot("share.scan skip dir \(dir.isEmpty ? "<root>" : dir) (\(error))")
-            return DirResult(lister: lister, subdirs: [], assets: [], sidecars: [], ok: false)
+            // PATH-PRIVATE diagnostics (C3): never log the directory/basename or the
+            // error's localized description (either can embed a share path). Classify
+            // the failure into a bounded category; the caller aggregates counts.
+            return DirResult(
+                lister: lister, subdirs: [], assets: [], sidecars: [], ok: false,
+                failureCategory: ShareScanListFailureCategory(error)
+            )
         }
         var subdirs: [String] = []
         var assets: [CatalogAsset] = []
@@ -592,5 +622,69 @@ actor ShareScanPacer {
               lastInteractiveActivity.duration(to: clock.now) < activeWindow else { return false }
         try? await Task.sleep(for: activeDelay)
         return true
+    }
+}
+
+/// Bounded, PATH-FREE classification of a directory-listing failure, used only for
+/// aggregate scan diagnostics. The raw value is a fixed, library-structure-free token;
+/// it is derived solely from the error's domain/code — never its localized description
+/// (which can embed a share path/basename) and never any directory string.
+enum ShareScanListFailureCategory: String, Sendable, CaseIterable {
+    case timedOut
+    case connectionLost
+    case authFailed
+    case permissionDenied
+    case notFound
+    case cancelled
+    case other
+
+    init(_ error: Error) {
+        if error is CancellationError {
+            self = .cancelled
+            return
+        }
+        let ns = error as NSError
+        switch (ns.domain, ns.code) {
+        case (NSURLErrorDomain, NSURLErrorTimedOut):
+            self = .timedOut
+        case (NSURLErrorDomain, NSURLErrorCancelled):
+            self = .cancelled
+        case (NSURLErrorDomain, NSURLErrorNetworkConnectionLost),
+             (NSURLErrorDomain, NSURLErrorNotConnectedToInternet),
+             (NSURLErrorDomain, NSURLErrorCannotConnectToHost),
+             (NSURLErrorDomain, NSURLErrorCannotFindHost),
+             (NSURLErrorDomain, NSURLErrorDNSLookupFailed):
+            self = .connectionLost
+        case (NSURLErrorDomain, NSURLErrorUserAuthenticationRequired),
+             (NSURLErrorDomain, NSURLErrorUserCancelledAuthentication):
+            self = .authFailed
+        case (NSURLErrorDomain, NSURLErrorNoPermissionsToReadFile):
+            self = .permissionDenied
+        case (NSURLErrorDomain, NSURLErrorFileDoesNotExist),
+             (NSURLErrorDomain, NSURLErrorResourceUnavailable):
+            self = .notFound
+        case (NSCocoaErrorDomain, NSFileReadNoPermissionError),
+             (NSCocoaErrorDomain, NSFileWriteNoPermissionError):
+            self = .permissionDenied
+        case (NSCocoaErrorDomain, NSFileNoSuchFileError),
+             (NSCocoaErrorDomain, NSFileReadNoSuchFileError):
+            self = .notFound
+        case (NSPOSIXErrorDomain, Int(EACCES)),
+             (NSPOSIXErrorDomain, Int(EPERM)):
+            self = .permissionDenied
+        case (NSPOSIXErrorDomain, Int(ENOENT)):
+            self = .notFound
+        case (NSPOSIXErrorDomain, Int(ETIMEDOUT)):
+            self = .timedOut
+        case (NSPOSIXErrorDomain, Int(ECONNRESET)),
+             (NSPOSIXErrorDomain, Int(ECONNREFUSED)),
+             (NSPOSIXErrorDomain, Int(ENOTCONN)),
+             (NSPOSIXErrorDomain, Int(EHOSTUNREACH)),
+             (NSPOSIXErrorDomain, Int(ENETUNREACH)),
+             (NSPOSIXErrorDomain, Int(ENETDOWN)):
+            self = .connectionLost
+        default:
+            self = .other
+        }
     }
 }

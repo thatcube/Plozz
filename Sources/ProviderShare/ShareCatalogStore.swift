@@ -1329,6 +1329,7 @@ actor ShareCatalogStore {
         status: String,
         fingerprint: String?,
         associatedItemID: String?,
+        parserVersion: Int = ShareNFOParser.parserVersion,
         now: Date = Date()
     ) -> Bool {
         ensureOpen()
@@ -1336,16 +1337,38 @@ actor ShareCatalogStore {
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, """
         UPDATE local_metadata_files SET
-          status=?, processed_fingerprint=?, associated_item_id=?, local_attempts=0, updated_at=?
+          status=?, processed_fingerprint=?, associated_item_id=?, parser_version=?,
+          local_attempts=0, updated_at=?
         WHERE rel_path=?;
         """, -1, &stmt, nil) == SQLITE_OK else { return false }
         defer { sqlite3_finalize(stmt) }
         bindText(stmt, 1, status)
         bindOptText(stmt, 2, fingerprint)
         bindOptText(stmt, 3, associatedItemID)
-        sqlite3_bind_double(stmt, 4, now.timeIntervalSince1970)
-        bindText(stmt, 5, relPath)
+        sqlite3_bind_int64(stmt, 4, Int64(parserVersion))
+        sqlite3_bind_double(stmt, 5, now.timeIntervalSince1970)
+        bindText(stmt, 6, relPath)
         return sqlite3_step(stmt) == SQLITE_DONE
+    }
+
+    /// Reread already-indexed NFOs exactly once after a parser-rule upgrade: mark
+    /// every terminally-processed sidecar whose stored `parser_version` predates the
+    /// current `ShareNFOParser.parserVersion` (or was never stamped) back to
+    /// `pending`, so the local enricher reparses it under the corrected rules and
+    /// restamps the new version. Idempotent — a row already at the current version,
+    /// or one still `pending` (e.g. freshly inventoried this scan), is untouched, so
+    /// the reread happens once, not on every scan. Touches no external/local-version
+    /// state and forces no resolver call.
+    @discardableResult
+    func markSidecarsPendingForParserUpgrade(to version: Int = ShareNFOParser.parserVersion) -> Int {
+        ensureOpen()
+        guard db != nil else { return 0 }
+        guard exec("""
+            UPDATE local_metadata_files
+            SET status='pending', local_attempts=0, processed_fingerprint=NULL
+            WHERE status <> 'pending' AND (parser_version IS NULL OR parser_version < \(version));
+            """) else { return 0 }
+        return Int(sqlite3_changes(db))
     }
 
     /// Record a TRANSIENT transport failure: stays `pending`, bumps the bounded
@@ -2734,7 +2757,7 @@ actor ShareCatalogStore {
         -- is never mutated (it stays the scanner's own fallback).
         LEFT JOIN metadata_values sv
           ON sv.item_id = g.rep_id AND sv.field = 'sortTitle' AND sv.source = 'localNFO'
-        ORDER BY COALESCE(substr(sv.value_json, 2, length(sv.value_json) - 2), g.gsort), g.title, g.logical_id
+        ORDER BY COALESCE(CASE WHEN json_valid(sv.value_json) THEN json_extract(sv.value_json, '$') END, g.gsort), g.title, g.logical_id
         LIMIT ? OFFSET ?;
         """, bind: { sqlite3_bind_int64($0, 1, Int64(limit)); sqlite3_bind_int64($0, 2, Int64(offset)) }) { stmt in
             let item = MediaItem(
@@ -2777,7 +2800,7 @@ actor ShareCatalogStore {
           ON sv.item_id = 'series:' || a.series_key AND sv.field = 'sortTitle' AND sv.source = 'localNFO'
         WHERE a.library=? AND a.kind='episode' AND a.series_key IS NOT NULL
         GROUP BY a.series_key
-        ORDER BY COALESCE(substr(MIN(sv.value_json), 2, length(MIN(sv.value_json)) - 2), s), a.series_key
+        ORDER BY COALESCE(CASE WHEN json_valid(MIN(sv.value_json)) THEN json_extract(MIN(sv.value_json), '$') END, s), a.series_key
         LIMIT ? OFFSET ?;
         """, bind: {
             self.bindText($0, 1, library.rawValue)

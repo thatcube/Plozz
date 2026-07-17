@@ -95,6 +95,14 @@ enum ShareNFOParser {
     /// unbounded intermediate collection.
     static let maxListEntries = 512
 
+    /// Parser-only semantic version. Advanced (v1 -> v2) when the parse RULES change
+    /// (root-gated episode-only fields, strict impossible-date rejection) so an
+    /// already-indexed catalog rereads each existing NFO exactly once under the
+    /// corrected rules. Persisted per-sidecar in `local_metadata_files.parser_version`
+    /// and INDEPENDENT of the classifier, local-inventory, local-materialization, and
+    /// external enrichment versions — a bump forces no external work.
+    static let parserVersion = 2
+
     static func parse(_ data: Data) -> NFOParseOutcome {
         guard data.count <= maxBytes else { return .oversized }
         let delegate = NFODelegate()
@@ -236,11 +244,11 @@ private final class NFODelegate: NSObject, XMLParserDelegate {
         case "premiered":
             if let normalized = Self.normalizeDate(text) { premiered = normalized }
         case "aired":
-            if let normalized = Self.normalizeDate(text) { aired = normalized }
+            if rootKind == .episodedetails, let normalized = Self.normalizeDate(text) { aired = normalized }
         case "season":
-            if let s = Int(text), s >= 0 { season = s }
+            if rootKind == .episodedetails, let s = Int(text), s >= 0 { season = s }
         case "episode":
-            if let e = Int(text), e >= 0 { episode = e }
+            if rootKind == .episodedetails, let e = Int(text), e >= 0 { episode = e }
         case "imdbid", "imdb_id":
             if Self.isValidIMDbID(text) { commitID(namespace: "imdb", value: text, isDefault: false) }
         case "tmdbid":
@@ -408,7 +416,13 @@ private final class NFODelegate: NSObject, XMLParserDelegate {
         comps.day = d
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(identifier: "UTC") ?? .current
-        guard calendar.date(from: comps) != nil else { return nil }
+        // `Calendar` is lenient: `date(from:)` silently ROLLS an impossible date
+        // (2023-02-29 -> 2023-03-01, 2024-04-31 -> 2024-05-01) into a valid `Date`
+        // rather than failing. Round-trip the produced date back to components and
+        // require an exact match so impossible calendar dates are rejected.
+        guard let date = calendar.date(from: comps) else { return nil }
+        let roundTrip = calendar.dateComponents([.year, .month, .day], from: date)
+        guard roundTrip.year == y, roundTrip.month == m, roundTrip.day == d else { return nil }
         return String(format: "%04d-%02d-%02d", y, m, d)
     }
 

@@ -254,8 +254,11 @@ public actor MediaIOArbiter {
         }
         try Task.checkCancellation()
         // A playback reservation may have appeared while we drained the previous
-        // scanner; yield the freshly cleared slot to it.
-        guard playbackIDs.isEmpty, playbackReservations == 0,
+        // scanner; yield the freshly cleared slot to it. Retirement may also have
+        // begun during the drain suspension: a replacement that started before
+        // `shutdownAndDrain()` set the flag must not install a scanner afterwards, or
+        // the coordinator could drop the arbiter with a live scanner still admitted.
+        guard !isShutDown, playbackIDs.isEmpty, playbackReservations == 0,
               activeScanner == nil, !transitionInProgress else {
             throw MediaTransportError.resourceBusy
         }
@@ -273,10 +276,20 @@ public actor MediaIOArbiter {
         // Reserve priority before any suspension so a concurrent or at-boundary
         // scanner replacement observes the reservation and yields to us.
         playbackReservations += 1
-        defer { playbackReservations -= 1 }
+        defer {
+            playbackReservations -= 1
+            // A reservation that exits (granted, cancelled, or rejected) may be the last
+            // thing a retiring arbiter is waiting on; wake the shutdown drain so it can
+            // return once no reservation or lease remains.
+            resumeShutdownDrainIfComplete()
+        }
 
         while true {
             try Task.checkCancellation()
+            // Re-check on every iteration: retirement may have begun while this
+            // reservation was suspended in `awaitTransitionClear()`/`runDrainTransition`.
+            // No new lease is granted once `shutdownAndDrain()` set the flag.
+            guard !isShutDown else { throw MediaTransportError.resourceBusy }
             if transitionInProgress {
                 // Another caller is draining the active scanner (a replacement that
                 // will yield to this reservation, or another playback that will
@@ -285,6 +298,9 @@ public actor MediaIOArbiter {
                 continue
             }
             guard let scanner = activeScanner else {
+                // Guard once more immediately before granting: the reservation kept the
+                // slot ours across suspensions, but retirement must still veto a new lease.
+                guard !isShutDown else { throw MediaTransportError.resourceBusy }
                 let id = UUID()
                 playbackIDs.insert(id)
                 return MediaIOPlaybackLease(id: id, arbiter: self)
@@ -310,9 +326,13 @@ public actor MediaIOArbiter {
 
     /// Retire this arbiter: reject all new scanner/playback admission, drain any active
     /// scanner under the bounded transition deadline, then wait for already-issued
-    /// playback leases to drain *naturally* (playback finishes on its own timeline; we
-    /// never cancel a live lease). Returns only once no lease remains, so the
-    /// coordinator can drop the account without leaking arbiters (finding A7).
+    /// playback leases *and any in-flight playback reservation* to resolve. A reservation
+    /// that resumed after shutdown began is rejected without a lease, but retirement does
+    /// not return until it has exited admission, so the coordinator never drops the
+    /// arbiter while a caller is still mid-`acquirePlayback`. Playback leases finish on
+    /// their own timeline; we never cancel a live lease. Returns only once no lease or
+    /// reservation remains, so the coordinator can drop the account without leaking
+    /// arbiters (finding A7).
     ///
     /// Bounded where it must be: scanner cancel/force-close uses the same single
     /// absolute deadline as `stopAndDrain`, so this never waits forever on an
@@ -329,7 +349,10 @@ public actor MediaIOArbiter {
             _ = await runDrainTransition(scanner)
         }
         // Existing playback leases finish naturally; wait for the last one to release.
-        while !playbackIDs.isEmpty {
+        // Also wait for any in-flight reservation to resolve: a reservation that resumed
+        // after shutdown began is rejected (no lease), but we must not return while one is
+        // still mid-admission, or the coordinator could drop the arbiter under it.
+        while !playbackIDs.isEmpty || playbackReservations > 0 {
             await awaitShutdownDrain()
         }
     }
@@ -341,7 +364,8 @@ public actor MediaIOArbiter {
     }
 
     private func resumeShutdownDrainIfComplete() {
-        guard isShutDown, playbackIDs.isEmpty, !shutdownDrainWaiters.isEmpty else { return }
+        guard isShutDown, playbackIDs.isEmpty, playbackReservations == 0,
+              !shutdownDrainWaiters.isEmpty else { return }
         let waiters = shutdownDrainWaiters
         shutdownDrainWaiters.removeAll()
         for waiter in waiters { waiter.resume() }
@@ -466,5 +490,12 @@ public actor MediaIOArbiter {
     /// priority reservation but not yet granted a lease.
     func pendingPlaybackReservations() -> Int {
         playbackReservations
+    }
+
+    /// Test-only introspection: whether retirement has begun. Lets race tests wait
+    /// deterministically for `shutdownAndDrain()` to set the flag before releasing a
+    /// gated transition, without a timing sleep.
+    func isRetired() -> Bool {
+        isShutDown
     }
 }

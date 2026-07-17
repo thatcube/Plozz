@@ -598,6 +598,169 @@ final class SourceLeaseAndArbiterTests: XCTestCase {
         await shutdown.value
         XCTAssertTrue(done.isSet, "retirement completes once the final lease drains")
     }
+
+    // MARK: - shutdownAndDrain vs. in-flight admission races (Batch 3 follow-up)
+
+    func testShutdownDuringScannerReplacementDrainRejectsInstallation() async throws {
+        // Scanner A active; replacement B suspended mid-drain of A. Retirement begins
+        // while B is draining. When the drain releases, B must observe the retirement at
+        // its post-drain installation guard and throw resourceBusy — it must NOT install
+        // a scanner after shutdown began, or the coordinator would drop a live arbiter.
+        let drainGate = AsyncTestGate()
+        let arbiter = MediaIOArbiter(
+            accountID: "shutdown-vs-scanner",
+            deadline: ControlledDrainDeadline(results: [true], gate: drainGate)
+        )
+        let firstResource = FakeScannerResource()
+        let first = try await arbiter.acquireScanner(resource: firstResource)
+        let secondResource = FakeScannerResource()
+        let replacement = Task {
+            try await arbiter.acquireScanner(resource: secondResource)
+        }
+        // Wait until B is inside the drain-verification of A (blocked on the gate).
+        await drainGate.waitUntilEntered()
+
+        // Retire the arbiter while B is mid-drain, then wait until the flag is set so the
+        // gate release is deterministically observed after shutdown began.
+        let done = ShutdownDoneFlag()
+        let shutdown = Task {
+            await arbiter.shutdownAndDrain()
+            done.set()
+        }
+        _ = await waitUntilAsync { await arbiter.isRetired() }
+
+        // Releasing A's drain lets B reach its post-drain guard, which now sees shutdown.
+        drainGate.open()
+
+        do {
+            _ = try await replacement.value
+            XCTFail("scanner replacement installed after retirement began")
+        } catch let error as MediaTransportError {
+            XCTAssertEqual(error, .resourceBusy)
+        }
+        await shutdown.value
+        XCTAssertTrue(done.isSet)
+        let permits = await arbiter.permitsBackgroundWork()
+        XCTAssertFalse(permits, "no scanner may remain admitted after retirement")
+        do {
+            _ = try await arbiter.acquireScanner(resource: FakeScannerResource())
+            XCTFail("a retired arbiter must reject fresh scanner admission")
+        } catch let error as MediaTransportError {
+            XCTAssertEqual(error, .resourceBusy)
+        }
+        _ = first
+    }
+
+    func testShutdownWaitsForReservationBlockedBehindTransition() async throws {
+        // A playback reservation is parked behind an in-progress scanner transition when
+        // retirement begins. Retirement must NOT return while that reservation is still
+        // mid-admission; the reservation must be rejected (no lease); only then may
+        // shutdown complete.
+        let drainGate = AsyncTestGate()
+        let arbiter = MediaIOArbiter(
+            accountID: "shutdown-vs-reservation",
+            deadline: ControlledDrainDeadline(results: [true], gate: drainGate)
+        )
+        let firstResource = FakeScannerResource()
+        let first = try await arbiter.acquireScanner(resource: firstResource)
+        let replacement = Task {
+            try await arbiter.acquireScanner(resource: FakeScannerResource())
+        }
+        await drainGate.waitUntilEntered()
+
+        // Reservation R parks behind the in-progress transition.
+        let reservation = Task { try await arbiter.acquirePlayback() }
+        _ = await waitUntilAsync { await arbiter.pendingPlaybackReservations() == 1 }
+
+        let done = ShutdownDoneFlag()
+        let shutdown = Task {
+            await arbiter.shutdownAndDrain()
+            done.set()
+        }
+        _ = await waitUntilAsync { await arbiter.isRetired() }
+
+        // While the reservation is still parked, retirement cannot have completed.
+        try? await Task.sleep(nanoseconds: 60_000_000)
+        XCTAssertFalse(done.isSet, "retirement must not return while a reservation is in-flight")
+
+        // Release the transition: the replacement yields, the reservation is rejected,
+        // and only then does retirement complete.
+        drainGate.open()
+
+        do {
+            _ = try await reservation.value
+            XCTFail("a reservation must not be granted a lease after retirement began")
+        } catch let error as MediaTransportError {
+            XCTAssertEqual(error, .resourceBusy)
+        }
+        do {
+            _ = try await replacement.value
+            XCTFail("scanner replacement installed after retirement began")
+        } catch let error as MediaTransportError {
+            XCTAssertEqual(error, .resourceBusy)
+        }
+        await shutdown.value
+        XCTAssertTrue(done.isSet, "retirement completes once the reservation exits")
+        let pending = await arbiter.pendingPlaybackReservations()
+        XCTAssertEqual(pending, 0)
+        _ = first
+    }
+
+    func testShutdownWithMultipleReservationsAndCancellationLeavesCleanCounts() async throws {
+        // Two reservations parked behind a transition; one is cancelled and one is
+        // rejected by retirement. Both must exit, the reservation count must return to
+        // zero, and a second shutdownAndDrain() must be idempotent (no leaked waiter).
+        let drainGate = AsyncTestGate()
+        let arbiter = MediaIOArbiter(
+            accountID: "shutdown-multi-reservation",
+            deadline: ControlledDrainDeadline(results: [true], gate: drainGate)
+        )
+        let firstResource = FakeScannerResource()
+        let first = try await arbiter.acquireScanner(resource: firstResource)
+        let replacement = Task {
+            try await arbiter.acquireScanner(resource: FakeScannerResource())
+        }
+        await drainGate.waitUntilEntered()
+
+        let cancelled = Task { try await arbiter.acquirePlayback() }
+        let rejected = Task { try await arbiter.acquirePlayback() }
+        _ = await waitUntilAsync { await arbiter.pendingPlaybackReservations() == 2 }
+
+        let done = ShutdownDoneFlag()
+        let shutdown = Task {
+            await arbiter.shutdownAndDrain()
+            done.set()
+        }
+        _ = await waitUntilAsync { await arbiter.isRetired() }
+
+        cancelled.cancel()
+        drainGate.open()
+
+        do {
+            _ = try await cancelled.value
+            XCTFail("a cancelled reservation must not be granted a lease")
+        } catch is CancellationError {
+            // expected
+        } catch let error as MediaTransportError {
+            // A teardown-timing race may surface as resourceBusy; either is a clean exit.
+            XCTAssertEqual(error, .resourceBusy)
+        }
+        do {
+            _ = try await rejected.value
+            XCTFail("a reservation must not be granted a lease after retirement began")
+        } catch let error as MediaTransportError {
+            XCTAssertEqual(error, .resourceBusy)
+        }
+        _ = try? await replacement.value
+        await shutdown.value
+
+        XCTAssertTrue(done.isSet)
+        let pending = await arbiter.pendingPlaybackReservations()
+        XCTAssertEqual(pending, 0, "all reservation counts released")
+        // Idempotent: a second retirement returns immediately with no leaked waiter.
+        await arbiter.shutdownAndDrain()
+        _ = first
+    }
 }
 
 /// Thread-safe completion flag for the concurrent shutdown-drain test.

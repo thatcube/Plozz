@@ -345,6 +345,39 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
         lastBackgroundScanCompletedAt[accountKey]
     }
 
+    /// The number of pending (stamped-but-unconsumed) cancellation reasons for an
+    /// account. Must return to zero once every scan task has been cleared — a reason
+    /// stamped in the `recordScanOutcome`→`clearScanTask` window must not leak. Test-only.
+    func pendingCancellationReasonCount(_ accountKey: String) -> Int {
+        pendingCancellationReasons[accountKey]?.count ?? 0
+    }
+
+    /// Test-only: stamp a cancellation reason for one task through the real
+    /// no-overwrite stamp path (a racing playback/rescan does exactly this).
+    func stampCancellationReasonForTesting(
+        _ accountKey: String,
+        taskID: UUID,
+        owner: ShareScanCancellationOwner
+    ) {
+        let entry: [UUID: Task<Void, Never>] = [taskID: Task {}]
+        stampCancellationReason(accountKey, taskIDs: entry.keys, owner: owner)
+    }
+
+    /// Test-only: consume a task's reason exactly as `recordScanOutcome` does.
+    @discardableResult
+    func takeCancellationReasonForTesting(
+        _ accountKey: String,
+        taskID: UUID
+    ) -> ShareScanCancellationOwner? {
+        takeCancellationReason(accountKey, taskID: taskID)
+    }
+
+    /// Test-only: run the real `clearScanTask`, which must discard any reason stamped
+    /// after `recordScanOutcome` already consumed the task's first reason.
+    func clearScanTaskForTesting(_ accountKey: String, taskID: UUID) {
+        clearScanTask(accountKey, taskID: taskID)
+    }
+
     /// Fast-track enrichment of ONE item the user just opened, ahead of the
     /// background backlog, so its hero/poster/overview persist promptly (and the
     /// persisted art then supersedes the flaky live title-only fallback). Spawns a
@@ -465,6 +498,12 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
         if scanTasks[accountKey]?.isEmpty == true {
             scanTasks[accountKey] = nil
         }
+        // Discard any reason stamped for this task in the window between
+        // `recordScanOutcome` consuming its first reason and this removal. The task is
+        // finished, so no future `recordScanOutcome` will ever consume a reason keyed to
+        // this taskID; leaving it would leak into `pendingCancellationReasons`. taskIDs
+        // are unique UUIDs, so this never changes attribution of any other task.
+        _ = takeCancellationReason(accountKey, taskID: taskID)
     }
 
     /// Decide whether a finished scan pass earns a background-completion timestamp,

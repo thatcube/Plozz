@@ -584,4 +584,38 @@ final class ShareScanLifecycleTests: XCTestCase {
         let outcome = await scanner.scan()
         XCTAssertEqual(outcome, .invalidated)
     }
+
+    // MARK: - Late cancellation-reason leak (Batch 3 follow-up)
+
+    /// A reason stamped for a task AFTER `recordScanOutcome` already consumed its first
+    /// reason (a racing playback/rescan targeting the still-present task) must be
+    /// discarded by `clearScanTask`, or it would leak in `pendingCancellationReasons`
+    /// forever. Exercised through the real stamp/consume/clear methods.
+    func testReasonStampedInRecordClearWindowIsDiscardedOnClear() async {
+        let accountID = "reason-leak-\(UUID().uuidString)"
+        let taskID = UUID()
+        let coordinator = makeCoordinator(diagnostics: ScanDiagnosticsSpy())
+
+        // 1. Playback admission stamps the task's owner before cancelling it.
+        await coordinator.stampCancellationReasonForTesting(
+            accountID, taskID: taskID, owner: .playbackAdmission
+        )
+        // 2. recordScanOutcome consumes that first reason.
+        let consumed = await coordinator.takeCancellationReasonForTesting(accountID, taskID: taskID)
+        XCTAssertEqual(consumed, .playbackAdmission)
+        var pending = await coordinator.pendingCancellationReasonCount(accountID)
+        XCTAssertEqual(pending, 0, "the consumed reason is gone")
+
+        // 3. A racing action stamps a NEW reason in the record→clear window.
+        await coordinator.stampCancellationReasonForTesting(
+            accountID, taskID: taskID, owner: .rescanSuperseded
+        )
+        pending = await coordinator.pendingCancellationReasonCount(accountID)
+        XCTAssertEqual(pending, 1, "a late stamp lands while the task is still present")
+
+        // 4. clearScanTask must discard it — otherwise the reason leaks.
+        await coordinator.clearScanTaskForTesting(accountID, taskID: taskID)
+        pending = await coordinator.pendingCancellationReasonCount(accountID)
+        XCTAssertEqual(pending, 0, "clearScanTask discards a reason stamped after consumption")
+    }
 }

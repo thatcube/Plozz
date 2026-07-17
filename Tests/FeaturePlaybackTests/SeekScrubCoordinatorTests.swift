@@ -104,6 +104,29 @@ final class SeekScrubCoordinatorTests: XCTestCase {
         XCTAssertEqual(engine.lastSeekTarget, 42)
     }
 
+    // MARK: duration-gate (DV·SMB "seek during load snaps to start" guard)
+
+    func testCommittedSeekWaitsForDurationBeforeReachingEngine() async {
+        // Engine has reported .ready (scrubber revealed) but hasn't published a
+        // duration yet — AetherEngine would clamp min(target, 0) == 0 and snap
+        // playback to the start. The coordinator must hold the engine seek until a
+        // real duration is known, then issue it at the true target.
+        let (sut, _, engine, controls) = makeSUT(intendsPlayback: false)
+        engine.duration = 0
+        sut.requestSeek(to: 500)
+        // Give the debounce + a few drain ticks time to run; no seek may reach the
+        // engine while duration is unknown.
+        try? await Task.sleep(nanoseconds: 60_000_000)
+        XCTAssertTrue(engine.seekLog.isEmpty, "no committed seek may reach the engine while duration is 0")
+        XCTAssertTrue(controls.isSeeking, "the seek is still in flight, pinned on screen")
+        XCTAssertEqual(controls.currentSeconds, 500, "the optimistic position holds the requested target")
+        // Duration lands → the held seek fires at the true target, not clamped to 0.
+        engine.duration = 1_000
+        await waitUntil { !controls.isSeeking }
+        XCTAssertEqual(engine.seekLog.count, 1, "exactly one committed seek once duration is known")
+        XCTAssertEqual(engine.lastSeekTarget, 500, "the real target survives (never clamped to 0)")
+    }
+
     // MARK: intendsPause phantom-.playing gate
 
     func testPauseToSeekReassertsPauseAndIntent() async {

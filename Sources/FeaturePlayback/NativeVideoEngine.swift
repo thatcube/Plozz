@@ -707,6 +707,7 @@ public final class NativeVideoEngine: VideoEngine {
     /// is silently dropped by AVPlayer, leaving playback at 0.
     private func seekWhenReady(player: AVPlayer, to seconds: TimeInterval) async {
         guard let item = player.currentItem else { return }
+        PlaybackTrace.note("NATIVE resumeSeek WAIT to=\(String(format: "%.2f", seconds)) status=\(item.status.rawValue)")
         let deadline = Date().addingTimeInterval(5)
         // 20ms poll keeps resume start-up snappy: most assets reach
         // `.readyToPlay` within one or two ticks, instead of waiting out a
@@ -715,6 +716,7 @@ public final class NativeVideoEngine: VideoEngine {
             if item.status == .failed { return }
             try? await Task.sleep(nanoseconds: 20_000_000)
         }
+        PlaybackTrace.note("NATIVE resumeSeek FIRE to=\(String(format: "%.2f", seconds)) status=\(item.status.rawValue)")
         await seek(player: player, to: seconds)
     }
 
@@ -732,7 +734,13 @@ public final class NativeVideoEngine: VideoEngine {
         // seeks can stall or fail on transcoded HLS, so 1s is the sweet spot.
         let toleranceSeconds: Double = kind == .fast ? 5 : 1
         let tolerance = CMTime(seconds: toleranceSeconds, preferredTimescale: 600)
+        if PlaybackTrace.enabled {
+            let (lo, hi) = seekableBounds(item: player.currentItem)
+            let clamped = abs(target - max(0, seconds)) > 0.5
+            PlaybackTrace.note("NATIVE seek BEGIN req=\(String(format: "%.2f", seconds)) target=\(String(format: "%.2f", target))\(clamped ? " CLAMPED" : "") kind=\(kind) seekable=[\(String(format: "%.2f", lo)),\(String(format: "%.2f", hi))] status=\(player.currentItem?.status.rawValue ?? -9) tcs=\(player.timeControlStatus.rawValue)")
+        }
         await player.seek(to: time, toleranceBefore: tolerance, toleranceAfter: tolerance)
+        PlaybackTrace.note("NATIVE seek END   target=\(String(format: "%.2f", target)) curr=\(String(format: "%.2f", player.currentTime().seconds)) tcs=\(player.timeControlStatus.rawValue)")
     }
 
     private func seekTarget(_ seconds: TimeInterval, item: AVPlayerItem?) -> TimeInterval {
@@ -752,6 +760,20 @@ public final class NativeVideoEngine: VideoEngine {
         }
         guard upper > 0 else { return max(0, seconds) }
         return min(max(seconds, lower), upper)
+    }
+
+    /// Diagnostic: the merged [lower, upper] of the item's seekable ranges, or
+    /// [0, 0] when none are known yet. Used only by `PLZSEEK` tracing.
+    private func seekableBounds(item: AVPlayerItem?) -> (Double, Double) {
+        guard let ranges = item?.seekableTimeRanges, !ranges.isEmpty else { return (0, 0) }
+        var lower = TimeInterval.greatestFiniteMagnitude
+        var upper = 0.0
+        for value in ranges {
+            let range = value.timeRangeValue
+            lower = min(lower, range.start.seconds)
+            upper = max(upper, (range.start + range.duration).seconds)
+        }
+        return (lower == .greatestFiniteMagnitude ? 0 : lower, upper)
     }
 
     // MARK: - Progress cadence

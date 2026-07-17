@@ -90,6 +90,26 @@ final class SeekScrubCoordinator {
         return min(floored, duration - endGuard)
     }
 
+    /// Waits (bounded) for the engine to publish a usable duration before a
+    /// committed seek is forwarded, so AetherEngine's `min(target, duration)` VOD
+    /// clamp can't collapse the target to 0 during the brief post-`.ready`,
+    /// pre-duration window (the DV·SMB "seek during load snaps to the start" bug).
+    /// A no-op once a finite, positive duration is known; bails immediately on a
+    /// stop/teardown so a torn-down engine is never awaited.
+    private func awaitSeekableDuration() async {
+        func durationKnown() -> Bool {
+            guard let engine else { return true } // torn down — don't block the drain
+            return engine.duration.isFinite && engine.duration > 0
+        }
+        if durationKnown() { return }
+        let deadline = Date().addingTimeInterval(5)
+        while Date() < deadline {
+            if Task.isCancelled || (host?.seekDidStop ?? true) { return }
+            if durationKnown() { return }
+            try? await Task.sleep(nanoseconds: 50_000_000) // 50ms
+        }
+    }
+
     /// Requests a committed seek. Coalesces rapid presses: while one seek is
     /// in flight, additional calls just update the *latest target*; the
     /// scheduler loop then jumps directly to that latest target (skipping the
@@ -169,6 +189,17 @@ final class SeekScrubCoordinator {
             // that reach the model is what flashed the pause icon and (worse) made
             // the resume gate below mis-read intent. Cleared on every exit path.
             if self.host?.seekIntendsPlayback ?? true { self.controls.isResumeConfirming = true }
+            // Hold the committed seek until the engine has published a usable
+            // duration. AetherEngine clamps a VOD seek to `min(target, duration)`;
+            // in the sliver between it reporting `.ready` (scrubber revealed) and
+            // publishing a real duration, `duration` is still 0, so that clamp
+            // collapses EVERY target to 0 and slams playback back to the start.
+            // That is the "seek right after / while a DV·SMB title is loading snaps
+            // to the beginning" report. The optimistic on-screen pin
+            // (`pendingSeekTarget`) keeps the requested position visible during the
+            // brief wait; it's bounded so a source that never reports a duration
+            // still seeks best-effort rather than hanging.
+            await self.awaitSeekableDuration()
             // Drain: process the latest pending target until none remains.
             while let next = self.takeLatestSeekTarget() {
                 // If a newer target arrives while this one is in flight, we

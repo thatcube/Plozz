@@ -473,42 +473,23 @@ final class PlayerInputViewController: UIViewController {
         // Evaluated every tick, before any early-return, so a pause, end-of-
         // stream, or stall promptly releases the wake lock for every engine.
         idleSleepGuard.keepAwake(engine.preventsDisplaySleep)
-        let duration = engine.duration
-        if duration > 0 { model.duration = duration }
-        // Don't fight the scrub head or an in-flight committed seek.
-        if model.isScrubbing { return }
-        let engineTime = engine.currentTime
-        if let pending = model.pendingSeekTarget {
-            // A committed seek is in flight (or just finished). Holding the bar
-            // at the optimistic target until the engine actually arrives is the
-            // entire fix for the "press right → snap back" feel: a poll arriving
-            // between the optimistic update and the engine catching up would
-            // otherwise overwrite `currentSeconds` with the stale pre-seek time.
-            // Once the engine's position is within tolerance, release. The
-            // window must exceed the engine's `.exact` seek tolerance (1s): a
-            // seek can legally land up to 1s *ahead* of the target by snapping to
-            // the next keyframe, and a tighter window than that would leave the
-            // bar pinned forever in that case. A real seek jump is many seconds,
-            // so this stays comfortably clear of a false early release.
-            if abs(engineTime - pending) < 1.25 {
-                model.pendingSeekTarget = nil
-                model.currentSeconds = engineTime
-            }
-            // else: keep `currentSeconds` pinned to the optimistic value.
-        } else {
-            model.currentSeconds = engineTime
-        }
-        model.bufferedSeconds = engine.bufferedPosition
-        // While the view model is actively re-asserting playback after a seek,
-        // the engine can briefly report paused (rate-0 settle on a buffering
-        // edge). Don't mirror that transient into the model, or the pause icon
-        // flashes on by itself and the resume loop fights its own state. The
-        // resume loop clears `isResumeConfirming` the instant the clock advances
-        // (or it gives up), at which point we resume reflecting reality.
-        if !model.isResumeConfirming {
-            model.isPaused = engine.isPaused
-        }
-        evaluateSkipPresentation()
+        let resolution = PlaybackClockReconciler.reconcile(
+            snapshot: .init(
+                currentTime: engine.currentTime,
+                duration: engine.duration,
+                bufferedPosition: engine.bufferedPosition,
+                isPaused: engine.isPaused),
+            isScrubbing: model.isScrubbing,
+            pendingSeekTarget: model.pendingSeekTarget,
+            isResumeConfirming: model.isResumeConfirming)
+
+        if let duration = resolution.duration { model.duration = duration }
+        if resolution.clearPendingSeek { model.pendingSeekTarget = nil }
+        if let currentSeconds = resolution.currentSeconds { model.currentSeconds = currentSeconds }
+        if let bufferedSeconds = resolution.bufferedSeconds { model.bufferedSeconds = bufferedSeconds }
+        if let isPaused = resolution.isPaused { model.isPaused = isPaused }
+
+        if resolution.shouldEvaluateSkip { evaluateSkipPresentation() }
     }
 
     // MARK: Skip intro/credits presentation
@@ -674,32 +655,27 @@ final class PlayerInputViewController: UIViewController {
     /// A grace-window seek into credits presents the card passively (no auto, no
     /// focus-steal); a deep seek suppressed `upNextActive` entirely upstream.
     private func presentUpNextIfNeeded() {
-        if model.activeSkipWasSeekEntered {
-            guard !presentingUpNext, focusContext == .surface, !model.isScrubbing else { return }
+        let deadlineReached = upNextAdvanceAtSeconds.map { model.currentSeconds >= $0 } ?? false
+        switch UpNextPresentationDecision.action(
+            skipMode: model.skipMode,
+            wasSeekEntered: model.activeSkipWasSeekEntered,
+            presentingCard: presentingUpNext,
+            focusIsSurface: focusContext == .surface,
+            isScrubbing: model.isScrubbing,
+            autoDelayDeadlineReached: deadlineReached
+        ) {
+        case .none:
+            break
+        case .presentPassive:
             enterUpNext(stealFocus: false)
-            return
-        }
-
-        switch model.skipMode {
-        case .off, .on:
-            guard !presentingUpNext, focusContext == .surface, !model.isScrubbing else { return }
+        case .presentManual:
             enterUpNext()
-
-        case .autoInstant:
-            guard !model.isScrubbing else { return }
-            advanceToUpNext()
-
-        case .autoDelay:
-            if presentingUpNext {
-                if let deadline = upNextAdvanceAtSeconds, model.currentSeconds >= deadline, !model.isScrubbing {
-                    advanceToUpNext()
-                }
-                return
-            }
-            guard focusContext == .surface, !model.isScrubbing else { return }
+        case .beginAutoDelay:
             upNextAdvanceAtSeconds = model.currentSeconds + SkipIntrosMode.autoSkipDelay
             model.upNextAdvanceAtSeconds = upNextAdvanceAtSeconds
             enterUpNext()
+        case .advance:
+            advanceToUpNext()
         }
     }
 

@@ -11,6 +11,7 @@ import FeatureAuth
 import FeatureDiscovery
 import FeatureHome
 import FeaturePlayback
+import MetadataKit
 
 /// Composes the identity that scopes the Home tab subtree — and the retained
 /// ``HomeHeroRuntimeState`` it owns — to the active profile and Plex Home-user
@@ -52,6 +53,12 @@ public struct RootView: View {
     /// consent in `appState.crashReportingModel` — nothing is sent unless the user
     /// has opted in AND a DSN is present.
     @State private var crashReporting = CrashReportingController()
+
+    /// Maps the active content identity (profile + accounts + Plex Home-user
+    /// generation) to one scoped detail-snapshot cache, memoized for the app's
+    /// lifetime so every detail destination under the same identity shares one
+    /// instance and a switch of identity reads from a different on-disk scope.
+    @State private var detailCacheFactory = DetailSnapshotCacheFactory()
 
     @MainActor
     public init(appState: AppState? = nil) {
@@ -129,8 +136,18 @@ public struct RootView: View {
                 } else {
                     let accounts = appState.homeAccounts
                     if !accounts.isEmpty {
+                    let detailCache = detailCacheFactory.cache(
+                        for: DetailSnapshotCacheScope(
+                            profileID: appState.profilesModel.activeProfileID,
+                            identityMaterial: HomeRuntimeScope.identityKey(
+                                profileID: appState.profilesModel.activeProfileID,
+                                plexIdentityGeneration: appState.plexIdentityGeneration
+                            ) + "|" + HomeRuntimeScope.accountScopeKey(accounts.map(\.account))
+                        )
+                    )
                     MainTabView(
                         accounts: accounts,
+                        detailSnapshotCache: detailCache,
                         currentAccounts: { appState.homeAccounts },
                         networkFileResolver: appState.networkFileResolver,
                         authenticatedHTTPResolver: appState.authenticatedHTTPResolver,

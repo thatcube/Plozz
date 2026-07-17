@@ -63,8 +63,16 @@ public final class DetailSnapshotCache: Sendable {
     /// instead of failing to decode (decode failures are treated as a cache miss,
     /// so a stale schema just silently falls back to the network — but a bump also
     /// reclaims the orphaned files).
-    private static let schemaDirName = "plozz-detail-cache-v2"
+    ///
+    /// v3 also introduced per-content-identity **scoping**: snapshots live under
+    /// `plozz-detail-cache-v3/<scope-digest>/…` so one profile / account / Plex
+    /// Home-user identity can never read another's cached detail (which would leak
+    /// the wrong sources or watch state). A nil scope maps to a single shared
+    /// `default` subdirectory, preserving the unscoped behaviour for callers (tests,
+    /// previews) that don't provide an identity.
+    private static let schemaDirName = "plozz-detail-cache-v3"
     private static let schemaDirPrefix = "plozz-detail-cache"
+    private static let defaultScopeComponent = "default"
 
     private let directory: URL?
     private let maxEntries: Int
@@ -72,6 +80,15 @@ public final class DetailSnapshotCache: Sendable {
     private let maxAge: TimeInterval
     typealias DirectoryContents = @Sendable (URL, [URLResourceKey]) -> [URL]?
     private let directoryContents: DirectoryContents
+
+    /// Resolves the on-disk directory for a base caches directory and an optional
+    /// scope digest: `<base>/plozz-detail-cache-v3/<scope-or-default>`.
+    private static func resolvedDirectory(base: URL?, scope: String?) -> URL? {
+        base.map {
+            $0.appendingPathComponent(schemaDirName, isDirectory: true)
+                .appendingPathComponent(scope ?? defaultScopeComponent, isDirectory: true)
+        }
+    }
 
     /// Concurrent queue for snapshot reads/writes: independent titles run in
     /// parallel, so a slow encode/write for one never blocks a read for another.
@@ -91,11 +108,12 @@ public final class DetailSnapshotCache: Sendable {
 
     public init(
         directory: URL? = DetailSnapshotCache.defaultDirectory(),
+        scope: String? = nil,
         maxEntries: Int = 800,
         maxBytes: Int = 48 * 1024 * 1024,
         maxAge: TimeInterval = 60 * 60 * 24 * 30
     ) {
-        let resolved = directory.map { $0.appendingPathComponent(Self.schemaDirName, isDirectory: true) }
+        let resolved = Self.resolvedDirectory(base: directory, scope: scope)
         let contents: DirectoryContents = { directory, keys in
             try? FileManager.default.contentsOfDirectory(
                 at: directory,
@@ -120,15 +138,14 @@ public final class DetailSnapshotCache: Sendable {
 
     init(
         directory: URL?,
+        scope: String? = nil,
         maxEntries: Int = 800,
         maxBytes: Int = 48 * 1024 * 1024,
         maxAge: TimeInterval = 60 * 60 * 24 * 30,
         debounce: DispatchTimeInterval = .milliseconds(500),
         directoryContents: @escaping DirectoryContents
     ) {
-        let resolved = directory.map {
-            $0.appendingPathComponent(Self.schemaDirName, isDirectory: true)
-        }
+        let resolved = Self.resolvedDirectory(base: directory, scope: scope)
         self.directory = resolved
         self.maxEntries = maxEntries
         self.maxBytes = max(0, maxBytes)

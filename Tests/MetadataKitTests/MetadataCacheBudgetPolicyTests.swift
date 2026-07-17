@@ -28,9 +28,13 @@ final class MetadataCacheBudgetPolicyTests: XCTestCase {
     func testDeterministicTieBreakByKey() {
         let policy = MetadataCacheBudgetPolicy()
         // Equal expiry: tie broken by key ascending, so "aaa" evicts before "bbb".
+        // Share ONE expiry instant so the entries are a genuine tie — reading
+        // `Date()` per entry would make "bbb" (created first) expire marginally
+        // earlier and evict on recency, not the key tie-break under test.
+        let expires = Date().addingTimeInterval(100)
         let entries = [
-            sized("bbb", expiresIn: 100, size: 200),
-            sized("aaa", expiresIn: 100, size: 200),
+            MetadataCacheBudgetPolicy.SizedEntry(key: "bbb", expires: expires, estimatedSize: 200),
+            MetadataCacheBudgetPolicy.SizedEntry(key: "aaa", expires: expires, estimatedSize: 200),
         ]
         let evicted = policy.evictionKeys(entries, maxBytes: 250)
         XCTAssertEqual(evicted, ["aaa"], "ties broken deterministically by key")

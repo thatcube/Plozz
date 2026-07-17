@@ -178,14 +178,19 @@ public final class PlayerViewModel {
     /// Device/display/audio policy the router uses to pick an engine.
     private let capabilities: MediaCapabilities
 
-    /// The active engine. A `var` so the cross-engine fallback can swap engines
-    /// at runtime (e.g. a failed VLCKit attempt → native, or vice-versa).
-    private var engine: any VideoEngine
+    /// Owns the active engine instance and everything about swapping it:
+    /// construction, the re-host token, the stall watchdog, and the cross-engine
+    /// failure fallback chain. Built at the end of `init` (needs `self` as host).
+    @ObservationIgnored private var engineHandoff: EngineHandoffCoordinator!
+
+    /// The active engine. Owned by ``engineHandoff``; read here through a thin
+    /// forwarder so the rest of the view model is unchanged.
+    private var engine: any VideoEngine { engineHandoff.engine }
     /// Which engine ``engine`` currently is, so swaps know the alternate.
-    private var currentEngineKind: PlaybackEngineKind = .native
+    private var currentEngineKind: PlaybackEngineKind { engineHandoff.currentEngineKind }
     /// Bumped whenever ``engine`` is swapped, so the SwiftUI player re-hosts the
     /// new engine's bare video surface (`.id(engineToken)`).
-    public private(set) var engineToken = UUID()
+    public var engineToken: UUID { engineHandoff.engineToken }
 
     /// Bumped the moment a request resolves and the engine is committed (before
     /// the engine's `load()` is even awaited), so the diagnostics overlay can
@@ -193,23 +198,6 @@ public final class PlayerViewModel {
     /// not just once playback reaches `.ready`. Lets the user see *why* a file is
     /// stuck instead of an opaque spinner.
     public private(set) var diagnosticsToken = UUID()
-
-    /// Watches the active engine for stalled start-up: if playback never makes
-    /// real progress within a deadline, it converts a silent "loads forever" hang
-    /// into an engine failure so the cross-engine / transcode fallback chain runs.
-    private var watchdogTask: Task<Void, Never>?
-
-    /// The stall-recovery work the watchdog launches once it declares a hang.
-    /// Deliberately kept OFF ``watchdogTask``: recovery re-arms the watchdog (via
-    /// ``playResolved`` → ``armPlaybackWatchdog``), which cancels ``watchdogTask``.
-    /// If recovery ran on that same task it would cancel its own in-flight
-    /// re-resolve mid-flight — observed on device as the fresh-engine retry
-    /// failing instantly with `LOAD_FAILED stage=resolve detail=cancelled`.
-    private var recoveryTask: Task<Void, Never>?
-
-    /// How long the watchdog waits for the first real progress before declaring a
-    /// stall. Generous enough for legitimate 4K start-up buffering.
-    private let watchdogTimeout: TimeInterval = 30
 
     private var request: PlaybackRequest?
     /// Owns manual + automatic remote-subtitle acquisition (search / download /
@@ -219,21 +207,6 @@ public final class PlayerViewModel {
     /// building, per-pick routing across engines/id-spaces, load-time default,
     /// dual line, hot-loaded downloads). Built at the end of `init`.
     @ObservationIgnored private var subtitleController: SubtitleTrackController!
-
-    /// Guards the cross-engine swap so it only ever fires once: a chosen engine's
-    /// failure swaps to the *other* engine exactly once before escalating.
-    private var hasTriedAlternateEngine = false
-    /// A typed network file has no native/server-transcode fallback. One fresh
-    /// Plozzigen instance retry recovers the observed intermittent AVPlayer/HLS
-    /// post-start stall without requiring the viewer to Back out and press Play.
-    private var hasRetriedNetworkFileEngine = false
-    /// Guards the automatic transcode fallback so it only ever fires once — a
-    /// second failure surfaces the error instead of looping.
-    private var hasAttemptedTranscodeFallback = false
-    /// Tracks whether the first routed engine has been committed. We avoid
-    /// bumping `engineToken` for this first selection to prevent an unnecessary
-    /// host re-build during initial SwiftUI bring-up.
-    private var hasCommittedInitialEngine = false
 
     /// Seek pipeline (request coalescing, deferred commit debounce, drain loop,
     /// post-seek resume confirmation). Owned by a dedicated collaborator so the
@@ -414,20 +387,6 @@ public final class PlayerViewModel {
         self.onPlaybackCheckpoint = onPlaybackCheckpoint
         self.checkpointInterval = checkpointInterval
         self.adoptedResolved = adoptedResolved
-        // Boot directly on the engine the hand-off already resolved, so an adopted
-        // prefetch skips the native→Plozzigen swap entirely — no mid-bring-up
-        // engine switch, no SDR-drop→DV-resync, one loading indicator. This is the
-        // "know the engine before it even starts" path. Falls back to native when
-        // there's no adopted decision (fresh launch) or Plozzigen isn't linked.
-        if let adopted = adoptedResolved, adopted.engineKind == .plozzigen,
-           let makePlozzigen = engineFactory.makePlozzigen, let plozzigen = makePlozzigen() {
-            self.engine = plozzigen
-            self.currentEngineKind = .plozzigen
-            HandoffDiagnostics.emit("engine BOOT plozzigen (adopted; no native→plozzigen swap)")
-        } else {
-            self.engine = engineFactory.makeNative(style)
-            self.currentEngineKind = .native
-        }
         PlaybackInstrumentation.increment(.viewModel)
         // Seed last-used speed so a user who set 1.25× on the last show keeps it.
         self.controls.playbackSpeed = preferencesStore.loadPlaybackSpeed()
@@ -460,6 +419,17 @@ public final class PlayerViewModel {
             controls: controls,
             playbackSettings: playbackSettings,
             spoilerSettings: spoilerSettings
+        )
+        // Boot the engine the hand-off already resolved (adopted prefetch) or a
+        // fresh native engine. Owning this in the coordinator keeps the "know the
+        // engine before it even starts" path — no mid-bring-up native→Plozzigen
+        // swap, one loading indicator — alongside the swap/watchdog/fallback it
+        // drives later.
+        self.engineHandoff = EngineHandoffCoordinator(
+            host: self,
+            engineFactory: engineFactory,
+            adopted: adoptedResolved,
+            initialStyle: style
         )
         configureEngineCallbacks()
 
@@ -496,7 +466,7 @@ public final class PlayerViewModel {
         engine.onFailure = { [weak self] error in
             guard let self, self.engineToken == callbackEngineToken else { return }
             Task {
-                await self.handleEngineFailure(
+                await self.engineHandoff.handleEngineFailure(
                     error,
                     sourceEngineToken: callbackEngineToken
                 )
@@ -644,101 +614,11 @@ public final class PlayerViewModel {
     }
 
     // MARK: - Engine selection / swapping
-
-    /// Instantiates the engine for `kind`, falling back to native if the
-    /// Plozzigen engine was requested but isn't wired in (defensive — the router
-    /// never asks for on-device decode unless it's available).
-    private func makeEngine(_ kind: PlaybackEngineKind) -> any VideoEngine {
-        switch kind {
-        case .hybrid, .plozzigen:
-            // Plozzigen is the sole on-device decode engine. `.hybrid` is the
-            // router's abstract "needs on-device decode" signal; it resolves here
-            // to Plozzigen (the former backing engine is retired).
-            if let makePlozzigen = engineFactory.makePlozzigen, let engine = makePlozzigen() {
-                return engine
-            }
-            return engineFactory.makeNative(style)
-        case .native:
-            return engineFactory.makeNative(style)
-        }
-    }
-
-    /// Swaps the active engine when the routed kind differs from the current one,
-    /// tearing the old engine down and re-pointing the UI at the new surface.
-    private func switchEngine(to kind: PlaybackEngineKind) {
-        guard kind != currentEngineKind else {
-            return
-        }
-        clearEngineCallbacks()
-        engine.stop()
-        engine = makeEngine(kind)
-        currentEngineKind = kind
-        engineToken = UUID()
-        configureEngineCallbacks()
-    }
-
-    private func clearEngineCallbacks() {
-        engine.onProgress = nil
-        engine.onFailure = nil
-        engine.onEnded = nil
-        engine.onTracksChanged = nil
-        engine.onSubtitleCues = nil
-        engine.onSecondarySubtitleCues = nil
-    }
-
-    private func replaceEngineForRetry(
-        _ kind: PlaybackEngineKind,
-        preserveDisplayMode: Bool
-    ) async {
-        let oldEngine = engine
-        clearEngineCallbacks()
-        oldEngine.stop(preserveDisplayMode: preserveDisplayMode)
-        // Deterministically drain the old engine's leased transport (SMB session +
-        // source cursor) before opening a fresh one, so the retry's re-resolve
-        // doesn't race the old cursor's asynchronous deinit release — the race
-        // that made the previous fresh-engine retry re-fail in ~3ms.
-        await oldEngine.drainTransport()
-        engine = makeEngine(kind)
-        currentEngineKind = kind
-        engineToken = UUID()
-        configureEngineCallbacks()
-    }
-
-    /// Commits the first routed engine without forcing a host `.id` rebuild.
-    /// Subsequent swaps use the normal token-bumping `switchEngine` path.
-    private func commitEngineForPlayback(_ kind: PlaybackEngineKind) {
-        guard hasCommittedInitialEngine else {
-            hasCommittedInitialEngine = true
-            guard kind != currentEngineKind else {
-                return
-            }
-            clearEngineCallbacks()
-            engine.stop()
-            engine = makeEngine(kind)
-            currentEngineKind = kind
-            configureEngineCallbacks()
-            return
-        }
-        switchEngine(to: kind)
-    }
-
-    /// The engine to try when the current one fails: the opposite engine, but
-    /// only if it's actually available (no Plozzigen → nothing to swap to).
-    private var alternateEngineKind: PlaybackEngineKind? {
-        switch currentEngineKind {
-        case .native:
-            // AVPlayer failed (e.g. the runtime `hev1` black-screen catch). Try
-            // Plozzigen (AetherEngine): it fetches the source itself and remuxes
-            // on-device. If it isn't wired in, there's nothing to swap to → fall
-            // through to the server-transcode safety net.
-            return engineFactory.plozzigenAvailable ? .plozzigen : nil
-        case .hybrid, .plozzigen:
-            // On-device decode failed — fall back to native (server-transcode
-            // safety net). (`.hybrid` is a legacy routing value; treated as
-            // Plozzigen, which is what it resolves to.)
-            return .native
-        }
-    }
+    //
+    // Engine construction, swapping, the re-host token, the stall watchdog, and
+    // the cross-engine failure fallback chain all live in `EngineHandoffCoordinator`
+    // (`engineHandoff`). The view model keeps the bring-up orchestration
+    // (`playResolved` / `startPlayback`) and hands the mechanics there.
 
     /// Yields one main-runloop turn so SwiftUI can reconcile engine-swap state
     /// (including the loading-phase video surface host) before `engine.load()`.
@@ -969,7 +849,7 @@ public final class PlayerViewModel {
         engineKind: PlaybackEngineKind,
         startPosition: TimeInterval
     ) async {
-        commitEngineForPlayback(engineKind)
+        engineHandoff.commitEngineForPlayback(engineKind)
         // Publish the dynamic range the display is being driven to *before*
         // engine.load() requests the actual HDMI mode switch, so the view can
         // fade to black ahead of it. Only the native engine drives the panel's
@@ -996,7 +876,7 @@ public final class PlayerViewModel {
         controls.subtitlesRenderHDR = liveSubtitles.isHDR
         // Arm the stall watchdog around load() so a hang that never reports an
         // error still triggers the fallback chain instead of spinning forever.
-        armPlaybackWatchdog(startPosition: startPosition)
+        engineHandoff.armPlaybackWatchdog(startPosition: startPosition)
         await Self.yieldToRunLoop()
         let loadStart = Date()
         await engine.load(request: request, startPosition: startPosition)
@@ -1142,166 +1022,13 @@ public final class PlayerViewModel {
         }
     }
 
-    // MARK: - Stall watchdog
-
-    /// Starts (or restarts) the playback watchdog for the current engine. Polls
-    /// the engine's `currentTime`; if it never advances past `startPosition`
-    /// within ``watchdogTimeout``, the engine is treated as stalled and the
-    /// failure chain runs. Cancelled/replaced on every `playResolved`, on pause,
-    /// and on `stop()`. The once-only fallback guards keep this from looping.
-    private func armPlaybackWatchdog(startPosition: TimeInterval) {
-        watchdogTask?.cancel()
-        let timeout = watchdogTimeout
-        let threshold = startPosition + 0.5
-        let watchedEngineToken = engineToken
-        watchdogTask = Task { [weak self] in
-            let pollNanos: UInt64 = 2_000_000_000
-            var waited: TimeInterval = 0
-            while waited < timeout {
-                try? await Task.sleep(nanoseconds: pollNanos)
-                if Task.isCancelled { return }
-                guard let self else { return }
-                // Real progress → healthy, stop watching.
-                if self.engine.currentTime > threshold { return }
-                // User paused (or playback hasn't been asked to play) → not a
-                // stall; stop watching rather than fire a false positive.
-                if self.engine.isPaused { return }
-                waited += 2
-            }
-            if Task.isCancelled { return }
-            guard let self else { return }
-            // Still no progress after the deadline → treat as a stalled stream.
-            if self.engine.currentTime <= threshold, !self.engine.isPaused {
-                PlozzLog.playback.info("Playback watchdog: no progress before deadline; triggering fallback")
-                // Run recovery on a SEPARATE task, not this watchdog task.
-                // handleEngineFailure → playResolved re-arms the watchdog, which
-                // cancels `watchdogTask`; doing the recovery inline here would
-                // cancel its own re-resolve (LOAD_FAILED stage=resolve
-                // detail=cancelled). Mirrors the `onFailure` dispatch.
-                self.launchStallRecovery(token: watchedEngineToken)
-            }
-        }
-    }
-
-    /// Runs stall recovery off ``watchdogTask`` (see ``recoveryTask``). Replaces any
-    /// in-flight recovery so a later watchdog fire can't stack two retries.
-    private func launchStallRecovery(token: UUID) {
-        recoveryTask?.cancel()
-        recoveryTask = Task { [weak self] in
-            guard let self else { return }
-            await self.handleEngineFailure(.invalidResponse, sourceEngineToken: token)
-        }
-    }
-
-    private func cancelWatchdog() {
-        watchdogTask?.cancel()
-        watchdogTask = nil
-    }
-
-    // MARK: - Cross-engine fallback policy
-
-    /// Formats the typed `.unknown` payload as a redacted ` detail=…` suffix for a
-    /// failure log line (empty string for classified errors or an empty payload),
-    /// so a stall/retry line names the underlying throw without leaking URLs or
-    /// credentials.
-    private static func redactedFailureDetail(_ error: AppError) -> String {
-        guard case .unknown(let message) = error, !message.isEmpty else {
-            return ""
-        }
-        return " detail=\(HandoffDiagnostics.redactedDetail(message))"
-    }
-
-    /// Decides what to do when the active engine reports a playback failure,
-    /// following the fallback chain: the chosen engine's failure swaps to the
-    /// *other* engine (once) at the last known position; if that also fails, force
-    /// a server transcode (once); if even that fails, surface the error. Each step
-    /// fires at most once so the chain can never loop.
-    private func handleEngineFailure(
-        _ error: AppError,
-        sourceEngineToken: UUID
-    ) async {
-        // The engine's best failure classification collapses to a short code
-        // (`unknown`), which for the network-file stall discarded the ACTUAL throw
-        // reason. Surface the typed `.unknown` payload (redacted) on every branch
-        // so the journal names why a stall/retry failed instead of a bare code.
-        let detail = Self.redactedFailureDetail(error)
-        guard sourceEngineToken == engineToken else {
-            HandoffDiagnostics.emit(
-                "engine FAILURE_IGNORED stale-callback item=\(itemID) "
-                    + "error=\(HandoffDiagnostics.errorCode(error))\(detail)"
-            )
-            return
-        }
-        guard let request else {
-            HandoffDiagnostics.emit(
-                "engine FAILED item=\(itemID) request=nil "
-                    + "error=\(HandoffDiagnostics.errorCode(error))\(detail)"
-            )
-            phase = .failed(error)
-            return
-        }
-        let resumeFrom = max(engine.furthestObservedPosition, engine.currentTime)
-        let resume = resumeFrom > 1 ? resumeFrom : (startPositionOverride ?? request.startPosition)
-
-        // 1) Direct play failed on the chosen engine → try the other engine once,
-        //    re-using the same raw stream (no re-resolve needed). Skipped for an
-        //    adaptive source (separate audio track): only the hybrid engine can
-        //    mux it, so swapping to native would play silent video — go straight
-        //    to the re-resolved safe (muxed) fallback below instead. Also skipped
-        //    when the only alternate is native AVPlayer and the source is a typed
-        //    network file: native URL loaders must never reinterpret that source.
-        let isNetworkFile: Bool
-        if case .some(.networkFile) = request.playbackSource {
-            isNetworkFile = true
-        } else {
-            isNetworkFile = false
-        }
-        if isNetworkFile,
-           currentEngineKind == .plozzigen,
-           !hasRetriedNetworkFileEngine {
-            hasRetriedNetworkFileEngine = true
-            HandoffDiagnostics.emit(
-                "engine RETRY_FRESH item=\(itemID) engine=plozzigen "
-                    + "error=\(HandoffDiagnostics.errorCode(error))\(detail)"
-            )
-            phase = .loading
-            await replaceEngineForRetry(
-                .plozzigen,
-                preserveDisplayMode: contentDisplayMode.isHDR
-            )
-            await playResolved(
-                request,
-                engineKind: .plozzigen,
-                startPosition: resume
-            )
-            return
-        }
-        if !request.isTranscoding, !hasTriedAlternateEngine, request.externalAudioURL == nil,
-           let alternate = alternateEngineKind,
-           !(alternate == .native && isNetworkFile) {
-            hasTriedAlternateEngine = true
-            PlozzLog.playback.info("Engine failed; swapping to the alternate engine")
-            await playResolved(request, engineKind: alternate, startPosition: resume)
-            return
-        }
-
-        // 2) Both engines exhausted (or none to swap to) → force a server
-        //    transcode once, resuming where the failed attempt left off.
-        if !isNetworkFile, !request.isTranscoding, !hasAttemptedTranscodeFallback {
-            hasAttemptedTranscodeFallback = true
-            PlozzLog.playback.info("Direct play failed; retrying with server transcode")
-            await startPlayback(forceTranscode: true, resumeOverride: resume > 1 ? resume : nil)
-            return
-        }
-
-        // 3) Already transcoding (or out of options): surface the error.
-        HandoffDiagnostics.emit(
-            "engine FAILED item=\(itemID) engine=\(currentEngineKind.rawValue) "
-                + "error=\(HandoffDiagnostics.errorCode(error))\(detail) exhausted=true"
-        )
-        nextEpisodeCoordinator.clearFirstFrameWait()
-        phase = .failed(error)
-    }
+    // MARK: - Stall watchdog / cross-engine fallback
+    //
+    // The stall watchdog and the cross-engine failure fallback chain live in
+    // `EngineHandoffCoordinator` (`engineHandoff`), with the fallback *decision*
+    // pinned by `EngineFailurePolicy`. `playResolved` arms the watchdog via
+    // `engineHandoff.armPlaybackWatchdog`; `stop()`/pause cancel it via
+    // `engineHandoff.cancelWatchdog()`.
 
     // MARK: - Progress reporting / convergence checkpoints
     //
@@ -1502,7 +1229,7 @@ public final class PlayerViewModel {
         // watchdog misfire, and stop any post-seek resume nudging so we don't
         // race the pause back to playing.
         if paused {
-            cancelWatchdog()
+            engineHandoff.cancelWatchdog()
             seekCoordinator.cancelResumeConfirm()
         }
         controls.isPaused = paused
@@ -1546,9 +1273,7 @@ public final class PlayerViewModel {
         segmentsTask = nil
         autoSkipNoticeTask?.cancel()
         autoSkipNoticeTask = nil
-        cancelWatchdog()
-        recoveryTask?.cancel()
-        recoveryTask = nil
+        engineHandoff.cancelWatchdogAndRecovery()
         seekCoordinator.cancelAll()
         subtitleAcquisition.cancelAll()
         subtitleOverlay.cancelAll()
@@ -1937,6 +1662,40 @@ extension PlayerViewModel: SubtitleTrackControllerHost {
         _ request: PlaybackRequest, startPosition: TimeInterval
     ) async {
         await playResolved(request, engineKind: .plozzigen, startPosition: startPosition)
+    }
+}
+
+// MARK: - EngineHandoffCoordinatorHost
+
+extension PlayerViewModel: EngineHandoffCoordinatorHost {
+    var handoffStyle: SubtitleStyle { style }
+    var handoffRequest: PlaybackRequest? { request }
+    var handoffItemID: String { itemID }
+    var handoffStartPositionOverride: TimeInterval? { startPositionOverride }
+    var handoffContentDisplayModeIsHDR: Bool { contentDisplayMode.isHDR }
+
+    func handoffConfigureEngineCallbacks() {
+        configureEngineCallbacks()
+    }
+
+    func handoffPlayResolved(
+        _ request: PlaybackRequest,
+        engineKind: PlaybackEngineKind,
+        startPosition: TimeInterval
+    ) async {
+        await playResolved(request, engineKind: engineKind, startPosition: startPosition)
+    }
+
+    func handoffStartPlayback(forceTranscode: Bool, resumeOverride: TimeInterval?) async {
+        await startPlayback(forceTranscode: forceTranscode, resumeOverride: resumeOverride)
+    }
+
+    func handoffSetPhase(_ phase: PlayerViewModel.Phase) {
+        self.phase = phase
+    }
+
+    func handoffClearFirstFrameWait() {
+        nextEpisodeCoordinator.clearFirstFrameWait()
     }
 }
 

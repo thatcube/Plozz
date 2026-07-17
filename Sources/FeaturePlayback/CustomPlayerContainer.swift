@@ -576,44 +576,32 @@ final class PlayerInputViewController: UIViewController {
         // A seek that landed in the segment's opening grace window offers a manual
         // button only — never auto-skip, never a countdown, never a focus-steal —
         // so a deliberate seek is never hijacked. (A *deep* seek already cleared
-        // `activeSkipSegment` above, so this branch is the grace-window case.)
-        // Skip OFF suppresses it: markers are now fetched when the Up Next card is
-        // enabled (skip can be off), so a grace seek must not resurrect a Skip
-        // button the viewer turned off — fall through to the `.off` tear-down.
-        if model.activeSkipWasSeekEntered, model.skipMode != .off {
-            guard !presentingSkipButton, focusContext == .surface, !model.isScrubbing else { return }
-            enterSkipButton(stealFocus: false)
-            return
-        }
-
-        switch model.skipMode {
-        case .off:
-            // Markers may be loaded only for the Up Next card (skip is off), so
-            // never offer a Skip button here.
+        // `activeSkipSegment` above.) Skip OFF suppresses it, and scrubbing / an
+        // off-surface focus always defers. The branching lives in the pure
+        // `SkipPresentationDecision` so those rules are unit-tested directly.
+        let deadlineReached = autoSkipAtSeconds.map { model.currentSeconds >= $0 } ?? false
+        switch SkipPresentationDecision.action(
+            skipMode: model.skipMode,
+            wasSeekEntered: model.activeSkipWasSeekEntered,
+            presentingButton: presentingSkipButton,
+            focusIsSurface: focusContext == .surface,
+            isScrubbing: model.isScrubbing,
+            autoDelayDeadlineReached: deadlineReached
+        ) {
+        case .tearDownIfPresenting:
             if presentingSkipButton { exitSkipButton() }
-
-        case .on:
-            guard !presentingSkipButton, focusContext == .surface, !model.isScrubbing else { return }
-            enterSkipButton()
-
+        case let .presentManual(stealFocus):
+            enterSkipButton(stealFocus: stealFocus)
         case .autoInstant:
-            guard !model.isScrubbing else { return }
             actions.autoSkipSegment()
-
-        case .autoDelay:
-            if presentingSkipButton {
-                // Fire once playback reaches the deadline (skips while paused are
-                // deferred until it resumes, by design — the countdown is tied to
-                // playback position, not wall-clock).
-                if let deadline = autoSkipAtSeconds, model.currentSeconds >= deadline, !model.isScrubbing {
-                    autoSkipFromDelay()
-                }
-                return
-            }
-            guard focusContext == .surface, !model.isScrubbing else { return }
+        case .beginAutoDelay:
             autoSkipAtSeconds = model.currentSeconds + SkipIntrosMode.autoSkipDelay
             model.autoSkipAtSeconds = autoSkipAtSeconds
             enterSkipButton()
+        case .fireAutoDelay:
+            autoSkipFromDelay()
+        case .none:
+            break
         }
     }
 

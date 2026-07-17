@@ -240,7 +240,9 @@ actor ShareEnricher {
     /// logical movie/series. Runs independently of `enrichPending` (no `isRunning`
     /// guard) so opening an item during a full drain still fast-tracks it.
     func enrichOne(itemID: String) async {
+        if Task.isCancelled { return }
         guard let pending = await store.pendingEnrichment(forItemID: itemID, version: Self.version) else { return }
+        guard !Task.isCancelled else { return }
         let request = await request(for: pending)
         let record = await resolver.resolve(request)
         guard !Task.isCancelled else { return }

@@ -13,6 +13,11 @@ enum ShareLocalMetadataOutcome: Sendable, Equatable {
     case terminal
     /// A transient transport failure. Retryable up to the bounded attempt cap.
     case transientFailure
+    /// The work was cancelled at an await boundary (interrupt/suspend/removal).
+    /// Distinct from `transientFailure`: it leaves the sidecar's fingerprint,
+    /// status, and `local_attempts` UNCHANGED — cancellation burns no attempt — and
+    /// must not fall through to external enrichment.
+    case cancelled
 }
 
 /// Second, entirely LOCAL pass after a scan: reads changed NFO sidecars through
@@ -85,7 +90,8 @@ actor ShareLocalMetadataEnricher {
         var attempted = rematerialized
         for file in pending {
             if Task.isCancelled { break }
-            _ = await process(file)
+            let outcome = await process(file)
+            if outcome == .cancelled { break }
             attempted += 1
             if started.duration(to: clock.now) >= maxDuration { break }
         }
@@ -102,6 +108,7 @@ actor ShareLocalMetadataEnricher {
     /// bounded by `ShareCatalogStore.maxLocalAttempts`), so the caller never
     /// hangs the opened item indefinitely regardless of outcome.
     func resolveOne(itemID: String) async -> ShareLocalMetadataOutcome {
+        if Task.isCancelled { return .cancelled }
         if await store.rematerializeLocalMetadataIfNeeded(
             itemID: itemID,
             version: Self.version
@@ -118,6 +125,7 @@ actor ShareLocalMetadataEnricher {
 
     @discardableResult
     private func process(_ file: ShareCatalogStore.PendingLocalMetadataFile) async -> ShareLocalMetadataOutcome {
+        if Task.isCancelled { return .cancelled }
         let facts = await store.localMetadataAssociationFacts(for: file)
         guard let itemID = ShareLocalMetadataAssociationPolicy.itemID(
             for: file.kind,
@@ -152,15 +160,26 @@ actor ShareLocalMetadataEnricher {
 
         let data: Data
         do {
+            if Task.isCancelled { return .cancelled }
             ShareBackgroundActivity.listStarted()
             defer { ShareBackgroundActivity.listFinished() }
             data = try await transportBrowser().readFile(
                 file.relPath, maximumBytes: ShareNFOParser.maxBytes
             )
         } catch {
+            // Cancellation (a CancellationError, or any transport error thrown while
+            // the task is cancelled) leaves the sidecar UNCHANGED and burns no
+            // attempt — it is not a transient transport failure.
+            if error is CancellationError || Task.isCancelled {
+                return .cancelled
+            }
             await store.markSidecarTransientFailure(relPath: file.relPath)
             return .transientFailure
         }
+
+        // A cancellation after the read but before any parse/persist mutation also
+        // leaves the sidecar unchanged.
+        if Task.isCancelled { return .cancelled }
 
         let outcome: ShareLocalMetadataOutcome
         switch ShareNFOParser.parse(data) {

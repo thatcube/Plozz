@@ -191,60 +191,21 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
                     accountKey: accountKey,
                     mayRun: { await arbiter.permitsBackgroundWork() },
                     runSlice: { maxItems, maxDuration in
-                        ShareBackgroundActivity.enrichStarted()
-                        defer { ShareBackgroundActivity.enrichFinished() }
-                        // Local work FIRST, then whatever slice budget remains for
-                        // the existing external pass — the minimum ordering needed
-                        // so explicit ids/local fields prevent an unnecessary fuzzy
-                        // external lookup, without reordering external providers.
-                        let clock = ContinuousClock()
-                        let sliceStart = clock.now
-                        BrowseDiagnostics.event("local-slice+ \(accountKey)")
-                        let localResult = await localEnricher.resolvePendingSlice(
+                        await ShareMetadataWorkComposition.runSlice(
+                            accountKey: accountKey,
                             maxItems: maxItems,
-                            maxDuration: maxDuration
-                        )
-                        BrowseDiagnostics.event(
-                            "local-slice- \(accountKey) attempted=\(localResult.attempted) more=\(localResult.hasMore)"
-                        )
-                        let elapsed = sliceStart.duration(to: clock.now)
-                        let remaining = maxDuration > elapsed ? maxDuration - elapsed : .zero
-                        guard remaining > .zero else {
-                            return ShareEnrichmentSliceResult(attempted: localResult.attempted, hasMore: true)
-                        }
-                        BrowseDiagnostics.event("enrich-slice+ \(accountKey)")
-                        let result = await enricher.enrichPendingSlice(
-                            maxItems: maxItems,
-                            maxDuration: remaining,
-                            beforeResolve: { itemID in
-                                await localEnricher.resolveOne(itemID: itemID)
-                                    != .transientFailure
-                            }
-                        )
-                        BrowseDiagnostics.event(
-                            "enrich-slice- \(accountKey) attempted=\(result.attempted) more=\(result.hasMore)"
-                        )
-                        return ShareEnrichmentSliceResult(
-                            attempted: localResult.attempted + result.attempted,
-                            hasMore: localResult.hasMore || result.hasMore,
-                            retryAfter: result.retryAfter
+                            maxDuration: maxDuration,
+                            local: localEnricher,
+                            external: enricher
                         )
                     },
                     runItem: { itemID in
-                        ShareBackgroundActivity.enrichStarted()
-                        defer { ShareBackgroundActivity.enrichFinished() }
-                        // Promote the item's own pending/changed local NFO first and
-                        // await its bounded outcome — so freshly-persisted local ids
-                        // are visible to the external request below (and a provider
-                        // with exact-id support can skip fuzzy title search) —
-                        // before ever falling through to the external fast-track.
-                        BrowseDiagnostics.event("local-item+ \(accountKey)")
-                        let localOutcome = await localEnricher.resolveOne(itemID: itemID)
-                        BrowseDiagnostics.event("local-item- \(accountKey)")
-                        guard localOutcome != .transientFailure else { return }
-                        BrowseDiagnostics.event("enrich-item+ \(accountKey)")
-                        await enricher.enrichOne(itemID: itemID)
-                        BrowseDiagnostics.event("enrich-item- \(accountKey)")
+                        await ShareMetadataWorkComposition.runItem(
+                            accountKey: accountKey,
+                            itemID: itemID,
+                            local: localEnricher,
+                            external: enricher
+                        )
                     },
                     pausePass: {
                         await enricher.pauseScheduledPass()

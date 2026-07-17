@@ -198,6 +198,83 @@ final class ShareLocalMetadataEnricherTests: XCTestCase {
         XCTAssertEqual(localIDs["imdb"], "tt1160419")
     }
 
+    // MARK: - A4: cancellation fences (real SQLite store, real attempt counters)
+
+    private func seedPendingMovieSidecar(
+        accountKey: String
+    ) async -> (store: ShareCatalogStore, itemID: String) {
+        let store = ShareCatalogStore(accountKey: accountKey, directory: tempDir())
+        let tree: [String: [RemoteFileEntry]] = [
+            "": [dir("Movies")],
+            "Movies": [dir("Dune (2021)")],
+            "Movies/Dune (2021)": [file("Dune (2021).mkv"), file("Dune (2021).nfo")],
+        ]
+        await makeScanner(store: store, tree: tree).scan()
+        return (store, "f:Movies/Dune (2021)/Dune (2021).mkv")
+    }
+
+    /// A `CancellationError` thrown by the transport read must NOT be recorded as a
+    /// transient failure: it leaves the sidecar pending with zero `local_attempts`
+    /// so cancellation burns no attempt (finding A4).
+    func testCancellationErrorDuringLocalReadBurnsNoAttempt() async throws {
+        let (store, itemID) = await seedPendingMovieSidecar(accountKey: "a4-cancel-read")
+        let fileSystem = LocalMetaFakeFileSystem(files: [:], readError: CancellationError())
+        let localEnricher = makeLocalEnricher(store: store, fileSystem: fileSystem)
+
+        let outcome = await localEnricher.resolveOne(itemID: itemID)
+
+        XCTAssertEqual(outcome, .cancelled)
+        XCTAssertGreaterThanOrEqual(fileSystem.readCount, 1, "the read was attempted before cancellation")
+        let sidecars = await store.candidateSidecars(forItemID: itemID)
+        let sidecar = try XCTUnwrap(sidecars.first)
+        XCTAssertEqual(sidecar.attempts, 0, "cancellation must not burn a local attempt")
+        XCTAssertEqual(sidecar.status, "pending", "the sidecar remains pending after cancellation")
+    }
+
+    /// A cancellation observed BEFORE the read (the enclosing task is already
+    /// cancelled) skips the read entirely and burns no attempt.
+    func testCancellationBeforeLocalReadSkipsReadAndBurnsNoAttempt() async throws {
+        let (store, itemID) = await seedPendingMovieSidecar(accountKey: "a4-cancel-pre")
+        let fileSystem = LocalMetaFakeFileSystem(files: [
+            "Movies/Dune (2021)/Dune (2021).nfo": Self.nfo("<movie><title>Dune</title></movie>")
+        ])
+        let localEnricher = makeLocalEnricher(store: store, fileSystem: fileSystem)
+
+        let task = Task { () -> ShareLocalMetadataOutcome in
+            while !Task.isCancelled { await Task.yield() }
+            return await localEnricher.resolveOne(itemID: itemID)
+        }
+        task.cancel()
+        let outcome = await task.value
+
+        XCTAssertEqual(outcome, .cancelled)
+        XCTAssertEqual(fileSystem.readCount, 0, "a pre-read cancellation must not touch transport")
+        let sidecars = await store.candidateSidecars(forItemID: itemID)
+        let sidecar = try XCTUnwrap(sidecars.first)
+        XCTAssertEqual(sidecar.attempts, 0)
+        XCTAssertEqual(sidecar.status, "pending")
+    }
+
+    /// Guard against over-swallowing: a genuine (non-cancellation) transport error
+    /// while the task is NOT cancelled still records a transient failure and burns
+    /// exactly one attempt, preserving the existing retry semantics.
+    func testGenuineTransportErrorStillBurnsTransientAttempt() async throws {
+        let (store, itemID) = await seedPendingMovieSidecar(accountKey: "a4-transient")
+        let fileSystem = LocalMetaFakeFileSystem(
+            files: [:],
+            readError: MediaTransportError.protocolViolation(reason: "boom")
+        )
+        let localEnricher = makeLocalEnricher(store: store, fileSystem: fileSystem)
+
+        let outcome = await localEnricher.resolveOne(itemID: itemID)
+
+        XCTAssertEqual(outcome, .transientFailure)
+        let sidecars = await store.candidateSidecars(forItemID: itemID)
+        let sidecar = try XCTUnwrap(sidecars.first)
+        XCTAssertEqual(sidecar.attempts, 1, "a real transport failure still burns one attempt")
+        XCTAssertEqual(sidecar.status, "pending")
+    }
+
     // MARK: - Local vs external write isolation (correction #1)
 
     func testExternalSaveNeverClobbersLocalWinner() async throws {
@@ -632,9 +709,13 @@ private final class LocalMetaFakeSession: MediaTransportSession, @unchecked Send
 
 private final class LocalMetaFakeFileSystem: MediaTransportFileSystem, @unchecked Sendable {
     private let files: [String: Data]
+    private let readError: (any Error)?
     private let lock = NSLock()
     private var reads = 0
-    init(files: [String: Data]) { self.files = files }
+    init(files: [String: Data], readError: (any Error)? = nil) {
+        self.files = files
+        self.readError = readError
+    }
 
     var readCount: Int { lock.withLock { reads } }
 
@@ -661,6 +742,7 @@ private final class LocalMetaFakeFileSystem: MediaTransportFileSystem, @unchecke
 
     func readSmallFile(relativePath: String, maximumBytes: Int) async throws -> Data {
         lock.withLock { reads += 1 }
+        if let readError { throw readError }
         guard let data = files[relativePath] else {
             throw MediaTransportError.protocolViolation(reason: "no fake data for \(relativePath)")
         }

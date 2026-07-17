@@ -658,4 +658,29 @@ final class ShareEnricherTests: XCTestCase {
         let item = await store.item(id: ShareCatalogID.file("Movies/Dune (2021).mkv"))
         XCTAssertEqual(item?.posterURL, URL(string: "https://img/dune.jpg"))
     }
+
+    /// A cancelled task must fence `enrichOne` before it consults the store, calls
+    /// the resolver, or persists anything — cancellation burns no external call and
+    /// leaves the item pending for a later pass (finding A4).
+    func testEnrichOneCancelledMakesNoResolverCallAndPersistsNothing() async {
+        let store = ShareCatalogStore(accountKey: "a4-external-cancel", directory: tempDir())
+        await store.upsert([movie("Movies/Dune (2021).mkv", "Dune", 2021)], scanID: 1)
+        let opened = ShareCatalogID.file("Movies/Dune (2021).mkv")
+        let resolver = CountingResolver(record: .init(posterURL: URL(string: "https://img/dune.jpg")))
+        let enricher = ShareEnricher(store: store, resolver: resolver)
+
+        let task = Task {
+            while !Task.isCancelled { await Task.yield() }
+            await enricher.enrichOne(itemID: opened)
+        }
+        task.cancel()
+        await task.value
+
+        let calls = await resolver.calls
+        XCTAssertEqual(calls, 0, "a cancelled enrichOne must not call the external resolver")
+        let item = await store.item(id: opened)
+        XCTAssertNil(item?.posterURL, "nothing was persisted for a cancelled item")
+        let stillPending = await store.pendingEnrichment(version: ShareEnricher.version, limit: 10)
+        XCTAssertEqual(stillPending.map(\.title), ["Dune"], "the item remains pending for a later pass")
+    }
 }

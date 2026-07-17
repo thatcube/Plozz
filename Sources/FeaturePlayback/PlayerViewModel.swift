@@ -212,12 +212,6 @@ public final class PlayerViewModel {
     private let watchdogTimeout: TimeInterval = 30
 
     private var request: PlaybackRequest?
-    /// Prevents a pause/unpause event from racing ahead of the initial start
-    /// report when tvOS backgrounds the app during engine bring-up.
-    private var hasReportedPlaybackStart = false
-    /// Latest transport state requested while the initial start report is in
-    /// flight. Replayed afterward when it differs from the state sent at start.
-    private var pendingPlaybackStateReport: Bool?
     /// Owns manual + automatic remote-subtitle acquisition (search / download /
     /// post-download poll). Set at the end of `init` (needs `self` as its host).
     private var subtitleAcquisition: RemoteSubtitleAcquisition!
@@ -401,13 +395,11 @@ public final class PlayerViewModel {
     /// plugins aren't spammed. Tunable; `0` (or non-positive) disables the loop.
     private let checkpointInterval: TimeInterval
 
-    /// Drives the periodic checkpoint; cancelled on `stop()`.
-    private var checkpointTask: Task<Void, Never>?
-
-    /// The position reported by the last checkpoint, so a stalled/paused player
-    /// doesn't re-enqueue the same position and a checkpoint only fires on real
-    /// forward progress.
-    private var lastCheckpointPosition: TimeInterval = 0
+    /// Owns progress reporting (provider + Trakt lifecycle fan-out) and the
+    /// periodic convergence-checkpoint loop. Set at the end of `init` (needs
+    /// `self` as its host). Driven from playback start / setPaused / stop / the
+    /// engine progress callback / background lifecycle.
+    private var progressReporter: WatchProgressReporter!
 
     /// Optional playback bring-up started eagerly in `init` so the (network-bound)
     /// `playbackInfo` resolution and engine warm-up overlap the SwiftUI fullscreen
@@ -524,6 +516,14 @@ public final class PlayerViewModel {
         self.subtitleAcquisition = RemoteSubtitleAcquisition(provider: provider, itemID: itemID, host: self)
         self.subtitleOverlay = SubtitleOverlayLoader(host: self)
         self.seekCoordinator = SeekScrubCoordinator(host: self, controls: controls)
+        self.progressReporter = WatchProgressReporter(
+            host: self,
+            provider: provider,
+            itemID: itemID,
+            scrobbler: scrobbler,
+            checkpointInterval: checkpointInterval,
+            onCheckpoint: onPlaybackCheckpoint
+        )
         configureEngineCallbacks()
 
         // Kick off bring-up now so playbackInfo + engine warm-up run *during* the
@@ -554,7 +554,7 @@ public final class PlayerViewModel {
             // hand-off window opens; idempotent providers prefetch eagerly instead.
             self.maybeStartWindowedNextPrefetch()
             self.logUpNextStateIfNearEnd()
-            Task { await self.report(event: .progress, isPaused: false) }
+            self.progressReporter.reportProgress()
         }
         engine.onFailure = { [weak self] error in
             guard let self, self.engineToken == callbackEngineToken else { return }
@@ -1326,21 +1326,10 @@ public final class PlayerViewModel {
         // resumed a position learned from another server, this converges the chosen
         // server to that unified furthest-progress point on entry.
         let startWasPaused = !intendsPlayback
-        await report(
-            event: .start,
+        await progressReporter.reportStart(
             isPaused: startWasPaused,
             positionOverride: startPosition > 0 ? startPosition : nil
         )
-        hasReportedPlaybackStart = true
-        if let pendingPaused = pendingPlaybackStateReport {
-            pendingPlaybackStateReport = nil
-            if pendingPaused != startWasPaused {
-                await report(
-                    event: pendingPaused ? .pause : .unpause,
-                    isPaused: pendingPaused
-                )
-            }
-        }
         // Register the live session (idempotent) now that the server has a real
         // now-playing session, so convergence writes against this server defer
         // until stop() ends it.
@@ -1348,7 +1337,7 @@ public final class PlayerViewModel {
         // Begin periodic mid-play convergence checkpoints from the resumed point so
         // progress fans out to other servers without waiting for Back. Seeded so the
         // first checkpoint only fires after real forward progress past the resume.
-        startCheckpointLoop(seedPosition: startPosition)
+        progressReporter.startCheckpointLoop(seedPosition: startPosition)
 
         // Seed the in-player track menu from the engine's track lists (the
         // engine has already applied the user's default subtitle selection).
@@ -1620,109 +1609,19 @@ public final class PlayerViewModel {
         phase = .failed(error)
     }
 
-    // MARK: - Progress reporting
-
-    /// Reports the current position. Best-effort: a failed report must never
-    /// interrupt playback, so errors are swallowed (and never logged with data).
-    /// The same lifecycle is forwarded to Trakt so watches sync to the user's
-    /// Trakt history.
-    private func report(
-        event: PlaybackEvent,
-        isPaused: Bool,
-        positionOverride: TimeInterval? = nil,
-        durationOverride: TimeInterval? = nil
-    ) async {
-        guard let request else { return }
-        let position = positionOverride ?? engine.currentTime
-        let knownDuration = durationOverride ?? knownPlaybackDuration()
-        let progress = PlaybackProgress(
-            itemID: itemID,
-            playSessionID: request.playSessionID,
-            positionSeconds: position,
-            isPaused: isPaused,
-            durationSeconds: knownDuration
-        )
-        do {
-            try await provider.reportPlayback(progress, event: event)
-        } catch {
-            PlozzLog.playback.debug("Progress report failed (non-fatal)")
-        }
-        // Compute the scrobble percent from the SAME position the report used. At
-        // stop() the engine is already torn down, so `engine.currentTime` reads 0 —
-        // honoring `positionOverride` keeps the live stop-scrobble's percent honest
-        // (otherwise Trakt would see 0% and never mark the title watched).
-        let scrobblePercent = positionOverride.map { watchedPercent(at: $0) } ?? watchedPercent()
-        await scrobbler.scrobble(item: request.item, progress: scrobblePercent, event: event)
-    }
-
-    private func knownPlaybackDuration() -> TimeInterval? {
-        WatchProgressMath.knownDuration(
-            engineDuration: engine.duration,
-            controlsDuration: controls.duration,
-            itemRuntime: request?.item.runtime
-        )
-    }
-
-    /// Watched percentage (0...100) from the engine's current position over the
-    /// item's duration, preferring the engine's known duration and falling back
-    /// to the item runtime. `0` when neither is known.
-    private func watchedPercent() -> Double {
-        watchedPercent(at: engine.currentTime)
-    }
-
-    /// Watched percentage (0...100) for an explicit `position` over the item's
-    /// duration, preferring the engine's known duration and falling back to the
-    /// item runtime. `0` when neither is known. Used at `stop()` so the percentage
-    /// is computed from the captured final position (the engine is torn down there).
-    private func watchedPercent(at position: TimeInterval) -> Double {
-        WatchProgressMath.watchedPercent(
-            position: position,
-            engineDuration: engine.duration,
-            itemRuntime: request?.item.runtime
-        )
-    }
-
-    // MARK: - Convergence checkpoints
-
-    /// Starts the periodic mid-play convergence loop. Each tick fires a checkpoint
-    /// (see ``emitCheckpoint``) so progress fans out to other servers roughly every
-    /// ``checkpointInterval`` seconds without the user pressing Back. Cancelled and
-    /// restarted defensively; `stop()` tears it down. A non-positive interval (or a
-    /// default no-op hook) leaves the loop off so standalone/test players are
-    /// unaffected.
-    private func startCheckpointLoop(seedPosition: TimeInterval) {
-        lastCheckpointPosition = max(0, seedPosition)
-        checkpointTask?.cancel()
-        guard checkpointInterval > 0 else { return }
-        let interval = checkpointInterval
-        checkpointTask = Task { @MainActor [weak self] in
-            while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
-                if Task.isCancelled { return }
-                self?.emitCheckpoint()
-            }
-        }
-    }
-
-    /// Enqueues a convergence checkpoint for the current position **iff** the player
-    /// has made real forward progress since the last one and isn't paused/stalled —
-    /// so a paused or stuck player never re-writes the same position to N servers.
-    /// Pure enqueue (no network on this path); safe to call from the timer or, on
-    /// app background, from `checkpointNow()`.
-    private func emitCheckpoint(includingPaused: Bool = false) {
-        guard request != nil, includingPaused || !engine.isPaused else { return }
-        let position = currentResumePosition()
-        guard position > 1, abs(position - lastCheckpointPosition) >= 1 else { return }
-        lastCheckpointPosition = position
-        onPlaybackCheckpoint(position, watchedPercent(at: position))
-    }
+    // MARK: - Progress reporting / convergence checkpoints
+    //
+    // Progress reporting (provider + Trakt lifecycle) and the periodic
+    // convergence-checkpoint loop live in `WatchProgressReporter`. The view model
+    // keeps only the public `checkpointNow()` entry point (used by the background
+    // lifecycle path below) as a thin forwarder.
 
     /// Forces an immediate convergence checkpoint regardless of the timer — used
     /// when the app is about to be backgrounded/suspended (the TV Home button or
     /// sleep path, which never fires the view's `onDisappear`/`stop()`), so the
     /// latest position is durably captured before the process can be killed.
     public func checkpointNow() {
-        emitCheckpoint(includingPaused: true)
+        progressReporter.checkpointNow()
     }
 
     /// Handles the app leaving the foreground (TV Home button, sleep, or app
@@ -1734,7 +1633,7 @@ public final class PlayerViewModel {
     /// paused so the user resumes intentionally, rather than audio springing back
     /// to life on its own.
     public func suspendForBackground() {
-        emitCheckpoint(includingPaused: true)
+        progressReporter.emitCheckpoint(includingPaused: true)
         // Key off intent, not `engine.isPaused`: if we mean to be playing (even
         // while the engine is mid post-seek settle), pause for real — this also
         // routes through `cancelResumeConfirm()` so a recovery loop can't wake the
@@ -1931,11 +1830,7 @@ public final class PlayerViewModel {
             seekCoordinator.cancelResumeConfirm()
         }
         controls.isPaused = paused
-        if hasReportedPlaybackStart {
-            Task { await report(event: paused ? .pause : .unpause, isPaused: paused) }
-        } else {
-            pendingPlaybackStateReport = paused
-        }
+        progressReporter.reportStateChange(paused: paused)
     }
 
     /// Guards against a double teardown: `PlayerView` may call `stop()` itself on
@@ -1971,8 +1866,7 @@ public final class PlayerViewModel {
         nextEpisodePrefetchTask?.cancel()
         nextEpisodePrefetchTask = nil
         clearFirstFrameWait()
-        checkpointTask?.cancel()
-        checkpointTask = nil
+        progressReporter.cancel()
         segmentsTask?.cancel()
         segmentsTask = nil
         autoSkipNoticeTask?.cancel()
@@ -1990,8 +1884,8 @@ public final class PlayerViewModel {
         let finalPosition = didReachNaturalEnd
             ? max(engine.furthestObservedPosition, engine.currentTime)
             : currentResumePosition()
-        let finalDuration = knownPlaybackDuration()
-        let percent = watchedPercent(at: finalPosition)
+        let finalDuration = progressReporter.knownPlaybackDuration()
+        let percent = progressReporter.watchedPercent(at: finalPosition)
         engine.stop(preserveDisplayMode: preserveDisplayMode)
         // Release any prefetched next-episode session that was never adopted, and
         // an adopted-but-never-committed session (a hand-off torn down before the
@@ -2017,7 +1911,7 @@ public final class PlayerViewModel {
                 group.cancelAll()
             }
         }
-        await report(
+        await progressReporter.report(
             event: .stop,
             isPaused: true,
             positionOverride: finalPosition,
@@ -2656,6 +2550,15 @@ extension PlayerViewModel: SeekScrubCoordinatorHost {
     var seekIntendsPlayback: Bool { intendsPlayback }
     var seekDidStop: Bool { didStop }
     func seekApplyPaused(_ paused: Bool) { setPaused(paused) }
+}
+
+extension PlayerViewModel: WatchProgressReporterHost {
+    var reporterEngineCurrentTime: TimeInterval { engine.currentTime }
+    var reporterEngineDuration: TimeInterval { engine.duration }
+    var reporterEngineIsPaused: Bool { engine.isPaused }
+    var reporterControlsDuration: TimeInterval { controls.duration }
+    var reporterRequest: PlaybackRequest? { request }
+    var reporterResumePosition: TimeInterval { currentResumePosition() }
 }
 
 extension PlayerViewModel: RemoteSubtitleAcquisitionHost {

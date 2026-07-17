@@ -1185,54 +1185,13 @@ public final class PlayerViewModel {
     /// engine mutation or network. Extracted so the current-item load and the
     /// next-episode prefetch pick the engine the same way.
     private func routeEngine(for request: PlaybackRequest, forceTranscode: Bool) -> PlaybackEngineKind {
-        if case .some(.networkFile) = request.playbackSource {
-            return .plozzigen
-        }
-
-        var kind: PlaybackEngineKind
-        if !forceTranscode, engineFactory.plozzigenAvailable,
-                  let descriptor = request.localRemuxSource,
-                  case .eligible = descriptor.plozzigenEligibility {
-            // Plozzigen handles the full pipeline: FFmpeg demux → HLS-fMP4 →
-            // localhost → AVPlayer. Covers HEVC/H.264/VP9/AV1 video with any
-            // audio (stream-copy or lossless bridge). The engine reads
-            // localRemuxSource.originalSource directly.
-            kind = .plozzigen
-        } else {
-            kind = EngineRouter.selectEngine(
-                source: request.sourceMetadata,
-                capabilities: capabilities,
-                isTranscoding: request.isTranscoding,
-                // Plozzigen is the on-device decode engine, so "hybrid available"
-                // (needs-on-device-decode is routable) == Plozzigen available.
-                // When it isn't wired in, the router stays native.
-                hybridAvailable: engineFactory.plozzigenAvailable
-            )
-            // The router's `.hybrid` return is its abstract "needs on-device
-            // decode" signal; Plozzigen (AetherEngine) is that engine. Resolve
-            // `.hybrid` to it. (The former backing engine is retired.)
-            if kind == .hybrid, engineFactory.plozzigenAvailable {
-                kind = .plozzigen
-            }
-        }
-
-        // If the subtitle that would be shown by default is image-based
-        // (PGS/DVB/DVD/VOBSUB), AVPlayer can't render it — route to Plozzigen,
-        // which decodes bitmap subtitle packets into image cues that Plozz's
-        // overlay draws (no server burn-in). Only when direct-playing and
-        // Plozzigen is wired in; a no-op when already routed to Plozzigen.
-        let subtitleRule = effectiveSubtitleRule(for: request.item)
-        if kind == .native, !request.isTranscoding, engineFactory.plozzigenAvailable,
-           request.subtitleTracks.defaultSubtitleNeedsHybridEngine(
-               mode: subtitleRule.mode,
-               preferredLanguage: subtitleRule.preferredLanguage) {
-            PlozzLog.playback.info("Default subtitle is image-based; routing to Plozzigen so it can be rendered on-device")
-            kind = .plozzigen
-        }
-
-        let v = request.sourceMetadata?.video
-        HandoffDiagnostics.emit("route kind=\(kind.rawValue) container=\(request.sourceMetadata?.container ?? "-") vcodec=\(v?.codec ?? "-") tag=\(v?.codecTag ?? "-") range=\(v?.videoRange ?? "-") rangeType=\(v?.videoRangeType ?? "-") transfer=\(v?.colorTransfer ?? "-") profile=\(v?.profile ?? "-")")
-        return kind
+        EngineSelection.route(
+            request: request,
+            forceTranscode: forceTranscode,
+            plozzigenAvailable: engineFactory.plozzigenAvailable,
+            capabilities: capabilities,
+            subtitleRule: effectiveSubtitleRule(for: request.item)
+        )
     }
 
     /// Resolves the ordered audio-language preference for a load from per-series

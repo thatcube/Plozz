@@ -242,3 +242,14 @@ func waitUntil(
     }
     return predicate()
 }
+
+func waitUntilAsync(
+    iterations: Int = 1_000,
+    _ predicate: () async -> Bool
+) async -> Bool {
+    for _ in 0..<iterations {
+        if await predicate() { return true }
+        await Task.yield()
+    }
+    return await predicate()
+}

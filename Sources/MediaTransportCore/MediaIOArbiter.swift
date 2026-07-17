@@ -41,6 +41,64 @@ public struct MediaIOOneSecondDeadline: MediaIODrainDeadline {
     }
 }
 
+/// A one-shot race latch. The first `resolve` wins; every later `resolve` is a
+/// no-op. Used to bound an unresponsive scanner operation against a deadline
+/// without a structured task group whose scope could still wait forever for a
+/// cancellation-insensitive child. The latch owns no arbiter state, so a timed-out
+/// operation task that resolves it late can never mutate the arbiter.
+final class MediaIORaceLatch<Value: Sendable>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var settled = false
+    private var value: Value?
+    private var continuation: CheckedContinuation<Value, Never>?
+
+    func wait() async -> Value {
+        await withCheckedContinuation { continuation in
+            let resolved: Value? = lock.withLock {
+                if settled { return value }
+                self.continuation = continuation
+                return nil
+            }
+            if let resolved { continuation.resume(returning: resolved) }
+        }
+    }
+
+    func resolve(_ newValue: Value) {
+        let waiter: CheckedContinuation<Value, Never>? = lock.withLock {
+            guard !settled else { return nil }
+            settled = true
+            value = newValue
+            let waiter = continuation
+            continuation = nil
+            return waiter
+        }
+        waiter?.resume(returning: newValue)
+    }
+}
+
+/// Staged escalation windows carved out of a single absolute transition deadline.
+/// The graceful-cancel slice can never consume the force-close reserve, and the
+/// force-close slice can never consume the final drain-verification reserve, so a
+/// cancellation-insensitive `cancel()` cannot starve `forceClose()`.
+struct MediaIOTransitionBudget {
+    let gracefulCancel: Duration
+    let drainVerify: Duration
+    let forceClose: Duration
+
+    init(total: Duration) {
+        let clamped = total > .zero ? total : .zero
+        // ~50% graceful cancel, ~20% drain verification, remainder (~30%)
+        // reserved for force-close. Subtracting the first two from the total keeps
+        // the three windows summing to exactly one absolute deadline with no drift.
+        let cancel = clamped / 2
+        let verify = clamped / 5
+        let close = clamped - cancel - verify
+        self.gracefulCancel = cancel
+        self.drainVerify = verify
+        self.forceClose = close > .zero ? close : .zero
+    }
+}
+
 public final class MediaIOScannerLease: @unchecked Sendable {
     public let generation: UInt64
 
@@ -127,14 +185,27 @@ public actor MediaIOArbiter {
         let resource: any MediaIOScannerResource
     }
 
+    private enum BoundedStage: Sendable, Equatable {
+        case completed
+        case failed
+        case timedOut
+    }
+
     public let accountID: String
     private let deadline: any MediaIODrainDeadline
     private let drainTimeout: Duration
     private var nextGeneration: UInt64 = 0
     private var activeScanner: ScannerAdmission?
     private var playbackIDs: Set<UUID> = []
-    private var playbackPending = false
-    private var scannerTransitionPending = false
+    /// Playback requests that have entered admission and reserved priority but have
+    /// not yet been granted a lease. A reservation preempts any in-progress or
+    /// at-boundary scanner replacement so playback wins deterministically.
+    private var playbackReservations = 0
+    /// True while exactly one caller is draining the active scanner. Other callers
+    /// wait on `transitionWaiters` and re-evaluate when it clears rather than
+    /// racing a second concurrent drain of the same resource.
+    private var transitionInProgress = false
+    private var transitionWaiters: [CheckedContinuation<Void, Never>] = []
 
     public init(
         accountID: String,
@@ -149,25 +220,25 @@ public actor MediaIOArbiter {
     public func acquireScanner(
         resource: any MediaIOScannerResource
     ) async throws -> MediaIOScannerLease {
-        guard playbackIDs.isEmpty, !playbackPending, !scannerTransitionPending else {
+        // A scanner yields to any playback that is active or merely reserved, and
+        // it never queues behind another in-progress transition (fast-fail avoids a
+        // scan storm and preserves single-transition serialization).
+        guard playbackIDs.isEmpty, playbackReservations == 0, !transitionInProgress else {
             throw MediaTransportError.resourceBusy
         }
         nextGeneration &+= 1
         let generation = nextGeneration
-        scannerTransitionPending = true
-        defer { scannerTransitionPending = false }
         if let replaced = activeScanner {
-            do {
-                try await stopAndDrain(replaced)
-            } catch {
+            let drained = await runDrainTransition(replaced)
+            if !drained {
                 throw MediaTransportError.resourceBusy
-            }
-            if activeScanner?.generation == replaced.generation {
-                activeScanner = nil
             }
         }
         try Task.checkCancellation()
-        guard playbackIDs.isEmpty, !playbackPending, activeScanner == nil else {
+        // A playback reservation may have appeared while we drained the previous
+        // scanner; yield the freshly cleared slot to it.
+        guard playbackIDs.isEmpty, playbackReservations == 0,
+              activeScanner == nil, !transitionInProgress else {
             throw MediaTransportError.resourceBusy
         }
         activeScanner = ScannerAdmission(
@@ -178,33 +249,31 @@ public actor MediaIOArbiter {
     }
 
     public func acquirePlayback() async throws -> MediaIOPlaybackLease {
-        guard !playbackPending, !scannerTransitionPending else {
-            throw MediaTransportError.resourceBusy
-        }
-        if activeScanner == nil {
-            let id = UUID()
-            playbackIDs.insert(id)
-            return MediaIOPlaybackLease(id: id, arbiter: self)
-        }
-        playbackPending = true
-        defer { playbackPending = false }
-        if let scanner = activeScanner {
-            do {
-                try await stopAndDrain(scanner)
-            } catch {
+        // Reserve priority before any suspension so a concurrent or at-boundary
+        // scanner replacement observes the reservation and yields to us.
+        playbackReservations += 1
+        defer { playbackReservations -= 1 }
+
+        while true {
+            try Task.checkCancellation()
+            if transitionInProgress {
+                // Another caller is draining the active scanner (a replacement that
+                // will yield to this reservation, or another playback that will
+                // clear the scanner). Wait for it, then re-evaluate.
+                await awaitTransitionClear()
+                continue
+            }
+            guard let scanner = activeScanner else {
+                let id = UUID()
+                playbackIDs.insert(id)
+                return MediaIOPlaybackLease(id: id, arbiter: self)
+            }
+            let drained = await runDrainTransition(scanner)
+            if !drained {
                 throw MediaTransportError.resourceBusy
             }
-            if activeScanner?.generation == scanner.generation {
-                activeScanner = nil
-            }
+            // The scanner is cleared; loop admits playback on the next iteration.
         }
-        try Task.checkCancellation()
-        guard activeScanner == nil, !scannerTransitionPending else {
-            throw MediaTransportError.resourceBusy
-        }
-        let id = UUID()
-        playbackIDs.insert(id)
-        return MediaIOPlaybackLease(id: id, arbiter: self)
     }
 
     /// Whether passive metadata work may use this account right now. The scheduler
@@ -212,20 +281,106 @@ public actor MediaIOArbiter {
     /// callback into a higher-level module.
     public func permitsBackgroundWork() -> Bool {
         playbackIDs.isEmpty
-            && !playbackPending
+            && playbackReservations == 0
             && activeScanner == nil
-            && !scannerTransitionPending
+            && !transitionInProgress
     }
 
-    private func stopAndDrain(_ scanner: ScannerAdmission) async throws {
-        await scanner.resource.cancel()
-        let drained = await deadline.waitForDrain(
-            of: scanner.resource,
-            timeout: drainTimeout
-        )
-        if !drained {
-            try await scanner.resource.forceClose()
+    /// Drains `scanner` under a single absolute deadline, clearing it on success.
+    /// Returns whether closure was positively established; a bounded failure leaves
+    /// the scanner installed so a retry re-drains it. Only one drain runs at a time.
+    private func runDrainTransition(_ scanner: ScannerAdmission) async -> Bool {
+        transitionInProgress = true
+        let closed = await stopAndDrain(scanner)
+        if closed, activeScanner?.generation == scanner.generation {
+            activeScanner = nil
         }
+        endTransition()
+        return closed
+    }
+
+    private func awaitTransitionClear() async {
+        await withCheckedContinuation { continuation in
+            transitionWaiters.append(continuation)
+        }
+    }
+
+    private func endTransition() {
+        transitionInProgress = false
+        let waiters = transitionWaiters
+        transitionWaiters.removeAll()
+        for waiter in waiters { waiter.resume() }
+    }
+
+    /// One absolute deadline, staged: bounded graceful cancel, then a bounded
+    /// drain-verification, then bounded force-close. Returns true only when closure
+    /// is positively established (drained after cancel, or a non-throwing
+    /// force-close). A timed-out or throwing force-close returns false — a timed-out
+    /// unclosed scanner is never reported as cleanly drained. Late completion from a
+    /// timed-out cancel/force-close resolves an abandoned latch that owns no arbiter
+    /// state, so it can never mutate admission after its window closes.
+    private func stopAndDrain(_ scanner: ScannerAdmission) async -> Bool {
+        let resource = scanner.resource
+        let budget = MediaIOTransitionBudget(total: drainTimeout)
+
+        let cancelReturned = await runBounded(
+            timeout: budget.gracefulCancel,
+            timedOutValue: false
+        ) {
+            await resource.cancel()
+            return true
+        }
+
+        // Only spend the drain-verification reserve when cancel actually returned;
+        // a blocked cancel escalates straight to force-close so its reserved window
+        // is preserved.
+        if cancelReturned {
+            let drained = await deadline.waitForDrain(
+                of: resource,
+                timeout: budget.drainVerify
+            )
+            if drained { return true }
+        }
+
+        let closed = await runBounded(
+            timeout: budget.forceClose,
+            timedOutValue: BoundedStage.timedOut
+        ) {
+            do {
+                try await resource.forceClose()
+                return BoundedStage.completed
+            } catch {
+                return BoundedStage.failed
+            }
+        }
+        return closed == .completed
+    }
+
+    /// Runs `operation` in an unstructured detached task and races it against
+    /// `timeout`. Returns the operation's value if it finishes first, otherwise
+    /// `timedOutValue`. The operation task captures only the injected resource and
+    /// the latch — never the arbiter — so an operation that never returns cannot
+    /// retain or mutate the arbiter, and the arbiter drops its handle here.
+    private func runBounded<R: Sendable>(
+        timeout: Duration,
+        timedOutValue: R,
+        operation: @escaping @Sendable () async -> R
+    ) async -> R {
+        guard timeout > .zero else { return timedOutValue }
+        let latch = MediaIORaceLatch<R>()
+        let operationTask = Task.detached { latch.resolve(await operation()) }
+        let timerTask = Task.detached {
+            do {
+                try await ContinuousClock().sleep(for: timeout)
+                latch.resolve(timedOutValue)
+            } catch {
+                latch.resolve(timedOutValue)
+            }
+        }
+        let result = await latch.wait()
+        timerTask.cancel()
+        operationTask.cancel()
+        return result
     }
 
     fileprivate func finishScanner(generation: UInt64) {
@@ -235,5 +390,11 @@ public actor MediaIOArbiter {
 
     fileprivate func releasePlayback(id: UUID) {
         playbackIDs.remove(id)
+    }
+
+    /// Test-only introspection: the number of playback requests currently holding a
+    /// priority reservation but not yet granted a lease.
+    func pendingPlaybackReservations() -> Int {
+        playbackReservations
     }
 }

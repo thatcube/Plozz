@@ -19,22 +19,6 @@ private final class BlockingByteSource: MediaTransportByteSource, @unchecked Sen
     }
 }
 
-private final class BlockingCancelScannerResource: MediaIOScannerResource, @unchecked Sendable {
-    let cancelGate = AsyncTestGate()
-    private let lock = NSLock()
-    private var cancelCountStorage = 0
-
-    var cancelCount: Int { lock.withLock { cancelCountStorage } }
-    var isDrained: Bool { true }
-
-    func cancel() async {
-        lock.withLock { cancelCountStorage += 1 }
-        await cancelGate.wait()
-    }
-
-    func forceClose() async throws {}
-}
-
 private final class RetryingDrainScannerResource: MediaIOScannerResource, @unchecked Sendable {
     enum FakeError: Error { case closeFailed }
 
@@ -70,6 +54,66 @@ private final class BlockingForceCloseScannerResource: MediaIOScannerResource, @
     func forceClose() async throws {
         await forceCloseGate.wait()
         throw FakeError.closeFailed
+    }
+}
+
+/// cancel and forceClose both block on gates that the test controls, so neither
+/// ever returns on its own — the arbiter must bound both under one deadline.
+private final class HangingScannerResource: MediaIOScannerResource, @unchecked Sendable {
+    enum FakeError: Error { case closeFailed }
+
+    let cancelGate = AsyncTestGate()
+    let forceCloseGate = AsyncTestGate()
+    private let lock = NSLock()
+    private var cancelCountStorage = 0
+    private var forceCloseCountStorage = 0
+
+    var cancelCount: Int { lock.withLock { cancelCountStorage } }
+    var forceCloseCount: Int { lock.withLock { forceCloseCountStorage } }
+    var isDrained: Bool { false }
+
+    func cancel() async {
+        lock.withLock { cancelCountStorage += 1 }
+        await cancelGate.wait()
+    }
+
+    func forceClose() async throws {
+        lock.withLock { forceCloseCountStorage += 1 }
+        await forceCloseGate.wait()
+        throw FakeError.closeFailed
+    }
+}
+
+/// cancel blocks forever, but force-close returns cleanly — proves a cancel that
+/// consumes its whole graceful slice still leaves the force-close reserve.
+private final class CancelHangsForceCloseSucceedsResource: MediaIOScannerResource, @unchecked Sendable {
+    let cancelGate = AsyncTestGate()
+    private let lock = NSLock()
+    private var forceCloseCountStorage = 0
+
+    var forceCloseCount: Int { lock.withLock { forceCloseCountStorage } }
+    var isDrained: Bool { false }
+
+    func cancel() async { await cancelGate.wait() }
+
+    func forceClose() async throws {
+        lock.withLock { forceCloseCountStorage += 1 }
+    }
+}
+
+/// cancel returns immediately but the resource never signals drained; force-close
+/// then establishes closure within the remaining budget.
+private final class NeverDrainsResource: MediaIOScannerResource, @unchecked Sendable {
+    private let lock = NSLock()
+    private var forceCloseCountStorage = 0
+
+    var forceCloseCount: Int { lock.withLock { forceCloseCountStorage } }
+    var isDrained: Bool { false }
+
+    func cancel() async {}
+
+    func forceClose() async throws {
+        lock.withLock { forceCloseCountStorage += 1 }
     }
 }
 
@@ -245,48 +289,147 @@ final class SourceLeaseAndArbiterTests: XCTestCase {
         playback.release()
     }
 
-    func testScannerReplacementReservesAdmissionAcrossCancellation() async throws {
+    func testPlaybackReservationPreemptsScannerReplacement() async throws {
+        // Scanner A active, replacement B mid-drain, then playback arrives. Playback
+        // reserves ahead of the replacement; B must yield resourceBusy and playback
+        // must win deterministically after A drains (finding A2).
+        let drainGate = AsyncTestGate()
         let arbiter = MediaIOArbiter(
             accountID: "account",
-            deadline: FakeDrainDeadline(drains: true)
+            deadline: ControlledDrainDeadline(results: [true], gate: drainGate)
         )
-        let firstResource = BlockingCancelScannerResource()
+        let firstResource = FakeScannerResource()
         let first = try await arbiter.acquireScanner(resource: firstResource)
         let secondResource = FakeScannerResource()
         let replacement = Task {
             try await arbiter.acquireScanner(resource: secondResource)
         }
-        await firstResource.cancelGate.waitUntilEntered()
+        // Wait until B is inside the drain-verification of A (blocked on the gate).
+        await drainGate.waitUntilEntered()
 
+        let playbackTask = Task { try await arbiter.acquirePlayback() }
+        // Deterministically wait for playback to register its priority reservation.
+        _ = await waitUntilAsync { await arbiter.pendingPlaybackReservations() == 1 }
+
+        // Completing A's drain lets the replacement observe the reservation and yield.
+        drainGate.open()
+
+        do {
+            _ = try await replacement.value
+            XCTFail("scanner replacement installed despite a playback reservation")
+        } catch let error as MediaTransportError {
+            XCTAssertEqual(error, .resourceBusy)
+        }
+        let playback = try await playbackTask.value
+        XCTAssertEqual(firstResource.cancelCount, 1)
+        _ = first
+        playback.release()
+    }
+
+    func testPermanentlyBlockedCancelAndForceCloseReturnsBoundedFailure() async throws {
+        let resource = HangingScannerResource()
+        let arbiter = MediaIOArbiter(
+            accountID: "account",
+            drainTimeout: .milliseconds(300)
+        )
+        let scanner = try await arbiter.acquireScanner(resource: resource)
+
+        let clock = ContinuousClock()
+        let start = clock.now
         do {
             _ = try await arbiter.acquirePlayback()
-            XCTFail("playback admitted while scanner replacement was pending")
+            XCTFail("playback admitted despite an unclosable scanner")
         } catch let error as MediaTransportError {
             XCTAssertEqual(error, .resourceBusy)
         }
-        do {
-            _ = try await arbiter.acquireScanner(resource: FakeScannerResource())
-            XCTFail("second replacement admitted while cancellation was pending")
-        } catch let error as MediaTransportError {
-            XCTAssertEqual(error, .resourceBusy)
-        }
+        let elapsed = start.duration(to: clock.now)
 
-        firstResource.cancelGate.open()
-        let second = try await replacement.value
-        XCTAssertNotEqual(first.generation, second.generation)
-        XCTAssertEqual(firstResource.cancelCount, 1)
+        XCTAssertEqual(
+            resource.forceCloseCount,
+            1,
+            "force-close must be invoked within the absolute deadline even when cancel blocks"
+        )
+        // Bounded by ONE absolute deadline (cancel + force-close reserves), never a
+        // per-stage sum and never unbounded.
+        XCTAssertLessThan(elapsed, .milliseconds(600))
 
-        first.finish()
+        scanner.finish()
+        resource.cancelGate.open()
+        resource.forceCloseGate.open()
+    }
+
+    func testBlockedCancelPreservesForceCloseReserve() async throws {
+        let resource = CancelHangsForceCloseSucceedsResource()
+        let arbiter = MediaIOArbiter(
+            accountID: "account",
+            drainTimeout: .milliseconds(300)
+        )
+        let scanner = try await arbiter.acquireScanner(resource: resource)
         let playback = try await arbiter.acquirePlayback()
-        XCTAssertEqual(secondResource.cancelCount, 1)
-        second.finish()
+
+        XCTAssertEqual(
+            resource.forceCloseCount,
+            1,
+            "a cancel that consumes its whole graceful slice still leaves the force-close reserve"
+        )
         playback.release()
+        scanner.finish()
+        resource.cancelGate.open()
+    }
+
+    func testCancelReturnsButDrainNeverSignalsThenForceCloseSucceeds() async throws {
+        let resource = NeverDrainsResource()
+        let arbiter = MediaIOArbiter(
+            accountID: "account",
+            drainTimeout: .milliseconds(120)
+        )
+        let scanner = try await arbiter.acquireScanner(resource: resource)
+        let playback = try await arbiter.acquirePlayback()
+
+        XCTAssertGreaterThanOrEqual(
+            resource.forceCloseCount,
+            1,
+            "force-close establishes closure when the resource never signals drained"
+        )
+        playback.release()
+        scanner.finish()
+    }
+
+    func testArbiterRetiresWhileResourceOperationNeverReturns() async throws {
+        let resource = HangingScannerResource()
+        weak var weakArbiter: MediaIOArbiter?
+        var lease: MediaIOScannerLease?
+        do {
+            let arbiter = MediaIOArbiter(
+                accountID: "account",
+                drainTimeout: .milliseconds(80)
+            )
+            weakArbiter = arbiter
+            lease = try await arbiter.acquireScanner(resource: resource)
+            // Force a drain that times out against a permanently blocked resource.
+            do {
+                _ = try await arbiter.acquirePlayback()
+                XCTFail("playback admitted despite an unclosable scanner")
+            } catch let error as MediaTransportError {
+                XCTAssertEqual(error, .resourceBusy)
+            }
+        }
+        // Drop the only arbiter-retaining handle. The detached cancel/force-close
+        // operation tasks hold the resource and their latch, never the arbiter.
+        lease = nil
+        _ = await waitUntilAsync(iterations: 5_000) { weakArbiter == nil }
+        XCTAssertNil(
+            weakArbiter,
+            "arbiter must retire even while a resource operation never returns"
+        )
+        resource.cancelGate.open()
+        resource.forceCloseGate.open()
     }
 
     func testRepeatedFailedForceCloseUsesBoundedDrainPolling() async throws {
         let arbiter = MediaIOArbiter(
             accountID: "account",
-            drainTimeout: .milliseconds(1)
+            drainTimeout: .milliseconds(50)
         )
         let resource = RetryingDrainScannerResource()
         let scanner = try await arbiter.acquireScanner(resource: resource)

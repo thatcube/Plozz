@@ -31,6 +31,299 @@ final class ItemDetailViewModelTests: XCTestCase {
         XCTAssertEqual(vm.state.value?.children.map(\.id), ["s1", "s2"])
     }
 
+    func testAtmosProbeUpdatesBadgeAfterFirstPaint() async {
+        let item = MediaItem(
+            id: "movie",
+            title: "Movie",
+            kind: .movie,
+            mediaInfo: MediaSourceMetadata(
+                container: "mkv",
+                sourceRevision: "rev-1",
+                audio: .init(codec: "eac3", channels: 6, channelLayout: "5.1")
+            )
+        )
+        let provider = FakeMediaProvider(allItems: [item])
+        let probeGate = AsyncGate()
+        provider.supplementalFactsGate = { await probeGate.wait() }
+        provider.supplementalFactsByItem["movie"] = ProbedStreamFacts(
+            audioCodec: "eac3",
+            audioChannels: 6,
+            audioIsAtmos: true
+        )
+        let vm = ItemDetailViewModel(
+            provider: provider,
+            itemID: "movie",
+            onlineTrailerResolver: { _ in [] },
+            playableVideoIDResolver: { _ in nil },
+            trailerCache: TrailerResolutionCache()
+        )
+
+        await vm.load()
+        XCTAssertEqual(vm.state.value?.item.mediaInfo?.audio?.profile, nil)
+
+        probeGate.open()
+        await waitUntil {
+            vm.state.value?.item.mediaInfo?.audio?.profile == "Dolby Atmos"
+        }
+
+        XCTAssertEqual(provider.supplementalProbeCount, 1)
+        XCTAssertEqual(
+            vm.state.value?.item.technicalBadges.map(\.label),
+            ["Dolby Atmos"]
+        )
+    }
+
+    func testShareProbeCreatesAtmosMetadataWithoutServerStreamFacts() async {
+        let item = MediaItem(
+            id: "share-movie",
+            title: "Movie",
+            kind: .movie,
+            sourceAccountID: "share",
+            versions: [
+                MediaVersion(
+                    id: "Movies/Movie.mkv",
+                    container: "mkv",
+                    sourceItemID: "share-movie",
+                    sourceAccountID: "share"
+                )
+            ]
+        )
+        let provider = FakeMediaProvider(allItems: [item], kind: .mediaShare)
+        provider.supplementalFactsByItem[item.id] = ProbedStreamFacts(
+            videoWidth: 3840,
+            videoHeight: 2160,
+            videoRangeType: "DOVI",
+            videoCodec: "hevc",
+            audioTrackID: 1,
+            audioCodec: "eac3",
+            audioChannels: 6,
+            audioIsAtmos: true
+        )
+        let vm = ItemDetailViewModel(
+            provider: provider,
+            itemID: item.id,
+            sourceAccountID: "share",
+            onlineTrailerResolver: { _ in [] },
+            playableVideoIDResolver: { _ in nil },
+            trailerCache: TrailerResolutionCache()
+        )
+
+        await vm.load()
+        await waitUntil {
+            vm.state.value?.item.mediaInfo?.audio?.profile == "Dolby Atmos"
+        }
+
+        XCTAssertEqual(vm.state.value?.item.mediaInfo?.video?.videoRangeType, "DOVI")
+        XCTAssertEqual(vm.state.value?.item.versions.first?.audioProfile, "Dolby Atmos")
+        XCTAssertEqual(
+            vm.state.value?.item.versions.first?.technicalBadges.map { $0.label },
+            ["4K", "Dolby Vision", "Dolby Atmos"]
+        )
+    }
+
+    func testAtmosProbeDoesNotRunWhenServerAlreadyReportsAtmos() async {
+        let item = MediaItem(
+            id: "movie",
+            title: "Movie",
+            kind: .movie,
+            mediaInfo: MediaSourceMetadata(
+                container: "mkv",
+                sourceRevision: "rev-1",
+                audio: .init(codec: "eac3", profile: "Dolby Atmos", channels: 6)
+            )
+        )
+        let provider = FakeMediaProvider(allItems: [item])
+        let vm = ItemDetailViewModel(
+            provider: provider,
+            itemID: "movie",
+            onlineTrailerResolver: { _ in [] },
+            playableVideoIDResolver: { _ in nil },
+            trailerCache: TrailerResolutionCache()
+        )
+
+        await vm.load()
+        for _ in 0..<20 { await Task.yield() }
+
+        XCTAssertEqual(provider.supplementalProbeCount, 0)
+        XCTAssertEqual(vm.state.value?.item.mediaInfo?.audio?.profile, "Dolby Atmos")
+    }
+
+    func testConfirmedAtmosSurvivesRefreshForSameSourceRevision() async {
+        let fresh = MediaItem(
+            id: "movie",
+            title: "Movie",
+            kind: .movie,
+            mediaInfo: MediaSourceMetadata(
+                container: "mkv",
+                sourceRevision: "rev-1",
+                audio: .init(codec: "eac3", channels: 6)
+            )
+        )
+        var cached = fresh
+        cached.mediaInfo?.audio?.profile = "Dolby Atmos"
+        let provider = FakeMediaProvider(allItems: [fresh])
+        let vm = ItemDetailViewModel(
+            provider: provider,
+            itemID: "movie",
+            initialItem: cached,
+            onlineTrailerResolver: { _ in [] },
+            playableVideoIDResolver: { _ in nil },
+            trailerCache: TrailerResolutionCache()
+        )
+
+        await vm.load()
+        for _ in 0..<20 { await Task.yield() }
+
+        XCTAssertEqual(vm.state.value?.item.mediaInfo?.audio?.profile, "Dolby Atmos")
+        XCTAssertEqual(provider.supplementalProbeCount, 0)
+    }
+
+    func testConfirmedAtmosIsDroppedWhenSourceRevisionChanges() async {
+        let fresh = MediaItem(
+            id: "movie",
+            title: "Movie",
+            kind: .movie,
+            mediaInfo: MediaSourceMetadata(
+                container: "mkv",
+                sourceRevision: "rev-2",
+                audio: .init(codec: "eac3", channels: 6)
+            )
+        )
+        var cached = fresh
+        cached.mediaInfo?.sourceRevision = "rev-1"
+        cached.mediaInfo?.audio?.profile = "Dolby Atmos"
+        let provider = FakeMediaProvider(allItems: [fresh])
+        let vm = ItemDetailViewModel(
+            provider: provider,
+            itemID: "movie",
+            initialItem: cached,
+            onlineTrailerResolver: { _ in [] },
+            playableVideoIDResolver: { _ in nil },
+            trailerCache: TrailerResolutionCache()
+        )
+
+        await vm.load()
+        await waitUntil { provider.supplementalProbeCount == 1 }
+
+        XCTAssertNil(vm.state.value?.item.mediaInfo?.audio?.profile)
+    }
+
+    func testSwitchingFromPlexToEmbyStartsEmbyAtmosProbe() async {
+        let plexItem = MediaItem(
+            id: "plex-movie",
+            title: "Movie",
+            kind: .movie,
+            mediaInfo: MediaSourceMetadata(
+                container: "mkv",
+                sourceRevision: "plex-rev",
+                audio: .init(codec: "truehd", profile: "Dolby Atmos", channels: 8)
+            ),
+            sourceAccountID: "plex"
+        )
+        let embyItem = MediaItem(
+            id: "emby-movie",
+            title: "Movie",
+            kind: .movie,
+            mediaInfo: MediaSourceMetadata(
+                container: "mkv",
+                sourceRevision: "emby-rev",
+                audio: .init(codec: "eac3", channels: 6)
+            ),
+            sourceAccountID: "emby"
+        )
+        let plex = FakeMediaProvider(allItems: [plexItem], kind: .plex)
+        let emby = FakeMediaProvider(allItems: [embyItem], kind: .emby)
+        emby.supplementalFactsByItem["emby-movie"] = ProbedStreamFacts(
+            audioCodec: "eac3",
+            audioChannels: 6,
+            audioIsAtmos: true
+        )
+        let vm = ItemDetailViewModel(
+            provider: plex,
+            itemID: "plex-movie",
+            sourceAccountID: "plex",
+            onlineTrailerResolver: { _ in [] },
+            playableVideoIDResolver: { _ in nil },
+            trailerCache: TrailerResolutionCache(),
+            initialSources: [
+                MediaSourceRef(accountID: "plex", itemID: "plex-movie"),
+                MediaSourceRef(accountID: "emby", itemID: "emby-movie")
+            ],
+            alternateProviderResolver: { $0 == "emby" ? emby : nil }
+        )
+
+        await vm.load()
+        await vm.switchToSource(accountID: "emby")
+        await waitUntil {
+            vm.state.value?.item.mediaInfo?.audio?.profile == "Dolby Atmos"
+        }
+
+        XCTAssertEqual(vm.state.value?.item.id, "emby-movie")
+        XCTAssertEqual(emby.supplementalProbeCount, 1)
+        XCTAssertEqual(plex.supplementalProbeCount, 0)
+        XCTAssertEqual(
+            vm.sources.first { $0.accountID == "emby" }?.versions.first?.audioProfile,
+            "Dolby Atmos"
+        )
+    }
+
+    func testSwitchingBetweenShareAccountsRunsEachSourceProbe() async {
+        let smbItem = MediaItem(
+            id: "movie",
+            title: "Movie",
+            kind: .movie,
+            sourceAccountID: "smb"
+        )
+        let webDAVItem = MediaItem(
+            id: "movie",
+            title: "Movie",
+            kind: .movie,
+            sourceAccountID: "webdav"
+        )
+        let smb = FakeMediaProvider(
+            allItems: [smbItem],
+            kind: .mediaShare,
+            accountID: "smb"
+        )
+        let webDAV = FakeMediaProvider(
+            allItems: [webDAVItem],
+            kind: .mediaShare,
+            accountID: "webdav"
+        )
+        smb.supplementalFactsByItem["movie"] = ProbedStreamFacts(
+            audioCodec: "eac3",
+            audioChannels: 6
+        )
+        webDAV.supplementalFactsByItem["movie"] = ProbedStreamFacts(
+            audioCodec: "eac3",
+            audioChannels: 6,
+            audioIsAtmos: true
+        )
+        let vm = ItemDetailViewModel(
+            provider: smb,
+            itemID: "movie",
+            sourceAccountID: "smb",
+            onlineTrailerResolver: { _ in [] },
+            playableVideoIDResolver: { _ in nil },
+            trailerCache: TrailerResolutionCache(),
+            initialSources: [
+                MediaSourceRef(accountID: "smb", itemID: "movie"),
+                MediaSourceRef(accountID: "webdav", itemID: "movie")
+            ],
+            alternateProviderResolver: { $0 == "webdav" ? webDAV : smb }
+        )
+
+        await vm.load()
+        await waitUntil { smb.supplementalProbeCount == 1 }
+        await vm.switchToSource(accountID: "webdav")
+        await waitUntil {
+            vm.state.value?.item.mediaInfo?.audio?.profile == "Dolby Atmos"
+        }
+
+        XCTAssertEqual(smb.supplementalProbeCount, 1)
+        XCTAssertEqual(webDAV.supplementalProbeCount, 1)
+    }
+
     func testEnrichesAlternateSourcesAndUnifiesWatchState() async {
         let primary = MediaItem(id: "p1", title: "Dune", kind: .movie, productionYear: 2021,
                                 sourceAccountID: "plex",
@@ -378,6 +671,54 @@ final class ItemDetailViewModelTests: XCTestCase {
         await vm.load()
         XCTAssertEqual(vm.state.value?.item.sourceAccountID, "remote",
                        "A subsequent load() must not re-apply the local-first preference over the user's pick")
+    }
+
+    func testMovieRetargetsToPreferredSourceAfterAsyncDiscovery() async {
+        let remoteMovie = MediaItem(
+            id: "remote-movie",
+            title: "Movie",
+            kind: .movie,
+            sourceAccountID: "remote"
+        )
+        let localMovie = MediaItem(
+            id: "local-movie",
+            title: "Movie",
+            kind: .movie,
+            sourceAccountID: "local"
+        )
+        let remote = FakeMediaProvider(allItems: [remoteMovie])
+        remote.localityOverride = .remote
+        let local = FakeMediaProvider(allItems: [localMovie])
+        local.localityOverride = .local
+        let discovered = [
+            MediaSourceRef(
+                accountID: "remote",
+                itemID: "remote-movie",
+                locality: .remote
+            ),
+            MediaSourceRef(
+                accountID: "local",
+                itemID: "local-movie",
+                locality: .local
+            )
+        ]
+        let vm = ItemDetailViewModel(
+            provider: remote,
+            itemID: "remote-movie",
+            sourceAccountID: "remote",
+            initialSources: [discovered[0]],
+            alternateProviderResolver: { accountID in
+                accountID == "local" ? local : (accountID == "remote" ? remote : nil)
+            },
+            crossServerSourceResolver: { _ in discovered }
+        )
+
+        await vm.load()
+        await waitUntil {
+            vm.state.value?.item.id == "local-movie"
+        }
+
+        XCTAssertEqual(vm.state.value?.item.sourceAccountID, "local")
     }
 
     func testLoadEpisodesFetchesAndCachesPerSeason() async {
@@ -875,6 +1216,73 @@ final class ItemDetailViewModelTests: XCTestCase {
         XCTAssertEqual(Set(vm.sources.map(\.itemID)), ["p1", "p2"])
     }
 
+    func testUnchangedDiscoveryRetargetsSnapshotRestoredMovieSource() async {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("plozz-atmos-source-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        let cache = DetailSnapshotCache(directory: tempDir)
+        let remoteMovie = MediaItem(
+            id: "remote-movie",
+            title: "Movie",
+            kind: .movie,
+            sourceAccountID: "remote"
+        )
+        let localMovie = MediaItem(
+            id: "local-movie",
+            title: "Movie",
+            kind: .movie,
+            sourceAccountID: "local"
+        )
+        let restoredSources = [
+            MediaSourceRef(
+                accountID: "remote",
+                itemID: "remote-movie",
+                locality: .remote
+            ),
+            MediaSourceRef(
+                accountID: "local",
+                itemID: "local-movie",
+                locality: .local
+            )
+        ]
+        await cache.store(
+            DetailSnapshotCache.Snapshot(
+                item: remoteMovie,
+                children: [],
+                seasonEpisodes: [:],
+                sources: restoredSources
+            ),
+            for: "remote|remote-movie"
+        )
+        let remote = FakeMediaProvider(allItems: [remoteMovie])
+        remote.localityOverride = .remote
+        let local = FakeMediaProvider(allItems: [localMovie])
+        local.localityOverride = .local
+        let discoveryGate = AsyncGate()
+        let vm = ItemDetailViewModel(
+            provider: remote,
+            itemID: "remote-movie",
+            sourceAccountID: "remote",
+            initialSources: [restoredSources[0]],
+            alternateProviderResolver: { accountID in
+                accountID == "local" ? local : (accountID == "remote" ? remote : nil)
+            },
+            crossServerSourceResolver: { _ in
+                await discoveryGate.wait()
+                return restoredSources
+            },
+            snapshotCache: cache
+        )
+
+        await vm.load()
+        await waitUntil { vm.sources.count == 2 }
+        discoveryGate.open()
+        await waitUntil { vm.state.value?.item.id == "local-movie" }
+
+        XCTAssertEqual(vm.state.value?.item.sourceAccountID, "local")
+    }
+
     /// Disabling a server (its account is excluded from the active profile, so
     /// `alternateProviderResolver` returns nil for it) must drop that server from
     /// the picker even when it lingers in an on-disk snapshot persisted while the
@@ -1273,13 +1681,10 @@ final class ItemDetailViewModelTests: XCTestCase {
         XCTAssertEqual(vm.state.value?.children, [])
     }
 
-    func testSeriesWaitsForChildrenBeforePublishingLoadedState() async {
-        // Regression guard: a series page must NOT publish a `.loaded` hero with
-        // an empty children list, because SeriesDetailView latches its @State
-        // (selected season + hero/Play target) from the children it first sees —
-        // a childless intermediate state strands it with no seasons, no episodes
-        // and no Play button. The series load must therefore stay non-loaded
-        // until its children resolve, then publish once, complete.
+    func testSeriesPublishesHeroThenFillsChildren() async {
+        // Current detail loading intentionally paints the full series hero before
+        // a potentially slow remote children request. SeriesDetailView observes the
+        // season-id list and re-latches selection/Play when children arrive.
         let provider = FakeMediaProvider(allItems: [series("show")])
         provider.childrenByParent = [
             "show": [season("s1", "Book One"), season("s2", "Book Two")]
@@ -1297,15 +1702,12 @@ final class ItemDetailViewModelTests: XCTestCase {
 
         let loadTask = Task { await vm.load() }
 
-        // While the children fetch is suspended, the series must NOT be published
-        // in a loaded-but-childless state.
-        await waitUntil { vm.state.isLoading || vm.state.value != nil }
-        if let published = vm.state.value {
-            XCTAssertEqual(published.item.id, "show")
-            XCTAssertFalse(published.children.isEmpty, "Series must never publish a loaded state with empty children")
-        }
+        await waitUntil { vm.state.value?.item.id == "show" }
+        XCTAssertEqual(vm.state.value?.item.id, "show")
+        XCTAssertTrue(vm.state.value?.children.isEmpty ?? false)
+        XCTAssertEqual(vm.state.value?.childrenLoaded, false)
 
-        // Release the gate; load completes with the full children list in one shot.
+        // Release the gate; the same page fills its season list in place.
         gate.open()
         await loadTask.value
         XCTAssertEqual(vm.state.value?.children.map(\.id), ["s1", "s2"])

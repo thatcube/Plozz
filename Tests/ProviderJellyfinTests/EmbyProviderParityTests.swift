@@ -3,14 +3,28 @@ import CoreNetworking
 import XCTest
 @testable import ProviderJellyfin
 
+private actor StubAuthenticatedStreamProber: AuthenticatedHTTPStreamProbing {
+    let facts: ProbedStreamFacts?
+    private(set) var locators: [AuthenticatedHTTPPlaybackLocator] = []
+
+    init(facts: ProbedStreamFacts?) {
+        self.facts = facts
+    }
+
+    func probe(locator: AuthenticatedHTTPPlaybackLocator) async -> ProbedStreamFacts? {
+        locators.append(locator)
+        return facts
+    }
+}
+
 final class EmbyProviderParityTests: XCTestCase {
-    private func makeSession() -> UserSession {
+    private func makeSession(provider: ProviderKind = .emby) -> UserSession {
         UserSession(
             server: MediaServer(
                 id: "emby-server",
                 name: "Emby Home",
                 baseURL: URL(string: "http://host:8096")!,
-                provider: .emby
+                provider: provider
             ),
             userID: "u1",
             userName: "Alice",
@@ -137,6 +151,116 @@ final class EmbyProviderParityTests: XCTestCase {
 
         XCTAssertEqual(item.technicalBadges.map(\.label), ["4K", "HDR10"])
         XCTAssertFalse(item.technicalBadges.map(\.label).contains("SDR"))
+    }
+
+    func testEmbyBuildsSecretFreeDirectLocatorForAtmosProbe() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Users/u1/Items/atmos", json: """
+        {"Id":"atmos","Name":"Atmos Movie","Type":"Movie",
+         "MediaStreams":[
+           {"Index":0,"Type":"Video","Codec":"hevc"},
+           {"Index":1,"Type":"Audio","Codec":"eac3","Channels":6,"IsDefault":true}
+         ],
+         "MediaSources":[
+           {"Id":"source-1","ETag":"etag-1","Container":"mkv","Size":123456,
+            "MediaStreams":[
+              {"Index":0,"Type":"Video","Codec":"hevc"},
+              {"Index":1,"Type":"Audio","Codec":"eac3","Channels":6,"IsDefault":true}
+            ]}
+         ]}
+        """)
+        stub.stub(pathSuffix: "/Items/atmos/PlaybackInfo", json: """
+        {"MediaSources":[
+          {"Id":"source-1","ETag":"etag-1","Container":"mkv","Size":123456,
+           "SupportsDirectPlay":true,
+           "MediaStreams":[
+             {"Index":0,"Type":"Video","Codec":"hevc"},
+             {"Index":1,"Type":"Audio","Codec":"eac3","Channels":6,"IsDefault":true}
+           ]}
+        ],"PlaySessionId":"play-atmos"}
+        """)
+        let prober = StubAuthenticatedStreamProber(
+            facts: ProbedStreamFacts(
+                audioCodec: "eac3",
+                audioChannels: 6,
+                audioIsAtmos: true
+            )
+        )
+        let provider = JellyfinProvider(
+            session: makeSession(),
+            http: stub,
+            authenticatedStreamProber: prober
+        )
+        let item = try await provider.item(id: "atmos")
+
+        let facts = await provider.supplementalStreamFacts(for: item)
+
+        XCTAssertEqual(facts?.audioIsAtmos, true)
+        let capturedLocators = await prober.locators
+        let locator = try XCTUnwrap(capturedLocators.first)
+        XCTAssertEqual(locator.provider, .emby)
+        XCTAssertEqual(locator.deliveryMode, .directFile)
+        XCTAssertEqual(locator.purpose, .originalFile)
+        XCTAssertEqual(locator.resource.path, "Videos/atmos/stream.mkv")
+        XCTAssertTrue(locator.resource.queryItems.contains {
+            $0.name == "mediaSourceId" && $0.value == "source-1"
+        })
+        XCTAssertFalse(String(describing: locator).contains("TOKEN"))
+
+        _ = await provider.supplementalStreamFacts(for: item)
+        let cachedLocators = await prober.locators
+        XCTAssertEqual(cachedLocators.count, 1, "same revision should reuse the cached probe")
+
+        let request = try await provider.playbackInfo(
+            for: "atmos",
+            mediaSourceID: "source-1",
+            forceTranscode: false
+        )
+        XCTAssertEqual(request.item.mediaInfo?.audio?.profile, "Dolby Atmos")
+        XCTAssertEqual(request.sourceMetadata?.audio?.profile, "Dolby Atmos")
+        XCTAssertTrue(request.audioTracks.first { $0.isDefault }?.isAtmos ?? false)
+        XCTAssertTrue(request.item.technicalBadges.map(\.label).contains("Dolby Atmos"))
+    }
+
+    func testAtmosProbeCapabilityIsEmbyOnly() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Users/u1/Items/plain", json: """
+        {"Id":"plain","Name":"Plain","Type":"Movie",
+         "MediaStreams":[{"Index":0,"Type":"Audio","Codec":"eac3","Channels":6}],
+         "MediaSources":[{"Id":"source","Container":"mkv",
+          "MediaStreams":[{"Index":0,"Type":"Audio","Codec":"eac3","Channels":6}]}]}
+        """)
+        let prober = StubAuthenticatedStreamProber(
+            facts: ProbedStreamFacts(audioIsAtmos: true)
+        )
+        let provider = JellyfinProvider(
+            session: makeSession(provider: .jellyfin),
+            http: stub,
+            authenticatedStreamProber: prober
+        )
+        let item = try await provider.item(id: "plain")
+
+        let facts = await provider.supplementalStreamFacts(for: item)
+        let capturedLocators = await prober.locators
+
+        XCTAssertNil(facts)
+        XCTAssertTrue(capturedLocators.isEmpty)
+    }
+
+    func testProbeDescriptorStoreEvictsLeastRecentlyUsedItems() async throws {
+        let store = MediaBrowserProbeDescriptorStore()
+        for index in 0...256 {
+            let data = Data("""
+            [{"Id":"source-\(index)","ETag":"etag-\(index)","Container":"mkv","Size":\(index + 1)}]
+            """.utf8)
+            let sources = try JSONDecoder().decode([MediaSourceInfo].self, from: data)
+            await store.remember(itemID: "item-\(index)", sources: sources)
+        }
+
+        let evicted = await store.descriptor(for: "item-0")
+        let retained = await store.descriptor(for: "item-256")
+        XCTAssertNil(evicted)
+        XCTAssertNotNil(retained)
     }
 
     func testEmbyEpisodesAreNormalizedIntoNumericOrder() async throws {

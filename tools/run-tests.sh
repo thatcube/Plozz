@@ -46,6 +46,18 @@ export GIT_CONFIG_PARAMETERS="${GIT_CONFIG_PARAMETERS-'safe.bareRepository=all'}
 
 PARALLEL="${PLOZZ_PARALLEL:-NO}"
 
+# --- Architecture layering guard (fast, data-driven) -------------------------
+# Enforce the module-layering invariants before any (slow) compile/simulator
+# orchestration. This is the chokepoint both CI and tools/test-fast.sh funnel
+# through, so a forbidden module edge fails here too. Set PLOZZ_SKIP_ARCH_GUARD=1
+# to bypass (the standalone CI step still runs it). See tools/arch-guard.py.
+if [[ "${PLOZZ_SKIP_ARCH_GUARD:-0}" != "1" ]]; then
+  python3 "$(dirname "$0")/arch-guard.py" || {
+    echo "run-tests.sh: architecture layering guard FAILED — fix the module graph before testing."
+    exit 1
+  }
+fi
+
 # --- Discover all test targets (data-driven) ---------------------------------
 ALL_TESTS=()
 while IFS= read -r T; do

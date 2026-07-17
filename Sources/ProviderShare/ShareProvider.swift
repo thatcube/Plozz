@@ -30,6 +30,10 @@ public struct ShareProvider: MediaProvider {
     private let catalogAccessor: @Sendable () async -> any ShareCatalogReading
     private let watchState: ShareWatchStateService
     private let playbackSource: SharePlaybackSourceService
+    /// Injected engine-side network-file header prober. It uses the same typed
+    /// locator and transport resolver as playback.
+    private let streamProber: NetworkFileStreamProbing?
+    private let streamProbeCache = ShareStreamProbeCache()
 
     public init(
         session: UserSession,
@@ -111,6 +115,7 @@ public struct ShareProvider: MediaProvider {
             accountID: accountID,
             credentialRevision: credentialRevision
         )
+        self.streamProber = streamProber
     }
 
     // MARK: Library browsing
@@ -316,7 +321,29 @@ public struct ShareProvider: MediaProvider {
         let records = await watchState.records(for: [canonicalItemID])
         let record = records[canonicalItemID]
         let startPosition = (record?.played == true) ? 0 : (record?.position ?? 0)
-        let playItem = (mediaSourceID != nil) ? item.selectingVersion(mediaSourceID) : item
+        var playItem = (mediaSourceID != nil) ? item.selectingVersion(mediaSourceID) : item
+        let probedFacts = await streamProbeCache.completedFacts(for: locator)
+        var sourceMetadata: MediaSourceMetadata?
+        var audioTracks: [MediaTrack] = []
+        if let probedFacts {
+            playItem = playItem.applyingSupplementalStreamFacts(probedFacts)
+            var metadata = probedFacts.applying()
+            metadata.container = locator.formatHint.container
+            sourceMetadata = metadata
+            if let trackID = probedFacts.audioTrackID {
+                audioTracks = [
+                    MediaTrack(
+                        id: trackID,
+                        kind: .audio,
+                        displayTitle: "Track \(trackID)",
+                        codec: probedFacts.audioCodec,
+                        isDefault: true,
+                        channels: probedFacts.audioChannels,
+                        isAtmos: probedFacts.audioIsAtmos
+                    )
+                ]
+            }
+        }
         // Surface any text sidecar subtitles sitting next to the video (and in a
         // sibling Subs/Subtitles folder) as selectable tracks. Best-effort: a
         // listing/read failure just yields no sidecars rather than blocking play.
@@ -324,8 +351,10 @@ public struct ShareProvider: MediaProvider {
         return PlaybackRequest(
             item: playItem,
             playbackSource: .networkFile(locator),
+            audioTracks: audioTracks,
             subtitleTracks: subtitleTracks,
             startPosition: startPosition,
+            sourceMetadata: sourceMetadata,
             sourceProvider: .mediaShare,
             serverName: session.server.name,
             sourceFileName: (relPath as NSString).lastPathComponent
@@ -421,6 +450,37 @@ extension ShareProvider: InteractiveBrowseActivityReporting {
     }
 }
 
+extension ShareProvider: SupplementalStreamFactsProviding {
+    public func supplementalStreamFacts(for item: MediaItem) async -> ProbedStreamFacts? {
+        guard item.kind == .movie || item.kind == .episode || item.kind == .video,
+              let streamProber,
+              let relativePath = await probeRelativePath(for: item),
+              let locator = try? await networkFileLocator(for: relativePath) else {
+            return nil
+        }
+        return await streamProbeCache.facts(for: locator) {
+            await streamProber.probe(locator: locator)
+        }
+    }
+
+    private func probeRelativePath(for item: MediaItem) async -> String? {
+        if let selectedVersionID = item.selectedVersionID, !selectedVersionID.isEmpty {
+            return selectedVersionID
+        }
+        let catalog = await self.catalog
+        let canonicalItemID = await catalog.canonicalItemID(item.id)
+        if let key = ShareCatalogID.movieKey(forMovieID: canonicalItemID),
+           let path = await catalog.defaultMovieRelPath(forKey: key) {
+            return path
+        }
+        if let versionID = item.versions.first?.id,
+           !versionID.hasPrefix("synth:") {
+            return versionID
+        }
+        return await store.path(forItemID: item.id)
+    }
+}
+
 extension ShareProvider: WatchStateProviding {
     /// Live UI toggle (mark watched / unwatched): the action happens *now*, so
     /// stamp with the current time. The outbox-drained path uses the timestamped
@@ -445,5 +505,31 @@ extension ShareProvider: ResumeStateWriting {
     /// draining queued resume can't overwrite a newer state.
     public func setResumePosition(_ seconds: TimeInterval, itemID: String, capturedAt: Date) async throws {
         await watchState.setResumePosition(seconds, itemID: itemID, capturedAt: capturedAt)
+    }
+}
+
+private actor ShareStreamProbeCache {
+    private var completed: Set<NetworkFileLocator> = []
+    private var results: [NetworkFileLocator: ProbedStreamFacts] = [:]
+    private var inFlight: [NetworkFileLocator: Task<ProbedStreamFacts?, Never>] = [:]
+
+    func facts(
+        for locator: NetworkFileLocator,
+        loader: @escaping @Sendable () async -> ProbedStreamFacts?
+    ) async -> ProbedStreamFacts? {
+        if completed.contains(locator) { return results[locator] }
+        if let existing = inFlight[locator] { return await existing.value }
+        let task = Task(priority: .utility) { await loader() }
+        inFlight[locator] = task
+        let facts = await task.value
+        inFlight[locator] = nil
+        completed.insert(locator)
+        if let facts { results[locator] = facts }
+        return facts
+    }
+
+    func completedFacts(for locator: NetworkFileLocator) -> ProbedStreamFacts? {
+        guard completed.contains(locator) else { return nil }
+        return results[locator]
     }
 }

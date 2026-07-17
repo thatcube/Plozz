@@ -1129,16 +1129,20 @@ public final class AppState {
         self.mediaShareRuntime = resolvedRuntime
         self.mediaShareAccountService = MediaShareAccountService(runtime: resolvedRuntime)
         let defaultAuthenticatedHTTPResolver: AppAuthenticatedHTTPResourceResolver?
+        let resolvedAuthenticatedHTTPResolver: any AuthenticatedHTTPResourceResolving
         if let authenticatedHTTPResolver {
             self.authenticatedHTTPResolver = authenticatedHTTPResolver
+            resolvedAuthenticatedHTTPResolver = authenticatedHTTPResolver
             defaultAuthenticatedHTTPResolver = nil
         } else {
             let resolver = AppAuthenticatedHTTPResourceResolver()
             self.authenticatedHTTPResolver = resolver
+            resolvedAuthenticatedHTTPResolver = resolver
             defaultAuthenticatedHTTPResolver = resolver
         }
         self.registry = registry ?? Self.makeDefaultRegistry(
             runtime: resolvedRuntime,
+            authenticatedHTTPResolver: resolvedAuthenticatedHTTPResolver,
             durableLocalStateStore: resolvedDurableLocalStateStore
         )
         self.profilesModel = profilesModel ?? Self.makeDefaultProfilesModel()
@@ -1339,6 +1343,7 @@ public final class AppState {
     /// by the runtime, which owns the transport composition and coordinator.
     private static func makeDefaultRegistry(
         runtime: any MediaShareRuntime,
+        authenticatedHTTPResolver: any AuthenticatedHTTPResourceResolving,
         durableLocalStateStore: DurableLocalStateStore?
     ) -> ProviderRegistry {
         let registry = ProviderRegistry()
@@ -1357,7 +1362,10 @@ public final class AppState {
                 accountID: context.accountID,
                 credentialRevision: context.credentialRevision,
                 interactiveHTTP: URLSessionHTTPClient(session: .plozzInteractive),
-                hybridEngineEnabled: HybridPlayback.enabled
+                hybridEngineEnabled: HybridPlayback.enabled,
+                authenticatedStreamProber: PlozzigenAuthenticatedHTTPStreamProber(
+                    resolver: authenticatedHTTPResolver
+                )
             )
         }
         registry.register(.plex) { context in

@@ -6,21 +6,9 @@ import MediaTransportCore
 /// Probes a network file's headers through the same transport resolver and
 /// representation-bound source used by playback.
 ///
-/// NOTE: this uses AetherEngine's standard `probe(source:)`, which currently opens
-/// with the engine's default demux budget (not the bounded browse budget) — the
-/// on-device timing measurement will tell us whether that resolves fast enough over
-/// SMB for the common (well-formed) case, or whether we need a bounded/header-only
-/// fast path (plan Phase 2).
+/// Uses AetherEngine's opt-in bounded Atmos probe. This remains detail-only in
+/// production; browse scans never decode media.
 public struct PlozzigenNetworkFileStreamProber: NetworkFileStreamProbing {
-    /// A dedicated serial queue for the BLOCKING find_stream_info call, so it never
-    /// occupies a Swift concurrency (cooperative) thread — a blocked cooperative
-    /// thread starves all other async work (image loading, enrichment, UI). Serial,
-    /// so it also can't run two blocking probes at once.
-    private static let probeQueue = DispatchQueue(
-        label: "com.thatcube.Plozz.network-file-stream-probe",
-        qos: .utility
-    )
-
     private let resolver: any MediaTransportNetworkFileResolving
 
     public init(resolver: any MediaTransportNetworkFileResolving) {
@@ -28,7 +16,10 @@ public struct PlozzigenNetworkFileStreamProber: NetworkFileStreamProbing {
     }
 
     public func probe(locator: NetworkFileLocator) async -> ProbedStreamFacts? {
-        guard let resolved = try? await resolver.resolve(locator) else { return nil }
+        guard let resolved = try? await resolver.resolve(locator) else {
+            HandoffDiagnostics.emit("shareProbe FAILED stage=resolve")
+            return nil
+        }
         let reader = TransportIOReader(resolvedSource: resolved)
         let source = MediaSource.custom(
             reader,
@@ -37,16 +28,24 @@ public struct PlozzigenNetworkFileStreamProber: NetworkFileStreamProbing {
 
         // find_stream_info is a BLOCKING call; run it on a dedicated serial thread so
         // it never occupies (and exhausts) the Swift concurrency pool.
-        let probe: SourceProbe? = await withCheckedContinuation { continuation in
-            Self.probeQueue.async {
-                continuation.resume(returning: try? AetherEngine.probe(source: source))
-            }
+        let started = Date()
+        let probe = await PlozzigenStreamProbeExecutor.runAtmosProbe {
+            try? AetherEngine.probeDetectingAtmos(source: source)
         }
+        let elapsedMs = Int(Date().timeIntervalSince(started) * 1_000)
         reader.close()
         await reader.waitForFinalShutdown()
 
-        guard let probe else { return nil }
-        return Self.facts(from: probe)
+        guard let probe else {
+            HandoffDiagnostics.emit("shareProbe FAILED stage=probe elapsed=\(elapsedMs)ms")
+            return nil
+        }
+        let facts = Self.facts(from: probe)
+        HandoffDiagnostics.emit(
+            "shareProbe elapsed=\(elapsedMs)ms range=\(facts.videoRangeType ?? "-") "
+                + "codec=\(facts.audioCodec ?? "-") atmos=\(facts.audioIsAtmos)"
+        )
+        return facts
     }
 
     static func facts(from probe: SourceProbe) -> ProbedStreamFacts {
@@ -65,6 +64,7 @@ public struct PlozzigenNetworkFileStreamProber: NetworkFileStreamProbing {
             videoHeight: h > 0 ? h : nil,
             videoRangeType: range,
             videoCodec: probe.videoCodecName,
+            audioTrackID: audio?.id,
             audioCodec: audio?.codec,
             audioChannels: audio.map(\.channels).flatMap { $0 > 0 ? $0 : nil },
             audioIsAtmos: audio?.isAtmos ?? false,

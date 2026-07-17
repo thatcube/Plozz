@@ -322,6 +322,12 @@ public final class ItemDetailViewModel {
     /// pays zero speculative cost. Zero under tests. (Trailer extraction has its
     /// own dwell on the awaited path — see ``trailerExtractionDwellNanos``.)
     private static var enrichmentDwellNanos: UInt64 { isRunningUnderTests ? 0 : 800_000_000 }
+    /// Settle time before a bounded one-frame stream probe. This task is separate
+    /// from cross-server discovery so an explicit source switch restarts it for
+    /// the newly selected provider without rerunning unrelated fan-out.
+    private static var streamProbeDwellNanos: UInt64 {
+        isRunningUnderTests ? 0 : 2_300_000_000
+    }
 
     /// Further dwell before the authoritative YouTubeKit/JavaScriptCore trailer
     /// extraction (the single biggest CPU consumer during browsing) runs, so only
@@ -337,6 +343,8 @@ public final class ItemDetailViewModel {
     /// after tapping through several titles. Trailers + ratings, by contrast, are
     /// awaited on the `load()` path (see ``runTrailersAndRatings(for:)``).
     private nonisolated(unsafe) var enrichmentTask: Task<Void, Never>?
+    private nonisolated(unsafe) var streamProbeTask: Task<Void, Never>?
+    private var completedStreamProbeKey: String?
     /// The fully-loaded item enrichment is keyed to, so a page returned to (popped
     /// back onto) can resume the speculative discovery that was suspended on
     /// disappear.
@@ -440,6 +448,7 @@ public final class ItemDetailViewModel {
     /// watchdog. `Task.cancel()` is safe to call from this non-isolated `deinit`.
     deinit {
         enrichmentTask?.cancel()
+        streamProbeTask?.cancel()
         crossServerDiscoveryTask?.cancel()
         alternateSourceEnrichmentTask?.cancel()
         snapshotRestoreTask?.cancel()
@@ -524,7 +533,10 @@ public final class ItemDetailViewModel {
             // Immutable snapshot so the concurrent async-lets below capture a
             // Sendable value (Swift 6 strict-concurrency forbids capturing
             // mutated `var`s into concurrently-executing code).
-            let item = redirected.item
+            let item = Self.preservingConfirmedAtmos(
+                in: redirected.item,
+                from: state.value?.item
+            )
             let taggedItem = tagged(item)
 
             // Container kinds (series/season/folder/collection) have children
@@ -556,6 +568,11 @@ public final class ItemDetailViewModel {
                 state = .loaded(Detail(item: taggedItem, children: seededChildren, childrenLoaded: state.value?.childrenLoaded ?? false))
                 hasPaintedFreshDetail = true
                 seedSources(from: taggedItem)
+                startStreamProbeEnrichment(
+                    for: item,
+                    provider: loadProvider,
+                    sourceGeneration: loadSourceGeneration
+                )
                 // Speculative discovery (cross-server picker + alternate-source
                 // watch-state) runs as a CANCELLABLE unit that `load()` does NOT
                 // await — so navigating away cancels it instead of letting the
@@ -582,6 +599,11 @@ public final class ItemDetailViewModel {
                 state = .loaded(Detail(item: taggedItem, children: [], childrenLoaded: true))
                 hasPaintedFreshDetail = true
                 seedSources(from: taggedItem)
+                startStreamProbeEnrichment(
+                    for: item,
+                    provider: loadProvider,
+                    sourceGeneration: loadSourceGeneration
+                )
                 persistSnapshot()
                 // See container branch: speculative discovery is cancellable and
                 // NOT awaited (a navigate-away drops it), while trailers + ratings
@@ -742,6 +764,7 @@ public final class ItemDetailViewModel {
     /// page's `provider.item` (the multi-second blank-detail hang).
     public func suspendEnrichment() {
         enrichmentTask?.cancel(); enrichmentTask = nil
+        streamProbeTask?.cancel(); streamProbeTask = nil
         crossServerDiscoveryTask?.cancel(); crossServerDiscoveryTask = nil
         alternateSourceEnrichmentTask?.cancel(); alternateSourceEnrichmentTask = nil
         seasonLoadingSuspended = true
@@ -756,7 +779,15 @@ public final class ItemDetailViewModel {
         if seasonLoadingResumeSourceGeneration == nil {
             seasonLoadingSuspended = false
         }
-        guard hasPaintedFreshDetail, !enrichmentComplete, enrichmentTask == nil,
+        guard hasPaintedFreshDetail else { return }
+        if let item = state.value?.item {
+            startStreamProbeEnrichment(
+                for: item,
+                provider: activeProvider,
+                sourceGeneration: sourceGeneration
+            )
+        }
+        guard !enrichmentComplete, enrichmentTask == nil,
               let item = enrichmentItem else { return }
         startSpeculativeEnrichment(for: item)
     }
@@ -965,7 +996,10 @@ public final class ItemDetailViewModel {
         let redirected = await redirectingSeasonToSeries(fetched, using: provider)
         guard !Task.isCancelled, isCurrent() else { return }
         preselectedSeasonID = redirected.preselectedSeasonID
-        let item = redirected.item
+        let item = Self.preservingConfirmedAtmos(
+            in: redirected.item,
+            from: state.value?.item
+        )
         captureSeriesContext(from: item)
         let children: [MediaItem]
         switch item.kind {
@@ -976,6 +1010,11 @@ public final class ItemDetailViewModel {
         }
         guard !Task.isCancelled, isCurrent() else { return }
         state = .loaded(Detail(item: tagged(item), children: children.map(tagged), childrenLoaded: true))
+        startStreamProbeEnrichment(
+            for: item,
+            provider: provider,
+            sourceGeneration: reloadSourceGeneration
+        )
         if seasonLoadingResumeSourceGeneration == reloadSourceGeneration {
             seasonLoadingSuspended = false
             seasonLoadingResumeSourceGeneration = nil
@@ -1087,7 +1126,7 @@ public final class ItemDetailViewModel {
     }
 
     /// Deferred twin of ``applyInitialLocalityPreferenceIfNeeded`` for the common
-    /// case where a series cold-loads with a SINGLE source and its local copy is
+    /// case where a title cold-loads with a SINGLE source and its preferred copy is
     /// only discovered later (async cross-server discovery).
     ///
     /// The initial pass can only choose among the sources known at first paint. A
@@ -1101,13 +1140,14 @@ public final class ItemDetailViewModel {
     /// also refreshes the retarget against LIVE locality, so it doubles as the
     /// detail page's fix for a stale synchronous locality read.
     ///
-    /// Series only (a movie re-selects its best copy at play time via
-    /// `bestSourcePlayItem`). Never overrides an explicit user pick
-    /// (``switchToSource``) or an origin-pinned detail page, and reloads in place so
-    /// the local server's episode tree loads. Returns `true` when it retargeted.
+    /// Movies also retarget now that provider-specific delayed enrichment updates
+    /// their detail badges; the picker must never highlight one server while the
+    /// detail model remains loaded from another. Never overrides an explicit user
+    /// pick (``switchToSource``) or an origin-pinned detail page. Returns `true`
+    /// when it retargeted.
     @discardableResult
     private func retargetToMostLocalSourceAfterDiscovery(kind: MediaItemKind) async -> Bool {
-        guard kind == .series,
+        guard kind == .series || kind == .movie || kind == .episode || kind == .video,
               originSourceAccountID == nil,
               !userDidSwitchSource,
               sources.count > 1 else { return false }
@@ -1420,6 +1460,16 @@ public final class ItemDetailViewModel {
     /// downgrading anything the live fetch already produced (each merge is guarded
     /// on the current value being empty/thinner).
     private func adoptSnapshotEnrichments(_ snapshot: DetailSnapshotCache.Snapshot) {
+        if case var .loaded(detail) = state {
+            let enriched = Self.preservingConfirmedAtmos(
+                in: detail.item,
+                from: snapshot.item
+            )
+            if enriched != detail.item {
+                detail.item = enriched
+                state = .loaded(detail)
+            }
+        }
         if let detail = state.value, detail.children.isEmpty, !snapshot.children.isEmpty {
             state = .loaded(Detail(item: detail.item, children: snapshot.children.map(tagged), childrenLoaded: true))
         }
@@ -1506,6 +1556,85 @@ public final class ItemDetailViewModel {
         guard detail.item.overview?.isEmpty ?? true else { return }
         detail.item.overview = text
         state = .loaded(detail)
+    }
+
+    /// Confirms E-AC-3 JOC by decoding one bounded audio frame in the background.
+    /// Initial detail rendering and playback never await this; a confirmed result
+    /// only upgrades the already-visible audio badge and persisted snapshot.
+    private func enrichSupplementalStreamFacts(
+        for item: MediaItem,
+        provider: any MediaProvider,
+        sourceGeneration: UInt64
+    ) async {
+        guard item.mediaInfo?.audio?.profile?
+                  .localizedCaseInsensitiveContains("atmos") != true,
+              let provider = provider as? any SupplementalStreamFactsProviding else {
+            return
+        }
+        guard let facts = await provider.supplementalStreamFacts(for: item),
+              !Task.isCancelled,
+              self.sourceGeneration == sourceGeneration,
+              case var .loaded(detail) = state,
+              detail.item.id == item.id else {
+            return
+        }
+
+        let enrichedItem = detail.item.applyingSupplementalStreamFacts(facts)
+        detail.item = enrichedItem
+        state = .loaded(detail)
+        sources = sources.map { stampedPrimarySource($0, from: enrichedItem) }
+        persistSnapshot()
+    }
+
+    private func startStreamProbeEnrichment(
+        for item: MediaItem,
+        provider: any MediaProvider,
+        sourceGeneration: UInt64
+    ) {
+        let key = [
+            provider.kind.rawValue,
+            provider.session.server.id,
+            item.id,
+            item.mediaInfo?.sourceRevision ?? "-"
+        ].joined(separator: "|")
+        guard completedStreamProbeKey != key else { return }
+        streamProbeTask?.cancel()
+        streamProbeTask = Task(priority: .utility) { [weak self] in
+            if Self.streamProbeDwellNanos > 0 {
+                try? await Task.sleep(nanoseconds: Self.streamProbeDwellNanos)
+                guard !Task.isCancelled else { return }
+            }
+            guard let self else { return }
+            await self.enrichSupplementalStreamFacts(
+                for: item,
+                provider: provider,
+                sourceGeneration: sourceGeneration
+            )
+            guard !Task.isCancelled,
+                  self.sourceGeneration == sourceGeneration else {
+                return
+            }
+            self.completedStreamProbeKey = key
+            self.streamProbeTask = nil
+        }
+    }
+
+    /// Retains a previously confirmed Atmos result only for the exact same
+    /// provider source revision; a replaced file automatically loses the cached
+    /// enrichment and is probed again.
+    private static func preservingConfirmedAtmos(
+        in fresh: MediaItem,
+        from cached: MediaItem?
+    ) -> MediaItem {
+        guard let cached,
+              fresh.id == cached.id,
+              let revision = fresh.mediaInfo?.sourceRevision,
+              revision == cached.mediaInfo?.sourceRevision,
+              fresh.mediaInfo?.audio?.codec?.lowercased() == "eac3",
+              cached.mediaInfo?.audio?.profile?.localizedCaseInsensitiveContains("atmos") == true else {
+            return fresh
+        }
+        return fresh.confirmingAtmos()
     }
 
     /// Seeds ``sources`` from the merged card's references, stamping the *primary*
@@ -1655,12 +1784,16 @@ public final class ItemDetailViewModel {
                 result.append(source)
             }
         }
-        // Publish when discovery expanded the server list OR refreshed a kept
-        // server's locality (result differs from the current sources).
-        guard result.count > 1, result != sources else { return }
-        sources = result
-        applyUnifiedWatchState()
-        persistSnapshot()
+        guard result.count > 1 else { return }
+        // Publish when discovery expanded the server list or refreshed locality.
+        // Even an unchanged result must continue into retargeting: the same list
+        // may already have arrived from a snapshot while the active detail provider
+        // is still the merge primary.
+        if result != sources {
+            sources = result
+            applyUnifiedWatchState()
+            persistSnapshot()
+        }
         // A library-origin copy that was not present at first paint can arrive from
         // async discovery. Prefer it before any Home/Search locality routing.
         if applyLibraryOriginPreferenceIfAvailable(in: result) {
@@ -1668,11 +1801,10 @@ public final class ItemDetailViewModel {
             startAlternateSourceEnrichment(primaryID: activeItemID)
             return
         }
-        // If discovery surfaced a more-local copy of a SERIES, route there now so
-        // its episode tree loads from the local (same-LAN) server — the initial
-        // pass couldn't pick it because the twin wasn't known at first paint. The
-        // reload inside re-drives detail AND re-establishes alternate enrichment for
-        // the new active server, so return before kicking the old server's pass.
+        // If discovery surfaced a preferred copy, route there now so the detail
+        // provider matches the server highlighted by the picker. The reload inside
+        // re-drives detail and re-establishes alternate enrichment for the new
+        // active server, so return before kicking the old server's pass.
         if await retargetToMostLocalSourceAfterDiscovery(kind: primary.kind) { return }
         startAlternateSourceEnrichment(primaryID: primary.id)
     }

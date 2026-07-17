@@ -2,13 +2,16 @@ import Foundation
 import CoreModels
 import MediaTransportCore
 
-protocol ShareCatalogCoordinating: Sendable {
-    func store(
+public protocol ShareCatalogCoordinating: Sendable {
+    /// Returns the read-only catalog capability for a share, creating the backing
+    /// store/scanner/enricher on first use. The concrete store is never exposed —
+    /// callers get only `any ShareCatalogReading`.
+    func catalogReader(
         accountKey: String,
         displayName: String,
         credentialRevision: CredentialRevision,
         sessionFactory: @escaping ShareTransportSessionFactory
-    ) async -> ShareCatalogStore
+    ) async -> any ShareCatalogReading
     func rescan(accountKey: String) async
     func enrichItem(accountKey: String, itemID: String) async
     func noteInteractiveActivity(accountKey: String) async
@@ -103,6 +106,23 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
         guard revision >= preferredAccountRevision else { return }
         preferredAccountRevision = revision
         await metadataScheduler.setPreferredAccountKeys(accountKeys)
+    }
+
+    /// Public capability seam: vends the read-only catalog for a share without
+    /// exposing the concrete `ShareCatalogStore`. Delegates to the internal
+    /// `store(...)` factory so registration/scan/enrich lifecycle is identical.
+    public func catalogReader(
+        accountKey: String,
+        displayName: String,
+        credentialRevision: CredentialRevision,
+        sessionFactory: @escaping ShareTransportSessionFactory
+    ) async -> any ShareCatalogReading {
+        await store(
+            accountKey: accountKey,
+            displayName: displayName,
+            credentialRevision: credentialRevision,
+            sessionFactory: sessionFactory
+        )
     }
 
     /// Return the shared catalog store for a share, creating it (and a dedicated
@@ -230,7 +250,7 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
     /// safe even if an auto-scan is already in flight. No-op only if the share was
     /// never registered (its scanner doesn't exist) — callers ensure it does by
     /// touching the provider's catalog first (see `ShareProvider.rescan()`).
-    func rescan(accountKey: String) async {
+    public func rescan(accountKey: String) async {
         while let invalidationTask = invalidationTasks[accountKey] {
             await invalidationTask.value
         }
@@ -377,12 +397,12 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
     /// background task and returns immediately — callers on the detail hot path add
     /// no latency. No-op if the share was never registered or the item is already
     /// enriched.
-    func enrichItem(accountKey: String, itemID: String) async {
+    public func enrichItem(accountKey: String, itemID: String) async {
         guard enrichers[accountKey] != nil else { return }
         await metadataScheduler.enqueueItem(accountKey: accountKey, itemID: itemID)
     }
 
-    func noteInteractiveActivity(accountKey: String) async {
+    public func noteInteractiveActivity(accountKey: String) async {
         let pacer = pacers[accountKey] ?? {
             let created = ShareScanPacer()
             pacers[accountKey] = created

@@ -18,7 +18,7 @@ import Foundation
 /// `.series`; anime is split out because the app classifies + fetches anime
 /// metadata separately. Classification is best-effort at scan time (folder hint)
 /// and confirmed later once real ids resolve (Phase 2).
-enum CatalogLibrary: String, Sendable, CaseIterable {
+public enum CatalogLibrary: String, Sendable, CaseIterable {
     case movies
     case tv
     case anime

@@ -1090,22 +1090,64 @@ final class PlayerInputViewController: UIViewController {
     private func scheduleAutoHide() {
         cancelAutoHide()
         autoHideTask = Task { [weak self] in
-            // Hide the transport 4s after the video is actually *playing*, not 4s
-            // after the reveal was requested. On a slow (re)load the old fixed 4s
-            // timer would fire mid-spin — or, once gated, hide the instant frames
-            // appeared. So: first wait out any engine .loading (initial bring-up or
-            // a re-resolve/transcode reload), THEN run the 4s idle window. If a
-            // reload kicks in during that window, restart it so the count is always
-            // measured from playback presenting. Re-read through a weak self each
-            // tick so a torn-down container isn't retained by the loop (which would
-            // defeat deinit's cancellation).
-            while !Task.isCancelled {
-                while !Task.isCancelled, self?.engine.status == .loading {
-                    try? await Task.sleep(nanoseconds: 250_000_000)
+            // Anchor the idle countdown to the playhead ACTUALLY ADVANCING, not to
+            // the reveal request, the engine's .ready status, or a single
+            // `preventsDisplaySleep` sample. The container only mounts at .ready,
+            // and on the native engine `preventsDisplaySleep` is just
+            // `timeControlStatus == .playing`, which can blip true during the
+            // pre-roll / resume-seek a few seconds before the picture is genuinely
+            // progressing — so a one-shot gate starts the count early and the
+            // transport vanishes only ~6-7s after a ~10s intent, however long the
+            // load took. Requiring several consecutive ticks of real forward motion
+            // (a plausible playback delta, so a resume seek's jump doesn't count)
+            // is the unambiguous cross-engine "video is really playing" signal. A
+            // wall-clock cap keeps a stalled/paused-through load from pinning the
+            // transport forever. All reads go through a weak self so a torn-down
+            // container isn't retained by the loop.
+            @MainActor func awaitPlaybackPresenting() async -> (presented: Bool, sawLoading: Bool) {
+                let deadline = Date().addingTimeInterval(45)
+                let requiredTicks = 4            // ~0.8s of confirmed forward motion
+                let tick: UInt64 = 200_000_000
+                var lastTime: TimeInterval = -1
+                var advancingTicks = 0
+                var sawLoading = false           // did we wait through a not-yet-playing stretch?
+                while !Task.isCancelled {
+                    guard let sample = self.map({ ($0.engine.preventsDisplaySleep, $0.engine.currentTime) })
+                    else { return (false, sawLoading) } // container torn down
+                    let (playing, now) = sample
+                    if playing, lastTime >= 0, now > lastTime, now - lastTime < 2.0 {
+                        advancingTicks += 1
+                        if advancingTicks >= requiredTicks { return (true, sawLoading) }
+                    } else if !playing {
+                        advancingTicks = 0        // paused / stalled / buffering — reset
+                        sawLoading = true
+                    }
+                    lastTime = now
+                    if Date() >= deadline { return (true, sawLoading) } // safety cap
+                    try? await Task.sleep(nanoseconds: tick)
                 }
-                try? await Task.sleep(nanoseconds: 4_000_000_000)
+                return (false, sawLoading)
+            }
+
+            var result = await awaitPlaybackPresenting()
+            guard result.presented else { return }
+            while !Task.isCancelled {
+                // Hide 2s after an unattended load actually starts playing (long
+                // enough to confirm the load happened without lingering), but 4s
+                // after a hands-on interaction on already-rolling video, so the
+                // viewer has time to act on the controls they just summoned.
+                let idle: UInt64 = result.sawLoading ? 2_000_000_000 : 4_000_000_000
+                try? await Task.sleep(nanoseconds: idle)
+                if Task.isCancelled { return }
+                // A re-resolve / transcode reload dropped frames mid-window:
+                // re-anchor to the re-presented playback rather than hiding over
+                // a spinner. Checked weakly so a torn-down container isn't held.
+                if self?.engine.preventsDisplaySleep == false, self?.engine.status == .loading {
+                    result = await awaitPlaybackPresenting()
+                    guard result.presented else { return }
+                    continue
+                }
                 guard let self, !Task.isCancelled else { return }
-                if self.engine.status == .loading { continue } // reloaded mid-window
                 if !self.model.isScrubbing && !self.model.isPaused && self.focusContext == .surface {
                     self.model.controlsVisible = false
                 }

@@ -35,6 +35,7 @@ actor ShareCatalogStore {
     /// only runs while the store's actor is executing a catalog transaction.
     private var reconciler: ShareSeriesReconciler { ShareSeriesReconciler(connection: connection) }
     private var scanWriter: ScanCatalogWriter { ScanCatalogWriter(connection: connection) }
+    private var localRepo: LocalMetadataRepository { LocalMetadataRepository(connection: connection) }
     private var normalizedMetadataReady = false
     /// Cached "does ANY local (NFO/filename) metadata_values row exist" check —
     /// avoids a real query on every read-path call (`withLocalOverlay`/grid sort
@@ -627,8 +628,8 @@ actor ShareCatalogStore {
     /// rematerializes their winners in the same transaction.
     private func recomputeSidecarAssociationsInTransaction() -> (ok: Bool, affectedItemIDs: Set<String>) {
         var files: [PendingLocalMetadataFile] = []
-        query("SELECT \(Self.pendingLocalMetadataFileColumns) FROM local_metadata_files ORDER BY rel_path;") { stmt in
-            if let file = self.materializePendingLocalMetadataFile(stmt) { files.append(file) }
+        query("SELECT \(LocalMetadataRepository.pendingLocalMetadataFileColumns) FROM local_metadata_files ORDER BY rel_path;") { stmt in
+            if let file = self.localRepo.materializePendingLocalMetadataFile(stmt) { files.append(file) }
         }
         var affected = Set<String>()
         for file in files {
@@ -688,43 +689,12 @@ actor ShareCatalogStore {
         )
     }
 
-    private func materializePendingLocalMetadataFile(_ stmt: OpaquePointer?) -> PendingLocalMetadataFile? {
-        guard let relPath = columnText(stmt, 0),
-              let parentDir = columnText(stmt, 1),
-              let kindRaw = columnText(stmt, 2),
-              let kind = LocalSidecarKind(rawValue: kindRaw) else { return nil }
-        return PendingLocalMetadataFile(
-            relPath: relPath, parentDir: parentDir, kind: kind,
-            size: sqlite3_column_int64(stmt, 3),
-            associatedVideoRelPath: columnText(stmt, 4),
-            processedItemID: columnText(stmt, 5),
-            fingerprint: columnText(stmt, 6),
-            scanGenerationBound: sqlite3_column_int64(stmt, 7) != 0,
-            status: columnText(stmt, 8) ?? "pending",
-            attempts: Int(sqlite3_column_int64(stmt, 9))
-        )
-    }
-
-    private static let pendingLocalMetadataFileColumns =
-        "rel_path, parent_dir, kind, size, associated_video_rel_path, associated_item_id, fingerprint, scan_generation_bound, status, local_attempts"
-
     /// The next bounded slice of pending sidecars for the scheduled background
     /// pass, oldest-scanned first.
     func pendingLocalMetadataFiles(limit: Int) -> [PendingLocalMetadataFile] {
         ensureOpen()
-        guard db != nil, limit > 0 else { return [] }
-        var out: [PendingLocalMetadataFile] = []
-        query("""
-        SELECT \(Self.pendingLocalMetadataFileColumns) FROM local_metadata_files
-        WHERE status='pending' AND local_attempts < ?
-        ORDER BY last_scan, rel_path LIMIT ?;
-        """, bind: {
-            sqlite3_bind_int64($0, 1, Int64(Self.maxLocalAttempts))
-            sqlite3_bind_int64($0, 2, Int64(limit))
-        }) { stmt in
-            if let file = self.materializePendingLocalMetadataFile(stmt) { out.append(file) }
-        }
-        return out
+        guard db != nil else { return [] }
+        return localRepo.pendingLocalMetadataFiles(limit: limit, maxAttempts: Self.maxLocalAttempts)
     }
 
     /// Whether ANY pending/retryable sidecar would associate with `itemID` — the
@@ -739,10 +709,8 @@ actor ShareCatalogStore {
     }
 
     func sidecarStatus(relPath: String) -> String? {
-        var status: String?
-        query("SELECT status FROM local_metadata_files WHERE rel_path=?;",
-              bind: { self.bindText($0, 1, relPath) }) { stmt in status = self.columnText(stmt, 0) }
-        return status
+        ensureOpen()
+        return localRepo.sidecarStatus(relPath: relPath)
     }
 
     /// Every sidecar row that WOULD associate with `itemID` under the
@@ -811,10 +779,10 @@ actor ShareCatalogStore {
                 value = parentDir
             }
             query("""
-            SELECT \(Self.pendingLocalMetadataFileColumns)
+            SELECT \(LocalMetadataRepository.pendingLocalMetadataFileColumns)
             FROM local_metadata_files WHERE \(predicate);
             """, bind: { self.bindText($0, 1, value) }) { stmt in
-                if let file = self.materializePendingLocalMetadataFile(stmt) {
+                if let file = self.localRepo.materializePendingLocalMetadataFile(stmt) {
                     out.append(file)
                 }
             }
@@ -880,8 +848,8 @@ actor ShareCatalogStore {
         ensureOpen()
         guard admits(scanGeneration), db != nil else { return }
         var files: [PendingLocalMetadataFile] = []
-        query("SELECT \(Self.pendingLocalMetadataFileColumns) FROM local_metadata_files ORDER BY rel_path;") { stmt in
-            if let file = self.materializePendingLocalMetadataFile(stmt) {
+        query("SELECT \(LocalMetadataRepository.pendingLocalMetadataFileColumns) FROM local_metadata_files ORDER BY rel_path;") { stmt in
+            if let file = self.localRepo.materializePendingLocalMetadataFile(stmt) {
                 files.append(file)
             }
         }
@@ -959,30 +927,7 @@ actor ShareCatalogStore {
         ensureOpen()
         guard db != nil else { return false }
         guard exec("BEGIN IMMEDIATE;") else { return false }
-        var del: OpaquePointer?
-        var ok = sqlite3_prepare_v2(db, "DELETE FROM local_metadata_file_values WHERE rel_path=?;", -1, &del, nil) == SQLITE_OK
-        if ok {
-            bindText(del, 1, relPath)
-            ok = sqlite3_step(del) == SQLITE_DONE
-        }
-        sqlite3_finalize(del)
-        if ok, !fields.isEmpty {
-            var stmt: OpaquePointer?
-            ok = sqlite3_prepare_v2(db, """
-            INSERT INTO local_metadata_file_values(rel_path, field, value_json) VALUES(?,?,?);
-            """, -1, &stmt, nil) == SQLITE_OK
-            if ok {
-                for (field, json) in fields {
-                    sqlite3_reset(stmt)
-                    bindText(stmt, 1, relPath)
-                    bindText(stmt, 2, field.rawValue)
-                    bindText(stmt, 3, json)
-                    guard sqlite3_step(stmt) == SQLITE_DONE else { ok = false; break }
-                }
-            }
-            sqlite3_finalize(stmt)
-        }
-        guard ok, exec("COMMIT;") else {
+        guard localRepo.replaceSidecarValueCache(relPath: relPath, fields: fields), exec("COMMIT;") else {
             _ = exec("ROLLBACK;")
             return false
         }
@@ -993,30 +938,14 @@ actor ShareCatalogStore {
     func clearSidecarValueCache(relPath: String) -> Bool {
         ensureOpen()
         guard db != nil else { return false }
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(
-            db,
-            "DELETE FROM local_metadata_file_values WHERE rel_path=?;",
-            -1,
-            &stmt,
-            nil
-        ) == SQLITE_OK else { return false }
-        defer { sqlite3_finalize(stmt) }
-        bindText(stmt, 1, relPath)
-        return sqlite3_step(stmt) == SQLITE_DONE
+        return localRepo.clearSidecarValueCache(relPath: relPath)
     }
 
     /// The cached parsed field values for one sidecar (`nil` when never cached).
     func sidecarValueCache(relPath: String) -> [MetadataField: String] {
         ensureOpen()
         guard db != nil else { return [:] }
-        var out: [MetadataField: String] = [:]
-        query("SELECT field, value_json FROM local_metadata_file_values WHERE rel_path=?;",
-              bind: { self.bindText($0, 1, relPath) }) { stmt in
-            guard let field = self.columnText(stmt, 0), let json = self.columnText(stmt, 1) else { return }
-            out[MetadataField(rawValue: field)] = json
-        }
-        return out
+        return localRepo.sidecarValueCache(relPath: relPath)
     }
 
     /// Rebuild the complete local-NFO lane for an item from currently associated,
@@ -1112,21 +1041,10 @@ actor ShareCatalogStore {
     ) -> Bool {
         ensureOpen()
         guard db != nil else { return false }
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, """
-        UPDATE local_metadata_files SET
-          status=?, processed_fingerprint=?, associated_item_id=?, parser_version=?,
-          local_attempts=0, updated_at=?
-        WHERE rel_path=?;
-        """, -1, &stmt, nil) == SQLITE_OK else { return false }
-        defer { sqlite3_finalize(stmt) }
-        bindText(stmt, 1, status)
-        bindOptText(stmt, 2, fingerprint)
-        bindOptText(stmt, 3, associatedItemID)
-        sqlite3_bind_int64(stmt, 4, Int64(parserVersion))
-        sqlite3_bind_double(stmt, 5, now.timeIntervalSince1970)
-        bindText(stmt, 6, relPath)
-        return sqlite3_step(stmt) == SQLITE_DONE
+        return localRepo.markSidecarProcessed(
+            relPath: relPath, status: status, fingerprint: fingerprint,
+            associatedItemID: associatedItemID, parserVersion: parserVersion, now: now
+        )
     }
 
     /// Reread already-indexed NFOs exactly once after a parser-rule upgrade: mark
@@ -1141,12 +1059,7 @@ actor ShareCatalogStore {
     func markSidecarsPendingForParserUpgrade(to version: Int = ShareNFOParser.parserVersion) -> Int {
         ensureOpen()
         guard db != nil else { return 0 }
-        guard exec("""
-            UPDATE local_metadata_files
-            SET status='pending', local_attempts=0, processed_fingerprint=NULL
-            WHERE status <> 'pending' AND (parser_version IS NULL OR parser_version < \(version));
-            """) else { return 0 }
-        return Int(sqlite3_changes(db))
+        return localRepo.markSidecarsPendingForParserUpgrade(to: version)
     }
 
     /// Record a TRANSIENT transport failure: stays `pending`, bumps the bounded
@@ -1155,19 +1068,13 @@ actor ShareCatalogStore {
     func markSidecarTransientFailure(relPath: String) -> Bool {
         ensureOpen()
         guard db != nil else { return false }
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, """
-        UPDATE local_metadata_files SET local_attempts = local_attempts + 1 WHERE rel_path=?;
-        """, -1, &stmt, nil) == SQLITE_OK else { return false }
-        defer { sqlite3_finalize(stmt) }
-        bindText(stmt, 1, relPath)
-        return sqlite3_step(stmt) == SQLITE_DONE
+        return localRepo.markSidecarTransientFailure(relPath: relPath)
     }
 
     func resetPendingLocalMetadataAttempts() {
         ensureOpen()
         guard db != nil else { return }
-        _ = exec("UPDATE local_metadata_files SET local_attempts=0 WHERE status='pending';")
+        localRepo.resetPendingLocalMetadataAttempts()
     }
 
     private func replaceLocalNFOMetadata(

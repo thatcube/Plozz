@@ -63,18 +63,18 @@ actor MetadataDependencyRecorder {
 actor MetadataResolverSpy: ShareMetadataResolving {
     private(set) var requests: [ShareEnrichRequest] = []
     private(set) var cancellationCrossings = 0
-    private let response: ShareCatalogStore.EnrichmentRecord
+    private let response: EnrichmentRecord
     private let gate: MetadataAsyncTestGate?
 
     init(
-        response: ShareCatalogStore.EnrichmentRecord = .init(),
+        response: EnrichmentRecord = .init(),
         gate: MetadataAsyncTestGate? = nil
     ) {
         self.response = response
         self.gate = gate
     }
 
-    func resolve(_ request: ShareEnrichRequest) async -> ShareCatalogStore.EnrichmentRecord {
+    func resolve(_ request: ShareEnrichRequest) async -> EnrichmentRecord {
         requests.append(request)
         if let gate { await gate.wait() }
         if Task.isCancelled { cancellationCrossings += 1 }

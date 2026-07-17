@@ -26,21 +26,21 @@ final class ShareEnricherTests: XCTestCase {
 
     /// Records requests and returns canned metadata keyed by title.
     private struct FakeResolver: ShareMetadataResolving {
-        let byTitle: [String: ShareCatalogStore.EnrichmentRecord]
-        func resolve(_ request: ShareEnrichRequest) async -> ShareCatalogStore.EnrichmentRecord {
-            byTitle[request.title] ?? ShareCatalogStore.EnrichmentRecord()
+        let byTitle: [String: EnrichmentRecord]
+        func resolve(_ request: ShareEnrichRequest) async -> EnrichmentRecord {
+            byTitle[request.title] ?? EnrichmentRecord()
         }
     }
 
     private actor CountingResolver: ShareMetadataResolving {
         private(set) var calls = 0
-        let record: ShareCatalogStore.EnrichmentRecord
+        let record: EnrichmentRecord
 
-        init(record: ShareCatalogStore.EnrichmentRecord) {
+        init(record: EnrichmentRecord) {
             self.record = record
         }
 
-        func resolve(_ request: ShareEnrichRequest) async -> ShareCatalogStore.EnrichmentRecord {
+        func resolve(_ request: ShareEnrichRequest) async -> EnrichmentRecord {
             calls += 1
             return record
         }
@@ -50,7 +50,7 @@ final class ShareEnricherTests: XCTestCase {
         let store = ShareCatalogStore(accountKey: "a", directory: tempDir())
         await store.upsert([movie("Movies/The Matrix (1999).mkv", "The Matrix", 1999)], scanID: 1)
 
-        let rec = ShareCatalogStore.EnrichmentRecord(
+        let rec = EnrichmentRecord(
             providerIDs: ["Imdb": "tt0133093", "Tmdb": "603"],
             overview: "A hacker learns the truth.",
             genres: ["Sci-Fi"],
@@ -97,7 +97,7 @@ final class ShareEnricherTests: XCTestCase {
             movie("Movies/B (2001).mkv", "B", 2001),
             movie("Movies/C (2002).mkv", "C", 2002),
         ], scanID: 1)
-        let rec = ShareCatalogStore.EnrichmentRecord(providerIDs: ["Tmdb": "1"])
+        let rec = EnrichmentRecord(providerIDs: ["Tmdb": "1"])
         let enricher = ShareEnricher(
             store: store,
             resolver: FakeResolver(byTitle: ["A": rec, "B": rec, "C": rec]),
@@ -125,7 +125,7 @@ final class ShareEnricherTests: XCTestCase {
         let counter = Counter()
         struct Resolver: ShareMetadataResolving {
             let counter: Counter
-            func resolve(_ request: ShareEnrichRequest) async -> ShareCatalogStore.EnrichmentRecord {
+            func resolve(_ request: ShareEnrichRequest) async -> EnrichmentRecord {
                 await counter.bump()
                 return .init(providerIDs: ["Tmdb": request.itemID])
             }
@@ -222,7 +222,7 @@ final class ShareEnricherTests: XCTestCase {
         let counter = Counter()
         struct Resolver: ShareMetadataResolving {
             let counter: Counter
-            func resolve(_ request: ShareEnrichRequest) async -> ShareCatalogStore.EnrichmentRecord {
+            func resolve(_ request: ShareEnrichRequest) async -> EnrichmentRecord {
                 await counter.bump()
                 return .init()
             }
@@ -264,7 +264,7 @@ final class ShareEnricherTests: XCTestCase {
         let counter = Counter()
         struct Resolver: ShareMetadataResolving {
             let counter: Counter
-            func resolve(_ request: ShareEnrichRequest) async -> ShareCatalogStore.EnrichmentRecord {
+            func resolve(_ request: ShareEnrichRequest) async -> EnrichmentRecord {
                 await counter.bump()
                 return .init()
             }
@@ -310,7 +310,7 @@ final class ShareEnricherTests: XCTestCase {
             movie("Movies/A (2000).mkv", "A", 2000),
             movie("Movies/B (2000).mkv", "B", 2000),
         ], scanID: 1)
-        let record = ShareCatalogStore.EnrichmentRecord(providerIDs: ["Tmdb": "1"])
+        let record = EnrichmentRecord(providerIDs: ["Tmdb": "1"])
         let enricher = ShareEnricher(
             store: store,
             resolver: FakeResolver(byTitle: ["A": record, "B": record]),
@@ -345,7 +345,7 @@ final class ShareEnricherTests: XCTestCase {
         let counter = Counter()
         struct Resolver: ShareMetadataResolving {
             let counter: Counter
-            func resolve(_ request: ShareEnrichRequest) async -> ShareCatalogStore.EnrichmentRecord {
+            func resolve(_ request: ShareEnrichRequest) async -> EnrichmentRecord {
                 await counter.bump()
                 return .init()
             }
@@ -383,7 +383,7 @@ final class ShareEnricherTests: XCTestCase {
         // MediaItemIdentity a Plex/Jellyfin twin would, so the merge engine fuses them.
         let store = ShareCatalogStore(accountKey: "a", directory: tempDir())
         await store.upsert([movie("Movies/Inception (2010).mkv", "Inception", 2010)], scanID: 1)
-        let rec = ShareCatalogStore.EnrichmentRecord(providerIDs: ["Tmdb": "27205"])
+        let rec = EnrichmentRecord(providerIDs: ["Tmdb": "27205"])
         await ShareEnricher(store: store, resolver: FakeResolver(byTitle: ["Inception": rec])).enrichPending()
 
         let shareItem = await store.item(id: ShareCatalogID.file("Movies/Inception (2010).mkv"))!
@@ -406,7 +406,7 @@ final class ShareEnricherTests: XCTestCase {
         let before = await store.series(in: .tv, offset: 0, limit: 10)
         XCTAssertEqual(before.count, 2, "two keys before merge")
 
-        let rec = ShareCatalogStore.EnrichmentRecord(providerIDs: ["Tvdb": "270261"], title: "Peaky Blinders")
+        let rec = EnrichmentRecord(providerIDs: ["Tvdb": "270261"], title: "Peaky Blinders")
         await ShareEnricher(store: store, resolver: FakeResolver(byTitle: [
             "Peaky Blinder": rec, "Peaky Blinders": rec,
         ])).enrichPending()
@@ -425,8 +425,8 @@ final class ShareEnricherTests: XCTestCase {
             episode("TV/1923/Season 1/1923.S01E01.mkv", series: "1923", s: 1, e: 1),
         ], scanID: 1)
         await ShareEnricher(store: store, resolver: FakeResolver(byTitle: [
-            "1883": ShareCatalogStore.EnrichmentRecord(providerIDs: ["Tvdb": "355774"], title: "1883"),
-            "1923": ShareCatalogStore.EnrichmentRecord(providerIDs: ["Tvdb": "403361"], title: "1923"),
+            "1883": EnrichmentRecord(providerIDs: ["Tvdb": "355774"], title: "1883"),
+            "1923": EnrichmentRecord(providerIDs: ["Tvdb": "403361"], title: "1923"),
         ])).enrichPending()
         let series = await store.series(in: .tv, offset: 0, limit: 10)
         XCTAssertEqual(series.count, 2, "distinct ids never merge")
@@ -443,7 +443,7 @@ final class ShareEnricherTests: XCTestCase {
         XCTAssertEqual(initial.tvSeries, 1)
 
         let key = ShareCatalogID.seriesKey(fromTitle: "Frieren")
-        let rec = ShareCatalogStore.EnrichmentRecord(providerIDs: ["AniList": "154587", "Mal": "52991"])
+        let rec = EnrichmentRecord(providerIDs: ["AniList": "154587", "Mal": "52991"])
         await ShareEnricher(store: store, resolver: FakeResolver(byTitle: ["Frieren": rec])).enrichPending()
 
         let counts = await store.libraryCounts()
@@ -459,9 +459,9 @@ final class ShareEnricherTests: XCTestCase {
         let counter = Counter()
         struct CountingResolver: ShareMetadataResolving {
             let counter: Counter
-            func resolve(_ request: ShareEnrichRequest) async -> ShareCatalogStore.EnrichmentRecord {
+            func resolve(_ request: ShareEnrichRequest) async -> EnrichmentRecord {
                 await counter.bump()
-                return ShareCatalogStore.EnrichmentRecord(providerIDs: ["Tmdb": "1"])
+                return EnrichmentRecord(providerIDs: ["Tmdb": "1"])
             }
         }
         let enricher = ShareEnricher(store: store, resolver: CountingResolver(counter: counter))
@@ -536,7 +536,7 @@ final class ShareEnricherTests: XCTestCase {
         let stillPending = await store.pendingEnrichment(version: ShareEnricher.version, limit: 10)
         XCTAssertEqual(stillPending.count, 1)
 
-        let rec = ShareCatalogStore.EnrichmentRecord(providerIDs: ["Tmdb": "1"])
+        let rec = EnrichmentRecord(providerIDs: ["Tmdb": "1"])
         await ShareEnricher(store: store, resolver: FakeResolver(byTitle: ["A": rec])).enrichPending()
         let item = await store.item(id: ShareCatalogID.file("Movies/A (2000).mkv"))
         XCTAssertEqual(item?.providerID(.tmdb), "1")
@@ -617,7 +617,7 @@ final class ShareEnricherTests: XCTestCase {
             movie("Movies/Sicario (2015).mkv", "Sicario", 2015),
         ], scanID: 1)
         let opened = ShareCatalogID.file("Movies/Arrival (2016).mkv")
-        let rec = ShareCatalogStore.EnrichmentRecord(
+        let rec = EnrichmentRecord(
             providerIDs: ["Tmdb": "329865"],
             backdropURL: URL(string: "https://img/arrival-backdrop.jpg")
         )

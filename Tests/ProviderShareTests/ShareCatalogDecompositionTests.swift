@@ -64,7 +64,7 @@ final class ShareCatalogDecompositionTests: XCTestCase {
         item.overview = "Existing overview"
         item.providerIDs = ["Imdb": "tt1"]
 
-        var rec = ShareCatalogStore.EnrichmentRecord()
+        var rec = EnrichmentRecord()
         rec.providerIDs = ["Imdb": "tt-WRONG", "Tmdb": "27205"] // must not clobber Imdb
         rec.overview = "External overview"                       // must not clobber existing
         rec.genres = ["Sci-Fi"]                                  // fills empty
@@ -83,7 +83,7 @@ final class ShareCatalogDecompositionTests: XCTestCase {
     func testApplyEnrichmentUpgradesNearIdenticalSeriesTitleButNotDown() {
         var typo = MediaItem(id: "series:pb", title: "Peaky Blinder", kind: .series)
         typo.seriesID = "series:pb"
-        var rec = ShareCatalogStore.EnrichmentRecord()
+        var rec = EnrichmentRecord()
         rec.title = "Peaky Blinders"
         XCTAssertEqual(ShareCatalogReadProjection.applyEnrichment(typo, rec).title, "Peaky Blinders")
 
@@ -91,7 +91,7 @@ final class ShareCatalogDecompositionTests: XCTestCase {
         // must never rename the show down.
         var spinoff = MediaItem(id: "series:x", title: "Better Call Saul", kind: .series)
         spinoff.seriesID = "series:x"
-        var recBad = ShareCatalogStore.EnrichmentRecord()
+        var recBad = EnrichmentRecord()
         recBad.title = "Breaking Bad"
         XCTAssertEqual(ShareCatalogReadProjection.applyEnrichment(spinoff, recBad).title, "Better Call Saul")
     }
@@ -99,7 +99,7 @@ final class ShareCatalogDecompositionTests: XCTestCase {
     func testApplyEnrichmentEpisodeUsesSeriesArtAndSkipsOverview() {
         var episode = MediaItem(id: "f:s01e01.mkv", title: "Pilot", kind: .episode)
         episode.seriesID = "series:x"
-        var rec = ShareCatalogStore.EnrichmentRecord()
+        var rec = EnrichmentRecord()
         rec.overview = "Series synopsis"
         rec.posterURL = URL(string: "https://img/show.jpg")
 

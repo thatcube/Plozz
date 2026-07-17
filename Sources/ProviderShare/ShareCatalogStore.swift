@@ -21,26 +21,6 @@ import CoreNetworking
 /// An `actor` so the single SQLite connection is only ever touched from one task
 /// at a time (the connection is used single-threaded).
 actor ShareCatalogStore {
-    enum EnrichmentSaveFailurePoint: Sendable, Equatable {
-        case afterDerivedCatalogMutations
-    }
-
-    /// Test-only injection points for the atomic clean-scan finalize. Forcing a
-    /// failure at each phase proves the whole transaction rolls back as a unit, so
-    /// a reopen observes either the complete old state or the complete corrected
-    /// state — never a partial prune, a stale local winner, a missing fallback, or
-    /// resurrectable orphan metadata. Never set in production.
-    enum CleanScanFailurePoint: Sendable, Equatable {
-        case afterAssetDelete
-        case afterMovieRegroup
-        case afterOrphanMetadataCleanup
-        case afterSidecarCleanup
-        case afterAliasCleanup
-        case afterAssociationRecompute
-        case afterWinnerRematerialize
-        case afterFilenameProjection
-    }
-
     private let url: URL
     private let enrichmentSaveFailurePoint: EnrichmentSaveFailurePoint?
     /// The actor-confined SQLite handle owner. Never escapes this actor and is only
@@ -470,21 +450,6 @@ actor ShareCatalogStore {
 
     /// One sidecar row read back for the local metadata worker (either the
     /// scheduled slice's next batch, or the urgent opened-item lookup).
-    struct PendingLocalMetadataFile: Sendable, Equatable {
-        var relPath: String
-        var parentDir: String
-        var kind: LocalSidecarKind
-        var size: Int64
-        var associatedVideoRelPath: String?
-        var processedItemID: String?
-        var fingerprint: String?
-        /// A weak transport gave no change-detection facts — this file rereads
-        /// once per successful full scan rather than on every scheduler slice.
-        var scanGenerationBound: Bool
-        var status: String
-        var attempts: Int
-    }
-
     /// Insert/update the sidecar inventory discovered by THIS scan's BFS listing.
     /// A row whose fingerprint is UNCHANGED keeps its `status`/`processed_fingerprint`/
     /// `local_attempts`/`associated_item_id` (no rereading an unchanged file); a
@@ -1699,90 +1664,6 @@ actor ShareCatalogStore {
     /// One logical item awaiting enrichment (movie or series). `itemID` is the
     /// catalog id the enrichment row is keyed by; `isAnime` reflects the current
     /// (best-effort) library classification so the resolver can route.
-    struct PendingEnrichment: Sendable, Equatable {
-        var itemID: String
-        var title: String
-        var year: Int?
-        var isMovie: Bool
-        var isAnime: Bool
-        var discoveredAt: Date
-    }
-
-    /// Resolved metadata to persist for one logical item.
-    struct EnrichmentRecord: Sendable, Equatable {
-        var providerIDs: [String: String] = [:]
-        var overview: String?
-        var genres: [String] = []
-        var runtime: TimeInterval?
-        var posterURL: URL?
-        var backdropURL: URL?
-        var logoURL: URL?
-        /// The resolved canonical show/movie title (e.g. "Avatar: The Last
-        /// Airbender"), overlaid over a generic folder-derived display title at read
-        /// time. Persisted in the `title` enrichment column so it survives re-scans.
-        var title: String?
-        var provenance = MetadataProvenance()
-
-        static func sourced(
-            providerIDs: [String: SourcedValue<String>] = [:],
-            overview: SourcedValue<String>? = nil,
-            genres: SourcedValue<[String]>? = nil,
-            runtime: SourcedValue<TimeInterval>? = nil,
-            posterURL: SourcedValue<URL>? = nil,
-            backdropURL: SourcedValue<URL>? = nil,
-            logoURL: SourcedValue<URL>? = nil,
-            title: SourcedValue<String>? = nil
-        ) -> EnrichmentRecord {
-            var provenance = MetadataProvenance()
-            for (namespace, value) in providerIDs {
-                provenance[.providerID(namespace)] = value.attribution
-            }
-            provenance.set(overview, for: .overview)
-            provenance.set(genres, for: .genres)
-            provenance.set(runtime, for: .runtime)
-            provenance.set(posterURL, for: .posterURL)
-            provenance.set(backdropURL, for: .backdropURL)
-            provenance.set(logoURL, for: .logoURL)
-            provenance.set(title, for: .title)
-            return EnrichmentRecord(
-                providerIDs: providerIDs.mapValues(\.value),
-                overview: overview?.value,
-                genres: genres?.value ?? [],
-                runtime: runtime?.value,
-                posterURL: posterURL?.value,
-                backdropURL: backdropURL?.value,
-                logoURL: logoURL?.value,
-                title: title?.value,
-                provenance: provenance
-            )
-        }
-
-        /// Whether this record carries anything worth showing/merging. An *unusable*
-        /// result (no ids, overview, or artwork) is treated as a miss — usually a
-        /// transient rate-limit/timeout — and is retried across passes rather than
-        /// cached as a permanent blank.
-        var isUsable: Bool {
-            !providerIDs.isEmpty
-                || (overview?.isEmpty == false)
-                || posterURL != nil || backdropURL != nil || logoURL != nil
-        }
-
-        mutating func inferLegacyProvenanceForMissingFields() {
-            let legacy = MetadataAttribution(source: .legacyUnknown)
-            provenance.fillMissing(
-                legacy,
-                for: providerIDs.keys.map(MetadataField.providerID)
-            )
-            if overview?.isEmpty == false { provenance.fillMissing(legacy, for: [.overview]) }
-            if !genres.isEmpty { provenance.fillMissing(legacy, for: [.genres]) }
-            if runtime != nil { provenance.fillMissing(legacy, for: [.runtime]) }
-            if posterURL != nil { provenance.fillMissing(legacy, for: [.posterURL]) }
-            if backdropURL != nil { provenance.fillMissing(legacy, for: [.backdropURL]) }
-            if logoURL != nil { provenance.fillMissing(legacy, for: [.logoURL]) }
-            if title?.isEmpty == false { provenance.fillMissing(legacy, for: [.title]) }
-        }
-    }
-
     private struct PersistedMetadataValue {
         var field: MetadataField
         var valueJSON: String

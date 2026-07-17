@@ -24,7 +24,7 @@ enum ShareCatalogReadProjection {
     static func metadataValueMatches(
         field: MetadataField,
         valueJSON: String,
-        record: ShareCatalogStore.EnrichmentRecord
+        record: EnrichmentRecord
     ) -> Bool {
         switch field {
         case .title:
@@ -59,10 +59,10 @@ enum ShareCatalogReadProjection {
     /// instead of N+1 per-row lookups. Returns nil when the core columns are all NULL
     /// (no enrichment row matched the LEFT JOIN); `title` is a supplementary 8th
     /// column not counted in that emptiness check.
-    static func enrichmentRecord(fromColumns stmt: OpaquePointer?, startingAt base: Int32) -> ShareCatalogStore.EnrichmentRecord? {
+    static func enrichmentRecord(fromColumns stmt: OpaquePointer?, startingAt base: Int32) -> EnrichmentRecord? {
         let allNull = (0..<7).allSatisfy { sqlite3_column_type(stmt, base + $0) == SQLITE_NULL }
         if allNull { return nil }
-        var rec = ShareCatalogStore.EnrichmentRecord()
+        var rec = EnrichmentRecord()
         rec.providerIDs = CatalogJSON.decode([String: String].self, CatalogConnection.columnText(stmt, base + 0)) ?? [:]
         rec.overview = CatalogConnection.columnText(stmt, base + 1)
         rec.genres = CatalogJSON.decode([String].self, CatalogConnection.columnText(stmt, base + 2)) ?? []
@@ -171,7 +171,7 @@ enum ShareCatalogReadProjection {
 
     /// Merge an already-fetched enrichment record onto an item. Extracted from
     /// `withEnrichment` so the JOINed grid queries can reuse the exact same merge.
-    static func applyEnrichment(_ item: MediaItem, _ rec: ShareCatalogStore.EnrichmentRecord) -> MediaItem {
+    static func applyEnrichment(_ item: MediaItem, _ rec: EnrichmentRecord) -> MediaItem {
         var copy = item
         if copy.metadataProvenance[.title] == nil {
             copy.metadataProvenance[.title] = MetadataAttribution(source: .filename)

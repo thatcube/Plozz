@@ -36,7 +36,7 @@ struct ShareEnrichRequest: Sendable, Equatable {
 /// Abstracted so a keyed tier (TheTVDB — Phase 2b) can layer on top of the
 /// keyless base without changing the enricher.
 protocol ShareMetadataResolving: Sendable {
-    func resolve(_ request: ShareEnrichRequest) async -> ShareCatalogStore.EnrichmentRecord
+    func resolve(_ request: ShareEnrichRequest) async -> EnrichmentRecord
 }
 
 /// The keyless enrichment tier: strong external ids (AniList/MAL for anime, TVmaze
@@ -51,7 +51,7 @@ struct KeylessShareResolver: ShareMetadataResolving {
     let artworkResolver: any ShareSourcedArtworkResolving
     let overviewResolver: any ShareSourcedOverviewResolving
 
-    func resolve(_ request: ShareEnrichRequest) async -> ShareCatalogStore.EnrichmentRecord {
+    func resolve(_ request: ShareEnrichRequest) async -> EnrichmentRecord {
         let sourcedIDs = await idResolver.sourcedExternalIDs(
             title: request.title,
             year: request.year,
@@ -76,7 +76,7 @@ struct KeylessShareResolver: ShareMetadataResolving {
         async let logo = artworkResolver.sourcedArtworkURL(.logo, for: item)
         async let overview = overviewResolver.sourcedOverview(for: item)
 
-        return ShareCatalogStore.EnrichmentRecord.sourced(
+        return EnrichmentRecord.sourced(
             providerIDs: sourcedIDs,
             overview: await overview,
             posterURL: await poster,
@@ -100,7 +100,7 @@ struct TVDBShareResolver: ShareMetadataResolving {
     let artworkResolver: any ShareSourcedArtworkResolving
     let overviewResolver: any ShareSourcedOverviewResolving
 
-    func resolve(_ request: ShareEnrichRequest) async -> ShareCatalogStore.EnrichmentRecord {
+    func resolve(_ request: ShareEnrichRequest) async -> EnrichmentRecord {
         // Keyless ids: for anime these add AniList/MAL (TheTVDB doesn't carry them);
         // for TV they add IMDb/TVDB but TheTVDB supersedes those below.
         async let keylessIDsTask = idResolver.sourcedExternalIDs(
@@ -214,7 +214,7 @@ struct TVDBShareResolver: ShareMetadataResolving {
             SourcedValue(value: $0, source: .tvdb, sourceURL: tvdbSourceURL)
         }
 
-        return ShareCatalogStore.EnrichmentRecord.sourced(
+        return EnrichmentRecord.sourced(
             providerIDs: sourcedIDs,
             overview: overview,
             genres: genres,

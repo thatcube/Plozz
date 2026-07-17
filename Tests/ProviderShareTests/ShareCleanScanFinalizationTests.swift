@@ -367,7 +367,7 @@ final class ShareCleanScanFinalizationTests: XCTestCase {
     // MARK: - Atomicity: per-phase failure rolls the whole transaction back
 
     func testPerPhaseFailureRollsBackEntireTransaction() async throws {
-        let allPoints: [ShareCatalogStore.CleanScanFailurePoint] = [
+        let allPoints: [CleanScanFailurePoint] = [
             .afterAssetDelete, .afterMovieRegroup, .afterOrphanMetadataCleanup,
             .afterSidecarCleanup, .afterAliasCleanup, .afterAssociationRecompute,
             .afterWinnerRematerialize, .afterFilenameProjection,

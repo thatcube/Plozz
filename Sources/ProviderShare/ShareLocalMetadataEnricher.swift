@@ -124,7 +124,7 @@ actor ShareLocalMetadataEnricher {
     // MARK: - Per-sidecar processing
 
     @discardableResult
-    private func process(_ file: ShareCatalogStore.PendingLocalMetadataFile) async -> ShareLocalMetadataOutcome {
+    private func process(_ file: PendingLocalMetadataFile) async -> ShareLocalMetadataOutcome {
         if Task.isCancelled { return .cancelled }
         let facts = await store.localMetadataAssociationFacts(for: file)
         guard let itemID = ShareLocalMetadataAssociationPolicy.itemID(

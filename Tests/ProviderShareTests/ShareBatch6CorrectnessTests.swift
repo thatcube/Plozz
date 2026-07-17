@@ -420,7 +420,7 @@ final class ShareBatch6CorrectnessTests: XCTestCase {
 
         // Seed an INDEPENDENT external enrichment row and capture the local state so we
         // can prove the reread leaves both untouched.
-        let externalRecord = ShareCatalogStore.EnrichmentRecord(overview: "External overview.")
+        let externalRecord = EnrichmentRecord(overview: "External overview.")
         _ = await store.saveEnrichment(itemID: itemID, externalRecord, version: 14)
         let localBefore = await store.localEnrichmentState(itemID: itemID)
         let externalBefore = await store.pendingEnrichmentCount(version: 14)

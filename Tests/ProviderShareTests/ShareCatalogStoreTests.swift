@@ -795,7 +795,7 @@ final class ShareCatalogStoreTests: XCTestCase {
     func testEpisodeSidecarAssociationRequiresEpisodeAssetKind() async {
         let store = ShareCatalogStore(accountKey: "a", directory: tempDir())
         let videoPath = "TV/Show/S01E01.mkv"
-        let sidecar = ShareCatalogStore.PendingLocalMetadataFile(
+        let sidecar = PendingLocalMetadataFile(
             relPath: "TV/Show/S01E01.nfo",
             parentDir: "TV/Show",
             kind: .episodeStem,

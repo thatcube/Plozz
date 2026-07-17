@@ -281,7 +281,7 @@ actor ShareEnricher {
     /// Builds the resolve request for a pending item, attaching on-disk episode
     /// title hints for a series so a same-name metadata collision can be resolved
     /// by content (see ``TVDBClient`` disambiguation). No hints for movies.
-    private func request(for pending: ShareCatalogStore.PendingEnrichment) async -> ShareEnrichRequest {
+    private func request(for pending: PendingEnrichment) async -> ShareEnrichRequest {
         var hints: [SeriesEpisodeHint] = []
         var alternates: [String] = []
         var knownTVDBID: String?

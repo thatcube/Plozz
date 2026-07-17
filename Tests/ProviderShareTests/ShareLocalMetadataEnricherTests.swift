@@ -345,7 +345,7 @@ final class ShareLocalMetadataEnricherTests: XCTestCase {
 
         // A later EXTERNAL save for the same representative file must not erase
         // the local overview, and must still persist its own artwork/ids.
-        var record = ShareCatalogStore.EnrichmentRecord()
+        var record = EnrichmentRecord()
         record.overview = "External overview should not win."
         record.posterURL = URL(string: "https://example.com/poster.jpg")
         let saved = await store.saveEnrichment(itemID: "f:Movies/Arrival (2016)/Arrival (2016).mkv", record, version: 1)
@@ -823,13 +823,13 @@ private final class LocalMetaFakeFileSystem: MediaTransportFileSystem, @unchecke
 
 private actor LocalMetaResolverRecorder: ShareMetadataResolving {
     private(set) var requests: [ShareEnrichRequest] = []
-    private let record: ShareCatalogStore.EnrichmentRecord
+    private let record: EnrichmentRecord
 
-    init(record: ShareCatalogStore.EnrichmentRecord) {
+    init(record: EnrichmentRecord) {
         self.record = record
     }
 
-    func resolve(_ request: ShareEnrichRequest) async -> ShareCatalogStore.EnrichmentRecord {
+    func resolve(_ request: ShareEnrichRequest) async -> EnrichmentRecord {
         requests.append(request)
         return record
     }

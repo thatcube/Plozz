@@ -167,10 +167,14 @@ actor ShareLocalMetadataEnricher {
                 file.relPath, maximumBytes: ShareNFOParser.maxBytes
             )
         } catch {
-            // Cancellation (a CancellationError, or any transport error thrown while
-            // the task is cancelled) leaves the sidecar UNCHANGED and burns no
-            // attempt — it is not a transient transport failure.
-            if error is CancellationError || Task.isCancelled {
+            // Cancellation leaves the sidecar UNCHANGED and burns no attempt — it is
+            // not a transient transport failure. This covers a raw CancellationError,
+            // a mapped MediaTransportError.cancelled (a session teardown can surface
+            // it *after* the task's cancellation state is no longer observable), or
+            // any error thrown while the task is still cancelled.
+            if error is CancellationError
+                || (error as? MediaTransportError) == .cancelled
+                || Task.isCancelled {
                 return .cancelled
             }
             await store.markSidecarTransientFailure(relPath: file.relPath)

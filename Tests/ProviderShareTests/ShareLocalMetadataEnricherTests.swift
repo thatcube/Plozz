@@ -214,8 +214,9 @@ final class ShareLocalMetadataEnricherTests: XCTestCase {
     }
 
     /// A `CancellationError` thrown by the transport read must NOT be recorded as a
-    /// transient failure: it leaves the sidecar pending with zero `local_attempts`
-    /// so cancellation burns no attempt (finding A4).
+    /// transient failure, and must NOT trigger a reconnect/retry: cancellation is a
+    /// deliberate stop, not a recoverable fault. Exactly one read attempt, zero
+    /// `local_attempts`, sidecar left pending (finding A4).
     func testCancellationErrorDuringLocalReadBurnsNoAttempt() async throws {
         let (store, itemID) = await seedPendingMovieSidecar(accountKey: "a4-cancel-read")
         let fileSystem = LocalMetaFakeFileSystem(files: [:], readError: CancellationError())
@@ -224,11 +225,38 @@ final class ShareLocalMetadataEnricherTests: XCTestCase {
         let outcome = await localEnricher.resolveOne(itemID: itemID)
 
         XCTAssertEqual(outcome, .cancelled)
-        XCTAssertGreaterThanOrEqual(fileSystem.readCount, 1, "the read was attempted before cancellation")
+        XCTAssertEqual(fileSystem.readCount, 1, "a raw CancellationError must not reconnect/retry")
         let sidecars = await store.candidateSidecars(forItemID: itemID)
         let sidecar = try XCTUnwrap(sidecars.first)
         XCTAssertEqual(sidecar.attempts, 0, "cancellation must not burn a local attempt")
         XCTAssertEqual(sidecar.status, "pending", "the sidecar remains pending after cancellation")
+    }
+
+    /// A mapped `MediaTransportError.cancelled` surfaced AFTER the task's cancellation
+    /// state is no longer observable (`Task.isCancelled == false`) must still classify
+    /// as cancellation: exactly one read (no reconnect), zero burned attempts, and no
+    /// fall-through to external work through the real composition seam (finding A4).
+    func testMappedCancelledTransportErrorBurnsNoAttemptAndSkipsExternal() async throws {
+        let (store, itemID) = await seedPendingMovieSidecar(accountKey: "a4-mapped-cancel")
+        let fileSystem = LocalMetaFakeFileSystem(files: [:], readError: MediaTransportError.cancelled)
+        let localEnricher = makeLocalEnricher(store: store, fileSystem: fileSystem)
+        let external = SpyExternalRunning()
+
+        await ShareMetadataWorkComposition.runItem(
+            accountKey: "a4-mapped-cancel",
+            itemID: itemID,
+            local: localEnricher,
+            external: external,
+            isCancelled: { false }
+        )
+
+        XCTAssertEqual(fileSystem.readCount, 1, "a mapped cancelled error must not reconnect/retry")
+        let itemCalls = await external.itemCalls
+        XCTAssertEqual(itemCalls, 0, "a cancelled local outcome must not fall through to external")
+        let sidecars = await store.candidateSidecars(forItemID: itemID)
+        let sidecar = try XCTUnwrap(sidecars.first)
+        XCTAssertEqual(sidecar.attempts, 0, "a mapped cancellation must not burn a local attempt")
+        XCTAssertEqual(sidecar.status, "pending")
     }
 
     /// A cancellation observed BEFORE the read (the enclosing task is already
@@ -257,7 +285,8 @@ final class ShareLocalMetadataEnricherTests: XCTestCase {
 
     /// Guard against over-swallowing: a genuine (non-cancellation) transport error
     /// while the task is NOT cancelled still records a transient failure and burns
-    /// exactly one attempt, preserving the existing retry semantics.
+    /// exactly one attempt, preserving the existing retry semantics. A
+    /// non-reconnectable protocol violation is read exactly once.
     func testGenuineTransportErrorStillBurnsTransientAttempt() async throws {
         let (store, itemID) = await seedPendingMovieSidecar(accountKey: "a4-transient")
         let fileSystem = LocalMetaFakeFileSystem(
@@ -269,9 +298,29 @@ final class ShareLocalMetadataEnricherTests: XCTestCase {
         let outcome = await localEnricher.resolveOne(itemID: itemID)
 
         XCTAssertEqual(outcome, .transientFailure)
+        XCTAssertEqual(fileSystem.readCount, 1, "a non-reconnectable error is read exactly once")
         let sidecars = await store.candidateSidecars(forItemID: itemID)
         let sidecar = try XCTUnwrap(sidecars.first)
         XCTAssertEqual(sidecar.attempts, 1, "a real transport failure still burns one attempt")
+        XCTAssertEqual(sidecar.status, "pending")
+    }
+
+    /// A genuinely reconnectable transport error (a timeout) must still reconnect
+    /// exactly once — the cancellation short-circuit must not suppress legitimate
+    /// retry/reconnect behavior. Two reads, then a transient failure burning one
+    /// attempt (finding A4 regression guard).
+    func testGenuineTimeoutStillReconnectsOnceAndBurnsTransientAttempt() async throws {
+        let (store, itemID) = await seedPendingMovieSidecar(accountKey: "a4-timeout")
+        let fileSystem = LocalMetaFakeFileSystem(files: [:], readError: MediaTransportError.timeout)
+        let localEnricher = makeLocalEnricher(store: store, fileSystem: fileSystem)
+
+        let outcome = await localEnricher.resolveOne(itemID: itemID)
+
+        XCTAssertEqual(outcome, .transientFailure)
+        XCTAssertEqual(fileSystem.readCount, 2, "a reconnectable timeout still reconnects exactly once")
+        let sidecars = await store.candidateSidecars(forItemID: itemID)
+        let sidecar = try XCTUnwrap(sidecars.first)
+        XCTAssertEqual(sidecar.attempts, 1, "a reconnectable failure still burns one transient attempt")
         XCTAssertEqual(sidecar.status, "pending")
     }
 
@@ -683,6 +732,24 @@ final class ShareLocalMetadataEnricherTests: XCTestCase {
         XCTAssertFalse(encoded.contains("/Media"))
         XCTAssertNil(item.metadataProvenance[.overview]?.sourceURL)
     }
+}
+
+/// Records external fill-missing calls so a test can prove the local→external
+/// composition seam fences a cancelled local outcome before external work starts.
+private actor SpyExternalRunning: ShareExternalMetadataRunning {
+    private(set) var sliceCalls = 0
+    private(set) var itemCalls = 0
+
+    func enrichPendingSlice(
+        maxItems: Int,
+        maxDuration: Duration,
+        beforeResolve: (@Sendable (String) async -> Bool)?
+    ) async -> ShareEnrichmentSliceResult {
+        sliceCalls += 1
+        return .init(attempted: 0, hasMore: false)
+    }
+
+    func enrichOne(itemID: String) async { itemCalls += 1 }
 }
 
 private final class LocalMetaFakeSession: MediaTransportSession, @unchecked Sendable {

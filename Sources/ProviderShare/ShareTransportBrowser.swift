@@ -109,6 +109,12 @@ actor ShareTransportBrowser {
     }
 
     private func shouldReconnect(after error: Swift.Error) -> Bool {
+        // Never reconnect/retry a cancellation: a raw CancellationError (or a
+        // cancelled task) is a deliberate stop, not a recoverable transport fault,
+        // even if a current/future adapter fails to map it to a MediaTransportError.
+        if error is CancellationError || Task.isCancelled {
+            return false
+        }
         guard let transportError = error as? MediaTransportError else {
             return true
         }

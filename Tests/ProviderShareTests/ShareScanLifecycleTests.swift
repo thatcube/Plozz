@@ -527,6 +527,86 @@ final class ShareScanLifecycleTests: XCTestCase {
         XCTAssertEqual(count, 0, "repeated add/invalidate must not retain arbiters")
     }
 
+    // MARK: - B18: playback-vs-removal race (never lazily revive a runtime/arbiter)
+
+    /// A playback request for an account that was never registered must fail bounded
+    /// and must NOT lazily install an arbiter/runtime for it. Before B18 `acquirePlayback`
+    /// called a lazy `arbiter(for:)` that conjured (and retained) an arbiter for an
+    /// account with no store; now an arbiter exists iff a live runtime exists.
+    func testPlaybackForUnregisteredAccountInstallsNoArbiter() async {
+        let accountID = "absent-\(UUID().uuidString)"
+        let coordinator = makeCoordinator(diagnostics: ScanDiagnosticsSpy())
+
+        let initialCount = await coordinator.arbiterCount()
+        XCTAssertEqual(initialCount, 0)
+        do {
+            _ = try await coordinator.acquirePlayback(accountKey: accountID)
+            XCTFail("playback for an unregistered account must fail, not lazily create a runtime")
+        } catch let error as MediaTransportError {
+            XCTAssertEqual(error, .resourceBusy)
+        } catch {
+            XCTFail("unexpected error: \(error)")
+        }
+        let afterReject = await coordinator.arbiterCount()
+        XCTAssertEqual(
+            afterReject, 0,
+            "a rejected playback request must not install/retain an arbiter"
+        )
+    }
+
+    /// After an account is fully invalidated (its runtime + arbiter retired to zero), a
+    /// playback request racing the removal must fail bounded and must not revive a fresh
+    /// arbiter for the torn-down account. Only an explicit re-registration (`store`)
+    /// creates a new runtime generation.
+    func testPlaybackAfterInvalidationDoesNotReviveRuntime() async throws {
+        let accountID = "revive-\(UUID().uuidString)"
+        let revision = CredentialRevision()
+        let controller = LifecycleListController(blocksRoot: false)
+        let coordinator = makeCoordinator(diagnostics: ScanDiagnosticsSpy())
+        let factory = makeSessionFactory(
+            accountID: accountID, revision: revision, controller: controller
+        )
+
+        _ = await coordinator.store(
+            accountKey: accountID, displayName: "NAS",
+            credentialRevision: revision, sessionFactory: factory
+        )
+        _ = await poll { await coordinator.backgroundScanCompletedAt(accountID) != nil }
+        let registeredCount = await coordinator.arbiterCount()
+        XCTAssertEqual(registeredCount, 1)
+
+        await coordinator.invalidate(accountKey: accountID)
+        let retiredCount = await coordinator.arbiterCount()
+        XCTAssertEqual(retiredCount, 0, "invalidation retires the runtime")
+
+        do {
+            _ = try await coordinator.acquirePlayback(accountKey: accountID)
+            XCTFail("playback for a retired account must fail, not revive an arbiter")
+        } catch let error as MediaTransportError {
+            XCTAssertEqual(error, .resourceBusy)
+        }
+        let afterRacedPlayback = await coordinator.arbiterCount()
+        XCTAssertEqual(
+            afterRacedPlayback, 0,
+            "a playback request racing removal must not install a replacement arbiter"
+        )
+
+        // Only an explicit re-registration creates a fresh runtime/arbiter generation.
+        _ = await coordinator.store(
+            accountKey: accountID, displayName: "NAS",
+            credentialRevision: revision, sessionFactory: factory
+        )
+        let reAddedCount = await coordinator.arbiterCount()
+        XCTAssertEqual(
+            reAddedCount, 1,
+            "explicit re-registration installs exactly one fresh runtime"
+        )
+
+        await coordinator.invalidate(accountKey: accountID)
+        let finalCount = await coordinator.arbiterCount()
+        XCTAssertEqual(finalCount, 0)
+    }
+
     // MARK: - Scanner outcome contracts (drives the coordinator's gating)
 
     private func scannerTempDir() -> URL {

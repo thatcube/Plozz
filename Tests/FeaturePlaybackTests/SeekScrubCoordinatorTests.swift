@@ -50,6 +50,47 @@ final class SeekScrubCoordinatorTests: XCTestCase {
         }
     }
 
+    // MARK: End-guard clamp (network-file EOF-fault guard)
+
+    func testCommittedSeekPastEndClampsBelowDuration() {
+        // Scrubbing to the very end must not drop the engine exactly on EOF: a
+        // network-file source faults its demuxer there. The committed target lands
+        // one endGuard shy of duration so the stream plays out to a clean onEnded.
+        let (sut, _, engine, controls) = makeSUT(intendsPlayback: false)
+        engine.duration = 1_000
+        sut.requestSeek(to: 1_000)
+        XCTAssertEqual(controls.pendingSeekTarget ?? -1, 999, accuracy: 0.0001)
+        XCTAssertEqual(sut.clampedSeekTarget(1_000), 999, accuracy: 0.0001)
+        XCTAssertEqual(sut.clampedSeekTarget(5_000), 999, accuracy: 0.0001,
+                       "a target past the end still clamps to just below duration")
+    }
+
+    func testCommittedSeekWithinRangeIsUnchanged() {
+        let (sut, _, engine, _) = makeSUT(intendsPlayback: false)
+        engine.duration = 1_000
+        XCTAssertEqual(sut.clampedSeekTarget(500), 500, accuracy: 0.0001)
+        XCTAssertEqual(sut.clampedSeekTarget(0), 0, accuracy: 0.0001)
+        XCTAssertEqual(sut.clampedSeekTarget(-42), 0, accuracy: 0.0001,
+                       "still floored at zero")
+    }
+
+    func testUnknownDurationOnlyFloorsAtZero() {
+        // Early bring-up: duration not yet known → only the lower bound applies,
+        // preserving prior behaviour (no upper clamp against a bogus 0 duration).
+        let (sut, _, engine, _) = makeSUT(intendsPlayback: false)
+        engine.duration = 0
+        XCTAssertEqual(sut.clampedSeekTarget(12_345), 12_345, accuracy: 0.0001)
+        engine.duration = .infinity
+        XCTAssertEqual(sut.clampedSeekTarget(12_345), 12_345, accuracy: 0.0001)
+    }
+
+    func testVeryShortDurationDoesNotProduceNegativeTarget() {
+        let (sut, _, engine, _) = makeSUT(intendsPlayback: false)
+        engine.duration = 0.5 // shorter than endGuard
+        XCTAssertEqual(sut.clampedSeekTarget(0.4), 0.4, accuracy: 0.0001,
+                       "sub-endGuard durations skip the upper clamp rather than go negative")
+    }
+
     // MARK: isSeeking clear-on-return (forever-spinner guard)
 
     func testIsSeekingClearsAfterDrainReturns() async {

@@ -53,6 +53,18 @@ final class SeekScrubCoordinator {
     private var resumeConfirmTask: Task<Void, Never>?
     private let seekCommitDebounce: UInt64
 
+    /// How far shy of the very end a committed seek is allowed to land. Scrubbing
+    /// to the far right of the bar otherwise sends the engine a seek *at* (or a
+    /// hair past) the final sample. On a network-file source (SMB/WebDAV via
+    /// Plozzigen) that faults the demuxer at EOF, which surfaces as a playback
+    /// error and — worse — the failure fallback then re-resolves *resumed at that
+    /// same EOF position*, faulting again with a second, more confusing error,
+    /// exactly while an up-next hand-off may already be in flight. Landing a beat
+    /// before the end instead lets the stream play out its final moment and fire a
+    /// clean natural `onEnded`, which is the path that cleanly auto-advances to the
+    /// next episode — which is what a scrub-to-the-end was asking for anyway.
+    private let endGuard: TimeInterval = 1.0
+
     init(
         host: SeekScrubCoordinatorHost,
         controls: PlayerControlsModel,
@@ -65,6 +77,19 @@ final class SeekScrubCoordinator {
 
     private var engine: (any VideoEngine)? { host?.seekEngine }
 
+    /// Clamps a requested seek into `[0, duration - endGuard]` so a scrub to the
+    /// very end can't drop the engine exactly on (or past) EOF. Only applies the
+    /// upper bound when the engine reports a finite, usefully-long duration; while
+    /// duration is still unknown (`0`/non-finite, early bring-up) the target is
+    /// only floored at 0, preserving prior behaviour.
+    func clampedSeekTarget(_ seconds: TimeInterval) -> TimeInterval {
+        let floored = max(0, seconds)
+        guard let engine else { return floored }
+        let duration = engine.duration
+        guard duration.isFinite, duration > endGuard else { return floored }
+        return min(floored, duration - endGuard)
+    }
+
     /// Requests a committed seek. Coalesces rapid presses: while one seek is
     /// in flight, additional calls just update the *latest target*; the
     /// scheduler loop then jumps directly to that latest target (skipping the
@@ -73,7 +98,7 @@ final class SeekScrubCoordinator {
     /// the on-screen position so the refresh loop can't snap the bar backward
     /// to a stale `engine.currentTime` while the seek resolves.
     func requestSeek(to seconds: TimeInterval) {
-        let target = max(0, seconds)
+        let target = clampedSeekTarget(seconds)
         let intendsPlayback = host?.seekIntendsPlayback ?? true
         if let engine {
             PlaybackTrace.note("requestSeek to=\(String(format: "%.2f", target)) from=\(String(format: "%.2f", controls.currentSeconds)) dir=\(target < controls.currentSeconds ? "BACK" : "fwd") engineState curr=\(String(format: "%.2f", engine.currentTime)) dur=\(String(format: "%.2f", engine.duration))")

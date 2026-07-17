@@ -59,8 +59,8 @@ public final class PlayerViewModel {
     /// so the viewer sees ONE continuous loading indicator from tap → first frame
     /// instead of a spinner that vanishes the instant `engine.load()` returns and
     /// then a black gap / second in-player spinner while the picture actually
-    /// arrives. Driven by ``beginAwaitingFirstFrame``.
-    public private(set) var awaitingFirstFrame = false
+    /// Driven by ``NextEpisodeCoordinator/beginAwaitingFirstFrame()``.
+    public var awaitingFirstFrame: Bool { nextEpisodeCoordinator.awaitingFirstFrame }
 
     /// Whether the full-screen bring-up spinner should be shown: while resolving/
     /// loading, and while `.ready` but the first frame hasn't been presented yet.
@@ -338,10 +338,9 @@ public final class PlayerViewModel {
     public private(set) var previousEpisode: MediaItem?
 
     /// A resolved, engine-routed playback for the NEXT episode, prefetched during
-    /// this episode so the hand-off is near-instant. Handed to the incoming player
-    /// via ``consumePrefetchedNext(matching:)``; released on ``stop()`` if the
-    /// viewer backs out without advancing (so a Jellyfin session isn't orphaned).
-    public private(set) var prefetchedNext: PrefetchedPlayback?
+    /// this episode so the hand-off is near-instant. Owned by
+    /// ``nextEpisodeCoordinator``; surfaced here for the hand-off callers.
+    public var prefetchedNext: PrefetchedPlayback? { nextEpisodeCoordinator.prefetchedNext }
 
     /// A prefetched playback injected at init by the OUTGOING episode's player, to
     /// be adopted by ``startPlayback`` instead of re-resolving over the network.
@@ -401,6 +400,12 @@ public final class PlayerViewModel {
     /// engine progress callback / background lifecycle.
     private var progressReporter: WatchProgressReporter!
 
+    /// Owns the fast-hand-off next-episode machinery: the one-shot next-episode
+    /// prefetch (eager for idempotent providers, windowed for Jellyfin), the
+    /// spoiler-aware Up Next card, and the single bring-up first-frame gate. Set
+    /// at the end of `init` (needs `self` as its host).
+    private var nextEpisodeCoordinator: NextEpisodeCoordinator!
+
     /// Optional playback bring-up started eagerly in `init` so the (network-bound)
     /// `playbackInfo` resolution and engine warm-up overlap the SwiftUI fullscreen
     /// navigation transition instead of starting only once the view appears. The
@@ -408,23 +413,9 @@ public final class PlayerViewModel {
     /// bring-up; `stop()` cancels it so a Back during the transition tears down
     /// cleanly via the cancellation checks in `startPlayback`.
     private var prefetchTask: Task<Void, Never>?
-    /// Background resolve of the NEXT episode's playback (see ``prefetchedNext``).
-    private var nextEpisodePrefetchTask: Task<Void, Never>?
-    /// Fires the next-episode prefetch at most once per player.
-    private var didStartNextEpisodePrefetch = false
-    /// Polls the engine for its first presented frame so the bring-up spinner can
-    /// be held until the picture is actually on screen (see ``awaitingFirstFrame``).
-    private var firstFrameTask: Task<Void, Never>?
     /// When the current bring-up began, for hand-off latency telemetry
     /// (``HandoffDiagnostics``). `nil` until ``startPlayback`` runs.
     private var bringUpStartedAt: Date?
-    /// How long before the end to prefetch the next episode when the provider's
-    /// `playbackInfo` is NOT idempotent (Jellyfin) and no closing-credits marker
-    /// opened the Up Next window — a safety net for marker-less servers so the
-    /// hand-off is still resolved ahead of time without orphaning a session early.
-    private static let windowedNextPrefetchLeadTime: TimeInterval = 90
-    /// Background series-id enrichment; awaited (briefly) at stop so a fast
-    /// finisher still scrobbles with the show's ids resolved.
     private var enrichTask: Task<Void, Never>?
 
     public init(
@@ -524,6 +515,12 @@ public final class PlayerViewModel {
             checkpointInterval: checkpointInterval,
             onCheckpoint: onPlaybackCheckpoint
         )
+        self.nextEpisodeCoordinator = NextEpisodeCoordinator(
+            host: self,
+            controls: controls,
+            playbackSettings: playbackSettings,
+            spoilerSettings: spoilerSettings
+        )
         configureEngineCallbacks()
 
         // Kick off bring-up now so playbackInfo + engine warm-up run *during* the
@@ -552,8 +549,8 @@ public final class PlayerViewModel {
             guard let self, self.engineToken == callbackEngineToken else { return }
             // Jellyfin (non-idempotent) next-episode prefetch fires once the
             // hand-off window opens; idempotent providers prefetch eagerly instead.
-            self.maybeStartWindowedNextPrefetch()
-            self.logUpNextStateIfNearEnd()
+            self.nextEpisodeCoordinator.maybeStartWindowedNextPrefetch()
+            self.nextEpisodeCoordinator.logUpNextStateIfNearEnd()
             self.progressReporter.reportProgress()
         }
         engine.onFailure = { [weak self] error in
@@ -639,250 +636,32 @@ public final class PlayerViewModel {
         nextEpisode = next
         controls.hasPreviousEpisode = prev != nil
         controls.hasNextEpisode = next != nil
-        updateUpNextCard()
+        nextEpisodeCoordinator.updateUpNextCard()
         // Eagerly prefetch the next episode's resolved stream when the provider's
         // `playbackInfo` is idempotent (Plex, SMB share) — safe to resolve the
         // moment it's known, for a near-instant hand-off. Jellyfin (a
         // session-minting POST) defers to the hand-off window instead; see
-        // ``maybeStartWindowedNextPrefetch``.
+        // ``NextEpisodeCoordinator/maybeStartWindowedNextPrefetch()``.
         if next != nil, provider.kind.playbackInfoIsIdempotent {
-            startNextEpisodePrefetch(trigger: "eager")
+            nextEpisodeCoordinator.startNextEpisodePrefetch(trigger: "eager")
         }
     }
 
-    // MARK: - Next-episode prefetch (fast hand-off)
+    // MARK: - Next-episode hand-off (forwarders to NextEpisodeCoordinator)
 
-    /// Resolves the NEXT episode's stream + engine ahead of the hand-off and
-    /// caches it in ``prefetchedNext``. Fires at most once. Best-effort: a failure
-    /// just means the hand-off resolves normally (no regression). The eager path
-    /// (idempotent providers) calls this from ``resolveNeighbors``; the windowed
-    /// path (Jellyfin) calls it from ``maybeStartWindowedNextPrefetch``.
-    private func startNextEpisodePrefetch(trigger: String) {
-        guard let next = nextEpisode, !didStartNextEpisodePrefetch, prefetchedNext == nil,
-              nextEpisodePrefetchTask == nil else { return }
-        didStartNextEpisodePrefetch = true
-        HandoffDiagnostics.emit("prefetch START trigger=\(trigger) next=\(next.id) provider=\(provider.kind.rawValue) idempotent=\(provider.kind.playbackInfoIsIdempotent)")
-        let prefetchStart = Date()
-        nextEpisodePrefetchTask = Task { @MainActor [weak self] in
-            guard let self else { return }
-            do {
-                let resolved = try await self.resolveAndRoute(
-                    itemID: next.id, mediaSourceID: next.selectedVersionID, forceTranscode: false)
-                // A stop()/back-out cancelled us after the resolve opened a
-                // (Jellyfin) session — release it rather than orphan it.
-                if Task.isCancelled {
-                    await self.releasePrefetchedSession(resolved.request)
-                    self.nextEpisodePrefetchTask = nil
-                    return
-                }
-                self.prefetchedNext = resolved
-                HandoffDiagnostics.emit("prefetch READY next=\(next.id) engine=\(resolved.engineKind.rawValue) took=\(HandoffDiagnostics.ms(prefetchStart))")
-                PlozzLog.playback.info("Prefetched next-episode playback (engine=\(resolved.engineKind.rawValue))")
-            } catch is CancellationError {
-                // Nothing resolved yet — nothing to release.
-            } catch {
-                // One-shot: a failed prefetch does NOT re-arm. Re-arming would let
-                // maybeStartWindowedNextPrefetch re-POST every progress tick and
-                // orphan a Jellyfin session that was minted just before the
-                // failure. The hand-off then resolves normally (no regression).
-                HandoffDiagnostics.emit("prefetch FAILED next=\(next.id) took=\(HandoffDiagnostics.ms(prefetchStart)) (hand-off will resolve normally)")
-                PlozzLog.playback.debug("Next-episode prefetch failed (non-fatal)")
-            }
-            self.nextEpisodePrefetchTask = nil
-        }
-    }
-
-    /// Starts the next-episode prefetch for a NON-idempotent provider (Jellyfin)
-    /// once the hand-off window has opened — the closing-credits marker (Up Next
-    /// active) or, as a fallback for marker-less servers, the last
-    /// ``windowedNextPrefetchLeadTime`` seconds. Keeps the minted session fresh.
-    /// Called on the progress cadence. Idempotent providers use the eager path.
-    private func maybeStartWindowedNextPrefetch() {
-        guard nextEpisode != nil, prefetchedNext == nil, !didStartNextEpisodePrefetch,
-              nextEpisodePrefetchTask == nil else { return }
-        guard !provider.kind.playbackInfoIsIdempotent else { return }
-        let duration = engine.duration
-        let remaining = duration - engine.currentTime
-        let windowOpen = controls.upNextActive
-            || (duration > 0 && remaining > 0 && remaining <= Self.windowedNextPrefetchLeadTime)
-        guard windowOpen else { return }
-        startNextEpisodePrefetch(trigger: "windowed")
-    }
-
-    /// Emits the Up Next card decision state on the progress cadence when we're
-    /// near the end (or the duration is unknown, which itself blocks the
-    /// time-based card). Diagnostic only (gated + throttled) — pinpoints why the
-    /// card does/doesn't appear on device (e.g. an SMB stream with duration 0).
-    private var lastUpNextDiagAt = Date.distantPast
-    private func logUpNextStateIfNearEnd() {
-        guard HandoffDiagnostics.isEnabled, nextEpisode != nil else { return }
-        let cDur = controls.duration
-        let cCur = controls.currentSeconds
-        let remaining = cDur - cCur
-        let durUnknown = !(cDur.isFinite && cDur > 0)
-        guard durUnknown || (remaining > 0 && remaining <= 60) else { return }
-        guard Date().timeIntervalSince(lastUpNextDiagAt) >= 8 else { return }
-        lastUpNextDiagAt = Date()
-        let creditsStart = controls.skippableSegments.first { $0.kind == .credits }?.start
-        HandoffDiagnostics.emit("upnext-state cDur=\(Int(cDur)) cCur=\(Int(cCur)) eDur=\(Int(engine.duration)) remaining=\(Int(remaining)) creditsStart=\(creditsStart.map { Int($0) }.map(String.init) ?? "none") card=\(controls.upNext != nil) show=\(playbackSettings.showUpNextCard) marker=\(controls.hasCreditsMarker) nearEndByTime=\(controls.isNearEndByTime) active=\(controls.upNextActive) presenting=\(controls.isPresentingUpNext) lead=\(Int(controls.upNextLeadSeconds))")
-    }
-
-    /// Hands the prefetched next-episode resolution to the incoming player and
-    /// clears it locally so ``stop()`` won't release the session being adopted.
+    /// Hands the prefetched next-episode resolution to the incoming player.
     /// Returns `nil` when there's no prefetch or it doesn't match `itemID` (the
     /// hand-off then resolves normally). Call this synchronously BEFORE `stop()`.
+    /// Public: the ``PlayerPresentation`` advance path (AppShell) drives it.
     public func consumePrefetchedNext(matching itemID: String) -> PrefetchedPlayback? {
-        guard let prefetched = prefetchedNext, prefetched.itemID == itemID else {
-            HandoffDiagnostics.emit("handoff advance next=\(itemID) prefetch=MISS (not ready — incoming player will resolve)")
-            return nil
-        }
-        HandoffDiagnostics.emit("handoff advance next=\(itemID) prefetch=HIT engine=\(prefetched.engineKind.rawValue)")
-        prefetchedNext = nil
-        // The producing task already completed; drop the handle so stop()'s
-        // cancel-and-release can't touch the session the incoming player now owns.
-        nextEpisodePrefetchTask = nil
-        return prefetched
+        nextEpisodeCoordinator.consumePrefetchedNext(matching: itemID)
     }
 
     /// Whether the panel's HDR/Dolby-Vision mode should be kept across this
-    /// hand-off — i.e. stop the outgoing engine WITHOUT resetting the display, so
-    /// the TV doesn't flap DV→SDR→DV between episodes. True only when both this
-    /// and the next episode play on the on-device engine in the SAME HDR/DV mode:
-    /// the incoming engine then re-applies identical criteria, so tvOS re-syncs
-    /// nothing. Any mismatch (different range, SDR, or a native-engine side) keeps
-    /// the normal full reset so a genuine mode change still happens.
+    /// hand-off. Public: the advance path (AppShell) reads it to decide whether to
+    /// preserve the display mode across the VM swap.
     public func shouldPreserveDisplayMode(forNext next: PrefetchedPlayback?) -> Bool {
-        let curMode = contentDisplayMode
-        let nextMode = next.map { HDRDisplayMode($0.request.sourceMetadata) }
-        let bothPlozzigen = currentEngineKind == .plozzigen && next?.engineKind == .plozzigen
-        let preserve = bothPlozzigen && (nextMode?.isHDR ?? false) && nextMode == curMode
-        HandoffDiagnostics.emit("handoff display cur=\(curMode) next=\(nextMode.map { "\($0)" } ?? "none") bothPlozzigen=\(bothPlozzigen) preserve=\(preserve)")
-        return preserve
-    }
-
-    /// Releases a prefetched-but-unadopted server session so a back-out doesn't
-    /// orphan a Jellyfin play/transcode session. A no-op for idempotent providers
-    /// (Plex/SMB create no server-side state). Best-effort.
-    private func releasePrefetchedSession(_ request: PlaybackRequest) async {
-        guard !provider.kind.playbackInfoIsIdempotent else { return }
-        guard let sessionID = request.playSessionID, !sessionID.isEmpty else { return }
-        let progress = PlaybackProgress(
-            itemID: request.item.id, playSessionID: sessionID, positionSeconds: 0, isPaused: true)
-        try? await provider.reportPlayback(progress, event: .stop)
-        PlozzLog.playback.info("Released orphaned prefetched next-episode session")
-    }
-
-    // MARK: - First-frame gate (single bring-up spinner)
-
-    /// Holds the bring-up spinner (``showBringUpSpinner``) until the engine is
-    /// genuinely presenting moving frames, so tap → first frame shows ONE
-    /// continuous indicator. Called from ``playResolved`` after `engine.load()`.
-    /// If the engine is already presenting (e.g. a mid-play cross-engine swap),
-    /// clears immediately.
-    private func beginAwaitingFirstFrame() {
-        firstFrameTask?.cancel()
-        if engine.preventsDisplaySleep {
-            awaitingFirstFrame = false
-            if let start = bringUpStartedAt {
-                HandoffDiagnostics.emit("first-frame (already presenting) total=\(HandoffDiagnostics.ms(start)) engine=\(currentEngineKind.rawValue)")
-            }
-            return
-        }
-        awaitingFirstFrame = true
-        firstFrameTask = Task { @MainActor [weak self] in
-            // Poll the engine's "frames genuinely advancing" signal
-            // (`preventsDisplaySleep`: native `timeControlStatus == .playing`,
-            // Plozzigen `state == .playing`) — finer than the ~report-cadence
-            // `onProgress`, so the spinner drops the instant the picture is up.
-            // A true hang is handled by the existing playback watchdog, not here.
-            while !Task.isCancelled {
-                guard let self, self.awaitingFirstFrame else { return }
-                if self.engine.preventsDisplaySleep {
-                    self.awaitingFirstFrame = false
-                    if let start = self.bringUpStartedAt {
-                        HandoffDiagnostics.emit("first-frame PRESENTED total=\(HandoffDiagnostics.ms(start)) engine=\(self.currentEngineKind.rawValue)")
-                    }
-                    return
-                }
-                try? await Task.sleep(nanoseconds: 100_000_000)
-            }
-        }
-    }
-
-    /// Tears down the first-frame gate on any terminal path (stop / failure) so
-    /// the poll never lingers and the spinner never sticks.
-    private func clearFirstFrameWait() {
-        firstFrameTask?.cancel()
-        firstFrameTask = nil
-        awaitingFirstFrame = false
-    }
-
-    /// Builds the spoiler-aware Up Next presentation for the resolved next episode
-    /// and publishes it to the controls model — or clears it when there's no next
-    /// episode or the card is disabled. The container only ever shows the card
-    /// during the closing-credits window (see ``PlayerControlsModel/upNextActive``).
-    private func updateUpNextCard() {
-        guard playbackSettings.showUpNextCard, let next = nextEpisode else {
-            controls.upNext = nil
-            return
-        }
-        let hideThumb = spoilerSettings.shouldHideThumbnail(for: next)
-        let hideText = spoilerSettings.shouldHideText(for: next)
-
-        // The show/series name leads the card — never a spoiler (you're watching
-        // it) and reliably readable. Fall back to the (spoiler-aware) episode title
-        // only when the series title is unknown.
-        let showName = next.parentTitle
-            ?? (hideText ? spoilerSettings.maskedTitle(for: next) : next.title)
-        let metaLine = Self.upNextMeta(for: next)
-
-        // Placeholder mode never loads the real still: fall back to spoiler-safe
-        // series art. Blur mode shows the real still but blurred. When not hidden,
-        // use the episode's own backdrop (16:9 still), then its safe fallbacks.
-        let thumbnailURLs: [URL]
-        let blur: Bool
-        if hideThumb, spoilerSettings.mode == .placeholder {
-            thumbnailURLs = [next.fallbackArtworkURL, next.seriesPosterURL].compactMap { $0 }
-            blur = false
-        } else {
-            thumbnailURLs = [next.backdropURL, next.fallbackArtworkURL].compactMap { $0 }
-            blur = hideThumb // blur mode (the only remaining hidden case)
-        }
-
-        controls.upNext = UpNextInfo(
-            episode: next,
-            showName: showName,
-            metaLine: metaLine,
-            thumbnailURLs: thumbnailURLs,
-            blurThumbnail: blur
-        )
-    }
-
-    /// The Up Next card's secondary line, e.g. "S2 · E3 · 48m" — season/episode
-    /// plus runtime. Season/episode numbers and runtime are never spoilers, so
-    /// this is always shown even under a masked thumbnail.
-    private static func upNextMeta(for item: MediaItem) -> String? {
-        var parts: [String] = []
-        if let season = item.seasonNumber, let episode = item.episodeNumber {
-            parts.append("S\(season) · E\(episode)")
-        } else if let episode = item.episodeNumber {
-            parts.append("Episode \(episode)")
-        }
-        if let runtime = item.runtime, runtime > 0 {
-            parts.append(Self.upNextRuntimeLabel(runtime))
-        }
-        return parts.isEmpty ? nil : parts.joined(separator: " · ")
-    }
-
-    /// Compact runtime label for the Up Next meta line, e.g. `48m` or `1h 2m`.
-    private static func upNextRuntimeLabel(_ seconds: TimeInterval) -> String {
-        let totalMinutes = max(0, Int(seconds / 60))
-        let hours = totalMinutes / 60
-        let minutes = totalMinutes % 60
-        if hours > 0 {
-            return minutes > 0 ? "\(hours)h \(minutes)m" : "\(hours)h"
-        }
-        return "\(minutes)m"
+        nextEpisodeCoordinator.shouldPreserveDisplayMode(forNext: next)
     }
 
     /// Advances to the resolved next episode (Up Next card Play / auto-advance).
@@ -1120,14 +899,14 @@ public final class PlayerViewModel {
                 "bringup FAILED item=\(itemID) provider=\(provider.kind.rawValue) "
                     + "error=\(HandoffDiagnostics.errorCode(error))"
             )
-            clearFirstFrameWait()
+            nextEpisodeCoordinator.clearFirstFrameWait()
             phase = .failed(error)
         } catch {
             HandoffDiagnostics.emit(
                 "bringup FAILED item=\(itemID) provider=\(provider.kind.rawValue) "
                     + "error=nonAppError"
             )
-            clearFirstFrameWait()
+            nextEpisodeCoordinator.clearFirstFrameWait()
             phase = .failed(.unknown(""))
         }
     }
@@ -1317,7 +1096,7 @@ public final class PlayerViewModel {
         // frame, so `.loading` → `.ready` is one continuous indicator rather than
         // a spinner that vanishes here (before the picture is up) and then a black
         // gap / second in-player spinner while frames arrive.
-        beginAwaitingFirstFrame()
+        nextEpisodeCoordinator.beginAwaitingFirstFrame()
         // Publish diagnostics after the engine load attempt returns, so the
         // diagnostics sampler doesn't churn SwiftUI layout during Plozzigen init.
         diagnosticsToken = UUID()
@@ -1605,7 +1384,7 @@ public final class PlayerViewModel {
             "engine FAILED item=\(itemID) engine=\(currentEngineKind.rawValue) "
                 + "error=\(HandoffDiagnostics.errorCode(error))\(detail) exhausted=true"
         )
-        clearFirstFrameWait()
+        nextEpisodeCoordinator.clearFirstFrameWait()
         phase = .failed(error)
     }
 
@@ -1863,9 +1642,8 @@ public final class PlayerViewModel {
         // Cancel the next-episode prefetch; its session (if any) is released
         // below, after the current engine is silenced, so cleanup never delays
         // stopping playback.
-        nextEpisodePrefetchTask?.cancel()
-        nextEpisodePrefetchTask = nil
-        clearFirstFrameWait()
+        nextEpisodeCoordinator.cancelPrefetch()
+        nextEpisodeCoordinator.clearFirstFrameWait()
         progressReporter.cancel()
         segmentsTask?.cancel()
         segmentsTask = nil
@@ -1892,13 +1670,10 @@ public final class PlayerViewModel {
         // incoming player took ownership), so a Jellyfin session isn't orphaned.
         // A no-op for idempotent providers. Done AFTER engine.stop() so it never
         // keeps audio playing while the cleanup round-trips.
-        if let orphan = prefetchedNext {
-            prefetchedNext = nil
-            await releasePrefetchedSession(orphan.request)
-        }
+        await nextEpisodeCoordinator.releaseOrphanedPrefetchIfNeeded()
         if let unadopted = adoptedResolved {
             adoptedResolved = nil
-            await releasePrefetchedSession(unadopted.request)
+            await nextEpisodeCoordinator.releaseSession(unadopted.request)
         }
         // Let in-flight series-id enrichment finish so a fast playthrough still
         // scrobbles with the show's ids (anime tagged only AniDB resolve mal/
@@ -2559,6 +2334,21 @@ extension PlayerViewModel: WatchProgressReporterHost {
     var reporterControlsDuration: TimeInterval { controls.duration }
     var reporterRequest: PlaybackRequest? { request }
     var reporterResumePosition: TimeInterval { currentResumePosition() }
+}
+
+extension PlayerViewModel: NextEpisodeCoordinatorHost {
+    var nextEpisodeCandidate: MediaItem? { nextEpisode }
+    var upNextEngine: any VideoEngine { engine }
+    var upNextProvider: any MediaProvider { provider }
+    var upNextContentDisplayMode: HDRDisplayMode { contentDisplayMode }
+    var upNextCurrentEngineKind: PlaybackEngineKind { currentEngineKind }
+    var upNextBringUpStartedAt: Date? { bringUpStartedAt }
+    func upNextResolveAndRoute(
+        itemID: String, mediaSourceID: String?, forceTranscode: Bool
+    ) async throws -> PrefetchedPlayback {
+        try await resolveAndRoute(
+            itemID: itemID, mediaSourceID: mediaSourceID, forceTranscode: forceTranscode)
+    }
 }
 
 extension PlayerViewModel: RemoteSubtitleAcquisitionHost {

@@ -546,17 +546,35 @@ private actor ShareScanStartGate {
     }
 }
 
-private final class ShareScannerResource: MediaIOScannerResource, @unchecked Sendable {
-    private let scanner: ShareScanner
-    private let store: ShareCatalogStore
+/// The graceful-cancel-side dependency a scanner resource notifies so a superseded
+/// scan generation can no longer commit writes. Extracted as a narrow seam so a
+/// blocked implementation cannot prevent force-close from reaching lister closure,
+/// and so tests can inject a blocking invalidator. `ShareCatalogStore` conforms.
+protocol ScanGenerationInvalidating: Sendable {
+    func invalidateScanGeneration() async
+}
+
+/// The force-close-side dependency a scanner resource drives to tear down active
+/// directory listers (each a live transport session) immediately, independent of
+/// the graceful-cancel path. `ShareScanner` conforms.
+protocol ScanListerForceClosing: Sendable {
+    func forceCloseActiveListers() async
+}
+
+extension ShareCatalogStore: ScanGenerationInvalidating {}
+extension ShareScanner: ScanListerForceClosing {}
+
+final class ShareScannerResource: MediaIOScannerResource, @unchecked Sendable {
+    private let listerCloser: ScanListerForceClosing
+    private let generationInvalidator: ScanGenerationInvalidating
     private let lock = NSLock()
     private var task: Task<Void, Never>?
     private var cancelled = false
     private var drained = false
 
-    init(scanner: ShareScanner, store: ShareCatalogStore) {
-        self.scanner = scanner
-        self.store = store
+    init(scanner: ScanListerForceClosing, store: ScanGenerationInvalidating) {
+        self.listerCloser = scanner
+        self.generationInvalidator = store
     }
 
     var isDrained: Bool {
@@ -580,20 +598,33 @@ private final class ShareScannerResource: MediaIOScannerResource, @unchecked Sen
         }
     }
 
-    func cancel() async {
+    /// Synchronously mark the resource cancelled and cancel the in-flight scan task.
+    /// Contains no `await`, so it can never inherit a blocked graceful-cancel
+    /// dependency; both `cancel()` and `forceClose()` start here. Idempotent:
+    /// re-marking and re-cancelling an already-cancelled task are no-ops.
+    private func cancelTaskSynchronously() {
         let task = lock.withLock {
             cancelled = true
             return self.task
         }
         task?.cancel()
-        await store.invalidateScanGeneration()
+    }
+
+    func cancel() async {
+        cancelTaskSynchronously()
+        await generationInvalidator.invalidateScanGeneration()
     }
 
     func forceClose() async throws {
-        await cancel()
-        await scanner.forceCloseActiveListers()
-        lock.withLock {
-            drained = true
-        }
+        // Do NOT await cancel() first. If the graceful-cancel dependency
+        // (generation invalidation) is blocked/hung, awaiting it here would repeat
+        // the same blockage and force-close would never reach active lister closure.
+        // Instead: cancel the scan task synchronously, tear down active listers
+        // immediately (this is what actually stops in-flight transport I/O), mark
+        // drained, then perform generation-invalidation bookkeeping last.
+        cancelTaskSynchronously()
+        await listerCloser.forceCloseActiveListers()
+        lock.withLock { drained = true }
+        await generationInvalidator.invalidateScanGeneration()
     }
 }

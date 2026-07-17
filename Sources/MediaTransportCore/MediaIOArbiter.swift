@@ -77,25 +77,35 @@ final class MediaIORaceLatch<Value: Sendable>: @unchecked Sendable {
 }
 
 /// Staged escalation windows carved out of a single absolute transition deadline.
-/// The graceful-cancel slice can never consume the force-close reserve, and the
-/// force-close slice can never consume the final drain-verification reserve, so a
-/// cancellation-insensitive `cancel()` cannot starve `forceClose()`.
-struct MediaIOTransitionBudget {
-    let gracefulCancel: Duration
-    let drainVerify: Duration
-    let forceClose: Duration
+/// A single `ContinuousClock.Instant` at transition start anchors three absolute
+/// cutoffs. Each stage's wait is recomputed as `max(.zero, cutoff - clock.now)` at
+/// invocation, so actor-scheduling/transition overhead between stages can never
+/// push the end-to-end bound past `finalDeadline`: a stage that starts after its
+/// cutoff has already slipped receives no time, and no earlier stage can borrow
+/// from a later reserve. The graceful-cancel slice therefore can never consume the
+/// force-close reserve even if `cancel()` is cancellation-insensitive.
+struct MediaIOTransitionSchedule {
+    let cancelCutoff: ContinuousClock.Instant
+    let drainCutoff: ContinuousClock.Instant
+    let finalDeadline: ContinuousClock.Instant
 
-    init(total: Duration) {
+    init(start: ContinuousClock.Instant, total: Duration) {
         let clamped = total > .zero ? total : .zero
-        // ~50% graceful cancel, ~20% drain verification, remainder (~30%)
-        // reserved for force-close. Subtracting the first two from the total keeps
-        // the three windows summing to exactly one absolute deadline with no drift.
+        // ~50% graceful cancel, ~20% drain verification, remainder (~30%) reserved
+        // for force-close. Cutoffs are absolute offsets from one start instant, so
+        // the three windows sum to exactly one deadline with no inter-stage drift.
         let cancel = clamped / 2
         let verify = clamped / 5
-        let close = clamped - cancel - verify
-        self.gracefulCancel = cancel
-        self.drainVerify = verify
-        self.forceClose = close > .zero ? close : .zero
+        self.cancelCutoff = start.advanced(by: cancel)
+        self.drainCutoff = start.advanced(by: cancel + verify)
+        self.finalDeadline = start.advanced(by: clamped)
+    }
+
+    /// The time still available before `cutoff`, or `.zero` if it has already
+    /// slipped. Computed against the caller-supplied `now` at each stage boundary.
+    func remaining(until cutoff: ContinuousClock.Instant, now: ContinuousClock.Instant) -> Duration {
+        let interval = now.duration(to: cutoff)
+        return interval > .zero ? interval : .zero
     }
 }
 
@@ -190,6 +200,16 @@ public actor MediaIOArbiter {
         case failed
         case timedOut
     }
+
+    /// Force-close is the mandatory terminal escalation: it must always get a real,
+    /// bounded attempt so that a fully-elapsed or zero-length transition deadline
+    /// cannot livelock playback by leaving an un-force-closed scanner permanently
+    /// installed. The staged schedule already reserves force-close budget for any
+    /// normal deadline; this floor only takes effect when the remaining budget has
+    /// rounded/slipped to (near) zero, guaranteeing one attempt rather than silently
+    /// skipping the escalation. Graceful-cancel and drain-verify waits have no floor
+    /// — under pressure they are meant to be skipped.
+    private static let minimumForceCloseAttempt = Duration.milliseconds(50)
 
     public let accountID: String
     private let deadline: any MediaIODrainDeadline
@@ -313,7 +333,10 @@ public actor MediaIOArbiter {
     }
 
     /// One absolute deadline, staged: bounded graceful cancel, then a bounded
-    /// drain-verification, then bounded force-close. Returns true only when closure
+    /// drain-verification, then bounded force-close. A single clock instant at the
+    /// start anchors all three cutoffs; each stage's timeout is recomputed as the
+    /// time remaining until its cutoff, so scheduling overhead between stages cannot
+    /// push the end-to-end bound past `finalDeadline`. Returns true only when closure
     /// is positively established (drained after cancel, or a non-throwing
     /// force-close). A timed-out or throwing force-close returns false — a timed-out
     /// unclosed scanner is never reported as cleanly drained. Late completion from a
@@ -321,10 +344,11 @@ public actor MediaIOArbiter {
     /// state, so it can never mutate admission after its window closes.
     private func stopAndDrain(_ scanner: ScannerAdmission) async -> Bool {
         let resource = scanner.resource
-        let budget = MediaIOTransitionBudget(total: drainTimeout)
+        let clock = ContinuousClock()
+        let schedule = MediaIOTransitionSchedule(start: clock.now, total: drainTimeout)
 
         let cancelReturned = await runBounded(
-            timeout: budget.gracefulCancel,
+            timeout: schedule.remaining(until: schedule.cancelCutoff, now: clock.now),
             timedOutValue: false
         ) {
             await resource.cancel()
@@ -333,17 +357,20 @@ public actor MediaIOArbiter {
 
         // Only spend the drain-verification reserve when cancel actually returned;
         // a blocked cancel escalates straight to force-close so its reserved window
-        // is preserved.
+        // (all time up to the absolute final deadline) is preserved.
         if cancelReturned {
             let drained = await deadline.waitForDrain(
                 of: resource,
-                timeout: budget.drainVerify
+                timeout: schedule.remaining(until: schedule.drainCutoff, now: clock.now)
             )
             if drained { return true }
         }
 
         let closed = await runBounded(
-            timeout: budget.forceClose,
+            timeout: max(
+                schedule.remaining(until: schedule.finalDeadline, now: clock.now),
+                Self.minimumForceCloseAttempt
+            ),
             timedOutValue: BoundedStage.timedOut
         ) {
             do {

@@ -328,9 +328,10 @@ final class SourceLeaseAndArbiterTests: XCTestCase {
 
     func testPermanentlyBlockedCancelAndForceCloseReturnsBoundedFailure() async throws {
         let resource = HangingScannerResource()
+        let drainTimeout = Duration.milliseconds(300)
         let arbiter = MediaIOArbiter(
             accountID: "account",
-            drainTimeout: .milliseconds(300)
+            drainTimeout: drainTimeout
         )
         let scanner = try await arbiter.acquireScanner(resource: resource)
 
@@ -349,9 +350,22 @@ final class SourceLeaseAndArbiterTests: XCTestCase {
             1,
             "force-close must be invoked within the absolute deadline even when cancel blocks"
         )
-        // Bounded by ONE absolute deadline (cancel + force-close reserves), never a
-        // per-stage sum and never unbounded.
-        XCTAssertLessThan(elapsed, .milliseconds(600))
+        // ONE absolute deadline: a blocked cancel is bounded at its start-anchored
+        // cutoff, then the blocked force-close is bounded at the same start-anchored
+        // final deadline — so total elapsed tracks drainTimeout, NOT the additive sum
+        // of per-stage durations (which would be ~2x). The tolerance covers CI
+        // actor-scheduling jitter around the two start-anchored cutoffs.
+        let tolerance = Duration.milliseconds(150)
+        XCTAssertGreaterThanOrEqual(
+            elapsed,
+            drainTimeout - tolerance,
+            "escalation returned before exhausting the single transition deadline"
+        )
+        XCTAssertLessThan(
+            elapsed,
+            drainTimeout + tolerance,
+            "elapsed exceeded one absolute deadline (stages summed instead of sharing it)"
+        )
 
         scanner.finish()
         resource.cancelGate.open()

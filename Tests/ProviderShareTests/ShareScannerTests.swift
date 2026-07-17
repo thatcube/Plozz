@@ -719,11 +719,18 @@ final class ShareScannerTests: XCTestCase {
         )
         let gate = BlockingListGate()
         let shutdownCounter = ShutdownCounter()
+        // A literal `.zero` deadline reserves no force-close window, so force-close
+        // is intentionally not attempted (bounded failure / no lease). This test
+        // asserts the opposite — that a blocked graceful cancel escalates to a
+        // *successful* force-close before playback — so it must grant a real,
+        // deterministic transition budget. 100 ms is the smallest window here that
+        // reserves a force-close slice (~30 ms) with the immediate drain deadline,
+        // large enough for the prompt `BlockingListSession.shutdown()` to complete.
         let coordinator = ShareCatalogCoordinator { accountID in
             MediaIOArbiter(
                 accountID: accountID,
                 deadline: ImmediateTimeoutDeadline(),
-                drainTimeout: .zero
+                drainTimeout: .milliseconds(100)
             )
         }
         let sessionFactory: ShareTransportSessionFactory = { role in

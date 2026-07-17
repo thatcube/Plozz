@@ -372,6 +372,54 @@ final class SourceLeaseAndArbiterTests: XCTestCase {
         resource.forceCloseGate.open()
     }
 
+    /// Contract for a literal zero / fully-elapsed transition deadline: force-close
+    /// is granted exactly `remaining(until: finalDeadline)` with no hidden minimum,
+    /// so a zero deadline reserves no force-close window at all. The transition must
+    /// then report bounded failure (no lease / `resourceBusy`) rather than borrowing
+    /// extra time to squeeze in an attempt — that borrowing would silently exceed the
+    /// promised absolute bound. This is the direct guard against reintroducing a
+    /// `minimumForceCloseAttempt`-style floor.
+    func testZeroDeadlineReservesNoForceCloseAndReportsBoundedFailure() async throws {
+        let resource = HangingScannerResource()
+        let arbiter = MediaIOArbiter(
+            accountID: "account",
+            drainTimeout: .zero
+        )
+        let scanner = try await arbiter.acquireScanner(resource: resource)
+
+        let clock = ContinuousClock()
+        let start = clock.now
+        do {
+            _ = try await arbiter.acquirePlayback()
+            XCTFail("playback admitted under a zero transition deadline")
+        } catch let error as MediaTransportError {
+            XCTAssertEqual(error, .resourceBusy)
+        }
+        let elapsed = start.duration(to: clock.now)
+
+        XCTAssertEqual(
+            resource.forceCloseCount,
+            0,
+            "a zero deadline must reserve no force-close window (no hidden minimum floor)"
+        )
+        XCTAssertEqual(
+            resource.cancelCount,
+            0,
+            "a zero deadline must reserve no graceful-cancel window either"
+        )
+        // No blocking stage was awaited, so the failure is reported almost
+        // immediately; the only slack is actor-scheduling jitter, never a floor.
+        XCTAssertLessThan(
+            elapsed,
+            .milliseconds(50),
+            "zero deadline returned late — an implicit minimum window was granted"
+        )
+
+        scanner.finish()
+        resource.cancelGate.open()
+        resource.forceCloseGate.open()
+    }
+
     func testBlockedCancelPreservesForceCloseReserve() async throws {
         let resource = CancelHangsForceCloseSucceedsResource()
         let arbiter = MediaIOArbiter(

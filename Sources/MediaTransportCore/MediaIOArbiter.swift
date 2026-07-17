@@ -201,16 +201,6 @@ public actor MediaIOArbiter {
         case timedOut
     }
 
-    /// Force-close is the mandatory terminal escalation: it must always get a real,
-    /// bounded attempt so that a fully-elapsed or zero-length transition deadline
-    /// cannot livelock playback by leaving an un-force-closed scanner permanently
-    /// installed. The staged schedule already reserves force-close budget for any
-    /// normal deadline; this floor only takes effect when the remaining budget has
-    /// rounded/slipped to (near) zero, guaranteeing one attempt rather than silently
-    /// skipping the escalation. Graceful-cancel and drain-verify waits have no floor
-    /// — under pressure they are meant to be skipped.
-    private static let minimumForceCloseAttempt = Duration.milliseconds(50)
-
     public let accountID: String
     private let deadline: any MediaIODrainDeadline
     private let drainTimeout: Duration
@@ -336,8 +326,12 @@ public actor MediaIOArbiter {
     /// drain-verification, then bounded force-close. A single clock instant at the
     /// start anchors all three cutoffs; each stage's timeout is recomputed as the
     /// time remaining until its cutoff, so scheduling overhead between stages cannot
-    /// push the end-to-end bound past `finalDeadline`. Returns true only when closure
-    /// is positively established (drained after cancel, or a non-throwing
+    /// push the end-to-end bound past `finalDeadline`. Force-close is granted exactly
+    /// the time remaining until `finalDeadline` — there is no hidden minimum, so the
+    /// promised absolute bound is never exceeded. A literal zero/fully-elapsed
+    /// deadline therefore yields no bounded force-close stage and reports failure (no
+    /// lease) rather than silently borrowing extra time. Returns true only when
+    /// closure is positively established (drained after cancel, or a non-throwing
     /// force-close). A timed-out or throwing force-close returns false — a timed-out
     /// unclosed scanner is never reported as cleanly drained. Late completion from a
     /// timed-out cancel/force-close resolves an abandoned latch that owns no arbiter
@@ -367,10 +361,7 @@ public actor MediaIOArbiter {
         }
 
         let closed = await runBounded(
-            timeout: max(
-                schedule.remaining(until: schedule.finalDeadline, now: clock.now),
-                Self.minimumForceCloseAttempt
-            ),
+            timeout: schedule.remaining(until: schedule.finalDeadline, now: clock.now),
             timedOutValue: BoundedStage.timedOut
         ) {
             do {

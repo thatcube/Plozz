@@ -35,6 +35,11 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
     private var invalidationTaskIDs: [String: UUID] = [:]
     private var restartingScans: Set<String> = []
     private var arbiters: [String: MediaIOArbiter] = [:]
+    /// The owner a coordinator-initiated cancellation stamps for an in-flight scan
+    /// task before cancelling it, keyed by account then task id. Consumed when the
+    /// task ends so a non-completing scan can be attributed to an exact, secret-safe
+    /// owner (finding A5) rather than guessed from timing.
+    private var pendingCancellationReasons: [String: [UUID: ShareScanCancellationOwner]] = [:]
     private let metadataScheduler = ShareMetadataWorkScheduler()
     private var preferredAccountRevision: UInt64 = 0
     private let arbiterFactory: ArbiterFactory
@@ -58,11 +63,15 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
     /// Where scan/enrich progress is reported for the Home banner + Settings.
     /// Wired once by the app (`AppState`); `.noop` until then (tests/previews).
     private var reporter: ShareScanReporter = .noop
+    /// Secret-safe sink for scans that end without a completion stamp. Injected so
+    /// tests can assert the exact owner/generation of each non-completing scan.
+    private let diagnostics: ShareScanDiagnostics
 
     public init(
         arbiterFactory: @escaping ArbiterFactory = { MediaIOArbiter(accountID: $0) }
     ) {
         self.arbiterFactory = arbiterFactory
+        self.diagnostics = DefaultShareScanDiagnostics()
         self.metadataResolverFactory = {
             ShareExternalResolverSelection.make(for: TVDBConfig.resolved())
         }
@@ -70,9 +79,11 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
 
     init(
         arbiterFactory: @escaping ArbiterFactory = { MediaIOArbiter(accountID: $0) },
+        diagnostics: ShareScanDiagnostics = DefaultShareScanDiagnostics(),
         metadataResolverFactory: @escaping MetadataResolverFactory
     ) {
         self.arbiterFactory = arbiterFactory
+        self.diagnostics = diagnostics
         self.metadataResolverFactory = metadataResolverFactory
     }
 
@@ -244,6 +255,11 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
             )
         }
         let existingTasks = Array(existingTaskEntries.values)
+        stampCancellationReason(
+            accountKey,
+            taskIDs: existingTaskEntries.keys,
+            owner: .rescanSuperseded
+        )
         existingTasks.forEach { $0.cancel() }
         await stores[accountKey]?.invalidateScanGeneration()
         for task in existingTasks {
@@ -281,6 +297,19 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
     }
 
     public func acquirePlayback(accountKey: String) async throws -> MediaIOPlaybackLease {
+        // Playback admission drains any active scanner to grant a lease; attribute that
+        // cancellation to playback so the interrupted scan is diagnosable and not
+        // mistaken for an unexplained cancellation.
+        stampCancellationReason(
+            accountKey,
+            taskIDs: scanTasks[accountKey]?.keys,
+            owner: .playbackAdmission
+        )
+        stampCancellationReason(
+            accountKey,
+            taskIDs: drainingScanTasks[accountKey]?.keys,
+            owner: .playbackAdmission
+        )
         await metadataScheduler.suspend(accountKey: accountKey)
         do {
             let lease = try await arbiter(for: accountKey).acquirePlayback()
@@ -299,6 +328,21 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
         let arbiter = arbiterFactory(accountKey)
         arbiters[accountKey] = arbiter
         return arbiter
+    }
+
+    // MARK: - Test introspection
+
+    /// The number of per-account arbiters currently retained. Must return to zero
+    /// across repeated add/invalidate cycles (finding A7). Test-only.
+    func arbiterCount() -> Int {
+        arbiters.count
+    }
+
+    /// When the given account last recorded a background-scan completion, or nil if a
+    /// completing pass has not (yet) been stamped. Test-only assertion seam for the
+    /// A5 completion-gating behavior.
+    func backgroundScanCompletedAt(_ accountKey: String) -> Date? {
+        lastBackgroundScanCompletedAt[accountKey]
     }
 
     /// Fast-track enrichment of ONE item the user just opened, ahead of the
@@ -346,6 +390,11 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
     ) async {
         guard enrichers[accountKey] != nil,
               let store = stores[accountKey] else { return }
+        // Capture the scanner/credential generation this walk is bound to, so
+        // completion is only stamped if the SAME generation is still current when the
+        // walk returns (a superseded scanner/credential must not stamp its replacement).
+        let scannerID = scannerIDs[accountKey]
+        let credentialRevision = scannerRevisions[accountKey]
         await metadataScheduler.suspend(accountKey: accountKey)
         let resource = ShareScannerResource(scanner: scanner, store: store)
         let scannerLease: MediaIOScannerLease
@@ -363,15 +412,24 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
             guard !Task.isCancelled else {
                 resource.markDrained()
                 await scannerLease.finishAndWait()
+                await self?.recordScanOutcome(
+                    accountKey,
+                    taskID: taskID,
+                    scannerID: scannerID,
+                    credentialRevision: credentialRevision,
+                    outcome: .cancelled(scanGeneration: nil),
+                    taskCancelled: true
+                )
                 await self?.clearScanTask(accountKey, taskID: taskID)
                 return
             }
             ShareBackgroundActivity.scanStarted()
             BrowseDiagnostics.event("scan+ \(accountKey) force=\(force)")
+            let outcome: ShareScanOutcome
             if force {
-                await scanner.scan()
+                outcome = await scanner.scan()
             } else {
-                await scanner.scanIfStale()
+                outcome = await scanner.scanIfStale()
             }
             ShareBackgroundActivity.scanFinished()
             BrowseDiagnostics.event("scan- \(accountKey)")
@@ -381,10 +439,20 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
                 await self?.metadataScheduler.enqueueBacklog(accountKey: accountKey)
             }
             // Record scan completion so `ensureScanning` coalesces the frequent
-            // per-render re-triggers into at most one cycle per window. A forced
-            // "Scan now" also resets it, so a manual scan doesn't immediately
-            // re-thrash on the next Home render.
-            await self?.noteScanCompleted(accountKey)
+            // per-render re-triggers into at most one cycle per window — but ONLY when
+            // this pass genuinely completed for the still-current generation and was
+            // not cancelled. A cancelled/superseded/invalidated pass records a
+            // secret-safe non-completion diagnostic instead and never suppresses the
+            // next needed scan (finding A5). A forced "Scan now" that completes also
+            // resets the timestamp so it doesn't immediately re-thrash on Home render.
+            await self?.recordScanOutcome(
+                accountKey,
+                taskID: taskID,
+                scannerID: scannerID,
+                credentialRevision: credentialRevision,
+                outcome: outcome,
+                taskCancelled: Task.isCancelled
+            )
             await self?.clearScanTask(accountKey, taskID: taskID)
         }
         resource.attach(task)
@@ -399,10 +467,93 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
         }
     }
 
-    /// Records that a background scan+enrich cycle finished for this share, so
-    /// `ensureScanning` coalesces the frequent per-render re-triggers.
-    private func noteScanCompleted(_ accountKey: String) {
-        lastBackgroundScanCompletedAt[accountKey] = Date()
+    /// Decide whether a finished scan pass earns a background-completion timestamp,
+    /// and record a secret-safe non-completion diagnostic otherwise (finding A5).
+    ///
+    /// A completion stamp — which suppresses the next needed scan for the coalesce
+    /// window — is recorded ONLY when the pass genuinely completed (or was a true
+    /// no-op), the task was not cancelled, AND the scanner/credential generation this
+    /// walk was bound to is still current. Everything else (cancelled, invalidated,
+    /// superseded, failed-to-start) records an owner-attributed diagnostic and leaves
+    /// completion unset so the next access rescans.
+    private func recordScanOutcome(
+        _ accountKey: String,
+        taskID: UUID,
+        scannerID: UUID?,
+        credentialRevision: CredentialRevision?,
+        outcome: ShareScanOutcome,
+        taskCancelled: Bool
+    ) {
+        let reason = takeCancellationReason(accountKey, taskID: taskID)
+        let generationCurrent = scannerID != nil
+            && scannerIDs[accountKey] == scannerID
+            && scannerRevisions[accountKey] == credentialRevision
+        if outcome.earnsCompletionStamp && !taskCancelled && generationCurrent {
+            lastBackgroundScanCompletedAt[accountKey] = Date()
+            return
+        }
+        let owner = cancellationOwner(
+            reason: reason,
+            outcome: outcome,
+            generationCurrent: generationCurrent
+        )
+        diagnostics.recordCancellation(
+            ShareScanCancellationRecord(
+                accountKey: accountKey,
+                owner: owner,
+                scannerGeneration: scannerID,
+                credentialRevision: credentialRevision?.rawValue,
+                outcome: outcome.diagnosticLabel
+            )
+        )
+    }
+
+    /// Resolve the authoritative owner of a non-completing scan. A coordinator-stamped
+    /// reason (rescan/credential/invalidation/playback) is authoritative; otherwise the
+    /// outcome and generation currency disambiguate a supersession from an unattributed
+    /// teardown-timing cancellation. Timing is never consulted.
+    private func cancellationOwner(
+        reason: ShareScanCancellationOwner?,
+        outcome: ShareScanOutcome,
+        generationCurrent: Bool
+    ) -> ShareScanCancellationOwner {
+        if let reason { return reason }
+        switch outcome {
+        case .invalidated, .failedToStart:
+            return .scannerGenerationReplaced
+        case .completedClean, .completedPartial, .freshNoOp:
+            // A genuinely completed pass that did not stamp can only mean its
+            // generation was superseded while it ran.
+            return .supersededCompletion
+        case .cancelled:
+            return generationCurrent ? .unattributed : .scannerGenerationReplaced
+        }
+    }
+
+    private func stampCancellationReason(
+        _ accountKey: String,
+        taskIDs: Dictionary<UUID, Task<Void, Never>>.Keys?,
+        owner: ShareScanCancellationOwner
+    ) {
+        guard let taskIDs, !taskIDs.isEmpty else { return }
+        for taskID in taskIDs {
+            // Never overwrite a reason already stamped by an earlier owner for the same
+            // task; the first coordinator action that decides to cancel it owns it.
+            if pendingCancellationReasons[accountKey]?[taskID] == nil {
+                pendingCancellationReasons[accountKey, default: [:]][taskID] = owner
+            }
+        }
+    }
+
+    private func takeCancellationReason(
+        _ accountKey: String,
+        taskID: UUID
+    ) -> ShareScanCancellationOwner? {
+        let reason = pendingCancellationReasons[accountKey]?.removeValue(forKey: taskID)
+        if pendingCancellationReasons[accountKey]?.isEmpty == true {
+            pendingCancellationReasons[accountKey] = nil
+        }
+        return reason
     }
 
     private func clearDrainingScanTasks(
@@ -431,6 +582,13 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
         let taskEntries = activeTasks.merging(
             drainingTasks,
             uniquingKeysWith: { current, _ in current }
+        )
+        // Attribute the cancellation before cancelling: a full invalidation is an
+        // account removal; a runtime-preserving one is a credential rotation.
+        stampCancellationReason(
+            accountKey,
+            taskIDs: taskEntries.keys,
+            owner: releaseRuntimeState ? .accountInvalidation : .credentialChange
         )
         let tasks = Array(taskEntries.values)
         tasks.forEach { $0.cancel() }
@@ -481,6 +639,19 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
             await metadataScheduler.remove(accountKey: accountKey)
             await removedLocalEnricher?.close()
             reporter.shareRemoved(accountKey)
+            pendingCancellationReasons[accountKey] = nil
+            // Retire the per-account arbiter (finding A7): reject new admission, drain
+            // any active scanner under the bounded deadline, and wait for already-issued
+            // playback leases to drain naturally. Remove it only after it drains, and
+            // only if the dictionary still points at THIS identity — a re-add after this
+            // completed invalidation installs a fresh arbiter generation that must
+            // survive. This awaits genuine playback lifetime but never a hung scanner.
+            if let arbiter = arbiters[accountKey] {
+                await arbiter.shutdownAndDrain()
+                if arbiters[accountKey] === arbiter {
+                    arbiters[accountKey] = nil
+                }
+            }
         }
         restartingScans.remove(accountKey)
         invalidationTasks[accountKey] = nil

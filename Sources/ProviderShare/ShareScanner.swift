@@ -147,8 +147,10 @@ actor ShareScanner {
 
     /// Run a scan unless one already ran within `minInterval` (or is running).
     /// Called fire-and-forget from the Home hot path, so it must be cheap to no-op.
-    func scanIfStale(minInterval: TimeInterval = 600) async {
-        if isRunning || isInvalidated { return }
+    @discardableResult
+    func scanIfStale(minInterval: TimeInterval = 600) async -> ShareScanOutcome {
+        if isRunning { return .freshNoOp }
+        if isInvalidated { return .invalidated }
         // Force a walk (ignoring the staleness throttle) when the CLASSIFIER changed
         // since the last completed pass, so every already-indexed file is
         // reclassified under the new movie/episode rules right away instead of
@@ -168,15 +170,18 @@ actor ShareScanner {
            let last = await store.meta("last_full_scan_at"),
            let ts = TimeInterval(last),
            Date().timeIntervalSince1970 - ts < minInterval {
-            return
+            return .freshNoOp
         }
-        await scan()
+        return await scan()
     }
 
     /// Full breadth-first walk from the share root, using a pool of independent
     /// connections to list `concurrency` directories at once. Idempotent.
-    func scan() async {
-        if isRunning || isInvalidated || Task.isCancelled { return }
+    @discardableResult
+    func scan() async -> ShareScanOutcome {
+        if isRunning { return .freshNoOp }
+        if isInvalidated { return .invalidated }
+        if Task.isCancelled { return .cancelled(scanGeneration: nil) }
         isRunning = true
         let scanGeneration = UUID()
         await store.activateScanGeneration(scanGeneration)
@@ -185,7 +190,7 @@ actor ShareScanner {
 
         guard !Task.isCancelled, !isInvalidated else {
             await finishScan(listers: [])
-            return
+            return isInvalidated ? .invalidated : .cancelled(scanGeneration: scanGeneration)
         }
 
         // Pre-build the pool of independent listers (each its own SMB connection).
@@ -203,7 +208,7 @@ actor ShareScanner {
         guard let scanID = await store.nextScanID(for: scanGeneration),
               !isInvalidated else {
             await finishScan(listers: pool)
-            return
+            return isInvalidated ? .invalidated : .failedToStart
         }
         PlozzLog.boot("share.scan begin scanID=\(scanID) concurrency=\(concurrency)")
 
@@ -225,7 +230,7 @@ actor ShareScanner {
             if Task.isCancelled {
                 PlozzLog.boot("share.scan cancelled after \(dirsWalked) dirs, \(filesFound) files — no prune")
                 await finishScan(listers: pool)
-                return
+                return .cancelled(scanGeneration: scanGeneration)
             }
             var nextFrontier: [String] = []
             var index = 0                         // next directory in `frontier` to dispatch
@@ -300,7 +305,7 @@ actor ShareScanner {
             if Task.isCancelled || isInvalidated {
                 PlozzLog.boot("share.scan cancelled after \(dirsWalked) dirs, \(filesFound) files — no prune")
                 await finishScan(listers: pool)
-                return
+                return isInvalidated ? .invalidated : .cancelled(scanGeneration: scanGeneration)
             }
             frontier = nextFrontier
         }
@@ -314,30 +319,30 @@ actor ShareScanner {
         // clean pass performs the deferred prune.
         guard !isInvalidated else {
             await finishScan(listers: pool)
-            return
+            return .invalidated
         }
         if !anyListingFailed {
             await store.preserveMovieAliasesBeforePrune(scanGeneration: scanGeneration)
             guard !isInvalidated else {
                 await finishScan(listers: pool)
-                return
+                return .invalidated
             }
             await store.pruneNotSeen(inScan: scanID, scanGeneration: scanGeneration)
             guard !isInvalidated else {
                 await finishScan(listers: pool)
-                return
+                return .invalidated
             }
             await store.pruneSidecarsNotSeen(inScan: scanID, scanGeneration: scanGeneration)
             guard !isInvalidated else {
                 await finishScan(listers: pool)
-                return
+                return .invalidated
             }
             await store.rebuildMovieGroups(scanGeneration: scanGeneration)
             await store.reconcileSidecarAssociations(scanGeneration: scanGeneration)
         }
         guard !isInvalidated else {
             await finishScan(listers: pool)
-            return
+            return .invalidated
         }
         // Filename/folder explicit ids are pure path computation (already
         // persisted on the asset row) — materialize them into the same
@@ -365,6 +370,11 @@ actor ShareScanner {
             "share.scan done scanID=\(scanID) dirs=\(dirsWalked) files=\(filesFound) pruned=\(!anyListingFailed) elapsed=\(Int(Date().timeIntervalSince(started) * 1_000))ms"
         )
         await finishScan(listers: pool)
+        // A completed pass earns a completion stamp. When some listing failed the pass
+        // stayed unpruned (partial), but it is still a *completed* pass under the
+        // approved partial throttle — the coordinator distinguishes this from a
+        // cancelled/superseded pass via the explicit outcome.
+        return anyListingFailed ? .completedPartial : .completedClean
     }
 
     private func finishScan(listers: [ScanLister]) async {

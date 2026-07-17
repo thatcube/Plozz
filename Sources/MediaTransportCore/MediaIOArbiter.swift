@@ -216,6 +216,11 @@ public actor MediaIOArbiter {
     /// racing a second concurrent drain of the same resource.
     private var transitionInProgress = false
     private var transitionWaiters: [CheckedContinuation<Void, Never>] = []
+    /// Once shut down, no new scanner or playback lease is admitted. Set by
+    /// `shutdownAndDrain()` during account invalidation so a retired arbiter can be
+    /// removed from the coordinator once its already-issued leases drain.
+    private var isShutDown = false
+    private var shutdownDrainWaiters: [CheckedContinuation<Void, Never>] = []
 
     public init(
         accountID: String,
@@ -230,6 +235,9 @@ public actor MediaIOArbiter {
     public func acquireScanner(
         resource: any MediaIOScannerResource
     ) async throws -> MediaIOScannerLease {
+        // A retired arbiter admits no new work; the coordinator installs a fresh
+        // arbiter generation after invalidation completes.
+        guard !isShutDown else { throw MediaTransportError.resourceBusy }
         // A scanner yields to any playback that is active or merely reserved, and
         // it never queues behind another in-progress transition (fast-fail avoids a
         // scan storm and preserves single-transition serialization).
@@ -259,6 +267,9 @@ public actor MediaIOArbiter {
     }
 
     public func acquirePlayback() async throws -> MediaIOPlaybackLease {
+        // A retired arbiter admits no new playback; the coordinator installs a fresh
+        // arbiter generation after invalidation completes.
+        guard !isShutDown else { throw MediaTransportError.resourceBusy }
         // Reserve priority before any suspension so a concurrent or at-boundary
         // scanner replacement observes the reservation and yields to us.
         playbackReservations += 1
@@ -290,10 +301,50 @@ public actor MediaIOArbiter {
     /// polls this between short slices, so playback/scanning never needs to retain a
     /// callback into a higher-level module.
     public func permitsBackgroundWork() -> Bool {
-        playbackIDs.isEmpty
+        !isShutDown
+            && playbackIDs.isEmpty
             && playbackReservations == 0
             && activeScanner == nil
             && !transitionInProgress
+    }
+
+    /// Retire this arbiter: reject all new scanner/playback admission, drain any active
+    /// scanner under the bounded transition deadline, then wait for already-issued
+    /// playback leases to drain *naturally* (playback finishes on its own timeline; we
+    /// never cancel a live lease). Returns only once no lease remains, so the
+    /// coordinator can drop the account without leaking arbiters (finding A7).
+    ///
+    /// Bounded where it must be: scanner cancel/force-close uses the same single
+    /// absolute deadline as `stopAndDrain`, so this never waits forever on an
+    /// unresponsive scanner. It intentionally *does* wait for genuine playback leases —
+    /// that wait is bounded by playback's own lifetime, and new admission is already
+    /// rejected. Idempotent: a second call after drain returns immediately.
+    public func shutdownAndDrain() async {
+        isShutDown = true
+        // Let any in-progress drain (a replacement transition) finish before we drain.
+        while transitionInProgress {
+            await awaitTransitionClear()
+        }
+        if let scanner = activeScanner {
+            _ = await runDrainTransition(scanner)
+        }
+        // Existing playback leases finish naturally; wait for the last one to release.
+        while !playbackIDs.isEmpty {
+            await awaitShutdownDrain()
+        }
+    }
+
+    private func awaitShutdownDrain() async {
+        await withCheckedContinuation { continuation in
+            shutdownDrainWaiters.append(continuation)
+        }
+    }
+
+    private func resumeShutdownDrainIfComplete() {
+        guard isShutDown, playbackIDs.isEmpty, !shutdownDrainWaiters.isEmpty else { return }
+        let waiters = shutdownDrainWaiters
+        shutdownDrainWaiters.removeAll()
+        for waiter in waiters { waiter.resume() }
     }
 
     /// Drains `scanner` under a single absolute deadline, clearing it on success.
@@ -408,6 +459,7 @@ public actor MediaIOArbiter {
 
     fileprivate func releasePlayback(id: UUID) {
         playbackIDs.remove(id)
+        resumeShutdownDrainIfComplete()
     }
 
     /// Test-only introspection: the number of playback requests currently holding a

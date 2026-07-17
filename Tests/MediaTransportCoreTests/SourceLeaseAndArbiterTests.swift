@@ -534,4 +534,76 @@ final class SourceLeaseAndArbiterTests: XCTestCase {
         let replacement = try await arbiter.acquireScanner(resource: FakeScannerResource())
         replacement.finish()
     }
+
+    // MARK: - shutdownAndDrain (finding A7 primitive)
+
+    func testShutdownAndDrainRejectsNewAdmissionWithNoLeases() async throws {
+        let arbiter = MediaIOArbiter(accountID: "shutdown-empty")
+        // No scanner and no lease: retirement completes immediately.
+        await arbiter.shutdownAndDrain()
+
+        let permits = await arbiter.permitsBackgroundWork()
+        XCTAssertFalse(permits, "a retired arbiter permits no background work")
+        do {
+            _ = try await arbiter.acquireScanner(resource: FakeScannerResource())
+            XCTFail("a retired arbiter must reject scanner admission")
+        } catch let error as MediaTransportError {
+            XCTAssertEqual(error, .resourceBusy)
+        }
+        do {
+            _ = try await arbiter.acquirePlayback()
+            XCTFail("a retired arbiter must reject playback admission")
+        } catch let error as MediaTransportError {
+            XCTAssertEqual(error, .resourceBusy)
+        }
+    }
+
+    func testShutdownAndDrainDrainsActiveScanner() async throws {
+        let arbiter = MediaIOArbiter(
+            accountID: "shutdown-scanner",
+            deadline: FakeDrainDeadline(drains: true)
+        )
+        let resource = FakeScannerResource()
+        let lease = try await arbiter.acquireScanner(resource: resource)
+
+        await arbiter.shutdownAndDrain()
+
+        XCTAssertEqual(resource.cancelCount, 1, "retirement drains the active scanner")
+        let permits = await arbiter.permitsBackgroundWork()
+        XCTAssertFalse(permits)
+        lease.finish() // a stale finish after retirement is harmless
+    }
+
+    func testShutdownAndDrainWaitsForHeldPlaybackLease() async throws {
+        let arbiter = MediaIOArbiter(accountID: "shutdown-lease")
+        let lease = try await arbiter.acquirePlayback()
+
+        let done = ShutdownDoneFlag()
+        let shutdown = Task {
+            await arbiter.shutdownAndDrain()
+            done.set()
+        }
+
+        // The live lease keeps retirement pending, but new admission is already rejected.
+        try? await Task.sleep(nanoseconds: 60_000_000)
+        XCTAssertFalse(done.isSet, "retirement must wait for the held playback lease to drain")
+        do {
+            _ = try await arbiter.acquirePlayback()
+            XCTFail("a shutting-down arbiter must reject new playback admission")
+        } catch let error as MediaTransportError {
+            XCTAssertEqual(error, .resourceBusy)
+        }
+
+        await lease.releaseAndWait()
+        await shutdown.value
+        XCTAssertTrue(done.isSet, "retirement completes once the final lease drains")
+    }
+}
+
+/// Thread-safe completion flag for the concurrent shutdown-drain test.
+private final class ShutdownDoneFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = false
+    var isSet: Bool { lock.withLock { value } }
+    func set() { lock.withLock { value = true } }
 }

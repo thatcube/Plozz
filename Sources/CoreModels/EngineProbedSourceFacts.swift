@@ -19,15 +19,7 @@ public struct EngineProbedSourceFacts: Equatable, Sendable {
     /// Deliberately does NOT carry a Dolby Vision *profile* number: single-layer
     /// engines detect "this is Dolby Vision" without reliably resolving 5 vs 8.1,
     /// so we surface "Dolby Vision" without asserting a profile.
-    public enum DynamicRange: Equatable, Sendable {
-        case sdr
-        case hlg
-        case hdr10
-        case hdr10Plus
-        case dolbyVision
-    }
-
-    public var range: DynamicRange?
+    public var range: SourceDynamicRange?
     public var videoWidth: Int?
     public var videoHeight: Int?
     public var videoDecoder: String?
@@ -37,7 +29,7 @@ public struct EngineProbedSourceFacts: Equatable, Sendable {
     public var audioDecoder: String?
 
     public init(
-        range: DynamicRange? = nil,
+        range: SourceDynamicRange? = nil,
         videoWidth: Int? = nil,
         videoHeight: Int? = nil,
         videoDecoder: String? = nil,

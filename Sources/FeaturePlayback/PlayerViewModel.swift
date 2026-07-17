@@ -50,10 +50,28 @@ public final class PlayerViewModel {
         public let itemID: String
         public let request: PlaybackRequest
         public let engineKind: PlaybackEngineKind
-        public init(itemID: String, request: PlaybackRequest, engineKind: PlaybackEngineKind) {
+        public let inheritedPreservedDynamicRange: SourceDynamicRange?
+        public init(
+            itemID: String,
+            request: PlaybackRequest,
+            engineKind: PlaybackEngineKind,
+            inheritedPreservedDynamicRange: SourceDynamicRange? = nil
+        ) {
             self.itemID = itemID
             self.request = request
             self.engineKind = engineKind
+            self.inheritedPreservedDynamicRange = inheritedPreservedDynamicRange
+        }
+
+        public func inheritingPreservedDisplayMode(_ inherits: Bool) -> Self {
+            Self(
+                itemID: itemID,
+                request: request,
+                engineKind: engineKind,
+                inheritedPreservedDynamicRange: inherits
+                    ? SourceDynamicRange.providerHint(from: request.sourceMetadata)
+                    : nil
+            )
         }
     }
 
@@ -83,26 +101,30 @@ public final class PlayerViewModel {
     /// which keeps the finished frame on screen as before.
     public private(set) var shouldDismiss = false
 
-    /// The dynamic-range class the connected display is currently being driven
-    /// to. `.sdr` until a request resolves on the **native** engine. Drives the
-    /// HDR/Dolby-Vision display-mode transition smoothing in `PlayerView`: when
-    /// this moves off `.sdr`, the TV switches HDMI display mode, so the view
-    /// fades to black around the switch.
-    ///
-    /// Only the native engine drives `AVDisplayManager`'s HDMI mode switch; the
-    /// Plozzigen engine renders HDR without a panel mode switch, so it stays
-    /// `.sdr` here and the view never raises an unnecessary veil. Provider-
-    /// agnostic — derived from `MediaSourceMetadata`, identical for Plex/Jellyfin.
-    private(set) var displayMode: HDRDisplayMode = .sdr
+    /// Best available source range for this playback. Provider metadata is only
+    /// an early hint for Plozzigen; its demux probe replaces it authoritatively.
+    /// Native AVPlayer keeps its historical metadata-or-SDR behavior.
+    public private(set) var effectiveDynamicRange: EffectiveDynamicRange =
+        .native(metadata: nil)
 
-    /// The dynamic range of the **content** being played, independent of which
-    /// engine renders it. `displayMode` only goes HDR for the native engine
-    /// (the only one that drives `AVDisplayManager`'s mode switch *itself*), but
-    /// on some TVs the Plozzigen engine's HDR/DV output still makes the panel switch
-    /// HDMI modes — so the exit veil must cover that switch for *any* engine
-    /// playing HDR/DV content. Gating the exit veil on content (not engine)
-    /// avoids the flash-on-Home when a Plozzigen-played HDR/DV title is dismissed.
-    private(set) var contentDisplayMode: HDRDisplayMode = .sdr
+    /// Range whose Plozzigen criteria intentionally remain applied across this
+    /// probe (same-range handoff or fresh-engine retry). A matching probe needs no
+    /// settle callback; a correction still waits behind black for the real switch.
+    public private(set) var inheritedPreservedDynamicRange: SourceDynamicRange?
+    public var inheritsPreservedDisplayMode: Bool {
+        inheritedPreservedDynamicRange != nil
+    }
+
+    /// Changes for every load even when two consecutive loads have the same
+    /// pending-range value, allowing the view to restart its pre-probe veil.
+    public private(set) var dynamicRangeTransitionToken = UUID()
+
+    /// A pending Plozzigen probe is conservatively veiled on exit because the
+    /// engine may already have begun a display switch before publishing facts.
+    var requiresHDRExitVeil: Bool {
+        effectiveDynamicRange.isAwaitingEngineProbe
+            || (effectiveDynamicRange.bestAvailable?.isHDR ?? false)
+    }
 
     /// Shared, observable transport state for the custom player overlay. The
     /// view model writes live playback facts here; the input controller writes
@@ -196,6 +218,9 @@ public final class PlayerViewModel {
     /// Bumped whenever ``engine`` is swapped, so the SwiftUI player re-hosts the
     /// new engine's bare video surface (`.id(engineToken)`).
     public private(set) var engineToken = UUID()
+    /// Fences probe updates when the same engine instance is asked to load a new
+    /// request. Engine swaps are additionally fenced by `engineToken`.
+    private var dynamicRangeLoadGeneration: UInt = 0
 
     /// Bumped the moment a request resolves and the engine is committed (before
     /// the engine's `load()` is even awaited), so the diagnostics overlay can
@@ -386,6 +411,7 @@ public final class PlayerViewModel {
     /// A prefetched playback injected at init by the OUTGOING episode's player, to
     /// be adopted by ``startPlayback`` instead of re-resolving over the network.
     private var adoptedResolved: PrefetchedPlayback?
+    private var pendingPreservedDynamicRange: SourceDynamicRange?
 
     /// Resolves the surrounding episodes (previous, next) for the playing item,
     /// off the main actor. `nil` for non-episode playback.
@@ -522,6 +548,8 @@ public final class PlayerViewModel {
         self.onPlaybackCheckpoint = onPlaybackCheckpoint
         self.checkpointInterval = checkpointInterval
         self.adoptedResolved = adoptedResolved
+        self.pendingPreservedDynamicRange =
+            adoptedResolved?.inheritedPreservedDynamicRange
         // Boot directly on the engine the hand-off already resolved, so an adopted
         // prefetch skips the native→Plozzigen swap entirely — no mid-bring-up
         // engine switch, no SDR-drop→DV-resync, one loading indicator. This is the
@@ -634,6 +662,25 @@ public final class PlayerViewModel {
                 self.controls.secondarySubtitleStatus = .loaded(cueCount: cues.count)
             }
         }
+    }
+
+    private func configureSourceFactsCallback(loadGeneration: UInt) {
+        let callbackEngineToken = engineToken
+        engine.onProbedSourceFactsChanged = { [weak self] facts in
+            guard let self,
+                  self.engineToken == callbackEngineToken,
+                  self.dynamicRangeLoadGeneration == loadGeneration,
+                  !self.didStop else { return }
+            self.applyEngineProbedSourceFacts(facts)
+        }
+    }
+
+    private func applyEngineProbedSourceFacts(_ facts: EngineProbedSourceFacts) {
+        effectiveDynamicRange = effectiveDynamicRange.applyingEngineProbe(facts)
+        let isHDR = effectiveDynamicRange.bestAvailable?.isHDR ?? false
+        liveSubtitles.isHDR = isHDR
+        controls.subtitlesRenderHDR = isHDR
+        diagnosticsToken = UUID()
     }
 
     /// Called when the active engine reports a clean playthrough to the end of the
@@ -779,11 +826,17 @@ public final class PlayerViewModel {
     /// nothing. Any mismatch (different range, SDR, or a native-engine side) keeps
     /// the normal full reset so a genuine mode change still happens.
     public func shouldPreserveDisplayMode(forNext next: PrefetchedPlayback?) -> Bool {
-        let curMode = contentDisplayMode
-        let nextMode = next.map { HDRDisplayMode($0.request.sourceMetadata) }
+        let currentRange = effectiveDynamicRange.authoritativeRange
+        let nextRange = next.flatMap {
+            SourceDynamicRange.providerHint(from: $0.request.sourceMetadata)
+        }
+        let curMode = currentRange.map(HDRDisplayMode.init)
+        let nextMode = nextRange.map(HDRDisplayMode.init)
         let bothPlozzigen = currentEngineKind == .plozzigen && next?.engineKind == .plozzigen
-        let preserve = bothPlozzigen && (nextMode?.isHDR ?? false) && nextMode == curMode
-        HandoffDiagnostics.emit("handoff display cur=\(curMode) next=\(nextMode.map { "\($0)" } ?? "none") bothPlozzigen=\(bothPlozzigen) preserve=\(preserve)")
+        let preserve = bothPlozzigen
+            && (curMode?.isHDR ?? false)
+            && curMode == nextMode
+        HandoffDiagnostics.emit("handoff display cur=\(curMode.map { "\($0)" } ?? "unknown") next=\(nextMode.map { "\($0)" } ?? "unknown") bothPlozzigen=\(bothPlozzigen) preserve=\(preserve)")
         return preserve
     }
 
@@ -956,33 +1009,37 @@ public final class PlayerViewModel {
     /// Instantiates the engine for `kind`, falling back to native if the
     /// Plozzigen engine was requested but isn't wired in (defensive — the router
     /// never asks for on-device decode unless it's available).
-    private func makeEngine(_ kind: PlaybackEngineKind) -> any VideoEngine {
+    private func makeEngine(
+        _ kind: PlaybackEngineKind
+    ) -> (engine: any VideoEngine, kind: PlaybackEngineKind) {
         switch kind {
         case .hybrid, .plozzigen:
             // Plozzigen is the sole on-device decode engine. `.hybrid` is the
             // router's abstract "needs on-device decode" signal; it resolves here
             // to Plozzigen (the former backing engine is retired).
             if let makePlozzigen = engineFactory.makePlozzigen, let engine = makePlozzigen() {
-                return engine
+                return (engine, .plozzigen)
             }
-            return engineFactory.makeNative(style)
+            return (engineFactory.makeNative(style), .native)
         case .native:
-            return engineFactory.makeNative(style)
+            return (engineFactory.makeNative(style), .native)
         }
     }
 
     /// Swaps the active engine when the routed kind differs from the current one,
     /// tearing the old engine down and re-pointing the UI at the new surface.
-    private func switchEngine(to kind: PlaybackEngineKind) {
+    private func switchEngine(to kind: PlaybackEngineKind) -> PlaybackEngineKind {
         guard kind != currentEngineKind else {
-            return
+            return currentEngineKind
         }
         clearEngineCallbacks()
         engine.stop()
-        engine = makeEngine(kind)
-        currentEngineKind = kind
+        let replacement = makeEngine(kind)
+        engine = replacement.engine
+        currentEngineKind = replacement.kind
         engineToken = UUID()
         configureEngineCallbacks()
+        return currentEngineKind
     }
 
     private func clearEngineCallbacks() {
@@ -990,6 +1047,7 @@ public final class PlayerViewModel {
         engine.onFailure = nil
         engine.onEnded = nil
         engine.onTracksChanged = nil
+        engine.onProbedSourceFactsChanged = nil
         engine.onSubtitleCues = nil
         engine.onSecondarySubtitleCues = nil
     }
@@ -1006,28 +1064,32 @@ public final class PlayerViewModel {
         // doesn't race the old cursor's asynchronous deinit release — the race
         // that made the previous fresh-engine retry re-fail in ~3ms.
         await oldEngine.drainTransport()
-        engine = makeEngine(kind)
-        currentEngineKind = kind
+        let replacement = makeEngine(kind)
+        engine = replacement.engine
+        currentEngineKind = replacement.kind
         engineToken = UUID()
         configureEngineCallbacks()
     }
 
     /// Commits the first routed engine without forcing a host `.id` rebuild.
     /// Subsequent swaps use the normal token-bumping `switchEngine` path.
-    private func commitEngineForPlayback(_ kind: PlaybackEngineKind) {
+    private func commitEngineForPlayback(
+        _ kind: PlaybackEngineKind
+    ) -> PlaybackEngineKind {
         guard hasCommittedInitialEngine else {
             hasCommittedInitialEngine = true
             guard kind != currentEngineKind else {
-                return
+                return currentEngineKind
             }
             clearEngineCallbacks()
             engine.stop()
-            engine = makeEngine(kind)
-            currentEngineKind = kind
+            let replacement = makeEngine(kind)
+            engine = replacement.engine
+            currentEngineKind = replacement.kind
             configureEngineCallbacks()
-            return
+            return currentEngineKind
         }
-        switchEngine(to: kind)
+        return switchEngine(to: kind)
     }
 
     /// The engine to try when the current one fails: the opposite engine, but
@@ -1448,37 +1510,40 @@ public final class PlayerViewModel {
         engineKind: PlaybackEngineKind,
         startPosition: TimeInterval
     ) async {
-        commitEngineForPlayback(engineKind)
-        // Publish the dynamic range the display is being driven to *before*
-        // engine.load() requests the actual HDMI mode switch, so the view can
-        // fade to black ahead of it. Only the native engine drives the panel's
-        // display-mode switch; the Plozzigen engine plays HDR without one, so
-        // it stays `.sdr` and no veil is raised. On a cross-engine fallback this
-        // re-evaluates correctly: native→hybrid drops to `.sdr` (the native
-        // engine's teardown restores SDR — a real switch the view should veil),
-        // and hybrid→native rises to HDR (the new switch the view should veil).
-        displayMode = engineKind == .native ? HDRDisplayMode(request.sourceMetadata) : .sdr
-        // Engine-independent: tracks the *content's* range so the exit veil can
-        // cover a panel HDR/DV → SDR switch even when a match-content engine
-        // (Plozzigen) — which keeps `displayMode` `.sdr` above —
-        // drove the panel into HDR on this TV.
-        contentDisplayMode = HDRDisplayMode(request.sourceMetadata)
-        // The overlay clamps its white point on HDR frames; mirror whether the
-        // panel is actually being driven to HDR by ANY engine (Plozzigen also
-        // match-content-switches the display), not just the native display-mode
-        // transition above — otherwise HDR subtitle brightness is dead on the
-        // Plozzigen HDR path. Neutral by default (scale 1.0 = no change); this
-        // just unlocks the HDR Brightness row so it can actually take effect.
-        liveSubtitles.isHDR = contentDisplayMode.isHDR
-        // Mirror to the controls model so the style menu can show the HDR
-        // Brightness row only while it actually affects the picture.
-        controls.subtitlesRenderHDR = liveSubtitles.isHDR
+        dynamicRangeLoadGeneration &+= 1
+        let rangeLoadGeneration = dynamicRangeLoadGeneration
+        inheritedPreservedDynamicRange =
+            engineKind != .native ? pendingPreservedDynamicRange : nil
+        pendingPreservedDynamicRange = nil
+        effectiveDynamicRange = engineKind == .native
+            ? .native(metadata: request.sourceMetadata)
+            : .awaitingEngineProbe(metadata: request.sourceMetadata)
+        dynamicRangeTransitionToken = UUID()
+        let hintedHDR = effectiveDynamicRange.bestAvailable?.isHDR ?? false
+        liveSubtitles.isHDR = hintedHDR
+        controls.subtitlesRenderHDR = hintedHDR
+        // Publish the transition state before replacing/stopping the old engine.
+        // SwiftUI gets one run-loop turn to raise black before either criteria
+        // owner clears or applies its display mode.
+        await Self.yieldToRunLoop()
+        let actualEngineKind = commitEngineForPlayback(engineKind)
+        if actualEngineKind != engineKind {
+            inheritedPreservedDynamicRange = nil
+            effectiveDynamicRange = .native(metadata: request.sourceMetadata)
+            dynamicRangeTransitionToken = UUID()
+        }
+        configureSourceFactsCallback(loadGeneration: rangeLoadGeneration)
         // Arm the stall watchdog around load() so a hang that never reports an
         // error still triggers the fallback chain instead of spinning forever.
         armPlaybackWatchdog(startPosition: startPosition)
-        await Self.yieldToRunLoop()
         let loadStart = Date()
         await engine.load(request: request, startPosition: startPosition)
+        guard dynamicRangeLoadGeneration == rangeLoadGeneration, !didStop else {
+            return
+        }
+        if engineKind != .native, let facts = engine.probedSourceFacts {
+            applyEngineProbedSourceFacts(facts)
+        }
         HandoffDiagnostics.emit("engine.load returned engine=\(engineKind.rawValue) took=\(HandoffDiagnostics.ms(loadStart))")
         // A background transition or user transport command can arrive while
         // load() is suspended. Reconcile that current intent before publishing
@@ -1763,10 +1828,14 @@ public final class PlayerViewModel {
                     + "error=\(HandoffDiagnostics.errorCode(error))\(detail)"
             )
             phase = .loading
+            let preservedRange = effectiveDynamicRange.authoritativeRange?.isHDR == true
+                ? effectiveDynamicRange.authoritativeRange
+                : nil
             await replaceEngineForRetry(
                 .plozzigen,
-                preserveDisplayMode: contentDisplayMode.isHDR
+                preserveDisplayMode: preservedRange != nil
             )
+            pendingPreservedDynamicRange = preservedRange
             await playResolved(
                 request,
                 engineKind: .plozzigen,
@@ -2388,9 +2457,11 @@ public final class PlayerViewModel {
     /// resume point, then tear the engine down.
     public func stop(preserveDisplayMode: Bool = false) async {
         guard !didStop else { return }
-        HandoffDiagnostics.emit("stop preserveDisplayMode=\(preserveDisplayMode) contentMode=\(contentDisplayMode) (false ⇒ panel should reset to SDR)")
+        HandoffDiagnostics.emit("stop preserveDisplayMode=\(preserveDisplayMode) contentRange=\(String(describing: effectiveDynamicRange.bestAvailable)) (false ⇒ panel should reset to SDR)")
         PlaybackTrace.note("stop() teardown curr=\(String(format: "%.2f", engine.currentTime)) shouldDismiss=\(shouldDismiss) pendingNext=\(pendingNextEpisode != nil) isSeeking=\(controls.isSeeking)")
         didStop = true
+        dynamicRangeLoadGeneration &+= 1
+        engine.onProbedSourceFactsChanged = nil
         prefetchTask?.cancel()
         prefetchTask = nil
         // Cancel the next-episode prefetch; its session (if any) is released

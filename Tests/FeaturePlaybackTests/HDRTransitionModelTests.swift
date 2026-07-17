@@ -111,6 +111,154 @@ final class HDRTransitionModelTests: XCTestCase {
         XCTAssertEqual(HDRDisplayMode(metadata), .hdr10)
     }
 
+    func testProbePendingPreemptivelyRaisesVeil() {
+        let model = HDRTransitionModel()
+
+        model.reconcile(
+            from: .native(metadata: nil),
+            to: .awaitingEngineProbe(hint: nil)
+        )
+
+        XCTAssertEqual(model.veilOpacity, 1)
+        XCTAssertTrue(model.isVeiled)
+    }
+
+    func testSettleBeforeProbeResultWaitsForAuthoritativeHDR() async {
+        let sleeper = TaggedSleeper()
+        let model = makeModel(sleeper)
+        let pending = EffectiveDynamicRange.awaitingEngineProbe(hint: nil)
+
+        model.reconcile(from: .native(metadata: nil), to: pending)
+        await assertEventually { sleeper.pendingCount == 1 }
+        model.displayDidSettle()
+        for _ in 0..<20 { await Task.yield() }
+        XCTAssertEqual(
+            sleeper.pendingCount,
+            1,
+            "settle must wait until the pending probe identifies the source"
+        )
+
+        model.reconcile(
+            from: pending,
+            to: .resolved(.dolbyVision, authority: .engineProbe)
+        )
+        await assertEventually { sleeper.pendingCount == 2 }
+        sleeper.release(matching: 0.35)
+        await assertEventually { model.veilOpacity == 0 }
+    }
+
+    func testAuthoritativeSDRProbeLowersPreemptiveVeil() {
+        let model = HDRTransitionModel()
+        let pending = EffectiveDynamicRange.awaitingEngineProbe(hint: .hdr10)
+
+        model.reconcile(from: .native(metadata: nil), to: pending)
+        XCTAssertEqual(model.veilOpacity, 1)
+
+        model.reconcile(
+            from: pending,
+            to: .resolved(.sdr, authority: .engineProbe)
+        )
+        XCTAssertEqual(model.veilOpacity, 0)
+    }
+
+    func testSDRProbeWaitsWhenPendingLoadReplacedNativeHDR() {
+        let model = HDRTransitionModel()
+        let previous = EffectiveDynamicRange.resolved(
+            .hdr10,
+            authority: .providerMetadata
+        )
+        let pending = EffectiveDynamicRange.awaitingEngineProbe(hint: nil)
+
+        model.reconcile(from: previous, to: pending)
+        model.reconcile(
+            from: pending,
+            to: .resolved(.sdr, authority: .engineProbe)
+        )
+
+        XCTAssertEqual(model.veilOpacity, 1)
+    }
+
+    func testProbeConfirmationDoesNotRaiseSecondVeilAfterSafetyTimeout() async {
+        let sleeper = TaggedSleeper()
+        let model = makeModel(sleeper)
+        let pending = EffectiveDynamicRange.awaitingEngineProbe(hint: .dolbyVision)
+
+        model.reconcile(from: .native(metadata: nil), to: pending)
+        await assertEventually { sleeper.pendingCount == 1 }
+        sleeper.release(matching: 4.5)
+        await assertEventually { model.veilOpacity == 0 }
+
+        model.reconcile(
+            from: pending,
+            to: .resolved(.dolbyVision, authority: .engineProbe)
+        )
+        XCTAssertEqual(model.veilOpacity, 0)
+    }
+
+    func testPreservedSameRangeHandoffRevealsWhenProbeConfirmsHint() {
+        let model = HDRTransitionModel()
+        let pending = EffectiveDynamicRange.awaitingEngineProbe(hint: .dolbyVision)
+        model.reconcile(from: .native(metadata: nil), to: pending)
+        XCTAssertEqual(model.veilOpacity, 1)
+
+        model.reconcile(
+            from: pending,
+            to: .resolved(.dolbyVision, authority: .engineProbe),
+            inheritedPreservedRange: .dolbyVision
+        )
+
+        XCTAssertEqual(model.veilOpacity, 0)
+    }
+
+    func testPreservedHandoffCorrectionWaitsForRealDisplaySettle() {
+        let model = HDRTransitionModel()
+        let pending = EffectiveDynamicRange.awaitingEngineProbe(hint: .dolbyVision)
+        model.reconcile(from: .native(metadata: nil), to: pending)
+
+        model.reconcile(
+            from: pending,
+            to: .resolved(.hdr10, authority: .engineProbe),
+            inheritedPreservedRange: .dolbyVision
+        )
+
+        XCTAssertEqual(model.veilOpacity, 1)
+    }
+
+    func testPreservedHDRHandoffCorrectedToSDRWaitsForSettle() {
+        let model = HDRTransitionModel()
+        let pending = EffectiveDynamicRange.awaitingEngineProbe(hint: .dolbyVision)
+        model.reconcile(from: .native(metadata: nil), to: pending)
+
+        model.reconcile(
+            from: pending,
+            to: .resolved(.sdr, authority: .engineProbe),
+            inheritedPreservedRange: .dolbyVision
+        )
+
+        XCTAssertEqual(model.veilOpacity, 1)
+    }
+
+    func testRestartProbeTransitionRearmsAfterPriorVeilLowered() {
+        let model = HDRTransitionModel()
+        model.beginProbeTransition()
+        model.lowerVeil()
+
+        model.restartProbeTransition()
+
+        XCTAssertEqual(model.veilOpacity, 1)
+    }
+
+    func testPlozzigenToNativeEqualHDRFallbackRaisesVeil() {
+        let model = HDRTransitionModel()
+
+        model.reconcile(
+            from: .resolved(.hdr10, authority: .engineProbe),
+            to: .resolved(.hdr10, authority: .providerMetadata)
+        )
+
+        XCTAssertEqual(model.veilOpacity, 1)
+    }
+
     // MARK: Reveal on settle
 
     func testSettleLowersVeilAfterMinHold() async {

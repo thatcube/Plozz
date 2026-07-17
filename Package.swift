@@ -649,6 +649,7 @@ let package = Package(
         .testTarget(
             name: "EnginePlozzigenTests",
             dependencies: [
+                "CoreModels",
                 "EnginePlozzigen",
                 "MediaTransportCore",
                 .product(name: "AetherEngine", package: "AetherEngine"),

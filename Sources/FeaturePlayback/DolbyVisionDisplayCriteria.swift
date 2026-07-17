@@ -4,8 +4,8 @@ import AVFoundation
 import CoreMedia
 import CoreModels
 
-/// The HDR/Dolby-Vision dynamic-range class of a source, derived from the
-/// provider's `MediaSourceMetadata`. Drives the tvOS display-mode switch so the
+/// The HDR/Dolby-Vision display class of a resolved source range. Drives the
+/// tvOS display-mode switch so the
 /// Apple TV negotiates the correct HDMI signalling (true Dolby Vision, HDR10,
 /// HLG, or plain SDR) with the panel before `AVPlayer` starts rendering.
 ///
@@ -26,19 +26,15 @@ enum HDRDisplayMode: Equatable {
     /// fallback. Any Dolby Vision profile maps to `.dolbyVision` so the panel is
     /// driven into DoVi mode; the RPU base layer is handled downstream.
     init(_ metadata: MediaSourceMetadata?) {
-        let rangeType = metadata?.video?.videoRangeType?.uppercased() ?? ""
-        let range = metadata?.video?.videoRange?.uppercased() ?? ""
-        let transfer = metadata?.video?.colorTransfer?.lowercased() ?? ""
+        self.init(SourceDynamicRange.providerHint(from: metadata) ?? .sdr)
+    }
 
-        if rangeType.hasPrefix("DOVI") {
-            self = .dolbyVision
-        } else if rangeType == "HLG" || transfer == "arib-std-b67" {
-            self = .hlg
-        } else if rangeType.hasPrefix("HDR10") || rangeType == "HDR" || transfer == "smpte2084"
-            || range == "HDR" {
-            self = .hdr10
-        } else {
-            self = .sdr
+    init(_ range: SourceDynamicRange) {
+        switch range {
+        case .sdr: self = .sdr
+        case .hlg: self = .hlg
+        case .hdr10, .hdr10Plus: self = .hdr10
+        case .dolbyVision: self = .dolbyVision
         }
     }
 

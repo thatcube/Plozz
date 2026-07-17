@@ -43,6 +43,8 @@ public final class PlozzigenVideoEngine: VideoEngine {
     public private(set) var furthestObservedPosition: TimeInterval = 0
     public private(set) var audioTracks: [MediaTrack] = []
     public private(set) var subtitleTracks: [MediaTrack] = []
+    private var sourceFormatCancellable: AnyCancellable?
+    private var probePublicationGate = PlozzigenProbePublicationGate()
 
     public var currentTime: TimeInterval { engine.currentTime }
     public var duration: TimeInterval { engine.duration }
@@ -74,29 +76,61 @@ public final class PlozzigenVideoEngine: VideoEngine {
     /// so we publish nothing until it's known, rather than the `.sdr` default of
     /// AetherEngine's `sourceVideoFormat` before a source is opened.
     public var probedSourceFacts: EngineProbedSourceFacts? {
-        guard engine.sourceVideoWidth > 0 else { return nil }
-        let range: EngineProbedSourceFacts.DynamicRange = switch engine.sourceVideoFormat {
-        case .sdr: .sdr
-        case .hdr10: .hdr10
-        case .hdr10Plus: .hdr10Plus
-        case .hlg: .hlg
-        case .dolbyVision: .dolbyVision
-        }
+        guard let range = probePublicationGate.currentRange else { return nil }
+        return makeProbedSourceFacts(range: range)
+    }
+
+    private func makeProbedSourceFacts(
+        range: SourceDynamicRange
+    ) -> EngineProbedSourceFacts {
         let active = engine.activeAudioTrackIndex.flatMap { idx in
             engine.audioTracks.first { $0.id == idx }
         } ?? engine.audioTracks.first { $0.isDefault } ?? engine.audioTracks.first
-        let w = Int(engine.sourceVideoWidth)
-        let h = Int(engine.sourceVideoHeight)
+        let width = Int(engine.sourceVideoWidth)
+        let height = Int(engine.sourceVideoHeight)
         return EngineProbedSourceFacts(
             range: range,
-            videoWidth: w > 0 ? w : nil,
-            videoHeight: h > 0 ? h : nil,
+            videoWidth: width > 0 ? width : nil,
+            videoHeight: height > 0 ? height : nil,
             videoDecoder: engine.activeVideoDecoder,
             audioCodec: active?.codec,
             audioChannels: active.map(\.channels).flatMap { $0 > 0 ? $0 : nil },
             audioIsAtmos: active?.isAtmos ?? false,
             audioDecoder: engine.activeAudioDecoder
         )
+    }
+
+    private func sourceRange(for format: VideoFormat) -> SourceDynamicRange {
+        switch format {
+        case .sdr: .sdr
+        case .hdr10: .hdr10
+        case .hdr10Plus: .hdr10Plus
+        case .hlg: .hlg
+        case .dolbyVision: .dolbyVision
+        }
+    }
+
+    private func publishProbedSourceFacts(
+        format: VideoFormat,
+        generation: UInt
+    ) {
+        let range = sourceRange(for: format)
+        guard probePublicationGate.record(range, generation: generation) else { return }
+        let facts = makeProbedSourceFacts(range: range)
+        onProbedSourceFactsChanged?(facts)
+    }
+
+    private func beginObservingLateSourceFormatChanges(generation: UInt) {
+        sourceFormatCancellable?.cancel()
+        sourceFormatCancellable = engine.$sourceVideoFormat
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] format in
+                self?.publishProbedSourceFacts(
+                    format: format,
+                    generation: generation
+                )
+            }
     }
 
     public var preventsDisplaySleep: Bool {
@@ -121,6 +155,7 @@ public final class PlozzigenVideoEngine: VideoEngine {
     /// Fired after `syncTracks()` re-reads AetherEngine's async-published track
     /// lists, so the VM can repopulate its (otherwise-empty-at-load) options menu.
     public var onTracksChanged: (@MainActor () -> Void)?
+    public var onProbedSourceFactsChanged: (@MainActor (EngineProbedSourceFacts) -> Void)?
     /// Fired with AetherEngine's decoded subtitle cues (text + bitmap), mapped to
     /// Plozz's cue model, so the owned overlay draws them. This is the decoded
     /// read-ahead buffer — the host time-filters it against the playhead.
@@ -213,6 +248,9 @@ public final class PlozzigenVideoEngine: VideoEngine {
     // MARK: - VideoEngine Lifecycle
 
     public func load(request: PlaybackRequest, startPosition: TimeInterval) async {
+        let probeGeneration = probePublicationGate.beginLoad()
+        sourceFormatCancellable?.cancel()
+        sourceFormatCancellable = nil
         suppressFailureCallbackForForegroundReload = false
         status = .loading
         isPaused = false
@@ -281,10 +319,17 @@ public final class PlozzigenVideoEngine: VideoEngine {
                 )
             }
             // Guard against stop() having run during the await above.
-            guard status == .loading else { return }
+            guard status == .loading,
+                  probePublicationGate.accepts(probeGeneration) else { return }
+            publishProbedSourceFacts(
+                format: engine.sourceVideoFormat,
+                generation: probeGeneration
+            )
+            beginObservingLateSourceFormatChanges(generation: probeGeneration)
             engine.play()
             syncTracks()
         } catch {
+            guard probePublicationGate.accepts(probeGeneration) else { return }
             // Preserve typed error detail rather than collapsing it to a generic
             // localized error code, and journal WHICH stage threw so a fast
             // re-fail on retry is attributable (SMB/registry resolve vs the
@@ -327,7 +372,14 @@ public final class PlozzigenVideoEngine: VideoEngine {
     }
 
     public func reloadAfterForeground() async throws {
+        let probeGeneration = probePublicationGate.currentGeneration
+        guard probePublicationGate.accepts(probeGeneration) else { return }
+        // AetherEngine resets sourceVideoFormat to its provisional `.sdr` value
+        // while rebuilding. Suspend publication until the reload probe completes.
+        sourceFormatCancellable?.cancel()
+        sourceFormatCancellable = nil
         suppressFailureCallbackForForegroundReload = true
+        defer { suppressFailureCallbackForForegroundReload = false }
         status = .loading
         do {
             try await engine.reloadAtCurrentPosition()
@@ -337,9 +389,15 @@ public final class PlozzigenVideoEngine: VideoEngine {
             await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
                 DispatchQueue.main.async { continuation.resume() }
             }
+            guard probePublicationGate.accepts(probeGeneration) else { return }
             if case .error(let message) = engine.state {
                 throw AppError.unknown(message)
             }
+            publishProbedSourceFacts(
+                format: engine.sourceVideoFormat,
+                generation: probeGeneration
+            )
+            beginObservingLateSourceFormatChanges(generation: probeGeneration)
             syncTracks()
             if intendsPause {
                 engine.pause()
@@ -349,8 +407,8 @@ public final class PlozzigenVideoEngine: VideoEngine {
                 isPaused = false
             }
             status = .ready
-            suppressFailureCallbackForForegroundReload = false
         } catch {
+            guard probePublicationGate.accepts(probeGeneration) else { return }
             let appError = (error as? AppError) ?? .unknown(String(describing: error))
             status = .failed(appError)
             throw appError
@@ -380,6 +438,9 @@ public final class PlozzigenVideoEngine: VideoEngine {
     }
 
     private func stopEngine(resetDisplayCriteria: Bool) {
+        probePublicationGate.invalidate()
+        sourceFormatCancellable?.cancel()
+        sourceFormatCancellable = nil
         progressTimer?.cancel()
         progressTimer = nil
         engine.stop(resetDisplayCriteria: resetDisplayCriteria)

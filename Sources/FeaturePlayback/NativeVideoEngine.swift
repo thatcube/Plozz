@@ -76,6 +76,7 @@ public final class NativeVideoEngine: VideoEngine {
     /// native engine never fires either of these. Declared to satisfy the
     /// protocol.
     public var onTracksChanged: (@MainActor () -> Void)?
+    public var onProbedSourceFactsChanged: (@MainActor (EngineProbedSourceFacts) -> Void)?
     public var onSubtitleCues: (@MainActor ([SubtitleCue]) -> Void)?
     public var onSecondarySubtitleCues: (@MainActor ([SubtitleCue]) -> Void)?
 

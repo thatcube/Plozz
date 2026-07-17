@@ -1,6 +1,7 @@
 #if canImport(AVFoundation)
 import Foundation
 import Observation
+import CoreModels
 
 /// Smooths the ugly flash/black-snap the TV produces while it re-syncs its HDMI
 /// display mode when **entering** or **leaving** HDR / Dolby Vision playback.
@@ -11,10 +12,10 @@ import Observation
 /// as a hard guarantee, once a safety timeout elapses. The timeout means a
 /// missing/late settle callback can **never** strand the user on a black screen.
 ///
-/// This is provider-agnostic: it keys off `HDRDisplayMode` (derived from the
-/// provider's `MediaSourceMetadata`), so it behaves identically for Plex and
-/// Jellyfin. The platform wiring (observing the display manager) lives in the
-/// view; this model owns only the testable timing/decision logic.
+/// This is provider-agnostic: it keys off the effective source range, which may
+/// begin as a provider hint and later be corrected by the playback engine. The
+/// platform wiring (observing the display manager) lives in the view; this model
+/// owns only the testable timing/decision logic.
 @MainActor
 @Observable
 final class HDRTransitionModel {
@@ -59,6 +60,9 @@ final class HDRTransitionModel {
 
     private var safetyTask: Task<Void, Never>?
     private var settleTask: Task<Void, Never>?
+    private var isAwaitingProbeResolution = false
+    private var didSettleWhileAwaitingProbe = false
+    private var preProbeDisplayMode: HDRDisplayMode?
 
     /// True between `beginExit` and the moment the exit wait resolves (settle or
     /// timeout). While exiting, the veil is held fully black continuously and is
@@ -99,6 +103,102 @@ final class HDRTransitionModel {
         return true
     }
 
+    /// Synchronize a newly mounted view with a probe already in flight.
+    func synchronize(
+        with range: EffectiveDynamicRange,
+        inheritedPreservedRange: SourceDynamicRange? = nil
+    ) {
+        guard range.isAwaitingEngineProbe else { return }
+        beginProbeTransition(
+            replacing: inheritedPreservedRange.map(HDRDisplayMode.init) ?? .sdr
+        )
+    }
+
+    /// Reconcile provider hints and later engine truth without raising a second
+    /// veil when the probe merely confirms the pending transition.
+    func reconcile(
+        from previous: EffectiveDynamicRange,
+        to next: EffectiveDynamicRange,
+        inheritedPreservedRange: SourceDynamicRange? = nil
+    ) {
+        if next.isAwaitingEngineProbe {
+            beginProbeTransition(
+                replacing: previous.bestAvailable.map(HDRDisplayMode.init)
+            )
+            return
+        }
+
+        guard let nextRange = next.bestAvailable else { return }
+        if previous.isAwaitingEngineProbe {
+            let preservedModeWasConfirmed = inheritedPreservedRange
+                .map(HDRDisplayMode.init) == HDRDisplayMode(nextRange)
+            resolveProbeTransition(
+                with: nextRange,
+                inheritedPreservedRange: inheritedPreservedRange,
+                preservedModeWasConfirmed: preservedModeWasConfirmed
+            )
+            return
+        }
+
+        guard let previousRange = previous.bestAvailable else {
+            if nextRange.isHDR {
+                _ = beginTransition(from: .sdr, to: HDRDisplayMode(nextRange))
+            }
+            return
+        }
+        if previousRange.isHDR,
+           nextRange.isHDR,
+           previous.authority == .engineProbe,
+           next.authority != .engineProbe {
+            // Plozzigen owns and clears its criteria before NativeVideoEngine
+            // applies its own. Equal content classes still cross SDR in between.
+            raiseVeil()
+            return
+        }
+        _ = beginTransition(
+            from: HDRDisplayMode(previousRange),
+            to: HDRDisplayMode(nextRange)
+        )
+    }
+
+    /// Every Plozzigen load is pre-veiled before AetherEngine probes and writes
+    /// display criteria, including loads whose provider hint currently says SDR.
+    func beginProbeTransition(replacing displayMode: HDRDisplayMode? = nil) {
+        guard !isAwaitingProbeResolution else { return }
+        restartProbeTransition(replacing: displayMode)
+    }
+
+    /// Starts a fresh probe window even when the prior load was also pending.
+    func restartProbeTransition(replacing displayMode: HDRDisplayMode? = nil) {
+        cancelTasks()
+        isExiting = false
+        isAwaitingProbeResolution = true
+        didSettleWhileAwaitingProbe = false
+        if let displayMode {
+            preProbeDisplayMode = displayMode
+        }
+        armVeil()
+    }
+
+    private func resolveProbeTransition(
+        with range: SourceDynamicRange,
+        inheritedPreservedRange: SourceDynamicRange?,
+        preservedModeWasConfirmed: Bool
+    ) {
+        guard isAwaitingProbeResolution else { return }
+
+        isAwaitingProbeResolution = false
+        if preservedModeWasConfirmed
+            || (!range.isHDR
+                && inheritedPreservedRange == nil
+                && preProbeDisplayMode?.isHDR != true) {
+            lowerVeil()
+        } else if didSettleWhileAwaitingProbe {
+            scheduleRevealAfterSettle()
+        }
+        didSettleWhileAwaitingProbe = false
+    }
+
     /// Raise the veil immediately and arm the safety timeout that guarantees it
     /// will come back down even if no settle signal ever arrives. This is the
     /// **enter** path (fade to black while the panel switches into HDR/DV, reveal
@@ -106,6 +206,12 @@ final class HDRTransitionModel {
     func raiseVeil() {
         cancelTasks()
         isExiting = false
+        isAwaitingProbeResolution = false
+        didSettleWhileAwaitingProbe = false
+        armVeil()
+    }
+
+    private func armVeil() {
         veilOpacity = 1
         let sleep = self.sleep
         let timeout = configuration.maxBlackout
@@ -125,6 +231,14 @@ final class HDRTransitionModel {
             finishExitAfterHold()
             return
         }
+        if isAwaitingProbeResolution {
+            didSettleWhileAwaitingProbe = true
+            return
+        }
+        scheduleRevealAfterSettle()
+    }
+
+    private func scheduleRevealAfterSettle() {
         guard veilOpacity > 0, settleTask == nil else { return }
         let sleep = self.sleep
         let hold = configuration.minVeil
@@ -138,6 +252,9 @@ final class HDRTransitionModel {
     /// Drop the veil now and cancel any pending reveal/timeout work.
     func lowerVeil() {
         cancelTasks()
+        isAwaitingProbeResolution = false
+        didSettleWhileAwaitingProbe = false
+        preProbeDisplayMode = nil
         veilOpacity = 0
     }
 
@@ -153,6 +270,8 @@ final class HDRTransitionModel {
     func beginExit(isHDR: Bool) -> Bool {
         guard isHDR else { return false }
         cancelTasks()
+        isAwaitingProbeResolution = false
+        didSettleWhileAwaitingProbe = false
         isExiting = true
         exitFinished = false
         veilOpacity = 1

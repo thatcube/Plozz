@@ -1609,11 +1609,12 @@ private struct PlayerPresentation: View {
             // reuses the already-open session rather than the old player releasing
             // it. `nil` when the prefetch didn't finish → the new player resolves
             // normally (no regression).
-            let prefetched = viewModel?.consumePrefetchedNext(matching: next.id)
+            let consumed = viewModel?.consumePrefetchedNext(matching: next.id)
             // Keep the panel's HDR/DV mode across a same-range hand-off so the TV
             // doesn't flap DV→SDR→DV between episodes (needs the prefetched next's
             // source facts, so it's a no-op on a prefetch miss).
-            let preserveDisplay = viewModel?.shouldPreserveDisplayMode(forNext: prefetched) ?? false
+            let preserveDisplay = viewModel?.shouldPreserveDisplayMode(forNext: consumed) ?? false
+            let prefetched = consumed?.inheritingPreservedDisplayMode(preserveDisplay)
             Task { @MainActor in
                 // Stop + scrobble the finished episode before swapping.
                 await viewModel?.stop(preserveDisplayMode: preserveDisplay)

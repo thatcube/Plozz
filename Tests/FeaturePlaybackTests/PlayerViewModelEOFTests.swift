@@ -331,6 +331,78 @@ final class PlayerViewModelEOFTests: XCTestCase {
         await viewModel.stop()
     }
 
+    func testStopDuringPreCommitYieldDoesNotCreateReplacementEngine() async throws {
+        let request = try makeNetworkFileRequest()
+        let provider = RecordingPlaybackProvider(request: request)
+        let native = SpyVideoEngine()
+        var plozzigenEngines: [SpyVideoEngine] = []
+        let gate = PreCommitYieldGate()
+        let viewModel = PlayerViewModel(
+            provider: provider,
+            itemID: request.item.id,
+            engineFactory: EngineFactory(
+                makeNative: { _ in native },
+                makePlozzigen: {
+                    let engine = SpyVideoEngine()
+                    plozzigenEngines.append(engine)
+                    return engine
+                }
+            )
+        )
+        viewModel.preEngineCommitYield = { await gate.suspend() }
+
+        let loadTask = Task { await viewModel.load() }
+        await waitForGate(gate, entries: 1)
+        await viewModel.stop()
+        gate.releaseNext()
+        await loadTask.value
+
+        XCTAssertTrue(plozzigenEngines.isEmpty)
+        XCTAssertEqual(native.loadCount, 0)
+        XCTAssertEqual(native.stopCount, 1)
+        XCTAssertEqual(native.status, .idle)
+        XCTAssertNil(native.onProbedSourceFactsChanged)
+    }
+
+    func testNewGenerationSupersedesLoadDuringPreCommitYield() async throws {
+        let request = try makeNetworkFileRequest()
+        let provider = RecordingPlaybackProvider(request: request)
+        let native = SpyVideoEngine()
+        var plozzigenEngines: [SpyVideoEngine] = []
+        let gate = PreCommitYieldGate()
+        let viewModel = PlayerViewModel(
+            provider: provider,
+            itemID: request.item.id,
+            engineFactory: EngineFactory(
+                makeNative: { _ in native },
+                makePlozzigen: {
+                    let engine = SpyVideoEngine()
+                    plozzigenEngines.append(engine)
+                    return engine
+                }
+            )
+        )
+        viewModel.preEngineCommitYield = { await gate.suspend() }
+
+        let staleLoad = Task { await viewModel.load() }
+        await waitForGate(gate, entries: 1)
+        let currentLoad = Task { await viewModel.load() }
+        await waitForGate(gate, entries: 2)
+
+        gate.releaseNext()
+        await staleLoad.value
+        XCTAssertTrue(plozzigenEngines.isEmpty)
+        XCTAssertEqual(native.stopCount, 0)
+
+        gate.releaseNext()
+        await currentLoad.value
+        XCTAssertEqual(plozzigenEngines.count, 1)
+        XCTAssertEqual(plozzigenEngines[0].loadCount, 1)
+        XCTAssertNotNil(plozzigenEngines[0].onProbedSourceFactsChanged)
+        XCTAssertEqual(native.stopCount, 1)
+        await viewModel.stop()
+    }
+
     func testSameRangeHandoffRequiresKnownEqualNextHint() async throws {
         let request = try makeNetworkFileRequest()
         let provider = RecordingPlaybackProvider(request: request)
@@ -419,6 +491,16 @@ final class PlayerViewModelEOFTests: XCTestCase {
         await viewModel.stop()
     }
 
+    private func waitForGate(
+        _ gate: PreCommitYieldGate,
+        entries: Int
+    ) async {
+        for _ in 0..<1_000 where gate.entryCount < entries {
+            await Task.yield()
+        }
+        XCTAssertEqual(gate.entryCount, entries)
+    }
+
     private func makeNetworkFileRequest(
         metadata: MediaSourceMetadata? = nil
     ) throws -> PlaybackRequest {
@@ -467,6 +549,24 @@ final class PlayerViewModelEOFTests: XCTestCase {
             engineFactory: EngineFactory(makeNative: { _ in engine })
         )
         return (viewModel, engine, provider)
+    }
+}
+
+@MainActor
+private final class PreCommitYieldGate {
+    private var continuations: [CheckedContinuation<Void, Never>] = []
+    private(set) var entryCount = 0
+
+    func suspend() async {
+        entryCount += 1
+        await withCheckedContinuation { continuation in
+            continuations.append(continuation)
+        }
+    }
+
+    func releaseNext() {
+        guard !continuations.isEmpty else { return }
+        continuations.removeFirst().resume()
     }
 }
 

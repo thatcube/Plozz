@@ -215,12 +215,21 @@ public final class PlayerViewModel {
     private var engine: any VideoEngine
     /// Which engine ``engine`` currently is, so swaps know the alternate.
     private var currentEngineKind: PlaybackEngineKind = .native
+    /// The current instance was stopped for a fresh-engine retry and must not be
+    /// reused if another load supersedes that retry while transport drains.
+    private var engineRequiresReplacement = false
     /// Bumped whenever ``engine`` is swapped, so the SwiftUI player re-hosts the
     /// new engine's bare video surface (`.id(engineToken)`).
     public private(set) var engineToken = UUID()
     /// Fences probe updates when the same engine instance is asked to load a new
     /// request. Engine swaps are additionally fenced by `engineToken`.
     private var dynamicRangeLoadGeneration: UInt = 0
+    /// Run-loop yield that lets SwiftUI paint the pre-probe veil before an engine
+    /// swap. Internal so lifecycle tests can suspend this exact race window.
+    @ObservationIgnored var preEngineCommitYield:
+        @MainActor @Sendable () async -> Void = {
+            await PlayerViewModel.yieldToRunLoop()
+        }
 
     /// Bumped the moment a request resolves and the engine is committed (before
     /// the engine's `load()` is even awaited), so the diagnostics overlay can
@@ -1029,14 +1038,17 @@ public final class PlayerViewModel {
     /// Swaps the active engine when the routed kind differs from the current one,
     /// tearing the old engine down and re-pointing the UI at the new surface.
     private func switchEngine(to kind: PlaybackEngineKind) -> PlaybackEngineKind {
-        guard kind != currentEngineKind else {
+        guard kind != currentEngineKind || engineRequiresReplacement else {
             return currentEngineKind
         }
         clearEngineCallbacks()
-        engine.stop()
+        if !engineRequiresReplacement {
+            engine.stop()
+        }
         let replacement = makeEngine(kind)
         engine = replacement.engine
         currentEngineKind = replacement.kind
+        engineRequiresReplacement = false
         engineToken = UUID()
         configureEngineCallbacks()
         return currentEngineKind
@@ -1055,20 +1067,28 @@ public final class PlayerViewModel {
     private func replaceEngineForRetry(
         _ kind: PlaybackEngineKind,
         preserveDisplayMode: Bool
-    ) async {
+    ) async -> Bool {
         let oldEngine = engine
+        let replacementGeneration = dynamicRangeLoadGeneration
         clearEngineCallbacks()
         oldEngine.stop(preserveDisplayMode: preserveDisplayMode)
+        engineRequiresReplacement = true
         // Deterministically drain the old engine's leased transport (SMB session +
         // source cursor) before opening a fresh one, so the retry's re-resolve
         // doesn't race the old cursor's asynchronous deinit release — the race
         // that made the previous fresh-engine retry re-fail in ~3ms.
         await oldEngine.drainTransport()
+        guard !didStop,
+              dynamicRangeLoadGeneration == replacementGeneration else {
+            return false
+        }
         let replacement = makeEngine(kind)
         engine = replacement.engine
         currentEngineKind = replacement.kind
+        engineRequiresReplacement = false
         engineToken = UUID()
         configureEngineCallbacks()
+        return true
     }
 
     /// Commits the first routed engine without forcing a host `.id` rebuild.
@@ -1525,7 +1545,11 @@ public final class PlayerViewModel {
         // Publish the transition state before replacing/stopping the old engine.
         // SwiftUI gets one run-loop turn to raise black before either criteria
         // owner clears or applies its display mode.
-        await Self.yieldToRunLoop()
+        await preEngineCommitYield()
+        guard !didStop,
+              dynamicRangeLoadGeneration == rangeLoadGeneration else {
+            return
+        }
         let actualEngineKind = commitEngineForPlayback(engineKind)
         if actualEngineKind != engineKind {
             inheritedPreservedDynamicRange = nil
@@ -1831,10 +1855,10 @@ public final class PlayerViewModel {
             let preservedRange = effectiveDynamicRange.authoritativeRange?.isHDR == true
                 ? effectiveDynamicRange.authoritativeRange
                 : nil
-            await replaceEngineForRetry(
+            guard await replaceEngineForRetry(
                 .plozzigen,
                 preserveDisplayMode: preservedRange != nil
-            )
+            ) else { return }
             pendingPreservedDynamicRange = preservedRange
             await playResolved(
                 request,

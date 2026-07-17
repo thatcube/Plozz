@@ -160,21 +160,11 @@ final class PlayerInputViewController: UIViewController {
     private var thumbnailTask: Task<Void, Never>?
     private var refreshTask: Task<Void, Never>?
     private var skipHintTask: Task<Void, Never>?
-    /// The pan-gesture `translation.x` from the *previous* scrub sample. Each
-    /// pan event scrubs by the *increment* since this value (not the cumulative
-    /// translation against a base), which is what lets the velocity-accelerated
-    /// transfer function apply per-sample gain. Seeded with the translation at
-    /// the axis decision so the dead-zone travel spent deciding the axis never
-    /// counts as scrub distance, and never mutated on the recognizer itself
-    /// (no `setTranslation(.zero)`), so the head can't snap backward between
-    /// events.
-    private var scrubLastTranslationX: CGFloat = 0
-    /// Low-pass-filtered pan speed (points/sec) used to drive the acceleration
-    /// gain. The recognizer's raw `velocity` spikes sample-to-sample, and feeding
-    /// that straight into the gain made fast flicks feel *jumpy* (the multiplier
-    /// lurched between events). An exponential moving average smooths it so the
-    /// gain ramps fluidly. Reset to 0 at the start of each scrub.
-    private var scrubSmoothedSpeed: Double = 0
+    /// Interprets Siri-Remote pan samples into scrub decisions (axis lock,
+    /// pause-to-seek gate, velocity smoothing, flick-vs-land commit). Owns the
+    /// per-gesture state that used to live inline in `handlePan`; the point→
+    /// seconds math stays in ``ScrubGeometry`` and the side effects stay here.
+    private var scrubGesture = ScrubGestureInterpreter()
     private var resumeAfterScrub = false
 
     /// Pending debounced commit for a *flick*-ended scrub. A fast flick lift
@@ -183,10 +173,6 @@ final class PlayerInputViewController: UIViewController {
     /// multi-swipe traversal into one fluid scrub that seeks (and resumes) only
     /// once, instead of fighting a seek + rebuffer + play/pause on every swipe.
     private var scrubCommitTask: Task<Void, Never>?
-    /// Lift speed (points/sec) above which a scrub is treated as a mid-traversal
-    /// flick (defer the commit to bridge to the next swipe) rather than a
-    /// deliberate landing (commit + resume playback immediately).
-    private let scrubFlickCommitThreshold: Double = 1000
     /// How long after a flick lift to wait for a follow-up swipe before
     /// committing. Long enough to bridge the gap between rapid swipes, short
     /// enough that a final flick still lands without a noticeable delay.
@@ -818,23 +804,6 @@ final class PlayerInputViewController: UIViewController {
 
     // MARK: Scrubbing
 
-    /// Axis decision for the current pan. Decided once on the first sample that
-    /// crosses the dead zone; locked for the rest of the gesture so a small
-    /// vertical drift inside a horizontal scrub never bleeds into the bar (and
-    /// — more importantly — a vertical swipe NEVER moves the scrub head).
-    private enum PanAxis { case undecided, horizontal, verticalIgnored }
-    private var panAxis: PanAxis = .undecided
-    /// Distance (points) a touch must travel before we lock to an axis. Smaller
-    /// than the swipe-down recognizer's threshold so deliberate horizontal
-    /// scrubs feel immediate but a stray vertical drift can still ignore.
-    private let panAxisDeadZone: CGFloat = 18
-
-    /// EMA weight for the per-sample pan-speed used to drive scrub acceleration.
-    /// Lower = smoother (more lag), higher = more responsive (more jitter). 0.25
-    /// removes the sample-to-sample velocity spikes that made flicks feel jumpy
-    /// while still tracking a real flick within a few events.
-    private let scrubSpeedSmoothing: Double = 0.25
-
     private var scrubTuning: ScrubGeometry.Tuning {
         // Base seconds-per-point scales with runtime so the *fraction* of the
         // content a swipe covers stays consistent across lengths — a fast flick
@@ -859,106 +828,61 @@ final class PlayerInputViewController: UIViewController {
         guard focusContext == .surface else { return }
         switch gesture.state {
         case .began:
-            panAxis = .undecided
-            scrubLastTranslationX = 0
+            scrubGesture.begin()
         case .changed:
             let translation = gesture.translation(in: view)
-            if panAxis == .undecided {
-                // Wait for a clear directional signal before committing. While
-                // undecided, NOTHING happens — the scrub head doesn't move and
-                // we don't begin a scrub, so vertical swipes that the system
-                // turns into a swipe-down recognizer don't briefly nudge the
-                // bar before being suppressed.
-                let absX = abs(translation.x)
-                let absY = abs(translation.y)
-                guard max(absX, absY) >= panAxisDeadZone else { return }
-                if absX >= absY {
-                    panAxis = .horizontal
-                    if model.isScrubbing {
-                        // Continuing a multi-swipe traversal: a previous flick
-                        // left the scrub session alive with a commit pending.
-                        // Cancel that pending commit and keep scrubbing from here,
-                        // carrying the smoothed speed so momentum builds across
-                        // swipes instead of resetting to a crawl on each one.
-                        cancelScrubCommit()
-                    } else if !model.seekWithoutPausing, !model.isPaused {
-                        // "Pause to seek" mode (per-profile, opt-in): while
-                        // playing, a horizontal swipe does NOTHING to the
-                        // timeline — it neither seeks NOR pauses. You must pause
-                        // the video yourself first (remote Play/Pause anywhere,
-                        // or a center-press on the scrub timeline) before you can
-                        // scrub, so a stray swipe can't move your position or
-                        // even pause playback. Scrubbing only ever engages while
-                        // paused and stays paused on landing until you explicitly
-                        // resume. We just flash the transport for feedback, then
-                        // suppress the rest of this gesture.
-                        panAxis = .verticalIgnored
-                        flashControls()
-                        return
-                    } else {
-                        beginScrub()
-                        scrubSmoothedSpeed = 0
-                    }
-                    // Seed the incremental anchor at *this* translation so the
-                    // axis-decision dead-zone travel is excluded (the first
-                    // scrub sample moves by zero, not the cumulative pan
-                    // offset). We track our own previous-translation rather than
-                    // calling `gesture.setTranslation(.zero)`, which would leave
-                    // the pre-reset `translation` applied this event and a
-                    // reset-to-tiny translation next event — stepping the bar
-                    // backward by the gap.
-                    scrubLastTranslationX = translation.x
-                } else {
-                    panAxis = .verticalIgnored
-                    // A deliberate downward swipe reveals the controls and drops
-                    // focus into the bottom button row — handled here off the pan
-                    // (rather than a separate swipe recognizer, which competes
-                    // with this pan and was unreliable).
-                    if translation.y > 0 {
-                        enterControlBar()
-                    }
-                    return
-                }
-            }
-            guard panAxis == .horizontal else { return }
-            // Scrub by the increment since the last sample, with gain that ramps
-            // up with pan speed: slow drags stay precise, fast flicks fling far.
-            // The raw recognizer velocity is jittery, so smooth it (EMA) before
-            // it drives the gain — otherwise fast flicks feel jumpy.
             let sampleStart = ScrubDiagnostics.enabled ? CACurrentMediaTime() : 0
-            let dx = Double(translation.x - scrubLastTranslationX)
-            scrubLastTranslationX = translation.x
-            let rawSpeed = abs(Double(gesture.velocity(in: view).x))
-            scrubSmoothedSpeed += (rawSpeed - scrubSmoothedSpeed) * scrubSpeedSmoothing
-            model.scrubSeconds = ScrubGeometry.advance(
-                scrubSeconds: model.scrubSeconds,
-                translationDeltaPoints: dx,
-                speedPointsPerSecond: scrubSmoothedSpeed,
-                tuning: scrubTuning,
-                duration: model.duration)
-            let cacheHit = updatePreviewThumbnail()
-            if ScrubDiagnostics.enabled {
-                scrubDiag.recordSample(
-                    handlerMs: (CACurrentMediaTime() - sampleStart) * 1000,
-                    cacheHit: cacheHit)
+            let outcome = scrubGesture.changed(
+                translationX: Double(translation.x),
+                translationY: Double(translation.y),
+                velocityX: Double(gesture.velocity(in: view).x),
+                isScrubbing: model.isScrubbing,
+                seekWithoutPausing: model.seekWithoutPausing,
+                isPaused: model.isPaused)
+            switch outcome {
+            case .ignore:
+                break
+            case .enterControlBar:
+                // A deliberate downward swipe reveals the controls and drops focus
+                // into the bottom button row.
+                enterControlBar()
+            case .flashAndSuppress:
+                // Pause-to-seek gate: flash the transport for feedback only.
+                flashControls()
+            case let .advance(deltaPoints, smoothedSpeed, beginScrub, continueTraversal):
+                // Continuing a flick-bridged traversal cancels the pending commit
+                // and keeps scrubbing (momentum carried in the interpreter).
+                if continueTraversal { cancelScrubCommit() }
+                if beginScrub { self.beginScrub() }
+                model.scrubSeconds = ScrubGeometry.advance(
+                    scrubSeconds: model.scrubSeconds,
+                    translationDeltaPoints: deltaPoints,
+                    speedPointsPerSecond: smoothedSpeed,
+                    tuning: scrubTuning,
+                    duration: model.duration)
+                let cacheHit = updatePreviewThumbnail()
+                if ScrubDiagnostics.enabled {
+                    scrubDiag.recordSample(
+                        handlerMs: (CACurrentMediaTime() - sampleStart) * 1000,
+                        cacheHit: cacheHit)
+                }
             }
         case .ended, .cancelled, .failed:
             // Auto-commit a horizontal scrub on lift, like Apple's own
-            // AVPlayerViewController. But distinguish *intent*: a deliberate slow
-            // landing commits now so playback resumes the instant you settle (the
-            // play-on-landing feel), while a fast flick is mid-traversal — keep
-            // the scrub session alive and bridge to the next swipe so we don't
-            // seek + rebuffer + resume between every swipe (the "fighting it"
-            // churn, which also steals bandwidth from the trickplay download).
-            if panAxis == .horizontal, model.isScrubbing {
-                let liftSpeed = abs(Double(gesture.velocity(in: view).x))
-                if gesture.state == .ended, liftSpeed >= scrubFlickCommitThreshold {
-                    scheduleScrubCommit()
-                } else {
-                    commitScrub()
-                }
+            // AVPlayerViewController — but distinguish a deliberate landing
+            // (commit + resume now) from a fast flick (keep the session alive and
+            // bridge to the next swipe so we don't seek + rebuffer between swipes).
+            switch scrubGesture.ended(
+                gestureEnded: gesture.state == .ended,
+                velocityX: Double(gesture.velocity(in: view).x),
+                isScrubbing: model.isScrubbing) {
+            case .none:
+                break
+            case .commit:
+                commitScrub()
+            case .bridgeCommit:
+                scheduleScrubCommit()
             }
-            panAxis = .undecided
         default:
             break
         }

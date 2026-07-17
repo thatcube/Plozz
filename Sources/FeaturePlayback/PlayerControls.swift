@@ -182,16 +182,10 @@ struct PlayerControls: View {
     /// Hold-to-accelerate state for the numeric style rows. `.onMoveCommand`
     /// repeats while a direction is held on the remote, so we ramp the step size
     /// as a same-direction streak builds on one focused row (fine taps stay 1×;
-    /// a sustained hold climbs 1→2→4→8 grid steps). Any pause beyond `holdWindow`,
-    /// a direction flip, or a row change restarts at the fine step.
-    private struct MoveAccel {
-        var slot: Int?
-        var sign: Int = 0
-        var lastMove: Date = .distantPast
-        var streak: Int = 0
-    }
-    @State private var moveAccel = MoveAccel()
-    private static let holdWindow: TimeInterval = 0.32
+    /// a sustained hold climbs 1→2→4→8 grid steps). Any pause beyond the hold
+    /// window, a direction flip, or a row change restarts at the fine step. The
+    /// ramp state machine lives in `SubtitleStyleAccelerator`.
+    @State private var styleAccelerator = SubtitleStyleAccelerator()
 
     var body: some View {
         ZStack {
@@ -1543,41 +1537,15 @@ struct PlayerControls: View {
               let row = rows.first(where: { $0.slot == slot }) else { return }
         switch (direction, row.kind) {
         case let (.left, .number(_, step)):
-            step(-acceleratedStep(slot: slot, sign: -1))
+            step(-styleAccelerator.magnitude(slot: slot, sign: -1))
         case let (.right, .number(_, step)):
-            step(acceleratedStep(slot: slot, sign: 1))
+            step(styleAccelerator.magnitude(slot: slot, sign: 1))
         case let (.left, .choice(_, prev, _)):
             prev()
         case let (.right, .choice(_, _, next)):
             next()
         default:
             break
-        }
-    }
-
-    /// Advances the hold streak for this focused row + direction and returns the
-    /// grid magnitude to move. A pause longer than `holdWindow`, a direction flip,
-    /// or a different row restarts the streak so the next move is a fine 1 step.
-    private func acceleratedStep(slot: Int, sign: Int) -> Int {
-        let now = Date()
-        let held = moveAccel.slot == slot
-            && moveAccel.sign == sign
-            && now.timeIntervalSince(moveAccel.lastMove) < Self.holdWindow
-        let streak = held ? moveAccel.streak + 1 : 0
-        moveAccel = MoveAccel(slot: slot, sign: sign, lastMove: now, streak: streak)
-        return Self.accelMagnitude(streak)
-    }
-
-    /// Grid-index magnitude for the current hold streak: the first few repeats
-    /// stay fine (1 step) so deliberate taps land exactly, then a sustained hold
-    /// ramps up to cover large ranges quickly. On the 1% Position grid this reads
-    /// as 1→2→4→8 % per repeat.
-    private static func accelMagnitude(_ streak: Int) -> Int {
-        switch streak {
-        case ..<3: return 1
-        case ..<8: return 2
-        case ..<16: return 4
-        default: return 8
         }
     }
 
@@ -1596,9 +1564,9 @@ struct PlayerControls: View {
         rows.append(StyleRowSpec(slot: slot, title: "Font", kind: .submenu(summary: s.fontFamily.displayName, open: { openSubtitleScreen(.styleFont) }))); slot += 1
         rows.append(choiceRow(slot, "Weight", options: weights, current: s.fontWeight.snapped(to: weights), label: { $0.displayName }) { v in updateStyle { $0.fontWeight = v } }); slot += 1
         rows.append(numberRow(slot, "Text Size", options: Self.sizeOptions, current: Int((s.fontScale * 100).rounded()), label: { "\($0)%" }) { v in updateStyle { $0.fontScale = Double(v) / 100 } }); slot += 1
-        rows.append(numberRow(slot, "Position", options: Self.positionOptions, current: Int((s.verticalPosition * 100).rounded()), label: Self.positionLabel) { v in updateStyle { $0.verticalPosition = Double(v) / 100 } }); slot += 1
-        rows.append(numberRow(slot, "Horizontal Offset", options: Self.hOffsetOptions, current: Int((s.horizontalOffset * 100).rounded()), label: Self.hOffsetLabel) { v in updateStyle { $0.horizontalOffset = Double(v) / 100 } }); slot += 1
-        rows.append(colorRow(slot, "Text Color", options: Self.textColorOptions, current: s.textColor, label: Self.colorLabel) { c in updateStyle { $0.textColor = c } }); slot += 1
+        rows.append(numberRow(slot, "Position", options: Self.positionOptions, current: Int((s.verticalPosition * 100).rounded()), label: PlayerControlsFormatting.positionLabel) { v in updateStyle { $0.verticalPosition = Double(v) / 100 } }); slot += 1
+        rows.append(numberRow(slot, "Horizontal Offset", options: Self.hOffsetOptions, current: Int((s.horizontalOffset * 100).rounded()), label: PlayerControlsFormatting.hOffsetLabel) { v in updateStyle { $0.horizontalOffset = Double(v) / 100 } }); slot += 1
+        rows.append(colorRow(slot, "Text Color", options: Self.textColorOptions, current: s.textColor, label: PlayerControlsFormatting.colorLabel) { c in updateStyle { $0.textColor = c } }); slot += 1
         rows.append(numberRow(slot, "Opacity", options: Self.opacityOptions, current: Int((s.opacity * 100).rounded()), label: { "\($0)%" }) { v in updateStyle { $0.opacity = Double(v) / 100 } }); slot += 1
         // Only affects HDR frames, so it appears exclusively while HDR is live —
         // mirroring how the bitmap-primary gate hides controls that can't act.
@@ -1608,7 +1576,7 @@ struct PlayerControls: View {
 
         // The submenu group + Reset sit under a divider, wherever the knobs above end.
         let dividerBefore = slot
-        rows.append(StyleRowSpec(slot: slot, title: "Shadow & Outline", kind: .submenu(summary: Self.edgeSummary(s), open: { openSubtitleScreen(.styleOutline) }))); slot += 1
+        rows.append(StyleRowSpec(slot: slot, title: "Shadow & Outline", kind: .submenu(summary: PlayerControlsFormatting.edgeSummary(s), open: { openSubtitleScreen(.styleOutline) }))); slot += 1
         rows.append(StyleRowSpec(slot: slot, title: "Background", kind: .submenu(summary: s.background.isEnabled ? "On" : "Off", open: { openSubtitleScreen(.styleBackground) }))); slot += 1
         rows.append(StyleRowSpec(slot: slot, title: "Dual Subtitles", kind: .submenu(summary: hasSecondaryTrack ? "On" : "Off", open: { openSubtitleScreen(.styleDual) }))); slot += 1
         rows.append(StyleRowSpec(slot: slot, title: "Reset to Default", kind: .action(run: { updateStyle { $0 = .default } }))); slot += 1
@@ -1682,13 +1650,13 @@ struct PlayerControls: View {
 
         rows.append(choiceRow(slot, "Shadow", options: Self.shadowStyleOptions, current: s.edge.style, label: { $0.displayName }) { v in updateStyle { $0.edge.style = v } }); slot += 1
         if s.edge.style != .none {
-            rows.append(colorRow(slot, "Shadow Color", options: Self.textColorOptions, current: s.edge.color, label: Self.colorLabel) { c in updateStyle { $0.edge.color = c } }); slot += 1
+            rows.append(colorRow(slot, "Shadow Color", options: Self.textColorOptions, current: s.edge.color, label: PlayerControlsFormatting.colorLabel) { c in updateStyle { $0.edge.color = c } }); slot += 1
             rows.append(numberRow(slot, "Shadow Thickness", options: Self.thicknessOptions, current: Int(s.edge.thickness.rounded()), label: { "\($0)" }) { v in updateStyle { $0.edge.thickness = Double(v) } }); slot += 1
         }
 
         rows.append(StyleRowSpec(slot: slot, title: "Outline", kind: .toggle(isOn: s.border.isEnabled, flip: { updateStyle { $0.border.isEnabled.toggle() } }))); slot += 1
         if s.border.isEnabled {
-            rows.append(colorRow(slot, "Outline Color", options: Self.textColorOptions, current: s.border.color, label: Self.colorLabel) { c in updateStyle { $0.border.color = c } }); slot += 1
+            rows.append(colorRow(slot, "Outline Color", options: Self.textColorOptions, current: s.border.color, label: PlayerControlsFormatting.colorLabel) { c in updateStyle { $0.border.color = c } }); slot += 1
             rows.append(numberRow(slot, "Outline Width", options: Self.thicknessOptions, current: Int(s.border.width.rounded()), label: { "\($0)" }) { v in updateStyle { $0.border.width = Double(v) } }); slot += 1
         }
         return rows
@@ -1705,9 +1673,9 @@ struct PlayerControls: View {
         // (matching the Outline and Dual screens' gating).
         guard s.background.isEnabled else { return rows }
         var slot = 1
-        rows.append(colorRow(slot, "Color", options: Self.boxColorOptions, current: s.background.color, label: Self.boxColorLabel) { c in updateStyle { $0.background.color = c } }); slot += 1
+        rows.append(colorRow(slot, "Color", options: Self.boxColorOptions, current: s.background.color, label: PlayerControlsFormatting.boxColorLabel) { c in updateStyle { $0.background.color = c } }); slot += 1
         rows.append(numberRow(slot, "Box Opacity", options: Self.boxOpacityOptions, current: Int((s.background.color.alpha * 100).rounded()), label: { "\($0)%" }) { v in updateStyle { $0.background.color.alpha = Double(v) / 100 } }); slot += 1
-        rows.append(numberRow(slot, "Corner Radius", options: Self.cornerOptions, current: Int(s.background.cornerRadius.rounded()), label: Self.cornerLabel) { v in updateStyle { $0.background.cornerRadius = Double(v) } }); slot += 1
+        rows.append(numberRow(slot, "Corner Radius", options: Self.cornerOptions, current: Int(s.background.cornerRadius.rounded()), label: PlayerControlsFormatting.cornerLabel) { v in updateStyle { $0.background.cornerRadius = Double(v) } }); slot += 1
         rows.append(numberRow(slot, "Horizontal Padding", options: Self.paddingOptions, current: Int(s.background.horizontalPadding.rounded()), label: { "\($0)" }) { v in updateStyle { $0.background.horizontalPadding = Double(v) } }); slot += 1
         rows.append(numberRow(slot, "Vertical Padding", options: Self.paddingOptions, current: Int(s.background.verticalPadding.rounded()), label: { "\($0)" }) { v in updateStyle { $0.background.verticalPadding = Double(v) } }); slot += 1
         return rows
@@ -1767,7 +1735,7 @@ struct PlayerControls: View {
             // they're not dead controls.
             if sec.differentiate {
                 rows.append(numberRow(slot, "Size", options: Self.secondarySizeOptions, current: Int((sec.relativeScale * 100).rounded()), label: { "\($0)%" }) { v in updateStyle { $0.secondary?.relativeScale = Double(v) / 100 } }); slot += 1
-                rows.append(colorRow(slot, "Color", options: Self.textColorOptions, current: sec.textColor, label: Self.colorLabel) { c in updateStyle { $0.secondary?.textColor = c } }); slot += 1
+                rows.append(colorRow(slot, "Color", options: Self.textColorOptions, current: sec.textColor, label: PlayerControlsFormatting.colorLabel) { c in updateStyle { $0.secondary?.textColor = c } }); slot += 1
             }
             rows.append(numberRow(slot, "Gap", options: Self.gapOptions, current: Int(sec.gap.rounded()), label: { "\($0)" }) { v in updateStyle { $0.secondary?.gap = Double(v) } }); slot += 1
         }
@@ -1860,7 +1828,7 @@ struct PlayerControls: View {
     /// Corner radius in points, then a large sentinel the box renderer clamps to a
     /// perfect capsule (`UIBezierPath` caps the radius at half the shorter side),
     /// so the top of the range always reads as "fully rounded" at any box size.
-    private static let cornerFull = 400
+    private static let cornerFull = PlayerControlsFormatting.cornerFull
     private static let cornerOptions: [Int] = Array(stride(from: 0, through: 40, by: 2)) + [cornerFull]
     private static let paddingOptions: [Int] = Array(stride(from: 0, through: 40, by: 2))
     private static let gapOptions: [Int] = Array(stride(from: 0, through: 24, by: 2))
@@ -1874,64 +1842,7 @@ struct PlayerControls: View {
     ]
 
     private static func nearestIndex(_ options: [Int], _ value: Int) -> Int {
-        guard !options.isEmpty else { return 0 }
-        var best = 0, bestDelta = Int.max
-        for (i, option) in options.enumerated() {
-            let delta = abs(option - value)
-            if delta < bestDelta { bestDelta = delta; best = i }
-        }
-        return best
-    }
-
-    /// 0% = seated at the bottom safe edge; 90% = near the top. Anchors are named
-    /// so the extremes read clearly, but every step in between is a plain percent.
-    private static func positionLabel(_ pct: Int) -> String {
-        switch pct {
-        case 0: return "Bottom"
-        case 90: return "Top"
-        default: return "\(pct)%"
-        }
-    }
-
-    /// Horizontal offset readout: 0 reads "Centre"; a signed percentage otherwise,
-    /// worded by direction so the sign never has to be parsed.
-    private static func hOffsetLabel(_ pct: Int) -> String {
-        if pct == 0 { return "Centre" }
-        return pct > 0 ? "Right \(pct)%" : "Left \(-pct)%"
-    }
-
-    /// Corner radius readout: the sentinel top step reads "Full" (a capsule/pill);
-    /// every other step is its point value.
-    private static func cornerLabel(_ pts: Int) -> String {
-        pts >= cornerFull ? "Full" : "\(pts)"
-    }
-
-    /// Matches the preset palette by RGB (ignoring alpha), so a swatch reads by name
-    /// even when its opacity has been dialled down elsewhere.
-    private static func colorLabel(_ color: SubtitleColor) -> String {
-        SubtitleColor.presets.first(where: { $0.color.red == color.red && $0.color.green == color.green && $0.color.blue == color.blue })?.name ?? "Custom"
-    }
-
-    /// Compact summary for the "Shadow & Outline" submenu row. The row title
-    /// already says "Shadow & Outline", so echoing "Shadow + Outline" as the value
-    /// reads as repetitive — collapse to "On" when both effects are active, name
-    /// the single active one otherwise, and "Off" when neither is on.
-    private static func edgeSummary(_ s: SubtitleStyle) -> String {
-        let shadow = s.edge.style != .none
-        let outline = s.border.isEnabled
-        switch (shadow, outline) {
-        case (true, true): return "On"
-        case (true, false): return "Shadow"
-        case (false, true): return "Outline"
-        case (false, false): return "Off"
-        }
-    }
-
-    private static func boxColorLabel(_ color: SubtitleColor) -> String {
-        if color.red == 0, color.green == 0, color.blue == 0 { return "Black" }
-        if color.red == 1, color.green == 1, color.blue == 1 { return "White" }
-        if color.red == 0.15, color.green == 0.15, color.blue == 0.15 { return "Charcoal" }
-        return "Custom"
+        PlayerControlsFormatting.nearestIndex(options, value)
     }
 
     /// Shown in place of the whole style editor when the primary subtitle is a

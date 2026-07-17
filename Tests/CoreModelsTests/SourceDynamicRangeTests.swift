@@ -20,6 +20,21 @@ final class SourceDynamicRangeTests: XCTestCase {
         XCTAssertEqual(hint(rangeType: nil, transfer: "arib-std-b67"), .hlg)
     }
 
+    func testEngineHeaderSignalsUseTheSameProviderIndependentClassification() {
+        XCTAssertEqual(
+            SourceDynamicRange.classify(videoRangeType: "DOVIWithHDR10"),
+            .dolbyVision
+        )
+        XCTAssertEqual(
+            SourceDynamicRange.classify(videoRangeType: "HDR10Plus"),
+            .hdr10Plus
+        )
+        XCTAssertEqual(SourceDynamicRange.classify(videoRangeType: "HDR10"), .hdr10)
+        XCTAssertEqual(SourceDynamicRange.classify(videoRangeType: "HLG"), .hlg)
+        XCTAssertEqual(SourceDynamicRange.classify(videoRangeType: "SDR"), .sdr)
+        XCTAssertNil(SourceDynamicRange.classify(videoRangeType: nil))
+    }
+
     func testEngineProbeOverridesProviderHint() {
         let hintedHDR = EffectiveDynamicRange.awaitingEngineProbe(
             metadata: metadata(rangeType: "HDR10")

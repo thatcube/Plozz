@@ -403,7 +403,7 @@ final class PlayerViewModelEOFTests: XCTestCase {
         await viewModel.stop()
     }
 
-    func testSameRangeHandoffRequiresKnownEqualNextHint() async throws {
+    func testSameRangeHandoffUsesAuthoritativePrefetchProbeAndFallsBackToKnownHint() async throws {
         let request = try makeNetworkFileRequest()
         let provider = RecordingPlaybackProvider(request: request)
         let plozzigen = SpyVideoEngine()
@@ -442,13 +442,55 @@ final class PlayerViewModelEOFTests: XCTestCase {
 
         XCTAssertTrue(viewModel.shouldPreserveDisplayMode(forNext: knownNext))
         XCTAssertFalse(viewModel.shouldPreserveDisplayMode(forNext: unknownNext))
+
+        let probedNext = PlayerViewModel.PrefetchedPlayback(
+            itemID: "probed",
+            request: unknownNext.request,
+            engineKind: .plozzigen,
+            prefetchedDynamicRange: .dolbyVision
+        )
+        let mismatchedNext = PlayerViewModel.PrefetchedPlayback(
+            itemID: "mismatched",
+            request: unknownNext.request,
+            engineKind: .plozzigen,
+            prefetchedDynamicRange: .hdr10
+        )
+        let authoritativeSDRNext = PlayerViewModel.PrefetchedPlayback(
+            itemID: "sdr",
+            request: unknownNext.request,
+            engineKind: .plozzigen,
+            prefetchedDynamicRange: .sdr
+        )
+        XCTAssertTrue(viewModel.shouldPreserveDisplayMode(forNext: probedNext))
+        XCTAssertFalse(viewModel.shouldPreserveDisplayMode(forNext: mismatchedNext))
+        XCTAssertFalse(viewModel.shouldPreserveDisplayMode(forNext: authoritativeSDRNext))
+
+        for range in [
+            SourceDynamicRange.hdr10,
+            .hdr10Plus,
+            .hlg
+        ] {
+            plozzigen.onProbedSourceFactsChanged?(
+                EngineProbedSourceFacts(range: range)
+            )
+            let sameDisplayClassNext = PlayerViewModel.PrefetchedPlayback(
+                itemID: "probed-\(range.rawValue)",
+                request: unknownNext.request,
+                engineKind: .plozzigen,
+                prefetchedDynamicRange: range
+            )
+            XCTAssertTrue(
+                viewModel.shouldPreserveDisplayMode(forNext: sameDisplayClassNext),
+                "Expected \(range.rawValue) handoff to preserve display criteria"
+            )
+        }
         await viewModel.stop()
 
-        let inherited = knownNext.inheritingPreservedDisplayMode(true)
+        let inherited = probedNext.inheritingPreservedDisplayMode(true)
         let incomingEngine = SpyVideoEngine()
         let incoming = PlayerViewModel(
-            provider: RecordingPlaybackProvider(request: knownNext.request),
-            itemID: knownNext.itemID,
+            provider: RecordingPlaybackProvider(request: probedNext.request),
+            itemID: probedNext.itemID,
             engineFactory: EngineFactory(
                 makeNative: { _ in SpyVideoEngine() },
                 makePlozzigen: { incomingEngine }
@@ -459,9 +501,153 @@ final class PlayerViewModelEOFTests: XCTestCase {
         XCTAssertTrue(incoming.inheritsPreservedDisplayMode)
         XCTAssertEqual(
             incoming.effectiveDynamicRange,
-            .awaitingEngineProbe(hint: .dolbyVision)
+            .awaitingEngineProbe(hint: nil)
         )
+        XCTAssertEqual(incoming.inheritedPreservedDynamicRange, .dolbyVision)
         await incoming.stop()
+    }
+
+    func testDirectFilePrefetchHeaderProbesRangeWithoutMetadataEnrichment() async throws {
+        let current = try makeNetworkFileRequest(
+            itemID: "current",
+            title: "Episode 1",
+            kind: .episode,
+            relativePath: "Shows/Show/S01E01.mkv"
+        )
+        let next = try makeNetworkFileRequest(
+            itemID: "next",
+            title: "Episode 2",
+            kind: .episode,
+            relativePath: "Shows/Show/S01E02.mkv"
+        )
+        let provider = RecordingPlaybackProvider(
+            request: current,
+            kind: .mediaShare,
+            requestsByItemID: ["next": next]
+        )
+        let rangeProbe = RangeProbeRecorder(result: .dolbyVision)
+        let viewModel = PlayerViewModel(
+            provider: provider,
+            itemID: current.item.id,
+            engineFactory: EngineFactory(
+                makeNative: { _ in SpyVideoEngine() },
+                makePlozzigen: { SpyVideoEngine() },
+                probeSourceDynamicRange: { request in
+                    await rangeProbe.probe(request)
+                }
+            ),
+            neighborResolver: { (nil, next.item) }
+        )
+
+        await waitForPrefetchedNext(viewModel)
+
+        XCTAssertEqual(viewModel.prefetchedNext?.itemID, next.item.id)
+        XCTAssertEqual(
+            viewModel.prefetchedNext?.prefetchedDynamicRange,
+            .dolbyVision
+        )
+        let rangeProbeCallCount = await rangeProbe.callCount()
+        let rangeProbeLastItemID = await rangeProbe.lastItemID()
+        let providerItemCallCount = await provider.itemCallCountValue()
+        XCTAssertEqual(rangeProbeCallCount, 1)
+        XCTAssertEqual(rangeProbeLastItemID, next.item.id)
+        XCTAssertEqual(providerItemCallCount, 0)
+        await viewModel.stop()
+    }
+
+    func testCancelledDirectFilePrefetchProbeCannotPublishRange() async throws {
+        let current = try makeNetworkFileRequest(
+            itemID: "current",
+            title: "Episode 1",
+            kind: .episode,
+            relativePath: "Shows/Show/S01E01.mkv"
+        )
+        let next = try makeNetworkFileRequest(
+            itemID: "next",
+            title: "Episode 2",
+            kind: .episode,
+            relativePath: "Shows/Show/S01E02.mkv"
+        )
+        let provider = RecordingPlaybackProvider(
+            request: current,
+            kind: .mediaShare,
+            requestsByItemID: ["next": next]
+        )
+        let gate = RangeProbeGate(result: .dolbyVision)
+        let viewModel = PlayerViewModel(
+            provider: provider,
+            itemID: current.item.id,
+            engineFactory: EngineFactory(
+                makeNative: { _ in SpyVideoEngine() },
+                makePlozzigen: { SpyVideoEngine() },
+                probeSourceDynamicRange: { request in
+                    await gate.probe(request)
+                }
+            ),
+            neighborResolver: { (nil, next.item) }
+        )
+        await gate.waitUntilEntered()
+
+        await viewModel.stop()
+        await gate.release()
+        for _ in 0..<100 {
+            await Task.yield()
+        }
+
+        XCTAssertNil(viewModel.prefetchedNext)
+    }
+
+    func testCancelledPrefetchProbeReleasesResolvedNonIdempotentSession() async throws {
+        let current = try makeNetworkFileRequest(
+            itemID: "current",
+            title: "Episode 1",
+            kind: .episode,
+            relativePath: "Shows/Show/S01E01.mkv",
+            playSessionID: "current-session"
+        )
+        let next = try makeNetworkFileRequest(
+            itemID: "next",
+            title: "Episode 2",
+            kind: .episode,
+            relativePath: "Shows/Show/S01E02.mkv",
+            playSessionID: "next-session"
+        )
+        let provider = RecordingPlaybackProvider(
+            request: current,
+            kind: .jellyfin,
+            requestsByItemID: ["next": next]
+        )
+        let gate = RangeProbeGate(result: .dolbyVision)
+        let engine = SpyVideoEngine()
+        let viewModel = PlayerViewModel(
+            provider: provider,
+            itemID: current.item.id,
+            engineFactory: EngineFactory(
+                makeNative: { _ in SpyVideoEngine() },
+                makePlozzigen: { engine },
+                probeSourceDynamicRange: { request in
+                    await gate.probe(request)
+                }
+            ),
+            neighborResolver: { (nil, next.item) }
+        )
+        await viewModel.load()
+        await waitForNextEpisode(viewModel)
+        engine.duration = 120
+        engine.currentTime = 60
+        engine.onProgress?()
+        await gate.waitUntilEntered()
+
+        await viewModel.stop()
+        await gate.release()
+        let released = await waitForReport(
+            provider,
+            itemID: next.item.id,
+            event: .stop
+        )
+
+        XCTAssertTrue(released)
+        XCTAssertNil(viewModel.prefetchedNext)
     }
 
     func testForegroundReloadRetainsAuthoritativeProbeTruth() async throws {
@@ -502,7 +688,12 @@ final class PlayerViewModelEOFTests: XCTestCase {
     }
 
     private func makeNetworkFileRequest(
-        metadata: MediaSourceMetadata? = nil
+        metadata: MediaSourceMetadata? = nil,
+        itemID: String = "movie",
+        title: String = "Movie",
+        kind: MediaItemKind = .movie,
+        relativePath: String = "Movies/Movie.mkv",
+        playSessionID: String? = nil
     ) throws -> PlaybackRequest {
         let identity = try RemoteFileIdentity(
             kind: .strongETag,
@@ -517,7 +708,7 @@ final class PlayerViewModelEOFTests: XCTestCase {
             accountID: "account",
             sourceID: "source",
             credentialRevision: CredentialRevision(),
-            relativePath: "Movies/Movie.mkv",
+            relativePath: relativePath,
             representation: representation,
             formatHint: MediaFormatHint(
                 container: "mkv",
@@ -525,10 +716,39 @@ final class PlayerViewModelEOFTests: XCTestCase {
             )
         )
         return PlaybackRequest(
-            item: MediaItem(id: "movie", title: "Movie", kind: .movie, runtime: 120),
+            item: MediaItem(id: itemID, title: title, kind: kind, runtime: 120),
             playbackSource: .networkFile(locator),
+            playSessionID: playSessionID,
             sourceMetadata: metadata
         )
+    }
+
+    private func waitForPrefetchedNext(_ viewModel: PlayerViewModel) async {
+        for _ in 0..<1_000 where viewModel.prefetchedNext == nil {
+            await Task.yield()
+        }
+        XCTAssertNotNil(viewModel.prefetchedNext)
+    }
+
+    private func waitForNextEpisode(_ viewModel: PlayerViewModel) async {
+        for _ in 0..<1_000 where viewModel.nextEpisode == nil {
+            await Task.yield()
+        }
+        XCTAssertNotNil(viewModel.nextEpisode)
+    }
+
+    private func waitForReport(
+        _ provider: RecordingPlaybackProvider,
+        itemID: String,
+        event: PlaybackEvent
+    ) async -> Bool {
+        for _ in 0..<1_000 {
+            if await provider.hasReport(itemID: itemID, event: event) {
+                return true
+            }
+            await Task.yield()
+        }
+        return false
     }
 
     private func makeViewModel() -> (
@@ -576,7 +796,7 @@ private actor RecordingPlaybackProvider: MediaProvider {
         let progress: PlaybackProgress
     }
 
-    nonisolated let kind: ProviderKind = .jellyfin
+    nonisolated let kind: ProviderKind
     nonisolated let session = UserSession(
         server: MediaServer(
             id: "server",
@@ -591,12 +811,19 @@ private actor RecordingPlaybackProvider: MediaProvider {
     )
 
     private let request: PlaybackRequest
+    private let requestsByItemID: [String: PlaybackRequest]
     private(set) var reports: [Report] = []
     private(set) var playbackInfoCallCount = 0
     private(set) var itemCallCount = 0
 
-    init(request: PlaybackRequest) {
+    init(
+        request: PlaybackRequest,
+        kind: ProviderKind = .jellyfin,
+        requestsByItemID: [String: PlaybackRequest] = [:]
+    ) {
         self.request = request
+        self.kind = kind
+        self.requestsByItemID = requestsByItemID
     }
 
     func libraries() async throws -> [MediaLibrary] { [] }
@@ -604,7 +831,7 @@ private actor RecordingPlaybackProvider: MediaProvider {
     func latest(limit: Int) async throws -> [MediaItem] { [] }
     func item(id: String) async throws -> MediaItem {
         itemCallCount += 1
-        return request.item
+        return requestsByItemID[id]?.item ?? request.item
     }
     func children(of itemID: String) async throws -> [MediaItem] { [] }
     func items(in containerID: String, kind: MediaItemKind, page: PageRequest) async throws -> MediaPage {
@@ -613,16 +840,70 @@ private actor RecordingPlaybackProvider: MediaProvider {
     func search(query: String, limit: Int) async throws -> [MediaItem] { [] }
     func playbackInfo(for itemID: String) async throws -> PlaybackRequest {
         playbackInfoCallCount += 1
-        return request
+        return requestsByItemID[itemID] ?? request
     }
     func playbackInfo(for itemID: String, mediaSourceID: String?, forceTranscode: Bool) async throws -> PlaybackRequest {
         playbackInfoCallCount += 1
-        return request
+        return requestsByItemID[itemID] ?? request
+    }
+
+    func itemCallCountValue() -> Int { itemCallCount }
+    func hasReport(itemID: String, event: PlaybackEvent) -> Bool {
+        reports.contains {
+            $0.progress.itemID == itemID && $0.event == event
+        }
     }
     func reportPlayback(_ progress: PlaybackProgress, event: PlaybackEvent) async throws {
         reports.append(Report(event: event, progress: progress))
     }
     nonisolated func imageURL(itemID: String, kind: ImageKind, maxWidth: Int?) -> URL? { nil }
+}
+
+private actor RangeProbeRecorder {
+    private let result: SourceDynamicRange?
+    private var requests: [PlaybackRequest] = []
+
+    init(result: SourceDynamicRange?) {
+        self.result = result
+    }
+
+    func probe(_ request: PlaybackRequest) -> SourceDynamicRange? {
+        requests.append(request)
+        return result
+    }
+
+    func callCount() -> Int { requests.count }
+    func lastItemID() -> String? { requests.last?.item.id }
+}
+
+private actor RangeProbeGate {
+    private let result: SourceDynamicRange?
+    private var didEnter = false
+    private var continuation: CheckedContinuation<Void, Never>?
+
+    init(result: SourceDynamicRange?) {
+        self.result = result
+    }
+
+    func probe(_ request: PlaybackRequest) async -> SourceDynamicRange? {
+        _ = request
+        didEnter = true
+        await withCheckedContinuation { continuation in
+            self.continuation = continuation
+        }
+        return result
+    }
+
+    func waitUntilEntered() async {
+        while !didEnter {
+            await Task.yield()
+        }
+    }
+
+    func release() {
+        continuation?.resume()
+        continuation = nil
+    }
 }
 
 @MainActor

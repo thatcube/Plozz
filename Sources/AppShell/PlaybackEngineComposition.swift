@@ -61,6 +61,20 @@ enum HybridPlayback {
                     networkFileResolver: networkFileResolver,
                     authenticatedHTTPResolver: authenticatedHTTPResolver
                 )
+            },
+            probeSourceDynamicRange: { request in
+                guard case .some(.networkFile(let locator)) = request.playbackSource else {
+                    return nil
+                }
+                let prober = PlozzigenNetworkFileStreamProber(
+                    resolver: networkFileResolver
+                )
+                guard let facts = await prober.probe(locator: locator) else {
+                    return nil
+                }
+                return SourceDynamicRange.classify(
+                    videoRangeType: facts.videoRangeType
+                )
             }
         )
         #else

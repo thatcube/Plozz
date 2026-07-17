@@ -50,17 +50,34 @@ public final class PlayerViewModel {
         public let itemID: String
         public let request: PlaybackRequest
         public let engineKind: PlaybackEngineKind
+        /// Authoritative header-probed range for an upcoming direct file. Used
+        /// only to decide whether identical criteria can survive the handoff.
+        public let prefetchedDynamicRange: SourceDynamicRange?
         public let inheritedPreservedDynamicRange: SourceDynamicRange?
         public init(
             itemID: String,
             request: PlaybackRequest,
             engineKind: PlaybackEngineKind,
+            prefetchedDynamicRange: SourceDynamicRange? = nil,
             inheritedPreservedDynamicRange: SourceDynamicRange? = nil
         ) {
             self.itemID = itemID
             self.request = request
             self.engineKind = engineKind
+            self.prefetchedDynamicRange = prefetchedDynamicRange
             self.inheritedPreservedDynamicRange = inheritedPreservedDynamicRange
+        }
+
+        public func withPrefetchedDynamicRange(
+            _ range: SourceDynamicRange?
+        ) -> Self {
+            Self(
+                itemID: itemID,
+                request: request,
+                engineKind: engineKind,
+                prefetchedDynamicRange: range,
+                inheritedPreservedDynamicRange: inheritedPreservedDynamicRange
+            )
         }
 
         public func inheritingPreservedDisplayMode(_ inherits: Bool) -> Self {
@@ -68,10 +85,14 @@ public final class PlayerViewModel {
                 itemID: itemID,
                 request: request,
                 engineKind: engineKind,
-                inheritedPreservedDynamicRange: inherits
-                    ? SourceDynamicRange.providerHint(from: request.sourceMetadata)
-                    : nil
+                prefetchedDynamicRange: prefetchedDynamicRange,
+                inheritedPreservedDynamicRange: inherits ? handoffRange : nil
             )
+        }
+
+        public var handoffRange: SourceDynamicRange? {
+            prefetchedDynamicRange
+                ?? SourceDynamicRange.providerHint(from: request.sourceMetadata)
         }
     }
 
@@ -689,6 +710,10 @@ public final class PlayerViewModel {
         let isHDR = effectiveDynamicRange.bestAvailable?.isHDR ?? false
         liveSubtitles.isHDR = isHDR
         controls.subtitlesRenderHDR = isHDR
+        HandoffDiagnostics.emit(
+            "range AUTHORITATIVE value=\(effectiveDynamicRange.authoritativeRange?.rawValue ?? "unknown") "
+                + "generation=\(dynamicRangeLoadGeneration) subtitlesHDR=\(isHDR)"
+        )
         diagnosticsToken = UUID()
     }
 
@@ -749,8 +774,17 @@ public final class PlayerViewModel {
         nextEpisodePrefetchTask = Task { @MainActor [weak self] in
             guard let self else { return }
             do {
-                let resolved = try await self.resolveAndRoute(
+                var resolved = try await self.resolveAndRoute(
                     itemID: next.id, mediaSourceID: next.selectedVersionID, forceTranscode: false)
+                if resolved.engineKind == .plozzigen,
+                   let probe = self.engineFactory.probeSourceDynamicRange {
+                    let range = await probe(resolved.request)
+                    resolved = resolved.withPrefetchedDynamicRange(range)
+                    HandoffDiagnostics.emit(
+                        "prefetch RANGE next=\(next.id) range=\(range?.rawValue ?? "unknown") "
+                            + "authority=engineHeaderProbe"
+                    )
+                }
                 // A stop()/back-out cancelled us after the resolve opened a
                 // (Jellyfin) session — release it rather than orphan it.
                 if Task.isCancelled {
@@ -836,9 +870,7 @@ public final class PlayerViewModel {
     /// the normal full reset so a genuine mode change still happens.
     public func shouldPreserveDisplayMode(forNext next: PrefetchedPlayback?) -> Bool {
         let currentRange = effectiveDynamicRange.authoritativeRange
-        let nextRange = next.flatMap {
-            SourceDynamicRange.providerHint(from: $0.request.sourceMetadata)
-        }
+        let nextRange = next?.handoffRange
         let curMode = currentRange.map(HDRDisplayMode.init)
         let nextMode = nextRange.map(HDRDisplayMode.init)
         let bothPlozzigen = currentEngineKind == .plozzigen && next?.engineKind == .plozzigen
@@ -1542,6 +1574,11 @@ public final class PlayerViewModel {
         let hintedHDR = effectiveDynamicRange.bestAvailable?.isHDR ?? false
         liveSubtitles.isHDR = hintedHDR
         controls.subtitlesRenderHDR = hintedHDR
+        HandoffDiagnostics.emit(
+            "range AWAITING engine=\(engineKind.rawValue) "
+                + "hint=\(effectiveDynamicRange.bestAvailable?.rawValue ?? "unknown") "
+                + "generation=\(rangeLoadGeneration) subtitlesHDR=\(hintedHDR)"
+        )
         // Publish the transition state before replacing/stopping the old engine.
         // SwiftUI gets one run-loop turn to raise black before either criteria
         // owner clears or applies its display mode.

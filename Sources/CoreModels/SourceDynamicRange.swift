@@ -14,11 +14,27 @@ public enum SourceDynamicRange: String, Codable, Equatable, Sendable {
     /// metadata remains unknown rather than being mislabeled SDR.
     public static func providerHint(from metadata: MediaSourceMetadata?) -> Self? {
         guard let video = metadata?.video else { return nil }
-        let rangeType = video.videoRangeType?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? ""
-        let range = video.videoRange?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? ""
-        let transfer = video.colorTransfer?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+        return classify(
+            videoRangeType: video.videoRangeType,
+            videoRange: video.videoRange,
+            colorTransfer: video.colorTransfer,
+            dolbyVisionProfile: video.dolbyVisionProfile
+        )
+    }
 
-        if video.dolbyVisionProfile != nil || rangeType.hasPrefix("DOVI") {
+    /// Classifies normalized video signals regardless of whether they came from
+    /// provider metadata or an engine-backed file-header probe.
+    public static func classify(
+        videoRangeType: String?,
+        videoRange: String? = nil,
+        colorTransfer: String? = nil,
+        dolbyVisionProfile: Int? = nil
+    ) -> Self? {
+        let rangeType = videoRangeType?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? ""
+        let range = videoRange?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? ""
+        let transfer = colorTransfer?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+
+        if dolbyVisionProfile != nil || rangeType.hasPrefix("DOVI") {
             return .dolbyVision
         }
         if rangeType.hasPrefix("HDR10PLUS") || rangeType.hasPrefix("HDR10+") {

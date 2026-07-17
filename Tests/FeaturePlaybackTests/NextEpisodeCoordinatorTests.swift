@@ -195,19 +195,44 @@ final class NextEpisodeCoordinatorTests: XCTestCase {
 
     // MARK: - first-frame gate
 
-    func testFirstFrameClearsImmediatelyWhenAlreadyPresenting() {
+    func testFirstFrameClearsWhenClockAdvancesWhilePlaying() async {
         let (sut, _, engine, _) = makeSUT()
         engine.preventsDisplaySleep = true
-        sut.beginAwaitingFirstFrame()
-        XCTAssertFalse(sut.awaitingFirstFrame, "an already-presenting engine never holds the spinner")
+        engine._currentTime = 100
+        sut.beginAwaitingFirstFrame(resumeClock: 100)
+        XCTAssertTrue(sut.awaitingFirstFrame, "holds until the rendered clock advances past the buffering baseline")
+        engine._currentTime = 100.5 // frames genuinely presenting → clock advances
+        await waitUntil { sut.awaitingFirstFrame == false }
+        XCTAssertFalse(sut.awaitingFirstFrame)
+    }
+
+    /// Regression: on the Plozzigen/custom-source path the engine reports
+    /// `state == .playing` (preventsDisplaySleep) the instant the play command is
+    /// issued, ~20s before a cold SMB/WebDAV source renders its first frame. The
+    /// rendered clock stays PINNED at the resume position while AVPlayer buffers,
+    /// so the spinner MUST stay up (not drop to a black screen) until the clock
+    /// actually advances.
+    func testFirstFrameHoldsWhilePlayingButClockPinned() async {
+        let (sut, _, engine, _) = makeSUT()
+        engine.preventsDisplaySleep = true    // engine claims "playing" immediately
+        engine._currentTime = 2117.70         // clock pinned at resume during cold buffering
+        sut.beginAwaitingFirstFrame(resumeClock: 2117.70)
+        XCTAssertTrue(sut.awaitingFirstFrame, "a playing-but-pinned clock keeps the spinner up rather than a black screen")
+        try? await Task.sleep(nanoseconds: 250_000_000) // simulate ongoing buffering
+        XCTAssertTrue(sut.awaitingFirstFrame, "still held while the clock stays pinned")
+        engine._currentTime = 2118.20         // first frame presents → clock advances
+        await waitUntil { sut.awaitingFirstFrame == false }
+        XCTAssertFalse(sut.awaitingFirstFrame)
     }
 
     func testFirstFrameHoldsThenClearsWhenPictureArrives() async {
         let (sut, _, engine, _) = makeSUT()
         engine.preventsDisplaySleep = false
-        sut.beginAwaitingFirstFrame()
+        engine._currentTime = 50
+        sut.beginAwaitingFirstFrame(resumeClock: 50)
         XCTAssertTrue(sut.awaitingFirstFrame, "the spinner holds until the picture is up")
         engine.preventsDisplaySleep = true // picture arrives
+        engine._currentTime = 51           // and the clock advances
         await waitUntil { sut.awaitingFirstFrame == false }
         XCTAssertFalse(sut.awaitingFirstFrame)
     }
@@ -215,7 +240,7 @@ final class NextEpisodeCoordinatorTests: XCTestCase {
     func testClearFirstFrameWaitStopsHolding() {
         let (sut, _, engine, _) = makeSUT()
         engine.preventsDisplaySleep = false
-        sut.beginAwaitingFirstFrame()
+        sut.beginAwaitingFirstFrame(resumeClock: 0)
         XCTAssertTrue(sut.awaitingFirstFrame)
         sut.clearFirstFrameWait()
         XCTAssertFalse(sut.awaitingFirstFrame)

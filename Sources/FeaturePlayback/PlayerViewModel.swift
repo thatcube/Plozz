@@ -59,7 +59,7 @@ public final class PlayerViewModel {
     /// so the viewer sees ONE continuous loading indicator from tap → first frame
     /// instead of a spinner that vanishes the instant `engine.load()` returns and
     /// then a black gap / second in-player spinner while the picture actually
-    /// Driven by ``NextEpisodeCoordinator/beginAwaitingFirstFrame()``.
+    /// Driven by ``NextEpisodeCoordinator/beginAwaitingFirstFrame(resumeClock:)``.
     public var awaitingFirstFrame: Bool { nextEpisodeCoordinator.awaitingFirstFrame }
 
     /// Whether the full-screen bring-up spinner should be shown: while resolving/
@@ -898,7 +898,7 @@ public final class PlayerViewModel {
         // frame, so `.loading` → `.ready` is one continuous indicator rather than
         // a spinner that vanishes here (before the picture is up) and then a black
         // gap / second in-player spinner while frames arrive.
-        nextEpisodeCoordinator.beginAwaitingFirstFrame()
+        nextEpisodeCoordinator.beginAwaitingFirstFrame(resumeClock: startPosition)
         // Publish diagnostics after the engine load attempt returns, so the
         // diagnostics sampler doesn't churn SwiftUI layout during Plozzigen init.
         diagnosticsToken = UUID()

@@ -322,33 +322,38 @@ actor ShareScanner {
             return .invalidated
         }
         if !anyListingFailed {
-            await store.preserveMovieAliasesBeforePrune(scanGeneration: scanGeneration)
+            // Clean full pass: prune vanished assets AND every orphan row they
+            // leave behind (enrichment/metadata_values/state, sidecar inventory +
+            // value cache, dead aliases/merges), regroup movies, recompute sidecar
+            // associations, and rematerialize local + filename projections — all in
+            // ONE atomic transaction. After commit no readable item can resurrect a
+            // deleted item's ids/artwork/metadata/state on path/series-key reuse.
+            let finalized = await store.finalizeCleanScan(
+                inScan: scanID,
+                scanGeneration: scanGeneration
+            )
             guard !isInvalidated else {
                 await finishScan(listers: pool)
                 return .invalidated
             }
-            await store.pruneNotSeen(inScan: scanID, scanGeneration: scanGeneration)
+            if !finalized {
+                // Superseded generation or a rolled-back SQLite failure: the clean
+                // transaction made NO change (no partial prune — invariant 9). Still
+                // refresh the pure path-derived filename/explicit ids so they stay
+                // current; orphan cleanup is deferred to the next clean pass.
+                await store.materializeFilenameProviderIDs(scanGeneration: scanGeneration)
+            }
+        } else {
+            // Partial walk: never prune/reconcile. Still refresh pure path-derived
+            // filename/folder explicit ids (already persisted on the asset row and
+            // independent of the deferred prune) into the same `metadata_values`
+            // priority projection NFO ids use.
             guard !isInvalidated else {
                 await finishScan(listers: pool)
                 return .invalidated
             }
-            await store.pruneSidecarsNotSeen(inScan: scanID, scanGeneration: scanGeneration)
-            guard !isInvalidated else {
-                await finishScan(listers: pool)
-                return .invalidated
-            }
-            await store.rebuildMovieGroups(scanGeneration: scanGeneration)
-            await store.reconcileSidecarAssociations(scanGeneration: scanGeneration)
+            await store.materializeFilenameProviderIDs(scanGeneration: scanGeneration)
         }
-        guard !isInvalidated else {
-            await finishScan(listers: pool)
-            return .invalidated
-        }
-        // Filename/folder explicit ids are pure path computation (already
-        // persisted on the asset row) — materialize them into the same
-        // `metadata_values` priority projection NFO ids use, every scan
-        // (clean or partial), since nothing here depends on the prune above.
-        await store.materializeFilenameProviderIDs(scanGeneration: scanGeneration)
         await store.setMeta(
             "last_full_scan_at",
             String(Date().timeIntervalSince1970),

@@ -25,6 +25,22 @@ actor ShareCatalogStore {
         case afterDerivedCatalogMutations
     }
 
+    /// Test-only injection points for the atomic clean-scan finalize. Forcing a
+    /// failure at each phase proves the whole transaction rolls back as a unit, so
+    /// a reopen observes either the complete old state or the complete corrected
+    /// state — never a partial prune, a stale local winner, a missing fallback, or
+    /// resurrectable orphan metadata. Never set in production.
+    enum CleanScanFailurePoint: Sendable, Equatable {
+        case afterAssetDelete
+        case afterMovieRegroup
+        case afterOrphanMetadataCleanup
+        case afterSidecarCleanup
+        case afterAliasCleanup
+        case afterAssociationRecompute
+        case afterWinnerRematerialize
+        case afterFilenameProjection
+    }
+
     private let url: URL
     private let enrichmentSaveFailurePoint: EnrichmentSaveFailurePoint?
     /// The actor-confined SQLite handle owner. Never escapes this actor and is only
@@ -72,6 +88,62 @@ actor ShareCatalogStore {
     private struct MovieGroupingPlan: Sendable {
         var assignments: [MovieGroupAssignment]
         var aliases: [MovieAlias]
+    }
+
+    /// Pure movie clustering: groups movie rows by normalized title, splits into
+    /// year-adjacency clusters, folds year-less rows in, and picks each cluster's
+    /// canonical group (an existing group if any, else the highest-year/movieKey
+    /// fallback). Returns only CHANGED assignments plus the full alias set. No
+    /// SQLite/actor state — shared verbatim by the async `rebuildMovieGroups` and
+    /// the synchronous in-transaction clean-scan regroup.
+    private static func movieGroupingPlan(rows: [MovieGroupingRow]) -> MovieGroupingPlan {
+        var assignments: [MovieGroupAssignment] = []
+        var aliases: [MovieAlias] = []
+        for titleRows in Dictionary(grouping: rows, by: \.titleKey).values {
+            let known = titleRows.filter { $0.year != nil }.sorted {
+                if $0.year != $1.year { return ($0.year ?? 0) < ($1.year ?? 0) }
+                return $0.relPath < $1.relPath
+            }
+            var clusters: [[MovieGroupingRow]] = []
+            for row in known {
+                if let last = clusters.indices.last,
+                   let firstYear = clusters[last].first?.year,
+                   let year = row.year,
+                   year - firstYear <= 1 {
+                    clusters[last].append(row)
+                } else {
+                    clusters.append([row])
+                }
+            }
+
+            let unknown = titleRows.filter { $0.year == nil }
+            if !unknown.isEmpty {
+                if clusters.count == 1 {
+                    clusters[0].append(contentsOf: unknown)
+                } else {
+                    clusters.append(unknown)
+                }
+            }
+
+            for cluster in clusters {
+                let existing = cluster.compactMap(\.existingGroup).sorted().first
+                let fallback = cluster.max {
+                    if $0.year != $1.year { return ($0.year ?? 0) < ($1.year ?? 0) }
+                    return $0.movieKey > $1.movieKey
+                }?.movieKey
+                guard let group = existing ?? fallback else { continue }
+                // Re-scans usually produce zero writes. Only changed/new group
+                // members enter the bounded SQLite update phase.
+                assignments.append(contentsOf: cluster.compactMap { row in
+                    row.existingGroup == group ? nil : MovieGroupAssignment(relPath: row.relPath, group: group)
+                })
+                for row in cluster {
+                    aliases.append(MovieAlias(id: row.movieKey, group: group))
+                    aliases.append(MovieAlias(id: ShareCatalogID.file(row.relPath), group: group))
+                }
+            }
+        }
+        return MovieGroupingPlan(assignments: assignments, aliases: aliases)
     }
 
     /// - Parameters:
@@ -255,53 +327,7 @@ actor ShareCatalogStore {
         // computing assignments.
         let computeStarted = Date()
         let plan: MovieGroupingPlan = await Task.detached(priority: .utility) {
-            var assignments: [MovieGroupAssignment] = []
-            var aliases: [MovieAlias] = []
-            for titleRows in Dictionary(grouping: rows, by: \.titleKey).values {
-                let known = titleRows.filter { $0.year != nil }.sorted {
-                    if $0.year != $1.year { return ($0.year ?? 0) < ($1.year ?? 0) }
-                    return $0.relPath < $1.relPath
-                }
-                var clusters: [[MovieGroupingRow]] = []
-                for row in known {
-                    if let last = clusters.indices.last,
-                       let firstYear = clusters[last].first?.year,
-                       let year = row.year,
-                       year - firstYear <= 1 {
-                        clusters[last].append(row)
-                    } else {
-                        clusters.append([row])
-                    }
-                }
-
-                let unknown = titleRows.filter { $0.year == nil }
-                if !unknown.isEmpty {
-                    if clusters.count == 1 {
-                        clusters[0].append(contentsOf: unknown)
-                    } else {
-                        clusters.append(unknown)
-                    }
-                }
-
-                for cluster in clusters {
-                    let existing = cluster.compactMap(\.existingGroup).sorted().first
-                    let fallback = cluster.max {
-                        if $0.year != $1.year { return ($0.year ?? 0) < ($1.year ?? 0) }
-                        return $0.movieKey > $1.movieKey
-                    }?.movieKey
-                    guard let group = existing ?? fallback else { continue }
-                    // Re-scans usually produce zero writes. Only changed/new group
-                    // members enter the bounded SQLite update phase.
-                    assignments.append(contentsOf: cluster.compactMap { row in
-                        row.existingGroup == group ? nil : MovieGroupAssignment(relPath: row.relPath, group: group)
-                    })
-                    for row in cluster {
-                        aliases.append(MovieAlias(id: row.movieKey, group: group))
-                        aliases.append(MovieAlias(id: ShareCatalogID.file(row.relPath), group: group))
-                    }
-                }
-            }
-            return MovieGroupingPlan(assignments: assignments, aliases: aliases)
+            Self.movieGroupingPlan(rows: rows)
         }.value
         guard admits(scanGeneration) else { return }
         let computeMs = Int(Date().timeIntervalSince(computeStarted) * 1_000)
@@ -594,6 +620,294 @@ actor ShareCatalogStore {
         for itemID in affectedItemIDs {
             _ = materializeCachedLocalMetadata(itemID: itemID)
         }
+    }
+
+    // MARK: - Atomic clean-scan finalization (Batch 5)
+
+    /// Finalize a CLEAN (no listing failure) full scan in ONE synchronous
+    /// `BEGIN IMMEDIATE` transaction. Replaces the former sequence of independent
+    /// single-statement/own-transaction passes (`preserveMovieAliasesBeforePrune`
+    /// → `pruneNotSeen` → `pruneSidecarsNotSeen` → `rebuildMovieGroups` →
+    /// `reconcileSidecarAssociations` → `materializeFilenameProviderIDs`). That
+    /// sequence deleted assets without ever removing the `enrichment`/
+    /// `metadata_values`/`metadata_enrichment_state` rows they left behind, so a
+    /// later reuse of the same path or series key resurrected stale ids/artwork/
+    /// completed state; it could also be interrupted between passes, leaving a
+    /// half-pruned catalog. Every phase here commits atomically: after `COMMIT`
+    /// every readable item already exposes the correct surviving local/filename/
+    /// external fallback, and no orphan row can resurface. Partial/cancelled scans
+    /// never call this. Transport-free and never yields the actor.
+    ///
+    /// `failurePoint` is test-only; forcing a failure after any phase must roll the
+    /// whole transaction back so a reopen sees the complete old or complete
+    /// corrected state, never a partial mutation.
+    func finalizeCleanScan(
+        inScan scanID: Int64,
+        scanGeneration: UUID? = nil,
+        failurePoint: CleanScanFailurePoint? = nil
+    ) -> Bool {
+        ensureOpen()
+        guard admits(scanGeneration), db != nil, normalizedMetadataReady else { return false }
+        guard exec("BEGIN IMMEDIATE;") else { return false }
+        func rollback() -> Bool { _ = exec("ROLLBACK;"); return false }
+
+        // P0 — Preserve a soon-to-be-removed movie version's aliases (captured from
+        // the pre-delete catalog) so its legacy file id still resolves to the
+        // surviving logical group.
+        guard preserveMovieAliasesInTransaction() else { return rollback() }
+
+        // P1 — Drop assets no longer present on the share.
+        guard deleteWhereStale(table: "assets", scanID: scanID),
+              failurePoint != .afterAssetDelete else { return rollback() }
+
+        // P2 — Recompute movie group keys on the surviving assets. Association
+        // resolution below reads the group representative, so this must precede it.
+        guard regroupMoviesInTransaction(),
+              failurePoint != .afterMovieRegroup else { return rollback() }
+
+        // P3 — Delete orphan enrichment/metadata rows for every item id whose
+        // backing asset just vanished (derived live ids via NOT EXISTS).
+        guard deleteOrphanMetadataInTransaction(),
+              failurePoint != .afterOrphanMetadataCleanup else { return rollback() }
+
+        // P4 — Delete vanished sidecar inventory and any value-cache row whose
+        // parent inventory row no longer exists (NOT EXISTS, never a bound IN list,
+        // so it holds above the SQLite variable limit). Capture the item ids whose
+        // sidecar is about to vanish FIRST: an item whose winning sidecar was
+        // deleted must be rematerialized from its surviving sidecars in P7 even
+        // when no surviving sidecar's association changed.
+        let orphanedSidecarItemIDs = staleSidecarAssociatedItemIDs(scanID: scanID)
+        guard deleteWhereStale(table: "local_metadata_files", scanID: scanID) else { return rollback() }
+        guard exec("""
+            DELETE FROM local_metadata_file_values
+            WHERE NOT EXISTS(
+              SELECT 1 FROM local_metadata_files f
+              WHERE f.rel_path = local_metadata_file_values.rel_path
+            );
+            """), failurePoint != .afterSidecarCleanup else { return rollback() }
+
+        // P5 — Clean only alias/reconciliation rows proven to have no live logical
+        // asset; aliases still backing a surviving version/group are preserved.
+        guard cleanDeadAliasesInTransaction(),
+              failurePoint != .afterAliasCleanup else { return rollback() }
+
+        // P6 — Recompute surviving sidecar associations from persisted assets.
+        let association = recomputeSidecarAssociationsInTransaction()
+        guard association.ok,
+              failurePoint != .afterAssociationRecompute else { return rollback() }
+
+        // P7 — Rematerialize local NFO winners for every affected item from the
+        // surviving persisted per-sidecar value cache. Union of items whose
+        // surviving association changed and items whose winning sidecar vanished.
+        for itemID in association.affectedItemIDs.union(orphanedSidecarItemIDs).sorted() {
+            guard materializeCachedLocalMetadataInTransaction(itemID: itemID) else { return rollback() }
+        }
+        guard failurePoint != .afterWinnerRematerialize else { return rollback() }
+
+        // P8 — Rematerialize the flat filename/explicit-id projection from the
+        // surviving assets (idempotent, whole-catalog).
+        guard repairFilenameProviderIDsInTransaction(),
+              failurePoint != .afterFilenameProjection else { return rollback() }
+
+        return exec("COMMIT;")
+    }
+
+    /// `DELETE FROM <table> WHERE last_scan <> scanID`, bound. `table` is a
+    /// compile-time literal at both call sites (no injection surface).
+    private func deleteWhereStale(table: String, scanID: Int64) -> Bool {
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "DELETE FROM \(table) WHERE last_scan <> ?;", -1, &stmt, nil) == SQLITE_OK else { return false }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_int64(stmt, 1, scanID)
+        return sqlite3_step(stmt) == SQLITE_DONE
+    }
+
+    /// The `associated_item_id`s of sidecars that this clean scan is about to prune
+    /// (their `last_scan` no longer matches). Captured before the P4 delete so P7
+    /// rematerializes each such item's winner from its surviving sidecars — the
+    /// item whose winning sidecar vanished must lose the deleted value even when no
+    /// surviving sidecar's association changed. Plain SELECT: no bound variable list.
+    private func staleSidecarAssociatedItemIDs(scanID: Int64) -> Set<String> {
+        var ids = Set<String>()
+        query("SELECT associated_item_id FROM local_metadata_files WHERE last_scan <> ? AND associated_item_id IS NOT NULL;",
+              bind: { sqlite3_bind_int64($0, 1, scanID) }) { stmt in
+            if let itemID = self.columnText(stmt, 0) { ids.insert(itemID) }
+        }
+        return ids
+    }
+
+    /// P0 helper: the two alias-capture INSERTs of `preserveMovieAliasesBeforePrune`
+    /// without their own transaction, so they join the clean-scan transaction.
+    private func preserveMovieAliasesInTransaction() -> Bool {
+        guard exec("""
+            INSERT INTO movie_alias(alias_id, group_key)
+            SELECT movie_key, COALESCE(movie_group_key, movie_key)
+            FROM assets
+            WHERE library='movies' AND kind='movie' AND movie_key IS NOT NULL
+            ON CONFLICT(alias_id) DO UPDATE SET group_key=excluded.group_key;
+            """) else { return false }
+        return exec("""
+            INSERT INTO movie_alias(alias_id, group_key)
+            SELECT 'f:' || rel_path, COALESCE(movie_group_key, movie_key)
+            FROM assets
+            WHERE library='movies' AND kind='movie' AND movie_key IS NOT NULL
+            ON CONFLICT(alias_id) DO UPDATE SET group_key=excluded.group_key;
+            """)
+    }
+
+    /// Synchronous, transaction-bound movie regroup: reads surviving movie rows,
+    /// runs the same pure clustering as the async `rebuildMovieGroups`, then applies
+    /// only changed group assignments plus the alias upserts inline (no nested
+    /// transaction, no off-actor hop, no yield — the clean-scan transaction owns the
+    /// serialization boundary). Behavior-identical result to `rebuildMovieGroups`
+    /// over the same surviving asset set.
+    private func regroupMoviesInTransaction() -> Bool {
+        var rows: [MovieGroupingRow] = []
+        query("""
+        SELECT rel_path, movie_key, movie_title_key, year, movie_group_key
+        FROM assets
+        WHERE library='movies' AND kind='movie'
+          AND movie_key IS NOT NULL AND movie_title_key IS NOT NULL;
+        """) { stmt in
+            guard let relPath = self.columnText(stmt, 0),
+                  let movieKey = self.columnText(stmt, 1),
+                  let titleKey = self.columnText(stmt, 2) else { return }
+            rows.append(MovieGroupingRow(
+                relPath: relPath, movieKey: movieKey, titleKey: titleKey,
+                year: self.columnOptInt(stmt, 3), existingGroup: self.columnText(stmt, 4)
+            ))
+        }
+        let plan = Self.movieGroupingPlan(rows: rows)
+        if !plan.aliases.isEmpty {
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, """
+            INSERT INTO movie_alias(alias_id, group_key) VALUES(?,?)
+            ON CONFLICT(alias_id) DO UPDATE SET group_key=excluded.group_key;
+            """, -1, &stmt, nil) == SQLITE_OK else { return false }
+            defer { sqlite3_finalize(stmt) }
+            for alias in plan.aliases {
+                sqlite3_reset(stmt)
+                bindText(stmt, 1, alias.id)
+                bindText(stmt, 2, alias.group)
+                guard sqlite3_step(stmt) == SQLITE_DONE else { return false }
+            }
+        }
+        if !plan.assignments.isEmpty {
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, "UPDATE assets SET movie_group_key=? WHERE rel_path=?;", -1, &stmt, nil) == SQLITE_OK else { return false }
+            defer { sqlite3_finalize(stmt) }
+            for assignment in plan.assignments {
+                sqlite3_reset(stmt)
+                bindText(stmt, 1, assignment.group)
+                bindText(stmt, 2, assignment.relPath)
+                guard sqlite3_step(stmt) == SQLITE_DONE else { return false }
+            }
+        }
+        return true
+    }
+
+    /// P3 helper: delete orphaned `enrichment`/`metadata_values`/
+    /// `metadata_enrichment_state` rows. The only persisted item-id shapes are
+    /// `f:<rel_path>` (movie representative / episode leaf) and `series:<key>`;
+    /// a row is orphaned when its backing asset no longer exists. Correlated
+    /// `NOT EXISTS` (index-friendly, no bound variable list).
+    private func deleteOrphanMetadataInTransaction() -> Bool {
+        for table in ["enrichment", "metadata_values", "metadata_enrichment_state"] {
+            let sql = """
+            DELETE FROM \(table) WHERE
+              (\(table).item_id LIKE 'f:%'
+               AND NOT EXISTS(SELECT 1 FROM assets a WHERE a.rel_path = substr(\(table).item_id, 3)))
+              OR (\(table).item_id LIKE 'series:%'
+               AND NOT EXISTS(SELECT 1 FROM assets a WHERE a.series_key = substr(\(table).item_id, 8)));
+            """
+            guard exec(sql) else { return false }
+        }
+        return true
+    }
+
+    /// P5 helper: drop movie aliases whose group key backs no surviving movie, and
+    /// series merges whose canonical AND alias keys both back no surviving series.
+    /// Aliases/merges still needed by a surviving version/group are preserved.
+    private func cleanDeadAliasesInTransaction() -> Bool {
+        guard exec("""
+            DELETE FROM movie_alias
+            WHERE group_key NOT IN (
+              SELECT COALESCE(movie_group_key, movie_key) FROM assets
+              WHERE library='movies' AND kind='movie' AND movie_key IS NOT NULL
+            );
+            """) else { return false }
+        return exec("""
+            DELETE FROM series_merge
+            WHERE canonical_key NOT IN (SELECT series_key FROM assets WHERE series_key IS NOT NULL)
+              AND alias_key NOT IN (SELECT series_key FROM assets WHERE series_key IS NOT NULL);
+            """)
+    }
+
+    /// P6 helper: the association recompute of `reconcileSidecarAssociations` with
+    /// no per-item materialize and no yield — it only updates `associated_item_id`/
+    /// `status` for every sidecar and returns the affected item ids so the caller
+    /// rematerializes their winners in the same transaction.
+    private func recomputeSidecarAssociationsInTransaction() -> (ok: Bool, affectedItemIDs: Set<String>) {
+        var files: [PendingLocalMetadataFile] = []
+        query("SELECT \(Self.pendingLocalMetadataFileColumns) FROM local_metadata_files ORDER BY rel_path;") { stmt in
+            if let file = self.materializePendingLocalMetadataFile(stmt) { files.append(file) }
+        }
+        var affected = Set<String>()
+        for file in files {
+            let facts = localMetadataAssociationFacts(for: file)
+            let desiredItemID = ShareLocalMetadataAssociationPolicy.itemID(
+                for: file.kind,
+                associatedVideoRelPath: file.associatedVideoRelPath,
+                facts: facts
+            )
+            let cache = sidecarValueCache(relPath: file.relPath)
+            guard let plan = ShareLocalMetadataAssociationPolicy.reassociationPlan(
+                priorItemID: file.processedItemID,
+                desiredItemID: desiredItemID,
+                priorStatus: file.status,
+                cacheIsEmpty: cache.isEmpty
+            ) else { continue }
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, """
+                UPDATE local_metadata_files
+                SET associated_item_id=?, status=?,
+                    processed_fingerprint=CASE WHEN ?=1 THEN NULL ELSE processed_fingerprint END
+                WHERE rel_path=?;
+                """, -1, &stmt, nil) == SQLITE_OK else { return (false, affected) }
+            bindOptText(stmt, 1, desiredItemID)
+            bindText(stmt, 2, plan.status)
+            sqlite3_bind_int64(stmt, 3, plan.clearProcessedFingerprint ? 1 : 0)
+            bindText(stmt, 4, file.relPath)
+            let stepped = sqlite3_step(stmt) == SQLITE_DONE
+            sqlite3_finalize(stmt)
+            guard stepped else { return (false, affected) }
+            for itemID in Set([file.processedItemID, desiredItemID].compactMap { $0 }) {
+                affected.insert(itemID)
+            }
+        }
+        return (true, affected)
+    }
+
+    /// Transaction-bound twin of `materializeCachedLocalMetadata` — assumes an
+    /// ambient transaction (no nested `BEGIN`), for use inside `finalizeCleanScan`.
+    @discardableResult
+    private func materializeCachedLocalMetadataInTransaction(itemID: String) -> Bool {
+        guard db != nil, normalizedMetadataReady else { return false }
+        let sidecars = candidateSidecars(forItemID: itemID)
+            .filter { $0.status == "parsed" }
+            .map { file in
+                ShareLocalMetadataSidecarValues(
+                    relPath: file.relPath,
+                    kind: file.kind,
+                    status: file.status,
+                    fingerprint: file.fingerprint,
+                    values: sidecarValueCache(relPath: file.relPath)
+                )
+            }
+        return replaceLocalNFOMetadataInTransaction(
+            itemID: itemID,
+            candidates: ShareLocalMetadataWinnerResolver.resolve(sidecars)
+        )
     }
 
     private func materializePendingLocalMetadataFile(_ stmt: OpaquePointer?) -> PendingLocalMetadataFile? {
@@ -1055,73 +1369,6 @@ actor ShareCatalogStore {
         _ = exec("UPDATE local_metadata_files SET local_attempts=0 WHERE status='pending';")
     }
 
-    /// Replace ONLY the local-sourced (`localNFO`/`filename`) `metadata_values`
-    /// rows for the fields this write touches, for ONE item — never external/
-    /// legacy rows, and never a local field NOT included here (so one sidecar's
-    /// write can't blank another sidecar's still-valid field). `sourceURL` is
-    /// always persisted `NULL` — the local-provenance-privacy invariant.
-    @discardableResult
-    func writeLocalMetadata(
-        itemID: String,
-        candidates: [ShareLocalMetadataFieldCandidate],
-        now: Date = Date()
-    ) -> Bool {
-        ensureOpen()
-        guard db != nil, normalizedMetadataReady else { return false }
-        guard exec("BEGIN IMMEDIATE;") else { return false }
-        var ok = true
-        let candidatesBySource = Dictionary(grouping: candidates, by: \.source)
-        for (source, sourceCandidates) in candidatesBySource where ok {
-            let fields = Array(Set(sourceCandidates.map(\.field.rawValue)))
-            let placeholders = Array(repeating: "?", count: fields.count).joined(separator: ",")
-            var del: OpaquePointer?
-            if sqlite3_prepare_v2(db, """
-                DELETE FROM metadata_values
-                WHERE item_id=? AND source=? AND field IN (\(placeholders));
-                """, -1, &del, nil) == SQLITE_OK {
-                bindText(del, 1, itemID)
-                bindText(del, 2, source.rawValue)
-                for (offset, field) in fields.enumerated() {
-                    bindText(del, Int32(offset + 3), field)
-                }
-                ok = sqlite3_step(del) == SQLITE_DONE
-            } else {
-                ok = false
-            }
-            sqlite3_finalize(del)
-        }
-        if ok, !candidates.isEmpty {
-            var stmt: OpaquePointer?
-            if sqlite3_prepare_v2(db, """
-                INSERT INTO metadata_values(
-                  item_id, field, source, value_json, source_url,
-                  source_revision, refreshed_at, expires_at
-                ) VALUES(?,?,?,?,NULL,?,?,NULL);
-                """, -1, &stmt, nil) == SQLITE_OK {
-                for candidate in candidates {
-                    sqlite3_reset(stmt)
-                    sqlite3_clear_bindings(stmt)
-                    bindText(stmt, 1, itemID)
-                    bindText(stmt, 2, candidate.field.rawValue)
-                    bindText(stmt, 3, candidate.source.rawValue)
-                    bindText(stmt, 4, candidate.valueJSON)
-                    bindOptText(stmt, 5, candidate.sourceRevision)
-                    sqlite3_bind_double(stmt, 6, now.timeIntervalSince1970)
-                    guard sqlite3_step(stmt) == SQLITE_DONE else { ok = false; break }
-                }
-            } else {
-                ok = false
-            }
-            sqlite3_finalize(stmt)
-        }
-        guard ok, exec("COMMIT;") else {
-            _ = exec("ROLLBACK;")
-            return false
-        }
-        if !candidates.isEmpty { hasAnyLocalMetadataCache = true }
-        return true
-    }
-
     private func replaceLocalNFOMetadata(
         itemID: String,
         candidates: [ShareLocalMetadataFieldCandidate],
@@ -1129,6 +1376,25 @@ actor ShareCatalogStore {
     ) -> Bool {
         guard db != nil, normalizedMetadataReady else { return false }
         guard exec("BEGIN IMMEDIATE;") else { return false }
+        guard replaceLocalNFOMetadataInTransaction(itemID: itemID, candidates: candidates, now: now),
+              exec("COMMIT;") else {
+            _ = exec("ROLLBACK;")
+            return false
+        }
+        return true
+    }
+
+    /// Transaction-bound core of `replaceLocalNFOMetadata` — assumes an ambient
+    /// transaction (no nested `BEGIN`/`COMMIT`), so the clean-scan transaction can
+    /// call it directly. Replaces the whole `localNFO` lane for one item. Returns
+    /// false without committing on any SQLite failure; the caller owns rollback.
+    @discardableResult
+    private func replaceLocalNFOMetadataInTransaction(
+        itemID: String,
+        candidates: [ShareLocalMetadataFieldCandidate],
+        now: Date = Date()
+    ) -> Bool {
+        guard db != nil, normalizedMetadataReady else { return false }
         var ok = true
         var del: OpaquePointer?
         if sqlite3_prepare_v2(
@@ -1170,10 +1436,7 @@ actor ShareCatalogStore {
             }
             sqlite3_finalize(stmt)
         }
-        guard ok, exec("COMMIT;") else {
-            _ = exec("ROLLBACK;")
-            return false
-        }
+        guard ok else { return false }
         hasAnyLocalMetadataCache = nil
         return true
     }
@@ -1307,6 +1570,21 @@ actor ShareCatalogStore {
 
     private func repairFilenameProviderIDs() {
         guard db != nil, normalizedMetadataReady else { return }
+        guard exec("BEGIN IMMEDIATE;") else { return }
+        guard repairFilenameProviderIDsInTransaction(), exec("COMMIT;") else {
+            _ = exec("ROLLBACK;")
+            return
+        }
+    }
+
+    /// Transaction-bound core of `repairFilenameProviderIDs` — computes the flat
+    /// filename/explicit-id projection from the surviving assets and rewrites the
+    /// `source='filename'` lane, assuming an ambient transaction (no nested
+    /// `BEGIN`/`COMMIT`). Whole-catalog and idempotent. Returns false without
+    /// committing on any SQLite failure; the caller owns rollback.
+    @discardableResult
+    private func repairFilenameProviderIDsInTransaction() -> Bool {
+        guard db != nil, normalizedMetadataReady else { return false }
         var materialized: [String: [String: String]] = [:]
         // Movies: the explicit ids of the GROUP's representative file (or, when
         // absent there, the first member in deterministic path order) apply to
@@ -1354,7 +1632,6 @@ actor ShareCatalogStore {
             materialized[ShareCatalogID.series(seriesKey)] = ids
         }
 
-        guard exec("BEGIN IMMEDIATE;") else { return }
         var ok = exec("DELETE FROM metadata_values WHERE source='filename';")
         var stmt: OpaquePointer?
         if ok {
@@ -1389,11 +1666,9 @@ actor ShareCatalogStore {
             }
         }
         sqlite3_finalize(stmt)
-        guard ok, exec("COMMIT;") else {
-            _ = exec("ROLLBACK;")
-            return
-        }
+        guard ok else { return false }
         hasAnyLocalMetadataCache = nil
+        return true
     }
 
     // MARK: - Enrichment (scan-time metadata resolution, persisted)
@@ -1530,8 +1805,9 @@ actor ShareCatalogStore {
             // Scoped to non-local sources ONLY: an external (re-)save must never
             // clobber a `localNFO`/`filename` candidate a separate, independently
             // versioned local worker wrote (see the local-vs-external write
-            // isolation invariant — Step 3). Local writes have their own
-            // `writeLocalMetadata`, which is scoped the mirror-opposite way.
+            // isolation invariant — Step 3). Local writes go through
+            // `replaceLocalNFOMetadata`/`repairFilenameProviderIDs`, each scoped
+            // to its own source the mirror-opposite way.
             guard sqlite3_prepare_v2(
                 db,
                 "DELETE FROM metadata_values WHERE item_id=? AND source NOT IN ('localNFO','filename');",

@@ -29,6 +29,17 @@ cd "$(dirname "$0")/.."
 
 export GIT_CONFIG_PARAMETERS="${GIT_CONFIG_PARAMETERS-'safe.bareRepository=all'}"
 
+# Architecture layering guard — always gate the inner loop (even on docs-only /
+# --dry-run selections), then tell the delegated run-tests.sh to skip its own
+# copy so the guard runs exactly once per invocation. See tools/arch-guard.py.
+if [[ "${PLOZZ_SKIP_ARCH_GUARD:-0}" != "1" ]]; then
+  python3 "$(dirname "$0")/arch-guard.py" || {
+    echo "test-fast: architecture layering guard FAILED — fix the module graph first."
+    exit 1
+  }
+  export PLOZZ_SKIP_ARCH_GUARD=1
+fi
+
 IMPACT="tools/test-impact.py"
 
 # --- Parse args ---------------------------------------------------------------

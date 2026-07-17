@@ -25,6 +25,12 @@ jobs:
       - name: Select Xcode
         run: sudo xcode-select -s /Applications/Xcode_26.2.app
 
+      # Fail fast on any module-layering violation before the (slow) project
+      # generation + simulator build. Data-driven from `swift package
+      # dump-package`; see tools/arch-guard.py for the enforced rules.
+      - name: Architecture layering guard
+        run: python3 tools/arch-guard.py
+
       - name: Install XcodeGen
         run: brew install xcodegen
 

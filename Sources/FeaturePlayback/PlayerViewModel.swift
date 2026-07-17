@@ -1837,12 +1837,11 @@ public final class PlayerViewModel {
     }
 
     private func knownPlaybackDuration() -> TimeInterval? {
-        let candidates = [
-            engine.duration,
-            controls.duration,
-            request?.item.runtime ?? 0
-        ]
-        return candidates.first { $0.isFinite && $0 > 0 }
+        WatchProgressMath.knownDuration(
+            engineDuration: engine.duration,
+            controlsDuration: controls.duration,
+            itemRuntime: request?.item.runtime
+        )
     }
 
     /// Watched percentage (0...100) from the engine's current position over the
@@ -1857,13 +1856,11 @@ public final class PlayerViewModel {
     /// item runtime. `0` when neither is known. Used at `stop()` so the percentage
     /// is computed from the captured final position (the engine is torn down there).
     private func watchedPercent(at position: TimeInterval) -> Double {
-        guard position.isFinite, position >= 0 else { return 0 }
-        let engineDuration = engine.duration
-        let duration = (engineDuration.isFinite && engineDuration > 0)
-            ? engineDuration
-            : request?.item.runtime
-        guard let duration, duration > 0 else { return 0 }
-        return min(max(position / duration * 100, 0), 100)
+        WatchProgressMath.watchedPercent(
+            position: position,
+            engineDuration: engine.duration,
+            itemRuntime: request?.item.runtime
+        )
     }
 
     // MARK: - Convergence checkpoints

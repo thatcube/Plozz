@@ -26,11 +26,21 @@ public enum ArtworkSession {
         public let diskCapacityBytes: Int
     }
 
-    private static let byteCache = URLCache(
-        memoryCapacity: memoryCapacityBytes,
-        diskCapacity: diskCapacityBytes,
-        diskPath: "plozz-artwork"
-    )
+    private static let byteCache: URLCache = {
+        // A bounded, dedicated on-disk *byte* cache in its own subdirectory of the
+        // app caches. The deprecated `diskPath:` initializer is replaced by the
+        // supported `directory:` initializer; the capacities, dedicated directory,
+        // and cache policy are unchanged.
+        let directory = FileManager.default
+            .urls(for: .cachesDirectory, in: .userDomainMask)
+            .first?
+            .appendingPathComponent("plozz-artwork", isDirectory: true)
+        return URLCache(
+            memoryCapacity: memoryCapacityBytes,
+            diskCapacity: diskCapacityBytes,
+            directory: directory
+        )
+    }()
 
     public static let shared: URLSession = {
         let config = URLSessionConfiguration.default

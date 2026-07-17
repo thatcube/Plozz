@@ -2440,47 +2440,30 @@ public final class PlayerViewModel {
         let audio = engine.audioTracks.map { track in
             track.enriched(withProvider: providerAudio.first { $0.id == track.id })
         }
-        // The "selected audio" indicator must reflect the track the engine is
-        // *actually* decoding, not a re-derived default-flag guess (those can
-        // disagree: e.g. a dual-audio anime whose container defaults to Japanese
-        // while the engine starts the English track per the viewer's audio-language
-        // preference — the menu was highlighting Japanese while English played).
-        // Priority: an in-flight pick (optimistic) → the engine's resolved active
-        // track (ground truth) → the default-flag heuristic only before either is
-        // known.
-        if let pending = pendingAudioTrackID, audio.contains(where: { $0.id == pending }) {
-            selectedAudioTrackID = pending
-            if engine.currentAudioTrackID == pending { pendingAudioTrackID = nil }
-        } else if let active = engine.currentAudioTrackID,
-                  audio.contains(where: { $0.id == active }) {
-            selectedAudioTrackID = active
-            pendingAudioTrackID = nil
-        } else if selectedAudioTrackID == nil {
-            selectedAudioTrackID = audio.first(where: { $0.isDefault })?.id ?? audio.first?.id
-        }
+        // Resolve which audio row shows as selected: an in-flight pick
+        // (optimistic) → the engine's resolved active track (ground truth) → the
+        // default-flag heuristic only before either is known. See
+        // `TrackMenuBuilder.resolveSelectedAudioTrackID`.
+        let audioResolution = TrackMenuBuilder.resolveSelectedAudioTrackID(
+            current: selectedAudioTrackID,
+            pending: pendingAudioTrackID,
+            engineActive: engine.currentAudioTrackID,
+            tracks: audio
+        )
+        selectedAudioTrackID = audioResolution.selected
+        if audioResolution.clearPending { pendingAudioTrackID = nil }
+
         // Preferred languages, highest priority first: the viewer's explicit
         // choice (or device language) leads, the device language backs it up.
         let preferred: [String?] = [
             behavior.resolvedPreferredLanguage,
             LanguageMatch.deviceLanguageCode
         ]
-        controls.audioOptions = audio
-            .sortedByPreferredLanguage(preferred)
-            .map { track in
-                PlayerTrackOption(
-                    id: track.id,
-                    title: TrackLabeling.audioLabel(
-                        displayTitle: track.displayTitle,
-                        language: track.language,
-                        codec: track.codec,
-                        channels: track.channels,
-                        isAtmos: track.isAtmos,
-                        isCommentary: track.isCommentary,
-                        trackID: track.id
-                    ),
-                    isSelected: track.id == selectedAudioTrackID
-                )
-            }
+        controls.audioOptions = TrackMenuBuilder.audioOptions(
+            tracks: audio,
+            selectedID: selectedAudioTrackID,
+            preferred: preferred
+        )
 
         let subtitles = engine.subtitleTracks.map { track in
             track.enriched(withProvider: providerSubs.first { $0.id == track.id })
@@ -2496,51 +2479,25 @@ public final class PlayerViewModel {
             "Track labels: \(subtitles.count) subs, \(unresolved) still no language; provider probe had \(providerSubs.count) subs (\(providerWithLang) with a language)"
         )
         #endif
-        if subtitles.isEmpty {
-            controls.subtitleOptions = []
-        } else {
-            // "Off" stays pinned first; real tracks sort preferred-language-first.
-            var options = [PlayerTrackOption(id: PlayerTrackOption.offID, title: "Off", isSelected: selectedSubtitleTrackID == nil)]
-            options.append(contentsOf: subtitles.sortedByPreferredLanguage(preferred).map { track in
-                PlayerTrackOption(
-                    id: track.id,
-                    title: TrackLabeling.subtitleLabel(
-                        displayTitle: track.displayTitle,
-                        language: track.language,
-                        codec: track.codec,
-                        isForced: track.isForced,
-                        isImageBased: track.isImageBasedSubtitle,
-                        isHearingImpaired: track.isHearingImpaired,
-                        isCommentary: track.isCommentary,
-                        detectedLanguage: detectedSubtitleLanguages[track.id],
-                        trackID: track.id
-                    ),
-                    isSelected: track.id == selectedSubtitleTrackID,
-                    isExternal: track.isExternal
-                )
-            })
-            controls.subtitleOptions = options
-        }
+        controls.subtitleOptions = TrackMenuBuilder.subtitleOptions(
+            tracks: subtitles,
+            selectedID: selectedSubtitleTrackID,
+            preferred: preferred,
+            detectedLanguages: detectedSubtitleLanguages
+        )
 
-        // Dual/second-line picker: any text track resolved to a sidecar the
-        // overlay can parse (embedded text falls back to the provider's VTT URL),
-        // excluding the primary. If the current secondary is no longer eligible
+        // Dual/second-line picker. If the current secondary is no longer eligible
         // (e.g. it just became the primary, or the media changed), reconcile by
         // dropping it — clearing both its cues and its styling.
         let secondaryEligible = eligibleSecondarySubtitleTracks()
         // Distinguish an empty dual picker caused by a bitmap PRIMARY (dual is
-        // disallowed — a PGS/DVD line can't be positioned) from one that's empty
-        // because the media simply has no other text track, so the row can explain
-        // the former ("Unavailable with PGS subtitles") rather than "None available".
-        if let primaryID = selectedSubtitleTrackID,
-           let primary = engine.subtitleTracks.first(where: { $0.id == primaryID })
-            ?? providerSubs.first(where: { $0.id == primaryID }),
-           primary.isBitmapSubtitle {
-            controls.secondarySubtitleImagePrimaryFormat =
-                TrackLabeling.subtitleFormatHint(codec: primary.codec, isImageBased: true) ?? "Image"
-        } else {
-            controls.secondarySubtitleImagePrimaryFormat = nil
-        }
+        // disallowed) from one empty because the media has no other text track, so
+        // the row can explain the former ("Unavailable with PGS subtitles").
+        controls.secondarySubtitleImagePrimaryFormat = TrackMenuBuilder.imagePrimaryFormat(
+            selectedPrimaryID: selectedSubtitleTrackID,
+            engineTracks: engine.subtitleTracks,
+            providerTracks: providerSubs
+        )
         if let sec = selectedSecondarySubtitleTrackID,
            !secondaryEligible.contains(where: { $0.id == sec }) {
             selectedSecondarySubtitleTrackID = nil
@@ -2557,29 +2514,12 @@ public final class PlayerViewModel {
                 applySubtitleStyle(cleared)
             }
         }
-        if secondaryEligible.isEmpty {
-            controls.secondarySubtitleOptions = []
-        } else {
-            var secOptions = [PlayerTrackOption(id: PlayerTrackOption.offID, title: "Off", isSelected: selectedSecondarySubtitleTrackID == nil)]
-            secOptions.append(contentsOf: secondaryEligible.sortedByPreferredLanguage(preferred).map { track in
-                PlayerTrackOption(
-                    id: track.id,
-                    title: TrackLabeling.subtitleLabel(
-                        displayTitle: track.displayTitle,
-                        language: track.language,
-                        codec: track.codec,
-                        isForced: track.isForced,
-                        isImageBased: track.isImageBasedSubtitle,
-                        isHearingImpaired: track.isHearingImpaired,
-                        isCommentary: track.isCommentary,
-                        detectedLanguage: detectedSubtitleLanguages[track.id],
-                        trackID: track.id
-                    ),
-                    isSelected: track.id == selectedSecondarySubtitleTrackID
-                )
-            })
-            controls.secondarySubtitleOptions = secOptions
-        }
+        controls.secondarySubtitleOptions = TrackMenuBuilder.secondaryOptions(
+            eligible: secondaryEligible,
+            selectedID: selectedSecondarySubtitleTrackID,
+            preferred: preferred,
+            detectedLanguages: detectedSubtitleLanguages
+        )
     }
 
     /// Selects an audio track from the menu, routed through the engine.
@@ -2957,51 +2897,12 @@ public final class PlayerViewModel {
     /// the overlay can't know where the primary bitmap will land to place a line
     /// clear of it.
     private func eligibleSecondarySubtitleTracks() -> [MediaTrack] {
-        // Dual mode needs a positionable primary to stack a second line against; a
-        // bitmap primary (PGS/DVD/DVB) has an uncontrollable authored position, so
-        // offer no seconds at all — the picker reads "None available".
-        if let primaryID = selectedSubtitleTrackID,
-           let primary = engine.subtitleTracks.first(where: { $0.id == primaryID })
-            ?? request?.subtitleTracks.first(where: { $0.id == primaryID }),
-           primary.isBitmapSubtitle {
-            #if DEBUG
-            PlozzLog.playback.debug("Secondary disabled: primary subtitle is bitmap (\(primary.codec ?? "?"))")
-            #endif
-            return []
-        }
-        // Engines that decode a second subtitle stream themselves (Plozzigen)
-        // source the dual picker from the ENGINE's own tracks (FFmpeg AVStream
-        // ids), so embedded tracks with no fetchable sidecar URL are selectable —
-        // the engine demuxes them. Include every subtitle track except the current
-        // primary (the viewer asked to be able to pick "all of them") and any
-        // bitmap track (can't be positioned as a second line); the exclude keys off
-        // the same engine id-space as `selectedSubtitleTrackID`.
-        if engine.capabilities.contains(.dualSubtitleDecode) {
-            let engineSubs = engine.subtitleTracks
-            let eligible = engineSubs.filter { $0.id != selectedSubtitleTrackID && !$0.isBitmapSubtitle }
-            #if DEBUG
-            PlozzLog.playback.debug(
-                "Secondary eligible (engine-dual): \(eligible.count) of \(engineSubs.count) engine subs (primary id \(self.selectedSubtitleTrackID.map(String.init) ?? "off"))"
-            )
-            #endif
-            return eligible
-        }
-        // Sidecar path (native): the second line renders through Plozz's overlay
-        // from a parsed VTT, so only text tracks with a fetchable URL, excluding the
-        // primary, qualify. (`isBitmapSubtitle` is redundant with the text-URL
-        // requirement here but kept for symmetry / defence in depth.)
-        let providerSubs = request?.subtitleTracks ?? []
-        let eligible = providerSubs.filter {
-            !$0.isBitmapSubtitle
-                && $0.deliverySource != nil
-                && $0.id != selectedSubtitleTrackID
-        }
-        #if DEBUG
-        PlozzLog.playback.debug(
-            "Secondary eligible: \(eligible.count) of \(providerSubs.count) provider subs (primary id \(self.selectedSubtitleTrackID.map(String.init) ?? "off"))"
+        TrackMenuBuilder.eligibleSecondaryTracks(
+            selectedPrimaryID: selectedSubtitleTrackID,
+            engineTracks: engine.subtitleTracks,
+            providerTracks: request?.subtitleTracks ?? [],
+            engineSupportsDualDecode: engine.capabilities.contains(.dualSubtitleDecode)
         )
-        #endif
-        return eligible
     }
 
     /// Selects the second (dual) subtitle track, or turns the second line off

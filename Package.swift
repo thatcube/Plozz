@@ -68,16 +68,11 @@ let package = Package(
         // decodes cleanly (#92), software-path seek holds last frame (#90). See
         // AGENTS.local.md › "Playback engine (AetherEngine / Plozzigen)".
         //
-        // Pinned to AetherEngine 5.3.1 + Plozz's re-applied local patches + the
-        // bounded stalled-seek / sparse-cache fix and opt-in Atmos detection.
-        // Lineage (verified in the fork
-        // history): upstream 5.3.1 → `07814d8` applies bounded seek/sparse-cache
-        // recovery and the reviewed late-landing/transport/subtitle hardening →
-        // `126f020` exposes `stop(resetDisplayCriteria:)` for same-range episode
-        // handoff → `a7355b8` adds a strictly opt-in,
-        // bounded one-frame E-AC-3 JOC probe used only by delayed detail-page
-        // enrichment. Default probe/playback paths remain unchanged. The base
-        // changes are also proposed upstream as PRs #129 and #128.
+        // Pinned to the tested Plozz fork revision based on upstream AetherEngine
+        // 5.4.1. PRs #128 and #129 are included upstream; they are not local or
+        // re-applied patches. Fork branch `plozz-on-5.4.1` adds only Plozz's
+        // strictly opt-in, bounded one-frame E-AC-3 JOC probe used by delayed
+        // detail-page enrichment. Default probe/playback paths remain unchanged.
         //
         // SMB enters AetherEngine only through Plozz's protocol-neutral custom-source
         // bridge; the engine's legacy SMB URL product is not linked. PR #94's
@@ -85,7 +80,7 @@ let package = Package(
         // muxer needs a PARSED audio packet to build the AC-3/E-AC-3/TrueHD sample
         // entry, else a mid-file backward seek wedged the muxer. See
         // docs/media-share-proposal.md § 5.1.
-        .package(url: "https://github.com/thatcube/AetherEngine", revision: "a7355b87dd8141a3dc585e25bf5978f17f0dab63"),
+        .package(url: "https://github.com/thatcube/AetherEngine", revision: "7af1a6be5e67197fa9a754f62280ba139f97288c"),
         // NOTE: FFmpegBuild (FFmpeg n8.1.x decode-only) and LibDovi (Dolby Vision
         // RPU parser) are pulled in TRANSITIVELY by AetherEngine — its own manifest
         // declares and consumes them. Plozz used to declare them directly only for

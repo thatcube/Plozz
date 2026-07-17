@@ -112,14 +112,20 @@ actor ShareEnricher {
     /// closes only when the backlog drains or the slice is interrupted.
     func enrichPendingSlice(
         maxItems: Int,
-        maxDuration: Duration
+        maxDuration: Duration,
+        beforeResolve: (@Sendable (String) async -> Bool)? = nil
     ) async -> ShareEnrichmentSliceResult {
-        await runSlice(maxItems: maxItems, maxDuration: maxDuration)
+        await runSlice(
+            maxItems: maxItems,
+            maxDuration: maxDuration,
+            beforeResolve: beforeResolve
+        )
     }
 
     private func runSlice(
         maxItems: Int,
-        maxDuration: Duration?
+        maxDuration: Duration?,
+        beforeResolve: (@Sendable (String) async -> Bool)? = nil
     ) async -> ShareEnrichmentSliceResult {
         if isRunning {
             return ShareEnrichmentSliceResult(attempted: 0, hasMore: true)
@@ -163,9 +169,14 @@ actor ShareEnricher {
         let started = clock.now
         var processed = 0
         var attempted = 0
+        var deferred = 0
         var writeFailures = 0
         for pending in snapshot {
             if Task.isCancelled { break }
+            if let beforeResolve, !(await beforeResolve(pending.itemID)) {
+                deferred += 1
+                continue
+            }
             let request = await request(for: pending)
             let record = await resolver.resolve(request)
             if Task.isCancelled { break }
@@ -192,12 +203,15 @@ actor ShareEnricher {
 
         let madeDurableProgress = processed > 0
         let hasMore = Task.isCancelled
+            || deferred > 0
             || writeFailures > 0
             || (
                 madeDurableProgress
                 && (attempted < snapshot.count || snapshot.count == limit)
             )
-        let retryAfter: Duration? = if writeFailures == 0 {
+        let retryAfter: Duration? = if deferred > 0 {
+            .seconds(5)
+        } else if writeFailures == 0 {
             nil
         } else if madeDurableProgress {
             .seconds(5)
@@ -276,10 +290,16 @@ actor ShareEnricher {
             alternates = await store.seriesSearchTitleAlternates(seriesKey: key, storedTitle: pending.title)
             knownTVDBID = await store.seriesEmbeddedTVDBID(seriesKey: key)
         }
+        // Already-persisted local (NFO/filename) ids let a provider that supports
+        // exact-id resolution skip fuzzy title search (see
+        // `ShareEnrichRequest.knownProviderIDs`) — never reorders existing
+        // sources, only seeds them.
+        let knownProviderIDs = await store.localProviderIDs(forItemID: pending.itemID)
         return ShareEnrichRequest(
             itemID: pending.itemID, title: pending.title, year: pending.year,
             isMovie: pending.isMovie, isAnime: pending.isAnime, episodeHints: hints,
-            titleAlternates: alternates, knownTVDBID: knownTVDBID
+            titleAlternates: alternates, knownTVDBID: knownTVDBID,
+            knownProviderIDs: knownProviderIDs
         )
     }
 }

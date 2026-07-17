@@ -26,6 +26,7 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
     private var scannerIDs: [String: UUID] = [:]
     private var scannerRevisions: [String: CredentialRevision] = [:]
     private var enrichers: [String: ShareEnricher] = [:]
+    private var localEnrichers: [String: ShareLocalMetadataEnricher] = [:]
     private var pacers: [String: ShareScanPacer] = [:]
     private var scanTasks: [String: [UUID: Task<Void, Never>]] = [:]
     private var drainingScanTasks: [String: [UUID: Task<Void, Never>]] = [:]
@@ -112,6 +113,11 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
 
             if let activeRevision = scannerRevisions[accountKey],
                activeRevision != credentialRevision {
+                let staleLocalEnricher = localEnrichers.removeValue(forKey: accountKey)
+                enrichers[accountKey] = nil
+                await metadataScheduler.remove(accountKey: accountKey)
+                await staleLocalEnricher?.close()
+                await store.resetPendingLocalMetadataAttempts()
                 await invalidateScanner(
                     accountKey: accountKey,
                     store: store,
@@ -164,29 +170,74 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
                     reporter: reporter
                 )
                 enrichers[accountKey] = enricher
+                // A dedicated `.metadata` transport session — separate from the
+                // scanner's own pooled connections and from live browsing — reads
+                // NFO sidecars. Owned alongside `enricher`; never touched from a
+                // Home/grid/detail read (only scheduler slices + the urgent path).
+                let localEnricher = ShareLocalMetadataEnricher(
+                    store: store,
+                    sessionFactory: sessionFactory
+                )
+                localEnrichers[accountKey] = localEnricher
                 let arbiter = arbiter(for: accountKey)
                 await metadataScheduler.register(
                     accountKey: accountKey,
                     mayRun: { await arbiter.permitsBackgroundWork() },
                     runSlice: { maxItems, maxDuration in
                         ShareBackgroundActivity.enrichStarted()
-                        BrowseDiagnostics.event("enrich-slice+ \(accountKey)")
-                        let result = await enricher.enrichPendingSlice(
+                        defer { ShareBackgroundActivity.enrichFinished() }
+                        // Local work FIRST, then whatever slice budget remains for
+                        // the existing external pass — the minimum ordering needed
+                        // so explicit ids/local fields prevent an unnecessary fuzzy
+                        // external lookup, without reordering external providers.
+                        let clock = ContinuousClock()
+                        let sliceStart = clock.now
+                        BrowseDiagnostics.event("local-slice+ \(accountKey)")
+                        let localResult = await localEnricher.resolvePendingSlice(
                             maxItems: maxItems,
                             maxDuration: maxDuration
                         )
                         BrowseDiagnostics.event(
+                            "local-slice- \(accountKey) attempted=\(localResult.attempted) more=\(localResult.hasMore)"
+                        )
+                        let elapsed = sliceStart.duration(to: clock.now)
+                        let remaining = maxDuration > elapsed ? maxDuration - elapsed : .zero
+                        guard remaining > .zero else {
+                            return ShareEnrichmentSliceResult(attempted: localResult.attempted, hasMore: true)
+                        }
+                        BrowseDiagnostics.event("enrich-slice+ \(accountKey)")
+                        let result = await enricher.enrichPendingSlice(
+                            maxItems: maxItems,
+                            maxDuration: remaining,
+                            beforeResolve: { itemID in
+                                await localEnricher.resolveOne(itemID: itemID)
+                                    != .transientFailure
+                            }
+                        )
+                        BrowseDiagnostics.event(
                             "enrich-slice- \(accountKey) attempted=\(result.attempted) more=\(result.hasMore)"
                         )
-                        ShareBackgroundActivity.enrichFinished()
-                        return result
+                        return ShareEnrichmentSliceResult(
+                            attempted: localResult.attempted + result.attempted,
+                            hasMore: localResult.hasMore || result.hasMore,
+                            retryAfter: result.retryAfter
+                        )
                     },
                     runItem: { itemID in
                         ShareBackgroundActivity.enrichStarted()
+                        defer { ShareBackgroundActivity.enrichFinished() }
+                        // Promote the item's own pending/changed local NFO first and
+                        // await its bounded outcome — so freshly-persisted local ids
+                        // are visible to the external request below (and a provider
+                        // with exact-id support can skip fuzzy title search) —
+                        // before ever falling through to the external fast-track.
+                        BrowseDiagnostics.event("local-item+ \(accountKey)")
+                        let localOutcome = await localEnricher.resolveOne(itemID: itemID)
+                        BrowseDiagnostics.event("local-item- \(accountKey)")
+                        guard localOutcome != .transientFailure else { return }
                         BrowseDiagnostics.event("enrich-item+ \(accountKey)")
                         await enricher.enrichOne(itemID: itemID)
                         BrowseDiagnostics.event("enrich-item- \(accountKey)")
-                        ShareBackgroundActivity.enrichFinished()
                     },
                     pausePass: {
                         await enricher.pauseScheduledPass()
@@ -457,8 +508,10 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
             }
             stores[accountKey] = nil
             enrichers[accountKey] = nil
+            let removedLocalEnricher = localEnrichers.removeValue(forKey: accountKey)
             pacers[accountKey] = nil
             await metadataScheduler.remove(accountKey: accountKey)
+            await removedLocalEnricher?.close()
             reporter.shareRemoved(accountKey)
         }
         restartingScans.remove(accountKey)

@@ -334,6 +334,43 @@ final class ShareScannerTests: XCTestCase {
         XCTAssertEqual(movies.first?.productionYear, 2010)
     }
 
+    /// The scanner's BFS discovers every supported NFO sidecar NAME in the same
+    /// listing pass as the videos beside them (movie-stem, `tvshow.nfo`,
+    /// episode-stem) — pure filename/sibling-stem facts. `ScanLister` only ever
+    /// exposes `list`/`close` (no read capability at all), so this discovery is
+    /// STRUCTURALLY listing-only: the BFS cannot call `readSmallFile`/parse XML
+    /// even in principle.
+    func testScanDiscoversNFOSidecarsWithoutReading() async {
+        let store = ShareCatalogStore(accountKey: "nfo", directory: tempDir())
+        var tree = standardTree()
+        tree["Movies"]?.append(file("Inception (2010).nfo"))
+        tree["TV Shows/Breaking Bad"]?.append(file("tvshow.nfo"))
+        tree["TV Shows/Breaking Bad/Season 01"]?.append(file("Breaking Bad - S01E01 - Pilot.nfo"))
+        let fake = FakeShare(tree)
+        let scanner = makeScanner(store: store, fake: fake)
+        await scanner.scan()
+
+        let pending = await store.pendingLocalMetadataFiles(limit: 10)
+        let kinds = Set(pending.map(\.kind.rawValue))
+        XCTAssertTrue(kinds.contains(LocalSidecarKind.movieStem.rawValue), "Inception (2010).nfo should match the movie's exact stem")
+        XCTAssertTrue(kinds.contains(LocalSidecarKind.series.rawValue), "tvshow.nfo should be discovered in the show folder")
+        XCTAssertTrue(kinds.contains(LocalSidecarKind.episodeStem.rawValue), "the episode-stem nfo should be discovered")
+    }
+
+    /// An unmatched, unsupported `.nfo` (no sibling stem, not `movie.nfo`/
+    /// `tvshow.nfo`) is simply ignored rather than inventoried.
+    func testUnsupportedNFONameIsIgnored() async {
+        let store = ShareCatalogStore(accountKey: "nfo-ignore", directory: tempDir())
+        var tree = standardTree()
+        tree["Movies"]?.append(file("random-notes.nfo"))
+        let fake = FakeShare(tree)
+        let scanner = makeScanner(store: store, fake: fake)
+        await scanner.scan()
+
+        let pending = await store.pendingLocalMetadataFiles(limit: 10)
+        XCTAssertFalse(pending.contains { $0.relPath == "Movies/random-notes.nfo" })
+    }
+
     func testEpisodesGroupUnderSeriesInOrder() async {
         let store = ShareCatalogStore(accountKey: "a", directory: tempDir())
         let fake = FakeShare(standardTree())

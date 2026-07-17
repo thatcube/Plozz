@@ -32,6 +32,20 @@ final class ShareEnricherTests: XCTestCase {
         }
     }
 
+    private actor CountingResolver: ShareMetadataResolving {
+        private(set) var calls = 0
+        let record: ShareCatalogStore.EnrichmentRecord
+
+        init(record: ShareCatalogStore.EnrichmentRecord) {
+            self.record = record
+        }
+
+        func resolve(_ request: ShareEnrichRequest) async -> ShareCatalogStore.EnrichmentRecord {
+            calls += 1
+            return record
+        }
+    }
+
     func testEnrichmentStampsIDsOverviewAndArtOntoItems() async {
         let store = ShareCatalogStore(accountKey: "a", directory: tempDir())
         await store.upsert([movie("Movies/The Matrix (1999).mkv", "The Matrix", 1999)], scanID: 1)
@@ -615,5 +629,33 @@ final class ShareEnricherTests: XCTestCase {
                        "the opened item gained persisted hero art")
         let stillPending = await store.pendingEnrichment(version: ShareEnricher.version, limit: 10)
         XCTAssertEqual(stillPending.map(\.title), ["Sicario"], "only the opened item was fast-tracked")
+    }
+
+    func testScheduledExternalResolutionDefersItemWhileLocalPreflightIsTransient() async {
+        let store = ShareCatalogStore(accountKey: "preflight", directory: tempDir())
+        await store.upsert([movie("Movies/Dune (2021).mkv", "Dune", 2021)], scanID: 1)
+        let resolver = CountingResolver(record: .init(
+            posterURL: URL(string: "https://img/dune.jpg")
+        ))
+        let enricher = ShareEnricher(store: store, resolver: resolver)
+
+        let deferred = await enricher.enrichPendingSlice(
+            maxItems: 1,
+            maxDuration: .seconds(5),
+            beforeResolve: { _ in false }
+        )
+        let callsAfterDeferral = await resolver.calls
+        XCTAssertEqual(callsAfterDeferral, 0)
+        XCTAssertTrue(deferred.hasMore)
+
+        _ = await enricher.enrichPendingSlice(
+            maxItems: 1,
+            maxDuration: .seconds(5),
+            beforeResolve: { _ in true }
+        )
+        let callsAfterRelease = await resolver.calls
+        XCTAssertEqual(callsAfterRelease, 1)
+        let item = await store.item(id: ShareCatalogID.file("Movies/Dune (2021).mkv"))
+        XCTAssertEqual(item?.posterURL, URL(string: "https://img/dune.jpg"))
     }
 }

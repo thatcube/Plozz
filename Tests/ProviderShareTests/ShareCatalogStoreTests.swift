@@ -239,7 +239,10 @@ final class ShareCatalogStoreTests: XCTestCase {
         XCTAssertEqual(pending.map(\.itemID), ["f:Movies/Retry.mkv"])
 
         let state = try queryMigrationState(at: url)
-        XCTAssertEqual(state.userVersion, 1)
+        // v2 adds the Step 3 NFO/explicit-id sidecar inventory schema; the legacy
+        // catalog's Step 2 normalized rows/state must still migrate/read exactly
+        // as before.
+        XCTAssertEqual(state.userVersion, 2)
         XCTAssertEqual(state.metadataValueCount, 14)
         XCTAssertEqual(state.enrichmentStateCount, 5)
         XCTAssertEqual(state.richLegacyValueCount, 10)
@@ -254,7 +257,7 @@ final class ShareCatalogStoreTests: XCTestCase {
         XCTAssertEqual(reopenedPending.map(\.itemID), [
             "f:Movies/Retry.mkv"
         ])
-        XCTAssertEqual(try queryMigrationState(at: url).userVersion, 1)
+        XCTAssertEqual(try queryMigrationState(at: url).userVersion, 2)
     }
 
     func testPartiallyMigratedCatalogDecodesValidProvenanceAndInfersMissingEntries() async throws {

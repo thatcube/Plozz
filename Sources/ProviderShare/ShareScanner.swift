@@ -156,7 +156,15 @@ actor ShareScanner {
         // library/keys). A cheap meta read on the hot path.
         let parserCurrent = String(ShareMediaParser.classifierVersion)
         let parserStored = await store.meta("parser_version")
+        // Same idea for the SIDECAR/explicit-id inventory (Step 3): a version bump
+        // here forces exactly one re-walk so an already-indexed share discovers
+        // existing NFO files / backfills explicit ids without waiting for files to
+        // change on disk — independent of the classifier and never forcing
+        // external re-enrichment (no `enrich_version`/`ShareEnricher` touch).
+        let localInventoryCurrent = String(ShareMediaParser.localInventoryVersion)
+        let localInventoryStored = await store.meta("local_inventory_version")
         if parserStored == parserCurrent,
+           localInventoryStored == localInventoryCurrent,
            let last = await store.meta("last_full_scan_at"),
            let ts = TimeInterval(last),
            Date().timeIntervalSince1970 - ts < minInterval {
@@ -265,6 +273,13 @@ actor ShareScanner {
                             scanGeneration: scanGeneration
                         )
                     }
+                    if !result.sidecars.isEmpty {
+                        await store.upsertSidecars(
+                            result.sidecars,
+                            scanID: scanID,
+                            scanGeneration: scanGeneration
+                        )
+                    }
                     let now = progressClock.now
                     if dirsWalked == 1
                         || lastProgressReport.duration(to: now) >= .milliseconds(250) {
@@ -312,12 +327,23 @@ actor ShareScanner {
                 await finishScan(listers: pool)
                 return
             }
+            await store.pruneSidecarsNotSeen(inScan: scanID, scanGeneration: scanGeneration)
+            guard !isInvalidated else {
+                await finishScan(listers: pool)
+                return
+            }
             await store.rebuildMovieGroups(scanGeneration: scanGeneration)
+            await store.reconcileSidecarAssociations(scanGeneration: scanGeneration)
         }
         guard !isInvalidated else {
             await finishScan(listers: pool)
             return
         }
+        // Filename/folder explicit ids are pure path computation (already
+        // persisted on the asset row) — materialize them into the same
+        // `metadata_values` priority projection NFO ids use, every scan
+        // (clean or partial), since nothing here depends on the prune above.
+        await store.materializeFilenameProviderIDs(scanGeneration: scanGeneration)
         await store.setMeta(
             "last_full_scan_at",
             String(Date().timeIntervalSince1970),
@@ -328,6 +354,11 @@ actor ShareScanner {
         await store.setMeta(
             "parser_version",
             String(ShareMediaParser.classifierVersion),
+            scanGeneration: scanGeneration
+        )
+        await store.setMeta(
+            "local_inventory_version",
+            String(ShareMediaParser.localInventoryVersion),
             scanGeneration: scanGeneration
         )
         PlozzLog.boot(
@@ -350,13 +381,15 @@ actor ShareScanner {
     }
 
     /// Result of listing one directory: the connection it used (returned to the
-    /// pool), the sub-directories discovered, the playable assets parsed, and
-    /// whether the listing actually succeeded (a failed listing must not let the
-    /// walk treat the folder as "empty" and prune its still-present content).
+    /// pool), the sub-directories discovered, the playable assets parsed, the NFO
+    /// sidecar candidates discovered (pure filename/sibling-stem facts — no read),
+    /// and whether the listing actually succeeded (a failed listing must not let
+    /// the walk treat the folder as "empty" and prune its still-present content).
     private struct DirResult: Sendable {
         let lister: ScanLister
         let subdirs: [String]
         let assets: [CatalogAsset]
+        let sidecars: [LocalSidecarCandidate]
         let ok: Bool
     }
 
@@ -372,27 +405,79 @@ actor ShareScanner {
             entries = try await lister.list(dir)
         } catch {
             PlozzLog.boot("share.scan skip dir \(dir.isEmpty ? "<root>" : dir) (\(error))")
-            return DirResult(lister: lister, subdirs: [], assets: [], ok: false)
+            return DirResult(lister: lister, subdirs: [], assets: [], sidecars: [], ok: false)
         }
         var subdirs: [String] = []
         var assets: [CatalogAsset] = []
+        // Video stems discovered in THIS SAME listing, bucketed by classified
+        // kind, so a sibling `.nfo`'s stem can be matched against a movie vs an
+        // episode file without any extra read — a pure by-product of the assets
+        // loop below (still listing-only: no `stat`/`readSmallFile`/XML parsing).
+        var movieStemsLower: Set<String> = []
+        var episodeStemsLower: Set<String> = []
+        var stemToVideoRelPath: [String: String] = [:]
+        var nfoEntries: [(entry: RemoteFileEntry, childPath: String)] = []
         for entry in entries {
             let childPath = dir.isEmpty ? entry.name : "\(dir)/\(entry.name)"
             if entry.kind == .directory {
                 if excludedDirs.contains(entry.name.lowercased()) { continue }
                 subdirs.append(childPath)
             } else if ShareMediaParser.isVideoFile(entry.name), !isSampleFile(entry.name) {
-                assets.append(asset(relPath: childPath, entry: entry))
+                let parsed = asset(relPath: childPath, entry: entry)
+                let stem = ShareMediaParser.videoStem(entry.name).lowercased()
+                switch parsed.kind {
+                case .movie: movieStemsLower.insert(stem)
+                case .episode: episodeStemsLower.insert(stem)
+                }
+                stemToVideoRelPath[stem] = childPath
+                assets.append(parsed)
+            } else if isNFOFile(entry.name) {
+                nfoEntries.append((entry, childPath))
             }
         }
 
-        return DirResult(lister: lister, subdirs: subdirs, assets: assets, ok: true)
+        var sidecars: [LocalSidecarCandidate] = []
+        for (entry, childPath) in nfoEntries {
+            let lowerName = entry.name.lowercased()
+            let kind: LocalSidecarKind
+            var associatedVideo: String?
+            if lowerName == "movie.nfo" {
+                kind = .movieGeneric
+            } else if lowerName == "tvshow.nfo" {
+                kind = .series
+            } else {
+                let stem = ShareMediaParser.videoStem(entry.name).lowercased()
+                if movieStemsLower.contains(stem) {
+                    kind = .movieStem
+                    associatedVideo = stemToVideoRelPath[stem]
+                } else if episodeStemsLower.contains(stem) {
+                    kind = .episodeStem
+                    associatedVideo = stemToVideoRelPath[stem]
+                } else {
+                    continue // Not a supported sidecar name/position — ignored.
+                }
+            }
+            sidecars.append(LocalSidecarCandidate(
+                relPath: childPath, parentDir: dir, basename: entry.name, kind: kind,
+                size: entry.size ?? 0, modifiedAt: entry.modifiedAt ?? .distantPast,
+                stableFileID: entry.stableFileID, strongETag: entry.strongETag,
+                changeToken: entry.changeToken, associatedVideoRelPath: associatedVideo
+            ))
+        }
+
+        return DirResult(lister: lister, subdirs: subdirs, assets: assets, sidecars: sidecars, ok: true)
+    }
+
+    /// A supported NFO sidecar filename (any casing).
+    private static func isNFOFile(_ name: String) -> Bool {
+        (name as NSString).pathExtension.caseInsensitiveCompare("nfo") == .orderedSame
     }
 
     // MARK: - Parse one file into a catalog asset
 
     static func asset(relPath: String, entry: RemoteFileEntry) -> CatalogAsset {
         let name = entry.name
+        let explicitIDs = ShareMediaParser.embeddedProviderIDs(relPath: relPath)
         switch ShareMediaParser.classify(relPath: relPath) {
         case .movie(let movie):
             let title = movie.title.isEmpty ? displayTitle(forFileName: name) : movie.title
@@ -408,7 +493,8 @@ actor ShareScanner {
                 modifiedAt: entry.modifiedAt ?? .distantPast, kind: .movie, library: .movies,
                 title: g.title, year: g.year,
                 seriesTitle: nil, seriesKey: nil, season: nil, episode: nil,
-                movieKey: movieKey, movieTitleKey: movieTitleKey
+                movieKey: movieKey, movieTitleKey: movieTitleKey,
+                explicitProviderIDs: explicitIDs, metadataRoot: nil
             )
         case .episode(let ep):
             let library: CatalogLibrary = isAnimePath(relPath) ? .anime : .tv
@@ -420,9 +506,24 @@ actor ShareScanner {
                 seriesTitle: ep.series,
                 seriesKey: ShareCatalogID.seriesKey(fromTitle: ep.series, providerTag: ep.providerTag),
                 season: ep.season, episode: ep.episode,
-                movieKey: nil, movieTitleKey: nil
+                movieKey: nil, movieTitleKey: nil,
+                explicitProviderIDs: explicitIDs, metadataRoot: seriesMetadataRoot(relPath: relPath)
             )
         }
+    }
+
+    /// The authoritative SHOW FOLDER's full relative path (root-first ancestors
+    /// joined up to and including the folder `ShareMediaParser.classify` proved
+    /// names the series) — where a `tvshow.nfo` sidecar would live. `nil` when the
+    /// folder tree doesn't prove a show folder (mirrors `authoritativeShowFolder`,
+    /// so this stays consistent with which folder GROUPING already trusts).
+    static func seriesMetadataRoot(relPath: String) -> String? {
+        let comps = relPath.split(separator: "/").map(String.init)
+        guard comps.count > 1 else { return nil }
+        let ancestors = Array(comps.dropLast())
+        guard let showFolder = ShareMediaParser.authoritativeShowFolder(fromAncestors: ancestors),
+              let idx = ancestors.lastIndex(of: showFolder) else { return nil }
+        return ancestors[0...idx].joined(separator: "/")
     }
 
     // MARK: - Heuristics

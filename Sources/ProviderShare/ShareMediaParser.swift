@@ -21,6 +21,14 @@ enum ShareMediaParser {
     /// year — collapses split/variant folders and fixes same-name matches.
     static let classifierVersion = 15
 
+    /// Bumped when the SIDECAR/explicit-id inventory the scanner records changes
+    /// shape (new sidecar kinds recognized, new explicit-id namespaces extracted),
+    /// so an already-indexed share gets exactly ONE forced re-walk to discover
+    /// existing NFO files / backfill explicit ids — independent of
+    /// `classifierVersion` (which governs movie/episode classification) and never
+    /// forcing external re-enrichment (see `ShareScanner.scanIfStale`).
+    static let localInventoryVersion = 1
+
     /// File extensions we treat as playable video.
     static let videoExtensions: Set<String> = [
         "mkv", "mp4", "m4v", "mov", "avi", "webm", "ts", "m2ts", "mts",
@@ -248,28 +256,102 @@ enum ShareMediaParser {
         return .movie(parseMovie(stem: stem, parentFolder: ancestors.last))
     }
 
-    /// An explicit external id embedded in a share-relative path by a media manager
-    /// (Plex/Jellyfin/Sonarr conventions): `[tvdb-81797]`, `{tmdb-1399}`,
-    /// `[imdb-tt0944947]`, `[anidb-69]`, `tvdbid=81797`. Normalized to
-    /// `source-number` (e.g. `tvdb-81797`), preferring the strongest source. Nil
-    /// when the path carries none. Case-insensitive.
-    static func embeddedProviderTag(relPath: String) -> String? {
-        let sources = ["tvdb", "tmdb", "imdb", "anidb", "tvmaze", "anilist"]
+    /// Recognized explicit-id namespaces, most-authoritative first (the order
+    /// `embeddedProviderTag` uses to pick ONE strongest tag for series grouping).
+    static let embeddedProviderSources = ["tvdb", "tmdb", "imdb", "anidb", "tvmaze", "anilist"]
+    static let conflictingExplicitIDMarker = "!conflict!"
+
+    /// Every EXPLICIT external id embedded in a share-relative path by a media
+    /// manager (Plex/Jellyfin/Sonarr conventions): `[tvdb-81797]`, `{tmdb-1399}`,
+    /// `[imdb-tt0944947]`, `[anidb-69]`, `tvdbid=81797`. Returns the RAW id value
+    /// per namespace (e.g. `["tvdb": "81797", "imdb": "tt0944947"]`) — every
+    /// namespace present, not just the strongest — so filename/folder ids can be
+    /// persisted as `MediaItem.providerIDs` candidates independently per
+    /// namespace. Case-insensitive. Empty when the path carries none.
+    static func embeddedProviderIDs(relPath: String) -> [String: String] {
         var found: [String: String] = [:]
-        for src in sources {
+        let ns = relPath as NSString
+        for src in embeddedProviderSources {
             let pattern = "[\\[{(]\\s*\(src)(?:id)?[-_=:]?\\s*(tt)?(\\d+)\\s*[\\]})]"
             guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { continue }
-            let ns = relPath as NSString
-            if let m = regex.firstMatch(in: relPath, range: NSRange(location: 0, length: ns.length)),
-               m.numberOfRanges >= 3 {
-                let tt = m.range(at: 1).location != NSNotFound ? ns.substring(with: m.range(at: 1)) : ""
-                let num = ns.substring(with: m.range(at: 2))
-                found[src] = "\(src)-\(tt)\(num)".lowercased()
+            var values = Set<String>()
+            for match in regex.matches(in: relPath, range: NSRange(location: 0, length: ns.length))
+                where match.numberOfRanges >= 3 {
+                let tt = match.range(at: 1).location != NSNotFound
+                    ? ns.substring(with: match.range(at: 1))
+                    : ""
+                let num = ns.substring(with: match.range(at: 2))
+                values.insert("\(tt)\(num)".lowercased())
+            }
+            if values.count == 1, let value = values.first {
+                found[src] = value
+            } else if values.count > 1 {
+                found[src] = conflictingExplicitIDMarker
             }
         }
-        // Prefer the most authoritative source present.
-        for src in sources { if let tag = found[src] { return tag } }
+        return found
+    }
+
+    /// An explicit external id embedded in a share-relative path, normalized to
+    /// `source-number` (e.g. `tvdb-81797`), preferring the strongest source. Nil
+    /// when the path carries none. Used only for the existing conservative series
+    /// grouping tag — broadening `embeddedProviderIDs` above to every namespace
+    /// must never change which tag this selects for an already-supported path.
+    static func embeddedProviderTag(relPath: String) -> String? {
+        let found = embeddedProviderIDs(relPath: relPath)
+        for src in embeddedProviderSources {
+            if let value = found[src],
+               let canonical = canonicalExplicitID(namespace: src, value: value) {
+                return "\(canonical.namespace)-\(canonical.value)"
+            }
+        }
         return nil
+    }
+
+    /// Conservative normalization for an explicit provider id, shared by
+    /// filename/folder tags and NFO `uniqueid`/direct-id elements so both sources
+    /// canonicalize to the SAME namespace/value convention. Aliases fold onto the
+    /// existing app keys (`thetvdb`→`tvdb`, `myanimelist`→`mal`, …) without
+    /// discarding a persisted-but-unrecognized forward-compatible namespace.
+    /// Returns nil for a blank, malformed, or (for a known numeric namespace)
+    /// non-positive-integer value.
+    static func canonicalExplicitID(namespace rawNamespace: String, value rawValue: String) -> (namespace: String, value: String)? {
+        let namespace = canonicalProviderNamespace(rawNamespace)
+        let value = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else { return nil }
+        if namespace == "imdb" {
+            let lower = value.lowercased()
+            guard lower.hasPrefix("tt"), lower.count > 2,
+                  lower.dropFirst(2).allSatisfy(\.isNumber) else { return nil }
+            return ("imdb", lower)
+        }
+        // Numeric namespaces reject signs, decimals, whitespace-only values, and
+        // zero/negative values.
+        let isPositiveInteger = !value.isEmpty && value.allSatisfy(\.isNumber) && (Int(value) ?? 0) > 0
+        if isKnownNumericProviderNamespace(namespace) {
+            return isPositiveInteger ? (namespace, value) : nil
+        }
+        // Unrecognized/forward-compatible namespace: persist losslessly as long as
+        // it isn't blank.
+        return (namespace, value)
+    }
+
+    static func canonicalProviderNamespace(_ raw: String) -> String {
+        let normalized = raw.lowercased().trimmingCharacters(in: .whitespaces)
+        switch normalized {
+        case "imdb", "imdbid", "imdb_id": return "imdb"
+        case "tmdb", "tmdbid", "themoviedb": return "tmdb"
+        case "tvdb", "tvdbid", "thetvdb": return "tvdb"
+        case "tvmaze", "tvmazeid": return "tvmaze"
+        case "anilist", "anilistid": return "anilist"
+        case "mal", "myanimelist", "myanimelistid": return "mal"
+        case "anidb", "anidbid": return "anidb"
+        default: return normalized
+        }
+    }
+
+    private static func isKnownNumericProviderNamespace(_ namespace: String) -> Bool {
+        ["tmdb", "tvdb", "tvmaze", "anilist", "mal", "anidb"].contains(namespace)
     }
 
     /// Resolves an episode's final series name + year for GROUPING and display.

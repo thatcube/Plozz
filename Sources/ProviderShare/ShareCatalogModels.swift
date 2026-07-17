@@ -61,6 +61,53 @@ struct CatalogAsset: Sendable, Equatable {
     /// Year-independent normalized title key used to discover near-year variants.
     /// Stacked parts append their part token so CD1/CD2 never become versions.
     var movieTitleKey: String?
+    /// Every EXPLICIT external id embedded in the media path (`[tvdb-81797]`,
+    /// `{tmdb-1399}`, …), keyed by lowercased namespace (`tvdb`, `imdb`, …) to its
+    /// raw id value. Populated by pure path parsing at scan time — no transport
+    /// read. Persisted so filename/folder ids become durable `filename`-sourced
+    /// metadata candidates (Step 3) independent from the single strongest tag
+    /// `seriesKey` already folds into series grouping.
+    var explicitProviderIDs: [String: String] = [:]
+    /// The directory a local sidecar (`tvshow.nfo`) authoritatively describing
+    /// this item's SERIES lives in — the full relative path of the authoritative
+    /// show folder. `nil` for movies (whose own parent directory is used instead,
+    /// computed on demand) and for episodes with no provable show folder.
+    var metadataRoot: String?
+}
+
+/// Which supported NFO sidecar name/position a discovered `.nfo` file matches.
+/// Populated by pure filename/sibling-stem comparison during the scanner's BFS
+/// listing — never by opening the file.
+enum LocalSidecarKind: String, Sendable {
+    /// `<video-stem>.nfo` beside a MOVIE file (exact case-insensitive stem match).
+    case movieStem
+    /// `movie.nfo` — applies only when its directory holds one unambiguous
+    /// logical movie group (checked at association time, not at scan time).
+    case movieGeneric
+    /// `tvshow.nfo` — describes the SERIES as a whole.
+    case series
+    /// `<video-stem>.nfo` beside an EPISODE file (exact case-insensitive stem
+    /// match).
+    case episodeStem
+}
+
+/// One discovered NFO sidecar candidate: pure listing facts (never a read). The
+/// scanner emits these alongside `CatalogAsset`s from the SAME directory
+/// listing; a separately scheduled local metadata worker later reads/parses the
+/// ones that matter and associates them with the persisted catalog.
+struct LocalSidecarCandidate: Sendable, Equatable {
+    var relPath: String
+    var parentDir: String
+    var basename: String
+    var kind: LocalSidecarKind
+    var size: Int64
+    var modifiedAt: Date
+    var stableFileID: String?
+    var strongETag: String?
+    var changeToken: String?
+    /// For `.movieStem`/`.episodeStem`: the sibling video's relative path this
+    /// sidecar's stem matched, so association never has to re-derive it.
+    var associatedVideoRelPath: String?
 }
 
 /// Central id scheme for catalog items so the store, scanner, and provider agree.

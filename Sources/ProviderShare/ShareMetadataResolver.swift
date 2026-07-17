@@ -22,6 +22,14 @@ struct ShareEnrichRequest: Sendable, Equatable {
     /// present, enrichment resolves DIRECTLY by this id — authoritative, skipping
     /// the ambiguous title search (fixes the tagged 1999 One Piece anime).
     var knownTVDBID: String? = nil
+    /// Already-persisted LOCAL (NFO/filename) provider ids for this item, keyed
+    /// by lowercased namespace (`tvdb`, `imdb`, `tmdb`, …) — see
+    /// `ShareCatalogStore.localProviderIDs`. Seeded so a resolver that supports
+    /// exact-id resolution can skip fuzzy title-based discovery for a namespace
+    /// it already knows, without reordering existing external sources or adding
+    /// new ones. Does not replace `knownTVDBID` (an authoritative FOLDER tag),
+    /// which still wins when both are present.
+    var knownProviderIDs: [String: String] = [:]
 }
 
 /// Resolves metadata (external ids + overview + artwork) for a bare share item.
@@ -94,8 +102,14 @@ struct TVDBShareResolver: ShareMetadataResolving {
         // "Avatar (2024)" resolves via "Avatar The Last Airbender"), then the stored
         // folder title. `search` prefers an exact-year hit but falls back to
         // relevance, so a specific query is far less likely to mis-match.
+        //
+        // A LOCAL (NFO/filename) tvdb id fills in only when no explicit folder
+        // tag was already known — the existing folder-tag behavior is preserved
+        // exactly; this only extends the SAME "skip the ambiguous title search"
+        // treatment to a persisted local id.
+        let knownID = request.knownTVDBID ?? request.knownProviderIDs["tvdb"]
         let meta: TVDBMetadata?
-        if let knownID = request.knownTVDBID {
+        if let knownID {
             if let byID = await tvdb.resolve(byTVDBID: knownID, isMovie: request.isMovie) {
                 meta = byID
             } else {

@@ -6,9 +6,6 @@ import CoreModels
 import CoreNetworking
 import TraktService
 import MetadataKit
-#if canImport(NaturalLanguage)
-import NaturalLanguage
-#endif
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -121,12 +118,11 @@ public final class PlayerViewModel {
     /// profile's appearance store. Set by whoever constructs the view model;
     /// defaults to a no-op (e.g. previews / tests). See ``applySubtitleStyle(_:)``.
     public var onSubtitleStyleChanged: (SubtitleStyle) -> Void = { _ in }
-    /// Fetches + parses the selected sidecar into cues off the main actor; one at
-    /// a time, cancelled when the selection changes or playback stops.
-    @ObservationIgnored private var subtitleCueLoadTask: Task<Void, Never>?
-    /// The equivalent one-at-a-time fetch for the **secondary** (dual) subtitle
-    /// sidecar. Separate from the primary task so the two never cancel each other.
-    @ObservationIgnored private var secondaryCueLoadTask: Task<Void, Never>?
+    /// Owns the subtitle-overlay cue-load pipeline (primary + secondary sidecar
+    /// fetch/parse/apply and their one-at-a-time task lifecycle). Set at the end of
+    /// `init`; the view model keeps ownership of subtitle *selection* and drives
+    /// this collaborator to (re)load or clear the overlay streams.
+    @ObservationIgnored private var subtitleOverlay: SubtitleOverlayLoader!
 
     private let provider: any MediaProvider
     private let itemID: String
@@ -546,6 +542,7 @@ public final class PlayerViewModel {
         // Gate the "Search for subtitles…" row on server-proxied support.
         self.controls.canSearchRemoteSubtitles = (provider as? CapabilityReporting)?.capabilities.contains(.remoteSubtitles) ?? false
         self.subtitleAcquisition = RemoteSubtitleAcquisition(provider: provider, itemID: itemID, host: self)
+        self.subtitleOverlay = SubtitleOverlayLoader(host: self)
         configureEngineCallbacks()
 
         // Kick off bring-up now so playbackInfo + engine warm-up run *during* the
@@ -1396,10 +1393,7 @@ public final class PlayerViewModel {
         // Drop any overlay cues from a previous stream/engine and reset the sync
         // offset; a fresh selection re-seeds them. This is a full reset (new media
         // or engine), so the dual-subtitle selection is dropped too.
-        subtitleCueLoadTask?.cancel()
-        subtitleCueLoadTask = nil
-        secondaryCueLoadTask?.cancel()
-        secondaryCueLoadTask = nil
+        subtitleOverlay.cancelAll()
         selectedSecondarySubtitleTrackID = nil
         controls.secondarySubtitleStatus = .idle
         #if DEBUG
@@ -2247,10 +2241,7 @@ public final class PlayerViewModel {
         seekTask = nil
         cancelResumeConfirm()
         subtitleAcquisition.cancelAll()
-        subtitleCueLoadTask?.cancel()
-        subtitleCueLoadTask = nil
-        secondaryCueLoadTask?.cancel()
-        secondaryCueLoadTask = nil
+        subtitleOverlay.cancelAll()
         // Silence the engine *before* the final server report. The report is a
         // network round-trip that can take a second or two; stopping first means
         // leaving the player never keeps playing audio while it completes. Grab
@@ -2501,8 +2492,7 @@ public final class PlayerViewModel {
         if let sec = selectedSecondarySubtitleTrackID,
            !secondaryEligible.contains(where: { $0.id == sec }) {
             selectedSecondarySubtitleTrackID = nil
-            secondaryCueLoadTask?.cancel()
-            secondaryCueLoadTask = nil
+            subtitleOverlay.cancelSecondary()
             if engine.capabilities.contains(.dualSubtitleDecode) {
                 engine.selectSecondarySubtitleTrack(nil)
             }
@@ -2602,7 +2592,7 @@ public final class PlayerViewModel {
             switch remembered {
             case .off:
                 engine.selectSubtitleTrack(nil)
-                clearOverlaySubtitle()
+                subtitleOverlay.clearPrimary()
                 selectedSubtitleTrackID = nil
                 loadTrackOptions()
                 return
@@ -2627,7 +2617,7 @@ public final class PlayerViewModel {
         )
         guard let chosen, !chosen.isImageBasedSubtitle else {
             engine.selectSubtitleTrack(nil)
-            clearOverlaySubtitle()
+            subtitleOverlay.clearPrimary()
             selectedSubtitleTrackID = nil
             loadTrackOptions()
             return
@@ -2654,7 +2644,7 @@ public final class PlayerViewModel {
         if id == PlayerTrackOption.offID {
             if userInitiated { recordSeriesSubtitleSelection(.off) }
             engine.selectSubtitleTrack(nil)
-            clearOverlaySubtitle()
+            subtitleOverlay.clearPrimary()
             selectedSubtitleTrackID = nil
             #if DEBUG
             controls.primarySubtitleDiagnostic = ""
@@ -2674,7 +2664,7 @@ public final class PlayerViewModel {
                 #if DEBUG
                 setPrimarySubtitleDiagnostic(route: "overlay · hot-loaded")
                 #endif
-                loadOverlaySubtitle(hot)
+                subtitleOverlay.loadPrimary(hot)
                 loadTrackOptions()
             }
             return
@@ -2690,7 +2680,7 @@ public final class PlayerViewModel {
         // renderable) stays on the native engine.
         if track.isImageBasedSubtitle, currentEngineKind == .native,
            let request, !request.isTranscoding, engineFactory.plozzigenAvailable {
-            clearOverlaySubtitle()
+            subtitleOverlay.clearPrimary()
             selectedSubtitleTrackID = id
             Task { await swapEngineForImageSubtitle(track) }
             return
@@ -2710,9 +2700,9 @@ public final class PlayerViewModel {
                 #if DEBUG
                 setPrimarySubtitleDiagnostic(route: "overlay")
                 #endif
-                loadOverlaySubtitle(track)
+                subtitleOverlay.loadPrimary(track)
             } else {
-                clearOverlaySubtitle()
+                subtitleOverlay.clearPrimary()
                 engine.selectSubtitleTrack(track)
                 #if DEBUG
                 setPrimarySubtitleDiagnostic(route: "avplayer-draw")
@@ -2728,8 +2718,7 @@ public final class PlayerViewModel {
         // `onSubtitleCues` callback (wired in configureEngineCallbacks) does the
         // feeding. Other engines that draw their own subs (Plozzigen) get an empty live
         // feed and keep drawing themselves — harmless.
-        subtitleCueLoadTask?.cancel()
-        subtitleCueLoadTask = nil
+        subtitleOverlay.cancelPrimary()
         liveSubtitles.beginLiveFeed()
         refreshSubtitleDelayAvailability()
         engine.selectSubtitleTrack(track)
@@ -2738,98 +2727,6 @@ public final class PlayerViewModel {
         setPrimarySubtitleDiagnostic(route: "live-feed")
         #endif
         loadTrackOptions()
-    }
-
-    /// Cancels any in-flight cue fetch and clears the **primary** overlay
-    /// (subtitles off, or switching to an engine that draws its own). Leaves the
-    /// secondary/dual line untouched — it's an independent overlay stream.
-    private func clearOverlaySubtitle() {
-        subtitleCueLoadTask?.cancel()
-        subtitleCueLoadTask = nil
-        liveSubtitles.loadPrimary(nil)
-        refreshSubtitleDelayAvailability()
-    }
-
-    /// Fetches the selected text sidecar, parses it to cues off the main actor,
-    /// and loads it into the overlay — unless the selection changed mid-fetch.
-    /// Best-effort: a failure simply leaves no overlay cues rather than wedging.
-    private func loadOverlaySubtitle(_ track: MediaTrack) {
-        subtitleCueLoadTask?.cancel()
-        // Clear only the primary stream; a selected dual/secondary line survives a
-        // primary track change.
-        liveSubtitles.loadPrimary(nil)
-        refreshSubtitleDelayAvailability()
-        guard track.deliverySource != nil else {
-            // Embedded text without a sidecar source: container extraction arrives
-            // with the Plozzigen cue path; leave nothing showing until then.
-            PlozzLog.playback.debug(
-                "Selected subtitle has no sidecar source; overlay not loaded"
-            )
-            return
-        }
-        let id = track.id
-        let language = track.language
-        let title = track.displayTitle
-        let forced = track.isForced
-        // Only spend a detection pass when the provider gave us no language tag
-        // and we haven't already guessed one for this track this session.
-        let needsDetection = (language == nil) && detectedSubtitleLanguages[id] == nil
-        subtitleCueLoadTask = Task(priority: .userInitiated) { @MainActor [weak self] in
-            guard let self else { return }
-            do {
-                guard let url = try await self.resolveSubtitleDeliveryURL(track)
-                else {
-                    return
-                }
-                guard let payload = try await Self.fetchSubtitlePayload(
-                    from: url,
-                    id: id,
-                    language: language,
-                    title: title,
-                    forced: forced,
-                    shouldDetectLanguage: needsDetection
-                ) else {
-                    guard self.selectedSubtitleTrackID == id else { return }
-                    #if DEBUG
-                    self.setPrimarySubtitleDiagnostic(
-                        route: "overlay · decode-fail"
-                    )
-                    #endif
-                    return
-                }
-                try Task.checkCancellation()
-                let storedNew = payload.detectedLanguage != nil
-                    && self.detectedSubtitleLanguages[id] == nil
-                if let detected = payload.detectedLanguage, storedNew {
-                    self.detectedSubtitleLanguages[id] = detected
-                }
-                if self.selectedSubtitleTrackID == id {
-                    self.liveSubtitles.loadPrimary(payload.stream)
-                    self.refreshSubtitleDelayAvailability()
-                    #if DEBUG
-                    self.setPrimarySubtitleDiagnostic(
-                        route: "overlay",
-                        cues: payload.stream.cues.count
-                    )
-                    #endif
-                }
-                if storedNew { self.loadTrackOptions() }
-            } catch is CancellationError {
-                // Selection changed; the newer selection owns the overlay.
-            } catch {
-                PlozzLog.playback.debug("Overlay subtitle fetch failed (non-fatal)")
-                guard self.selectedSubtitleTrackID == id else { return }
-                #if DEBUG
-                self.setPrimarySubtitleDiagnostic(route: "overlay · fetch-fail")
-                #endif
-            }
-        }
-    }
-
-    private struct ParsedSubtitlePayload: Sendable {
-        let stream: SubtitleCueStream
-        let detectedLanguage: String?
-        let byteCount: Int
     }
 
     private func resolveSubtitleDeliveryURL(
@@ -2842,39 +2739,6 @@ public final class PlayerViewModel {
         case .authenticatedHTTP(let locator):
             return try await authenticatedHTTPResolver?.resolve(locator)
         }
-    }
-
-    private nonisolated static func fetchSubtitlePayload(
-        from url: URL,
-        id: Int,
-        language: String?,
-        title: String,
-        forced: Bool,
-        shouldDetectLanguage: Bool
-    ) async throws -> ParsedSubtitlePayload? {
-        let (data, _) = try await URLSession.shared.data(from: url)
-        try Task.checkCancellation()
-        guard let text = SubtitleCueParser.decodeText(data) else {
-            PlozzLog.playback.error(
-                "Subtitle sidecar decode failed (\(data.count) bytes); unknown text encoding"
-            )
-            return nil
-        }
-        let stream = SubtitleCueParser.parse(
-            text,
-            id: id,
-            language: language,
-            title: title,
-            sourceTrackID: id,
-            isForced: forced
-        )
-        try Task.checkCancellation()
-        let detected = shouldDetectLanguage ? detectLanguage(in: stream.cues) : nil
-        return ParsedSubtitlePayload(
-            stream: stream,
-            detectedLanguage: detected,
-            byteCount: data.count
-        )
     }
 
     // MARK: - Dual (secondary) subtitle
@@ -2913,8 +2777,7 @@ public final class PlayerViewModel {
     public func selectSecondarySubtitleOption(id: Int) {
         let engineDual = engine.capabilities.contains(.dualSubtitleDecode)
         if id == PlayerTrackOption.offID {
-            secondaryCueLoadTask?.cancel()
-            secondaryCueLoadTask = nil
+            subtitleOverlay.cancelSecondary()
             selectedSecondarySubtitleTrackID = nil
             if engineDual {
                 // Tell the engine to stop decoding the second stream, then drop the
@@ -2949,102 +2812,13 @@ public final class PlayerViewModel {
             // which the model draws through secondary-live mode. This is what makes
             // dual subtitles work for tracks with no fetchable sidecar URL (Plex
             // direct-play MKV). Status flips to `.loaded` when the first cues land.
-            secondaryCueLoadTask?.cancel()
-            secondaryCueLoadTask = nil
+            subtitleOverlay.cancelSecondary()
             liveSubtitles.beginSecondaryLiveFeed()
             engine.selectSecondarySubtitleTrack(track)
         } else {
-            loadSecondaryOverlaySubtitle(track)
+            subtitleOverlay.loadSecondary(track)
         }
         loadTrackOptions()
-    }
-
-    /// Fetches + parses the secondary sidecar off the main actor and loads it into
-    /// the overlay's secondary stream, unless the secondary selection changed
-    /// mid-fetch. Mirrors ``loadOverlaySubtitle(_:)`` but never touches the
-    /// primary. Publishes a load status (`controls.secondarySubtitleStatus`) so the
-    /// picker row can show loading / cue count / unavailable. Best-effort: a
-    /// failure just leaves the second line empty.
-    private func loadSecondaryOverlaySubtitle(_ track: MediaTrack) {
-        secondaryCueLoadTask?.cancel()
-        liveSubtitles.loadSecondary(nil)
-        guard track.deliverySource != nil else {
-            controls.secondarySubtitleStatus = .unavailable
-            return
-        }
-        controls.secondarySubtitleStatus = .loading
-        let id = track.id
-        let language = track.language
-        let title = track.displayTitle
-        let forced = track.isForced
-        secondaryCueLoadTask = Task(
-            priority: .userInitiated
-        ) { @MainActor [weak self] in
-            guard let self else { return }
-            do {
-                guard let url = try await self.resolveSubtitleDeliveryURL(track),
-                      let payload = try await Self.fetchSubtitlePayload(
-                          from: url,
-                          id: id,
-                          language: language,
-                          title: title,
-                          forced: forced,
-                          shouldDetectLanguage: false
-                      ) else {
-                    guard self.selectedSecondarySubtitleTrackID == id else {
-                        return
-                    }
-                    self.controls.secondarySubtitleStatus = .unavailable
-                    return
-                }
-                try Task.checkCancellation()
-                #if DEBUG
-                let range = payload.stream.cues.isEmpty
-                    ? "none"
-                    : "\(Int(payload.stream.cues.first!.start))s–\(Int(payload.stream.cues.last!.end))s"
-                PlozzLog.playback.debug(
-                    "Secondary track \(id): fetched \(payload.byteCount) bytes → \(payload.stream.cues.count) cues (\(range))"
-                )
-                #endif
-                guard self.selectedSecondarySubtitleTrackID == id else { return }
-                self.liveSubtitles.loadSecondary(payload.stream)
-                self.controls.secondarySubtitleStatus = .loaded(
-                    cueCount: payload.stream.cues.count
-                )
-            } catch is CancellationError {
-                // Selection changed; the newer secondary owns the stream.
-            } catch {
-                PlozzLog.playback.debug("Secondary track \(id) sidecar fetch failed (non-fatal): \(error.localizedDescription)")
-                guard self.selectedSecondarySubtitleTrackID == id else { return }
-                self.controls.secondarySubtitleStatus = .unavailable
-            }
-        }
-    }
-
-    /// Best-effort on-device language guess for an untagged text subtitle, from a
-    /// sample of its parsed cue text. Runs off the main actor (`nonisolated`).
-    /// Returns a BCP-47-ish code (e.g. `en`, `es`, `zh-Hans`) or `nil` when there
-    /// isn't enough text to be confident. Bitmap cues have no `text`, so they
-    /// naturally yield `nil` (they need OCR, out of scope here).
-    private nonisolated static func detectLanguage(in cues: [SubtitleCue]) -> String? {
-        #if canImport(NaturalLanguage)
-        var sample = ""
-        for cue in cues {
-            guard let line = cue.text, !line.isEmpty else { continue }
-            sample += line
-            sample += "\n"
-            if sample.count > 4000 { break }
-        }
-        let trimmed = sample.trimmingCharacters(in: .whitespacesAndNewlines)
-        // Too little text to classify reliably — don't risk a wrong label.
-        guard trimmed.count >= 24 else { return nil }
-        let recognizer = NLLanguageRecognizer()
-        recognizer.processString(trimmed)
-        guard let language = recognizer.dominantLanguage, language != .undetermined else { return nil }
-        return language.rawValue
-        #else
-        return nil
-        #endif
     }
 
     /// Swaps from the native engine to Plozzigen (preserving position) so an
@@ -3150,6 +2924,48 @@ extension PlayerViewModel: RemoteSubtitleAcquisitionHost {
     }
 
     var isPrimarySubtitleOff: Bool { selectedSubtitleTrackID == nil }
+}
+
+// MARK: - SubtitleOverlayLoaderHost
+
+extension PlayerViewModel: SubtitleOverlayLoaderHost {
+    var primarySubtitleSelectionID: Int? { selectedSubtitleTrackID }
+    var secondarySubtitleSelectionID: Int? { selectedSecondarySubtitleTrackID }
+
+    func overlayResolveDeliveryURL(_ track: MediaTrack) async throws -> URL? {
+        try await resolveSubtitleDeliveryURL(track)
+    }
+
+    func overlayApplyPrimaryCues(_ stream: SubtitleCueStream?) {
+        liveSubtitles.loadPrimary(stream)
+        refreshSubtitleDelayAvailability()
+    }
+
+    func overlayApplySecondaryCues(_ stream: SubtitleCueStream?) {
+        liveSubtitles.loadSecondary(stream)
+    }
+
+    func overlayDetectedLanguage(for id: Int) -> String? {
+        detectedSubtitleLanguages[id]
+    }
+
+    func overlayRecordDetectedLanguage(_ language: String, for id: Int) {
+        detectedSubtitleLanguages[id] = language
+    }
+
+    func overlayReloadTrackOptions() {
+        loadTrackOptions()
+    }
+
+    func overlaySetSecondaryStatus(_ status: SecondarySubtitleStatus) {
+        controls.secondarySubtitleStatus = status
+    }
+
+    #if DEBUG
+    func overlaySetPrimaryDiagnostic(route: String, cues: Int?) {
+        setPrimarySubtitleDiagnostic(route: route, cues: cues)
+    }
+    #endif
 }
 
 #endif

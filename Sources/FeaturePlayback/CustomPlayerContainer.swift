@@ -1090,19 +1090,26 @@ final class PlayerInputViewController: UIViewController {
     private func scheduleAutoHide() {
         cancelAutoHide()
         autoHideTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 4_000_000_000)
-            // Don't let the transport auto-hide while the video is still loading
-            // (initial bring-up or a re-resolve/transcode reload): keep the seek
-            // bar and buttons up so the viewer sees state while it spins, and only
-            // begin hiding once playback is actually presenting. Re-read through a
-            // weak self each tick so a torn-down container isn't retained by this
-            // loop (which would defeat deinit's cancellation).
-            while !Task.isCancelled, self?.engine.status == .loading {
-                try? await Task.sleep(nanoseconds: 250_000_000)
-            }
-            guard let self, !Task.isCancelled else { return }
-            if !self.model.isScrubbing && !self.model.isPaused && self.focusContext == .surface {
-                self.model.controlsVisible = false
+            // Hide the transport 4s after the video is actually *playing*, not 4s
+            // after the reveal was requested. On a slow (re)load the old fixed 4s
+            // timer would fire mid-spin — or, once gated, hide the instant frames
+            // appeared. So: first wait out any engine .loading (initial bring-up or
+            // a re-resolve/transcode reload), THEN run the 4s idle window. If a
+            // reload kicks in during that window, restart it so the count is always
+            // measured from playback presenting. Re-read through a weak self each
+            // tick so a torn-down container isn't retained by the loop (which would
+            // defeat deinit's cancellation).
+            while !Task.isCancelled {
+                while !Task.isCancelled, self?.engine.status == .loading {
+                    try? await Task.sleep(nanoseconds: 250_000_000)
+                }
+                try? await Task.sleep(nanoseconds: 4_000_000_000)
+                guard let self, !Task.isCancelled else { return }
+                if self.engine.status == .loading { continue } // reloaded mid-window
+                if !self.model.isScrubbing && !self.model.isPaused && self.focusContext == .surface {
+                    self.model.controlsVisible = false
+                }
+                return
             }
         }
     }

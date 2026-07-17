@@ -116,13 +116,14 @@ actor ShareLocalMetadataEnricher {
 
     // MARK: - Per-sidecar processing
 
-    private struct Association: Sendable, Equatable {
-        var itemID: String
-    }
-
     @discardableResult
     private func process(_ file: ShareCatalogStore.PendingLocalMetadataFile) async -> ShareLocalMetadataOutcome {
-        guard let association = await resolveAssociation(file) else {
+        let facts = await store.localMetadataAssociationFacts(for: file)
+        guard let itemID = ShareLocalMetadataAssociationPolicy.itemID(
+            for: file.kind,
+            associatedVideoRelPath: file.associatedVideoRelPath,
+            facts: facts
+        ) else {
             await store.markSidecarProcessed(
                 relPath: file.relPath, status: "ambiguous",
                 fingerprint: file.fingerprint, associatedItemID: nil
@@ -132,19 +133,19 @@ actor ShareLocalMetadataEnricher {
             }
             return .terminal
         }
-        let affectedItemIDs = Set([association.itemID, file.processedItemID].compactMap { $0 })
+        let affectedItemIDs = Set([itemID, file.processedItemID].compactMap { $0 })
 
         if file.size > Int64(ShareNFOParser.maxBytes) {
             await store.clearSidecarValueCache(relPath: file.relPath)
             await store.markSidecarProcessed(
                 relPath: file.relPath, status: "oversized",
-                fingerprint: file.fingerprint, associatedItemID: association.itemID
+                fingerprint: file.fingerprint, associatedItemID: itemID
             )
             for itemID in affectedItemIDs {
                 await store.materializeCachedLocalMetadata(itemID: itemID)
             }
             await store.writeLocalEnrichmentState(
-                itemID: association.itemID, version: Self.version, attempts: 0
+                itemID: itemID, version: Self.version, attempts: 0
             )
             return .terminal
         }
@@ -167,14 +168,14 @@ actor ShareLocalMetadataEnricher {
             await store.clearSidecarValueCache(relPath: file.relPath)
             await store.markSidecarProcessed(
                 relPath: file.relPath, status: "oversized",
-                fingerprint: file.fingerprint, associatedItemID: association.itemID
+                fingerprint: file.fingerprint, associatedItemID: itemID
             )
             outcome = .terminal
         case .malformed:
             await store.clearSidecarValueCache(relPath: file.relPath)
             await store.markSidecarProcessed(
                 relPath: file.relPath, status: "malformed",
-                fingerprint: file.fingerprint, associatedItemID: association.itemID
+                fingerprint: file.fingerprint, associatedItemID: itemID
             )
             outcome = .terminal
         case .parsed(let parsed):
@@ -187,7 +188,7 @@ actor ShareLocalMetadataEnricher {
             }
             await store.markSidecarProcessed(
                 relPath: file.relPath, status: "parsed",
-                fingerprint: file.fingerprint, associatedItemID: association.itemID
+                fingerprint: file.fingerprint, associatedItemID: itemID
             )
             outcome = .resolved
         }
@@ -195,34 +196,9 @@ actor ShareLocalMetadataEnricher {
             await store.materializeCachedLocalMetadata(itemID: itemID)
         }
         await store.writeLocalEnrichmentState(
-            itemID: association.itemID, version: Self.version, attempts: 0
+            itemID: itemID, version: Self.version, attempts: 0
         )
         return outcome
-    }
-
-    /// Resolves which logical catalog item a sidecar describes, per the
-    /// deterministic association rules (Step 3 plan §5). `nil` means ambiguous
-    /// or unassociated (e.g. its video/show was removed) — a terminal, cached
-    /// outcome that applies no metadata.
-    private func resolveAssociation(_ file: ShareCatalogStore.PendingLocalMetadataFile) async -> Association? {
-        switch file.kind {
-        case .episodeStem:
-            guard let video = file.associatedVideoRelPath,
-                  await store.hasEpisodeAsset(relPath: video) else { return nil }
-            return Association(itemID: ShareCatalogID.file(video))
-        case .movieStem:
-            guard let video = file.associatedVideoRelPath else { return nil }
-            let rep = await store.movieGroupRepresentativeRelPath(forMemberRelPath: video)
-            return Association(itemID: ShareCatalogID.file(rep))
-        case .movieGeneric:
-            guard let rep = await store.unambiguousMovieGroupRepresentative(inDirectory: file.parentDir) else {
-                return nil
-            }
-            return Association(itemID: ShareCatalogID.file(rep))
-        case .series:
-            guard let key = await store.seriesKey(forMetadataRoot: file.parentDir) else { return nil }
-            return Association(itemID: ShareCatalogID.series(key))
-        }
     }
 
     /// JSON-encodes each present, VALIDATED field from a parsed NFO document,

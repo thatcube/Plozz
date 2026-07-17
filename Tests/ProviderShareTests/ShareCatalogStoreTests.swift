@@ -792,6 +792,33 @@ final class ShareCatalogStoreTests: XCTestCase {
         XCTAssertEqual(decoded?.season, 3)
     }
 
+    func testEpisodeSidecarAssociationRequiresEpisodeAssetKind() async {
+        let store = ShareCatalogStore(accountKey: "a", directory: tempDir())
+        let videoPath = "TV/Show/S01E01.mkv"
+        let sidecar = ShareCatalogStore.PendingLocalMetadataFile(
+            relPath: "TV/Show/S01E01.nfo",
+            parentDir: "TV/Show",
+            kind: .episodeStem,
+            size: 100,
+            associatedVideoRelPath: videoPath,
+            processedItemID: nil,
+            fingerprint: "etag:test",
+            scanGenerationBound: false,
+            status: "pending",
+            attempts: 0
+        )
+
+        await store.upsert([movie(videoPath, title: "Reclassified", year: nil)], scanID: 1)
+        var facts = await store.localMetadataAssociationFacts(for: sidecar)
+        XCTAssertFalse(facts.associatedVideoExists)
+
+        await store.upsert([
+            episode(videoPath, series: "Show", season: 1, episode: 1),
+        ], scanID: 2)
+        facts = await store.localMetadataAssociationFacts(for: sidecar)
+        XCTAssertTrue(facts.associatedVideoExists)
+    }
+
     func testSeriesKeyNormalizesPunctuationAndCase() {
         XCTAssertEqual(ShareCatalogID.seriesKey(fromTitle: "Breaking Bad"),
                        ShareCatalogID.seriesKey(fromTitle: "breaking.bad"))

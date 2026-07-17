@@ -259,7 +259,7 @@ enum ShareMediaParser {
     /// Recognized explicit-id namespaces, most-authoritative first (the order
     /// `embeddedProviderTag` uses to pick ONE strongest tag for series grouping).
     static let embeddedProviderSources = ["tvdb", "tmdb", "imdb", "anidb", "tvmaze", "anilist"]
-    static let conflictingExplicitIDMarker = "!conflict!"
+    static let conflictingExplicitIDMarker = ShareExplicitIDPolicy.conflictMarker
 
     /// Every EXPLICIT external id embedded in a share-relative path by a media
     /// manager (Plex/Jellyfin/Sonarr conventions): `[tvdb-81797]`, `{tmdb-1399}`,
@@ -316,42 +316,11 @@ enum ShareMediaParser {
     /// Returns nil for a blank, malformed, or (for a known numeric namespace)
     /// non-positive-integer value.
     static func canonicalExplicitID(namespace rawNamespace: String, value rawValue: String) -> (namespace: String, value: String)? {
-        let namespace = canonicalProviderNamespace(rawNamespace)
-        let value = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !value.isEmpty else { return nil }
-        if namespace == "imdb" {
-            let lower = value.lowercased()
-            guard lower.hasPrefix("tt"), lower.count > 2,
-                  lower.dropFirst(2).allSatisfy(\.isNumber) else { return nil }
-            return ("imdb", lower)
-        }
-        // Numeric namespaces reject signs, decimals, whitespace-only values, and
-        // zero/negative values.
-        let isPositiveInteger = !value.isEmpty && value.allSatisfy(\.isNumber) && (Int(value) ?? 0) > 0
-        if isKnownNumericProviderNamespace(namespace) {
-            return isPositiveInteger ? (namespace, value) : nil
-        }
-        // Unrecognized/forward-compatible namespace: persist losslessly as long as
-        // it isn't blank.
-        return (namespace, value)
+        ShareExplicitIDPolicy.canonicalize(namespace: rawNamespace, value: rawValue)
     }
 
     static func canonicalProviderNamespace(_ raw: String) -> String {
-        let normalized = raw.lowercased().trimmingCharacters(in: .whitespaces)
-        switch normalized {
-        case "imdb", "imdbid", "imdb_id": return "imdb"
-        case "tmdb", "tmdbid", "themoviedb": return "tmdb"
-        case "tvdb", "tvdbid", "thetvdb": return "tvdb"
-        case "tvmaze", "tvmazeid": return "tvmaze"
-        case "anilist", "anilistid": return "anilist"
-        case "mal", "myanimelist", "myanimelistid": return "mal"
-        case "anidb", "anidbid": return "anidb"
-        default: return normalized
-        }
-    }
-
-    private static func isKnownNumericProviderNamespace(_ namespace: String) -> Bool {
-        ["tmdb", "tvdb", "tvmaze", "anilist", "mal", "anidb"].contains(namespace)
+        ShareExplicitIDPolicy.canonicalNamespace(raw)
     }
 
     /// Resolves an episode's final series name + year for GROUPING and display.

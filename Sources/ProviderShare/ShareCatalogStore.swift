@@ -653,42 +653,6 @@ actor ShareCatalogStore {
         var attempts: Int
     }
 
-    /// A per-item local field candidate about to be persisted (either from a
-    /// parsed NFO or a filename/folder explicit id). `sourceRevision` carries the
-    /// winning sidecar's relative path for internal `source_revision`/invalidation
-    /// bookkeeping ONLY — see the local-provenance-privacy invariant: it is never
-    /// exposed through `MetadataAttribution`/`MediaItem`.
-    struct LocalMetadataFieldCandidate: Sendable {
-        var field: MetadataField
-        var valueJSON: String
-        var source: MetadataSource
-        var sourceRevision: String?
-
-        init(field: MetadataField, valueJSON: String, source: MetadataSource, sourceRevision: String? = nil) {
-            self.field = field
-            self.valueJSON = valueJSON
-            self.source = source
-            self.sourceRevision = sourceRevision
-        }
-    }
-
-    /// Deterministic content fingerprint from the strongest available transport
-    /// facts (strong ETag > change token > stable id+mtime+size). `nil` when a
-    /// transport lacks enough facts — the caller marks the row
-    /// `scan_generation_bound` so it rereads once per successful full scan rather
-    /// than being silently treated as permanently unchanged.
-    static func sidecarFingerprint(
-        strongETag: String?, changeToken: String?, stableFileID: String?,
-        modifiedAt: Date, size: Int64
-    ) -> String? {
-        if let strongETag, !strongETag.isEmpty { return "etag:\(strongETag)" }
-        if let changeToken, !changeToken.isEmpty { return "token:\(changeToken)" }
-        if let stableFileID, !stableFileID.isEmpty {
-            return "id:\(stableFileID):\(Int(modifiedAt.timeIntervalSince1970)):\(size)"
-        }
-        return "mtime:\(Int(modifiedAt.timeIntervalSince1970)):\(size)"
-    }
-
     /// Insert/update the sidecar inventory discovered by THIS scan's BFS listing.
     /// A row whose fingerprint is UNCHANGED keeps its `status`/`processed_fingerprint`/
     /// `local_attempts`/`associated_item_id` (no rereading an unchanged file); a
@@ -745,12 +709,13 @@ actor ShareCatalogStore {
             var affectedItemIDs = Set<String>()
             exec("BEGIN IMMEDIATE;")
             for sidecar in sidecars[index..<end] {
-                let fingerprint = Self.sidecarFingerprint(
+                let fingerprintEvaluation = ShareSidecarFingerprintPolicy.evaluate(
                     strongETag: sidecar.strongETag, changeToken: sidecar.changeToken,
                     stableFileID: sidecar.stableFileID, modifiedAt: sidecar.modifiedAt,
                     size: sidecar.size
                 )
-                let weakTransport = sidecar.strongETag == nil && sidecar.changeToken == nil && sidecar.stableFileID == nil
+                let fingerprint = fingerprintEvaluation.fingerprint
+                let weakTransport = fingerprintEvaluation.scanGenerationBound
                 var hadPriorRow = false
                 var priorFingerprint: String?
                 var priorItemID: String?
@@ -891,47 +856,70 @@ actor ShareCatalogStore {
         ensureOpen()
         guard db != nil else { return [] }
         var out: [PendingLocalMetadataFile] = []
-        func run(_ sql: String, _ path: String) {
-            query("SELECT \(Self.pendingLocalMetadataFileColumns) FROM local_metadata_files WHERE \(sql);",
-                  bind: { self.bindText($0, 1, path) }) { stmt in
-                if let file = self.materializePendingLocalMetadataFile(stmt) { out.append(file) }
-            }
-        }
-
-        var memberRelPaths: [(relPath: String, isMovie: Bool)] = []
+        var members: [ShareLocalMetadataMember] = []
         if let relPath = ShareCatalogID.relPath(forFileID: itemID) {
             var isMovie = false
             query("SELECT kind FROM assets WHERE rel_path=?;", bind: { self.bindText($0, 1, relPath) }) { stmt in
                 isMovie = self.columnText(stmt, 0) == "movie"
             }
-            memberRelPaths = [(relPath, isMovie)]
+            let parentDir = (relPath as NSString).deletingLastPathComponent
+            members = [.init(
+                relPath: relPath,
+                isMovie: isMovie,
+                genericRepresentativeRelPath: isMovie
+                    ? unambiguousMovieGroupRepresentative(inDirectory: parentDir)
+                    : nil
+            )]
         } else if let mkey = ShareCatalogID.movieKey(forMovieID: itemID) {
             let groupKey = resolvedMovieGroupKey(mkey)
             query("""
             SELECT rel_path FROM assets
             WHERE COALESCE(movie_group_key, movie_key)=? AND library='movies' AND kind='movie';
             """, bind: { self.bindText($0, 1, groupKey) }) { stmt in
-                if let p = self.columnText(stmt, 0) { memberRelPaths.append((p, true)) }
-            }
-        }
-        for (relPath, isMovie) in memberRelPaths {
-            run("associated_video_rel_path=? AND kind IN ('movieStem','episodeStem')", relPath)
-            if isMovie {
+                guard let relPath = self.columnText(stmt, 0) else { return }
                 let parentDir = (relPath as NSString).deletingLastPathComponent
-                if let representative = unambiguousMovieGroupRepresentative(inDirectory: parentDir),
-                   memberRelPaths.contains(where: { $0.relPath == representative }) {
-                    run("parent_dir=? AND kind='movieGeneric'", parentDir)
-                }
+                members.append(.init(
+                    relPath: relPath,
+                    isMovie: true,
+                    genericRepresentativeRelPath: self.unambiguousMovieGroupRepresentative(
+                        inDirectory: parentDir
+                    )
+                ))
             }
         }
 
+        var roots: Set<String> = []
         if ShareCatalogID.isSeries(itemID), let key = ShareCatalogID.seriesKey(forSeriesID: itemID) {
-            var roots: Set<String> = []
             query("SELECT DISTINCT metadata_root FROM assets WHERE series_key=? AND metadata_root IS NOT NULL;",
                   bind: { self.bindText($0, 1, key) }) { stmt in
                 if let r = self.columnText(stmt, 0) { roots.insert(r) }
             }
-            for root in roots { run("parent_dir=? AND kind='series'", root) }
+        }
+        for lookup in ShareLocalMetadataAssociationPolicy.lookups(
+            members: members,
+            seriesRoots: roots
+        ) {
+            let predicate: String
+            let value: String
+            switch lookup {
+            case .exactVideo(let relPath):
+                predicate = "associated_video_rel_path=? AND kind IN ('movieStem','episodeStem')"
+                value = relPath
+            case .genericMovie(let parentDir):
+                predicate = "parent_dir=? AND kind='movieGeneric'"
+                value = parentDir
+            case .series(let parentDir):
+                predicate = "parent_dir=? AND kind='series'"
+                value = parentDir
+            }
+            query("""
+            SELECT \(Self.pendingLocalMetadataFileColumns)
+            FROM local_metadata_files WHERE \(predicate);
+            """, bind: { self.bindText($0, 1, value) }) { stmt in
+                if let file = self.materializePendingLocalMetadataFile(stmt) {
+                    out.append(file)
+                }
+            }
         }
 
         var seen = Set<String>()
@@ -986,17 +974,6 @@ actor ShareCatalogStore {
         return key
     }
 
-    /// Whether an episode file asset still exists (an episode-stem sidecar whose
-    /// video was removed is unassociated, not applied).
-    func hasEpisodeAsset(relPath: String) -> Bool {
-        ensureOpen()
-        guard db != nil else { return false }
-        var found = false
-        query("SELECT 1 FROM assets WHERE rel_path=? AND kind='episode' LIMIT 1;",
-              bind: { self.bindText($0, 1, relPath) }) { _ in found = true }
-        return found
-    }
-
     /// Reconcile sidecar-to-item associations after a clean scan changes the
     /// asset topology. Parsed caches move (or stop applying) without a reread;
     /// a formerly ambiguous, never-parsed sidecar becomes pending when its
@@ -1012,21 +989,19 @@ actor ShareCatalogStore {
         }
         for file in files {
             guard admits(scanGeneration) else { return }
-            let desiredItemID = desiredSidecarItemID(file)
-            guard desiredItemID != file.processedItemID else { continue }
+            let facts = localMetadataAssociationFacts(for: file)
+            let desiredItemID = ShareLocalMetadataAssociationPolicy.itemID(
+                for: file.kind,
+                associatedVideoRelPath: file.associatedVideoRelPath,
+                facts: facts
+            )
             let cache = sidecarValueCache(relPath: file.relPath)
-            let nextStatus: String
-            let clearProcessedFingerprint: Bool
-            if desiredItemID == nil {
-                nextStatus = "ambiguous"
-                clearProcessedFingerprint = false
-            } else if file.status == "ambiguous" {
-                nextStatus = cache.isEmpty ? "pending" : "parsed"
-                clearProcessedFingerprint = cache.isEmpty
-            } else {
-                nextStatus = file.status
-                clearProcessedFingerprint = false
-            }
+            guard let plan = ShareLocalMetadataAssociationPolicy.reassociationPlan(
+                priorItemID: file.processedItemID,
+                desiredItemID: desiredItemID,
+                priorStatus: file.status,
+                cacheIsEmpty: cache.isEmpty
+            ) else { continue }
             var stmt: OpaquePointer?
             if sqlite3_prepare_v2(db, """
                 UPDATE local_metadata_files
@@ -1035,8 +1010,8 @@ actor ShareCatalogStore {
                 WHERE rel_path=?;
                 """, -1, &stmt, nil) == SQLITE_OK {
                 bindOptText(stmt, 1, desiredItemID)
-                bindText(stmt, 2, nextStatus)
-                sqlite3_bind_int64(stmt, 3, clearProcessedFingerprint ? 1 : 0)
+                bindText(stmt, 2, plan.status)
+                sqlite3_bind_int64(stmt, 3, plan.clearProcessedFingerprint ? 1 : 0)
                 bindText(stmt, 4, file.relPath)
                 _ = sqlite3_step(stmt)
             }
@@ -1048,25 +1023,35 @@ actor ShareCatalogStore {
         }
     }
 
-    private func desiredSidecarItemID(_ file: PendingLocalMetadataFile) -> String? {
-        switch file.kind {
-        case .episodeStem:
-            guard let relPath = file.associatedVideoRelPath,
-                  hasEpisodeAsset(relPath: relPath) else { return nil }
-            return ShareCatalogID.file(relPath)
-        case .movieStem:
-            guard let relPath = file.associatedVideoRelPath else { return nil }
-            var exists = false
-            query("SELECT 1 FROM assets WHERE rel_path=? AND kind='movie' LIMIT 1;",
-                  bind: { self.bindText($0, 1, relPath) }) { _ in exists = true }
-            guard exists else { return nil }
-            return ShareCatalogID.file(movieGroupRepresentativeRelPath(forMemberRelPath: relPath))
-        case .movieGeneric:
-            return unambiguousMovieGroupRepresentative(inDirectory: file.parentDir)
-                .map(ShareCatalogID.file)
-        case .series:
-            return seriesKey(forMetadataRoot: file.parentDir).map(ShareCatalogID.series)
+    func localMetadataAssociationFacts(
+        for file: PendingLocalMetadataFile
+    ) -> ShareLocalMetadataAssociationFacts {
+        ensureOpen()
+        guard db != nil else { return .init() }
+        var facts = ShareLocalMetadataAssociationFacts()
+        if let relPath = file.associatedVideoRelPath {
+            var kind: String?
+            query("SELECT kind FROM assets WHERE rel_path=? LIMIT 1;",
+                  bind: { self.bindText($0, 1, relPath) }) { stmt in
+                kind = self.columnText(stmt, 0)
+            }
+            facts.associatedVideoExists = switch file.kind {
+            case .episodeStem:
+                kind == "episode"
+            default:
+                kind != nil
+            }
+            if kind == "movie" {
+                facts.movieRepresentativeRelPath = movieGroupRepresentativeRelPath(
+                    forMemberRelPath: relPath
+                )
+            }
         }
+        facts.genericRepresentativeRelPath = unambiguousMovieGroupRepresentative(
+            inDirectory: file.parentDir
+        )
+        facts.seriesKey = seriesKey(forMetadataRoot: file.parentDir)
+        return facts
     }
 
     /// Persist ONE sidecar's raw parsed field cache (`local_metadata_file_values`)
@@ -1143,70 +1128,50 @@ actor ShareCatalogStore {
     func materializeCachedLocalMetadata(itemID: String) -> Bool {
         ensureOpen()
         guard db != nil, normalizedMetadataReady else { return false }
-        let rankedFiles = candidateSidecars(forItemID: itemID)
+        let sidecars = candidateSidecars(forItemID: itemID)
             .filter { $0.status == "parsed" }
-            .sorted {
-                let leftRank = $0.kind == .movieGeneric ? 1 : 0
-                let rightRank = $1.kind == .movieGeneric ? 1 : 0
-                return leftRank == rightRank ? $0.relPath < $1.relPath : leftRank < rightRank
-            }
-        var winners: [MetadataField: LocalMetadataFieldCandidate] = [:]
-        for file in rankedFiles {
-            let sourceRevision = Self.localSourceRevision(
+            .map { file in
+            ShareLocalMetadataSidecarValues(
                 relPath: file.relPath,
-                fingerprint: file.fingerprint
+                kind: file.kind,
+                status: file.status,
+                fingerprint: file.fingerprint,
+                values: sidecarValueCache(relPath: file.relPath)
             )
-            for (field, valueJSON) in sidecarValueCache(relPath: file.relPath)
-                where winners[field] == nil {
-                winners[field] = LocalMetadataFieldCandidate(
-                    field: field,
-                    valueJSON: valueJSON,
-                    source: .localNFO,
-                    sourceRevision: sourceRevision
-                )
-            }
         }
         return replaceLocalNFOMetadata(
             itemID: itemID,
-            candidates: Array(winners.values)
+            candidates: ShareLocalMetadataWinnerResolver.resolve(sidecars)
         )
-    }
-
-    private static func localSourceRevision(relPath: String, fingerprint: String?) -> String {
-        let path = Data(relPath.utf8).base64EncodedString()
-        let revision = Data((fingerprint ?? "unknown").utf8).base64EncodedString()
-        return "\(path).\(revision)"
     }
 
     private func repairAllLocalMetadataProjections() {
         guard db != nil, normalizedMetadataReady else { return }
-        var currentRevisions = Set<String>()
-        var parsedItemIDs = Set<String>()
+        var parsedSidecars: [ShareLocalMetadataParsedSidecar] = []
         query("""
         SELECT rel_path, fingerprint, associated_item_id
         FROM local_metadata_files
         WHERE status='parsed';
         """) { stmt in
             guard let relPath = self.columnText(stmt, 0) else { return }
-            currentRevisions.insert(Self.localSourceRevision(
-                relPath: relPath,
-                fingerprint: self.columnText(stmt, 1)
+            parsedSidecars.append(.init(
+                sourceRevision: ShareLocalMetadataWinnerResolver.sourceRevision(
+                    relPath: relPath,
+                    fingerprint: self.columnText(stmt, 1)
+                ),
+                itemID: self.columnText(stmt, 2)
             ))
-            if let itemID = self.columnText(stmt, 2) {
-                parsedItemIDs.insert(itemID)
-            }
         }
-        var itemIDs = Set<String>()
+        var storedValues: [ShareLocalMetadataStoredValue] = []
         query("""
         SELECT item_id, source_revision FROM metadata_values
         WHERE source='localNFO';
         """) { stmt in
             guard let itemID = self.columnText(stmt, 0) else { return }
-            guard let revision = self.columnText(stmt, 1),
-                  currentRevisions.contains(revision) else {
-                itemIDs.insert(itemID)
-                return
-            }
+            storedValues.append(.init(
+                itemID: itemID,
+                sourceRevision: self.columnText(stmt, 1)
+            ))
         }
         var currentLocalVersions: [String: Int] = [:]
         query("""
@@ -1216,10 +1181,12 @@ actor ShareCatalogStore {
             guard let itemID = self.columnText(stmt, 0) else { return }
             currentLocalVersions[itemID] = Int(sqlite3_column_int64(stmt, 1))
         }
-        for itemID in parsedItemIDs
-            where currentLocalVersions[itemID] != ShareLocalMetadataEnricher.version {
-            itemIDs.insert(itemID)
-        }
+        let itemIDs = ShareLocalMetadataRepairPlanner.itemIDsToRepair(
+            parsedSidecars: parsedSidecars,
+            storedValues: storedValues,
+            localVersions: currentLocalVersions,
+            currentVersion: ShareLocalMetadataEnricher.version
+        )
         for itemID in itemIDs {
             if materializeCachedLocalMetadata(itemID: itemID) {
                 _ = writeLocalEnrichmentState(
@@ -1290,7 +1257,7 @@ actor ShareCatalogStore {
     @discardableResult
     func writeLocalMetadata(
         itemID: String,
-        candidates: [LocalMetadataFieldCandidate],
+        candidates: [ShareLocalMetadataFieldCandidate],
         now: Date = Date()
     ) -> Bool {
         ensureOpen()
@@ -1351,7 +1318,7 @@ actor ShareCatalogStore {
 
     private func replaceLocalNFOMetadata(
         itemID: String,
-        candidates: [LocalMetadataFieldCandidate],
+        candidates: [ShareLocalMetadataFieldCandidate],
         now: Date = Date()
     ) -> Bool {
         guard db != nil, normalizedMetadataReady else { return false }
@@ -1549,7 +1516,9 @@ actor ShareCatalogStore {
         }
         let movieRowsByGroup = Dictionary(grouping: movieRows, by: \.groupKey)
         for (groupKey, rows) in movieRowsByGroup {
-            let ids = unambiguousExplicitIDs(from: rows.map(\.explicitJSON))
+            let ids = ShareExplicitIDPolicy.unambiguous(
+                rows.compactMap { decodeJSON([String: String].self, $0.explicitJSON) }
+            )
             guard !ids.isEmpty else { continue }
             var rep: String?
             query("""
@@ -1572,7 +1541,9 @@ actor ShareCatalogStore {
             seriesRows.append(SeriesRow(seriesKey: key, explicitJSON: self.columnText(stmt, 1)))
         }
         for (seriesKey, rows) in Dictionary(grouping: seriesRows, by: \.seriesKey) {
-            let ids = unambiguousExplicitIDs(from: rows.map(\.explicitJSON))
+            let ids = ShareExplicitIDPolicy.unambiguous(
+                rows.compactMap { decodeJSON([String: String].self, $0.explicitJSON) }
+            )
             guard !ids.isEmpty else { continue }
             materialized[ShareCatalogID.series(seriesKey)] = ids
         }
@@ -1617,32 +1588,6 @@ actor ShareCatalogStore {
             return
         }
         hasAnyLocalMetadataCache = nil
-    }
-
-    private func unambiguousExplicitIDs(from jsonValues: [String?]) -> [String: String] {
-        var valuesByNamespace: [String: Set<String>] = [:]
-        var conflictedNamespaces = Set<String>()
-        for json in jsonValues {
-            guard let ids = decodeJSON([String: String].self, json) else { continue }
-            for (namespace, value) in ids {
-                if value == ShareMediaParser.conflictingExplicitIDMarker {
-                    conflictedNamespaces.insert(namespace.lowercased())
-                    continue
-                }
-                guard let canonical = ShareMediaParser.canonicalExplicitID(
-                    namespace: namespace,
-                    value: value
-                ) else { continue }
-                valuesByNamespace[canonical.namespace, default: []].insert(canonical.value)
-            }
-        }
-        return valuesByNamespace.reduce(into: [:]) { result, entry in
-            if !conflictedNamespaces.contains(entry.key),
-               entry.value.count == 1,
-               let value = entry.value.first {
-                result[entry.key] = value
-            }
-        }
     }
 
     // MARK: - Enrichment (scan-time metadata resolution, persisted)
@@ -2888,26 +2833,14 @@ actor ShareCatalogStore {
             guard let value = decodeJSON(String.self, row.valueJSON), !value.isEmpty else { continue }
             let namespace = String(field.rawValue.dropFirst("providerID.".count))
             copy.providerIDs = copy.providerIDs.filter {
-                ShareMediaParser.canonicalProviderNamespace($0.key) != namespace
+                ShareExplicitIDPolicy.canonicalNamespace($0.key) != namespace
             }
-            copy.providerIDs[Self.projectedProviderIDKey(namespace)] = value
+            copy.providerIDs[ShareExplicitIDPolicy.projectedKey(namespace: namespace)] = value
             copy.metadataProvenance[field] = attribution(for: field)
         }
         return copy
     }
 
-    private static func projectedProviderIDKey(_ namespace: String) -> String {
-        switch namespace {
-        case "imdb": return "Imdb"
-        case "tmdb": return "Tmdb"
-        case "tvdb": return "Tvdb"
-        case "tvmaze": return "Tvmaze"
-        case "anilist": return "Anilist"
-        case "mal": return "Mal"
-        case "anidb": return "Anidb"
-        default: return namespace
-        }
-    }
 
     /// The enrichment row id for a movie item: the group's representative file id
     /// for a logical `movie:<key>`, else the id unchanged (a legacy `f:` movie).

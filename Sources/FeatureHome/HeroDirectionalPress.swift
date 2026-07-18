@@ -88,6 +88,13 @@ final class HeroDirectionalPressGate {
 struct HeroDirectionalPressMonitor: UIViewRepresentable {
     var capturesLeft: Bool
     let gate: HeroDirectionalPressGate
+    /// Fired when a physical **Select** click completes while the caller deems the
+    /// hero focused. Routes Select through this reliable window-level observer
+    /// instead of relying solely on the SwiftUI `.onTapGesture`, which the focus
+    /// engine can silently swallow when the hero's `@FocusState` desyncs from the
+    /// real focus during rapid paging (the "all hero buttons go dead" bug). The
+    /// caller gates on hero focus and de-dupes against the tap path.
+    var onSelect: (() -> Void)?
 
     func makeUIView(context: Context) -> InstallerView {
         let view = InstallerView()
@@ -95,12 +102,14 @@ struct HeroDirectionalPressMonitor: UIViewRepresentable {
         view.isUserInteractionEnabled = false
         view.monitor.gate = gate
         view.monitor.capturesLeft = capturesLeft
+        view.monitor.onSelect = onSelect
         return view
     }
 
     func updateUIView(_ uiView: InstallerView, context: Context) {
         uiView.monitor.gate = gate
         uiView.monitor.capturesLeft = capturesLeft
+        uiView.monitor.onSelect = onSelect
     }
 
     final class InstallerView: UIView {
@@ -121,12 +130,15 @@ struct HeroDirectionalPressMonitor: UIViewRepresentable {
     final class PressLifecycleRecognizer: UIGestureRecognizer {
         var capturesLeft = true
         weak var gate: HeroDirectionalPressGate?
+        /// Invoked on a completed Select click (see `HeroDirectionalPressMonitor`).
+        var onSelect: (() -> Void)?
 
         override init(target: Any?, action: Selector?) {
             super.init(target: target, action: action)
             allowedPressTypes = [
                 NSNumber(value: UIPress.PressType.leftArrow.rawValue),
-                NSNumber(value: UIPress.PressType.rightArrow.rawValue)
+                NSNumber(value: UIPress.PressType.rightArrow.rawValue),
+                NSNumber(value: UIPress.PressType.select.rawValue)
             ]
             cancelsTouchesInView = false
             delaysTouchesBegan = false
@@ -194,6 +206,11 @@ struct HeroDirectionalPressMonitor: UIViewRepresentable {
                 case .rightArrow:
                     HeroFocusDiagnostics.emit("ended physical Right")
                     gate?.ended(.right)
+                case .select:
+                    // A completed Select click. The caller's closure gates on hero
+                    // focus and de-dupes against the SwiftUI tap path, so this is a
+                    // no-op unless the tap was swallowed (the desync dead state).
+                    onSelect?()
                 default:
                     break
                 }

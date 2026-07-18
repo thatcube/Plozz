@@ -120,6 +120,9 @@ struct HomeHeroView: View {
     /// container `onMoveCommand` read the *post-move* button on device and paged
     /// the instant focus merely landed on an edge button — the bug this fixes.)
     @State private var selectedButton: Int = 0
+    /// Uptime of the last `activateSelected` dispatch, used to de-dupe the two
+    /// Select paths (SwiftUI tap + window recognizer) into one activation.
+    @State private var lastActivateAt: TimeInterval = 0
     /// Optimistic per-item availability overrides applied the instant the user
     /// taps Request, so the pill flips to Requested/Downloading without waiting
     /// for the next trending refresh. Keyed by `MediaItem.id`; reconciled with the
@@ -1058,7 +1061,14 @@ struct HomeHeroView: View {
                     .background {
                         HeroDirectionalPressMonitor(
                             capturesLeft: !allowsSidebarEscape,
-                            gate: directionalPressGate
+                            gate: directionalPressGate,
+                            // Reliable Select activation. Gated to when the hero holds
+                            // focus (so a Select on a detail page / another tab is
+                            // ignored) and de-duped inside `activateSelected` against
+                            // the `.onTapGesture` path, so a healthy press activates
+                            // exactly once while a swallowed tap (the focus-desync
+                            // dead state) still fires here.
+                            onSelect: { if focus != nil { activateSelected() } }
                         )
                     }
                     .contentShape(Rectangle())
@@ -1243,7 +1253,7 @@ struct HomeHeroView: View {
             selectedButton = newIndex
         case let .advance(toItem, keepButton):
             page(to: toItem, keepButton: keepButton, forward: false)
-            restoreFocusAfterPage()
+            // (Focus recovery is handled centrally in `page(to:)`.)
         case .escape, .blocked:
             break
         }
@@ -1304,7 +1314,7 @@ struct HomeHeroView: View {
             selectedButton = newIndex
         case let .advance(toItem, keepButton):
             page(to: toItem, keepButton: keepButton, forward: true)
-            restoreFocusAfterPage()
+            // (Focus recovery is handled centrally in `page(to:)`.)
         case .escape, .blocked:
             break
         }
@@ -1313,7 +1323,16 @@ struct HomeHeroView: View {
     /// Fires the currently-selected pill's action (remote Select / Play-Pause).
     /// Resolves the live slide and clamps the index defensively so a stale
     /// selection can never dispatch the wrong (or an out-of-range) action.
+    ///
+    /// Called from BOTH the SwiftUI `.onTapGesture` and the window-level press
+    /// recognizer's Select route. They fire within a frame of each other on a
+    /// healthy press, so a short de-dupe window collapses the two into a single
+    /// activation; in the focus-desync dead state only the recognizer path fires,
+    /// and it passes the de-dupe because the tap never ran.
     private func activateSelected() {
+        let now = ProcessInfo.processInfo.systemUptime
+        guard now - lastActivateAt > 0.2 else { return }
+        lastActivateAt = now
         noteInteraction()
         guard let item = current else { return }
         let itemButtons = buttons(for: item)

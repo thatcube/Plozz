@@ -63,24 +63,25 @@ let package = Package(
         // AetherEngine — production media player engine for Apple platforms.
         // FFmpeg demuxes, VideoToolbox decodes, AVPlayer handles Dolby Atmos.
         // Powers the native HLS-fMP4 remux path for MKV → DoVi + Atmos + seek.
-        // 4.8.0: unified `playbackPhase` status source-of-truth (#85), keyframe-
-        // gated VOD segment cutting so a seek landing on a segment boundary
-        // decodes cleanly (#92), software-path seek holds last frame (#90). See
-        // AGENTS.local.md › "Playback engine (AetherEngine / Plozzigen)".
+        // See AGENTS.local.md › "Playback engine (AetherEngine / Plozzigen)".
         //
-        // Pinned to the tested Plozz fork revision based on upstream AetherEngine
-        // 5.4.1. PRs #128 and #129 are included upstream; they are not local or
-        // re-applied patches. Fork branch `plozz-on-5.4.1` adds only Plozz's
-        // strictly opt-in, bounded one-frame E-AC-3 JOC probe used by delayed
-        // detail-page enrichment. Default probe/playback paths remain unchanged.
+        // Pinned by exact commit to the annotated tag
+        //   `plozz-pin-5.6.1-seekfixes-atmos` → ffaac108507a533b7d09e484c0e1ec4b50c80e53
+        // on the thatcube fork. The tag keeps this commit permanently reachable
+        // (a bare branch SHA could be force-pushed away; a tagged one cannot), so
+        // pinning the SHA here is both immutable and human-traceable. The tagged
+        // stack, on the upstream 5.6.1 base, bundles:
+        //   611a8b5 opt-in bounded E-AC-3 JOC/Atmos decode-detection probe
+        //   b441b5a re-anchor producer on deadline when a forward-seek target is unbuffered
+        //   c5f3cd5 progress-aware deadline extend (don't tear down a slow-but-serving producer)
+        //   83e705e recovery hold-at-target (never revert the clock to the old position)
+        //   cd15bd0 forward-overshoot landing (a seek that lands past target is done, not re-sought)
+        //   e5333ff edge-triggered finalize (clear the loading state the instant playback resumes)
+        //   ffaac10 deactivate AVAudioSession on final teardown (stops looping Atmos passthrough on exit)
         //
         // SMB enters AetherEngine only through Plozz's protocol-neutral custom-source
-        // bridge; the engine's legacy SMB URL product is not linked. PR #94's
-        // backward-seek muxer wedge fix is included: under +delay_moov the fMP4
-        // muxer needs a PARSED audio packet to build the AC-3/E-AC-3/TrueHD sample
-        // entry, else a mid-file backward seek wedged the muxer. See
-        // docs/media-share-proposal.md § 5.1.
-        .package(url: "https://github.com/thatcube/AetherEngine", revision: "7af1a6be5e67197fa9a754f62280ba139f97288c"),
+        // bridge; the engine's legacy SMB URL product is not linked.
+        .package(url: "https://github.com/thatcube/AetherEngine", revision: "ffaac108507a533b7d09e484c0e1ec4b50c80e53"),
         // NOTE: FFmpegBuild (FFmpeg n8.1.x decode-only) and LibDovi (Dolby Vision
         // RPU parser) are pulled in TRANSITIVELY by AetherEngine — its own manifest
         // declares and consumes them. Plozz used to declare them directly only for

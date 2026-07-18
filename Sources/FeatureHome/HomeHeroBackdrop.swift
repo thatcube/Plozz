@@ -251,8 +251,8 @@ private struct WipeImageView: UIViewRepresentable {
     let height: CGFloat
 
     /// Slightly longer than a push so the easeOut "settle" tail reads clearly.
-    /// Bumped 0.85 → 0.95 to slow the whole page transition ~0.1s overall.
-    private static let duration: TimeInterval = 0.95
+    /// 0.85 → 0.95 → 1.20: a couple of user-requested slow-downs (~+0.1s, then +0.25s).
+    private static let duration: TimeInterval = 1.20
     /// Tiny horizontal overscan, purely to avoid a sub-pixel seam shimmer during the
     /// wipe. It is intentionally small: in the wipe model the incoming content is
     /// shifted *into* the revealed area and the outgoing only drifts a little, so
@@ -537,17 +537,22 @@ private struct WipeImageView: UIViewRepresentable {
             let prepared = container.prepareWipe(incomingImage: image, forward: forward)
             let animationID = UUID()
 
-            // Incoming page: a strong ease-OUT (starts fast, then eases softly into
-            // the landing) via a custom "expo-out" cubic. Owns completion. Its curve
-            // is more aggressive than the outgoing ease-out (it rises to ~1 almost
-            // immediately), so the reveal window stays ahead of the outgoing drift at
-            // every instant and no uncovered seam is exposed.
+            // Both pages ride the SAME expo-out cubic so the leaving art drifts in
+            // lockstep with the wipe — fast while the reveal is fast, settling as the
+            // reveal settles — instead of on its own slower curve. Seam-safe despite the
+            // shared curve: the reveal sweeps the full slide width while the outgoing
+            // only drifts `driftOut` (≪ width), so the reveal always outpaces the small
+            // blank strip the drift opens on the covered edge.
+            let wipeCurve = { UICubicTimingParameters(
+                controlPoint1: CGPoint(x: 0.16, y: 1.0),
+                controlPoint2: CGPoint(x: 0.3, y: 1.0)
+            ) }
+
+            // Incoming page: the expo-out reveal (starts fast, eases softly into the
+            // landing). Owns completion.
             let incomingAnimator = UIViewPropertyAnimator(
                 duration: duration,
-                timingParameters: UICubicTimingParameters(
-                    controlPoint1: CGPoint(x: 0.16, y: 1.0),
-                    controlPoint2: CGPoint(x: 0.3, y: 1.0)
-                )
+                timingParameters: wipeCurve()
             )
             incomingAnimator.addAnimations {
                 container.animateIncoming(prepared.incoming)
@@ -561,16 +566,13 @@ private struct WipeImageView: UIViewRepresentable {
                 }
             }
 
-            // Outgoing page: ease-OUT so the leaving art starts drifting IMMEDIATELY
-            // (fast off the mark, then settles) rather than lingering — a distinct
-            // motion character from the incoming page. It animates a nested content
-            // wrapper, so an outgoing drift never interrupts that page's own reveal.
-            // The incoming reveal uses a still-more-aggressive expo-out, so it stays
-            // ahead of this drift at every instant and no seam is exposed.
+            // Outgoing page: the leaving art drifts on the SAME curve as the reveal, so
+            // its velocity tracks the wipe. It animates a nested content wrapper, so the
+            // drift never interrupts that page's own reveal.
             let outgoingAnimator = prepared.outgoing.map { outgoing in
                 let animator = UIViewPropertyAnimator(
                     duration: duration,
-                    timingParameters: UICubicTimingParameters(animationCurve: .easeOut)
+                    timingParameters: wipeCurve()
                 )
                 animator.addAnimations {
                     container.animateOutgoing(outgoing, forward: forward)

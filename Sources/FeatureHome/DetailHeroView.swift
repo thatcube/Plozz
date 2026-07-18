@@ -344,6 +344,17 @@ struct DetailHeroView: View {
         return subtitle == String(year)
     }
 
+    /// Top-billed cast names for the right-aligned "Starring …" line, joined in
+    /// billing order (our proxy for "stars" — the provider returns cast top-billed
+    /// first). Falls back to the backdrop item (the series) when the focused item
+    /// (an episode) carries no cast of its own, so a show's stars stay shown while
+    /// scrubbing episodes. `nil` when no cast is available.
+    private var starringCastNames: String? {
+        let cast = item.cast.isEmpty ? backdrop.cast : item.cast
+        let names = cast.prefix(3).map(\.name)
+        return names.isEmpty ? nil : names.joined(separator: ", ")
+    }
+
     var body: some View {
         let hideText = spoilerSettings.shouldHideText(for: item)
         let heroHeight = Self.screenHeight * heroHeightFraction
@@ -545,6 +556,26 @@ struct DetailHeroView: View {
                     bottomInset: bottomInset,
                     onRestore: { onHeroActionFocused?() }
                 )
+            }
+        }
+        // A right-aligned "Starring …" line opposite the action buttons (mirrors
+        // the Apple TV detail layout). Billing order is our proxy for the stars;
+        // the full cast still lives in the Cast row below. Shares the buttons'
+        // `bottomInset` so the two sit on the same baseline, and is hidden while
+        // the hero is receded for the episode browser.
+        .overlay(alignment: .bottomTrailing) {
+            if let starringCastNames, seriesRecedeModel?.isReceded != true {
+                (Text("Starring ").foregroundStyle(.secondary)
+                    + Text(starringCastNames).foregroundStyle(.primary))
+                    .font(.system(size: 24, weight: .medium))
+                    .multilineTextAlignment(.trailing)
+                    .lineLimit(2)
+                    .frame(maxWidth: 520, alignment: .trailing)
+                    .shadow(color: .black.opacity(0.55), radius: 5, y: 1)
+                    .padding(.trailing, PlozzTheme.Metrics.screenPadding)
+                    .padding(.bottom, bottomInset)
+                    .contentTransition(.opacity)
+                    .allowsHitTesting(false)
             }
         }
         // Fade the whole hero (backdrop + text) in on first appearance rather

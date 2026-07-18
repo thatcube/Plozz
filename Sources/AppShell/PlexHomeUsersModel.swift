@@ -200,7 +200,15 @@ public final class PlexHomeUsersModel {
         guard let account = accountsProviders.accounts.first(where: { $0.id == accountID }),
               account.server.provider == .plex,
               let adminToken = accountsProviders.accountStore.token(for: accountID) else { return [] }
-        return (try? await plexHomeUsersFetch(adminToken, accountsProviders.deviceID)) ?? []
+        // Log a fetch failure instead of swallowing it silently — an empty picker
+        // then reads as a real error, not indistinguishable from "no Home users".
+        // Contract unchanged: still returns [] on failure.
+        do {
+            return try await plexHomeUsersFetch(adminToken, accountsProviders.deviceID)
+        } catch {
+            PlozzLog.auth.error("Plex Home-users fetch failed acct=\(accountID): \(error)")
+            return []
+        }
     }
 
     /// Links the active profile to a specific Plex Home user (or clears the
@@ -317,8 +325,13 @@ public final class PlexHomeUsersModel {
                     // Refresh in the background to keep the cached token fresh.
                     // `performPlexSwitch` only bumps the identity generation when the
                     // resolved token actually changed, so a warm-cache refresh that
-                    // returns the same token triggers no reload.
-                    Task { await performPlexSwitch(accountID: account.id, homeUserID: binding.homeUserID, pin: nil) }
+                    // returns the same token triggers no reload. Capture the identity
+                    // generation at spawn and pass it as `expectedGeneration` so a
+                    // stale refresh — one whose profile was switched out from under it
+                    // during the network window — drops its confirming write instead
+                    // of re-installing the OLD Home-user's token under the NEW profile.
+                    let refreshGeneration = plexIdentityGeneration
+                    Task { await performPlexSwitch(accountID: account.id, homeUserID: binding.homeUserID, pin: nil, expectedGeneration: refreshGeneration) }
                 }
             } else {
                 if plexTokenOverrides[account.id] != nil {
@@ -366,7 +379,7 @@ public final class PlexHomeUsersModel {
     /// Performs the Plex Home-user switch and installs the resulting token as the
     /// account's override, bumping the identity generation only when the resolved
     /// token actually changed.
-    private func performPlexSwitch(accountID: String, homeUserID: String, pin: String?) async {
+    private func performPlexSwitch(accountID: String, homeUserID: String, pin: String?, expectedGeneration: Int? = nil) async {
         PlozzLog.auth.debug("performPlexSwitch acct=\(accountID) home=\(homeUserID) pin?=\(pin != nil)")
         guard let adminToken = accountsProviders.accountStore.token(for: accountID) else {
             // Surface a user-visible error instead of silently returning; otherwise a
@@ -401,6 +414,19 @@ public final class PlexHomeUsersModel {
                 pendingPlexPINRequest = nil
                 plexPINError = nil
                 if pin != nil { ensurePlexIdentityForActiveProfile() }
+                return
+            }
+            // Staleness guard: a background refresh captured the identity generation
+            // at spawn (`expectedGeneration`); if the active profile was switched /
+            // its binding dropped during the network window the generation has moved,
+            // so this write would re-install the OLD Home-user's token under the NEW
+            // profile. Drop it. Harmless: the synchronously-cached token installed by
+            // `ensurePlexIdentityForActiveProfile` before the spawn is already correct
+            // for whichever profile is now active, and a fresh ensure runs on switch.
+            // The user PIN path passes `nil` here and is never guarded (it's gated by
+            // its own `pendingPlexPINRequest` lifecycle).
+            if let expected = expectedGeneration, expected != plexIdentityGeneration {
+                PlozzLog.boot("performPlexSwitch stale refresh dropped acct=\(accountID) gen=\(expected) live=\(self.plexIdentityGeneration)")
                 return
             }
             setPlexTokenOverride(resolvedToken, for: accountID)

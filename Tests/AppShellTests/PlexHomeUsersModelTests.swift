@@ -105,4 +105,87 @@ final class PlexHomeUsersModelTests: XCTestCase {
         model.forgetAccount("missing")
         XCTAssertEqual(model.resolvedToken(for: "a"), "admin-a")
     }
+
+    // MARK: Generation-guard regression (stale background-refresh race)
+
+    /// Drains queued main-actor work so a `Task { … }` spawned by the model runs to
+    /// completion. Deterministic on the single-threaded main actor.
+    private func drainMainActor(_ iterations: Int = 200) async {
+        for _ in 0..<iterations { await Task.yield() }
+    }
+
+    /// Binds the active profile to an unprotected Home user on `accountID` and lets
+    /// the confirming background refresh install + cache its token, so a later
+    /// re-scope has an override to move the identity generation off.
+    private func installUnprotectedOverride(
+        _ model: PlexHomeUsersModel,
+        accountID: String,
+        userID: String,
+        token: String
+    ) async {
+        model.plexHomeUserSwitch = { uuid, _, _, _ in "acct-\(uuid)" }
+        model.plexServerTokenResolve = { _, _, _ in token }
+        model.setPlexHomeUserForActiveProfile(
+            accountID: accountID,
+            user: PlexHomeUser(id: userID, name: userID, requiresPIN: false)
+        )
+        await drainMainActor()
+    }
+
+    /// A background token refresh whose profile was switched out from under it (the
+    /// identity generation moved during its network window) must NOT re-install the
+    /// old Home-user's token — the staleness guard drops the confirming write.
+    func testStaleBackgroundRefreshDoesNotOverwriteNewerIdentity() async throws {
+        let (model, _, _) = try makeModel(accountIDs: ["a"])
+        // 1) Establish a live override for "old" (generation now > 0, override present).
+        await installUnprotectedOverride(model, accountID: "a", userID: "old", token: "tok-old")
+        XCTAssertEqual(model.resolvedToken(for: "a"), "tok-old")
+
+        // 2) Re-scope to a DIFFERENT unprotected user, and — mid-refresh, from inside
+        //    the injected server-token resolve (which runs right before the guarded
+        //    write) — simulate the active profile's binding being dropped. That bumps
+        //    the identity generation, so the in-flight refresh's captured generation
+        //    goes stale.
+        model.plexHomeUserSwitch = { uuid, _, _, _ in "acct-\(uuid)" }
+        model.plexServerTokenResolve = { [weak model] _, _, _ in
+            await MainActor.run { model?.setPlexHomeUserForActiveProfile(accountID: "a", user: nil) }
+            return "tok-new-STALE"
+        }
+        model.setPlexHomeUserForActiveProfile(
+            accountID: "a",
+            user: PlexHomeUser(id: "new", name: "new", requiresPIN: false)
+        )
+        await drainMainActor()
+
+        // The stale refresh dropped its write: the override is gone (fell back to the
+        // admin token), and the stale "tok-new-STALE" was never installed.
+        XCTAssertEqual(model.resolvedToken(for: "a"), "admin-a")
+        XCTAssertNotEqual(model.resolvedToken(for: "a"), "tok-new-STALE")
+    }
+
+    /// The guard must NOT false-abort the common case: with no interleaving profile
+    /// switch, the background refresh installs/confirms its token normally.
+    func testHappyPathRefreshInstallsTokenWhenGenerationStable() async throws {
+        let (model, _, _) = try makeModel(accountIDs: ["a"])
+        model.plexHomeUserSwitch = { uuid, _, _, _ in "acct-\(uuid)" }
+        model.plexServerTokenResolve = { _, _, _ in "tok-happy" }
+        model.setPlexHomeUserForActiveProfile(
+            accountID: "a",
+            user: PlexHomeUser(id: "solo", name: "solo", requiresPIN: false)
+        )
+        await drainMainActor()
+
+        // Generation was stable through the refresh → the confirming write proceeded.
+        XCTAssertEqual(model.resolvedToken(for: "a"), "tok-happy")
+    }
+
+    /// A failing Home-users fetch is logged (see PlozzLog.auth) but still honours the
+    /// `[]` contract — an empty picker instead of a crash.
+    func testPlexHomeUsersReturnsEmptyOnFetchFailure() async throws {
+        struct FetchError: Error {}
+        let (model, _, _) = try makeModel(accountIDs: ["a"])
+        model.plexHomeUsersFetch = { _, _ in throw FetchError() }
+        let users = await model.plexHomeUsers(forAccountID: "a")
+        XCTAssertTrue(users.isEmpty)
+    }
 }

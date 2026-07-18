@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import CoreModels
+import CoreNetworking
 import FeatureHome
 import MediaTransportCore
 import ProviderShare
@@ -79,7 +80,7 @@ public final class MediaShareRuntimeFacet {
         // `scanStatus` and the "Updating library…" banner + Settings last-scanned
         // line light up. The reporter is a Sendable value; capture it before the Task.
         let reporter = resolvedScanStatus.reporter()
-        Task { await runtime.configure(reporter: reporter) }
+        Task { [runtime] in await runtime.configure(reporter: reporter) }
     }
 
     /// Recomputes the active media-share account set from the resolved active
@@ -119,9 +120,25 @@ public final class MediaShareRuntimeFacet {
         guard let account = accountsProviders.accounts.first(where: { $0.id == accountID }),
               account.server.provider == .mediaShare else { return }
         let token = accountsProviders.tokenResolver(account.id) ?? ""
-        guard let shareProvider = try? accountsProviders.registry.provider(
-            for: accountsProviders.providerResolutionContext(for: account, token: token)
-        ) as? ShareProvider else { return }
+        let shareProvider: ShareProvider
+        do {
+            // Log a resolution failure instead of silently swallowing it: without
+            // this, Settings "Scan now" no-ops with no diagnostic when the share's
+            // provider can't be built (unregistered factory, stale credential
+            // revision, local-media context mismatch) or resolves to the wrong type.
+            // The early-return-on-failure behavior is unchanged — this only ADDS a
+            // log line, so a real "Scan now" no-op is no longer invisible.
+            guard let resolved = try accountsProviders.registry.provider(
+                for: accountsProviders.providerResolutionContext(for: account, token: token)
+            ) as? ShareProvider else {
+                PlozzLog.app.error("Scan now: resolved provider for share \(accountID) is not a ShareProvider")
+                return
+            }
+            shareProvider = resolved
+        } catch {
+            PlozzLog.app.error("Scan now: provider resolution failed for share \(accountID): \(error)")
+            return
+        }
         Task { await shareProvider.rescan() }
     }
 }

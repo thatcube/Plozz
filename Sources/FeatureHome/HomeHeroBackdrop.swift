@@ -264,12 +264,13 @@ private struct WipeImageView: UIViewRepresentable {
     /// needs to be ≤ the slide width.
     private static let parallaxIn: CGFloat = 1200
     /// How far the outgoing art drifts as it is covered by the wipe, as a FRACTION
-    /// of the slide width (so "half the screen" is robust to the actual size). At
-    /// 0.5 the leaving art travels half the screen while the reveal sweeps the full
-    /// width on the same curve — a ~0.5× parallax that reads as moving *with* the
-    /// wipe. Seam-safe for any fraction ≤ 1 with the shared curve (the reveal covers
-    /// the full width, always outpacing the blank strip the drift opens).
-    private static let driftFraction: CGFloat = 0.5
+    /// of the slide width (so the distance is robust to the actual size). At 0.625
+    /// the leaving art travels ~1200pt (of the 1920 tvOS width) while the reveal
+    /// sweeps the full width on the same curve — a strong parallax that reads as
+    /// moving *with* the wipe. Seam-safe for any fraction ≤ 1 with the shared curve
+    /// (the reveal covers the full width, always outpacing the blank strip the drift
+    /// opens).
+    private static let driftFraction: CGFloat = 0.625
 
     func makeCoordinator() -> Coordinator {
         Coordinator(duration: Self.duration)

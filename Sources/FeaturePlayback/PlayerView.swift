@@ -38,153 +38,7 @@ public struct PlayerView: View {
 
 
     public var body: some View {
-        ZStack {
-            Color.black.ignoresSafeArea()
-
-            switch viewModel.phase {
-            case .loading:
-                // Black backdrop that hosts the (not-yet-presenting) engine
-                // surface. The bring-up spinner is a top-level overlay
-                // (`showBringUpSpinner`) so it spans this and the `.ready`-but-
-                // awaiting-first-frame window as one continuous indicator.
-                VideoSurfaceContainer(engine: viewModel.videoEngine)
-                    .id(viewModel.engineToken)
-                    .ignoresSafeArea()
-
-            case .ready:
-                CustomPlayerContainer(
-                    engine: viewModel.videoEngine,
-                    model: viewModel.controls,
-                    subtitleModel: viewModel.liveSubtitles,
-                    actions: PlayerActions(
-                        seek: { target in viewModel.requestSeek(to: target) },
-                        togglePlayPause: { viewModel.togglePlayPause() },
-                        selectAudio: { viewModel.selectAudioOption(id: $0) },
-                        selectSubtitle: { viewModel.selectSubtitleOption(id: $0) },
-                        selectSecondarySubtitle: { viewModel.selectSecondarySubtitleOption(id: $0) },
-                        setPlaybackSpeed: { viewModel.setPlaybackSpeed($0) },
-                        setAudioDelay: { viewModel.setAudioDelay($0) },
-                        setSubtitleDelay: { viewModel.setSubtitleDelay($0) },
-                        setDialogEnhance: { viewModel.setDialogEnhanceEnabled($0) },
-                        setSubtitleStyle: { viewModel.applySubtitleStyle($0) },
-                        searchRemoteSubtitles: { viewModel.searchRemoteSubtitles(language: $0) },
-                        refreshRemoteSubtitleSearch: { viewModel.refreshRemoteSubtitleSearch() },
-                        downloadRemoteSubtitle: { viewModel.downloadAndLoadRemoteSubtitle($0) },
-                        playNextEpisode: { if let next = viewModel.nextEpisode { viewModel.playEpisode(next) } },
-                        playPreviousEpisode: { if let prev = viewModel.previousEpisode { viewModel.playEpisode(prev) } },
-                        restart: { viewModel.requestSeek(to: 0) },
-                        skipSegment: { viewModel.skipActiveSegment() },
-                        autoSkipSegment: { viewModel.autoSkipActiveSegment() },
-                        dismissSkip: { viewModel.dismissActiveSkipSegment() },
-                        playUpNext: { viewModel.playNextEpisode() },
-                        dismissUpNext: { viewModel.dismissUpNextCard() },
-                        dismiss: { dismissSmoothly() }
-                    ),
-                    scrubPreview: viewModel.scrubPreview,
-                    authenticatedHTTPResolver:
-                        viewModel.authenticatedHTTPResolver,
-                    themePalette: ThemePaletteBox(
-                        makeControls: { model, actions, onExitToSurface in
-                            AnyView(PlayerControls(
-                                model: model,
-                                palette: themePalette,
-                                actions: actions,
-                                onExitToSurface: onExitToSurface
-                            ))
-                        },
-                        makeSkipButton: { model, onSkip, onDismiss, onPlayPause in
-                            AnyView(SkipSegmentButton(
-                                model: model,
-                                palette: themePalette,
-                                onSkip: onSkip,
-                                onDismiss: onDismiss,
-                                onPlayPause: onPlayPause
-                            ))
-                        },
-                        makeUpNextCard: { model, onPlayNext, onDismiss, onPlayPause in
-                            AnyView(UpNextCardView(
-                                model: model,
-                                palette: themePalette,
-                                onPlayNext: onPlayNext,
-                                onDismiss: onDismiss,
-                                onPlayPause: onPlayPause
-                            ))
-                        }
-                    )
-                )
-                // Rebuild the host when the engine is swapped (cross-engine
-                // fallback) so it re-hosts the new engine's bare video surface.
-                .id(viewModel.engineToken)
-                .ignoresSafeArea()
-
-            case let .failed(error):
-                PlaybackErrorView(message: error.userMessage) { dismiss() }
-            }
-        }
-        // HDR/Dolby-Vision veil: a black layer above everything that hides the
-        // panel's HDMI display-mode re-sync. Opacity is driven by the transition
-        // model (0 = clear, 1 = black) and always returns to 0 (settle or timeout).
-        .overlay {
-            Color.black
-                .opacity(hdrTransition.veilOpacity)
-                .ignoresSafeArea()
-                .allowsHitTesting(hdrTransition.veilOpacity > 0.01)
-                .animation(.easeInOut(duration: 0.35), value: hdrTransition.veilOpacity)
-        }
-        // Single bring-up spinner: shown while resolving/loading AND while
-        // `.ready` but the engine hasn't presented its first frame yet, so the
-        // viewer sees one continuous indicator from tap → first frame (no black
-        // gap, no second in-player spinner on an engine swap). Above the HDR veil
-        // so it stays visible during an HDMI display-mode switch.
-        .overlay {
-            if viewModel.showBringUpSpinner {
-                LoadingMessagesView(spinnerTint: .white, messageColor: .white.opacity(0.85))
-                    .ignoresSafeArea()
-                    .transition(.opacity)
-            }
-        }
-        .animation(.easeInOut(duration: 0.2), value: viewModel.showBringUpSpinner)
-        .overlay(alignment: .topLeading) {
-            // Keep diagnostics off during load/failure while Plozzigen is initializing;
-            // this avoids extra SwiftUI preference/layout churn on the crash path.
-            if viewModel.controls.diagnosticsEnabled, viewModel.phase == .ready {
-                PlaybackDiagnosticsOverlay(diagnostics: diagnosticsSampler.latest)
-                    .environment(\.themePalette, themePalette)
-                    .allowsHitTesting(false)
-                    .ignoresSafeArea()
-                    .transition(.opacity)
-            }
-        }
-        .onAppear {
-            hdrTransition.synchronize(
-                with: viewModel.effectiveDynamicRange,
-                inheritedPreservedRange: viewModel.inheritedPreservedDynamicRange
-            )
-        }
-        .task {
-            viewModel.controls.diagnosticsEnabled = showDiagnostics
-            await viewModel.load()
-            if viewModel.controls.diagnosticsEnabled { startSampling() }
-        }
-        .onChange(of: viewModel.controls.diagnosticsEnabled) { _, enabled in
-            if enabled {
-                startSampling()
-            } else {
-                diagnosticsSampler.stop()
-            }
-        }
-        .onChange(of: viewModel.diagnosticsToken) { _, _ in
-            // A request resolved (initial load, cross-engine swap, or transcode
-            // retry) and the engine is committed — seed the overlay with the
-            // engine + source facts now, even before/if load() reaches ready.
-            if viewModel.controls.diagnosticsEnabled { startSampling() }
-        }
-        .onChange(of: viewModel.playerInstanceID) { _, _ in
-            // The native engine created its live AVPlayer (initial load or
-            // transcode fallback); restart sampling to pick up live per-tick
-            // metrics now that there's a player to read.
-            if viewModel.controls.diagnosticsEnabled { startSampling() }
-        }
+        configuredPlayerStack
         .onChange(of: viewModel.shouldDismiss) { _, shouldDismiss in
             // Playback finished; close the player so it never freezes on the final
             // frame. Use the HDR-aware path so finishing a Dolby Vision/HDR title
@@ -225,6 +79,198 @@ public struct PlayerView: View {
             diagnosticsSampler.stop()
             Task { await viewModel.stop() }
         }
+    }
+
+    /// `playerStack` plus the appearance + diagnostics lifecycle observers,
+    /// split out of `body` so the ~10 chained lifecycle modifiers type-check as
+    /// two shorter chains instead of one (the combined `body` measured
+    /// ~148-181ms). These observers are order-independent, so relocating them
+    /// across the split is a pure compile-time change with identical behavior.
+    private var configuredPlayerStack: some View {
+        playerStack
+        .onAppear {
+            hdrTransition.synchronize(
+                with: viewModel.effectiveDynamicRange,
+                inheritedPreservedRange: viewModel.inheritedPreservedDynamicRange
+            )
+        }
+        .task {
+            viewModel.controls.diagnosticsEnabled = showDiagnostics
+            await viewModel.load()
+            if viewModel.controls.diagnosticsEnabled { startSampling() }
+        }
+        .onChange(of: viewModel.controls.diagnosticsEnabled) { _, enabled in
+            if enabled {
+                startSampling()
+            } else {
+                diagnosticsSampler.stop()
+            }
+        }
+        .onChange(of: viewModel.diagnosticsToken) { _, _ in
+            // A request resolved (initial load, cross-engine swap, or transcode
+            // retry) and the engine is committed — seed the overlay with the
+            // engine + source facts now, even before/if load() reaches ready.
+            if viewModel.controls.diagnosticsEnabled { startSampling() }
+        }
+        .onChange(of: viewModel.playerInstanceID) { _, _ in
+            // The native engine created its live AVPlayer (initial load or
+            // transcode fallback); restart sampling to pick up live per-tick
+            // metrics now that there's a player to read.
+            if viewModel.controls.diagnosticsEnabled { startSampling() }
+        }
+    }
+
+    /// The visual layer stack (base + HDR veil + spinner + diagnostics), split
+    /// out of `body` so the type-checker isn't composing the overlay chain and
+    /// the ~10 lifecycle modifiers as one expression. Pure extraction.
+    private var playerStack: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+
+            phaseContent
+        }
+        // HDR/Dolby-Vision veil: a black layer above everything that hides the
+        // panel's HDMI display-mode re-sync. Opacity is driven by the transition
+        // model (0 = clear, 1 = black) and always returns to 0 (settle or timeout).
+        .overlay { hdrVeilOverlay }
+        // Single bring-up spinner: shown while resolving/loading AND while
+        // `.ready` but the engine hasn't presented its first frame yet, so the
+        // viewer sees one continuous indicator from tap → first frame (no black
+        // gap, no second in-player spinner on an engine swap). Above the HDR veil
+        // so it stays visible during an HDMI display-mode switch.
+        .overlay { bringUpSpinnerOverlay }
+        .animation(.easeInOut(duration: 0.2), value: viewModel.showBringUpSpinner)
+        .overlay(alignment: .topLeading) { diagnosticsOverlay }
+    }
+
+    /// The HDR/Dolby-Vision exit veil content, extracted from `body` so its
+    /// opacity/animation chain type-checks on its own. Pure extraction.
+    private var hdrVeilOverlay: some View {
+        Color.black
+            .opacity(hdrTransition.veilOpacity)
+            .ignoresSafeArea()
+            .allowsHitTesting(hdrTransition.veilOpacity > 0.01)
+            .animation(.easeInOut(duration: 0.35), value: hdrTransition.veilOpacity)
+    }
+
+    /// The single bring-up spinner overlay content, extracted from `body`.
+    /// Pure extraction — identical gating and transition.
+    @ViewBuilder
+    private var bringUpSpinnerOverlay: some View {
+        if viewModel.showBringUpSpinner {
+            LoadingMessagesView(spinnerTint: .white, messageColor: .white.opacity(0.85))
+                .ignoresSafeArea()
+                .transition(.opacity)
+        }
+    }
+
+    /// The diagnostics overlay content, extracted from `body`. Pure extraction —
+    /// identical gating (only while `.ready` and diagnostics enabled).
+    @ViewBuilder
+    private var diagnosticsOverlay: some View {
+        // Keep diagnostics off during load/failure while Plozzigen is initializing;
+        // this avoids extra SwiftUI preference/layout churn on the crash path.
+        if viewModel.controls.diagnosticsEnabled, viewModel.phase == .ready {
+            PlaybackDiagnosticsOverlay(diagnostics: diagnosticsSampler.latest)
+                .environment(\.themePalette, themePalette)
+                .allowsHitTesting(false)
+                .ignoresSafeArea()
+                .transition(.opacity)
+        }
+    }
+
+    /// The phase-driven main content, split out of `body` so the type-checker
+    /// isn't inferring the `ZStack` + `switch` + the large `.ready` container as
+    /// one expression (the combined `body` measured ~148-181ms). Pure view
+    /// extraction — identical structure and behavior.
+    @ViewBuilder
+    private var phaseContent: some View {
+        switch viewModel.phase {
+        case .loading:
+            // Black backdrop that hosts the (not-yet-presenting) engine
+            // surface. The bring-up spinner is a top-level overlay
+            // (`showBringUpSpinner`) so it spans this and the `.ready`-but-
+            // awaiting-first-frame window as one continuous indicator.
+            VideoSurfaceContainer(engine: viewModel.videoEngine)
+                .id(viewModel.engineToken)
+                .ignoresSafeArea()
+
+        case .ready:
+            readyPlayerContainer
+
+        case let .failed(error):
+            PlaybackErrorView(message: error.userMessage) { dismiss() }
+        }
+    }
+
+    /// The `.ready`-phase custom player, extracted so its large initializer (the
+    /// `PlayerActions` closure bundle + `ThemePaletteBox` factories) type-checks
+    /// on its own instead of inflating `body`. Pure extraction — no behavior change.
+    private var readyPlayerContainer: some View {
+        CustomPlayerContainer(
+            engine: viewModel.videoEngine,
+            model: viewModel.controls,
+            subtitleModel: viewModel.liveSubtitles,
+            actions: PlayerActions(
+                seek: { target in viewModel.requestSeek(to: target) },
+                togglePlayPause: { viewModel.togglePlayPause() },
+                selectAudio: { viewModel.selectAudioOption(id: $0) },
+                selectSubtitle: { viewModel.selectSubtitleOption(id: $0) },
+                selectSecondarySubtitle: { viewModel.selectSecondarySubtitleOption(id: $0) },
+                setPlaybackSpeed: { viewModel.setPlaybackSpeed($0) },
+                setAudioDelay: { viewModel.setAudioDelay($0) },
+                setSubtitleDelay: { viewModel.setSubtitleDelay($0) },
+                setDialogEnhance: { viewModel.setDialogEnhanceEnabled($0) },
+                setSubtitleStyle: { viewModel.applySubtitleStyle($0) },
+                searchRemoteSubtitles: { viewModel.searchRemoteSubtitles(language: $0) },
+                refreshRemoteSubtitleSearch: { viewModel.refreshRemoteSubtitleSearch() },
+                downloadRemoteSubtitle: { viewModel.downloadAndLoadRemoteSubtitle($0) },
+                playNextEpisode: { if let next = viewModel.nextEpisode { viewModel.playEpisode(next) } },
+                playPreviousEpisode: { if let prev = viewModel.previousEpisode { viewModel.playEpisode(prev) } },
+                restart: { viewModel.requestSeek(to: 0) },
+                skipSegment: { viewModel.skipActiveSegment() },
+                autoSkipSegment: { viewModel.autoSkipActiveSegment() },
+                dismissSkip: { viewModel.dismissActiveSkipSegment() },
+                playUpNext: { viewModel.playNextEpisode() },
+                dismissUpNext: { viewModel.dismissUpNextCard() },
+                dismiss: { dismissSmoothly() }
+            ),
+            scrubPreview: viewModel.scrubPreview,
+            authenticatedHTTPResolver:
+                viewModel.authenticatedHTTPResolver,
+            themePalette: ThemePaletteBox(
+                makeControls: { model, actions, onExitToSurface in
+                    AnyView(PlayerControls(
+                        model: model,
+                        palette: themePalette,
+                        actions: actions,
+                        onExitToSurface: onExitToSurface
+                    ))
+                },
+                makeSkipButton: { model, onSkip, onDismiss, onPlayPause in
+                    AnyView(SkipSegmentButton(
+                        model: model,
+                        palette: themePalette,
+                        onSkip: onSkip,
+                        onDismiss: onDismiss,
+                        onPlayPause: onPlayPause
+                    ))
+                },
+                makeUpNextCard: { model, onPlayNext, onDismiss, onPlayPause in
+                    AnyView(UpNextCardView(
+                        model: model,
+                        palette: themePalette,
+                        onPlayNext: onPlayNext,
+                        onDismiss: onDismiss,
+                        onPlayPause: onPlayPause
+                    ))
+                }
+            )
+        )
+        // Rebuild the host when the engine is swapped (cross-engine
+        // fallback) so it re-hosts the new engine's bare video surface.
+        .id(viewModel.engineToken)
+        .ignoresSafeArea()
     }
 
     /// Dismiss with an HDR-aware fade that keeps the screen fully black from the

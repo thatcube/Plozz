@@ -128,17 +128,22 @@ end
 # the upload already succeeded by the time this runs.
 #
 # `build_number` is the CFBundleVersion that was uploaded (sequential TestFlight
-# number, set by the `build` lane). `prerelease` marks TestFlight betas as GitHub
-# pre-releases; an App Store `release` marks the GitHub release as the latest.
-def tag_github_release(build_number, notes, prerelease)
+# number, set by the `build` lane). Tags are ZERO-PADDED (`release/016`) so the
+# GitHub Releases web page — which orders releases by tag name, lexicographically —
+# lists newest first (unpadded `release/16` would sort below `release/2` as text).
+# Releases are created as full (non-prerelease) so the newest earns GitHub's
+# "Latest" badge in the repo sidebar; this app ships via TestFlight, so those beta
+# builds ARE the visible releases.
+def tag_github_release(build_number, notes)
   return UI.important("No build number available; skipping release tag.") if build_number.nil? || build_number.to_s.strip.empty?
 
   # The host may inject `safe.bareRepository=explicit` (worktree checkouts); the
   # override is harmless in a normal clone, so set it defensively for our git calls.
   ENV["GIT_CONFIG_PARAMETERS"] ||= "'safe.bareRepository=all'"
   ident = "-c user.name='Brandon Moore' -c user.email='16313090+thatcube@users.noreply.github.com'"
-  tag = "release/#{build_number}"
-  prev_tag = "release/#{build_number.to_i - 1}"
+  n = build_number.to_i
+  tag = format("release/%03d", n)
+  prev_tag = format("release/%03d", n - 1)
 
   begin
     sh("cd .. && git #{ident} tag -a -f #{tag} -m 'TestFlight build #{build_number}'")
@@ -159,7 +164,7 @@ def tag_github_release(build_number, notes, prerelease)
   # Release title = the app's CalVer marketing version (e.g. "2026.7.18"), read from
   # the generated project (generate-project.sh bakes MARKETING_VERSION = build date).
   # Falls back to today's CalVer if it can't be read. The build number still shows in
-  # the release via its `release/<N>` tag, so same-day builds remain distinguishable.
+  # the release via its `release/<NNN>` tag, so same-day builds remain distinguishable.
   today_cal = "#{Time.now.year}.#{Time.now.month}.#{Time.now.day}"
   version =
     begin
@@ -177,9 +182,8 @@ def tag_github_release(build_number, notes, prerelease)
   file = Tempfile.new(["release-#{build_number}", ".md"])
   file.write(body)
   file.close
-  flag = prerelease ? "--prerelease" : "--latest"
   begin
-    sh("cd .. && gh release create #{tag} --verify-tag --title #{version.shellescape} --notes-file #{file.path.shellescape} #{flag}")
+    sh("cd .. && gh release create #{tag} --verify-tag --title #{version.shellescape} --notes-file #{file.path.shellescape} --latest")
     UI.success("Created GitHub release #{tag} (#{version})")
   rescue => e
     UI.important("gh release create failed (#{e.message}); the tag is pushed — create the release manually.")
@@ -265,7 +269,7 @@ lane :beta do
   )
 
   # Tag the shipped commit and open a GitHub pre-release with the changelog + notes.
-  tag_github_release(ENV["PLOZZ_BUILD_NUMBER"], notes, true)
+  tag_github_release(ENV["PLOZZ_BUILD_NUMBER"], notes)
 end
 
 desc "Build and upload to the App Store (no auto-submit for review)"
@@ -284,5 +288,5 @@ lane :release do
 
   # Tag the shipped commit and open a GitHub release (marked latest) with the
   # changelog and any tester notes.
-  tag_github_release(ENV["PLOZZ_BUILD_NUMBER"], whats_new, false)
+  tag_github_release(ENV["PLOZZ_BUILD_NUMBER"], whats_new)
 end

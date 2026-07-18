@@ -100,6 +100,11 @@ final class HeroForegroundUIView: UIView {
     private let columnSpacing: CGFloat = 12
     /// Extra breathing room above the action-pill row (on top of `columnSpacing`).
     private let pillsTopPadding: CGFloat = 16
+    /// Extra margin between the paging dots and the action-pill row above them: the
+    /// dots are laid out this far below their normal bottom-anchored slot so the pills
+    /// stay put while the pagination gains more air. Mirrors
+    /// `HomeHeroView.uikitButtonsDotsGap`.
+    private let buttonsToDotsGap: CGFloat = 20
     private let pillSpacing: CGFloat = 24
     private let dotSize: CGFloat = 10
     private let activeDotWidth: CGFloat = 30
@@ -485,9 +490,11 @@ final class HeroForegroundUIView: UIView {
         // Measure the bottom-anchored block bottom→top.
         var y = bounds.height - bottomMargin
 
-        // Dots (in their glass capsule) at the very bottom of the block.
+        // Dots (in their glass capsule) at the very bottom of the block, dropped an
+        // extra `buttonsToDotsGap` below the buttons so the pills/metadata stay at the
+        // lowered column position while the pagination gains more air beneath them.
         if model?.dots != nil {
-            layoutDots(bottom: y, leading: leading)
+            layoutDots(bottom: y + buttonsToDotsGap, leading: leading)
             dotsContainer.isHidden = false
             y -= dotsGlassHeight + columnSpacing
         } else {

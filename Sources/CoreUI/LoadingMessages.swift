@@ -433,17 +433,19 @@ public struct LoadingMessageSequencer: Sendable, Equatable {
     }
 
     /// How long to wait, showing only a spinner, before the first playful
-    /// message appears. Defaults to a few seconds so quick loads never see them.
+    /// message appears. Kept generous so only a genuinely slow load ever surfaces
+    /// a message — quick loads just show the spinner and finish.
     public var initialDelay: TimeInterval
-    /// How long each playful message stays before cycling to the next.
+    /// How long each playful message stays before cycling to the next. Paced so a
+    /// viewer has time to comfortably read one before it changes.
     public var cycleInterval: TimeInterval
     /// The messages to cycle through. Empty means "spinner only, forever".
     public var messages: [LoadingMessage]
 
     public init(
         messages: [LoadingMessage] = LoadingMessage.playfulDefaults,
-        initialDelay: TimeInterval = 3.5,
-        cycleInterval: TimeInterval = 3.0
+        initialDelay: TimeInterval = 6.0,
+        cycleInterval: TimeInterval = 5.5
     ) {
         self.messages = messages
         self.initialDelay = initialDelay

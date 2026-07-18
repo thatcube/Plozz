@@ -28,8 +28,8 @@ public struct LoadingMessagesView: View {
     ///   - messageColor: message text colour.
     public init(
         messages: [LoadingMessage] = LoadingMessage.playfulDefaults,
-        initialDelay: TimeInterval = 3.5,
-        cycleInterval: TimeInterval = 3.0,
+        initialDelay: TimeInterval = 6.0,
+        cycleInterval: TimeInterval = 5.5,
         spinnerScale: CGFloat = 1.5,
         spinnerTint: Color? = nil,
         messageColor: Color = .secondary
@@ -53,7 +53,7 @@ public struct LoadingMessagesView: View {
                 .tint(spinnerTint)
 
             // Reserve a stable slot so the spinner doesn't jump when a message
-            // appears; the message cross-fades/slides within it.
+            // appears; the message cross-fades within it.
             ZStack {
                 if let message = model.currentMessage {
                     Text(LocalizedStringKey(message.text))
@@ -79,17 +79,18 @@ public struct LoadingMessagesView: View {
         }
     }
 
-    /// Slide-and-fade normally; a plain cross-fade when Reduce Motion is on.
+    /// A calm, ambient cross-fade with a gentle scale — deliberately NOT a
+    /// directional slide, which reads like a toast/error banner. Reduce Motion
+    /// gets a plain opacity fade.
     private var messageTransition: AnyTransition {
         if reduceMotion { return .opacity }
-        return .asymmetric(
-            insertion: .move(edge: .bottom).combined(with: .opacity),
-            removal: .move(edge: .top).combined(with: .opacity)
-        )
+        return .opacity.combined(with: .scale(scale: 0.94))
     }
 
     private var messageAnimation: Animation {
-        reduceMotion ? .easeInOut(duration: 0.3) : .spring(response: 0.45, dampingFraction: 0.85)
+        // Slow, soft ease — no spring bounce — so a new message settles in gently
+        // rather than snapping like an alert.
+        .easeInOut(duration: reduceMotion ? 0.3 : 0.6)
     }
 
     /// Politely announce the new message to VoiceOver without interrupting.

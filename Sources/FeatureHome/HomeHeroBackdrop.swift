@@ -559,8 +559,8 @@ private struct WipeImageView: UIViewRepresentable {
             // strictly slower than the reveal at every instant, so the reveal (covering
             // the full width) always stays ahead of the fractional drift.
             let outgoingCurve = UICubicTimingParameters(
-                controlPoint1: CGPoint(x: 0.3, y: 1.0),
-                controlPoint2: CGPoint(x: 0.6, y: 1.0)
+                controlPoint1: CGPoint(x: 0.22, y: 1.0),
+                controlPoint2: CGPoint(x: 0.44, y: 1.0)
             )
 
             // Incoming page: the reveal. Owns completion.

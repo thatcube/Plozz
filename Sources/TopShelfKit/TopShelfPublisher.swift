@@ -54,7 +54,7 @@ public enum TopShelfPublisher {
         result.reserveCapacity(media.count)
 
         for item in media {
-            let posterURL = item.posterURL ?? item.backdropURL
+            let posterURL = Self.posterArtworkURL(for: item)
             var imageURL = posterURL
 
             if compositeProgress,
@@ -78,5 +78,18 @@ public enum TopShelfPublisher {
         }
 
         return result
+    }
+
+    /// Picks true **vertical poster** art (2:3) for the shelf card, mirroring
+    /// `PosterCardView.artworkCandidates(for: .poster)`: an episode uses its
+    /// *series* poster (never its own 16:9 still), then its own poster, then the
+    /// spoiler-safe parent fallback. A 16:9 backdrop is deliberately *not* a
+    /// candidate — stretching it into a poster frame is what made some cards look
+    /// massively zoomed. May be `nil` when the item has no vertical art at all.
+    private static func posterArtworkURL(for item: MediaItem) -> URL? {
+        if item.kind == .episode {
+            return item.seriesPosterURL ?? item.posterURL ?? item.fallbackArtworkURL
+        }
+        return item.posterURL ?? item.fallbackArtworkURL
     }
 }

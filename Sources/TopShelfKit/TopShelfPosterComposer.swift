@@ -57,7 +57,12 @@ public enum TopShelfPosterComposer {
         guard let directory = TopShelfStore.artworkDirectoryURL else { return nil }
 
         let bucket = Int((progress * 100).rounded())
-        let fileName = "\(sanitize(id))_\(bucket).png"
+        // Fold the source art URL into the cache key so that when an item's chosen
+        // poster changes (e.g. an episode gains a real series poster instead of a
+        // stretched backdrop) the composite is regenerated rather than served
+        // stale. Stale files are then pruned by `TopShelfStore.pruneArtwork`.
+        let artKey = String(fnv1a(posterURL.absoluteString), radix: 16)
+        let fileName = "\(sanitize(id))_\(bucket)_\(artKey).png"
         let destination = directory.appendingPathComponent(fileName)
 
         // Reuse an identical prior render (same item + same rounded percentage).
@@ -170,5 +175,16 @@ public enum TopShelfPosterComposer {
         let allowed = CharacterSet.alphanumerics
         let mapped = id.unicodeScalars.map { allowed.contains($0) ? Character($0) : "-" }
         return String(mapped)
+    }
+
+    /// A small, deterministic FNV-1a hash (stable across launches, unlike
+    /// `Hasher`) used to key the composite cache on its source art URL.
+    private static func fnv1a(_ string: String) -> UInt64 {
+        var hash: UInt64 = 0xcbf2_9ce4_8422_2325
+        for byte in string.utf8 {
+            hash ^= UInt64(byte)
+            hash = hash &* 0x1000_0000_01b3
+        }
+        return hash
     }
 }

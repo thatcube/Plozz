@@ -94,31 +94,6 @@ public final class AppState {
     /// `finishNewProfileThemeSelection()`.
     public private(set) var isPickingThemeForNewProfile = false
 
-    /// A pending Plex PIN prompt, raised when activating a profile mapped to a
-    /// PIN-protected Plex Home user. `RootView` presents an entry sheet bound to
-    /// this; `nil` when no prompt is outstanding.
-    public private(set) var pendingPlexPINRequest: PlexPINRequest?
-    /// A wrong/failed-PIN message shown in the entry sheet, or `nil`.
-    public private(set) var plexPINError: String?
-    /// Bumped whenever the active Plex identity (token override) changes so
-    /// `RootView` rebuilds the signed-in subtree and content reloads as the new
-    /// Plex Home user.
-    public private(set) var plexIdentityGeneration = 0
-
-    /// A pending "Which Plex user are you?" step, populated after a Plex account
-    /// with 2+ Home users signs in (and this profile hasn't bound one yet).
-    /// `RootView` presents the picker bound to this; `nil` when none is pending.
-    public private(set) var pendingPlexUserSelection: PendingPlexUserSelection?
-
-    /// Context for the "Which Plex user are you?" onboarding step.
-    public struct PendingPlexUserSelection: Equatable, Sendable {
-        public let accountID: String
-        public let serverName: String
-        public let users: [PlexHomeUser]
-        /// Whether this selection is happening during a brand-new-install first
-        /// run (drives whether we continue to profile-setup or the app).
-        public let isFirstRun: Bool
-    }
 
     @MainActor
     private final class AppAuthenticatedHTTPResourceResolver: AuthenticatedHTTPResourceResolving {
@@ -225,33 +200,6 @@ public final class AppState {
     /// binding is applied to every one of these newly-added Plex accounts (they
     /// share the same Home users). Empty for single-account / Jellyfin adds.
     private var pendingPlexUserApplyToAccountIDs: [String] = []
-
-    /// A profile activation waiting on a Plex Home user's PIN.
-    public struct PlexPINRequest: Identifiable, Equatable, Sendable {
-        /// The id of the profile being activated.
-        public let id: String
-        public let accountID: String
-        public let homeUserID: String
-        public let homeUserName: String
-        /// Optional Plex thumb URL for the Home user — used by the PIN
-        /// dialog to render the real avatar above the keypad, like Plex's
-        /// own tvOS PIN screen.
-        public let homeUserAvatarURL: String?
-
-        public init(
-            id: String,
-            accountID: String,
-            homeUserID: String,
-            homeUserName: String,
-            homeUserAvatarURL: String? = nil
-        ) {
-            self.id = id
-            self.accountID = accountID
-            self.homeUserID = homeUserID
-            self.homeUserName = homeUserName
-            self.homeUserAvatarURL = homeUserAvatarURL
-        }
-    }
 
     /// Provider-agnostic external-ratings enrichment (IMDb/RT/Metacritic via
     /// OMDb when a key is configured; otherwise a no-op). Injected into item
@@ -549,6 +497,18 @@ public final class AppState {
     /// concerns sit downstream of this hub. Its Plex-override token/credential
     /// seams and media-share preferred-keys hook are wired in `init`.
     public let accountsProviders: AccountsProvidersModel
+
+    /// The Plex Home users ("Who's watching?") facet — owns per-account Plex
+    /// token overrides, the PIN-prompt state, `plexIdentityGeneration`, and the
+    /// profile↔Home-user switching. It resolves the accounts hub's token/credential
+    /// seams. Lazily built so it can capture `self` for the PIN-cancel
+    /// `switchProfile` fallback, mirroring `identityIndex`.
+    @ObservationIgnored
+    public private(set) lazy var plexHomeUsers: PlexHomeUsersModel = PlexHomeUsersModel(
+        accountsProviders: accountsProviders,
+        profilesModel: profilesModel,
+        switchProfile: { [weak self] id in self?.switchProfile(to: id) }
+    )
     public let authenticatedHTTPResolver: any AuthenticatedHTTPResourceResolving
     /// The one atomic media-share runtime generation (coordinator + transport
     /// composition + network-file resolver). AppState forwards every media-share
@@ -569,64 +529,6 @@ public final class AppState {
     /// `SystemProfileBridging`.
     private let systemBridge: SystemProfileBridging
 
-    /// In-memory Plex auth-token overrides keyed by `Account.id`. Set when the
-    /// active profile maps to a non-owner Plex Home user so providers resolve as
-    /// that user. **PIN-protected** users are never persisted — their token must
-    /// not survive relaunch, so Plozz re-prompts each launch. **Unprotected**
-    /// users are seeded synchronously from `plexHomeUserTokenCache` (see below)
-    /// so their identity paints instantly without the startup double-load.
-    private var plexTokenOverrides: [String: String] = [:]
-    /// Runtime revision for the effective Plex Home-user credential. Owner
-    /// credentials continue to use the account's persisted revision.
-    private var plexOverrideCredentialRevisions: [String: CredentialRevision] = [:]
-
-    /// For each account, the Plex Home-user UUID the current override resolves to.
-    /// Lets the reconciler tell an already-satisfied protected switch apart from a
-    /// stale override left by a previous profile, so a just-entered PIN isn't
-    /// re-armed into an infinite prompt/re-prompt loop.
-    private var plexResolvedHomeUser: [String: String] = [:]
-
-    /// Keychain-backed cache of resolved server tokens for **unprotected** Plex
-    /// Home users. Lets `ensurePlexIdentityForActiveProfile` install the right
-    /// identity synchronously at launch/profile-pick (instant, ungated paint),
-    /// then refresh it in the background. PIN-protected users are never cached.
-    @ObservationIgnored
-    private let plexHomeUserTokenCache: PlexHomeUserTokenCache
-
-    /// Switches to a Plex Home user, returning the new auth token. Injectable for
-    /// tests; defaults to a live `PlexAuthClient` call.
-    @ObservationIgnored
-    var plexHomeUserSwitch: @Sendable (_ uuid: String, _ pin: String?, _ adminToken: String, _ deviceID: String) async throws -> String = { uuid, pin, adminToken, deviceID in
-        try await PlexAuthClient(deviceProfile: PlexDeviceProfile(clientIdentifier: deviceID))
-            .switchHomeUser(uuid: uuid, pin: pin, authToken: adminToken)
-    }
-    /// Lists a Plex account's Home users. Injectable for tests; defaults to a
-    /// live `PlexAuthClient` call.
-    @ObservationIgnored
-    var plexHomeUsersFetch: @Sendable (_ adminToken: String, _ deviceID: String) async throws -> [PlexHomeUser] = { adminToken, deviceID in
-        try await PlexAuthClient(deviceProfile: PlexDeviceProfile(clientIdentifier: deviceID))
-            .homeUsers(authToken: adminToken)
-    }
-
-    /// Resolves the **server-scoped** access token for `serverID` from a Plex
-    /// account/Home-user token, by asking plex.tv (`/api/v2/resources`) for that
-    /// user's access to the server. Injectable for tests; defaults to a live
-    /// `PlexAuthClient` call. Returns `nil` when the user has no access to the
-    /// server (or the lookup fails), so callers can fall back to the raw token.
-    ///
-    /// Why this exists: `switchHomeUser` returns the Home user's *account-level*
-    /// plex.tv token, **not** a per-server token. A PMS authorizes browsing with
-    /// the user's *server* access token (the same kind the owner account was
-    /// built from at sign-in). Sending the bare account token can yield an
-    /// unauthorized/empty `/library/sections`, so a switched Home user sees no
-    /// libraries. Re-resolving the per-server token here mirrors how every owner
-    /// account is built and works for any switched user / any number of accounts.
-    @ObservationIgnored
-    var plexServerTokenResolve: @Sendable (_ serverID: String, _ userToken: String, _ deviceID: String) async -> String? = { serverID, userToken, deviceID in
-        let client = PlexAuthClient(deviceProfile: PlexDeviceProfile(clientIdentifier: deviceID))
-        let servers = try? await client.servers(authToken: userToken)
-        return servers?.first { $0.id == serverID }?.accessToken
-    }
 
     public init(
         accountStore: AccountPersisting? = nil,
@@ -710,7 +612,6 @@ public final class AppState {
         )
         self.systemBridge = systemBridge ?? Self.makeDefaultSystemBridge()
         self.ratingsProvider = ratingsProvider ?? RatingsServiceFactory.make()
-        self.plexHomeUserTokenCache = .makeDefault()
 
         // If the caller supplied any settings model, treat them all as injected
         // (test path) and don't rebuild them on profile switch. Otherwise build
@@ -777,9 +678,9 @@ public final class AppState {
                       $0.id == locator.accountID
                   }),
                   account.server.provider == locator.provider,
-                  self.effectiveCredentialRevision(for: account)
+                  self.plexHomeUsers.effectiveCredentialRevision(for: account)
                     == locator.credentialRevision,
-                  let token = self.resolvedToken(for: account.id),
+                  let token = self.plexHomeUsers.resolvedToken(for: account.id),
                   !token.isEmpty else {
                 throw MediaTransportError.authentication(
                     reason: "inactive authenticated HTTP identity"
@@ -802,7 +703,7 @@ public final class AppState {
             return AppAuthenticatedHTTPResourceResolver.Context(
                 provider: account.server.provider,
                 accountID: account.id,
-                credentialRevision: self.effectiveCredentialRevision(for: account),
+                credentialRevision: self.plexHomeUsers.effectiveCredentialRevision(for: account),
                 baseURL: baseURL,
                 token: token
             )
@@ -813,10 +714,10 @@ public final class AppState {
         // These keep Plex-home-user and media-share state out of the hub while
         // preserving exact resolution behavior.
         accountsProviders.tokenResolver = { [weak self] accountID in
-            self?.resolvedToken(for: accountID)
+            self?.plexHomeUsers.resolvedToken(for: accountID)
         }
         accountsProviders.credentialRevision = { [weak self] account in
-            self?.effectiveCredentialRevision(for: account) ?? account.credentialRevision
+            self?.plexHomeUsers.effectiveCredentialRevision(for: account) ?? account.credentialRevision
         }
         accountsProviders.onActiveAccountsChanged = { [weak self] resolved, accounts in
             self?.propagatePreferredShareAccounts(resolved, accounts)
@@ -831,7 +732,7 @@ public final class AppState {
     public func rescanShare(accountID: String) {
         guard let account = accountsProviders.accounts.first(where: { $0.id == accountID }),
               account.server.provider == .mediaShare else { return }
-        let token = resolvedToken(for: account.id) ?? ""
+        let token = plexHomeUsers.resolvedToken(for: account.id) ?? ""
         guard let shareProvider = try? accountsProviders.registry.provider(
             for: accountsProviders.providerResolutionContext(for: account, token: token)
         ) as? ShareProvider else { return }
@@ -977,7 +878,7 @@ public final class AppState {
         // launch. When the picker is shown, the switch happens once the user
         // picks instead.
         if !isChoosingProfile {
-            ensurePlexIdentityForActiveProfile()
+            plexHomeUsers.ensurePlexIdentityForActiveProfile()
         }
 
         // One-time migration of any legacy per-profile Seerr connection into the
@@ -1002,66 +903,6 @@ public final class AppState {
 
     public var lastServerStore: LastServerStoring { UserDefaultsLastServerStore() }
 
-    private func effectiveCredentialRevision(for account: Account) -> CredentialRevision {
-        guard account.server.provider == .plex,
-              plexTokenOverrides[account.id] != nil else {
-            return account.credentialRevision
-        }
-        if let revision = plexOverrideCredentialRevisions[account.id] {
-            return revision
-        }
-        let revision = CredentialRevision()
-        plexOverrideCredentialRevisions[account.id] = revision
-        return revision
-    }
-
-    private func setPlexTokenOverride(_ token: String?, for accountID: String) {
-        if plexTokenOverrides[accountID] != token {
-            plexOverrideCredentialRevisions[accountID] = token == nil
-                ? nil
-                : CredentialRevision()
-        }
-        plexTokenOverrides[accountID] = token
-    }
-
-    // MARK: Plex Home users ("Who's watching?")
-
-    /// The auth token to use for `accountID`, preferring an in-memory Plex
-    /// Home-user override over the account's stored (admin) token.
-    private func resolvedToken(for accountID: String) -> String? {
-        plexTokenOverrides[accountID] ?? accountsProviders.accountStore.token(for: accountID)
-    }
-
-    /// Lists the Plex Home users for a signed-in Plex account (for the profile
-    /// editor's "Plex User" picker). Returns `[]` for non-Plex/unknown accounts
-    /// or on failure. Always uses the account's stored (admin) token.
-    public func plexHomeUsers(forAccountID accountID: String) async -> [PlexHomeUser] {
-        guard let account = accountsProviders.accounts.first(where: { $0.id == accountID }),
-              account.server.provider == .plex,
-              let adminToken = accountsProviders.accountStore.token(for: accountID) else { return [] }
-        return (try? await plexHomeUsersFetch(adminToken, accountsProviders.deviceID)) ?? []
-    }
-
-    /// Links the active profile to a specific Plex Home user (or clears the
-    /// link when `user` is `nil`, falling back to the account's admin user).
-    /// Writes through to the profile, then re-applies the Plex identity so the
-    /// switch takes effect immediately (a protected user triggers the PIN
-    /// prompt via `ensurePlexIdentityForActiveProfile`).
-    public func setPlexHomeUserForActiveProfile(accountID: String, user: PlexHomeUser?) {
-        let profile = profilesModel.activeProfile
-        let binding: PlexHomeUserBinding? = user.map {
-            PlexHomeUserBinding(
-                homeUserID: $0.id,
-                name: $0.name,
-                avatarURL: $0.avatarURL?.absoluteString,
-                requiresPIN: $0.requiresPIN
-            )
-        }
-        let updated = profile.settingHomeUserBinding(binding, forPlexAccount: accountID)
-        profilesModel.update(updated)
-        ensurePlexIdentityForActiveProfile()
-    }
-
     /// Maps a household **profile** to a Seerr user (or clears the mapping when
     /// `user` is `nil`, reverting to requesting as admin). Non-secret metadata,
     /// persisted on the profile — mirrors `setPlexHomeUserForActiveProfile`, but
@@ -1078,216 +919,6 @@ public final class AppState {
         profilesModel.update(updated)
     }
 
-    /// Submits a PIN for the outstanding Plex Home-user switch.
-    public func submitPlexPIN(_ pin: String) {
-        guard let request = pendingPlexPINRequest else { return }
-        PlozzLog.auth.debug("submitPlexPIN len=\(pin.count) acct=\(request.accountID)")
-        plexPINError = nil
-        Task { await performPlexSwitch(accountID: request.accountID, homeUserID: request.homeUserID, pin: pin) }
-    }
-
-    /// Cancels the outstanding Plex PIN prompt, reverting to the default profile
-    /// so the UI isn't left under a profile the user couldn't unlock.
-    public func cancelPlexPIN() {
-        pendingPlexPINRequest = nil
-        plexPINError = nil
-        if let fallback = profilesModel.profiles.first?.id,
-           fallback != profilesModel.activeProfileID {
-            switchProfile(to: fallback)
-        } else {
-            clearPlexOverrides()
-        }
-    }
-
-    /// Treats a programmatic sheet dismissal as a cancel **only** when a prompt
-    /// is still outstanding (a successful switch already cleared it).
-    public func dismissPlexPINIfPresented() {
-        if pendingPlexPINRequest != nil { cancelPlexPIN() }
-    }
-
-    /// Aligns the in-memory Plex identity for **every** signed-in Plex account
-    /// with the active profile's per-account Home-user bindings:
-    /// - Unprotected bindings switch silently on each account.
-    /// - The first protected binding (in account order) raises a PIN prompt;
-    ///   subsequent ones are processed after the user submits or cancels.
-    /// - An account with no binding drops any existing override for that
-    ///   account (back to the admin user).
-    private func ensurePlexIdentityForActiveProfile() {
-        let profile = profilesModel.activeProfile
-        let plexAccounts = accountsProviders.accounts.filter { $0.server.provider == .plex }
-        let boundCount = plexAccounts.filter { profile.homeUserBinding(forPlexAccount: $0.id) != nil }.count
-        PlozzLog.boot("ensurePlexIdentity profile=\(profile.id) plexAccounts=\(plexAccounts.count) withBinding=\(boundCount) gen=\(self.plexIdentityGeneration)")
-
-        var pinTarget: (accountID: String, binding: PlexHomeUserBinding)?
-
-        for account in plexAccounts {
-            if let binding = profile.homeUserBinding(forPlexAccount: account.id) {
-                if binding.requiresPIN == true {
-                    // A protected user must never have a token sitting at rest;
-                    // if it was previously unprotected and cached, drop it now.
-                    plexHomeUserTokenCache.remove(account: account.id, homeUser: binding.homeUserID)
-                    // Already resolved to exactly this user? It's satisfied —
-                    // leave it, don't re-prompt. (Was the source of the
-                    // re-entrancy loop: success cleared the override, the
-                    // reconciler immediately re-prompted, cover never tore down.)
-                    if plexTokenOverrides[account.id] != nil,
-                       plexResolvedHomeUser[account.id] == binding.homeUserID {
-                        continue
-                    }
-                    // Stale override for a DIFFERENT user — drop before prompting.
-                    if plexTokenOverrides[account.id] != nil {
-                        setPlexTokenOverride(nil, for: account.id)
-                        plexResolvedHomeUser[account.id] = nil
-                        accountsProviders.registry.invalidate(accountID: account.id)
-                        plexIdentityGeneration += 1
-                        PlozzLog.boot("genBump=\(self.plexIdentityGeneration) site=ensure.staleOverride acct=\(account.id)")
-                    }
-                    if pinTarget == nil {
-                        pinTarget = (account.id, binding)
-                    }
-                } else {
-                    // Unprotected Home user. If we're already resolved to exactly
-                    // this user this session, there's nothing to do (and no need
-                    // for another background refresh — one already ran).
-                    if plexTokenOverrides[account.id] != nil,
-                       plexResolvedHomeUser[account.id] == binding.homeUserID {
-                        continue
-                    }
-                    // Seed the cached token synchronously so the signed-in subtree
-                    // paints immediately with the correct identity. On a cache hit
-                    // this is the whole switch — no network on the launch path, and
-                    // the background refresh below confirms the token (usually
-                    // unchanged → no reload). On a cache miss (first launch for this
-                    // Home user) Home paints fast with the admin token and reloads
-                    // once when the switch lands; that token is then cached so it
-                    // never happens again.
-                    if let cached = plexHomeUserTokenCache.token(account: account.id, homeUser: binding.homeUserID) {
-                        setPlexTokenOverride(cached, for: account.id)
-                        plexResolvedHomeUser[account.id] = binding.homeUserID
-                        accountsProviders.registry.invalidate(accountID: account.id)
-                        PlozzLog.boot("ensure.cachedOverride acct=\(account.id) home=\(binding.homeUserID) — instant paint")
-                    } else {
-                        PlozzLog.boot("ensure.unprotectedSwitch acct=\(account.id) home=\(binding.homeUserID) — cache miss, async")
-                    }
-                    // Refresh in the background to keep the cached token fresh.
-                    // `performPlexSwitch` only bumps the identity generation when the
-                    // resolved token actually changed, so a warm-cache refresh that
-                    // returns the same token triggers no reload.
-                    Task { await performPlexSwitch(accountID: account.id, homeUserID: binding.homeUserID, pin: nil) }
-                }
-            } else {
-                if plexTokenOverrides[account.id] != nil {
-                    setPlexTokenOverride(nil, for: account.id)
-                    plexResolvedHomeUser[account.id] = nil
-                    accountsProviders.registry.invalidate(accountID: account.id)
-                    plexIdentityGeneration += 1
-                    PlozzLog.boot("genBump=\(self.plexIdentityGeneration) site=ensure.dropOverride acct=\(account.id)")
-                }
-            }
-        }
-
-        if let pin = pinTarget {
-            pendingPlexPINRequest = PlexPINRequest(
-                id: "\(profile.id)#\(pin.accountID)",
-                accountID: pin.accountID,
-                homeUserID: pin.binding.homeUserID,
-                homeUserName: pin.binding.name.isEmpty ? "Plex User" : pin.binding.name,
-                homeUserAvatarURL: pin.binding.avatarURL
-            )
-            plexPINError = nil
-        } else {
-            pendingPlexPINRequest = nil
-            plexPINError = nil
-        }
-    }
-
-    /// Drops all Plex token overrides, falling back to stored (admin) tokens.
-    private func clearPlexOverrides() {
-        pendingPlexPINRequest = nil
-        plexPINError = nil
-        if !plexTokenOverrides.isEmpty {
-            let accountIDs = Array(plexTokenOverrides.keys)
-            plexTokenOverrides.removeAll()
-            plexOverrideCredentialRevisions.removeAll()
-            plexResolvedHomeUser.removeAll()
-            for accountID in accountIDs {
-                accountsProviders.registry.invalidate(accountID: accountID)
-            }
-            plexIdentityGeneration += 1
-            PlozzLog.boot("genBump=\(self.plexIdentityGeneration) site=clearPlexOverrides")
-        }
-    }
-
-    /// Performs the Plex Home-user switch and installs the resulting token as the
-    /// account's override, bumping the identity generation only when the resolved
-    /// token actually changed (so a warm-cache refresh doesn't force a reload).
-    private func performPlexSwitch(accountID: String, homeUserID: String, pin: String?) async {
-        PlozzLog.auth.debug("performPlexSwitch acct=\(accountID) home=\(homeUserID) pin?=\(pin != nil)")
-        guard let adminToken = accountsProviders.accountStore.token(for: accountID) else {
-            // Surface a user-visible error instead of silently returning; otherwise a
-            // PIN submission with no cached admin token vanishes (no dismissal, no error)
-            // and the user can't tell whether the PIN was accepted.
-            PlozzLog.auth.error("no admin token cached for acct=\(accountID) — surfacing error")
-            if pin != nil { plexPINError = "Couldn’t reach this Plex account. Try signing in again." }
-            return
-        }
-        do {
-            let token = try await plexHomeUserSwitch(homeUserID, pin, adminToken, accountsProviders.deviceID)
-            PlozzLog.auth.debug("Plex Home-user switch OK — clearing pendingPlexPINRequest")
-            // `token` is the Home user's account-level plex.tv token. Re-resolve
-            // it to THIS server's access token (the kind PMS authorizes browsing
-            // with), mirroring how the owner account was built at sign-in. Falls
-            // back to the account token if the per-server lookup fails so the
-            // switch never silently dead-ends. See `plexServerTokenResolve`.
-            var resolvedToken = token
-            var gotServerToken = false
-            if let serverID = accountsProviders.accounts.first(where: { $0.id == accountID })?.server.id,
-               let serverToken = await plexServerTokenResolve(serverID, token, accountsProviders.deviceID) {
-                resolvedToken = serverToken
-                gotServerToken = true
-            }
-            let previousToken = plexTokenOverrides[accountID]
-            // Don't downgrade a good cached identity on a flaky refresh: if we
-            // already have an override for this account and the per-server lookup
-            // fell back to the account-level token, keep what we have instead of
-            // replacing it (which would also force a needless reload).
-            if previousToken != nil, !gotServerToken {
-                PlozzLog.boot("refresh fell back to account token — keeping existing override acct=\(accountID)")
-                pendingPlexPINRequest = nil
-                plexPINError = nil
-                if pin != nil { ensurePlexIdentityForActiveProfile() }
-                return
-            }
-            setPlexTokenOverride(resolvedToken, for: accountID)
-            plexResolvedHomeUser[accountID] = homeUserID
-            // Cache unprotected (no-PIN) switches so future launches install this
-            // identity synchronously. PIN-protected switches are never persisted.
-            if pin == nil {
-                plexHomeUserTokenCache.store(token: resolvedToken, account: accountID, homeUser: homeUserID)
-            }
-            pendingPlexPINRequest = nil
-            plexPINError = nil
-            // Only bump the identity generation — which tears down + rebuilds the
-            // signed-in subtree — when the token actually changed. A background
-            // refresh that returns the same token (the common case on a cache hit)
-            // must NOT rebuild, or it reintroduces the startup double-load.
-            if previousToken != resolvedToken {
-                accountsProviders.registry.invalidate(accountID: accountID)
-                plexIdentityGeneration += 1
-                PlozzLog.boot("genBump=\(self.plexIdentityGeneration) site=performPlexSwitch acct=\(accountID) home=\(homeUserID)")
-            } else {
-                PlozzLog.boot("refresh unchanged — no genBump acct=\(accountID) home=\(homeUserID)")
-            }
-            // If another Plex account still needs a PIN, surface that next.
-            if pin != nil { ensurePlexIdentityForActiveProfile() }
-        } catch AppError.unauthorized {
-            PlozzLog.auth.info("Plex Home-user switch unauthorized — wrong PIN")
-            plexPINError = "Incorrect PIN. Please try again."
-        } catch {
-            PlozzLog.auth.error("Plex Home-user switch failed: \(error)")
-            plexPINError = "Couldn’t switch Plex user. Please try again."
-        }
-    }
 
     // MARK: Events
 
@@ -1441,14 +1072,14 @@ public final class AppState {
            profilesModel.activeProfile.homeUserBinding(forPlexAccount: accountID) == nil {
             Task { [weak self] in
                 guard let self else { return }
-                let users = await self.plexHomeUsers(forAccountID: accountID)
+                let users = await self.plexHomeUsers.plexHomeUsers(forAccountID: accountID)
                 if users.count >= 2 {
-                    self.pendingPlexUserSelection = PendingPlexUserSelection(
+                    self.plexHomeUsers.presentUserSelection(PlexHomeUsersModel.PendingPlexUserSelection(
                         accountID: accountID,
                         serverName: session.server.name,
                         users: users,
                         isFirstRun: isFirstRun
-                    )
+                    ))
                     self.apply(.plexUserSelectionRequired)
                 } else {
                     self.beginLibrarySelection(
@@ -1504,7 +1135,7 @@ public final class AppState {
         } else {
             apply(.accountAuthenticated)
             if continuation?.applyPlexIdentity == true {
-                ensurePlexIdentityForActiveProfile()
+                plexHomeUsers.ensurePlexIdentityForActiveProfile()
             }
         }
     }
@@ -1515,7 +1146,7 @@ public final class AppState {
     /// owner). Then continues to the profile-setup sub-flow (first run) or the
     /// app, applying the binding so the Plex identity switches.
     public func selectPlexUserDuringOnboarding(_ user: PlexHomeUser?) {
-        guard let pending = pendingPlexUserSelection else { return }
+        guard let pending = plexHomeUsers.pendingPlexUserSelection else { return }
         if let user {
             let binding = PlexHomeUserBinding(
                 homeUserID: user.id,
@@ -1535,7 +1166,7 @@ public final class AppState {
             }
             profilesModel.update(updated)
         }
-        pendingPlexUserSelection = nil
+        plexHomeUsers.clearUserSelection()
         // Continue to the "choose your libraries" step. First run seeds the
         // profile identity from the picked user; a later add applies the Plex
         // identity once the library step completes.
@@ -1577,7 +1208,7 @@ public final class AppState {
     /// theme screen.
     public func finishThemeSelection() {
         apply(.themeSelected)
-        ensurePlexIdentityForActiveProfile()
+        plexHomeUsers.ensurePlexIdentityForActiveProfile()
     }
 
     /// Dismisses the one-time theme picker shown after creating a profile in-app
@@ -1587,7 +1218,7 @@ public final class AppState {
     public func finishNewProfileThemeSelection() {
         guard isPickingThemeForNewProfile else { return }
         isPickingThemeForNewProfile = false
-        ensurePlexIdentityForActiveProfile()
+        plexHomeUsers.ensurePlexIdentityForActiveProfile()
     }
 
     /// Completes a Plex sign-in started from the provider chooser.
@@ -2223,9 +1854,7 @@ public final class AppState {
             shareScanStatusModel.removeShare(shareID: shareAccountKey)
             mediaShareAccountService.invalidate(shareAccountKey: shareAccountKey)
         }
-        setPlexTokenOverride(nil, for: id)
-        plexResolvedHomeUser[id] = nil
-        plexHomeUserTokenCache.removeAll(account: id)
+        plexHomeUsers.forgetAccount(id)
         apply(.accountsChanged(accountsProviders.accounts))
     }
 
@@ -2261,9 +1890,7 @@ public final class AppState {
             mediaShareAccountService.invalidate(shareAccountKey: accountKey)
         }
         for account in confirmedRemovedAccounts {
-            setPlexTokenOverride(nil, for: account.id)
-            plexResolvedHomeUser[account.id] = nil
-            plexHomeUserTokenCache.removeAll(account: account.id)
+            plexHomeUsers.forgetAccount(account.id)
         }
         apply(.accountsChanged(accountsProviders.accounts))
     }
@@ -2299,14 +1926,10 @@ public final class AppState {
             apply(.accountsChanged(accountsProviders.accounts))
             return
         }
-        plexTokenOverrides.removeAll()
-        plexOverrideCredentialRevisions.removeAll()
-        plexResolvedHomeUser.removeAll()
-        plexHomeUserTokenCache.removeAll()
+        plexHomeUsers.resetAllForDebug()
         profilesModel.resetToPristineDefaultForDebugging()
         var recents = lastServerStore
         recents.recentServers = []
-        pendingPlexUserSelection = nil
         pendingLibrarySelectionAccountIDs = []
         pendingOnboardingContinuation = nil
         pendingPlexUserApplyToAccountIDs = []
@@ -2343,7 +1966,7 @@ public final class AppState {
         updateTraktForActiveProfile()
         accountsProviders.reloadAccounts()
         isChoosingProfile = false
-        ensurePlexIdentityForActiveProfile()
+        plexHomeUsers.ensurePlexIdentityForActiveProfile()
     }
 
     /// Creates or updates a profile from an editor draft. Updating the active
@@ -2378,7 +2001,7 @@ public final class AppState {
                 rebuildSettingsModels()
                 updateTraktForActiveProfile()
                 accountsProviders.reloadAccounts()
-                ensurePlexIdentityForActiveProfile()
+                plexHomeUsers.ensurePlexIdentityForActiveProfile()
             }
         } else {
             let created = profilesModel.add(

@@ -16,7 +16,7 @@ import CoreUI
 /// Rows use the shared `PlexHomeUserRow` + `SettingsFocusButtonStyle`, so this
 /// list is visually identical to the Settings → Plex User picker.
 struct PlexUserSelectionView: View {
-    let selection: AppState.PendingPlexUserSelection
+    let selection: PlexHomeUsersModel.PendingPlexUserSelection
     let onSelect: (PlexHomeUser) -> Void
 
     @FocusState private var focused: String?

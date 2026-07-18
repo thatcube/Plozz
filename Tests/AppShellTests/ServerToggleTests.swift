@@ -178,10 +178,10 @@ final class ServerToggleTests: XCTestCase {
                 registry: registry,
                 profilesModel: ProfilesModel(store: ProfileStore(defaults: makeDefaults()))
             )
-            state.plexHomeUserSwitch = { homeUserID, _, _, _ in
+            state.plexHomeUsers.plexHomeUserSwitch = { homeUserID, _, _, _ in
                 "account-token-\(homeUserID)"
             }
-            state.plexServerTokenResolve = { _, userToken, _ in
+            state.plexHomeUsers.plexServerTokenResolve = { _, userToken, _ in
                 "server-\(userToken)"
             }
             state.bootstrap()
@@ -196,7 +196,7 @@ final class ServerToggleTests: XCTestCase {
                 name: "Child A",
                 requiresPIN: false
             )
-            state.setPlexHomeUserForActiveProfile(accountID: account.id, user: firstUser)
+            state.plexHomeUsers.setPlexHomeUserForActiveProfile(accountID: account.id, user: firstUser)
             let firstContext = try await waitForPlexContext(
                 token: "server-account-token-child-a",
                 state: state,
@@ -240,7 +240,7 @@ final class ServerToggleTests: XCTestCase {
                 "plozz-device-item"
             )
 
-            state.setPlexHomeUserForActiveProfile(
+            state.plexHomeUsers.setPlexHomeUserForActiveProfile(
                 accountID: account.id,
                 user: PlexHomeUser(
                     id: "child-b",
@@ -268,7 +268,7 @@ final class ServerToggleTests: XCTestCase {
                 )
             }
 
-            state.setPlexHomeUserForActiveProfile(accountID: account.id, user: nil)
+            state.plexHomeUsers.setPlexHomeUserForActiveProfile(accountID: account.id, user: nil)
             XCTAssertNotNil(state.accountsProviders.provider(forAccountID: account.id))
             let restoredOwner = try XCTUnwrap(recorder.contexts.last)
             XCTAssertEqual(

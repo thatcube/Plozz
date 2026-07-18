@@ -114,7 +114,7 @@ public struct RootView: View {
         // as a dependency of body. The sheet's Binding closures aren't
         // tracked, so without this body never re-evaluates when the request
         // clears and the sheet stays up after a successful PIN.
-        let pinRequest = appState.pendingPlexPINRequest
+        let pinRequest = appState.plexHomeUsers.pendingPlexPINRequest
         return Group {
             switch appState.state {
             case .launching:
@@ -141,7 +141,7 @@ public struct RootView: View {
                             profileID: appState.profilesModel.activeProfileID,
                             identityMaterial: HomeRuntimeScope.identityKey(
                                 profileID: appState.profilesModel.activeProfileID,
-                                plexIdentityGeneration: appState.plexIdentityGeneration
+                                plexIdentityGeneration: appState.plexHomeUsers.plexIdentityGeneration
                             ) + "|" + HomeRuntimeScope.accountScopeKey(accounts.map(\.account))
                         )
                     )
@@ -238,15 +238,15 @@ public struct RootView: View {
                         onSignOutAll: { appState.signOutAll() },
                         onSwitchProfile: { appState.requestProfileSelection() },
                         onResetToFirstRun: { appState.resetToFirstRunForDebugging() },
-                        plexHomeUsersFetcher: { await appState.plexHomeUsers(forAccountID: $0) },
-                        onSelectPlexHomeUser: { appState.setPlexHomeUserForActiveProfile(accountID: $0, user: $1) },
+                        plexHomeUsersFetcher: { await appState.plexHomeUsers.plexHomeUsers(forAccountID: $0) },
+                        onSelectPlexHomeUser: { appState.plexHomeUsers.setPlexHomeUserForActiveProfile(accountID: $0, user: $1) },
                         onSetSeerrUser: { appState.setSeerrUserForProfile(profileID: $0, user: $1) },
                         identitySources: appState.identityIndex.identitySourcesProvider,
                         onWarmIdentityIndex: { appState.identityIndex.warmIdentityIndex() }
                     )
                     .id(HomeRuntimeScope.identityKey(
                         profileID: appState.profilesModel.activeProfileID,
-                        plexIdentityGeneration: appState.plexIdentityGeneration
+                        plexIdentityGeneration: appState.plexHomeUsers.plexIdentityGeneration
                     ))
                     .transition(.opacity)
                     }
@@ -277,14 +277,14 @@ public struct RootView: View {
         .environment(\.colorScheme, resolvedPalette.isLight ? .light : .dark)
         .fullScreenCover(item: Binding(
             get: { pinRequest },
-            set: { newValue in if newValue == nil { appState.dismissPlexPINIfPresented() } }
+            set: { newValue in if newValue == nil { appState.plexHomeUsers.dismissPlexPINIfPresented() } }
         )) { request in
             PlexPINEntryView(
                 appState: appState,
                 userName: request.homeUserName,
                 avatarURLString: request.homeUserAvatarURL,
-                onSubmit: { appState.submitPlexPIN($0) },
-                onCancel: { appState.cancelPlexPIN() }
+                onSubmit: { appState.plexHomeUsers.submitPlexPIN($0) },
+                onCancel: { appState.plexHomeUsers.cancelPlexPIN() }
             )
         }
         // One-time theme picker for a profile just created in-app (Settings →
@@ -342,7 +342,7 @@ public struct RootView: View {
 private enum OnboardingPage: Equatable {
     case selectingServer(canReturnToApp: Bool)
     case authenticating(MediaServer)
-    case selectPlexUser(AppState.PendingPlexUserSelection?)
+    case selectPlexUser(PlexHomeUsersModel.PendingPlexUserSelection?)
     case selectLibraries
     case enableProfilesPrompt
     case confirmProfile
@@ -351,7 +351,7 @@ private enum OnboardingPage: Equatable {
     init(
         step: OnboardingStep,
         canReturnToApp: Bool,
-        plexUserSelection: AppState.PendingPlexUserSelection?
+        plexUserSelection: PlexHomeUsersModel.PendingPlexUserSelection?
     ) {
         switch step {
         case .selectingServer:
@@ -428,7 +428,7 @@ private struct OnboardingFlowView: View {
         _displayedPage = State(initialValue: OnboardingPage(
             step: step,
             canReturnToApp: canReturnToApp,
-            plexUserSelection: appState.pendingPlexUserSelection
+            plexUserSelection: appState.plexHomeUsers.pendingPlexUserSelection
         ))
     }
 
@@ -454,7 +454,7 @@ private struct OnboardingFlowView: View {
         OnboardingPage(
             step: step,
             canReturnToApp: canReturnToApp,
-            plexUserSelection: appState.pendingPlexUserSelection
+            plexUserSelection: appState.plexHomeUsers.pendingPlexUserSelection
         )
     }
 
@@ -662,7 +662,7 @@ private struct PlexPINEntryView: View {
         // triggers the onChange-based dismiss below. Belt-and-suspenders
         // dismissal that does NOT rely on the outer cover binding tracking
         // anything — call dismiss() ourselves from inside the cover.
-        let pendingRequest = appState.pendingPlexPINRequest
+        let pendingRequest = appState.plexHomeUsers.pendingPlexPINRequest
         return ZStack {
             // Full-bleed dimmed backdrop so the PIN screen reads as a modal
             // OVER the app (like Plex does), not as an opaque context switch.
@@ -686,9 +686,9 @@ private struct PlexPINEntryView: View {
                 }
                 // Reserve the error slot so the strip doesn't jump up/down
                 // when an error appears/clears between attempts.
-                Text(appState.plexPINError ?? " ")
+                Text(appState.plexHomeUsers.plexPINError ?? " ")
                     .font(.callout)
-                    .foregroundStyle(appState.plexPINError == nil ? Color.clear : .red)
+                    .foregroundStyle(appState.plexHomeUsers.plexPINError == nil ? Color.clear : .red)
                     .multilineTextAlignment(.center)
                 PINStrip(onDigit: appendDigit, onDelete: deleteDigit)
                     .disabled(isSubmitting)
@@ -701,7 +701,7 @@ private struct PlexPINEntryView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .onExitCommand(perform: onCancel)
-        .onChange(of: appState.plexPINError) { _, newValue in
+        .onChange(of: appState.plexHomeUsers.plexPINError) { _, newValue in
             // Wrong-PIN response: clear the entered boxes + drop the submitting
             // state so the user can retry without first backspacing four times.
             if newValue != nil {

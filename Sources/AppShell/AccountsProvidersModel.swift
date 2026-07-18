@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import CoreModels
+import CoreNetworking
 import FeatureAuth
 
 /// The accounts + providers hub, extracted from `AppState`.
@@ -80,7 +81,7 @@ public final class AccountsProvidersModel {
     public var primaryProvider: (any MediaProvider)? {
         guard let account = primaryActiveAccount,
               let token = tokenResolver(account.id) else { return nil }
-        return try? registry.provider(for: providerResolutionContext(for: account, token: token))
+        return resolveProvider(for: providerResolutionContext(for: account, token: token))
     }
 
     /// The active account that drives the current single-provider UI.
@@ -96,7 +97,7 @@ public final class AccountsProvidersModel {
         accounts.compactMap { account in
             guard activeAccountIDs.contains(account.id),
                   let token = tokenResolver(account.id),
-                  let provider = try? registry.provider(
+                  let provider = resolveProvider(
                       for: providerResolutionContext(for: account, token: token)
                   )
             else { return nil }
@@ -110,8 +111,8 @@ public final class AccountsProvidersModel {
     public func resolvedAccounts(withIDs ids: [String]) -> [ResolvedAccount] {
         ids.compactMap { id in
             guard let account = accounts.first(where: { $0.id == id }),
-                  let token = tokenResolver(id),
-                  let provider = try? registry.provider(
+                  let token = tokenResolver(account.id),
+                  let provider = resolveProvider(
                       for: providerResolutionContext(for: account, token: token)
                   )
             else { return nil }
@@ -127,7 +128,7 @@ public final class AccountsProvidersModel {
         if !active.isEmpty { return active }
         guard let account = primaryActiveAccount,
               let token = tokenResolver(account.id),
-              let provider = try? registry.provider(
+              let provider = resolveProvider(
                   for: providerResolutionContext(for: account, token: token)
               )
         else { return [] }
@@ -141,7 +142,7 @@ public final class AccountsProvidersModel {
         guard let account = accounts.first(where: { $0.id == id }),
               let token = tokenResolver(account.id)
         else { return nil }
-        return try? registry.provider(for: providerResolutionContext(for: account, token: token))
+        return resolveProvider(for: providerResolutionContext(for: account, token: token))
     }
 
     /// Builds the provider-resolution context for an account + resolved token.
@@ -164,10 +165,28 @@ public final class AccountsProvidersModel {
         )
     }
 
-    /// The active account ids for a specific profile, falling back to the
-    /// household-global active set.
+    /// Resolves a provider through the registry, logging any resolution error
+    /// (unregistered provider, missing/stale credential revision, local-media
+    /// context mismatch) instead of silently swallowing it. Returns `nil` on
+    /// failure exactly as the previous `try?` did, so the observable resolution
+    /// behavior is unchanged — the only new effect is a diagnostic log line so
+    /// config/state bugs aren't invisible.
+    private func resolveProvider(for context: ProviderResolutionContext) -> (any MediaProvider)? {
+        do {
+            return try registry.provider(for: context)
+        } catch {
+            PlozzLog.app.error("Provider resolution failed for account \(context.accountID): \(error)")
+            return nil
+        }
+    }
+
+    /// The active account ids for a specific profile, filtered to accounts that
+    /// are still signed in, falling back to the household-global active set.
     public func activeAccountIDs(forProfile id: String) -> [String] {
-        Array(profilesModel.activeAccountIDs(for: id, fallback: accountStore.activeAccountIDs()))
+        let known = Set(accounts.map(\.id))
+        return profilesModel
+            .activeAccountIDs(for: id, fallback: accountStore.activeAccountIDs())
+            .filter { known.contains($0) }
     }
 
     /// Reloads accounts from the store and recomputes the active set for the

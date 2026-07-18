@@ -35,7 +35,7 @@ final class AccountsProvidersModelTests: XCTestCase {
         )
     }
 
-    private func makeModel(accountIDs: [(String, String)]) throws -> (AccountsProvidersModel, AccountStore) {
+    private func makeModel(accountIDs: [(String, String)]) throws -> (AccountsProvidersModel, AccountStore, ProfilesModel) {
         let store = AccountStore(secureStore: InMemorySecureStore())
         for (id, host) in accountIDs {
             try store.add(account(id: id, host: host), token: "token-\(id)")
@@ -46,11 +46,11 @@ final class AccountsProvidersModelTests: XCTestCase {
             registry: ProviderRegistry(),
             profilesModel: profiles
         )
-        return (model, store)
+        return (model, store, profiles)
     }
 
     func testReloadAccountsLoadsAccountsAndFiresHook() throws {
-        let (model, _) = try makeModel(accountIDs: [("a", "a.example.com"), ("b", "b.example.com")])
+        let (model, _, _) = try makeModel(accountIDs: [("a", "a.example.com"), ("b", "b.example.com")])
 
         var hookResolved: Set<String>?
         var hookAccountsCount: Int?
@@ -71,7 +71,7 @@ final class AccountsProvidersModelTests: XCTestCase {
     }
 
     func testProviderResolutionGatesOnTokenSeam() throws {
-        let (model, _) = try makeModel(accountIDs: [("a", "a.example.com")])
+        let (model, _, _) = try makeModel(accountIDs: [("a", "a.example.com")])
         model.reloadAccounts()
 
         // No token → nil, before the registry is even consulted.
@@ -83,16 +83,65 @@ final class AccountsProvidersModelTests: XCTestCase {
     }
 
     func testDeviceIDDelegatesToStore() throws {
-        let (model, store) = try makeModel(accountIDs: [])
+        let (model, store, _) = try makeModel(accountIDs: [])
         XCTAssertEqual(model.deviceID, store.deviceID())
     }
 
     func testPrimaryActiveAccountFallsBackToFirst() throws {
-        let (model, _) = try makeModel(accountIDs: [("a", "a.example.com"), ("b", "b.example.com")])
+        let (model, _, _) = try makeModel(accountIDs: [("a", "a.example.com"), ("b", "b.example.com")])
         model.reloadAccounts()
         // Even if the active set were empty, primaryActiveAccount falls back to the
         // first account so the signed-in UI is never empty.
         XCTAssertNotNil(model.primaryActiveAccount)
         XCTAssertTrue(["a", "b"].contains(model.primaryActiveAccount!.id))
+    }
+
+    // MARK: Active-set resolution matrix (reloadAccounts)
+    // The hub is the sole authority for account-set resolution. These unit-test
+    // the three explicit-choice branches directly on the hub (previously only
+    // covered end-to-end via ServerToggleTests through AppState), driving them
+    // through the same injected profilesModel/accountStore seams.
+
+    /// (a) An explicit EMPTY choice is honored — "watch nothing" / master toggle
+    /// off — and must NOT be silently re-expanded to the household-global set.
+    func testReloadHonorsExplicitEmptyChoice() throws {
+        let (model, _, profiles) = try makeModel(accountIDs: [("a", "a.example.com"), ("b", "b.example.com")])
+        // The profile explicitly chose to watch nothing.
+        profiles.setActiveAccountIDs([], for: profiles.activeProfileID)
+
+        model.reloadAccounts()
+
+        XCTAssertTrue(model.activeAccountIDs.isEmpty)
+    }
+
+    /// (b) An explicit choice whose accounts have ALL gone stale falls back to the
+    /// household-global active set (so a profile isn't left permanently blank by a
+    /// removal it didn't make) — not to empty.
+    func testReloadFallsBackToGlobalWhenAllChosenAreStale() throws {
+        let (model, store, profiles) = try makeModel(accountIDs: [("a", "a.example.com"), ("b", "b.example.com")])
+        // Household-global active set is just "b".
+        store.setActiveAccountIDs(["b"])
+        // The profile's explicit choice references only accounts that no longer exist.
+        profiles.setActiveAccountIDs(["gone-1", "gone-2"], for: profiles.activeProfileID)
+
+        model.reloadAccounts()
+
+        // Falls back to the global set (filtered to known), NOT empty, NOT all.
+        XCTAssertEqual(model.activeAccountIDs, ["b"])
+    }
+
+    /// (c) An explicit choice where only SOME chosen accounts survive honors
+    /// exactly the survivors — it does not fall back to the global set.
+    func testReloadHonorsSurvivingSubsetOfExplicitChoice() throws {
+        let (model, store, profiles) = try makeModel(accountIDs: [("a", "a.example.com"), ("b", "b.example.com")])
+        // Global set is everything, to prove we do NOT fall back to it here.
+        store.setActiveAccountIDs(["a", "b"])
+        // The profile chose "a" plus an account that no longer exists.
+        profiles.setActiveAccountIDs(["a", "gone"], for: profiles.activeProfileID)
+
+        model.reloadAccounts()
+
+        // Exactly the surviving chosen account — not the global {a, b}.
+        XCTAssertEqual(model.activeAccountIDs, ["a"])
     }
 }

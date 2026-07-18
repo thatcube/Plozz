@@ -542,23 +542,31 @@ private struct WipeImageView: UIViewRepresentable {
             let prepared = container.prepareWipe(incomingImage: image, forward: forward)
             let animationID = UUID()
 
-            // Both pages ride the SAME cubic so the leaving art drifts in lockstep with
-            // the wipe — same velocity profile — instead of on its own curve. Switched
-            // from an extreme expo-out (which dumped ~90% of the motion into the first
-            // ~0.2s and read as "rushed then stop") to a gentle ease-in-out, so the full
-            // travel is spread evenly across the whole duration for a deliberate glide.
-            // Seam-safe despite the shared curve: the reveal sweeps the full slide width
-            // while the outgoing only drifts a fraction of it, so the reveal always
-            // outpaces the small blank strip the drift opens on the covered edge.
-            let wipeCurve = { UICubicTimingParameters(
-                controlPoint1: CGPoint(x: 0.42, y: 0.0),
-                controlPoint2: CGPoint(x: 0.58, y: 1.0)
-            ) }
+            // The two pages ride DIFFERENT curves on purpose: the wipe keeps its
+            // original snappy speed, and the leaving art trails it a little (a parallax
+            // lag), rather than matching it.
+            //
+            // Incoming reveal — the original expo-out: near-instant off the mark,
+            // easing softly into the landing. This is "the wipe," unchanged in speed.
+            let incomingCurve = UICubicTimingParameters(
+                controlPoint1: CGPoint(x: 0.16, y: 1.0),
+                controlPoint2: CGPoint(x: 0.3, y: 1.0)
+            )
+            // Outgoing drift — the SAME front-loaded character (prompt start, no linger,
+            // settles) but a notch gentler, so the leaving art is a little slower than
+            // the wipe and visibly trails it. Its control-point x's are pushed right so
+            // it reaches the landing slightly later than the reveal. Seam-safe: it is
+            // strictly slower than the reveal at every instant, so the reveal (covering
+            // the full width) always stays ahead of the fractional drift.
+            let outgoingCurve = UICubicTimingParameters(
+                controlPoint1: CGPoint(x: 0.3, y: 1.0),
+                controlPoint2: CGPoint(x: 0.6, y: 1.0)
+            )
 
-            // Incoming page: the reveal, on the shared ease-in-out. Owns completion.
+            // Incoming page: the reveal. Owns completion.
             let incomingAnimator = UIViewPropertyAnimator(
                 duration: duration,
-                timingParameters: wipeCurve()
+                timingParameters: incomingCurve
             )
             incomingAnimator.addAnimations {
                 container.animateIncoming(prepared.incoming)
@@ -572,13 +580,13 @@ private struct WipeImageView: UIViewRepresentable {
                 }
             }
 
-            // Outgoing page: the leaving art drifts on the SAME curve as the reveal, so
-            // its velocity tracks the wipe. It animates a nested content wrapper, so the
-            // drift never interrupts that page's own reveal.
+            // Outgoing page: the leaving art drifts on its own slightly-slower curve, so
+            // it trails the wipe. It animates a nested content wrapper, so the drift
+            // never interrupts that page's own reveal.
             let outgoingAnimator = prepared.outgoing.map { outgoing in
                 let animator = UIViewPropertyAnimator(
                     duration: duration,
-                    timingParameters: wipeCurve()
+                    timingParameters: outgoingCurve
                 )
                 animator.addAnimations {
                     container.animateOutgoing(outgoing, forward: forward)

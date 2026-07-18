@@ -263,9 +263,13 @@ private struct WipeImageView: UIViewRepresentable {
     /// then settles to center — the parallax "glide." Independent of `bleed`; only
     /// needs to be ≤ the slide width.
     private static let parallaxIn: CGFloat = 1200
-    /// How far the outgoing art drifts (slowly) as it is covered by the wipe. Kept
-    /// small so the old image "slides out way more slowly than the new comes in."
-    private static let driftOut: CGFloat = 320
+    /// How far the outgoing art drifts as it is covered by the wipe, as a FRACTION
+    /// of the slide width (so "half the screen" is robust to the actual size). At
+    /// 0.5 the leaving art travels half the screen while the reveal sweeps the full
+    /// width on the same curve — a ~0.5× parallax that reads as moving *with* the
+    /// wipe. Seam-safe for any fraction ≤ 1 with the shared curve (the reveal covers
+    /// the full width, always outpacing the blank strip the drift opens).
+    private static let driftFraction: CGFloat = 0.5
 
     func makeCoordinator() -> Coordinator {
         Coordinator(duration: Self.duration)
@@ -275,7 +279,7 @@ private struct WipeImageView: UIViewRepresentable {
         let view = HeroWipeContainerView(
             bleed: Self.parallaxBleed,
             parallaxIn: Self.parallaxIn,
-            driftOut: Self.driftOut
+            driftFraction: Self.driftFraction
         )
         context.coordinator.container = view
         context.coordinator.configure(width: width, height: height)
@@ -541,8 +545,8 @@ private struct WipeImageView: UIViewRepresentable {
             // lockstep with the wipe — fast while the reveal is fast, settling as the
             // reveal settles — instead of on its own slower curve. Seam-safe despite the
             // shared curve: the reveal sweeps the full slide width while the outgoing
-            // only drifts `driftOut` (≪ width), so the reveal always outpaces the small
-            // blank strip the drift opens on the covered edge.
+            // only drifts a fraction of the width (≤ half), so the reveal always
+            // outpaces the small blank strip the drift opens on the covered edge.
             let wipeCurve = { UICubicTimingParameters(
                 controlPoint1: CGPoint(x: 0.16, y: 1.0),
                 controlPoint2: CGPoint(x: 0.3, y: 1.0)
@@ -679,8 +683,9 @@ final class HeroWipeContainerView: UIView {
     /// How far the *incoming* content is shifted toward the entering edge at the
     /// start of a wipe, settling to 0 — the parallax "glide."
     private let parallaxIn: CGFloat
-    /// How far the *outgoing* content drifts (slowly) away as it is covered.
-    private let driftOut: CGFloat
+    /// How far the *outgoing* content drifts away as it is covered, as a fraction of
+    /// the slide width (multiplied by `effectiveSize.width` at animate time).
+    private let driftFraction: CGFloat
 
     private var pages: [SlidePage] = []
     private var revealingPages = Set<ObjectIdentifier>()
@@ -698,10 +703,10 @@ final class HeroWipeContainerView: UIView {
         }
     }
 
-    init(bleed: CGFloat, parallaxIn: CGFloat, driftOut: CGFloat) {
+    init(bleed: CGFloat, parallaxIn: CGFloat, driftFraction: CGFloat) {
         self.bleed = bleed
         self.parallaxIn = parallaxIn
-        self.driftOut = driftOut
+        self.driftFraction = driftFraction
         super.init(frame: .zero)
         clipsToBounds = true
         backgroundColor = .clear
@@ -797,7 +802,8 @@ final class HeroWipeContainerView: UIView {
     }
 
     func animateOutgoing(_ handle: WipeHandle, forward: Bool) {
-        handle.page.setOutgoingDrift(forward ? -driftOut : driftOut)
+        let drift = effectiveSize.width * driftFraction
+        handle.page.setOutgoingDrift(forward ? -drift : drift)
     }
 
     /// Settle this incoming page and remove only pages below it. Any later pages

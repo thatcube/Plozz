@@ -10,33 +10,73 @@ import CoreModels
 public enum TopShelfPublisher {
     /// Builds and saves a snapshot from the Home screen's two playable rows.
     ///
-    /// Empty rows are dropped; if nothing is playable the snapshot is still
-    /// written (empty) so a freshly-signed-out state clears the shelf.
-    public static func publish(continueWatching: [MediaItem], latest: [MediaItem]) {
+    /// Continue-Watching items that are mid-playback get a poster with the resume
+    /// bar composited into the artwork (posters can't show the native Top Shelf
+    /// progress bar — see `TopShelfPosterComposer`); everything else uses its
+    /// plain remote poster. Empty rows are dropped; if nothing is playable the
+    /// snapshot is still written (empty) so a freshly-signed-out state clears the
+    /// shelf. Stale composited art is pruned each publish.
+    public static func publish(continueWatching: [MediaItem], latest: [MediaItem]) async {
         var sections: [TopShelfSnapshot.Section] = []
 
-        let resume = items(from: continueWatching)
+        let resume = await items(from: continueWatching, compositeProgress: true)
         if !resume.isEmpty {
             sections.append(.init(id: "continue", title: "Continue Watching", items: resume))
         }
 
-        let recent = items(from: latest)
+        let recent = await items(from: latest)
         if !recent.isEmpty {
             sections.append(.init(id: "latest", title: "Recently Added", items: recent))
         }
 
+        // Drop any composited poster no longer referenced by this snapshot.
+        let keptArtwork = Set(
+            sections
+                .flatMap(\.items)
+                .compactMap(\.imageURL)
+                .filter(\.isFileURL)
+                .map(\.lastPathComponent)
+        )
+        TopShelfStore.pruneArtwork(keeping: keptArtwork)
+
         TopShelfStore.save(TopShelfSnapshot(sections: sections))
     }
 
-    private static func items(from media: [MediaItem]) -> [TopShelfSnapshot.Item] {
-        media.map { item in
-            TopShelfSnapshot.Item(
-                id: item.id,
-                title: item.title,
-                subtitle: item.subtitle,
-                imageURL: item.posterURL ?? item.backdropURL,
-                playbackProgress: item.playedPercentage
+    /// Maps domain items onto snapshot items. When `compositeProgress` is set, a
+    /// mid-playback item's poster is replaced by a locally composited poster that
+    /// has the progress bar burned in; on any failure it falls back to the plain
+    /// remote poster (still a poster card, just without a bar).
+    private static func items(
+        from media: [MediaItem],
+        compositeProgress: Bool = false
+    ) async -> [TopShelfSnapshot.Item] {
+        var result: [TopShelfSnapshot.Item] = []
+        result.reserveCapacity(media.count)
+
+        for item in media {
+            let posterURL = item.posterURL ?? item.backdropURL
+            var imageURL = posterURL
+
+            if compositeProgress,
+               let progress = item.playedPercentage,
+               let poster = posterURL,
+               let composited = await TopShelfPosterComposer.compositedPosterURL(
+                   id: item.id, posterURL: poster, progress: progress
+               ) {
+                imageURL = composited
+            }
+
+            result.append(
+                TopShelfSnapshot.Item(
+                    id: item.id,
+                    title: item.title,
+                    subtitle: item.subtitle,
+                    imageURL: imageURL,
+                    playbackProgress: item.playedPercentage
+                )
             )
         }
+
+        return result
     }
 }

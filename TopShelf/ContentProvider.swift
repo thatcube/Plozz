@@ -36,10 +36,10 @@ final class ContentProvider: TVTopShelfContentProvider {
         let shelfItem = TVTopShelfSectionedItem(identifier: item.id)
         shelfItem.title = item.title
         shelfItem.imageShape = .poster
-
-        if let progress = item.playbackProgress, progress > 0 {
-            shelfItem.playbackProgress = min(progress, 1)
-        }
+        // No native `playbackProgress`: tvOS only draws that bar on `.hdtv`
+        // cards. For in-progress Continue-Watching items the app composites the
+        // resume bar directly into the poster art (`item.imageURL` points at the
+        // burned-in local file), so the bar shows on a poster card.
 
         if let imageURL = item.imageURL {
             shelfItem.setImageURL(imageURL, for: .screenScale1x)

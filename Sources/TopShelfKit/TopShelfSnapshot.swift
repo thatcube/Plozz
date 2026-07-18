@@ -36,10 +36,14 @@ public struct TopShelfSnapshot: Codable, Equatable, Sendable {
         public var id: String
         public var title: String
         public var subtitle: String?
-        /// Poster artwork (2:3) shown on the shelf card, falling back to backdrop.
+        /// Poster artwork (2:3) for the shelf card. Usually a remote Jellyfin
+        /// poster URL, but for a mid-playback Continue-Watching item it's a
+        /// **local file URL** in the shared App Group container pointing at a
+        /// poster with the resume bar composited in (see `TopShelfPosterComposer`).
         public var imageURL: URL?
-        /// Fraction watched (0…1). Drives the resume progress bar drawn on the
-        /// card; `nil`/`0` means no bar.
+        /// Fraction watched (0…1), recorded for reference. The bar itself is
+        /// burned into `imageURL` (posters can't show the native Top Shelf bar),
+        /// so the extension doesn't read this — it renders the artwork as-is.
         public var playbackProgress: Double?
 
         public init(

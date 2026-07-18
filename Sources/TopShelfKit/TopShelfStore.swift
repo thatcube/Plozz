@@ -65,6 +65,30 @@ public enum TopShelfStore {
         snapshotDirectoryURL?.appendingPathComponent(TopShelf.snapshotFileName)
     }
 
+    /// Directory holding composited Continue-Watching posters (poster art with
+    /// the progress bar burned in — see `TopShelfPosterComposer`). Lives beside
+    /// the snapshot under the writable `Library/Caches` subtree so both the app
+    /// (which writes) and the extension (which loads the files referenced by the
+    /// snapshot) resolve the same absolute paths.
+    public static var artworkDirectoryURL: URL? {
+        snapshotDirectoryURL?.appendingPathComponent("topshelf-art", isDirectory: true)
+    }
+
+    /// Deletes composited posters whose filenames are no longer referenced by the
+    /// freshly published snapshot, so stale/superseded art (old progress buckets,
+    /// items that dropped off Continue Watching) doesn't accumulate. A no-op when
+    /// the directory doesn't exist yet.
+    public static func pruneArtwork(keeping keepFilenames: Set<String>) {
+        guard let directory = artworkDirectoryURL else { return }
+        let fileManager = FileManager.default
+        guard let files = try? fileManager.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: nil
+        ) else { return }
+        for file in files where !keepFilenames.contains(file.lastPathComponent) {
+            try? fileManager.removeItem(at: file)
+        }
+    }
+
     /// Persists the snapshot into the shared App Group container.
     ///
     /// The container directory is created on demand first: the system hands back

@@ -366,7 +366,7 @@ public final class HomeViewModel {
         let continueWatching = content.continueWatching.filter { $0.isVisibleOnHome(isLibraryVisible: isLibraryVisible) }
         let latest = content.latest.filter { $0.isVisibleOnHome(isLibraryVisible: isLibraryVisible) }
         topShelfPublishTask = Task.detached(priority: .utility) {
-            TopShelfPublisher.publish(continueWatching: continueWatching, latest: latest)
+            await TopShelfPublisher.publish(continueWatching: continueWatching, latest: latest)
         }
     }
 

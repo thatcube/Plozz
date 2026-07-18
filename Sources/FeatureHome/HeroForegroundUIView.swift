@@ -102,9 +102,8 @@ final class HeroForegroundUIView: UIView {
     private let pillsTopPadding: CGFloat = 16
     /// Extra margin between the paging dots and the action-pill row above them: the
     /// dots are laid out this far below their normal bottom-anchored slot so the pills
-    /// stay put while the pagination gains more air. Mirrors
-    /// `HomeHeroView.uikitButtonsDotsGap`.
-    private let buttonsToDotsGap: CGFloat = 20
+    /// stay put while the pagination gains more air.
+    private let buttonsToDotsGap: CGFloat = 40
     private let pillSpacing: CGFloat = 24
     private let dotSize: CGFloat = 10
     private let activeDotWidth: CGFloat = 30

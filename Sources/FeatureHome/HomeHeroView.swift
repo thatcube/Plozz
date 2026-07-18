@@ -614,12 +614,6 @@ struct HomeHeroView: View {
     /// by this much. Applied as reduced bottom padding on the whole UIKit column so
     /// the imperative visual layer AND the SwiftUI focus overlay move down together.
     private static let uikitContentDrop: CGFloat = 80
-    /// Extra margin between the action buttons and the paging dots on the UIKit hero
-    /// (added on top of the pills→dots `columnSpacing`): the dots are dropped this far
-    /// below the buttons so the whole column stays lowered by `uikitContentDrop` while
-    /// gaining more air between the buttons and the pagination. Mirrored inside
-    /// ``HeroForegroundUIView`` (its `buttonsToDotsGap`).
-    private static let uikitButtonsDotsGap: CGFloat = 20
 
     /// The base of the action row: the visible SwiftUI pills (standard path) or a
     /// reserved clear focus region (UIKit-foreground path, which draws the pills).

@@ -48,65 +48,67 @@ struct MainTabView: View {
     /// Subtitle behaviour (mode / language / auto-download) and appearance
     /// (`SubtitleStyle`) split out of the retired `CaptionSettings`. Behaviour
     /// feeds the policy resolver; style seeds the player + live overlay.
-    let subtitleBehaviorModel: SubtitleBehaviorModel
-    let subtitleStyleModel: SubtitleStyleModel
-    let spoilerModel: SpoilerSettingsModel
-    let playbackModel: PlaybackSettingsModel
+    let profileSettings: ProfileSettingsModel
+    let syncServices: SyncServices
+    private var subtitleBehaviorModel: SubtitleBehaviorModel { profileSettings.subtitleBehaviorModel }
+    private var subtitleStyleModel: SubtitleStyleModel { profileSettings.subtitleStyleModel }
+    private var spoilerModel: SpoilerSettingsModel { profileSettings.spoilerModel }
+    private var playbackModel: PlaybackSettingsModel { profileSettings.playbackModel }
     /// Per-profile per-content-type subtitle policy overrides, threaded into the
     /// player (resolved against the caption base) and into Settings for editing.
-    let subtitlePolicyModel: SubtitlePolicyModel
+    private var subtitlePolicyModel: SubtitlePolicyModel { profileSettings.subtitlePolicyModel }
     /// Per-profile per-content-type audio-language overrides, threaded into the
     /// player (resolved against the playback base) and into Settings for editing.
-    let audioPolicyModel: AudioPolicyModel
-    let themeModel: ThemeSettingsModel
-    let themeMusicModel: ThemeMusicSettingsModel
+    private var audioPolicyModel: AudioPolicyModel { profileSettings.audioPolicyModel }
+    private var themeModel: ThemeSettingsModel { profileSettings.themeModel }
+    private var themeMusicModel: ThemeMusicSettingsModel { profileSettings.themeMusicModel }
     /// Per-profile remembered per-series audio/subtitle selections, threaded into
     /// the player so a manual track switch sticks across that show's episodes.
     let seriesTrackStore: any SeriesTrackPreferenceStoring
-    let diagnosticsModel: DiagnosticsSettingsModel
+    private var diagnosticsModel: DiagnosticsSettingsModel { profileSettings.diagnosticsModel }
     /// App-wide, opt-in crash-reporting consent (off by default). Threaded into
     /// Settings ▸ Help & Diagnostics so the household can turn it on/off.
     let crashReportingModel: CrashReportingSettingsModel
     /// Whether this build has a crash-reporting endpoint baked in; drives whether
     /// the opt-in toggle is enabled or shown disabled with a note.
     let crashReportingConfigured: Bool
-    let musicPlayerModel: MusicPlayerSettingsModel
+    private var musicPlayerModel: MusicPlayerSettingsModel { profileSettings.musicPlayerModel }
     /// Per-profile UI density, injected into the environment below so the
     /// Settings ▸ Appearance picker can edit it.
-    let uiDensityModel: UIDensitySettingsModel
+    private var uiDensityModel: UIDensitySettingsModel { profileSettings.uiDensityModel }
     /// Per-profile media card style, edited in Settings ▸ Appearance ▸ Display.
     /// Injected into the environment for the Settings editor; card rendering reads
     /// `\.plozzCardStyle` (installed at the app root in RootView).
-    let cardStyleModel: CardStyleSettingsModel
+    private var cardStyleModel: CardStyleSettingsModel { profileSettings.cardStyleModel }
     /// Per-profile watch-status indicator (a "watched" check badge vs an
     /// "unwatched" corner flag), edited in Settings ▸ Appearance ▸ Display.
     /// Injected into the environment for the Settings editor; card rendering reads
     /// `\.plozzWatchStatusIndicator` (installed at the app root in RootView).
-    let watchStatusIndicatorModel: WatchStatusIndicatorSettingsModel
+    private var watchStatusIndicatorModel: WatchStatusIndicatorSettingsModel { profileSettings.watchStatusIndicatorModel }
     /// Per-profile navigation chrome (top bar vs. sidebar), edited in Settings ▸
     /// Appearance ▸ Display. This view reads its `style` to pick the `TabViewStyle`;
     /// the Settings editor binds the model, and chrome-sensitive views elsewhere
     /// read `\.plozzNavigationStyle` (installed at the app root in RootView).
-    let navigationStyleModel: NavigationStyleSettingsModel
+    private var navigationStyleModel: NavigationStyleSettingsModel { profileSettings.navigationStyleModel }
     /// Per-profile transparency (liquid glass) preference, edited in Settings ▸
     /// Appearance ▸ Display. Injected into the environment for the Settings editor;
     /// the resolved value drives `\.plozzReduceTransparency` (installed in RootView).
-    let transparencyModel: TransparencyPreferenceModel
+    private var transparencyModel: TransparencyPreferenceModel { profileSettings.transparencyModel }
     /// Per-profile Home hero (featured carousel) settings, edited in
     /// Settings ▸ Home display. Threaded into `HomeTab` to drive the carousel and
     /// into Settings for editing.
-    let heroSettingsModel: HeroSettingsModel
+    private var heroSettingsModel: HeroSettingsModel { profileSettings.heroSettingsModel }
     /// App-wide media-share scan/enrich status, injected into the environment so
     /// Home shows an "Updating library…" banner and Settings shows last-scanned.
     let shareScanStatusModel: ShareScanStatusModel
     /// Per-profile Night Shift settings, edited in Settings ▸ Night Shift. Its
     /// overlay is installed at the app root (RootView); here it's only threaded
     /// into Settings for editing.
-    let nightShiftModel: NightShiftSettingsModel
+    private var nightShiftModel: NightShiftSettingsModel { profileSettings.nightShiftModel }
     /// App-scoped audio engine, owned by `AppState` so it survives the per-profile
     /// subtree rebuild (this view is re-created with a new `.id` on profile switch).
     let audioController: AudioPlaybackController
-    let homeVisibility: HomeLibraryVisibilityModel
+    private var homeVisibility: HomeLibraryVisibilityModel { profileSettings.homeLibraryVisibilityModel }
     /// Per-profile store for the last-rendered Home row structure, used to seed
     /// the loading skeleton so it matches the user's real Home before content
     /// arrives. Constructed with the active profile's namespace by `RootView`.
@@ -116,13 +118,13 @@ struct MainTabView: View {
     /// then silently refresh. Constructed with the active profile's namespace by
     /// `RootView` (same lifecycle as `homeLayoutStore`).
     let homeContentStore: HomeContentStoring
-    let ratingsProvider: any ExternalRatingsProviding
-    let trakt: TraktService
-    let simkl: SimklService
-    let seer: SeerService
-    let anilist: AniListService
-    let mal: MALService
-    let lastfm: LastFmService
+    private var ratingsProvider: any ExternalRatingsProviding { syncServices.ratingsProvider }
+    private var trakt: TraktService { syncServices.trakt }
+    private var simkl: SimklService { syncServices.simkl }
+    private var seer: SeerService { syncServices.seer }
+    private var anilist: AniListService { syncServices.anilist }
+    private var mal: MALService { syncServices.mal }
+    private var lastfm: LastFmService { syncServices.lastfm }
     let mediaItemActionHandler: any MediaItemActionHandling
     let enqueueWatchMutation: (WatchMutation) -> Void
     let watchBridge: WatchOutboxBridge

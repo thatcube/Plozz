@@ -36,14 +36,24 @@ public struct TopShelfSnapshot: Codable, Equatable, Sendable {
         public var id: String
         public var title: String
         public var subtitle: String?
-        /// Wide artwork shown on the shelf card (backdrop, falling back to poster).
+        /// Poster artwork (2:3) shown on the shelf card, falling back to backdrop.
         public var imageURL: URL?
+        /// Fraction watched (0…1). Drives the resume progress bar drawn on the
+        /// card; `nil`/`0` means no bar.
+        public var playbackProgress: Double?
 
-        public init(id: String, title: String, subtitle: String? = nil, imageURL: URL? = nil) {
+        public init(
+            id: String,
+            title: String,
+            subtitle: String? = nil,
+            imageURL: URL? = nil,
+            playbackProgress: Double? = nil
+        ) {
             self.id = id
             self.title = title
             self.subtitle = subtitle
             self.imageURL = imageURL
+            self.playbackProgress = playbackProgress
         }
     }
 

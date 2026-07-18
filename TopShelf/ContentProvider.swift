@@ -35,7 +35,11 @@ final class ContentProvider: TVTopShelfContentProvider {
     private static func makeItem(_ item: TopShelfSnapshot.Item) -> TVTopShelfSectionedItem {
         let shelfItem = TVTopShelfSectionedItem(identifier: item.id)
         shelfItem.title = item.title
-        shelfItem.imageShape = .hdtv
+        shelfItem.imageShape = .poster
+
+        if let progress = item.playbackProgress, progress > 0 {
+            shelfItem.playbackProgress = min(progress, 1)
+        }
 
         if let imageURL = item.imageURL {
             shelfItem.setImageURL(imageURL, for: .screenScale1x)

@@ -34,7 +34,8 @@ public enum TopShelfPublisher {
                 id: item.id,
                 title: item.title,
                 subtitle: item.subtitle,
-                imageURL: item.backdropURL ?? item.posterURL
+                imageURL: item.posterURL ?? item.backdropURL,
+                playbackProgress: item.playedPercentage
             )
         }
     }

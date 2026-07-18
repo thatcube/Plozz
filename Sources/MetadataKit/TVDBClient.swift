@@ -442,15 +442,16 @@ public actor TVDBClient {
     }
 
     private static func tokens(_ s: String) -> Set<String> {
-        Set(
-            s.lowercased()
-                .unicodeScalars
-                .map { CharacterSet.alphanumerics.contains($0) ? Character($0) : " " }
-                .reduce(into: "") { $0.append($1) }
-                .split(separator: " ")
-                .map(String.init)
-                .filter { $0.count >= 2 && Int($0) == nil }
-        )
+        // Broken into typed locals so this chain type-checks fast (measured ~178ms
+        // as a single expression). Same transform: lowercase, non-alphanumerics →
+        // spaces, split, drop short tokens and pure-number tokens.
+        let mapped: [Character] = s.lowercased().unicodeScalars.map {
+            CharacterSet.alphanumerics.contains($0) ? Character($0) : " "
+        }
+        let cleaned: String = mapped.reduce(into: "") { $0.append($1) }
+        let words: [String] = cleaned.split(separator: " ").map(String.init)
+        let kept: [String] = words.filter { $0.count >= 2 && Int($0) == nil }
+        return Set(kept)
     }
 
     // MARK: - DTOs

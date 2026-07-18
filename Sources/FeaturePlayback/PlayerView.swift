@@ -155,6 +155,12 @@ public struct PlayerView: View {
                     .transition(.opacity)
             }
         }
+        .onAppear {
+            hdrTransition.synchronize(
+                with: viewModel.effectiveDynamicRange,
+                inheritedPreservedRange: viewModel.inheritedPreservedDynamicRange
+            )
+        }
         .task {
             viewModel.controls.diagnosticsEnabled = showDiagnostics
             await viewModel.load()
@@ -185,11 +191,17 @@ public struct PlayerView: View {
             // fades cleanly back to SDR instead of flashing.
             if shouldDismiss { dismissSmoothly() }
         }
-        .onChange(of: viewModel.displayMode) { oldMode, newMode in
-            // The display is being driven to a new dynamic range (initial resolve
-            // on the native engine, or a cross-engine swap). If the HDMI display
-            // mode will switch, fade to black so the panel re-sync is hidden.
-            hdrTransition.beginTransition(from: oldMode, to: newMode)
+        .onChange(of: viewModel.effectiveDynamicRange) { oldRange, newRange in
+            hdrTransition.reconcile(
+                from: oldRange,
+                to: newRange,
+                inheritedPreservedRange: viewModel.inheritedPreservedDynamicRange
+            )
+        }
+        .onChange(of: viewModel.dynamicRangeTransitionToken) { _, _ in
+            if viewModel.effectiveDynamicRange.isAwaitingEngineProbe {
+                hdrTransition.restartProbeTransition()
+            }
         }
         .modifier(DisplaySettleObserver { hdrTransition.displayDidSettle() })
         .onChange(of: scenePhase) { _, phase in
@@ -234,7 +246,7 @@ public struct PlayerView: View {
     /// If no window veil is available (previews/tests), fall back to the player-only
     /// behavior: wait for the in-player settle/timeout before dismissing.
     private func dismissSmoothly() {
-        guard viewModel.contentDisplayMode.isHDR else {
+        guard viewModel.requiresHDRExitVeil else {
             dismiss()
             return
         }

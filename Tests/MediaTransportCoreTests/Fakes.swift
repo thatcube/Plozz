@@ -2,6 +2,53 @@ import CoreModels
 import Foundation
 @testable import MediaTransportCore
 
+final class AsyncTestGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var entered = false
+    private var opened = false
+    private var entryWaiters: [CheckedContinuation<Void, Never>] = []
+    private var openWaiters: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        let waiters = lock.withLock {
+            entered = true
+            let waiters = entryWaiters
+            entryWaiters.removeAll()
+            return waiters
+        }
+        waiters.forEach { $0.resume() }
+        await withCheckedContinuation { continuation in
+            let shouldResume = lock.withLock {
+                guard !opened else { return true }
+                openWaiters.append(continuation)
+                return false
+            }
+            if shouldResume { continuation.resume() }
+        }
+    }
+
+    func waitUntilEntered() async {
+        await withCheckedContinuation { continuation in
+            let shouldResume = lock.withLock {
+                guard !entered else { return true }
+                entryWaiters.append(continuation)
+                return false
+            }
+            if shouldResume { continuation.resume() }
+        }
+    }
+
+    func open() {
+        let waiters = lock.withLock {
+            opened = true
+            let waiters = openWaiters
+            openWaiters.removeAll()
+            return waiters
+        }
+        waiters.forEach { $0.resume() }
+    }
+}
+
 final class FakeByteSource: MediaTransportByteSource, @unchecked Sendable {
     private let lock = NSLock()
     private var shutdownCountStorage = 0
@@ -131,6 +178,32 @@ struct FakeDrainDeadline: MediaIODrainDeadline {
     }
 }
 
+final class ControlledDrainDeadline: MediaIODrainDeadline, @unchecked Sendable {
+    private let lock = NSLock()
+    private var results: [Bool]
+    private var timeoutsStorage: [Duration] = []
+    let gate: AsyncTestGate?
+
+    init(results: [Bool], gate: AsyncTestGate? = nil) {
+        self.results = results
+        self.gate = gate
+    }
+
+    var timeouts: [Duration] { lock.withLock { timeoutsStorage } }
+
+    func waitForDrain(
+        of resource: any MediaIOScannerResource,
+        timeout: Duration
+    ) async -> Bool {
+        let result = lock.withLock {
+            timeoutsStorage.append(timeout)
+            return results.isEmpty ? resource.isDrained : results.removeFirst()
+        }
+        if let gate { await gate.wait() }
+        return result
+    }
+}
+
 func makeEndpoint(
     host: String = "nas.example.com",
     root: String = "/media"
@@ -168,4 +241,15 @@ func waitUntil(
         await Task.yield()
     }
     return predicate()
+}
+
+func waitUntilAsync(
+    iterations: Int = 1_000,
+    _ predicate: () async -> Bool
+) async -> Bool {
+    for _ in 0..<iterations {
+        if await predicate() { return true }
+        await Task.yield()
+    }
+    return await predicate()
 }

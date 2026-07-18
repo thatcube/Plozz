@@ -992,10 +992,20 @@ public final class AppState {
     private var machine = SessionStateMachine()
     private let accountStore: AccountPersisting
     private let registry: ProviderRegistry
-    public let networkFileResolver: any MediaTransportNetworkFileResolving
     public let authenticatedHTTPResolver: any AuthenticatedHTTPResourceResolving
-    private let networkFileResolverRegistry: MediaTransportResolverRegistry?
-    private let shareCatalogCoordinator: ShareCatalogCoordinator
+    /// The one atomic media-share runtime generation (coordinator + transport
+    /// composition + network-file resolver). AppState forwards every media-share
+    /// concern to it rather than storing the pieces independently.
+    private let mediaShareRuntime: any MediaShareRuntime
+    /// Media-share account lifecycle policy (retire/invalidate) routed through
+    /// the same runtime generation.
+    private let mediaShareAccountService: MediaShareAccountService
+
+    /// The network-file resolver used for direct-file share playback. Forwards
+    /// to the runtime so there is a single owner of the resolver instance.
+    public var networkFileResolver: any MediaTransportNetworkFileResolving {
+        mediaShareRuntime.networkFileResolver
+    }
     private var sharePriorityRevision: UInt64 = 0
     private let durableLocalStateStore: DurableLocalStateStore?
     /// Optional tvOS system-user seam (default app-owned no-op). See
@@ -1067,9 +1077,8 @@ public final class AppState {
     public init(
         accountStore: AccountPersisting? = nil,
         registry: ProviderRegistry? = nil,
-        networkFileResolver: (any MediaTransportNetworkFileResolving)? = nil,
         authenticatedHTTPResolver: (any AuthenticatedHTTPResourceResolving)? = nil,
-        shareCatalogCoordinator: ShareCatalogCoordinator? = nil,
+        mediaShareRuntime: (any MediaShareRuntime)? = nil,
         durableLocalStateStore: DurableLocalStateStore? = nil,
         profilesModel: ProfilesModel? = nil,
         systemBridge: SystemProfileBridging? = nil,
@@ -1115,9 +1124,10 @@ public final class AppState {
             resolvedDurableLocalStateStore = nil
         }
         self.durableLocalStateStore = resolvedDurableLocalStateStore
-        let resolvedShareCatalogCoordinator = shareCatalogCoordinator
-            ?? ShareCatalogCoordinator()
-        self.shareCatalogCoordinator = resolvedShareCatalogCoordinator
+        let resolvedRuntime: any MediaShareRuntime = mediaShareRuntime
+            ?? DefaultMediaShareRuntime.make(accountStore: resolvedAccountStore)
+        self.mediaShareRuntime = resolvedRuntime
+        self.mediaShareAccountService = MediaShareAccountService(runtime: resolvedRuntime)
         let defaultAuthenticatedHTTPResolver: AppAuthenticatedHTTPResourceResolver?
         let resolvedAuthenticatedHTTPResolver: any AuthenticatedHTTPResourceResolving
         if let authenticatedHTTPResolver {
@@ -1130,24 +1140,9 @@ public final class AppState {
             resolvedAuthenticatedHTTPResolver = resolver
             defaultAuthenticatedHTTPResolver = resolver
         }
-        let resolvedNetworkFileResolver: any MediaTransportNetworkFileResolving
-        if let networkFileResolver {
-            resolvedNetworkFileResolver = networkFileResolver
-            self.networkFileResolverRegistry = nil
-        } else {
-            let composition = Self.makeDefaultNetworkFileResolver(
-                accountStore: resolvedAccountStore,
-                shareCatalogCoordinator: resolvedShareCatalogCoordinator
-            )
-            resolvedNetworkFileResolver = composition.resolver
-            self.networkFileResolverRegistry = composition.registry
-        }
-        self.networkFileResolver = resolvedNetworkFileResolver
         self.registry = registry ?? Self.makeDefaultRegistry(
-            accountStore: resolvedAccountStore,
-            networkFileResolver: resolvedNetworkFileResolver,
+            runtime: resolvedRuntime,
             authenticatedHTTPResolver: resolvedAuthenticatedHTTPResolver,
-            shareCatalogCoordinator: resolvedShareCatalogCoordinator,
             durableLocalStateStore: resolvedDurableLocalStateStore
         )
         self.profilesModel = profilesModel ?? Self.makeDefaultProfilesModel()
@@ -1230,7 +1225,7 @@ public final class AppState {
         // light up. The reporter is a Sendable value; capture it before the Task.
         let scanReporter = self.shareScanStatusModel.reporter()
         Task {
-            await resolvedShareCatalogCoordinator.configure(reporter: scanReporter)
+            await resolvedRuntime.configure(reporter: scanReporter)
         }
         defaultAuthenticatedHTTPResolver?.configure { [weak self] locator in
             guard let self,
@@ -1343,23 +1338,15 @@ public final class AppState {
         #endif
     }
 
-    /// Registers the providers this build links. Each backend is a single
-    /// `register(kind, …)` line; nothing else in core changes.
+    /// Registers the providers this build links. Jellyfin/Emby/Plex are each a
+    /// single `register(kind, …)` line; the media-share provider is registered
+    /// by the runtime, which owns the transport composition and coordinator.
     private static func makeDefaultRegistry(
-        accountStore: any AccountPersisting,
-        networkFileResolver: any MediaTransportNetworkFileResolving,
+        runtime: any MediaShareRuntime,
         authenticatedHTTPResolver: any AuthenticatedHTTPResourceResolving,
-        shareCatalogCoordinator: ShareCatalogCoordinator,
         durableLocalStateStore: DurableLocalStateStore?
     ) -> ProviderRegistry {
         let registry = ProviderRegistry()
-        // Media-share transport adapters keyed by scheme, so the scanner
-        // session factory routes each account to the right transport the same
-        // way the playback resolver registry does.
-        let mediaShareAdapters = Dictionary(
-            uniqueKeysWithValues: makeMediaShareAdapters(accountStore: accountStore)
-                .map { ($0.transportIdentifier, $0) }
-        )
         registry.register(.jellyfin) { context in
             JellyfinProvider(
                 session: context.session,
@@ -1391,349 +1378,11 @@ public final class AppState {
                 connectionRefresh: PlexProvider.connectionRefresh(for: context.session)
             )
         }
-        registry.register(.mediaShare) { context in
-            guard let localMediaContext = context.localMediaContext else {
-                throw ProviderResolutionError.localMediaContextRequired(.mediaShare)
-            }
-            let endpoint = try MediaShareTransportDispatch.endpoint(for: context.session.server)
-            guard let adapter = mediaShareAdapters[endpoint.transportIdentifier] else {
-                throw MediaTransportError.unsupportedCapability("media-share transport")
-            }
-            let server = context.session.server
-            let accountID = context.accountID
-            let credentialRevision = context.credentialRevision
-            let sessionFactory: ShareTransportSessionFactory = { role in
-                let key = try mediaShareSessionKey(
-                    server: server,
-                    accountID: accountID,
-                    credentialRevision: credentialRevision,
-                    role: role,
-                    accountStore: accountStore
-                )
-                return try await adapter.connect(for: key)
-            }
-            return ShareProvider(
-                session: context.session,
-                localMediaContext: localMediaContext,
-                credentialRevision: credentialRevision,
-                sessionFactory: sessionFactory,
-                catalogCoordinator: shareCatalogCoordinator,
-                durableLocalStateStore: durableLocalStateStore,
-                streamProber: PlozzigenNetworkFileStreamProber(
-                    resolver: networkFileResolver
-                )
-            )
-        }
+        runtime.registerProvider(
+            into: registry,
+            durableLocalStateStore: durableLocalStateStore
+        )
         return registry
-    }
-
-    private struct NetworkFileResolverComposition {
-        let resolver: any MediaTransportNetworkFileResolving
-        let registry: MediaTransportResolverRegistry
-    }
-
-    private static func makeDefaultNetworkFileResolver(
-        accountStore: any AccountPersisting,
-        shareCatalogCoordinator: ShareCatalogCoordinator
-    ) -> NetworkFileResolverComposition {
-        let transportRegistry = makeMediaShareRegistry(accountStore: accountStore)
-        let resolver = MediaTransportNetworkFileResolver(
-            registry: transportRegistry,
-            playbackLeaseProvider: { locator in
-                try await shareCatalogCoordinator.acquirePlayback(
-                    accountKey: locator.accountID
-                )
-            }
-        ) { locator in
-            guard locator.sourceID == locator.accountID,
-                  let account = accountStore.loadAccounts().first(where: {
-                      $0.id == locator.accountID
-                  }),
-                  account.server.provider == .mediaShare,
-                  account.credentialRevision == locator.credentialRevision else {
-                throw MediaTransportError.authentication(reason: "inactive network-file identity")
-            }
-            return try mediaShareSessionKey(
-                for: account,
-                role: .playback,
-                accountStore: accountStore
-            )
-        }
-        return NetworkFileResolverComposition(
-            resolver: resolver,
-            registry: transportRegistry
-        )
-    }
-
-    /// Builds the credential-free playback/scanner session key for a media
-    /// share, transport-neutrally. The endpoint's `transportIdentifier` is the
-    /// account's real scheme (so the registry routes to the right adapter), and
-    /// the trust revision is read from the stored envelope so a TLS-pinned
-    /// WebDAV endpoint's key matches the pinned trust policy the adapter builds
-    /// (the HTTP session registry rejects a `.pinnedLeaf` policy whose revision
-    /// disagrees with the key's). Any missing/invalid credential surfaces as a
-    /// `MediaTransportError`.
-    nonisolated static func mediaShareSessionKey(
-        for account: Account,
-        role: MediaTransportRole,
-        accountStore: any AccountPersisting
-    ) throws -> MediaTransportSessionKey {
-        try mediaShareSessionKey(
-            server: account.server,
-            accountID: account.id,
-            credentialRevision: account.credentialRevision,
-            role: role,
-            accountStore: accountStore
-        )
-    }
-
-    nonisolated static func mediaShareSessionKey(
-        server: MediaServer,
-        accountID: String,
-        credentialRevision: CredentialRevision,
-        role: MediaTransportRole,
-        accountStore: any AccountPersisting
-    ) throws -> MediaTransportSessionKey {
-        let endpoint = try MediaShareTransportDispatch.endpoint(for: server)
-        let trustRevision: UUID
-        do {
-            let envelope = try accountStore.mediaShareCredential(
-                for: accountID,
-                revision: credentialRevision
-            )
-            // Unpinned envelopes carry the all-zero sentinel revision, matching
-            // the SMB/system-trust case; a TLS pin carries a real revision.
-            trustRevision = envelope.trust.revision
-        } catch {
-            throw MediaTransportError.authentication(reason: "media-share credential unavailable")
-        }
-        return MediaTransportSessionKey(
-            accountID: accountID,
-            credentialRevision: credentialRevision,
-            endpoint: endpoint,
-            trustRevision: trustRevision,
-            role: role
-        )
-    }
-
-    /// The set of media-share transport adapters, keyed by the scheme
-    /// (`transportIdentifier`) their endpoints use.
-    private static func makeMediaShareAdapters(
-        accountStore: any AccountPersisting
-    ) -> [any MediaTransportAdapter] {
-        [
-            makeSMBAdapter(accountStore: accountStore),
-            makeWebDAVAdapter(scheme: .http, accountStore: accountStore),
-            makeWebDAVAdapter(scheme: .https, accountStore: accountStore),
-            makeSFTPAdapter(accountStore: accountStore),
-            makeNFSAdapter(),
-            makeFTPAdapter(scheme: .ftp, accountStore: accountStore),
-            makeFTPAdapter(scheme: .ftps, accountStore: accountStore),
-        ]
-    }
-
-    /// The NFS adapter is credential-free (`AUTH_UNIX`, no password — the vault
-    /// stores `.noCredentials`), so unlike SMB/WebDAV it needs no per-account
-    /// credential provider. It is registered under the `nfs` scheme.
-    private static func makeNFSAdapter() -> NFSMediaTransportAdapter {
-        NFSMediaTransportAdapter()
-    }
-
-    private static func makeSMBAdapter(
-        accountStore: any AccountPersisting
-    ) -> SMBMediaTransportAdapter {
-        SMBMediaTransportAdapter { accountID, revision in
-            let envelope = try accountStore.mediaShareCredential(
-                for: accountID,
-                revision: revision
-            )
-            guard envelope.transport == .smb else {
-                throw MediaTransportError.unsupportedCapability("non-SMB credential")
-            }
-            let credential: SMBMediaTransportCredential
-            switch envelope.authentication {
-            case .anonymous:
-                credential = .anonymous
-            case let .password(username, password):
-                credential = .password(username: username, password: password)
-            case .bearer, .generatedKey, .noCredentials:
-                throw MediaTransportError.unsupportedCapability("SMB authentication")
-            }
-            return SMBMediaTransportConfiguration(credential: credential)
-        }
-    }
-
-    /// Builds a WebDAV adapter for one HTTP scheme (http/https). The resolver
-    /// registry routes on the account's real scheme, so both are registered.
-    private static func makeWebDAVAdapter(
-        scheme: WebDAVScheme,
-        accountStore: any AccountPersisting
-    ) -> WebDAVMediaTransportAdapter {
-        WebDAVMediaTransportAdapter(scheme: scheme) { accountID, revision in
-            // Load the envelope inside the provider so a missing/incompatible
-            // credential surfaces as a MediaTransportError (never a raw vault
-            // error, which ShareTransportBrowser would treat as transient and
-            // retry-loop on).
-            let envelope: MediaShareCredentialEnvelope
-            do {
-                envelope = try accountStore.mediaShareCredential(for: accountID, revision: revision)
-            } catch {
-                throw MediaTransportError.authentication(reason: "WebDAV credential unavailable")
-            }
-            guard envelope.transport == .webDAV else {
-                throw MediaTransportError.unsupportedCapability("non-WebDAV credential")
-            }
-            return try Self.webDAVConfiguration(from: envelope)
-        }
-    }
-
-    /// Maps a stored credential envelope to the transport-layer WebDAV
-    /// configuration (credential + TLS trust policy).
-    nonisolated static func webDAVConfiguration(
-        from envelope: MediaShareCredentialEnvelope
-    ) throws -> WebDAVMediaTransportConfiguration {
-        let credential: WebDAVCredential
-        switch envelope.authentication {
-        case .anonymous:
-            credential = .anonymous
-        case let .password(username, password):
-            credential = .password(username: username, password: password, policy: .automatic)
-        case let .bearer(token):
-            credential = .bearerToken(token)
-        case .generatedKey, .noCredentials:
-            throw MediaTransportError.unsupportedCapability("WebDAV authentication")
-        }
-
-        let trustPolicy: TrustPolicy
-        if let pin = envelope.trust.tlsLeafCertificateSHA256 {
-            trustPolicy = .pinnedLeaf(sha256: pin.bytes, revision: envelope.trust.revision)
-        } else {
-            trustPolicy = .system
-        }
-        return WebDAVMediaTransportConfiguration(credential: credential, trustPolicy: trustPolicy)
-    }
-
-    /// Builds the SFTP adapter. Loads the envelope inside the provider so a
-    /// missing/incompatible credential surfaces as a `MediaTransportError` (never
-    /// a raw vault error, which `ShareTransportBrowser` would retry-loop on), and
-    /// maps the vault's mandatory `.sftp` host-key pin into the transport's
-    /// trust policy.
-    private static func makeSFTPAdapter(
-        accountStore: any AccountPersisting
-    ) -> SFTPMediaTransportAdapter {
-        SFTPMediaTransportAdapter { accountID, revision in
-            let envelope: MediaShareCredentialEnvelope
-            do {
-                envelope = try accountStore.mediaShareCredential(for: accountID, revision: revision)
-            } catch {
-                throw MediaTransportError.authentication(reason: "SFTP credential unavailable")
-            }
-            guard envelope.transport == .sftp else {
-                throw MediaTransportError.unsupportedCapability("non-SFTP credential")
-            }
-            return try Self.sftpConfiguration(from: envelope)
-        }
-    }
-
-    /// Maps a stored credential envelope to the transport-layer SFTP
-    /// configuration (credential + SSH host-key pin). The vault guarantees every
-    /// `.sftp` envelope carries a host-key SHA-256 pin, so its absence is a hard
-    /// error rather than a silent fall-through to unpinned trust.
-    nonisolated static func sftpConfiguration(
-        from envelope: MediaShareCredentialEnvelope
-    ) throws -> SFTPMediaTransportConfiguration {
-        let credential: SFTPMediaTransportCredential
-        switch envelope.authentication {
-        case let .password(username, password):
-            credential = .password(username: username, password: password)
-        case .generatedKey:
-            // The generated private key is resolved from the vault by key id and
-            // wired up by the credential/keygen ("Discovery UX") work; this
-            // headless transport ships password auth. Fail closed until then.
-            throw MediaTransportError.unsupportedCapability("SFTP key authentication")
-        case .anonymous, .bearer, .noCredentials:
-            throw MediaTransportError.unsupportedCapability("SFTP authentication")
-        }
-
-        guard let pin = envelope.trust.sshHostKeySHA256 else {
-            throw MediaTransportError.trust(reason: "SFTP host key pin missing")
-        }
-        return SFTPMediaTransportConfiguration(
-            credential: credential,
-            hostKeyPolicy: .pinned(sha256: Array(pin.bytes))
-        )
-    }
-
-    /// Builds an FTP adapter for one scheme (`ftp` plaintext / `ftps` implicit
-    /// TLS). The resolver registry routes on the account's real scheme, so both
-    /// are registered — mirroring the WebDAV http/https pair.
-    private static func makeFTPAdapter(
-        scheme: FTPScheme,
-        accountStore: any AccountPersisting
-    ) -> FTPMediaTransportAdapter {
-        FTPMediaTransportAdapter(scheme: scheme) { accountID, revision in
-            // Load the envelope inside the provider so a missing/incompatible
-            // credential surfaces as a MediaTransportError (never a raw vault
-            // error, which ShareTransportBrowser would treat as transient and
-            // retry-loop on).
-            let envelope: MediaShareCredentialEnvelope
-            do {
-                envelope = try accountStore.mediaShareCredential(for: accountID, revision: revision)
-            } catch {
-                throw MediaTransportError.authentication(reason: "FTP credential unavailable")
-            }
-            guard envelope.transport == .ftp else {
-                throw MediaTransportError.unsupportedCapability("non-FTP credential")
-            }
-            return try Self.ftpConfiguration(from: envelope, scheme: scheme)
-        }
-    }
-
-    /// Maps a stored credential envelope to the transport-layer FTP
-    /// configuration. Security is derived from the scheme: `ftps` → implicit
-    /// TLS, `ftp` → plaintext. (Explicit `AUTH TLS` has no distinct scheme and
-    /// is unsupported on tvOS, so it is never produced here.)
-    nonisolated static func ftpConfiguration(
-        from envelope: MediaShareCredentialEnvelope,
-        scheme: FTPScheme
-    ) throws -> FTPMediaTransportConfiguration {
-        let credential: FTPCredential
-        switch envelope.authentication {
-        case .anonymous:
-            credential = .anonymous
-        case let .password(username, password):
-            credential = .password(username: username, password: password)
-        case .bearer, .generatedKey, .noCredentials:
-            throw MediaTransportError.unsupportedCapability("FTP authentication")
-        }
-
-        let security: FTPSecurity = scheme == .ftps ? .implicitTLS : .plaintext
-        let trustPolicy: FTPTrustPolicy
-        if let pin = envelope.trust.tlsLeafCertificateSHA256 {
-            trustPolicy = .pinnedLeaf(sha256: Array(pin.bytes), revision: envelope.trust.revision)
-        } else {
-            trustPolicy = .system
-        }
-        return FTPMediaTransportConfiguration(
-            credential: credential,
-            security: security,
-            trustPolicy: trustPolicy
-        )
-    }
-
-    /// Registers every media-share transport adapter, keyed by the scheme its
-    /// endpoints use. SMB (`smb`), WebDAV over plain HTTP (`http`) and TLS
-    /// (`https`). Adding a transport = add its adapter here + persist its
-    /// scheme in onboarding.
-    private static func makeMediaShareRegistry(
-        accountStore: any AccountPersisting
-    ) -> MediaTransportResolverRegistry {
-        // Force-try is safe: the adapter identifiers (smb/http/https) are
-        // distinct compile-time constants, so registration never collides.
-        // swiftlint:disable:next force_try
-        return try! MediaTransportResolverRegistry(
-            adapters: makeMediaShareAdapters(accountStore: accountStore)
-        )
     }
 
     /// Restores stored accounts on launch (relaunch without re-login). Shows the
@@ -2259,7 +1908,7 @@ public final class AppState {
         if let previousAccount,
            let persisted = accountStore.loadAccounts().first(where: { $0.id == account.id }),
            previousAccount.credentialRevision != persisted.credentialRevision {
-            retireNetworkFileRevision(for: previousAccount)
+            mediaShareAccountService.retireCredential(for: previousAccount)
         }
         reloadAccounts()
         // Flow finished — next add-account starts at the chooser.
@@ -2285,7 +1934,7 @@ public final class AppState {
                 try accountStore.add(account, token: session.accessToken)
                 if let previousAccount,
                    previousAccount.credentialRevision != account.credentialRevision {
-                    retireNetworkFileRevision(for: previousAccount)
+                    mediaShareAccountService.retireCredential(for: previousAccount)
                 }
                 addedIDs.append(account.id)
             } catch {
@@ -3091,9 +2740,7 @@ public final class AppState {
     /// Removes one account; drops to onboarding if it was the last.
     public func removeAccount(id: String) {
         let removedAccount = accounts.first { $0.id == id }
-        let shareAccountKey = removedAccount?.server.provider == .mediaShare
-            ? removedAccount?.id
-            : nil
+        let shareAccountKey = mediaShareAccountService.mediaShareAccountKey(for: removedAccount)
         do {
             try accountStore.remove(id: id)
         } catch {
@@ -3105,13 +2752,11 @@ public final class AppState {
             return
         }
         if let removedAccount {
-            retireNetworkFileRevision(for: removedAccount)
+            mediaShareAccountService.retireCredential(for: removedAccount)
         }
         if let shareAccountKey {
             shareScanStatusModel.removeShare(shareID: shareAccountKey)
-            Task {
-                await self.shareCatalogCoordinator.invalidate(accountKey: shareAccountKey)
-            }
+            mediaShareAccountService.invalidate(shareAccountKey: shareAccountKey)
         }
         setPlexTokenOverride(nil, for: id)
         plexResolvedHomeUser[id] = nil
@@ -3129,9 +2774,7 @@ public final class AppState {
     /// Removes every account (full reset).
     public func signOutAll() {
         let removedAccounts = accounts
-        let shareAccountKeys = removedAccounts
-            .filter { $0.server.provider == .mediaShare }
-            .map(\.id)
+        let shareAccountKeys = mediaShareAccountService.mediaShareAccountKeys(in: removedAccounts)
         do {
             try accountStore.clearAll()
         } catch {
@@ -3145,14 +2788,12 @@ public final class AppState {
         let confirmedShareAccountKeys = shareAccountKeys.filter {
             !retainedAccountIDs.contains($0)
         }
-        confirmedRemovedAccounts.forEach(retireNetworkFileRevision)
+        confirmedRemovedAccounts.forEach(mediaShareAccountService.retireCredential)
         confirmedShareAccountKeys.forEach {
             shareScanStatusModel.removeShare(shareID: $0)
         }
         for accountKey in confirmedShareAccountKeys {
-            Task {
-                await self.shareCatalogCoordinator.invalidate(accountKey: accountKey)
-            }
+            mediaShareAccountService.invalidate(shareAccountKey: accountKey)
         }
         for account in confirmedRemovedAccounts {
             setPlexTokenOverride(nil, for: account.id)
@@ -3168,9 +2809,7 @@ public final class AppState {
     /// reproduces a genuine first run. Surfaced from a DEBUG-only Settings row.
     public func resetToFirstRunForDebugging() {
         let removedAccounts = accounts
-        let shareAccountKeys = removedAccounts
-            .filter { $0.server.provider == .mediaShare }
-            .map(\.id)
+        let shareAccountKeys = mediaShareAccountService.mediaShareAccountKeys(in: removedAccounts)
         do {
             try accountStore.clearAll()
         } catch {
@@ -3184,14 +2823,12 @@ public final class AppState {
         let confirmedShareAccountKeys = shareAccountKeys.filter {
             !retainedAccountIDs.contains($0)
         }
-        confirmedRemovedAccounts.forEach(retireNetworkFileRevision)
+        confirmedRemovedAccounts.forEach(mediaShareAccountService.retireCredential)
         confirmedShareAccountKeys.forEach {
             shareScanStatusModel.removeShare(shareID: $0)
         }
         for accountKey in confirmedShareAccountKeys {
-            Task {
-                await self.shareCatalogCoordinator.invalidate(accountKey: accountKey)
-            }
+            mediaShareAccountService.invalidate(shareAccountKey: accountKey)
         }
         guard accounts.isEmpty else {
             apply(.accountsChanged(accounts))
@@ -3401,17 +3038,6 @@ public final class AppState {
 
     // MARK: Internals
 
-    private func retireNetworkFileRevision(for account: Account) {
-        guard account.server.provider == .mediaShare,
-              let networkFileResolverRegistry else { return }
-        Task {
-            await networkFileResolverRegistry.retire(
-                accountID: account.id,
-                credentialRevision: account.credentialRevision
-            )
-        }
-    }
-
     private func reloadAccounts() {
         registry.invalidateCache()
         accounts = accountStore.loadAccounts()
@@ -3449,8 +3075,8 @@ public final class AppState {
                 }
                 .map(\.id)
         )
-        Task { [shareCatalogCoordinator] in
-            await shareCatalogCoordinator.setPreferredAccountKeys(
+        Task { [mediaShareRuntime] in
+            await mediaShareRuntime.setPreferredAccountKeys(
                 preferredShareIDs,
                 revision: priorityRevision
             )

@@ -24,13 +24,21 @@ public struct EngineFactory {
     /// AV1, DTS/TrueHD, …) and decodes embedded + bitmap (PGS/DVB/DVD) subtitles
     /// itself, so no server transcode/burn-in is needed for them.
     public var makePlozzigen: (@MainActor () -> (any VideoEngine)?)?
+    /// Bounded header probe used only for an already-resolved next-episode stream.
+    /// This gives handoff policy provider-independent range truth before stopping
+    /// the outgoing engine, without consulting catalogs or metadata APIs.
+    public var probeSourceDynamicRange:
+        (@Sendable (PlaybackRequest) async -> SourceDynamicRange?)?
 
     public init(
         makeNative: @escaping @MainActor (SubtitleStyle) -> any VideoEngine = { NativeVideoEngine(style: $0) },
-        makePlozzigen: (@MainActor () -> (any VideoEngine)?)? = nil
+        makePlozzigen: (@MainActor () -> (any VideoEngine)?)? = nil,
+        probeSourceDynamicRange:
+            (@Sendable (PlaybackRequest) async -> SourceDynamicRange?)? = nil
     ) {
         self.makeNative = makeNative
         self.makePlozzigen = makePlozzigen
+        self.probeSourceDynamicRange = probeSourceDynamicRange
     }
 
     /// Whether the Plozzigen (on-device decode) engine is wired in. Drives the

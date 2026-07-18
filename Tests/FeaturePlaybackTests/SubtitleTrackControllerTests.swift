@@ -360,6 +360,7 @@ private final class SpyTrackEngine: VideoEngine {
     var onTracksChanged: (@MainActor () -> Void)?
     var onSubtitleCues: (@MainActor ([SubtitleCue]) -> Void)?
     var onSecondarySubtitleCues: (@MainActor ([SubtitleCue]) -> Void)?
+    var onProbedSourceFactsChanged: (@MainActor (EngineProbedSourceFacts) -> Void)?
 
     private(set) var audioSelections: [MediaTrack?] = []
     private(set) var subtitleSelections: [MediaTrack?] = []

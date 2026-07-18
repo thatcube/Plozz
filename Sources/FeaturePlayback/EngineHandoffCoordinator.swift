@@ -120,9 +120,19 @@ protocol EngineHandoffCoordinatorHost: AnyObject {
     var handoffItemID: String { get }
     /// A user/resume start-position override, when one was supplied.
     var handoffStartPositionOverride: TimeInterval? { get }
-    /// Whether the content's dynamic range is HDR (drives whether a fresh-engine
-    /// retry preserves the display mode across the swap).
-    var handoffContentDisplayModeIsHDR: Bool { get }
+    /// The HDR range whose Plozzigen criteria a fresh-engine retry should keep
+    /// applied across the swap (nil when the authoritative range isn't HDR).
+    var handoffPreservedRetryRange: SourceDynamicRange? { get }
+    /// Whether the view model has been stopped — a retry that raced a `stop()`
+    /// while its transport drained must not build a fresh engine.
+    var handoffDidStop: Bool { get }
+    /// The view model's current dynamic-range load generation — a retry that races
+    /// a superseding load (which bumps this) while transport drains is abandoned.
+    var handoffDynamicRangeLoadGeneration: UInt { get }
+
+    /// Records the range whose criteria the next `playResolved` should re-apply
+    /// unchanged after a fresh-engine retry (or clears it).
+    func handoffSetPendingPreservedDynamicRange(_ range: SourceDynamicRange?)
 
     /// (Re)wire the active engine's callbacks after a swap. Owned by the view
     /// model because the closures fan out into its collaborators.
@@ -166,6 +176,9 @@ final class EngineHandoffCoordinator {
     private(set) var engine: any VideoEngine
     /// Which engine ``engine`` currently is, so swaps know the alternate.
     private(set) var currentEngineKind: PlaybackEngineKind
+    /// The current instance was stopped for a fresh-engine retry and must not be
+    /// reused if another load supersedes that retry while transport drains.
+    @ObservationIgnored private var engineRequiresReplacement = false
     /// Bumped whenever ``engine`` is swapped, so the SwiftUI player re-hosts the
     /// new engine's bare video surface (`.id(engineToken)`).
     private(set) var engineToken = UUID()
@@ -218,18 +231,20 @@ final class EngineHandoffCoordinator {
     /// Instantiates the engine for `kind`, falling back to native if the
     /// Plozzigen engine was requested but isn't wired in (defensive — the router
     /// never asks for on-device decode unless it's available).
-    private func makeEngine(_ kind: PlaybackEngineKind) -> any VideoEngine {
+    private func makeEngine(
+        _ kind: PlaybackEngineKind
+    ) -> (engine: any VideoEngine, kind: PlaybackEngineKind) {
         switch kind {
         case .hybrid, .plozzigen:
             // Plozzigen is the sole on-device decode engine. `.hybrid` is the
             // router's abstract "needs on-device decode" signal; it resolves here
             // to Plozzigen (the former backing engine is retired).
             if let makePlozzigen = engineFactory.makePlozzigen, let engine = makePlozzigen() {
-                return engine
+                return (engine, .plozzigen)
             }
-            return engineFactory.makeNative(style)
+            return (engineFactory.makeNative(style), .native)
         case .native:
-            return engineFactory.makeNative(style)
+            return (engineFactory.makeNative(style), .native)
         }
     }
 
@@ -238,54 +253,77 @@ final class EngineHandoffCoordinator {
         engine.onFailure = nil
         engine.onEnded = nil
         engine.onTracksChanged = nil
+        engine.onProbedSourceFactsChanged = nil
         engine.onSubtitleCues = nil
         engine.onSecondarySubtitleCues = nil
     }
 
     /// Swaps the active engine when the routed kind differs from the current one,
     /// tearing the old engine down and re-pointing the UI at the new surface.
-    private func switchEngine(to kind: PlaybackEngineKind) {
-        guard kind != currentEngineKind else { return }
+    /// Returns the engine kind actually in effect after the call.
+    @discardableResult
+    private func switchEngine(to kind: PlaybackEngineKind) -> PlaybackEngineKind {
+        guard kind != currentEngineKind || engineRequiresReplacement else {
+            return currentEngineKind
+        }
         clearEngineCallbacks()
-        engine.stop()
-        engine = makeEngine(kind)
-        currentEngineKind = kind
+        if !engineRequiresReplacement {
+            engine.stop()
+        }
+        let replacement = makeEngine(kind)
+        engine = replacement.engine
+        currentEngineKind = replacement.kind
+        engineRequiresReplacement = false
         engineToken = UUID()
         host?.handoffConfigureEngineCallbacks()
+        return currentEngineKind
     }
 
     private func replaceEngineForRetry(
         _ kind: PlaybackEngineKind,
         preserveDisplayMode: Bool
-    ) async {
+    ) async -> Bool {
+        guard let host else { return false }
         let oldEngine = engine
+        let replacementGeneration = host.handoffDynamicRangeLoadGeneration
         clearEngineCallbacks()
         oldEngine.stop(preserveDisplayMode: preserveDisplayMode)
+        engineRequiresReplacement = true
         // Deterministically drain the old engine's leased transport (SMB session +
         // source cursor) before opening a fresh one, so the retry's re-resolve
         // doesn't race the old cursor's asynchronous deinit release — the race
         // that made the previous fresh-engine retry re-fail in ~3ms.
         await oldEngine.drainTransport()
-        engine = makeEngine(kind)
-        currentEngineKind = kind
+        guard !host.handoffDidStop,
+              host.handoffDynamicRangeLoadGeneration == replacementGeneration else {
+            return false
+        }
+        let replacement = makeEngine(kind)
+        engine = replacement.engine
+        currentEngineKind = replacement.kind
+        engineRequiresReplacement = false
         engineToken = UUID()
-        host?.handoffConfigureEngineCallbacks()
+        host.handoffConfigureEngineCallbacks()
+        return true
     }
 
     /// Commits the first routed engine without forcing a host `.id` rebuild.
     /// Subsequent swaps use the normal token-bumping `switchEngine` path.
-    func commitEngineForPlayback(_ kind: PlaybackEngineKind) {
+    /// Returns the engine kind actually in effect after the call.
+    @discardableResult
+    func commitEngineForPlayback(_ kind: PlaybackEngineKind) -> PlaybackEngineKind {
         guard hasCommittedInitialEngine else {
             hasCommittedInitialEngine = true
-            guard kind != currentEngineKind else { return }
+            guard kind != currentEngineKind else { return currentEngineKind }
             clearEngineCallbacks()
             engine.stop()
-            engine = makeEngine(kind)
-            currentEngineKind = kind
+            let replacement = makeEngine(kind)
+            engine = replacement.engine
+            currentEngineKind = replacement.kind
             host?.handoffConfigureEngineCallbacks()
-            return
+            return currentEngineKind
         }
-        switchEngine(to: kind)
+        return switchEngine(to: kind)
     }
 
     /// The engine to try when the current one fails: the opposite engine, but
@@ -428,7 +466,12 @@ final class EngineHandoffCoordinator {
                     + "error=\(HandoffDiagnostics.errorCode(error))\(detail)"
             )
             host.handoffSetPhase(.loading)
-            await replaceEngineForRetry(.plozzigen, preserveDisplayMode: host.handoffContentDisplayModeIsHDR)
+            let preservedRange = host.handoffPreservedRetryRange
+            guard await replaceEngineForRetry(
+                .plozzigen,
+                preserveDisplayMode: preservedRange != nil
+            ) else { return }
+            host.handoffSetPendingPreservedDynamicRange(preservedRange)
             await host.handoffPlayResolved(request, engineKind: .plozzigen, startPosition: resume)
 
         case .swapAlternate(let kind, let resume):

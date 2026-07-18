@@ -239,7 +239,10 @@ final class ShareCatalogStoreTests: XCTestCase {
         XCTAssertEqual(pending.map(\.itemID), ["f:Movies/Retry.mkv"])
 
         let state = try queryMigrationState(at: url)
-        XCTAssertEqual(state.userVersion, 1)
+        // v2 adds the Step 3 NFO/explicit-id sidecar inventory schema; the legacy
+        // catalog's Step 2 normalized rows/state must still migrate/read exactly
+        // as before.
+        XCTAssertEqual(state.userVersion, 2)
         XCTAssertEqual(state.metadataValueCount, 14)
         XCTAssertEqual(state.enrichmentStateCount, 5)
         XCTAssertEqual(state.richLegacyValueCount, 10)
@@ -254,7 +257,7 @@ final class ShareCatalogStoreTests: XCTestCase {
         XCTAssertEqual(reopenedPending.map(\.itemID), [
             "f:Movies/Retry.mkv"
         ])
-        XCTAssertEqual(try queryMigrationState(at: url).userVersion, 1)
+        XCTAssertEqual(try queryMigrationState(at: url).userVersion, 2)
     }
 
     func testPartiallyMigratedCatalogDecodesValidProvenanceAndInfersMissingEntries() async throws {
@@ -789,6 +792,33 @@ final class ShareCatalogStoreTests: XCTestCase {
         XCTAssertEqual(decoded?.season, 3)
     }
 
+    func testEpisodeSidecarAssociationRequiresEpisodeAssetKind() async {
+        let store = ShareCatalogStore(accountKey: "a", directory: tempDir())
+        let videoPath = "TV/Show/S01E01.mkv"
+        let sidecar = PendingLocalMetadataFile(
+            relPath: "TV/Show/S01E01.nfo",
+            parentDir: "TV/Show",
+            kind: .episodeStem,
+            size: 100,
+            associatedVideoRelPath: videoPath,
+            processedItemID: nil,
+            fingerprint: "etag:test",
+            scanGenerationBound: false,
+            status: "pending",
+            attempts: 0
+        )
+
+        await store.upsert([movie(videoPath, title: "Reclassified", year: nil)], scanID: 1)
+        var facts = await store.localMetadataAssociationFacts(for: sidecar)
+        XCTAssertFalse(facts.associatedVideoExists)
+
+        await store.upsert([
+            episode(videoPath, series: "Show", season: 1, episode: 1),
+        ], scanID: 2)
+        facts = await store.localMetadataAssociationFacts(for: sidecar)
+        XCTAssertTrue(facts.associatedVideoExists)
+    }
+
     func testSeriesKeyNormalizesPunctuationAndCase() {
         XCTAssertEqual(ShareCatalogID.seriesKey(fromTitle: "Breaking Bad"),
                        ShareCatalogID.seriesKey(fromTitle: "breaking.bad"))
@@ -798,39 +828,39 @@ final class ShareCatalogStoreTests: XCTestCase {
     // MARK: - Reconciliation primitives
 
     func testLevenshtein() {
-        XCTAssertEqual(ShareCatalogStore.levenshtein("peaky blinder", "peaky blinders"), 1)
-        XCTAssertEqual(ShareCatalogStore.levenshtein("kitten", "sitting"), 3)
-        XCTAssertEqual(ShareCatalogStore.levenshtein("same", "same"), 0)
-        XCTAssertEqual(ShareCatalogStore.levenshtein("", "abc"), 3)
+        XCTAssertEqual(ShareTitleSimilarity.levenshtein("peaky blinder", "peaky blinders"), 1)
+        XCTAssertEqual(ShareTitleSimilarity.levenshtein("kitten", "sitting"), 3)
+        XCTAssertEqual(ShareTitleSimilarity.levenshtein("same", "same"), 0)
+        XCTAssertEqual(ShareTitleSimilarity.levenshtein("", "abc"), 3)
     }
 
     func testTitlesNearlyIdentical() {
         // Typo / plural of one show.
-        XCTAssertTrue(ShareCatalogStore.titlesNearlyIdentical("Peaky Blinder", "Peaky Blinders"))
-        XCTAssertTrue(ShareCatalogStore.titlesNearlyIdentical("The Handmaids Tale", "The Handmaid's Tale"))
+        XCTAssertTrue(ShareTitleSimilarity.titlesNearlyIdentical("Peaky Blinder", "Peaky Blinders"))
+        XCTAssertTrue(ShareTitleSimilarity.titlesNearlyIdentical("The Handmaids Tale", "The Handmaid's Tale"))
         // A digit difference is a deliberate distinction — never "nearly identical".
-        XCTAssertFalse(ShareCatalogStore.titlesNearlyIdentical("1883", "1923"))
+        XCTAssertFalse(ShareTitleSimilarity.titlesNearlyIdentical("1883", "1923"))
         // Too short / too different.
-        XCTAssertFalse(ShareCatalogStore.titlesNearlyIdentical("Fargo", "Cargo"))
-        XCTAssertFalse(ShareCatalogStore.titlesNearlyIdentical("Lost", "Loki"))
-        XCTAssertFalse(ShareCatalogStore.titlesNearlyIdentical("The Office", "The Wire"))
+        XCTAssertFalse(ShareTitleSimilarity.titlesNearlyIdentical("Fargo", "Cargo"))
+        XCTAssertFalse(ShareTitleSimilarity.titlesNearlyIdentical("Lost", "Loki"))
+        XCTAssertFalse(ShareTitleSimilarity.titlesNearlyIdentical("The Office", "The Wire"))
     }
 
     func testResolveAliasFollowsChains() {
         let map = ["a": "b", "b": "c", "x": "y"]
-        XCTAssertEqual(ShareCatalogStore.resolveAlias("a", in: map), "c")
-        XCTAssertEqual(ShareCatalogStore.resolveAlias("b", in: map), "c")
-        XCTAssertEqual(ShareCatalogStore.resolveAlias("x", in: map), "y")
-        XCTAssertEqual(ShareCatalogStore.resolveAlias("z", in: map), "z")
+        XCTAssertEqual(ShareSeriesReconciler.resolveAlias("a", in: map), "c")
+        XCTAssertEqual(ShareSeriesReconciler.resolveAlias("b", in: map), "c")
+        XCTAssertEqual(ShareSeriesReconciler.resolveAlias("x", in: map), "y")
+        XCTAssertEqual(ShareSeriesReconciler.resolveAlias("z", in: map), "z")
         // A cycle terminates (rather than looping forever) at a cycle member.
-        XCTAssertTrue(["a", "b"].contains(ShareCatalogStore.resolveAlias("a", in: ["a": "b", "b": "a"])))
+        XCTAssertTrue(["a", "b"].contains(ShareSeriesReconciler.resolveAlias("a", in: ["a": "b", "b": "a"])))
     }
 
     func testAddsVariantWordBlocksParodyUpgrade() {
         // "sword art online" must never upgrade to "sword art online abridged".
-        XCTAssertTrue(ShareCatalogStore.addsVariantWord(base: "sword art online", extended: "sword art online abridged"))
+        XCTAssertTrue(ShareTitleSimilarity.addsVariantWord(base: "sword art online", extended: "sword art online abridged"))
         // A genuine subtitle extension is allowed ("avatar" → "avatar the last airbender").
-        XCTAssertFalse(ShareCatalogStore.addsVariantWord(base: "avatar", extended: "avatar the last airbender"))
+        XCTAssertFalse(ShareTitleSimilarity.addsVariantWord(base: "avatar", extended: "avatar the last airbender"))
     }
 
     func testEpisodeHintsSkipSyntheticPlaceholders() async {

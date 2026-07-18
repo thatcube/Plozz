@@ -18,19 +18,30 @@ actor ShareMetadataWorkScheduler {
         var delayBetweenSlices: Duration
         var interactiveIdleDelay: Duration
         var blockedPollDelay: Duration
+        /// Consecutive preferred backlog admissions after which one runnable
+        /// non-preferred account is surfaced ahead of the preferred bias. Must be
+        /// at least 1; larger values bias the active profile more strongly.
+        var preferredBacklogBurst: Int
+        /// A non-preferred backlog account that has waited this long is promoted
+        /// ahead of the preferred bias regardless of the burst counter.
+        var nonPreferredAgePromotion: Duration
 
         init(
             maxItemsPerSlice: Int = 10,
             maxSliceDuration: Duration = .seconds(2),
             delayBetweenSlices: Duration = .milliseconds(500),
             interactiveIdleDelay: Duration = .seconds(1),
-            blockedPollDelay: Duration = .milliseconds(200)
+            blockedPollDelay: Duration = .milliseconds(200),
+            preferredBacklogBurst: Int = 4,
+            nonPreferredAgePromotion: Duration = .seconds(30)
         ) {
             self.maxItemsPerSlice = max(1, maxItemsPerSlice)
             self.maxSliceDuration = maxSliceDuration
             self.delayBetweenSlices = delayBetweenSlices
             self.interactiveIdleDelay = interactiveIdleDelay
             self.blockedPollDelay = blockedPollDelay
+            self.preferredBacklogBurst = max(1, preferredBacklogBurst)
+            self.nonPreferredAgePromotion = nonPreferredAgePromotion
         }
     }
 
@@ -88,22 +99,45 @@ actor ShareMetadataWorkScheduler {
         var task: Task<Outcome, Never>
     }
 
+    /// A queued unit of work tagged with the account registration generation that
+    /// was current when it was enqueued, plus the instant it entered the queue.
+    ///
+    /// The generation lets the scheduler DISCARD work whose registration was
+    /// replaced (`remove` + `register`) while it sat in the queue or was suspended
+    /// mid-admission, so stale work can never requeue into — or run under — a
+    /// replacement registration (finding A3). `enqueuedAt` drives backlog fairness
+    /// aging (finding A6).
+    private struct QueuedWork {
+        var work: Work
+        var registrationGeneration: UInt64
+        var enqueuedAt: ContinuousClock.Instant
+    }
+
     private let configuration: Configuration
     private let clock = ContinuousClock()
+    private let fairnessPolicy: ShareBacklogFairnessPolicy
     private var jobs: [String: Job] = [:]
-    private var backlogQueue: [String] = []
+    private var backlogQueue: [QueuedWork] = []
     private var queuedBacklogs: Set<String> = []
-    private var urgentQueue: [UrgentWork] = []
+    private var urgentQueue: [QueuedWork] = []
     private var queuedUrgentKeys: Set<String> = []
     private var admissionGenerations: [String: UInt64] = [:]
     private var registrationGenerations: [String: UInt64] = [:]
     private var suspensionCounts: [String: Int] = [:]
     private var preferredAccountKeys: Set<String> = []
+    /// Preferred backlog admissions that ran back-to-back with no intervening
+    /// non-preferred admission. Updated only on a REAL admission so a blocked
+    /// account cannot consume the burst quota.
+    private var consecutivePreferredBacklogAdmissions = 0
     private var worker: Task<Void, Never>?
     private var running: Running?
 
     init(configuration: Configuration = Configuration()) {
         self.configuration = configuration
+        self.fairnessPolicy = ShareBacklogFairnessPolicy(
+            preferredBurst: configuration.preferredBacklogBurst,
+            agePromotion: configuration.nonPreferredAgePromotion
+        )
     }
 
     func register(
@@ -144,7 +178,11 @@ actor ShareMetadataWorkScheduler {
         }
         let key = urgentKey(urgent)
         guard queuedUrgentKeys.insert(key).inserted else { return }
-        urgentQueue.append(urgent)
+        urgentQueue.append(QueuedWork(
+            work: .item(urgent),
+            registrationGeneration: currentRegistration,
+            enqueuedAt: clock.now
+        ))
         ensureWorker()
     }
 
@@ -155,7 +193,7 @@ actor ShareMetadataWorkScheduler {
         if let running,
            running.work.isBacklog,
            !accountKeys.contains(running.work.accountKey),
-           backlogQueue.contains(where: { accountKeys.contains($0) }) {
+           backlogQueue.contains(where: { accountKeys.contains($0.work.accountKey) }) {
             running.task.cancel()
         }
         ensureWorker()
@@ -215,12 +253,14 @@ actor ShareMetadataWorkScheduler {
         admissionGenerations[accountKey, default: 0] &+= 1
         registrationGenerations[accountKey, default: 0] &+= 1
         suspensionCounts[accountKey] = nil
-        backlogQueue.removeAll { $0 == accountKey }
+        backlogQueue.removeAll { $0.work.accountKey == accountKey }
         queuedBacklogs.remove(accountKey)
-        let removed = urgentQueue.filter { $0.accountKey == accountKey }
-        urgentQueue.removeAll { $0.accountKey == accountKey }
-        for urgent in removed {
-            queuedUrgentKeys.remove(urgentKey(urgent))
+        let removed = urgentQueue.filter { $0.work.accountKey == accountKey }
+        urgentQueue.removeAll { $0.work.accountKey == accountKey }
+        for queued in removed {
+            if case .item(let urgent) = queued.work {
+                queuedUrgentKeys.remove(urgentKey(urgent))
+            }
         }
         let runningTask = running?.work.accountKey == accountKey ? running?.task : nil
         runningTask?.cancel()
@@ -254,10 +294,11 @@ actor ShareMetadataWorkScheduler {
         }
 
         while !Task.isCancelled, hasQueuedWork {
-            guard let (work, job) = await dequeueRunnableWork() else {
+            guard let (queued, job) = await dequeueRunnableWork() else {
                 await sleep(configuration.blockedPollDelay)
                 continue
             }
+            let work = queued.work
 
             let task = Task(priority: .utility) {
                 switch work {
@@ -272,14 +313,10 @@ actor ShareMetadataWorkScheduler {
                 }
             }
             let runningID = UUID()
-            let registrationGeneration = registrationGenerations[
-                work.accountKey,
-                default: 0
-            ]
             running = Running(
                 id: runningID,
                 work: work,
-                registrationGeneration: registrationGeneration,
+                registrationGeneration: queued.registrationGeneration,
                 task: task
             )
             let outcome = await task.value
@@ -287,14 +324,17 @@ actor ShareMetadataWorkScheduler {
             if running?.id == runningID {
                 running = nil
             }
+            // The registration that owned this work may have been replaced while it
+            // ran; if so, discard rather than requeue into the replacement (A3).
             guard registrationGenerations[work.accountKey, default: 0]
-                    == registrationGeneration else {
+                    == queued.registrationGeneration else {
                 continue
             }
 
             switch outcome {
             case .item:
-                if wasCancelled { requeue(work) }
+                // A served turn restarts age; requeue is generation-guarded.
+                if wasCancelled { requeue(queued, resetAge: true) }
             case .backlog(let result):
                 if wasCancelled || result.hasMore {
                     if var updated = jobs[work.accountKey] {
@@ -307,7 +347,7 @@ actor ShareMetadataWorkScheduler {
                         }
                         jobs[work.accountKey] = updated
                     }
-                    requeue(work)
+                    requeue(queued, resetAge: true)
                 }
             }
         }
@@ -318,54 +358,85 @@ actor ShareMetadataWorkScheduler {
     }
 
     /// Tries every currently queued item once so one playback-blocked share cannot
-    /// starve runnable work from other accounts.
-    private func dequeueRunnableWork() async -> (Work, Job)? {
-        let candidates =
-            urgentQueue.map(Work.item)
-            + backlogQueue
-                .filter { preferredAccountKeys.contains($0) }
-                .map { Work.backlog(accountKey: $0) }
-            + backlogQueue
-                .filter { !preferredAccountKeys.contains($0) }
-                .map { Work.backlog(accountKey: $0) }
-        for work in candidates {
+    /// starve runnable work from other accounts. Urgent opened-item work is globally
+    /// first; backlog order comes from the pure fairness policy.
+    private func dequeueRunnableWork() async -> (QueuedWork, Job)? {
+        let now = clock.now
+        let backlogByKey = Dictionary(
+            backlogQueue.map { ($0.work.accountKey, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let orderedBacklogKeys = fairnessPolicy.order(
+            candidates: backlogQueue.map {
+                ShareBacklogFairnessPolicy.Candidate(
+                    accountKey: $0.work.accountKey,
+                    isPreferred: preferredAccountKeys.contains($0.work.accountKey),
+                    enqueuedAt: $0.enqueuedAt
+                )
+            },
+            consecutivePreferredAdmissions: consecutivePreferredBacklogAdmissions,
+            now: now
+        )
+        let candidates: [QueuedWork] =
+            urgentQueue + orderedBacklogKeys.compactMap { backlogByKey[$0] }
+
+        for queued in candidates {
+            let work = queued.work
             guard takeQueued(work), let job = jobs[work.accountKey] else { continue }
             if suspensionCounts[work.accountKey, default: 0] > 0 {
-                requeue(work)
+                requeue(queued, resetAge: false)
                 continue
             }
             if work.isBacklog,
                let notBefore = job.notBefore,
                clock.now < notBefore {
-                requeue(work)
+                requeue(queued, resetAge: false)
                 continue
             }
             let admissionGeneration = admissionGenerations[work.accountKey, default: 0]
             if await job.mayRun(),
                jobs[work.accountKey] != nil,
                admissionGenerations[work.accountKey, default: 0] == admissionGeneration,
+               registrationGenerations[work.accountKey, default: 0] == queued.registrationGeneration,
                suspensionCounts[work.accountKey, default: 0] == 0 {
                 // An enqueue may have landed while `mayRun` yielded the actor.
                 // Consume that duplicate before returning the admitted work.
                 _ = takeQueued(work)
-                return (work, job)
+                noteAdmission(work)
+                return (queued, job)
             }
-            requeue(work)
+            // Failed admission (blocked/suspended/replaced): preserve age; a stale
+            // registration is discarded by `requeue`'s generation guard.
+            requeue(queued, resetAge: false)
         }
         return nil
+    }
+
+    /// Records that `work` was actually admitted, updating the preferred-burst
+    /// counter. Only a real admission moves the counter, so a blocked account can
+    /// never consume the burst quota. Urgent work leaves the counter unchanged.
+    private func noteAdmission(_ work: Work) {
+        guard case .backlog(let accountKey) = work else { return }
+        if preferredAccountKeys.contains(accountKey) {
+            consecutivePreferredBacklogAdmissions += 1
+        } else {
+            consecutivePreferredBacklogAdmissions = 0
+        }
     }
 
     private func takeQueued(_ work: Work) -> Bool {
         switch work {
         case .item(let urgent):
-            guard let index = urgentQueue.firstIndex(of: urgent) else {
+            guard let index = urgentQueue.firstIndex(where: { $0.work == .item(urgent) }) else {
                 return false
             }
             urgentQueue.remove(at: index)
             queuedUrgentKeys.remove(urgentKey(urgent))
             return true
         case .backlog(let accountKey):
-            guard let index = backlogQueue.firstIndex(of: accountKey) else {
+            guard let index = backlogQueue.firstIndex(where: {
+                $0.work == .backlog(accountKey: accountKey)
+            }) else {
                 return false
             }
             backlogQueue.remove(at: index)
@@ -374,22 +445,42 @@ actor ShareMetadataWorkScheduler {
         }
     }
 
-    private func requeue(_ work: Work) {
-        guard jobs[work.accountKey] != nil else { return }
-        switch work {
+    /// Re-enqueues previously admitted/queued work, DISCARDING it if the account was
+    /// removed or its registration was replaced since the work was tagged (A3).
+    /// `resetAge` restarts the fairness age for a work item that just took a served
+    /// turn; a failed admission preserves the age so it keeps aging toward promotion.
+    private func requeue(_ queued: QueuedWork, resetAge: Bool) {
+        let accountKey = queued.work.accountKey
+        guard jobs[accountKey] != nil,
+              registrationGenerations[accountKey, default: 0] == queued.registrationGeneration else {
+            return
+        }
+        let enqueuedAt = resetAge ? clock.now : queued.enqueuedAt
+        switch queued.work {
         case .item(let urgent):
-            let key = urgentKey(urgent)
-            if queuedUrgentKeys.insert(key).inserted {
-                urgentQueue.append(urgent)
-            }
+            guard queuedUrgentKeys.insert(urgentKey(urgent)).inserted else { return }
+            urgentQueue.append(QueuedWork(
+                work: .item(urgent),
+                registrationGeneration: queued.registrationGeneration,
+                enqueuedAt: enqueuedAt
+            ))
         case .backlog(let accountKey):
-            requeueBacklog(accountKey)
+            guard queuedBacklogs.insert(accountKey).inserted else { return }
+            backlogQueue.append(QueuedWork(
+                work: .backlog(accountKey: accountKey),
+                registrationGeneration: queued.registrationGeneration,
+                enqueuedAt: enqueuedAt
+            ))
         }
     }
 
     private func requeueBacklog(_ accountKey: String) {
         guard queuedBacklogs.insert(accountKey).inserted else { return }
-        backlogQueue.append(accountKey)
+        backlogQueue.append(QueuedWork(
+            work: .backlog(accountKey: accountKey),
+            registrationGeneration: registrationGenerations[accountKey, default: 0],
+            enqueuedAt: clock.now
+        ))
     }
 
     private func urgentKey(_ work: UrgentWork) -> String {

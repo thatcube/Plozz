@@ -32,7 +32,8 @@ final class NextEpisodeCoordinatorTests: XCTestCase {
             host: host,
             controls: controls,
             playbackSettings: settings,
-            spoilerSettings: .default
+            spoilerSettings: .default,
+            engineFactory: .native
         )
         return (sut, host, engine, provider)
     }
@@ -168,7 +169,7 @@ final class NextEpisodeCoordinatorTests: XCTestCase {
 
     func testPreserveDisplayModeBothPlozzigenSameHDR() {
         let (sut, host, _, _) = makeSUT()
-        host.contentDisplayMode = .dolbyVision
+        host.authoritativeRange = .dolbyVision
         host.currentEngineKind = .plozzigen
         let next = prefetched(itemID: "n", engineKind: .plozzigen,
                               metadata: MediaSourceMetadata(video: .init(videoRangeType: "DOVI")))
@@ -177,7 +178,7 @@ final class NextEpisodeCoordinatorTests: XCTestCase {
 
     func testPreserveDisplayModeFalseOnNativeSide() {
         let (sut, host, _, _) = makeSUT()
-        host.contentDisplayMode = .dolbyVision
+        host.authoritativeRange = .dolbyVision
         host.currentEngineKind = .native // outgoing native → always full reset
         let next = prefetched(itemID: "n", engineKind: .plozzigen,
                               metadata: MediaSourceMetadata(video: .init(videoRangeType: "DOVI")))
@@ -186,7 +187,7 @@ final class NextEpisodeCoordinatorTests: XCTestCase {
 
     func testPreserveDisplayModeFalseOnModeMismatch() {
         let (sut, host, _, _) = makeSUT()
-        host.contentDisplayMode = .hdr10
+        host.authoritativeRange = .hdr10
         host.currentEngineKind = .plozzigen
         let next = prefetched(itemID: "n", engineKind: .plozzigen,
                               metadata: MediaSourceMetadata(video: .init(videoRangeType: "DOVI")))
@@ -259,7 +260,8 @@ final class NextEpisodeCoordinatorTests: XCTestCase {
         var settings = PlaybackSettings.default
         settings.showUpNextCard = true
         let coord = NextEpisodeCoordinator(
-            host: host, controls: controls, playbackSettings: settings, spoilerSettings: .default)
+            host: host, controls: controls, playbackSettings: settings, spoilerSettings: .default,
+            engineFactory: .native)
         coord.updateUpNextCard()
         XCTAssertNotNil(controls.upNext, "an enabled card with a next episode publishes an UpNextInfo")
     }
@@ -274,7 +276,8 @@ final class NextEpisodeCoordinatorTests: XCTestCase {
         var settings = PlaybackSettings.default
         settings.showUpNextCard = false
         let coord = NextEpisodeCoordinator(
-            host: host, controls: controls, playbackSettings: settings, spoilerSettings: .default)
+            host: host, controls: controls, playbackSettings: settings, spoilerSettings: .default,
+            engineFactory: .native)
         controls.upNext = UpNextInfo(episode: host.nextEpisodeCandidate!, showName: "x",
                                      metaLine: nil, thumbnailURLs: [], blurThumbnail: false)
         coord.updateUpNextCard()
@@ -303,7 +306,7 @@ private final class SpyNextEpisodeHost: NextEpisodeCoordinatorHost {
     var nextEpisodeCandidate: MediaItem?
     let engine: UpNextSpyEngine
     let provider: UpNextRecordingProvider
-    var contentDisplayMode: HDRDisplayMode = .sdr
+    var authoritativeRange: SourceDynamicRange?
     var currentEngineKind: PlaybackEngineKind = .native
     var bringUpStartedAt: Date?
 
@@ -318,7 +321,7 @@ private final class SpyNextEpisodeHost: NextEpisodeCoordinatorHost {
 
     var upNextEngine: any VideoEngine { engine }
     var upNextProvider: any MediaProvider { provider }
-    var upNextContentDisplayMode: HDRDisplayMode { contentDisplayMode }
+    var upNextAuthoritativeRange: SourceDynamicRange? { authoritativeRange }
     var upNextCurrentEngineKind: PlaybackEngineKind { currentEngineKind }
     var upNextBringUpStartedAt: Date? { bringUpStartedAt }
 
@@ -384,7 +387,7 @@ private final class UpNextSpyEngine: VideoEngine {
     var onTracksChanged: (@MainActor () -> Void)?
     var onSubtitleCues: (@MainActor ([SubtitleCue]) -> Void)?
     var onSecondarySubtitleCues: (@MainActor ([SubtitleCue]) -> Void)?
-
+    var onProbedSourceFactsChanged: (@MainActor (EngineProbedSourceFacts) -> Void)?
     func load(request: PlaybackRequest, startPosition: TimeInterval) async { status = .ready }
     func play() { isPaused = false }
     func pause() { isPaused = true }

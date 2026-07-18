@@ -63,13 +63,32 @@ public final class DetailSnapshotCache: Sendable {
     /// instead of failing to decode (decode failures are treated as a cache miss,
     /// so a stale schema just silently falls back to the network — but a bump also
     /// reclaims the orphaned files).
-    private static let schemaDirName = "plozz-detail-cache-v2"
+    ///
+    /// v3 also introduced per-content-identity **scoping**: snapshots live under
+    /// `plozz-detail-cache-v3/<scope-digest>/…` so one profile / account / Plex
+    /// Home-user identity can never read another's cached detail (which would leak
+    /// the wrong sources or watch state). A nil scope maps to a single shared
+    /// `default` subdirectory, preserving the unscoped behaviour for callers (tests,
+    /// previews) that don't provide an identity.
+    private static let schemaDirName = "plozz-detail-cache-v3"
     private static let schemaDirPrefix = "plozz-detail-cache"
+    private static let defaultScopeComponent = "default"
 
     private let directory: URL?
     private let maxEntries: Int
     private let maxBytes: Int
     private let maxAge: TimeInterval
+    typealias DirectoryContents = @Sendable (URL, [URLResourceKey]) -> [URL]?
+    private let directoryContents: DirectoryContents
+
+    /// Resolves the on-disk directory for a base caches directory and an optional
+    /// scope digest: `<base>/plozz-detail-cache-v3/<scope-or-default>`.
+    private static func resolvedDirectory(base: URL?, scope: String?) -> URL? {
+        base.map {
+            $0.appendingPathComponent(schemaDirName, isDirectory: true)
+                .appendingPathComponent(scope ?? defaultScopeComponent, isDirectory: true)
+        }
+    }
 
     /// Concurrent queue for snapshot reads/writes: independent titles run in
     /// parallel, so a slow encode/write for one never blocks a read for another.
@@ -80,26 +99,85 @@ public final class DetailSnapshotCache: Sendable {
         qos: .userInitiated,
         attributes: .concurrent
     )
-    /// Serial low-priority queue for the LRU prune so directory scans stay off the
-    /// critical write path (and never pile up concurrently).
-    private let pruneQueue = DispatchQueue(
-        label: "com.thatcube.Plozz.DetailSnapshotCache.prune",
-        qos: .background
-    )
+    /// Owns the off-write-path LRU prune: a successful write asks it to schedule a
+    /// prune, and a burst of writes coalesces into a single directory scan. The
+    /// prune logic itself depends only on this cache's immutable configuration
+    /// (`directory`/`maxEntries`/`maxBytes`/`directoryContents`), so it is passed to
+    /// the coordinator as a self-free closure — no retain cycle, no locking.
+    private let pruneCoordinator: DetailSnapshotPruneCoordinator
 
     public init(
         directory: URL? = DetailSnapshotCache.defaultDirectory(),
+        scope: String? = nil,
         maxEntries: Int = 800,
         maxBytes: Int = 48 * 1024 * 1024,
         maxAge: TimeInterval = 60 * 60 * 24 * 30
     ) {
-        self.directory = directory.map { $0.appendingPathComponent(Self.schemaDirName, isDirectory: true) }
+        let resolved = Self.resolvedDirectory(base: directory, scope: scope)
+        let contents: DirectoryContents = { directory, keys in
+            try? FileManager.default.contentsOfDirectory(
+                at: directory,
+                includingPropertiesForKeys: keys
+            )
+        }
+        self.directory = resolved
         self.maxEntries = maxEntries
         self.maxBytes = max(0, maxBytes)
         self.maxAge = maxAge
+        self.directoryContents = contents
+        self.pruneCoordinator = Self.makeCoordinator(
+            directory: resolved,
+            maxEntries: maxEntries,
+            maxBytes: max(0, maxBytes),
+            directoryContents: contents,
+            debounce: .milliseconds(500)
+        )
         if let directory { Self.removeSupersededCaches(in: directory) }
-        if self.directory != nil {
-            pruneQueue.async { self.pruneIfNeeded() }
+        if resolved != nil { pruneCoordinator.schedule() }
+    }
+
+    init(
+        directory: URL?,
+        scope: String? = nil,
+        maxEntries: Int = 800,
+        maxBytes: Int = 48 * 1024 * 1024,
+        maxAge: TimeInterval = 60 * 60 * 24 * 30,
+        debounce: DispatchTimeInterval = .milliseconds(500),
+        directoryContents: @escaping DirectoryContents
+    ) {
+        let resolved = Self.resolvedDirectory(base: directory, scope: scope)
+        self.directory = resolved
+        self.maxEntries = maxEntries
+        self.maxBytes = max(0, maxBytes)
+        self.maxAge = maxAge
+        self.directoryContents = directoryContents
+        self.pruneCoordinator = Self.makeCoordinator(
+            directory: resolved,
+            maxEntries: maxEntries,
+            maxBytes: max(0, maxBytes),
+            directoryContents: directoryContents,
+            debounce: debounce
+        )
+        if let directory { Self.removeSupersededCaches(in: directory) }
+        if resolved != nil { pruneCoordinator.schedule() }
+    }
+
+    /// Builds a prune coordinator whose scan closure captures only this cache's
+    /// immutable configuration, so the coordinator never retains the cache.
+    private static func makeCoordinator(
+        directory: URL?,
+        maxEntries: Int,
+        maxBytes: Int,
+        directoryContents: @escaping DirectoryContents,
+        debounce: DispatchTimeInterval
+    ) -> DetailSnapshotPruneCoordinator {
+        DetailSnapshotPruneCoordinator(debounce: debounce) {
+            Self.pruneIfNeeded(
+                directory: directory,
+                maxEntries: maxEntries,
+                maxBytes: maxBytes,
+                directoryContents: directoryContents
+            )
         }
     }
 
@@ -147,7 +225,7 @@ public final class DetailSnapshotCache: Sendable {
               let data = try? JSONEncoder().encode(snapshot) else { return }
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         guard (try? data.write(to: url, options: .atomic)) != nil else { return }
-        pruneQueue.async { self.pruneIfNeeded() }
+        pruneCoordinator.schedule()
     }
 
     /// Drops the snapshot for `key` (used by tests / explicit invalidation).
@@ -173,35 +251,30 @@ public final class DetailSnapshotCache: Sendable {
     }
 
 #if DEBUG
-    /// Test-only: awaits any LRU prune already scheduled by ``store(_:for:)``.
+    /// Test-only: awaits any LRU prune the ``DetailSnapshotPruneCoordinator`` has
+    /// coalesced from prior ``store(_:for:)`` calls.
     ///
-    /// `store` deliberately dispatches ``pruneIfNeeded()`` onto the serial
-    /// ``pruneQueue`` *off* the write path (so a slow directory scan never blocks
-    /// a write or a concurrent read — see the type header). That makes the prune
-    /// asynchronous relative to `store`'s completion, so a test that inspects the
-    /// cache directory immediately after storing races the prune and can observe
-    /// the pre-prune file count.
-    ///
-    /// This is the deterministic join point. By the time an `await store(…)` has
-    /// returned, its ``writeSnapshot(_:for:)`` has *already* enqueued that write's
-    /// prune onto ``pruneQueue`` (the enqueue happens before the write's
-    /// continuation resumes). Because ``pruneQueue`` is **serial**, a sentinel
-    /// enqueued here runs strictly after every prune queued by prior completed
-    /// stores — so awaiting it observes the settled, post-prune directory. Compiled
-    /// only into test/debug builds; it changes no production behaviour.
+    /// `store` deliberately asks the coordinator to *schedule* (debounce) a prune
+    /// off the write path, so the scan is asynchronous relative to `store`'s
+    /// completion and a test that inspects the directory immediately after storing
+    /// races the pending prune. Delegating to the coordinator's deterministic settle
+    /// cancels the outstanding debounce timer, runs the coalesced prune now, and
+    /// resumes — so by the time this returns the directory is settled. Compiled only
+    /// into test/debug builds; it changes no production behaviour.
     func awaitPendingPrune() async {
-        await withCheckedContinuation { continuation in
-            pruneQueue.async { continuation.resume() }
-        }
+        await pruneCoordinator.settleForTesting()
     }
 #endif
 
-    private func pruneIfNeeded() {
+    private static func pruneIfNeeded(
+        directory: URL?,
+        maxEntries: Int,
+        maxBytes: Int,
+        directoryContents: DirectoryContents
+    ) {
         guard let directory else { return }
         let keys: [URLResourceKey] = [.contentModificationDateKey, .fileSizeKey]
-        guard let files = try? FileManager.default.contentsOfDirectory(
-            at: directory, includingPropertiesForKeys: keys
-        ) else { return }
+        guard let files = directoryContents(directory, keys) else { return }
         var entries = files.map { url -> (url: URL, date: Date, bytes: Int) in
             let values = try? url.resourceValues(forKeys: Set(keys))
             return (

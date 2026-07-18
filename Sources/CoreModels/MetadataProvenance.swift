@@ -47,6 +47,28 @@ public struct MetadataField: RawRepresentable, Codable, Hashable, Sendable {
     public static let detailBackdrop = Self(rawValue: "detailBackdrop")
     public static let episodeThumbnail = Self(rawValue: "episodeThumbnail")
 
+    // MARK: - NFO / local-sidecar descriptive fields (Step 3)
+    //
+    // Additive fields introduced for local NFO + explicit-id enrichment. None of
+    // these change existing field semantics above; they extend the open set so a
+    // local sidecar parser can attribute the extra descriptive facts an NFO
+    // carries (Kodi/Jellyfin `movie`/`tvshow`/`episodedetails` documents).
+    public static let originalTitle = Self(rawValue: "originalTitle")
+    /// The catalog's SORT projection only (never `assets.sort_title`, which stays
+    /// scan-owned) — see `ShareCatalogStore`'s grid ORDER BY.
+    public static let sortTitle = Self(rawValue: "sortTitle")
+    public static let studios = Self(rawValue: "studios")
+    public static let tags = Self(rawValue: "tags")
+    public static let taglines = Self(rawValue: "taglines")
+    public static let productionYear = Self(rawValue: "productionYear")
+    /// Normalized local-date string (no dedicated UI yet; persisted for future use).
+    public static let premiereDate = Self(rawValue: "premiereDate")
+    /// Normalized local-date string (no dedicated UI yet; persisted for future use).
+    public static let airDate = Self(rawValue: "airDate")
+    public static let seasonNumber = Self(rawValue: "seasonNumber")
+    public static let episodeNumber = Self(rawValue: "episodeNumber")
+    public static let ratings = Self(rawValue: "ratings")
+
     public static func providerID(_ namespace: String) -> Self {
         Self(rawValue: "providerID.\(namespace.lowercased())")
     }

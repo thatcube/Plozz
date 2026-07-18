@@ -249,6 +249,7 @@ private final class SeekSpyEngine: VideoEngine {
     var onTracksChanged: (@MainActor () -> Void)?
     var onSubtitleCues: (@MainActor ([SubtitleCue]) -> Void)?
     var onSecondarySubtitleCues: (@MainActor ([SubtitleCue]) -> Void)?
+    var onProbedSourceFactsChanged: (@MainActor (EngineProbedSourceFacts) -> Void)?
 
     var seekLog: [SeekCall] = []
     var lastSeekTarget: TimeInterval? { seekLog.last?.target }

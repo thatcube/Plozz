@@ -22,24 +22,37 @@ struct ShareEnrichRequest: Sendable, Equatable {
     /// present, enrichment resolves DIRECTLY by this id — authoritative, skipping
     /// the ambiguous title search (fixes the tagged 1999 One Piece anime).
     var knownTVDBID: String? = nil
+    /// Already-persisted LOCAL (NFO/filename) provider ids for this item, keyed
+    /// by lowercased namespace (`tvdb`, `imdb`, `tmdb`, …) — see
+    /// `ShareCatalogStore.localProviderIDs`. Seeded so a resolver that supports
+    /// exact-id resolution can skip fuzzy title-based discovery for a namespace
+    /// it already knows, without reordering existing external sources or adding
+    /// new ones. Does not replace `knownTVDBID` (an authoritative FOLDER tag),
+    /// which still wins when both are present.
+    var knownProviderIDs: [String: String] = [:]
 }
 
 /// Resolves metadata (external ids + overview + artwork) for a bare share item.
 /// Abstracted so a keyed tier (TheTVDB — Phase 2b) can layer on top of the
 /// keyless base without changing the enricher.
 protocol ShareMetadataResolving: Sendable {
-    func resolve(_ request: ShareEnrichRequest) async -> ShareCatalogStore.EnrichmentRecord
+    func resolve(_ request: ShareEnrichRequest) async -> EnrichmentRecord
 }
 
-/// The keyless enrichment tier: strong external ids via ``KeylessIDResolver``
-/// (AniList/MAL for anime, TVmaze IMDb/TVDB for TV), plus artwork via
-/// ``ArtworkRouter`` and an overview via ``OverviewRouter`` — all no-API-key.
+/// The keyless enrichment tier: strong external ids (AniList/MAL for anime, TVmaze
+/// IMDb/TVDB for TV), plus artwork and an overview — all no-API-key. Every external
+/// capability is injected (`idResolver`/`artworkResolver`/`overviewResolver`) so this
+/// tier reaches no process-wide router directly.
 ///
 /// The resolved ids are stamped onto the synthetic query item **before** artwork
 /// resolution, so the routers can match by id (accurate) rather than title alone.
 struct KeylessShareResolver: ShareMetadataResolving {
-    func resolve(_ request: ShareEnrichRequest) async -> ShareCatalogStore.EnrichmentRecord {
-        let sourcedIDs = await KeylessIDResolver().sourcedExternalIDs(
+    let idResolver: any ShareExternalIDResolving
+    let artworkResolver: any ShareSourcedArtworkResolving
+    let overviewResolver: any ShareSourcedOverviewResolving
+
+    func resolve(_ request: ShareEnrichRequest) async -> EnrichmentRecord {
+        let sourcedIDs = await idResolver.sourcedExternalIDs(
             title: request.title,
             year: request.year,
             isAnime: request.isAnime,
@@ -58,12 +71,12 @@ struct KeylessShareResolver: ShareMetadataResolving {
             providerIDs: ids
         )
 
-        async let poster = ArtworkRouter.shared.sourcedArtworkURL(.poster, for: item)
-        async let hero = ArtworkRouter.shared.sourcedArtworkURL(.hero, for: item)
-        async let logo = ArtworkRouter.shared.sourcedArtworkURL(.logo, for: item)
-        async let overview = OverviewRouter.shared.sourcedOverview(for: item)
+        async let poster = artworkResolver.sourcedArtworkURL(.poster, for: item)
+        async let hero = artworkResolver.sourcedArtworkURL(.hero, for: item)
+        async let logo = artworkResolver.sourcedArtworkURL(.logo, for: item)
+        async let overview = overviewResolver.sourcedOverview(for: item)
 
-        return ShareCatalogStore.EnrichmentRecord.sourced(
+        return EnrichmentRecord.sourced(
             providerIDs: sourcedIDs,
             overview: await overview,
             posterURL: await poster,
@@ -77,15 +90,20 @@ struct KeylessShareResolver: ShareMetadataResolving {
 /// overview + poster + genres from TheTVDB (which, unlike the keyless sources, also
 /// covers **movies** — their previously id-less, poster-less gap), then fills any
 /// remaining holes keylessly: AniList/MAL ids for anime (TheTVDB lacks these), and
-/// `ArtworkRouter` backdrop/logo (+ poster if TheTVDB had none) / `OverviewRouter`.
+/// injected artwork backdrop/logo (+ poster if TheTVDB had none) / overview.
 /// TheTVDB ids are merged in before artwork resolution so the routers match by id.
+/// The TVDB client and keyless artwork/overview/id capabilities are all injected, so
+/// this tier reaches no process-wide router directly.
 struct TVDBShareResolver: ShareMetadataResolving {
-    let tvdb: TVDBClient
+    let tvdb: any ShareTVDBMetadataResolving
+    let idResolver: any ShareExternalIDResolving
+    let artworkResolver: any ShareSourcedArtworkResolving
+    let overviewResolver: any ShareSourcedOverviewResolving
 
-    func resolve(_ request: ShareEnrichRequest) async -> ShareCatalogStore.EnrichmentRecord {
+    func resolve(_ request: ShareEnrichRequest) async -> EnrichmentRecord {
         // Keyless ids: for anime these add AniList/MAL (TheTVDB doesn't carry them);
         // for TV they add IMDb/TVDB but TheTVDB supersedes those below.
-        async let keylessIDsTask = KeylessIDResolver().sourcedExternalIDs(
+        async let keylessIDsTask = idResolver.sourcedExternalIDs(
             title: request.title, year: request.year, isAnime: request.isAnime, isTV: !request.isMovie
         )
         // TheTVDB metadata: when the folder declared an explicit [tvdb-####] id,
@@ -94,8 +112,14 @@ struct TVDBShareResolver: ShareMetadataResolving {
         // "Avatar (2024)" resolves via "Avatar The Last Airbender"), then the stored
         // folder title. `search` prefers an exact-year hit but falls back to
         // relevance, so a specific query is far less likely to mis-match.
+        //
+        // A LOCAL (NFO/filename) tvdb id fills in only when no explicit folder
+        // tag was already known — the existing folder-tag behavior is preserved
+        // exactly; this only extends the SAME "skip the ambiguous title search"
+        // treatment to a persisted local id.
+        let knownID = request.knownTVDBID ?? request.knownProviderIDs["tvdb"]
         let meta: TVDBMetadata?
-        if let knownID = request.knownTVDBID {
+        if let knownID {
             if let byID = await tvdb.resolve(byTVDBID: knownID, isMovie: request.isMovie) {
                 meta = byID
             } else {
@@ -154,8 +178,8 @@ struct TVDBShareResolver: ShareMetadataResolving {
             providerIDs: ids
         )
 
-        async let hero = ArtworkRouter.shared.sourcedArtworkURL(.hero, for: item)
-        async let logo = ArtworkRouter.shared.sourcedArtworkURL(.logo, for: item)
+        async let hero = artworkResolver.sourcedArtworkURL(.hero, for: item)
+        async let logo = artworkResolver.sourcedArtworkURL(.logo, for: item)
         // Poster: prefer TheTVDB's (real, high-quality, and the only source for
         // movie posters), else the keyless router.
         let poster: SourcedValue<URL>?
@@ -166,7 +190,7 @@ struct TVDBShareResolver: ShareMetadataResolving {
                 sourceURL: tvdbSourceURL
             )
         } else {
-            poster = await ArtworkRouter.shared.sourcedArtworkURL(.poster, for: item)
+            poster = await artworkResolver.sourcedArtworkURL(.poster, for: item)
         }
         let overview: SourcedValue<String>?
         if let tvdbOverview = meta?.overview {
@@ -176,7 +200,7 @@ struct TVDBShareResolver: ShareMetadataResolving {
                 sourceURL: tvdbSourceURL
             )
         } else {
-            overview = await OverviewRouter.shared.sourcedOverview(for: item)
+            overview = await overviewResolver.sourcedOverview(for: item)
         }
         let genres = meta.flatMap { metadata -> SourcedValue<[String]>? in
             guard !metadata.genres.isEmpty else { return nil }
@@ -190,7 +214,7 @@ struct TVDBShareResolver: ShareMetadataResolving {
             SourcedValue(value: $0, source: .tvdb, sourceURL: tvdbSourceURL)
         }
 
-        return ShareCatalogStore.EnrichmentRecord.sourced(
+        return EnrichmentRecord.sourced(
             providerIDs: sourcedIDs,
             overview: overview,
             genres: genres,

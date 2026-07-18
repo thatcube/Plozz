@@ -379,6 +379,69 @@ final class ShareMediaParserTests: XCTestCase {
         XCTAssertNil(ShareMediaParser.embeddedProviderTag(relPath: "TV/Plain Show/Plain.Show.S01E01.mkv"))
     }
 
+    func testEmbeddedProviderIDsReturnsEveryNamespacePresent() {
+        let ids = ShareMediaParser.embeddedProviderIDs(
+            relPath: "TV/Show [tvdb-81797] {tmdb-1399} [imdb-tt0944947]/Show.S01E01.mkv"
+        )
+        XCTAssertEqual(ids["tvdb"], "81797")
+        XCTAssertEqual(ids["tmdb"], "1399")
+        XCTAssertEqual(ids["imdb"], "tt0944947")
+    }
+
+    func testEmbeddedProviderIDsEmptyForPlainPath() {
+        XCTAssertTrue(ShareMediaParser.embeddedProviderIDs(relPath: "TV/Plain Show/Plain.Show.S01E01.mkv").isEmpty)
+    }
+
+    func testConflictingFolderAndFilenameIDsRemainExplicitlyAmbiguous() {
+        let relPath = "TV/Show [tvdb-100]/Show.S01E01 [tvdb-200].mkv"
+        let ids = ShareMediaParser.embeddedProviderIDs(relPath: relPath)
+        XCTAssertEqual(ids["tvdb"], ShareMediaParser.conflictingExplicitIDMarker)
+        XCTAssertNil(ShareMediaParser.embeddedProviderTag(relPath: relPath))
+    }
+
+    func testEmbeddedProviderTagStillPicksStrongestFromFullDict() {
+        // Broadening `embeddedProviderIDs` to every namespace must not change
+        // which tag `embeddedProviderTag` selects for series grouping.
+        let relPath = "TV/Show [tvdb-81797] [imdb-tt0944947]/Show.S01E01.mkv"
+        XCTAssertEqual(ShareMediaParser.embeddedProviderTag(relPath: relPath), "tvdb-81797")
+    }
+
+    // MARK: - Explicit id normalization (shared by filename + NFO ids)
+
+    func testCanonicalExplicitIDNormalizesIMDb() {
+        let result = ShareMediaParser.canonicalExplicitID(namespace: "IMDb", value: "TT1234567")
+        XCTAssertEqual(result?.namespace, "imdb")
+        XCTAssertEqual(result?.value, "tt1234567")
+    }
+
+    func testCanonicalExplicitIDRejectsMalformedIMDb() {
+        XCTAssertNil(ShareMediaParser.canonicalExplicitID(namespace: "imdb", value: "1234567"))
+        XCTAssertNil(ShareMediaParser.canonicalExplicitID(namespace: "imdb", value: "tt"))
+    }
+
+    func testCanonicalExplicitIDRejectsNonPositiveNumericValues() {
+        XCTAssertNil(ShareMediaParser.canonicalExplicitID(namespace: "tmdb", value: "-5"))
+        XCTAssertNil(ShareMediaParser.canonicalExplicitID(namespace: "tvdb", value: "0"))
+        XCTAssertNil(ShareMediaParser.canonicalExplicitID(namespace: "tvdb", value: "1.5"))
+        XCTAssertNil(ShareMediaParser.canonicalExplicitID(namespace: "anilist", value: "  "))
+    }
+
+    func testCanonicalExplicitIDFoldsAliases() {
+        XCTAssertEqual(ShareMediaParser.canonicalExplicitID(namespace: "thetvdb", value: "81797")?.namespace, "tvdb")
+        XCTAssertEqual(ShareMediaParser.canonicalExplicitID(namespace: "myanimelist", value: "42")?.namespace, "mal")
+        XCTAssertEqual(ShareMediaParser.canonicalExplicitID(namespace: "themoviedb", value: "42")?.namespace, "tmdb")
+    }
+
+    func testCanonicalExplicitIDPreservesForwardCompatibleNamespace() {
+        let result = ShareMediaParser.canonicalExplicitID(namespace: "letterboxd", value: "some-slug")
+        XCTAssertEqual(result?.namespace, "letterboxd")
+        XCTAssertEqual(result?.value, "some-slug")
+    }
+
+    func testCanonicalExplicitIDRejectsBlankValue() {
+        XCTAssertNil(ShareMediaParser.canonicalExplicitID(namespace: "letterboxd", value: "   "))
+    }
+
     func testOnePieceAnimeAndLiveActionSplitByEmbeddedTvdbId() {
         // The anime folder carries an explicit [tvdb-81797]; the live-action reboot
         // does not. They must resolve to DIFFERENT series keys even though both

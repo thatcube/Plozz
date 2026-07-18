@@ -77,6 +77,11 @@ struct MainTabView: View {
     }
 
     let accounts: [ResolvedAccount]
+    /// The detail-snapshot cache scoped to the active content identity (profile +
+    /// accounts + Plex Home-user generation), injected from `RootView` so every
+    /// detail destination shares one identity-isolated instance instead of the
+    /// process-global `.shared` cache (which leaked snapshots across identities).
+    let detailSnapshotCache: DetailSnapshotCache
     /// Resolves the active accounts at action time for retained Settings
     /// destinations whose render-time `accounts` snapshot may be stale.
     let currentAccounts: @MainActor () -> [ResolvedAccount]
@@ -267,6 +272,7 @@ struct MainTabView: View {
             Tab("Home", systemImage: "house.fill", value: MainTab.home) {
             HomeTab(
                 accounts: accounts,
+                detailSnapshotCache: detailSnapshotCache,
                 seer: seer,
                 activeSeerrUserID: activeProfile.seerrUserID,
                 activeSeerrUserName: activeProfile.seerrUserName,
@@ -307,6 +313,7 @@ struct MainTabView: View {
             Tab("Search", systemImage: "magnifyingglass", value: MainTab.search) {
             SearchTab(
                 accounts: accounts,
+                detailSnapshotCache: detailSnapshotCache,
                 seer: seer,
                 activeSeerrUserID: activeProfile.seerrUserID,
                 activeSeerrUserName: activeProfile.seerrUserName,
@@ -1602,11 +1609,12 @@ private struct PlayerPresentation: View {
             // reuses the already-open session rather than the old player releasing
             // it. `nil` when the prefetch didn't finish → the new player resolves
             // normally (no regression).
-            let prefetched = viewModel?.consumePrefetchedNext(matching: next.id)
+            let consumed = viewModel?.consumePrefetchedNext(matching: next.id)
             // Keep the panel's HDR/DV mode across a same-range hand-off so the TV
             // doesn't flap DV→SDR→DV between episodes (needs the prefetched next's
             // source facts, so it's a no-op on a prefetch miss).
-            let preserveDisplay = viewModel?.shouldPreserveDisplayMode(forNext: prefetched) ?? false
+            let preserveDisplay = viewModel?.shouldPreserveDisplayMode(forNext: consumed) ?? false
+            let prefetched = consumed?.inheritingPreservedDisplayMode(preserveDisplay)
             Task { @MainActor in
                 // Stop + scrobble the finished episode before swapping.
                 await viewModel?.stop(preserveDisplayMode: preserveDisplay)
@@ -1653,6 +1661,9 @@ private struct PlayerPresentation: View {
 /// the tapped item/library's `sourceAccountID`.
 private struct HomeTab: View {
     let accounts: [ResolvedAccount]
+    /// Detail-snapshot cache scoped to the active content identity, threaded from
+    /// `MainTabView` so revisit paints never cross a profile/account/credential.
+    let detailSnapshotCache: DetailSnapshotCache
     /// Seerr discovery service backing the hero's featured content seam.
     let seer: SeerService
     /// The active profile's linked Seerr user (`X-API-User`) for requests, or
@@ -1819,7 +1830,7 @@ private struct HomeTab: View {
                         // the server list once the page settles.
                         alternateProviderResolver: { resolveOptionalProvider($0, in: accounts) },
                         crossServerSourceResolver: crossServerSourceResolver(in: accounts, identitySources: identitySources),
-                        snapshotCache: .shared
+                        snapshotCache: detailSnapshotCache
                     ),
                     spoilerSettings: spoilerSettings,
                     onPlay: { requestPlay($0) },
@@ -1851,7 +1862,7 @@ private struct HomeTab: View {
                         // cross-server "…" picker a directly-opened series does.
                         alternateProviderResolver: { resolveOptionalProvider($0, in: accounts) },
                         crossServerSourceResolver: crossServerSourceResolver(in: accounts, identitySources: identitySources),
-                        snapshotCache: .shared
+                        snapshotCache: detailSnapshotCache
                     ),
                     spoilerSettings: spoilerSettings,
                     onPlay: { requestPlay($0) },
@@ -1943,7 +1954,7 @@ private struct HomeTab: View {
                 initialSources: item.sources,
                 alternateProviderResolver: { resolveOptionalProvider($0, in: accounts) },
                 crossServerSourceResolver: crossServerSourceResolver(in: accounts, identitySources: identitySources),
-                snapshotCache: .shared
+                snapshotCache: detailSnapshotCache
             ),
             spoilerSettings: spoilerSettings,
             onPlay: { requestPlay($0) },
@@ -2207,6 +2218,9 @@ private extension View {
 /// across every active account; results route to their owning provider.
 private struct SearchTab: View {
     let accounts: [ResolvedAccount]
+    /// Detail-snapshot cache scoped to the active content identity, threaded from
+    /// `MainTabView` so revisit paints never cross a profile/account/credential.
+    let detailSnapshotCache: DetailSnapshotCache
     /// Seerr discovery service, backing the "Not in Your Library" search section
     /// and the discovery detail page's one-tap Request.
     let seer: SeerService
@@ -2279,7 +2293,7 @@ private struct SearchTab: View {
                         initialSources: item.sources,
                         alternateProviderResolver: { resolveOptionalProvider($0, in: accounts) },
                         crossServerSourceResolver: crossServerSourceResolver(in: accounts, identitySources: identitySources),
-                        snapshotCache: .shared
+                        snapshotCache: detailSnapshotCache
                     ),
                     spoilerSettings: spoilerSettings,
                     onPlay: { requestPlay($0) },
@@ -2315,7 +2329,7 @@ private struct SearchTab: View {
                         // cross-server "…" picker a directly-opened series does.
                         alternateProviderResolver: { resolveOptionalProvider($0, in: accounts) },
                         crossServerSourceResolver: crossServerSourceResolver(in: accounts, identitySources: identitySources),
-                        snapshotCache: .shared
+                        snapshotCache: detailSnapshotCache
                     ),
                     spoilerSettings: spoilerSettings,
                     onPlay: { requestPlay($0) },
@@ -2346,7 +2360,7 @@ private struct SearchTab: View {
                         // cross-server "…" picker a directly-opened series does.
                         alternateProviderResolver: { resolveOptionalProvider($0, in: accounts) },
                         crossServerSourceResolver: crossServerSourceResolver(in: accounts, identitySources: identitySources),
-                        snapshotCache: .shared
+                        snapshotCache: detailSnapshotCache
                     ),
                     spoilerSettings: spoilerSettings,
                     onPlay: { requestPlay($0) },

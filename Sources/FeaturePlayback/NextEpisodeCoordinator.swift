@@ -20,7 +20,7 @@ protocol NextEpisodeCoordinatorHost: AnyObject {
     var nextEpisodeCandidate: MediaItem? { get }
     var upNextEngine: any VideoEngine { get }
     var upNextProvider: any MediaProvider { get }
-    var upNextContentDisplayMode: HDRDisplayMode { get }
+    var upNextAuthoritativeRange: SourceDynamicRange? { get }
     var upNextCurrentEngineKind: PlaybackEngineKind { get }
     var upNextBringUpStartedAt: Date? { get }
     func upNextResolveAndRoute(
@@ -50,6 +50,9 @@ final class NextEpisodeCoordinator {
     @ObservationIgnored private let controls: PlayerControlsModel
     @ObservationIgnored private let playbackSettings: PlaybackSettings
     @ObservationIgnored private let spoilerSettings: SpoilerSettings
+    /// Builds the concrete engines; here only its bounded `probeSourceDynamicRange`
+    /// is used to header-probe an already-resolved direct-file next episode.
+    @ObservationIgnored private let engineFactory: EngineFactory
 
     /// A resolved, engine-routed playback for the NEXT episode, prefetched during
     /// this episode so the hand-off is near-instant. Handed to the incoming
@@ -82,12 +85,14 @@ final class NextEpisodeCoordinator {
         host: NextEpisodeCoordinatorHost,
         controls: PlayerControlsModel,
         playbackSettings: PlaybackSettings,
-        spoilerSettings: SpoilerSettings
+        spoilerSettings: SpoilerSettings,
+        engineFactory: EngineFactory
     ) {
         self.host = host
         self.controls = controls
         self.playbackSettings = playbackSettings
         self.spoilerSettings = spoilerSettings
+        self.engineFactory = engineFactory
     }
 
     private var engine: (any VideoEngine)? { host?.upNextEngine }
@@ -109,8 +114,20 @@ final class NextEpisodeCoordinator {
         nextEpisodePrefetchTask = Task { @MainActor [weak self] in
             guard let self, let host = self.host else { return }
             do {
-                let resolved = try await host.upNextResolveAndRoute(
+                var resolved = try await host.upNextResolveAndRoute(
                     itemID: next.id, mediaSourceID: next.selectedVersionID, forceTranscode: false)
+                // For an on-device-decode direct file, header-probe the upcoming
+                // range NOW (provider-independent, no metadata enrichment) so the
+                // hand-off has authoritative range truth before the swap.
+                if resolved.engineKind == .plozzigen,
+                   let probe = self.engineFactory.probeSourceDynamicRange {
+                    let range = await probe(resolved.request)
+                    resolved = resolved.withPrefetchedDynamicRange(range)
+                    HandoffDiagnostics.emit(
+                        "prefetch RANGE next=\(next.id) range=\(range?.rawValue ?? "unknown") "
+                            + "authority=engineHeaderProbe"
+                    )
+                }
                 // A stop()/back-out cancelled us after the resolve opened a
                 // (Jellyfin) session — release it rather than orphan it.
                 if Task.isCancelled {
@@ -139,8 +156,9 @@ final class NextEpisodeCoordinator {
     /// once the hand-off window has opened — the closing-credits marker (Up Next
     /// active) or, as a fallback for marker-less servers, the last
     /// ``windowedNextPrefetchLeadTime`` seconds. Keeps the minted session fresh.
-    /// Called on the progress cadence. Idempotent providers use the eager path.
-    func maybeStartWindowedNextPrefetch() {
+    /// Called on the progress cadence and when neighbor resolution completes.
+    /// Idempotent providers use the eager path.
+    func maybeStartWindowedNextPrefetch(trigger: String = "windowed") {
         guard let host, host.nextEpisodeCandidate != nil, prefetchedNext == nil,
               !didStartNextEpisodePrefetch, nextEpisodePrefetchTask == nil else { return }
         guard !host.upNextProvider.kind.playbackInfoIsIdempotent else { return }
@@ -150,7 +168,7 @@ final class NextEpisodeCoordinator {
         let windowOpen = controls.upNextActive
             || (duration > 0 && remaining > 0 && remaining <= Self.windowedNextPrefetchLeadTime)
         guard windowOpen else { return }
-        startNextEpisodePrefetch(trigger: "windowed")
+        startNextEpisodePrefetch(trigger: trigger)
     }
 
     /// Emits the Up Next card decision state on the progress cadence when we're
@@ -196,11 +214,15 @@ final class NextEpisodeCoordinator {
     /// the normal full reset so a genuine mode change still happens.
     func shouldPreserveDisplayMode(forNext next: PlayerViewModel.PrefetchedPlayback?) -> Bool {
         guard let host else { return false }
-        let curMode = host.upNextContentDisplayMode
-        let nextMode = next.map { HDRDisplayMode($0.request.sourceMetadata) }
+        let currentRange = host.upNextAuthoritativeRange
+        let nextRange = next?.handoffRange
+        let curMode = currentRange.map(HDRDisplayMode.init)
+        let nextMode = nextRange.map(HDRDisplayMode.init)
         let bothPlozzigen = host.upNextCurrentEngineKind == .plozzigen && next?.engineKind == .plozzigen
-        let preserve = bothPlozzigen && (nextMode?.isHDR ?? false) && nextMode == curMode
-        HandoffDiagnostics.emit("handoff display cur=\(curMode) next=\(nextMode.map { "\($0)" } ?? "none") bothPlozzigen=\(bothPlozzigen) preserve=\(preserve)")
+        let preserve = bothPlozzigen
+            && (curMode?.isHDR ?? false)
+            && curMode == nextMode
+        HandoffDiagnostics.emit("handoff display cur=\(curMode.map { "\($0)" } ?? "unknown") next=\(nextMode.map { "\($0)" } ?? "unknown") bothPlozzigen=\(bothPlozzigen) preserve=\(preserve)")
         return preserve
     }
 

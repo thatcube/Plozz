@@ -259,7 +259,7 @@ public final class PlaybackDiagnosticsSampler {
         diagnostics.liveNativeEngines = PlaybackInstrumentation.count(.nativeEngine)
     }
 
-    private static func hdrFormat(for range: EngineProbedSourceFacts.DynamicRange) -> PlaybackDiagnostics.HDRFormat {
+    private static func hdrFormat(for range: SourceDynamicRange) -> PlaybackDiagnostics.HDRFormat {
         switch range {
         case .sdr: return .sdr
         case .hlg: return .hlg
@@ -271,7 +271,7 @@ public final class PlaybackDiagnosticsSampler {
 
     /// Provider-agnostic range token, matching the `videoRangeType` strings the
     /// rest of the pipeline uses (Jellyfin's vocabulary).
-    private static func rangeToken(for range: EngineProbedSourceFacts.DynamicRange) -> String {
+    private static func rangeToken(for range: SourceDynamicRange) -> String {
         switch range {
         case .sdr: return "SDR"
         case .hlg: return "HLG"

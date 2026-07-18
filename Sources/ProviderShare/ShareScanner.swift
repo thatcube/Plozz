@@ -147,8 +147,10 @@ actor ShareScanner {
 
     /// Run a scan unless one already ran within `minInterval` (or is running).
     /// Called fire-and-forget from the Home hot path, so it must be cheap to no-op.
-    func scanIfStale(minInterval: TimeInterval = 600) async {
-        if isRunning || isInvalidated { return }
+    @discardableResult
+    func scanIfStale(minInterval: TimeInterval = 600) async -> ShareScanOutcome {
+        if isRunning { return .freshNoOp }
+        if isInvalidated { return .invalidated }
         // Force a walk (ignoring the staleness throttle) when the CLASSIFIER changed
         // since the last completed pass, so every already-indexed file is
         // reclassified under the new movie/episode rules right away instead of
@@ -156,19 +158,30 @@ actor ShareScanner {
         // library/keys). A cheap meta read on the hot path.
         let parserCurrent = String(ShareMediaParser.classifierVersion)
         let parserStored = await store.meta("parser_version")
+        // Same idea for the SIDECAR/explicit-id inventory (Step 3): a version bump
+        // here forces exactly one re-walk so an already-indexed share discovers
+        // existing NFO files / backfills explicit ids without waiting for files to
+        // change on disk — independent of the classifier and never forcing
+        // external re-enrichment (no `enrich_version`/`ShareEnricher` touch).
+        let localInventoryCurrent = String(ShareMediaParser.localInventoryVersion)
+        let localInventoryStored = await store.meta("local_inventory_version")
         if parserStored == parserCurrent,
+           localInventoryStored == localInventoryCurrent,
            let last = await store.meta("last_full_scan_at"),
            let ts = TimeInterval(last),
            Date().timeIntervalSince1970 - ts < minInterval {
-            return
+            return .freshNoOp
         }
-        await scan()
+        return await scan()
     }
 
     /// Full breadth-first walk from the share root, using a pool of independent
     /// connections to list `concurrency` directories at once. Idempotent.
-    func scan() async {
-        if isRunning || isInvalidated || Task.isCancelled { return }
+    @discardableResult
+    func scan() async -> ShareScanOutcome {
+        if isRunning { return .freshNoOp }
+        if isInvalidated { return .invalidated }
+        if Task.isCancelled { return .cancelled(scanGeneration: nil) }
         isRunning = true
         let scanGeneration = UUID()
         await store.activateScanGeneration(scanGeneration)
@@ -177,7 +190,7 @@ actor ShareScanner {
 
         guard !Task.isCancelled, !isInvalidated else {
             await finishScan(listers: [])
-            return
+            return isInvalidated ? .invalidated : .cancelled(scanGeneration: scanGeneration)
         }
 
         // Pre-build the pool of independent listers (each its own SMB connection).
@@ -195,7 +208,7 @@ actor ShareScanner {
         guard let scanID = await store.nextScanID(for: scanGeneration),
               !isInvalidated else {
             await finishScan(listers: pool)
-            return
+            return isInvalidated ? .invalidated : .failedToStart
         }
         PlozzLog.boot("share.scan begin scanID=\(scanID) concurrency=\(concurrency)")
 
@@ -209,6 +222,9 @@ actor ShareScanner {
         // folder, so pruning on a partial walk would delete still-present content and
         // reset its "date added" on rediscovery — skip the prune when this is set.
         var anyListingFailed = false
+        // PATH-FREE aggregate of listing failures by bounded category (C3): no dir/
+        // basename/error text is ever recorded — only per-category counts, logged once.
+        var listFailureCounts: [ShareScanListFailureCategory: Int] = [:]
 
         // Level-by-level BFS. Each level's directories are listed in parallel across
         // the pool; a plain free-list of listers (managed here on the actor) bounds
@@ -217,7 +233,7 @@ actor ShareScanner {
             if Task.isCancelled {
                 PlozzLog.boot("share.scan cancelled after \(dirsWalked) dirs, \(filesFound) files — no prune")
                 await finishScan(listers: pool)
-                return
+                return .cancelled(scanGeneration: scanGeneration)
             }
             var nextFrontier: [String] = []
             var index = 0                         // next directory in `frontier` to dispatch
@@ -248,6 +264,7 @@ actor ShareScanner {
                         // close, since that may hang too) and swap in a FRESH
                         // connection so throughput recovers immediately.
                         anyListingFailed = true
+                        listFailureCounts[result.failureCategory ?? .other, default: 0] += 1
                         let dead = result.lister
                         Task { await dead.close() }
                         let fresh = makeLister()
@@ -261,6 +278,13 @@ actor ShareScanner {
                         filesFound += result.assets.count
                         await store.upsert(
                             result.assets,
+                            scanID: scanID,
+                            scanGeneration: scanGeneration
+                        )
+                    }
+                    if !result.sidecars.isEmpty {
+                        await store.upsertSidecars(
+                            result.sidecars,
                             scanID: scanID,
                             scanGeneration: scanGeneration
                         )
@@ -285,7 +309,7 @@ actor ShareScanner {
             if Task.isCancelled || isInvalidated {
                 PlozzLog.boot("share.scan cancelled after \(dirsWalked) dirs, \(filesFound) files — no prune")
                 await finishScan(listers: pool)
-                return
+                return isInvalidated ? .invalidated : .cancelled(scanGeneration: scanGeneration)
             }
             frontier = nextFrontier
         }
@@ -299,24 +323,40 @@ actor ShareScanner {
         // clean pass performs the deferred prune.
         guard !isInvalidated else {
             await finishScan(listers: pool)
-            return
+            return .invalidated
         }
         if !anyListingFailed {
-            await store.preserveMovieAliasesBeforePrune(scanGeneration: scanGeneration)
+            // Clean full pass: prune vanished assets AND every orphan row they
+            // leave behind (enrichment/metadata_values/state, sidecar inventory +
+            // value cache, dead aliases/merges), regroup movies, recompute sidecar
+            // associations, and rematerialize local + filename projections — all in
+            // ONE atomic transaction. After commit no readable item can resurrect a
+            // deleted item's ids/artwork/metadata/state on path/series-key reuse.
+            let finalized = await store.finalizeCleanScan(
+                inScan: scanID,
+                scanGeneration: scanGeneration
+            )
             guard !isInvalidated else {
                 await finishScan(listers: pool)
-                return
+                return .invalidated
             }
-            await store.pruneNotSeen(inScan: scanID, scanGeneration: scanGeneration)
+            if !finalized {
+                // Superseded generation or a rolled-back SQLite failure: the clean
+                // transaction made NO change (no partial prune — invariant 9). Still
+                // refresh the pure path-derived filename/explicit ids so they stay
+                // current; orphan cleanup is deferred to the next clean pass.
+                await store.materializeFilenameProviderIDs(scanGeneration: scanGeneration)
+            }
+        } else {
+            // Partial walk: never prune/reconcile. Still refresh pure path-derived
+            // filename/folder explicit ids (already persisted on the asset row and
+            // independent of the deferred prune) into the same `metadata_values`
+            // priority projection NFO ids use.
             guard !isInvalidated else {
                 await finishScan(listers: pool)
-                return
+                return .invalidated
             }
-            await store.rebuildMovieGroups(scanGeneration: scanGeneration)
-        }
-        guard !isInvalidated else {
-            await finishScan(listers: pool)
-            return
+            await store.materializeFilenameProviderIDs(scanGeneration: scanGeneration)
         }
         await store.setMeta(
             "last_full_scan_at",
@@ -330,10 +370,37 @@ actor ShareScanner {
             String(ShareMediaParser.classifierVersion),
             scanGeneration: scanGeneration
         )
+        await store.setMeta(
+            "local_inventory_version",
+            String(ShareMediaParser.localInventoryVersion),
+            scanGeneration: scanGeneration
+        )
+        // One-time reread after an NFO PARSER-RULE upgrade (root-gated episode fields,
+        // strict date rejection): mark already-processed sidecars whose stored
+        // parser_version predates the current parser as pending so the local enricher
+        // reparses each existing NFO once under the corrected rules. The UPDATE is
+        // table-wide and idempotent; a meta gate keeps it to one pass per bump. Never
+        // touches external/local-materialization version or forces a resolver call.
+        let nfoParserCurrent = String(ShareNFOParser.parserVersion)
+        if await store.meta("nfo_parser_version") != nfoParserCurrent {
+            await store.markSidecarsPendingForParserUpgrade()
+            await store.setMeta("nfo_parser_version", nfoParserCurrent, scanGeneration: scanGeneration)
+        }
+        let failureSummary = listFailureCounts.isEmpty
+            ? "none"
+            : listFailureCounts
+                .sorted { $0.key.rawValue < $1.key.rawValue }
+                .map { "\($0.key.rawValue):\($0.value)" }
+                .joined(separator: ",")
         PlozzLog.boot(
-            "share.scan done scanID=\(scanID) dirs=\(dirsWalked) files=\(filesFound) pruned=\(!anyListingFailed) elapsed=\(Int(Date().timeIntervalSince(started) * 1_000))ms"
+            "share.scan done scanID=\(scanID) dirs=\(dirsWalked) files=\(filesFound) pruned=\(!anyListingFailed) failed=\(listFailureCounts.values.reduce(0, +)) failures=[\(failureSummary)] elapsed=\(Int(Date().timeIntervalSince(started) * 1_000))ms"
         )
         await finishScan(listers: pool)
+        // A completed pass earns a completion stamp. When some listing failed the pass
+        // stayed unpruned (partial), but it is still a *completed* pass under the
+        // approved partial throttle — the coordinator distinguishes this from a
+        // cancelled/superseded pass via the explicit outcome.
+        return anyListingFailed ? .completedPartial : .completedClean
     }
 
     private func finishScan(listers: [ScanLister]) async {
@@ -350,14 +417,20 @@ actor ShareScanner {
     }
 
     /// Result of listing one directory: the connection it used (returned to the
-    /// pool), the sub-directories discovered, the playable assets parsed, and
-    /// whether the listing actually succeeded (a failed listing must not let the
-    /// walk treat the folder as "empty" and prune its still-present content).
+    /// pool), the sub-directories discovered, the playable assets parsed, the NFO
+    /// sidecar candidates discovered (pure filename/sibling-stem facts — no read),
+    /// and whether the listing actually succeeded (a failed listing must not let
+    /// the walk treat the folder as "empty" and prune its still-present content).
     private struct DirResult: Sendable {
         let lister: ScanLister
         let subdirs: [String]
         let assets: [CatalogAsset]
+        let sidecars: [LocalSidecarCandidate]
         let ok: Bool
+        /// Set only when `ok == false`: a bounded, PATH-FREE classification of the
+        /// listing failure for aggregate diagnostics (never the directory, basename,
+        /// or the error's localized description, which can embed a share path).
+        var failureCategory: ShareScanListFailureCategory?
     }
 
     /// List + classify one directory off the actor (pure I/O + parsing, no shared
@@ -371,28 +444,85 @@ actor ShareScanner {
             defer { ShareBackgroundActivity.listFinished() }
             entries = try await lister.list(dir)
         } catch {
-            PlozzLog.boot("share.scan skip dir \(dir.isEmpty ? "<root>" : dir) (\(error))")
-            return DirResult(lister: lister, subdirs: [], assets: [], ok: false)
+            // PATH-PRIVATE diagnostics (C3): never log the directory/basename or the
+            // error's localized description (either can embed a share path). Classify
+            // the failure into a bounded category; the caller aggregates counts.
+            return DirResult(
+                lister: lister, subdirs: [], assets: [], sidecars: [], ok: false,
+                failureCategory: ShareScanListFailureCategory(error)
+            )
         }
         var subdirs: [String] = []
         var assets: [CatalogAsset] = []
+        // Video stems discovered in THIS SAME listing, bucketed by classified
+        // kind, so a sibling `.nfo`'s stem can be matched against a movie vs an
+        // episode file without any extra read — a pure by-product of the assets
+        // loop below (still listing-only: no `stat`/`readSmallFile`/XML parsing).
+        var movieStemsLower: Set<String> = []
+        var episodeStemsLower: Set<String> = []
+        var stemToVideoRelPath: [String: String] = [:]
+        var nfoEntries: [(entry: RemoteFileEntry, childPath: String)] = []
         for entry in entries {
             let childPath = dir.isEmpty ? entry.name : "\(dir)/\(entry.name)"
             if entry.kind == .directory {
                 if excludedDirs.contains(entry.name.lowercased()) { continue }
                 subdirs.append(childPath)
             } else if ShareMediaParser.isVideoFile(entry.name), !isSampleFile(entry.name) {
-                assets.append(asset(relPath: childPath, entry: entry))
+                let parsed = asset(relPath: childPath, entry: entry)
+                let stem = ShareMediaParser.videoStem(entry.name).lowercased()
+                switch parsed.kind {
+                case .movie: movieStemsLower.insert(stem)
+                case .episode: episodeStemsLower.insert(stem)
+                }
+                stemToVideoRelPath[stem] = childPath
+                assets.append(parsed)
+            } else if isNFOFile(entry.name) {
+                nfoEntries.append((entry, childPath))
             }
         }
 
-        return DirResult(lister: lister, subdirs: subdirs, assets: assets, ok: true)
+        var sidecars: [LocalSidecarCandidate] = []
+        for (entry, childPath) in nfoEntries {
+            let lowerName = entry.name.lowercased()
+            let kind: LocalSidecarKind
+            var associatedVideo: String?
+            if lowerName == "movie.nfo" {
+                kind = .movieGeneric
+            } else if lowerName == "tvshow.nfo" {
+                kind = .series
+            } else {
+                let stem = ShareMediaParser.videoStem(entry.name).lowercased()
+                if movieStemsLower.contains(stem) {
+                    kind = .movieStem
+                    associatedVideo = stemToVideoRelPath[stem]
+                } else if episodeStemsLower.contains(stem) {
+                    kind = .episodeStem
+                    associatedVideo = stemToVideoRelPath[stem]
+                } else {
+                    continue // Not a supported sidecar name/position — ignored.
+                }
+            }
+            sidecars.append(LocalSidecarCandidate(
+                relPath: childPath, parentDir: dir, basename: entry.name, kind: kind,
+                size: entry.size ?? 0, modifiedAt: entry.modifiedAt ?? .distantPast,
+                stableFileID: entry.stableFileID, strongETag: entry.strongETag,
+                changeToken: entry.changeToken, associatedVideoRelPath: associatedVideo
+            ))
+        }
+
+        return DirResult(lister: lister, subdirs: subdirs, assets: assets, sidecars: sidecars, ok: true)
+    }
+
+    /// A supported NFO sidecar filename (any casing).
+    private static func isNFOFile(_ name: String) -> Bool {
+        (name as NSString).pathExtension.caseInsensitiveCompare("nfo") == .orderedSame
     }
 
     // MARK: - Parse one file into a catalog asset
 
     static func asset(relPath: String, entry: RemoteFileEntry) -> CatalogAsset {
         let name = entry.name
+        let explicitIDs = ShareMediaParser.embeddedProviderIDs(relPath: relPath)
         switch ShareMediaParser.classify(relPath: relPath) {
         case .movie(let movie):
             let title = movie.title.isEmpty ? displayTitle(forFileName: name) : movie.title
@@ -408,7 +538,8 @@ actor ShareScanner {
                 modifiedAt: entry.modifiedAt ?? .distantPast, kind: .movie, library: .movies,
                 title: g.title, year: g.year,
                 seriesTitle: nil, seriesKey: nil, season: nil, episode: nil,
-                movieKey: movieKey, movieTitleKey: movieTitleKey
+                movieKey: movieKey, movieTitleKey: movieTitleKey,
+                explicitProviderIDs: explicitIDs, metadataRoot: nil
             )
         case .episode(let ep):
             let library: CatalogLibrary = isAnimePath(relPath) ? .anime : .tv
@@ -420,9 +551,24 @@ actor ShareScanner {
                 seriesTitle: ep.series,
                 seriesKey: ShareCatalogID.seriesKey(fromTitle: ep.series, providerTag: ep.providerTag),
                 season: ep.season, episode: ep.episode,
-                movieKey: nil, movieTitleKey: nil
+                movieKey: nil, movieTitleKey: nil,
+                explicitProviderIDs: explicitIDs, metadataRoot: seriesMetadataRoot(relPath: relPath)
             )
         }
+    }
+
+    /// The authoritative SHOW FOLDER's full relative path (root-first ancestors
+    /// joined up to and including the folder `ShareMediaParser.classify` proved
+    /// names the series) — where a `tvshow.nfo` sidecar would live. `nil` when the
+    /// folder tree doesn't prove a show folder (mirrors `authoritativeShowFolder`,
+    /// so this stays consistent with which folder GROUPING already trusts).
+    static func seriesMetadataRoot(relPath: String) -> String? {
+        let comps = relPath.split(separator: "/").map(String.init)
+        guard comps.count > 1 else { return nil }
+        let ancestors = Array(comps.dropLast())
+        guard let showFolder = ShareMediaParser.authoritativeShowFolder(fromAncestors: ancestors),
+              let idx = ancestors.lastIndex(of: showFolder) else { return nil }
+        return ancestors[0...idx].joined(separator: "/")
     }
 
     // MARK: - Heuristics
@@ -476,5 +622,69 @@ actor ShareScanPacer {
               lastInteractiveActivity.duration(to: clock.now) < activeWindow else { return false }
         try? await Task.sleep(for: activeDelay)
         return true
+    }
+}
+
+/// Bounded, PATH-FREE classification of a directory-listing failure, used only for
+/// aggregate scan diagnostics. The raw value is a fixed, library-structure-free token;
+/// it is derived solely from the error's domain/code — never its localized description
+/// (which can embed a share path/basename) and never any directory string.
+enum ShareScanListFailureCategory: String, Sendable, CaseIterable {
+    case timedOut
+    case connectionLost
+    case authFailed
+    case permissionDenied
+    case notFound
+    case cancelled
+    case other
+
+    init(_ error: Error) {
+        if error is CancellationError {
+            self = .cancelled
+            return
+        }
+        let ns = error as NSError
+        switch (ns.domain, ns.code) {
+        case (NSURLErrorDomain, NSURLErrorTimedOut):
+            self = .timedOut
+        case (NSURLErrorDomain, NSURLErrorCancelled):
+            self = .cancelled
+        case (NSURLErrorDomain, NSURLErrorNetworkConnectionLost),
+             (NSURLErrorDomain, NSURLErrorNotConnectedToInternet),
+             (NSURLErrorDomain, NSURLErrorCannotConnectToHost),
+             (NSURLErrorDomain, NSURLErrorCannotFindHost),
+             (NSURLErrorDomain, NSURLErrorDNSLookupFailed):
+            self = .connectionLost
+        case (NSURLErrorDomain, NSURLErrorUserAuthenticationRequired),
+             (NSURLErrorDomain, NSURLErrorUserCancelledAuthentication):
+            self = .authFailed
+        case (NSURLErrorDomain, NSURLErrorNoPermissionsToReadFile):
+            self = .permissionDenied
+        case (NSURLErrorDomain, NSURLErrorFileDoesNotExist),
+             (NSURLErrorDomain, NSURLErrorResourceUnavailable):
+            self = .notFound
+        case (NSCocoaErrorDomain, NSFileReadNoPermissionError),
+             (NSCocoaErrorDomain, NSFileWriteNoPermissionError):
+            self = .permissionDenied
+        case (NSCocoaErrorDomain, NSFileNoSuchFileError),
+             (NSCocoaErrorDomain, NSFileReadNoSuchFileError):
+            self = .notFound
+        case (NSPOSIXErrorDomain, Int(EACCES)),
+             (NSPOSIXErrorDomain, Int(EPERM)):
+            self = .permissionDenied
+        case (NSPOSIXErrorDomain, Int(ENOENT)):
+            self = .notFound
+        case (NSPOSIXErrorDomain, Int(ETIMEDOUT)):
+            self = .timedOut
+        case (NSPOSIXErrorDomain, Int(ECONNRESET)),
+             (NSPOSIXErrorDomain, Int(ECONNREFUSED)),
+             (NSPOSIXErrorDomain, Int(ENOTCONN)),
+             (NSPOSIXErrorDomain, Int(EHOSTUNREACH)),
+             (NSPOSIXErrorDomain, Int(ENETUNREACH)),
+             (NSPOSIXErrorDomain, Int(ENETDOWN)):
+            self = .connectionLost
+        default:
+            self = .other
+        }
     }
 }

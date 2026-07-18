@@ -265,6 +265,7 @@ private final class ReloadSpyEngine: VideoEngine {
     var onTracksChanged: (@MainActor () -> Void)?
     var onSubtitleCues: (@MainActor ([SubtitleCue]) -> Void)?
     var onSecondarySubtitleCues: (@MainActor ([SubtitleCue]) -> Void)?
+    var onProbedSourceFactsChanged: (@MainActor (EngineProbedSourceFacts) -> Void)?
 
     var reloadCount = 0
     var playCount = 0

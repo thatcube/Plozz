@@ -279,6 +279,11 @@ public protocol VideoEngine: AnyObject {
     /// at load never fire it. Invoked on the main actor.
     var onTracksChanged: (@MainActor () -> Void)? { get set }
 
+    /// Fired when an engine publishes fresh source facts from its own probe.
+    /// The owner must treat these as authoritative over provider metadata.
+    /// Engines without an independent probe never fire it.
+    var onProbedSourceFactsChanged: (@MainActor (EngineProbedSourceFacts) -> Void)? { get set }
+
     /// Fired with the engine's decoded subtitle cues for engines that decode
     /// subtitles themselves and want Plozz's owned overlay to draw them rather than
     /// drawing their own. AetherEngine emits text *and* bitmap cues here. NOTE:

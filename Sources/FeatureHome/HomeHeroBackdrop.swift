@@ -542,19 +542,20 @@ private struct WipeImageView: UIViewRepresentable {
             let prepared = container.prepareWipe(incomingImage: image, forward: forward)
             let animationID = UUID()
 
-            // Both pages ride the SAME expo-out cubic so the leaving art drifts in
-            // lockstep with the wipe — fast while the reveal is fast, settling as the
-            // reveal settles — instead of on its own slower curve. Seam-safe despite the
-            // shared curve: the reveal sweeps the full slide width while the outgoing
-            // only drifts a fraction of the width (≤ half), so the reveal always
+            // Both pages ride the SAME cubic so the leaving art drifts in lockstep with
+            // the wipe — same velocity profile — instead of on its own curve. Switched
+            // from an extreme expo-out (which dumped ~90% of the motion into the first
+            // ~0.2s and read as "rushed then stop") to a gentle ease-in-out, so the full
+            // travel is spread evenly across the whole duration for a deliberate glide.
+            // Seam-safe despite the shared curve: the reveal sweeps the full slide width
+            // while the outgoing only drifts a fraction of it, so the reveal always
             // outpaces the small blank strip the drift opens on the covered edge.
             let wipeCurve = { UICubicTimingParameters(
-                controlPoint1: CGPoint(x: 0.16, y: 1.0),
-                controlPoint2: CGPoint(x: 0.3, y: 1.0)
+                controlPoint1: CGPoint(x: 0.42, y: 0.0),
+                controlPoint2: CGPoint(x: 0.58, y: 1.0)
             ) }
 
-            // Incoming page: the expo-out reveal (starts fast, eases softly into the
-            // landing). Owns completion.
+            // Incoming page: the reveal, on the shared ease-in-out. Owns completion.
             let incomingAnimator = UIViewPropertyAnimator(
                 duration: duration,
                 timingParameters: wipeCurve()

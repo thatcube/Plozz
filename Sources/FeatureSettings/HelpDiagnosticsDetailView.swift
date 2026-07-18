@@ -151,11 +151,13 @@ struct HelpDiagnosticsDetailView: View {
     private var diagnosticsPanel: some View {
         SettingsPanel(
             title: "Diagnostics",
-            footer: "Overlays live playback stats (codec, bitrate, buffer, memory) on top of the video. A power-user aid for diagnosing playback issues — leave it off for normal watching. Saved on this profile."
+            footer: "Playback Diagnostics overlays live playback stats (codec, bitrate, buffer, memory) on top of the video. Home Performance Overlay shows a live Home rendering HUD. Both are power-user aids — leave them off for normal watching. Saved on this profile."
         ) {
             Toggle("Playback Diagnostics Overlay", isOn: $diagnostics.settings.isEnabled)
                 .toggleStyle(SettingsSwitchToggleStyle())
 
+            Toggle("Home Performance Overlay", isOn: $diagnostics.settings.homePerformanceOverlayEnabled)
+                .toggleStyle(SettingsSwitchToggleStyle())
         }
     }
 

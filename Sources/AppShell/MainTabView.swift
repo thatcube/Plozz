@@ -251,9 +251,10 @@ struct MainTabView: View {
                 seriesTrackStore: seriesTrackStore,
                 spoilerSettings: spoilerModel.settings,
                 showDiagnostics: diagnosticsModel.settings.isEnabled,
-                // Keep the on-screen Home profiler out of production. Remote,
-                // env-gated PLZPERF capture remains available for engineering A/Bs.
-                homePerfOverlayEnabled: false,
+                // Home performance HUD, gated on the Help & Diagnostics toggle
+                // (Diagnostics ▸ Home Performance Overlay). Off by default and opt-in
+                // per profile. Remote env-gated PLZPERF capture also remains available.
+                homePerfOverlayEnabled: diagnosticsModel.settings.homePerformanceOverlayEnabled,
                 themePalette: resolvedPalette,
                 ratingsProvider: ratingsProvider,
                 scrobbler: RealtimePlaybackScrobbler(trakt: trakt.scrobbler, simkl: simkl.scrobbler),

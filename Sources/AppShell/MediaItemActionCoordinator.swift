@@ -77,7 +77,7 @@ final class MediaItemActionCoordinator: MediaItemActionHandling {
             item: item,
             played: played,
             primaryAccountID: appState.primaryActiveAccount?.id,
-            additionalSources: appState.identitySnapshot.sourceRefs(for: item),
+            additionalSources: appState.identityIndex.identitySnapshot.sourceRefs(for: item),
             crossServerSync: appState.profileSettings.playbackModel.settings.syncWatchAcrossServers
         ) else { return }
 
@@ -210,7 +210,7 @@ final class MediaItemActionCoordinator: MediaItemActionHandling {
     private func unionedSourceRefs(for item: MediaItem) -> [MediaSourceRef] {
         var refs = item.sources
         var seen = Set(refs.map(\.id))
-        for ref in appState.identitySnapshot.sourceRefs(for: item)
+        for ref in appState.identityIndex.identitySnapshot.sourceRefs(for: item)
         where seen.insert(ref.id).inserted {
             refs.append(ref)
         }

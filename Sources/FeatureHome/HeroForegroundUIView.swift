@@ -108,8 +108,8 @@ final class HeroForegroundUIView: UIView {
     private let dotSize: CGFloat = 10
     private let activeDotWidth: CGFloat = 30
     private let dotSpacing: CGFloat = 12
-    /// Narrower cinematic text column: 60% of the original 960pt cap.
-    private let contentMaxWidth: CGFloat = 576
+    /// Narrower cinematic text column (was 576; trimmed 80pt for a tighter column).
+    private let contentMaxWidth: CGFloat = 496
     /// Keep logos proportionally aligned with the narrower column (60% of 620pt).
     private let logoMaxWidth: CGFloat = 372
     private let dotsGlassHPad: CGFloat = 14

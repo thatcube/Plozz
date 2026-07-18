@@ -371,8 +371,20 @@ struct DetailHeroView: View {
         let baseBottomInset = isFullScreenHero
             ? Self.horizontalSafeAreaInset + PlozzTheme.Metrics.heroLeadingPadding
             : PlozzTheme.Metrics.screenPadding
-        let bottomInset = baseBottomInset
+        let unshiftedBottomInset = baseBottomInset
             + (seriesRecedeModel == nil ? 0 : SeriesEpisodeBrowserLayout.heroContentBottomLift)
+        // Nudge the whole hero content block (logo → subtitle/metadata → Starring
+        // → overview → action row) DOWN by roughly one action-button height (~70pt)
+        // plus ~20pt of breathing room, per design — done by trimming the bottom
+        // inset. Floor at the overscan-safe inset so a full-screen (movie) hero,
+        // whose content already sits near the bottom, never drops into the unsafe
+        // overscan region; `min(unshifted, …)` keeps the floor from ever *raising*
+        // the content on a shallow hero whose inset is already below the safe line.
+        let heroContentDownShift: CGFloat = 90
+        let bottomInset = max(
+            unshiftedBottomInset - heroContentDownShift,
+            min(unshiftedBottomInset, Self.horizontalSafeAreaInset)
+        )
         // The leading-aligned content column. It is the ONLY thing that sizes the
         // hero, so the hero always reports the safe viewport width — never the
         // full panel — keeping its title/logo/Play on-screen and focusable.

@@ -156,6 +156,18 @@ def tag_github_release(build_number, notes, prerelease)
     end
   changelog = "- (no changes recorded)" if changelog.empty?
 
+  # Release title = the app's CalVer marketing version (e.g. "2026.7.18"), read from
+  # the generated project (generate-project.sh bakes MARKETING_VERSION = build date).
+  # Falls back to today's CalVer if it can't be read. The build number still shows in
+  # the release via its `release/<N>` tag, so same-day builds remain distinguishable.
+  today_cal = "#{Time.now.year}.#{Time.now.month}.#{Time.now.day}"
+  version =
+    begin
+      v = sh("cd .. && grep -m1 'MARKETING_VERSION' Plozz.xcodeproj/project.pbxproj 2>/dev/null | grep -oE '[0-9]+\\.[0-9]+\\.[0-9]+' || true").strip
+      v.empty? ? today_cal : v
+    rescue
+      today_cal
+    end
   date = Time.now.strftime("%Y-%m-%d")
   body = +"TestFlight build #{build_number} — #{date}\n"
   body << "\nWhat to Test:\n#{notes.strip}\n" unless notes.strip.empty?
@@ -167,8 +179,8 @@ def tag_github_release(build_number, notes, prerelease)
   file.close
   flag = prerelease ? "--prerelease" : "--latest"
   begin
-    sh("cd .. && gh release create #{tag} --verify-tag --title 'Build #{build_number} — #{date}' --notes-file #{file.path.shellescape} #{flag}")
-    UI.success("Created GitHub release #{tag}")
+    sh("cd .. && gh release create #{tag} --verify-tag --title #{version.shellescape} --notes-file #{file.path.shellescape} #{flag}")
+    UI.success("Created GitHub release #{tag} (#{version})")
   rescue => e
     UI.important("gh release create failed (#{e.message}); the tag is pushed — create the release manually.")
   ensure

@@ -222,6 +222,13 @@ public final class ProfileFlowModel {
             rebuildSettingsModels()
             updateTrackersForActiveProfile()
             accountsProviders.reloadAccounts()
+            // `profilesModel.remove(id)` above already selected the fallback profile
+            // as active, so re-apply ITS Plex identity — re-installing the fallback's
+            // Home-user binding or dropping the removed profile's stale token override.
+            // Mirrors `switchProfile(to:)`'s ordering (ensure runs last, after reload);
+            // without it the fallback could be left on the deleted profile's stale
+            // Plex override until the next explicit switch.
+            plexHomeUsers.ensurePlexIdentityForActiveProfile()
         }
     }
 

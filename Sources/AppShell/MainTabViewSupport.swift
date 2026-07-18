@@ -739,12 +739,13 @@ private func makePlayerViewModel(
                     )
                     return results.compactMap(\.youTubeTrailerVideoID)
                 },
-                // Adaptive (separate audio) trailers need routing through the
-                // Plozzigen muxer to pair the video+audio streams; this preview
-                // path uses the progressive **muxed** URL instead
-                // (AVPlayer/Plozzigen play it directly). Trailers stay playable,
-                // capped to the muxed resolution YouTube serves.
-                allowsSeparateAudio: false
+                // Adaptive (separate audio) trailers pair a video-only stream
+                // with an audio-only stream. The native engine muxes them via a
+                // synthesized HLS master (TrailerAudioMuxComposer) so AVPlayer
+                // plays them in sync — unlocking 1080p H.264, which YouTube only
+                // serves as adaptive tracks. Falls back to the progressive muxed
+                // (~360p) stream if the adaptive path fails.
+                allowsSeparateAudio: true
             ),
             itemID: videoID,
             behavior: behavior,

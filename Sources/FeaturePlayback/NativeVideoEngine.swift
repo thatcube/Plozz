@@ -108,6 +108,10 @@ public final class NativeVideoEngine: VideoEngine {
     /// Retains the resource-loader delegate that serves injected subtitle
     /// playlists; `AVAssetResourceLoader` holds it only weakly.
     @ObservationIgnored private var subtitleLoader: SubtitleInjectingResourceLoader?
+    /// Retains the resource-loader delegate that serves the synthesized HLS master
+    /// pairing a video-only + audio-only trailer stream (adaptive YouTube
+    /// trailers); `AVAssetResourceLoader` holds it only weakly.
+    @ObservationIgnored private var trailerMuxLoader: TrailerAudioMuxResourceLoader?
     /// Off-critical-path default-subtitle pick. Runs concurrently with playback
     /// startup so resolving the asset's `AVMediaSelectionGroup` never extends the
     /// time-to-first-frame; cancelled on teardown so a stale selection never
@@ -192,11 +196,23 @@ public final class NativeVideoEngine: VideoEngine {
         }
 
         let injectableSubtitles = await resolveInjectableSubtitles(for: request)
-        let asset = makeAsset(
-            for: request,
-            streamURL: streamURL,
-            injectableSubtitles: injectableSubtitles
-        )
+        let asset: AVURLAsset
+        if let audioURL = request.externalAudioURL {
+            // Adaptive trailer: a video-only stream paired with a separate
+            // audio-only stream. AVPlayer can't take two bare URLs, so wrap them
+            // in a synthesized HLS master and let it mux + sync them itself. Falls
+            // back to the plain video URL only if the duration probe fails (rare);
+            // that path is silent, so a failed decode there re-resolves through the
+            // engine's transcode fallback to the progressive muxed (audible) stream.
+            asset = await makeTrailerMuxAsset(videoURL: streamURL, audioURL: audioURL)
+                ?? makeAsset(for: request, streamURL: streamURL, injectableSubtitles: injectableSubtitles)
+        } else {
+            asset = makeAsset(
+                for: request,
+                streamURL: streamURL,
+                injectableSubtitles: injectableSubtitles
+            )
+        }
         let item = AVPlayerItem(asset: asset)
         // Apply in-app subtitle styling overrides if the user set any.
         item.textStyleRules = style.textStyleRules()
@@ -331,6 +347,7 @@ public final class NativeVideoEngine: VideoEngine {
         injectableSubtitles: [InjectableSubtitle]
     ) -> AVURLAsset {
         subtitleLoader = nil
+        trailerMuxLoader = nil
         guard !request.isManifestStream else {
             return AVURLAsset(url: streamURL)
         }
@@ -346,6 +363,41 @@ public final class NativeVideoEngine: VideoEngine {
         )
         let loader = SubtitleInjectingResourceLoader(composer: composer)
         subtitleLoader = loader
+        return loader.makeAsset()
+    }
+
+    /// Builds an `AVURLAsset` that pairs a **video-only** trailer stream with a
+    /// **separate audio-only** stream via a synthesized HLS master, so AVPlayer
+    /// muxes and syncs them itself (see ``TrailerAudioMuxComposer``). This unlocks
+    /// higher-quality (e.g. 1080p H.264) YouTube trailers, which are only offered
+    /// as adaptive video+audio tracks.
+    ///
+    /// The `EXTINF` needs the real media duration, which an online trailer item
+    /// doesn't carry — so read it directly from the video-only asset first (a
+    /// small metadata fetch: googlevideo fMP4 is faststart, so only the moov is
+    /// touched). Returns `nil` if the duration can't be read, so the caller falls
+    /// back to a plain asset rather than authoring a broken playlist.
+    private func makeTrailerMuxAsset(videoURL: URL, audioURL: URL) async -> AVURLAsset? {
+        subtitleLoader = nil
+        trailerMuxLoader = nil
+
+        let seconds: Double
+        do {
+            let duration = try await AVURLAsset(url: videoURL).load(.duration)
+            seconds = duration.seconds
+        } catch {
+            PlozzLog.playback.debug("Trailer mux: duration probe failed; falling back to plain asset")
+            return nil
+        }
+        guard seconds.isFinite, seconds > 0 else { return nil }
+
+        let composer = TrailerAudioMuxComposer(
+            videoURL: videoURL,
+            audioURL: audioURL,
+            durationSeconds: seconds
+        )
+        let loader = TrailerAudioMuxResourceLoader(composer: composer)
+        trailerMuxLoader = loader
         return loader.makeAsset()
     }
 
@@ -678,6 +730,7 @@ public final class NativeVideoEngine: VideoEngine {
         preferredAudioSelectionTask?.cancel()
         preferredAudioSelectionTask = nil
         subtitleLoader = nil
+        trailerMuxLoader = nil
         if let endOfPlaybackObserver {
             NotificationCenter.default.removeObserver(endOfPlaybackObserver)
         }

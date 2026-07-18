@@ -88,6 +88,13 @@ final class HeroForegroundUIView: UIView {
     /// slot, then fades up to 1 within the morph — a slight initial fill, not a pop
     /// from nothing). Mirrors SwiftUI's opacity insertion transition.
     private let dotEnterStartAlpha: CGFloat = 0.3
+    /// Duration of the logo cross-dissolve when a late-resolved logo lands (or a
+    /// warm logo replaces the text title) while the description is already on screen.
+    /// Mirrors the SwiftUI hero's `HeroLogoArtwork` `.onArrival` opacity transition /
+    /// `.contentTransition(.opacity)` so the logo dissolves in instead of hard-snapping
+    /// a beat after the metadata has settled. Pure content/alpha crossfade — no backdrop
+    /// sampling, so it keeps the flat foreground's hitch-free transition budget.
+    private let logoArrivalFade: TimeInterval = 0.3
 
     // MARK: Metrics (mirror the SwiftUI hero)
     private let columnSpacing: CGFloat = 12
@@ -241,13 +248,42 @@ final class HeroForegroundUIView: UIView {
         applyFade(metadataVisible: metadataVisible, slideChanged: slideChanged)
     }
 
-    /// Late async logo assignment, identity-guarded.
+    /// Late async logo assignment, identity-guarded. Cross-dissolves the logo in when
+    /// the description block is already visible (a late resolve landing after the group
+    /// fade has settled), mirroring the SwiftUI hero's `HeroLogoArtwork` arrival
+    /// transition, instead of a hard snap. When the block is currently hidden (mid
+    /// page snap-hide) it just sets the image so the group fade-in brings it up.
     func setLogo(_ image: UIImage, for itemID: String) {
         guard itemID == currentItemID else { return }
+        crossfadeToLogo(image)
+        setNeedsLayout()
+    }
+
+    /// Swaps the text title out for `image`, dissolving when on screen. Sets the image
+    /// and lays out at final geometry first (layout only positions the logo once its
+    /// image is non-nil), then cross-dissolves via alpha so the logo fades up as the
+    /// outgoing title fades out — no frame jump, no backdrop sampling.
+    private func crossfadeToLogo(_ image: UIImage) {
+        let onScreen = !isHidden && logoImageView.alpha > 0.01
         logoImageView.image = image
         logoImageView.isHidden = false
-        titleLabel.isHidden = true
+        guard onScreen else {
+            titleLabel.isHidden = true
+            return
+        }
+        // Settle layout for the logo's real size before dissolving, so only opacity
+        // animates — not the frame.
+        logoImageView.alpha = 0
         setNeedsLayout()
+        layoutIfNeeded()
+        UIView.animate(withDuration: logoArrivalFade, delay: 0,
+                       options: [.curveEaseInOut, .allowUserInteraction, .beginFromCurrentState]) {
+            self.logoImageView.alpha = 1
+            self.titleLabel.alpha = 0
+        } completion: { _ in
+            self.titleLabel.isHidden = true
+            self.titleLabel.alpha = 1
+        }
     }
 
     // MARK: Pills

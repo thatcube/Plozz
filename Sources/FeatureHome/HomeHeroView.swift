@@ -1538,6 +1538,13 @@ struct HomeHeroView: View {
             return
         }
         HeroFocusDiagnostics.emit("page BEGIN from=\(index) to=\(toItem) keepButton=\(keepButton) forward=\(isForward) | \(hfState())")
+        // Whether the hero currently holds focus (row leaf or a directional guard).
+        // A page that changes the action-button count can make the tvOS focus engine
+        // DROP focus to `nil` (see `restoreFocusAfterPage`); we reassert `.row` on the
+        // next tick — but ONLY when the hero already had focus, so a background
+        // auto-advance while the user is browsing Continue Watching below never yanks
+        // focus back up to the hero.
+        let heroWasFocused = focus != nil
         // Perf marker (PLZPERF stream only): lets a capture attribute frame hitches
         // to specific slide transitions vs idle. Zero-cost unless PLZPERF_STDOUT=1.
         HomePerfDiagnostics.emitLine("TRANSITION from=\(index) to=\(toItem) forward=\(isForward)")
@@ -1557,6 +1564,15 @@ struct HomeHeroView: View {
         restartDwell()
         metadataVisible = false
         selectedButton = min(keepButton, max(0, buttons(for: items[toItem]).count - 1))
+
+        // Recover focus for EVERY paging path — Left/Right, the Next chevron
+        // (`advanceForward`), and the auto-advance timer. Previously only the
+        // Left/Right handlers reasserted focus, so an auto-advance (or Next) onto a
+        // slide with a different button count could strand focus at `nil`, leaving
+        // the whole hero action row unresponsive until the user nudged focus.
+        if heroWasFocused {
+            restoreFocusAfterPage()
+        }
     }
 
     /// Begins a fresh auto-advance dwell from now: the progress gauge fills from

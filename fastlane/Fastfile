@@ -122,6 +122,60 @@ def whats_new
   (txt || "").strip
 end
 
+# Tags the shipped commit `release/<build>` and opens a GitHub Release with an
+# auto changelog (commits since the previous release tag) plus the tester notes.
+# Best-effort: a missing/failed `gh` or git push warns but never fails the ship —
+# the upload already succeeded by the time this runs.
+#
+# `build_number` is the CFBundleVersion that was uploaded (sequential TestFlight
+# number, set by the `build` lane). `prerelease` marks TestFlight betas as GitHub
+# pre-releases; an App Store `release` marks the GitHub release as the latest.
+def tag_github_release(build_number, notes, prerelease)
+  return UI.important("No build number available; skipping release tag.") if build_number.nil? || build_number.to_s.strip.empty?
+
+  # The host may inject `safe.bareRepository=explicit` (worktree checkouts); the
+  # override is harmless in a normal clone, so set it defensively for our git calls.
+  ENV["GIT_CONFIG_PARAMETERS"] ||= "'safe.bareRepository=all'"
+  ident = "-c user.name='Brandon Moore' -c user.email='16313090+thatcube@users.noreply.github.com'"
+  tag = "release/#{build_number}"
+  prev_tag = "release/#{build_number.to_i - 1}"
+
+  begin
+    sh("cd .. && git #{ident} tag -a -f #{tag} -m 'TestFlight build #{build_number}'")
+    sh("cd .. && git push origin -f #{tag}")
+  rescue => e
+    return UI.important("Release tagging failed (#{e.message}); ship succeeded, tag manually.")
+  end
+
+  has_prev = (sh("cd .. && git rev-parse -q --verify refs/tags/#{prev_tag} >/dev/null 2>&1 && echo yes || echo no").strip == "yes")
+  changelog =
+    if has_prev
+      (sh("cd .. && git log --no-merges --pretty='- %s' #{prev_tag}..#{tag}").strip)
+    else
+      "- Initial tagged release."
+    end
+  changelog = "- (no changes recorded)" if changelog.empty?
+
+  date = Time.now.strftime("%Y-%m-%d")
+  body = +"TestFlight build #{build_number} — #{date}\n"
+  body << "\nWhat to Test:\n#{notes.strip}\n" unless notes.strip.empty?
+  body << "\nChanges:\n#{changelog}\n"
+
+  require "tempfile"
+  file = Tempfile.new(["release-#{build_number}", ".md"])
+  file.write(body)
+  file.close
+  flag = prerelease ? "--prerelease" : "--latest"
+  begin
+    sh("cd .. && gh release create #{tag} --verify-tag --title 'Build #{build_number} — #{date}' --notes-file #{file.path.shellescape} #{flag}")
+    UI.success("Created GitHub release #{tag}")
+  rescue => e
+    UI.important("gh release create failed (#{e.message}); the tag is pushed — create the release manually.")
+  ensure
+    file.unlink
+  end
+end
+
 desc "Regenerate the Xcode project from project.yml via XcodeGen"
 lane :generate_project do
   # generate-project.sh runs xcodegen and bakes the build number (PLOZZ_BUILD_NUMBER
@@ -197,6 +251,9 @@ lane :beta do
     # and distributed — can't skip when distributing externally.
     skip_waiting_for_build_processing: false
   )
+
+  # Tag the shipped commit and open a GitHub pre-release with the changelog + notes.
+  tag_github_release(ENV["PLOZZ_BUILD_NUMBER"], notes, true)
 end
 
 desc "Build and upload to the App Store (no auto-submit for review)"
@@ -212,4 +269,8 @@ lane :release do
     precheck_include_in_app_purchases: false,
     force: true
   )
+
+  # Tag the shipped commit and open a GitHub release (marked latest) with the
+  # changelog and any tester notes.
+  tag_github_release(ENV["PLOZZ_BUILD_NUMBER"], whats_new, false)
 end

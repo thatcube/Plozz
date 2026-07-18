@@ -77,6 +77,63 @@ VENDOR_OWNERS = {
     "AetherEngine": {"EnginePlozzigen"},
 }
 
+# --- Observable fan-out policy ----------------------------------------------
+# The metric that actually hurt us: the number of STORED OBSERVABLE properties on
+# a single `@Observable` type (its "fan-out"). A wide observable surface makes
+# every SwiftUI view that touches `thatType.*` pay a large Swift type-check tax
+# (AppState's ~59-property surface regressed FirstRunProfileView/RootView by
+# ~230ms/view). This is NOT raw line count and NOT comments/blank lines — it is
+# specifically the count of type-body-scope `var`/`let` that are observed:
+#   - EXCLUDING `static` (not per-instance observable state),
+#   - EXCLUDING `@ObservationIgnored` (opted out of tracking),
+#   - EXCLUDING computed properties (a `{ ... }` accessor block with no
+#     initializer — they store nothing and don't participate in observation).
+#
+# Default ceiling for any `@Observable` type. Rationale: bounds the member
+# surface a view body must type-infer against; healthy single-responsibility
+# facets sit comfortably below this. Types that legitimately exceed it (mid-
+# decomposition god objects) get a DECREASING-only allowlist entry below.
+OBSERVABLE_FANOUT_DEFAULT_MAX = 25
+
+# Debt markers for types still above the default ceiling. Each entry is a
+# ratchet: the guard FAILS if a type's actual fan-out EXCEEDS its allowlisted
+# budget, so the number may only ever be LOWERED as the type is decomposed.
+# Raising an entry (or adding a new one) is a conscious, reviewed regression.
+# AppState is being decomposed into single-responsibility facets; this budget
+# tracks that shrink (was 62 before the ProfileSettingsModel extraction).
+OBSERVABLE_FANOUT_ALLOWLIST = {
+    # Being actively decomposed into single-responsibility facets (this workstream).
+    "AppState": 44,               # was 62 before ProfileSettingsModel extraction.
+    # Pre-existing god objects seeded at their current fan-out as debt markers so
+    # the ratchet prevents REGRESSION today and flags them as future decomposition
+    # targets. Lower these as each is split; never raise them.
+    "PlayerControlsModel": 62,
+    "PlayerViewModel": 50,
+    "UnifiedAddShareModel": 43,
+    "AudioPlaybackController": 43,
+    "ItemDetailViewModel": 37,
+}
+
+# Matches a stored-property declaration at a type body scope, capturing the name.
+# Deliberately excludes `static`/`class` type-level members via the negative set.
+_STORED_PROP_RE = re.compile(
+    r"^(?:public|private|internal|fileprivate|open|package)?\s*"
+    r"(?:public\(set\)|private\(set\)|internal\(set\)|fileprivate\(set\))?\s*"
+    r"(?:weak\s+|unowned\s+|lazy\s+)?"
+    r"(?:var|let)\s+([A-Za-z_]\w*)\s*(?::|=)"
+)
+_STATIC_PROP_RE = re.compile(
+    r"^(?:public|private|internal|fileprivate|open|package)?\s*"
+    r"(?:static|class)\s+(?:var|let)\b"
+)
+_OBSERVABLE_ATTR_RE = re.compile(r"@Observable\b")
+_OBSERVATION_IGNORED_RE = re.compile(r"@ObservationIgnored\b")
+# Type declarations that open a new brace scope we must track for nesting.
+_TYPE_DECL_RE = re.compile(
+    r"\b(?:final\s+)?(?:public\s+|private\s+|internal\s+|fileprivate\s+|open\s+|package\s+)*"
+    r"(?:final\s+)?(class|struct|actor|enum|extension)\s+([A-Za-z_]\w*)"
+)
+
 # Submodule-import kind keywords: `import struct Foo.Bar` -> module is `Foo`.
 _IMPORT_KINDS = {
     "struct", "class", "enum", "protocol", "func", "var", "let",
@@ -367,12 +424,185 @@ def check_imports(pkg: Package, sources_root: str) -> list[str]:
     return v
 
 
+def _is_computed(decl_line: str) -> bool:
+    """A stored property has an initializer/type-only decl; a computed property is
+    a `{ ... }` accessor block with NO initializer. Heuristic: there's a `{` and no
+    `=` precedes it (so `var x = { ... }()` — a stored closure init — stays stored).
+    """
+    if "{" not in decl_line:
+        return False
+    return "=" not in decl_line.split("{", 1)[0]
+
+
+def count_observable_fanout(text: str) -> list[tuple[str, int]]:
+    """Scan one Swift file and return `(type_name, stored_observable_prop_count)`
+    for every `@Observable` type DECLARED in it.
+
+    Fan-out counts type-body-scope stored `var`/`let` that are NOT `static`/`class`,
+    NOT `@ObservationIgnored`, and NOT computed. Properties inside nested types or
+    functions are attributed to their own immediate scope, never the outer type, so
+    a nested helper type can't inflate an outer `@Observable`'s count. Comments and
+    string literals are neutralised first so they can never be miscounted.
+    """
+    lines = _strip_comments_and_strings(text.split("\n"))
+    depth = 0
+    # scope stack entries: {"name", "observable", "body_depth"}
+    stack: list[dict] = []
+    counts: dict[str, int] = {}
+    order: list[str] = []
+    recent_attrs: list[str] = []  # attributes seen since the last code line
+
+    for raw in lines:
+        line = raw.strip()
+        if not line:
+            continue
+
+        # Attributes decorating the NEXT declaration may sit on their own lines.
+        attrs_here = list(recent_attrs)
+        if line.startswith("@"):
+            recent_attrs.append(line)
+            # A line that is ONLY attributes contributes nothing else this pass.
+            if line.lstrip().split(None, 1)[0].startswith("@") and not _TYPE_DECL_RE.search(line) \
+               and not _STORED_PROP_RE.match(line):
+                # keep accumulating unless the same line also holds a decl
+                if "{" not in line and "}" not in line:
+                    continue
+
+        # Effective attribute text for a decl on THIS line = accumulated + inline.
+        attr_text = " ".join(attrs_here) + " " + line
+
+        # --- classify this line before counting its braces ---
+        cur_depth = depth
+        directly_in = stack[-1] if stack and stack[-1]["body_depth"] == cur_depth else None
+
+        # Property? (only counts when directly inside an @Observable type body)
+        prop_m = _STORED_PROP_RE.match(line)
+        type_m = _TYPE_DECL_RE.search(line)
+        if prop_m and not type_m and not _STATIC_PROP_RE.match(line):
+            if directly_in and directly_in["observable"]:
+                if not _OBSERVATION_IGNORED_RE.search(attr_text) and not _is_computed(line):
+                    directly_in["count"] += 1
+
+        # Type declaration opening a body on this line?
+        if type_m and "{" in line:
+            name = type_m.group(2)
+            observable = bool(_OBSERVABLE_ATTR_RE.search(attr_text))
+            kind = type_m.group(1)
+            entry = {
+                "name": name,
+                "observable": observable and kind != "extension",
+                "body_depth": cur_depth + 1,
+                "count": 0,
+            }
+            stack.append(entry)
+            if entry["observable"] and name not in counts:
+                order.append(name)
+
+        # Any non-blank line resets the pending-attribute accumulator.
+        recent_attrs = []
+
+        # --- update brace depth and pop finished scopes ---
+        for ch in raw:
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                # Pop any scope whose body we've now closed.
+                while stack and depth < stack[-1]["body_depth"]:
+                    done = stack.pop()
+                    if done["observable"]:
+                        counts[done["name"]] = counts.get(done["name"], 0) + done["count"]
+
+    # Close any still-open observable scopes (malformed input tolerance).
+    while stack:
+        done = stack.pop()
+        if done["observable"]:
+            counts[done["name"]] = counts.get(done["name"], 0) + done["count"]
+
+    return [(n, counts[n]) for n in order]
+
+
+def check_observable_fanout(sources_root: str) -> list[str]:
+    """Enforce the observable-fan-out ceiling across Sources/**/*.swift.
+
+    A type's fan-out must not exceed `OBSERVABLE_FANOUT_ALLOWLIST[type]` if listed,
+    otherwise `OBSERVABLE_FANOUT_DEFAULT_MAX`. Allowlist entries are debt markers
+    that may only shrink; a listed type now UNDER its budget is reported as a hint
+    (not a failure) so the ratchet can be tightened.
+    """
+    v: list[str] = []
+    if not os.path.isdir(sources_root):
+        return v
+    totals: dict[str, int] = {}
+    for dirpath, _dirs, files in os.walk(sources_root):
+        for fn in files:
+            if not fn.endswith(".swift"):
+                continue
+            path = os.path.join(dirpath, fn)
+            try:
+                with open(path, encoding="utf-8") as fh:
+                    text = fh.read()
+            except (OSError, UnicodeDecodeError):
+                continue
+            for name, count in count_observable_fanout(text):
+                totals[name] = max(totals.get(name, 0), count)
+
+    for name in sorted(totals):
+        count = totals[name]
+        budget = OBSERVABLE_FANOUT_ALLOWLIST.get(name, OBSERVABLE_FANOUT_DEFAULT_MAX)
+        if count > budget:
+            if name in OBSERVABLE_FANOUT_ALLOWLIST:
+                v.append(
+                    f"[fanout] @Observable type '{name}' has {count} stored "
+                    f"observable properties, exceeding its allowlisted budget of "
+                    f"{budget}. The allowlist is a DECREASING-only ratchet — extract "
+                    f"a facet to shrink it, don't raise the number."
+                )
+            else:
+                v.append(
+                    f"[fanout] @Observable type '{name}' has {count} stored "
+                    f"observable properties, exceeding the ceiling of "
+                    f"{OBSERVABLE_FANOUT_DEFAULT_MAX}. Split it into narrower "
+                    f"single-responsibility facets, or add a DECREASING-only "
+                    f"OBSERVABLE_FANOUT_ALLOWLIST entry if this is tracked debt."
+                )
+    return v
+
+
+def observable_fanout_hints(sources_root: str) -> list[str]:
+    """Non-failing hints: allowlisted types now at/under their budget can tighten."""
+    hints: list[str] = []
+    if not os.path.isdir(sources_root):
+        return hints
+    totals: dict[str, int] = {}
+    for dirpath, _dirs, files in os.walk(sources_root):
+        for fn in files:
+            if not fn.endswith(".swift"):
+                continue
+            try:
+                with open(os.path.join(dirpath, fn), encoding="utf-8") as fh:
+                    text = fh.read()
+            except (OSError, UnicodeDecodeError):
+                continue
+            for name, count in count_observable_fanout(text):
+                totals[name] = max(totals.get(name, 0), count)
+    for name, budget in OBSERVABLE_FANOUT_ALLOWLIST.items():
+        count = totals.get(name, 0)
+        if count < budget:
+            hints.append(
+                f"OBSERVABLE_FANOUT_ALLOWLIST['{name}'] can tighten {budget} -> "
+                f"{count} (type is now under budget)."
+            )
+    return hints
+
+
 def run_checks(manifest: dict, sources_root: str) -> list[str]:
     pkg = Package(manifest)
     violations: list[str] = []
     violations += check_manifest(pkg)
     violations += check_acyclic(pkg)
     violations += check_imports(pkg, sources_root)
+    violations += check_observable_fanout(sources_root)
     return violations
 
 
@@ -470,8 +700,125 @@ def _self_test() -> int:
             ok = False
         print(f"  {status}  {name}: expected_violation={expect_violation} "
               f"got={got}" + (f" ({violations})" if status == "FAIL" else ""))
+
+    if not _self_test_fanout():
+        ok = False
     print("arch-guard --self-test: " + ("OK" if ok else "FAILED"))
     return 0 if ok else 1
+
+
+def _self_test_fanout() -> bool:
+    """Fixture set for the observable-fan-out counter/checker."""
+    ok = True
+
+    def prop(n):
+        return "\n".join(f"    var p{i}: Int = 0" for i in range(n))
+
+    # (label, swift source, type_name, expected_count)
+    count_cases: list[tuple[str, str, str, int]] = [
+        # Basic stored count on an @Observable type.
+        ("basic",
+         "@Observable final class A {\n" + prop(3) + "\n}", "A", 3),
+        # @ObservationIgnored excluded (attr on preceding line).
+        ("ignored-excluded",
+         "@Observable class A {\n    var x = 0\n    @ObservationIgnored\n    var y = 0\n}",
+         "A", 1),
+        # @ObservationIgnored inline on the same line excluded.
+        ("ignored-inline",
+         "@Observable class A {\n    var x = 0\n    @ObservationIgnored var y = 0\n}",
+         "A", 1),
+        # Computed properties excluded; stored closure-init NOT excluded.
+        ("computed-excluded",
+         "@Observable class A {\n    var stored = 0\n    var comp: Int { 1 }\n"
+         "    var closure = { 1 }()\n}", "A", 2),
+        # static/class type-level members excluded.
+        ("static-excluded",
+         "@Observable class A {\n    var x = 0\n    static var s = 0\n    class var c: Int { 0 }\n}",
+         "A", 1),
+        # Nested type's props not attributed to the outer @Observable type.
+        ("nested-not-counted",
+         "@Observable class A {\n    var x = 0\n    struct Inner {\n        var a = 0\n"
+         "        var b = 0\n    }\n    var y = 0\n}", "A", 2),
+        # Props inside a function body not counted.
+        ("func-locals-excluded",
+         "@Observable class A {\n    var x = 0\n    func f() {\n        var local = 0\n"
+         "        _ = local\n    }\n}", "A", 1),
+        # Multiple decorators before the type still detected as @Observable.
+        ("multi-attr-type",
+         "@MainActor\n@Observable\nfinal class A {\n" + prop(4) + "\n}", "A", 4),
+    ]
+    for label, src, tname, expected in count_cases:
+        got = dict(count_observable_fanout(src)).get(tname)
+        status = "PASS" if got == expected else "FAIL"
+        if status == "FAIL":
+            ok = False
+        print(f"  {status}  fanout:{label}: expected={expected} got={got}")
+
+    # Non-@Observable type must NOT be reported at all.
+    plain = "final class Plain {\n" + prop(40) + "\n}"
+    got_plain = dict(count_observable_fanout(plain))
+    status = "PASS" if "Plain" not in got_plain else "FAIL"
+    if status == "FAIL":
+        ok = False
+    print(f"  {status}  fanout:non-observable-ignored: reported={list(got_plain)}")
+
+    # --- checker (threshold + allowlist ratchet) fixtures, via a temp tree ---
+    import tempfile
+
+    def write_tree(files: dict[str, str]):
+        d = tempfile.mkdtemp()
+        for rel, content in files.items():
+            p = os.path.join(d, rel)
+            os.makedirs(os.path.dirname(p), exist_ok=True)
+            with open(p, "w") as fh:
+                fh.write(content)
+        return d
+
+    saved = dict(OBSERVABLE_FANOUT_ALLOWLIST)
+    try:
+        # under default ceiling -> pass
+        d = write_tree({"M/A.swift": "@Observable class Small {\n" + prop(10) + "\n}"})
+        r = check_observable_fanout(d)
+        s = "PASS" if not r else "FAIL"; ok = ok and not r
+        print(f"  {s}  fanout:under-ceiling: violations={r}")
+
+        # over default ceiling, not allowlisted -> fail
+        OBSERVABLE_FANOUT_ALLOWLIST.clear()
+        OBSERVABLE_FANOUT_ALLOWLIST.update(saved)
+        d = write_tree({"M/B.swift": "@Observable class Big {\n" + prop(30) + "\n}"})
+        r = check_observable_fanout(d)
+        s = "PASS" if r else "FAIL"; ok = ok and bool(r)
+        print(f"  {s}  fanout:over-ceiling-unlisted: violations={len(r)}")
+
+        # over ceiling but within allowlist -> pass
+        OBSERVABLE_FANOUT_ALLOWLIST.clear()
+        OBSERVABLE_FANOUT_ALLOWLIST["Big"] = 30
+        d = write_tree({"M/B.swift": "@Observable class Big {\n" + prop(30) + "\n}"})
+        r = check_observable_fanout(d)
+        s = "PASS" if not r else "FAIL"; ok = ok and not r
+        print(f"  {s}  fanout:over-ceiling-within-allowlist: violations={r}")
+
+        # allowlisted but EXCEEDS its (too-low) budget -> fail (ratchet enforced)
+        OBSERVABLE_FANOUT_ALLOWLIST.clear()
+        OBSERVABLE_FANOUT_ALLOWLIST["Big"] = 20
+        d = write_tree({"M/B.swift": "@Observable class Big {\n" + prop(30) + "\n}"})
+        r = check_observable_fanout(d)
+        s = "PASS" if r else "FAIL"; ok = ok and bool(r)
+        print(f"  {s}  fanout:allowlist-exceeded: violations={len(r)}")
+
+        # allowlisted and now UNDER budget -> pass + tighten hint offered
+        OBSERVABLE_FANOUT_ALLOWLIST.clear()
+        OBSERVABLE_FANOUT_ALLOWLIST["Big"] = 30
+        d = write_tree({"M/B.swift": "@Observable class Big {\n" + prop(18) + "\n}"})
+        r = check_observable_fanout(d)
+        h = observable_fanout_hints(d)
+        s = "PASS" if (not r and h) else "FAIL"; ok = ok and (not r and bool(h))
+        print(f"  {s}  fanout:under-allowlist-hint: violations={r} hints={len(h)}")
+    finally:
+        OBSERVABLE_FANOUT_ALLOWLIST.clear()
+        OBSERVABLE_FANOUT_ALLOWLIST.update(saved)
+
+    return ok
 
 
 # --- CLI ---------------------------------------------------------------------
@@ -501,6 +848,8 @@ def main(argv: list[str]) -> int:
         return 1
 
     print(f"ARCH GUARD: OK ({len(pkg.names)} targets, layering intact)")
+    for hint in observable_fanout_hints(sources_root):
+        print(f"  ℹ fan-out ratchet: {hint}")
     return 0
 
 

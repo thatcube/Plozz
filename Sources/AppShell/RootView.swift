@@ -73,7 +73,7 @@ public struct RootView: View {
     /// propagates back up to pollute this read. Re-resolves when the chosen theme
     /// or the device appearance changes.
     private var resolvedPalette: ThemePalette {
-        ThemePalette.palette(for: appState.themeModel.theme, systemColorScheme: systemColorScheme)
+        ThemePalette.palette(for: appState.profileSettings.themeModel.theme, systemColorScheme: systemColorScheme)
     }
 
     /// Reconcile the crash reporter with the current opt-in consent. Safe to call
@@ -151,29 +151,29 @@ public struct RootView: View {
                         currentAccounts: { appState.homeAccounts },
                         networkFileResolver: appState.networkFileResolver,
                         authenticatedHTTPResolver: appState.authenticatedHTTPResolver,
-                        subtitleBehaviorModel: appState.subtitleBehaviorModel,
-                        subtitleStyleModel: appState.subtitleStyleModel,
-                        spoilerModel: appState.spoilerModel,
-                        playbackModel: appState.playbackModel,
-                        subtitlePolicyModel: appState.subtitlePolicyModel,
-                        audioPolicyModel: appState.audioPolicyModel,
-                        themeModel: appState.themeModel,
-                        themeMusicModel: appState.themeMusicModel,
+                        subtitleBehaviorModel: appState.profileSettings.subtitleBehaviorModel,
+                        subtitleStyleModel: appState.profileSettings.subtitleStyleModel,
+                        spoilerModel: appState.profileSettings.spoilerModel,
+                        playbackModel: appState.profileSettings.playbackModel,
+                        subtitlePolicyModel: appState.profileSettings.subtitlePolicyModel,
+                        audioPolicyModel: appState.profileSettings.audioPolicyModel,
+                        themeModel: appState.profileSettings.themeModel,
+                        themeMusicModel: appState.profileSettings.themeMusicModel,
                         seriesTrackStore: SeriesTrackPreferenceStore(namespace: appState.profilesModel.activeNamespace),
-                        diagnosticsModel: appState.diagnosticsModel,
+                        diagnosticsModel: appState.profileSettings.diagnosticsModel,
                         crashReportingModel: appState.crashReportingModel,
                         crashReportingConfigured: crashReporting.isConfigured,
-                        musicPlayerModel: appState.musicPlayerModel,
-                        uiDensityModel: appState.uiDensityModel,
-                        cardStyleModel: appState.cardStyleModel,
-                        watchStatusIndicatorModel: appState.watchStatusIndicatorModel,
-                        navigationStyleModel: appState.navigationStyleModel,
-                        transparencyModel: appState.transparencyModel,
-                        heroSettingsModel: appState.heroSettingsModel,
+                        musicPlayerModel: appState.profileSettings.musicPlayerModel,
+                        uiDensityModel: appState.profileSettings.uiDensityModel,
+                        cardStyleModel: appState.profileSettings.cardStyleModel,
+                        watchStatusIndicatorModel: appState.profileSettings.watchStatusIndicatorModel,
+                        navigationStyleModel: appState.profileSettings.navigationStyleModel,
+                        transparencyModel: appState.profileSettings.transparencyModel,
+                        heroSettingsModel: appState.profileSettings.heroSettingsModel,
                         shareScanStatusModel: appState.shareScanStatusModel,
-                        nightShiftModel: appState.nightShiftModel,
+                        nightShiftModel: appState.profileSettings.nightShiftModel,
                         audioController: appState.audioController,
-                        homeVisibility: appState.homeLibraryVisibilityModel,
+                        homeVisibility: appState.profileSettings.homeLibraryVisibilityModel,
                         homeLayoutStore: HomeLayoutStore(namespace: appState.profilesModel.activeNamespace),
                         homeContentStore: HomeContentStore(namespace: appState.profilesModel.activeNamespace),
                         ratingsProvider: appState.ratingsProvider,
@@ -262,11 +262,11 @@ public struct RootView: View {
         }
         .background { AppBackground(palette: resolvedPalette) }
         .environment(\.themePalette, resolvedPalette)
-        .environment(\.plozzMetrics, PlozzMetrics(density: appState.uiDensityModel.density))
-        .environment(\.plozzCardStyle, appState.cardStyleModel.style)
-        .environment(\.plozzWatchStatusIndicator, appState.watchStatusIndicatorModel.indicator)
-        .environment(\.plozzNavigationStyle, appState.navigationStyleModel.style)
-        .environment(\.plozzReduceTransparency, appState.transparencyModel.preference.reducesTransparency(systemReduceTransparency: systemReduceTransparency))
+        .environment(\.plozzMetrics, PlozzMetrics(density: appState.profileSettings.uiDensityModel.density))
+        .environment(\.plozzCardStyle, appState.profileSettings.cardStyleModel.style)
+        .environment(\.plozzWatchStatusIndicator, appState.profileSettings.watchStatusIndicatorModel.indicator)
+        .environment(\.plozzNavigationStyle, appState.profileSettings.navigationStyleModel.style)
+        .environment(\.plozzReduceTransparency, appState.profileSettings.transparencyModel.preference.reducesTransparency(systemReduceTransparency: systemReduceTransparency))
         .environment(displayVeil)
         // Push the theme's effective scheme DOWN into the tree instead of forcing
         // it on the window via `preferredColorScheme`. A downward environment value
@@ -335,7 +335,7 @@ public struct RootView: View {
         // at the app root so it floats above every screen and modal cover. The
         // model is rebuilt on profile switch by AppState, so each profile gets its
         // own tint without re-architecting this call site.
-        .installNightShiftOverlay(appState.nightShiftModel)
+        .installNightShiftOverlay(appState.profileSettings.nightShiftModel)
     }
 }
 

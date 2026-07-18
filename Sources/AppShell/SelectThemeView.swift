@@ -13,7 +13,7 @@ import CoreUI
 ///   `AppState.finishNewProfileThemeSelection`).
 ///
 /// Selecting a theme applies it **live**: `RootView` derives its palette and
-/// `preferredColorScheme` from `appState.themeModel.theme`, so pressing an option
+/// `preferredColorScheme` from `appState.profileSettings.themeModel.theme`, so pressing an option
 /// repaints the whole screen immediately. Each card also renders an independent
 /// mini-preview built from that theme's own palette, so all four looks can be
 /// compared at a glance. "Continue" commits the choice and dismisses.
@@ -37,7 +37,7 @@ struct SelectThemeView: View {
         case continueButton
     }
 
-    private var selectedTheme: AppTheme { appState.themeModel.theme }
+    private var selectedTheme: AppTheme { appState.profileSettings.themeModel.theme }
 
     /// The palette for the currently selected theme, computed straight from the
     /// observable `themeModel` (so it repaints the instant a card is tapped, in
@@ -120,7 +120,7 @@ struct SelectThemeView: View {
             theme: theme,
             isSelected: theme == selectedTheme,
             accent: livePalette.accent,
-            action: { appState.themeModel.theme = theme }
+            action: { appState.profileSettings.themeModel.theme = theme }
         )
         .focused($focus, equals: .theme(theme))
     }

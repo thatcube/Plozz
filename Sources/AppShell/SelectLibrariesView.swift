@@ -132,8 +132,8 @@ struct SelectLibrariesView: View {
 
                                 ForEach(group.libraries) { library in
                                     Toggle(isOn: Binding(
-                                        get: { appState.homeLibraryVisibilityModel.isEnabled(library.key) },
-                                        set: { appState.homeLibraryVisibilityModel.setEnabled($0, for: library.key) }
+                                        get: { appState.profileSettings.homeLibraryVisibilityModel.isEnabled(library.key) },
+                                        set: { appState.profileSettings.homeLibraryVisibilityModel.setEnabled($0, for: library.key) }
                                     )) {
                                         Text(library.library.title)
                                     }

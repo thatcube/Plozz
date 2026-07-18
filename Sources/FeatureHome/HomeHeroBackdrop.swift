@@ -119,16 +119,17 @@ struct HomeHeroBackdrop: View {
     }
 
     /// Legibility scrim — a horizontal left→right wash. Darkest at the very left
-    /// edge, fading to clear ~40pt shy of the horizontally-centered pagination, and
-    /// uniform top-to-bottom (no vertical shaping). Lives under the dissolve mask so
-    /// it still fades away with the image at the bottom melt and never tints the
-    /// revealed background. Static across slides, so it never animates.
+    /// edge (0.55), fading to clear at the horizontal screen center (where the
+    /// pagination sits), and uniform top-to-bottom (no vertical shaping). Lives under
+    /// the dissolve mask so it still fades away with the image at the bottom melt and
+    /// never tints the revealed background. Static across slides, so it never animates.
     private var scrim: some View {
-        // Clear point: 40pt to the left of screen center, expressed as a width fraction.
-        let clearLocation = max(0, min(1, (width * 0.5 - 40) / width))
+        // Clear point: at screen center now (extended 40pt further in from the earlier
+        // center-40), expressed as a width fraction.
+        let clearLocation = max(0, min(1, (width * 0.5) / width))
         return LinearGradient(
             stops: [
-                .init(color: scrimTone.opacity(0.72), location: 0.0),
+                .init(color: scrimTone.opacity(0.55), location: 0.0),
                 .init(color: .clear, location: clearLocation)
             ],
             startPoint: .leading,

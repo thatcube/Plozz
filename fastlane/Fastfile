@@ -131,10 +131,14 @@ end
 # number, set by the `build` lane). Tags are ZERO-PADDED (`release/016`) so the
 # GitHub Releases web page — which orders releases by tag name, lexicographically —
 # lists newest first (unpadded `release/16` would sort below `release/2` as text).
-# Releases are created as full (non-prerelease) so the newest earns GitHub's
-# "Latest" badge in the repo sidebar; this app ships via TestFlight, so those beta
-# builds ARE the visible releases.
-def tag_github_release(build_number, notes)
+#
+# `prerelease` follows the industry standard for iOS betas: TestFlight builds (the
+# `beta` lane) are GitHub **pre-releases** (the orange badge — the canonical beta
+# indicator; they intentionally do NOT take the "Latest" slot). A real App Store
+# ship (the `release` lane) is a full release and earns the green "Latest" badge.
+# The newest beta is still surfaced on the repo page via the README shields.io
+# badge (`include_prereleases`).
+def tag_github_release(build_number, notes, prerelease)
   return UI.important("No build number available; skipping release tag.") if build_number.nil? || build_number.to_s.strip.empty?
 
   # The host may inject `safe.bareRepository=explicit` (worktree checkouts); the
@@ -182,9 +186,11 @@ def tag_github_release(build_number, notes)
   file = Tempfile.new(["release-#{build_number}", ".md"])
   file.write(body)
   file.close
+  # Beta (TestFlight) → pre-release badge; App Store release → full "Latest".
+  flag = prerelease ? "--prerelease" : "--latest"
   begin
-    sh("cd .. && gh release create #{tag} --verify-tag --title #{version.shellescape} --notes-file #{file.path.shellescape} --latest")
-    UI.success("Created GitHub release #{tag} (#{version})")
+    sh("cd .. && gh release create #{tag} --verify-tag --title #{version.shellescape} --notes-file #{file.path.shellescape} #{flag}")
+    UI.success("Created GitHub #{prerelease ? 'pre-release' : 'release'} #{tag} (#{version})")
   rescue => e
     UI.important("gh release create failed (#{e.message}); the tag is pushed — create the release manually.")
   ensure
@@ -268,8 +274,9 @@ lane :beta do
     skip_waiting_for_build_processing: false
   )
 
-  # Tag the shipped commit and open a GitHub pre-release with the changelog + notes.
-  tag_github_release(ENV["PLOZZ_BUILD_NUMBER"], notes)
+  # Tag the shipped commit and open a GitHub PRE-release (TestFlight beta) with the
+  # changelog + tester notes.
+  tag_github_release(ENV["PLOZZ_BUILD_NUMBER"], notes, true)
 end
 
 desc "Build and upload to the App Store (no auto-submit for review)"
@@ -286,7 +293,7 @@ lane :release do
     force: true
   )
 
-  # Tag the shipped commit and open a GitHub release (marked latest) with the
-  # changelog and any tester notes.
-  tag_github_release(ENV["PLOZZ_BUILD_NUMBER"], whats_new)
+  # Tag the shipped commit and open a full GitHub release (marked "Latest") with the
+  # changelog and any notes — this is a production App Store ship, not a beta.
+  tag_github_release(ENV["PLOZZ_BUILD_NUMBER"], whats_new, false)
 end

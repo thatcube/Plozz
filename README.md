@@ -13,6 +13,7 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/thatcube/Plozz/releases"><img src="https://img.shields.io/github/v/release/thatcube/Plozz?include_prereleases&sort=date&display_name=release&label=TestFlight%20beta&color=orange&logo=apple" alt="Latest TestFlight beta" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPL--3.0-blue.svg" alt="License: GPL-3.0" /></a>
   <a href="https://www.apple.com/apple-tv-4k/"><img src="https://img.shields.io/badge/Platform-tvOS-black.svg?logo=apple" alt="Platform: tvOS" /></a>
   <a href="https://github.com/sponsors/thatcube"><img src="https://img.shields.io/badge/Donate-%E2%9D%A4-db61a2?logo=githubsponsors&logoColor=white" alt="Donate" /></a>

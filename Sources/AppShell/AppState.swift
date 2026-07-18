@@ -73,20 +73,6 @@ public final class AppState {
     /// controller and leave the previous profile's track audibly playing. Stopped
     /// on profile switch so a new profile starts silent.
     public let audioController = AudioPlaybackController()
-    /// When `true`, `RootView` shows the profile picker instead of the signed-in
-    /// UI (shown at launch with >1 profile, and from "Switch Profile").
-    public private(set) var isChoosingProfile = false
-    /// Whether the current profile picker can be dismissed without choosing.
-    /// `false` for the mandatory launch picker (Back / Cancel must not bail out
-    /// of it), `true` when opened from Settings → "Switch Profile" over an
-    /// already-active profile.
-    public private(set) var isProfileSelectionCancelable = false
-
-    /// When `true`, `RootView` presents the one-time theme picker (as a
-    /// full-screen cover) for a profile just created in-app. Set right after
-    /// Settings → "Add Profile" switches to the new profile; cleared by
-    /// `finishNewProfileThemeSelection()`.
-    public private(set) var isPickingThemeForNewProfile = false
 
 
     @MainActor
@@ -501,7 +487,23 @@ public final class AppState {
     public private(set) lazy var plexHomeUsers: PlexHomeUsersModel = PlexHomeUsersModel(
         accountsProviders: accountsProviders,
         profilesModel: profilesModel,
-        switchProfile: { [weak self] id in self?.switchProfile(to: id) }
+        switchProfile: { [weak self] id in self?.profileFlow.switchProfile(to: id) }
+    )
+
+    /// The profile-flow + household facet — owns the launch-picker state and the
+    /// profile switch/create/edit/remove + household-membership orchestration. The
+    /// Plex facet's PIN-cancel fallback (above) wires into its `switchProfile`.
+    /// Lazily built so it can capture `self` for the tracker-rescope and
+    /// watch-reconciler-discard closures (those domains still live on `AppState`).
+    @ObservationIgnored
+    public private(set) lazy var profileFlow: ProfileFlowModel = ProfileFlowModel(
+        profilesModel: profilesModel,
+        accountsProviders: accountsProviders,
+        plexHomeUsers: plexHomeUsers,
+        profileSettings: profileSettings,
+        audioController: audioController,
+        updateTrackersForActiveProfile: { [weak self] in self?.updateTraktForActiveProfile() },
+        discardWatchReconciler: { [weak self] id in self?.watchReconcilers[id] = nil }
     )
     public let authenticatedHTTPResolver: any AuthenticatedHTTPResourceResolving
 
@@ -837,15 +839,12 @@ public final class AppState {
         //
         // When the toggle is OFF, the remembered selection (or default
         // profile) is used silently and the picker stays hidden.
-        isChoosingProfile = profilesModel.askProfileOnStartup
-            && profilesModel.profiles.count > 1
-        // The launch picker is mandatory: Back / Cancel must not dismiss it.
-        isProfileSelectionCancelable = false
+        profileFlow.prepareLaunchPicker()
         apply(.restored(accountsProviders.accounts))
         // Honor a remembered/auto-landed profile's Plex Home-user mapping at
         // launch. When the picker is shown, the switch happens once the user
         // picks instead.
-        if !isChoosingProfile {
+        if !profileFlow.isChoosingProfile {
             plexHomeUsers.ensurePlexIdentityForActiveProfile()
         }
 
@@ -1184,8 +1183,7 @@ public final class AppState {
     /// prompt if it maps to a protected Home user. Guarded so it's safe to call
     /// from both the Continue button and the cover's dismissal binding.
     public func finishNewProfileThemeSelection() {
-        guard isPickingThemeForNewProfile else { return }
-        isPickingThemeForNewProfile = false
+        guard profileFlow.finishPickingThemeForNewProfile() else { return }
         plexHomeUsers.ensurePlexIdentityForActiveProfile()
     }
 
@@ -1901,189 +1899,13 @@ public final class AppState {
         pendingLibrarySelectionAccountIDs = []
         pendingOnboardingContinuation = nil
         pendingPlexUserApplyToAccountIDs = []
-        isChoosingProfile = false
+        profileFlow.dismissPicker()
         rebuildSettingsModels()
         apply(.accountsChanged(accountsProviders.accounts))
     }
 
     public func retry() {
         apply(.retry)
-    }
-
-    // MARK: Profiles
-
-    /// Opens the profile picker (from Settings → "Switch Profile").
-    public func requestProfileSelection() {
-        isProfileSelectionCancelable = true
-        isChoosingProfile = true
-    }
-
-    /// Dismisses the profile picker without changing the active profile (only
-    /// allowed when a profile is already active behind it).
-    public func cancelProfileSelection() {
-        isChoosingProfile = false
-    }
-
-    /// Switches to `id`, re-scoping settings + the active account set, then
-    /// dismisses the picker. Fast: a few `UserDefaults` reads plus an in-memory
-    /// account recompute; content reloads async via the rebuilt view subtree.
-    public func switchProfile(to id: String) {
-        audioController.stop()
-        profilesModel.select(id)
-        rebuildSettingsModels()
-        updateTraktForActiveProfile()
-        accountsProviders.reloadAccounts()
-        isChoosingProfile = false
-        plexHomeUsers.ensurePlexIdentityForActiveProfile()
-    }
-
-    /// Creates or updates a profile from an editor draft. Updating the active
-    /// profile re-applies its settings + account scope immediately.
-    ///
-    /// A cosmetic-only edit (the new Settings → Profile editor) passes an
-    /// empty `activeAccountIDs` to mean "leave membership alone." Settings →
-    /// Servers & Libraries is the authoritative surface for membership now and
-    /// writes through `setAccount(_, includedInActiveProfile:)`.
-    public func saveProfile(_ draft: ProfileDraft) {
-        if let id = draft.id {
-            if var profile = profilesModel.profiles.first(where: { $0.id == id }) {
-                profile.name = draft.name
-                profile.avatarSymbol = draft.avatarSymbol
-                profile.colorIndex = draft.colorIndex
-                profile.linkedAccountID = draft.linkedAccountID
-                profile.plexHomeUserID = draft.plexHomeUserID
-                profile.plexHomeUserName = draft.plexHomeUserName
-                profile.plexHomeUserAccountID = draft.plexHomeUserAccountID
-                profile.plexHomeUserRequiresPIN = draft.plexHomeUserRequiresPIN
-                profile.plexHomeUserAvatarURL = draft.plexHomeUserAvatarURL
-                profile.plexHomeUserBindings = draft.plexHomeUserBindings
-                profile.avatarImageURL = draft.avatarImageURL
-                profile.avatarEmoji = draft.avatarEmoji
-                profile.avatarEmojiColorIndex = draft.avatarEmojiColorIndex
-                profilesModel.update(profile)
-            }
-            if !draft.activeAccountIDs.isEmpty {
-                profilesModel.setActiveAccountIDs(draft.activeAccountIDs, for: id)
-            }
-            if id == profilesModel.activeProfileID {
-                rebuildSettingsModels()
-                updateTraktForActiveProfile()
-                accountsProviders.reloadAccounts()
-                plexHomeUsers.ensurePlexIdentityForActiveProfile()
-            }
-        } else {
-            let created = profilesModel.add(
-                name: draft.name,
-                avatarSymbol: draft.avatarSymbol,
-                colorIndex: draft.colorIndex,
-                linkedAccountID: draft.linkedAccountID,
-                activeAccountIDs: draft.activeAccountIDs,
-                plexHomeUserID: draft.plexHomeUserID,
-                plexHomeUserName: draft.plexHomeUserName,
-                plexHomeUserAccountID: draft.plexHomeUserAccountID,
-                plexHomeUserRequiresPIN: draft.plexHomeUserRequiresPIN,
-                plexHomeUserAvatarURL: draft.plexHomeUserAvatarURL,
-                plexHomeUserBindings: draft.plexHomeUserBindings,
-                avatarImageURL: draft.avatarImageURL,
-                avatarEmoji: draft.avatarEmoji,
-                avatarEmojiColorIndex: draft.avatarEmojiColorIndex
-            )
-            // Switch to the freshly created profile so the per-profile theme
-            // picker edits *its* namespace, then present it. Mirrors
-            // `switchProfile(to:)` minus the Plex identity check, which is
-            // deferred to `finishNewProfileThemeSelection()` so any PIN prompt
-            // surfaces as the new profile actually enters the app — not stacked
-            // under the theme cover.
-            audioController.stop()
-            profilesModel.select(created.id)
-            rebuildSettingsModels()
-            updateTraktForActiveProfile()
-            accountsProviders.reloadAccounts()
-            isChoosingProfile = false
-            isPickingThemeForNewProfile = true
-        }
-    }
-
-    /// Persists ONLY a profile's cosmetic fields (name, avatar symbol/emoji,
-    /// colours, borrowed photo) — used by the editor's live auto-save while you
-    /// tweak an existing profile.
-    ///
-    /// Deliberately does **none** of `saveProfile`'s "the active profile's
-    /// substance changed" work — no `rebuildSettingsModels`, `reloadAccounts` or
-    /// `ensurePlexIdentityForActiveProfile`. Those re-scope which servers feed
-    /// Home and can raise a Plex PIN prompt; running them on every keystroke of a
-    /// cosmetic edit would reload/flicker Home and could pop a spurious PIN. A
-    /// name/avatar/colour change touches none of that, so we just write the
-    /// value through. No-op for an unknown id.
-    public func updateProfileCosmetics(_ draft: ProfileDraft) {
-        guard let id = draft.id,
-              var profile = profilesModel.profiles.first(where: { $0.id == id }) else { return }
-        let trimmed = draft.name.trimmingCharacters(in: .whitespacesAndNewlines)
-        // Never persist a blank name (the field may be momentarily empty while
-        // retyping) — keep the last valid one.
-        if !trimmed.isEmpty { profile.name = draft.name }
-        profile.avatarSymbol = draft.avatarSymbol
-        profile.colorIndex = draft.colorIndex
-        profile.avatarImageURL = draft.avatarImageURL
-        profile.avatarEmoji = draft.avatarEmoji
-        profile.avatarEmojiColorIndex = draft.avatarEmojiColorIndex
-        profilesModel.update(profile)
-    }
-
-    /// Removes a profile (the default profile can't be removed). If it was
-    /// active, selection falls back to the first profile and re-scopes.
-    public func removeProfile(id: String) {
-        let wasActive = id == profilesModel.activeProfileID
-        watchReconcilers[id] = nil
-        profilesModel.remove(id)
-        if wasActive {
-            rebuildSettingsModels()
-            updateTraktForActiveProfile()
-            accountsProviders.reloadAccounts()
-        }
-    }
-
-    // MARK: Household preferences
-
-    /// Opt the household into the profile UX (shows the "Enable Profiles"
-    /// affordance in Settings, surfaces profile management). Idempotent.
-    public func enableProfiles() {
-        profilesModel.enableProfiles()
-    }
-
-    /// Opt the household out of the profile UX. Only honored with a single
-    /// profile — `ProfilesModel.disableProfiles()` refuses when there are
-    /// multiple profiles so they don't become unreachable.
-    public func disableProfiles() {
-        profilesModel.disableProfiles()
-    }
-
-    /// Persists the "Ask which profile on startup" launch-picker toggle.
-    public func setAskProfileOnStartup(_ value: Bool) {
-        profilesModel.setAskProfileOnStartup(value)
-    }
-
-    /// Whether `accountID` is included in the active profile's "Use this
-    /// server" set. Used by Settings to drive the per-server toggle.
-    public func isAccountIncludedInActiveProfile(_ accountID: String) -> Bool {
-        accountsProviders.activeAccountIDs.contains(accountID)
-    }
-
-    /// Toggles inclusion of `accountID` in the active profile's account set
-    /// ("Use this server" toggle on Settings → Servers & Libraries → server).
-    public func setAccount(_ accountID: String, includedInActiveProfile included: Bool) {
-        let profileID = profilesModel.activeProfileID
-        // Mutate the resolved set that the UI is actually showing, not the raw
-        // stored set. The latter can contain only stale account ids after a
-        // server is removed/re-added; reloadAccounts() intentionally resolves
-        // that situation to the current household set. Starting from the stale
-        // stored value would make removing a visible account a no-op, then the
-        // next reload would fall back to every account and leave the switch On.
-        let current = accountsProviders.activeAccountIDs
-        var next = current
-        if included { next.insert(accountID) } else { next.remove(accountID) }
-        profilesModel.setActiveAccountIDs(Array(next), for: profileID)
-        accountsProviders.reloadAccounts()
     }
 
     // MARK: Internals

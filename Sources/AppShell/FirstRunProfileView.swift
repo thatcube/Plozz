@@ -89,7 +89,7 @@ struct FirstRunProfileView: View {
                 photoSourceAccounts: appState.accountsProviders.accounts,
                 plexHomeUsersFetcher: { await appState.plexHomeUsers.plexHomeUsers(forAccountID: $0) },
                 onSave: { draft in
-                    appState.saveProfile(draft)
+                    appState.profileFlow.saveProfile(draft)
                     editing = false
                     focus = .confirm
                 },

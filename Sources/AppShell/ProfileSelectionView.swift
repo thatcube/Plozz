@@ -18,9 +18,9 @@ struct ProfileSelectionView: View {
         ProfilePickerView(
             profiles: appState.profilesModel.profiles,
             activeProfileID: appState.profilesModel.activeProfileID,
-            onSelect: { appState.switchProfile(to: $0.id) },
+            onSelect: { appState.profileFlow.switchProfile(to: $0.id) },
             onAddProfile: nil,
-            onCancel: canCancel ? { appState.cancelProfileSelection() } : nil
+            onCancel: canCancel ? { appState.profileFlow.cancelProfileSelection() } : nil
         )
         // tvOS Menu button: the picker is rendered as a top-level view (not
         // a sheet / NavigationStack push), so without this handler Menu falls
@@ -31,7 +31,7 @@ struct ProfileSelectionView: View {
         //   event silently so Menu can't exit the app from the mandatory
         //   startup picker.
         .onExitCommand {
-            if canCancel { appState.cancelProfileSelection() }
+            if canCancel { appState.profileFlow.cancelProfileSelection() }
         }
     }
 }

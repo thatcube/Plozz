@@ -138,7 +138,7 @@ final class ServerToggleTests: XCTestCase {
             XCTAssertEqual(first.localMediaContext?.profileID, profiles.activeProfileID)
             XCTAssertNil(first.localMediaContext?.profileNamespace)
 
-            state.switchProfile(to: secondProfile.id)
+            state.profileFlow.switchProfile(to: secondProfile.id)
             XCTAssertNotNil(state.accountsProviders.provider(forAccountID: account.id))
             let second = try XCTUnwrap(recorder.contexts.last)
             XCTAssertEqual(second.localMediaContext?.profileID, secondProfile.id)
@@ -336,31 +336,31 @@ final class ServerToggleTests: XCTestCase {
         let state = try makeAppState(accountIDs: [("a", "a.example.com")])
 
         // Default: the only account is active, so the server reads "On".
-        XCTAssertTrue(state.isAccountIncludedInActiveProfile("a"))
+        XCTAssertTrue(state.profileFlow.isAccountIncludedInActiveProfile("a"))
 
         // Turn it off.
-        state.setAccount("a", includedInActiveProfile: false)
+        state.profileFlow.setAccount("a", includedInActiveProfile: false)
         XCTAssertFalse(
-            state.isAccountIncludedInActiveProfile("a"),
+            state.profileFlow.isAccountIncludedInActiveProfile("a"),
             "Turning off the last remaining server must actually turn it off, not snap back on."
         )
 
         // Turn it back on.
-        state.setAccount("a", includedInActiveProfile: true)
-        XCTAssertTrue(state.isAccountIncludedInActiveProfile("a"))
+        state.profileFlow.setAccount("a", includedInActiveProfile: true)
+        XCTAssertTrue(state.profileFlow.isAccountIncludedInActiveProfile("a"))
     }
 
     /// The intentional "watch nothing" state must survive a reload (e.g. the
     /// Settings page reappearing / a relaunch), not silently re-expand to all.
     func testEmptySelectionSurvivesReload() throws {
         let state = try makeAppState(accountIDs: [("a", "a.example.com")])
-        state.setAccount("a", includedInActiveProfile: false)
-        XCTAssertFalse(state.isAccountIncludedInActiveProfile("a"))
+        state.profileFlow.setAccount("a", includedInActiveProfile: false)
+        XCTAssertFalse(state.profileFlow.isAccountIncludedInActiveProfile("a"))
 
         // A fresh bootstrap (relaunch) must preserve the explicit empty choice.
         state.bootstrap()
         XCTAssertFalse(
-            state.isAccountIncludedInActiveProfile("a"),
+            state.profileFlow.isAccountIncludedInActiveProfile("a"),
             "An explicit 'watch nothing' selection must persist across reloads."
         )
     }
@@ -372,17 +372,17 @@ final class ServerToggleTests: XCTestCase {
             ("a", "a.example.com"),
             ("b", "b.example.com")
         ])
-        XCTAssertTrue(state.isAccountIncludedInActiveProfile("a"))
-        XCTAssertTrue(state.isAccountIncludedInActiveProfile("b"))
+        XCTAssertTrue(state.profileFlow.isAccountIncludedInActiveProfile("a"))
+        XCTAssertTrue(state.profileFlow.isAccountIncludedInActiveProfile("b"))
 
-        state.setAccount("a", includedInActiveProfile: false)
-        XCTAssertFalse(state.isAccountIncludedInActiveProfile("a"))
-        XCTAssertTrue(state.isAccountIncludedInActiveProfile("b"))
+        state.profileFlow.setAccount("a", includedInActiveProfile: false)
+        XCTAssertFalse(state.profileFlow.isAccountIncludedInActiveProfile("a"))
+        XCTAssertTrue(state.profileFlow.isAccountIncludedInActiveProfile("b"))
 
         // Turning off the now-last server must also stick.
-        state.setAccount("b", includedInActiveProfile: false)
-        XCTAssertFalse(state.isAccountIncludedInActiveProfile("a"))
-        XCTAssertFalse(state.isAccountIncludedInActiveProfile("b"))
+        state.profileFlow.setAccount("b", includedInActiveProfile: false)
+        XCTAssertFalse(state.profileFlow.isAccountIncludedInActiveProfile("a"))
+        XCTAssertFalse(state.profileFlow.isAccountIncludedInActiveProfile("b"))
     }
 
     /// A profile may retain ids for accounts that were removed and later
@@ -401,13 +401,13 @@ final class ServerToggleTests: XCTestCase {
 
         let state = AppState(accountStore: accountStore, profilesModel: profiles)
         state.bootstrap()
-        XCTAssertTrue(state.isAccountIncludedInActiveProfile("a"))
-        XCTAssertTrue(state.isAccountIncludedInActiveProfile("b"))
+        XCTAssertTrue(state.profileFlow.isAccountIncludedInActiveProfile("a"))
+        XCTAssertTrue(state.profileFlow.isAccountIncludedInActiveProfile("b"))
 
-        state.setAccount("a", includedInActiveProfile: false)
+        state.profileFlow.setAccount("a", includedInActiveProfile: false)
 
-        XCTAssertFalse(state.isAccountIncludedInActiveProfile("a"))
-        XCTAssertTrue(state.isAccountIncludedInActiveProfile("b"))
+        XCTAssertFalse(state.profileFlow.isAccountIncludedInActiveProfile("a"))
+        XCTAssertTrue(state.profileFlow.isAccountIncludedInActiveProfile("b"))
         XCTAssertEqual(
             Set(profiles.storedActiveAccountIDs(for: profiles.activeProfileID) ?? []),
             ["b"]

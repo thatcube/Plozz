@@ -130,8 +130,8 @@ public struct RootView: View {
 
             case .ready:
                 ZStack {
-                if appState.isChoosingProfile {
-                    ProfileSelectionView(appState: appState, canCancel: appState.isProfileSelectionCancelable)
+                if appState.profileFlow.isChoosingProfile {
+                    ProfileSelectionView(appState: appState, canCancel: appState.profileFlow.isProfileSelectionCancelable)
                         .transition(.opacity)
                 } else {
                     let accounts = appState.accountsProviders.homeAccounts
@@ -224,19 +224,19 @@ public struct RootView: View {
                             get: { appState.pendingPlayItemID },
                             set: { appState.pendingPlayItemID = $0 }
                         ),
-                        isAccountIncludedInActiveProfile: { appState.isAccountIncludedInActiveProfile($0) },
-                        onSetAccountIncluded: { appState.setAccount($0, includedInActiveProfile: $1) },
-                        onSetAskProfileOnStartup: { appState.setAskProfileOnStartup($0) },
-                        onEnableProfiles: { appState.enableProfiles() },
-                        onDisableProfiles: { appState.disableProfiles() },
-                        onSaveProfile: { appState.saveProfile($0) },
-                        onUpdateProfileCosmetics: { appState.updateProfileCosmetics($0) },
-                        onDeleteProfile: { appState.removeProfile(id: $0) },
+                        isAccountIncludedInActiveProfile: { appState.profileFlow.isAccountIncludedInActiveProfile($0) },
+                        onSetAccountIncluded: { appState.profileFlow.setAccount($0, includedInActiveProfile: $1) },
+                        onSetAskProfileOnStartup: { appState.profileFlow.setAskProfileOnStartup($0) },
+                        onEnableProfiles: { appState.profileFlow.enableProfiles() },
+                        onDisableProfiles: { appState.profileFlow.disableProfiles() },
+                        onSaveProfile: { appState.profileFlow.saveProfile($0) },
+                        onUpdateProfileCosmetics: { appState.profileFlow.updateProfileCosmetics($0) },
+                        onDeleteProfile: { appState.profileFlow.removeProfile(id: $0) },
                         onAddAccount: { appState.addAccount() },
                         onRemoveAccount: { appState.removeAccount(id: $0.id) },
                         onRescanShare: { appState.mediaShare.rescanShare(accountID: $0) },
                         onSignOutAll: { appState.signOutAll() },
-                        onSwitchProfile: { appState.requestProfileSelection() },
+                        onSwitchProfile: { appState.profileFlow.requestProfileSelection() },
                         onResetToFirstRun: { appState.resetToFirstRunForDebugging() },
                         plexHomeUsersFetcher: { await appState.plexHomeUsers.plexHomeUsers(forAccountID: $0) },
                         onSelectPlexHomeUser: { appState.plexHomeUsers.setPlexHomeUserForActiveProfile(accountID: $0, user: $1) },
@@ -252,7 +252,7 @@ public struct RootView: View {
                     }
                 }
                 }
-                .animation(.easeInOut(duration: 0.5), value: appState.isChoosingProfile)
+                .animation(.easeInOut(duration: 0.5), value: appState.profileFlow.isChoosingProfile)
 
             case let .failed(error, _):
                 FailureView(message: error.userMessage) {
@@ -291,7 +291,7 @@ public struct RootView: View {
         // "Add Profile"). The app has already switched to the new profile, so
         // this edits its per-profile theme; Continue dismisses into the app.
         .fullScreenCover(isPresented: Binding(
-            get: { appState.isPickingThemeForNewProfile },
+            get: { appState.profileFlow.isPickingThemeForNewProfile },
             set: { newValue in if !newValue { appState.finishNewProfileThemeSelection() } }
         )) {
             SelectThemeView(

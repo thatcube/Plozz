@@ -139,7 +139,17 @@ struct HomeTab: View {
                     return nil
                 },
                 navigationStyle: navigationStyle,
-                onSelectItem: { navigate(bestSourcePlayItem($0, accounts: accounts, identitySources: identitySources)) },
+                onSelectItem: {
+                    // "More Info" opens the detail for the item the user selected —
+                    // NOT a play-time best-source retarget. Retargeting here can hop
+                    // to a bad cross-server twin (a mis-indexed same-kind source that
+                    // survives the kind filter because the episode split-guard is
+                    // inactive), opening an unrelated title. The detail page owns its
+                    // own multi-server source resolution (crossServerSourceResolver +
+                    // server picker), so best-source selection still happens there and
+                    // at play time (requestPlay).
+                    navigate($0)
+                },
                 onPlayItem: { requestPlay($0) },
                 onSelectLibrary: { library in
                     path.append(library)

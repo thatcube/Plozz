@@ -297,9 +297,20 @@ struct SeriesDetailView: View {
                         showsCast: !series.cast.isEmpty,
                         focusAnchorID: Self.browserFocusAnchorID,
                         seasonContent: {
+                            // Keep the season chips + "request seasons" button hidden
+                            // while focus is up in the hero; reveal them once focus
+                            // moves down into the browser (which recedes the hero).
+                            // The bar stays in the hierarchy (opacity, not removed) so
+                            // pressing down still lands on the active season chip, whose
+                            // focus fires the recede that fades the bar in.
                             seasonTabBar {
                                 centerEpisodeBrowser(using: proxy)
                             }
+                            .opacity(recedeModel.isReceded ? 1 : 0)
+                            .animation(
+                                reduceMotion ? nil : .easeInOut(duration: 0.3),
+                                value: recedeModel.isReceded
+                            )
                         },
                         episodeContent: {
                             episodeRail {

@@ -444,6 +444,7 @@ public struct ItemDetailView: View {
                         } : nil,
                         playProgress: isPlayable(detail.item) ? detail.item.resumeProgressFraction : nil,
                         playRemainingText: isPlayable(detail.item) ? detail.item.resumeRemainingText : nil,
+                        playSeasonEpisodeText: isPlayable(detail.item) ? HeroForegroundModelBuilder.seasonEpisodeButtonText(for: detail.item) : nil,
                         onPlayTrailer: viewModel.trailers.first.map { trailer in { onPlay(trailer) } },
                         versions: effectiveVersions,
                         selectedVersionID: effectiveVersionID,

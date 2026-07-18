@@ -151,6 +151,39 @@ final class HeroForegroundModelTests: XCTestCase {
         XCTAssertNil(pill.progress)
     }
 
+    // MARK: - season/episode in the Play pill
+
+    func testSeasonEpisodeButtonTextUsesCommaForm() {
+        XCTAssertEqual(Builder.seasonEpisodeButtonText(for: episode(season: 21, number: 8)), "S21, E8")
+        XCTAssertNil(Builder.seasonEpisodeButtonText(for: movie()))
+        XCTAssertNil(Builder.seasonEpisodeButtonText(for: episode(season: nil, number: 8)))
+    }
+
+    func testPlainPlayPillAppendsSeasonEpisode() {
+        let pill = Builder.pill(for: PillInput(
+            kind: .play, resumeProgress: nil, isResume: false, seasonEpisodeText: "S21, E8"
+        ))
+        XCTAssertEqual(pill.text, "Play S21, E8")
+        XCTAssertNil(pill.progress)
+    }
+
+    func testResumePlayPillPrefixesSeasonEpisodeOntoRemaining() {
+        let pill = Builder.pill(for: PillInput(
+            kind: .play, resumeProgress: 0.42, isResume: true,
+            resumeRemainingText: "43m", seasonEpisodeText: "S5, E12"
+        ))
+        XCTAssertEqual(pill.text, "S5, E12 • 43m")
+        XCTAssertEqual(pill.progress, 0.42)
+    }
+
+    func testPlayPillOmitsSeasonEpisodeForMovies() {
+        // No seasonEpisodeText (movie): plain "Play" and bare remaining, unchanged.
+        XCTAssertEqual(Builder.pill(for: PillInput(kind: .play)).text, "Play")
+        XCTAssertEqual(Builder.pill(for: PillInput(
+            kind: .play, resumeProgress: 0.5, isResume: true, resumeRemainingText: "43m"
+        )).text, "43m")
+    }
+
     func testRequestPill() {
         let pill = Builder.pill(for: PillInput(kind: .request))
         XCTAssertEqual(pill.text, "Request")

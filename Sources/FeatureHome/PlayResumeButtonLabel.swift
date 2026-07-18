@@ -46,16 +46,28 @@ struct PlayResumeButtonLabel: View {
     let progress: Double?
     /// Remaining-time text (e.g. "20m") shown after the bar in the resume form.
     let remainingText: String?
+    /// The episode the button will play, as `S{n}, E{m}` — appended to the plain
+    /// title ("Play S21, E8") and prefixed to the resume trailing ("S5, E12 • 43m").
+    /// `nil` for movies/series, which keep their plain label.
+    var seasonEpisodeText: String? = nil
     /// Whether the label sits on a light background, forwarded to the progress bar.
     let onLight: Bool
     var spacing: CGFloat = 16
-    var capsuleWidth: CGFloat = 150
+    var capsuleWidth: CGFloat = 75
 
     /// The resume form is used only for a genuinely in-progress item: a fraction
     /// strictly between 0 and 1 with a remaining-time string to show.
     private var resumeForm: (progress: Double, remaining: String)? {
         guard let progress, progress > 0, progress < 1, let remainingText else { return nil }
-        return (progress, remainingText)
+        // Prefix the season/episode when present: "S5, E12 • 43m".
+        let trailing = seasonEpisodeText.map { "\($0) • \(remainingText)" } ?? remainingText
+        return (progress, trailing)
+    }
+
+    /// The plain (non-resume) label: the base title with the season/episode appended
+    /// when present — "Play S21, E8" — else just the base title ("Play").
+    private var plainTitle: String {
+        seasonEpisodeText.map { "\(title) \($0)" } ?? title
     }
 
     var body: some View {
@@ -66,7 +78,7 @@ struct PlayResumeButtonLabel: View {
                 Text(resumeForm.remaining)
                     .lineLimit(1)
             } else {
-                Text(title)
+                Text(plainTitle)
                     .lineLimit(1)
             }
         }

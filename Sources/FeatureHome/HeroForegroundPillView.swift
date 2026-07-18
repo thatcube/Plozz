@@ -106,7 +106,10 @@ final class HeroForegroundPillView: UIView {
     private let vPadding: CGFloat = 18
     private let glyphTextGap: CGFloat = 12
     private let glyphSize: CGFloat = 30
-    private let barWidth: CGFloat = 150
+    /// Half the former 150 — the resume trailing now also carries the "S5, E12 • "
+    /// prefix, so a shorter bar keeps the pill from growing over-wide. Mirrors
+    /// `PlayResumeButtonLabel.capsuleWidth`.
+    private let barWidth: CGFloat = 75
     private let barHeight: CGFloat = 6
 
     private var pill: HeroForegroundModel.Pill?

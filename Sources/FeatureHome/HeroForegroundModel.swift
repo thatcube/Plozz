@@ -112,6 +112,10 @@ enum HeroForegroundModelBuilder {
         /// glyph + inline progress bar + this text (no "Resume" word), matching
         /// `PlayResumeButtonLabel`'s resume layout.
         var resumeRemainingText: String? = nil
+        /// For `.play`: the episode the button plays, as `S{n}, E{m}` — appended to
+        /// the plain label ("Play S21, E8") and prefixed to the resume trailing
+        /// ("S5, E12 • 43m"). `nil` for movies/series.
+        var seasonEpisodeText: String? = nil
         /// For `.downloadStatus`: active download fraction, or `nil` when the
         /// request is queued/searching (shows a plain "Requested" status).
         var downloadProgress: Double? = nil
@@ -141,6 +145,17 @@ enum HeroForegroundModelBuilder {
         return "S\(season) · E\(episode)"
     }
 
+    /// The compact `S{season}, E{episode}` label used **inside Play/Resume buttons**
+    /// to name the episode that the button will play. Comma-separated (vs the dotted
+    /// subtitle form) to read tightly next to a title or a remaining-time. Episodes
+    /// only — `nil` for movies/series so those buttons keep their plain label.
+    static func seasonEpisodeButtonText(for item: MediaItem) -> String? {
+        guard item.kind == .episode,
+              let season = item.seasonNumber,
+              let episode = item.episodeNumber else { return nil }
+        return "S\(season), E\(episode)"
+    }
+
     /// Text fallback used when logo artwork is unavailable. Episodes represent their
     /// series in the hero, so pair the series title with the separate S/E line rather
     /// than showing an episode title such as "Episode 1" above "S2 · E1".
@@ -159,17 +174,23 @@ enum HeroForegroundModelBuilder {
         switch input.kind {
         case .play:
             // Resume form (matches PlayResumeButtonLabel): glyph + inline progress
-            // bar + remaining-time text, with NO "Resume" word. Only when we have a
+            // bar + trailing text, with NO "Resume" word. The trailing is prefixed
+            // with the episode ("S5, E12 • 43m") when known. Only when we have a
             // genuine in-range fraction *and* a remaining-time string; otherwise fall
-            // back to the plain titled pill ("Resume" if resumable, else "Play").
+            // back to the plain titled pill.
             if let p = input.resumeProgress, p > 0, p < 1, let remaining = input.resumeRemainingText {
+                let trailing = input.seasonEpisodeText.map { "\($0) • \(remaining)" } ?? remaining
                 return HeroForegroundModel.Pill(
-                    kind: .play, text: remaining, systemImage: "play.fill", progress: p
+                    kind: .play, text: trailing, systemImage: "play.fill", progress: p
                 )
             }
+            // Plain pill: base label with the episode appended when known
+            // ("Play S21, E8"), else just "Resume"/"Play".
+            let base = input.isResume ? "Resume" : "Play"
+            let plain = input.seasonEpisodeText.map { "\(base) \($0)" } ?? base
             return HeroForegroundModel.Pill(
                 kind: .play,
-                text: input.isResume ? "Resume" : "Play",
+                text: plain,
                 systemImage: "play.fill",
                 progress: nil
             )

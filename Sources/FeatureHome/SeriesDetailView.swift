@@ -239,6 +239,7 @@ struct SeriesDetailView: View {
                         onPlay: playTarget.map { target in { onPlay(target.selectingVersion(effectivePlayVersionID)) } },
                         playProgress: playTarget?.resumeProgressFraction,
                         playRemainingText: playTarget?.resumeRemainingText,
+                        playSeasonEpisodeText: playTarget.flatMap { HeroForegroundModelBuilder.seasonEpisodeButtonText(for: $0) },
                         onPlayTrailer: trailerButtonAction,
                         versions: playVersions,
                         selectedVersionID: effectivePlayVersionID,

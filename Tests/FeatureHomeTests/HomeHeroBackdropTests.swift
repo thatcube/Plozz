@@ -9,7 +9,7 @@ final class HomeHeroBackdropTests: XCTestCase {
         let container = HeroWipeContainerView(
             bleed: 8,
             parallaxIn: 1_200,
-            driftOut: 320
+            driftFraction: 0.625
         )
         container.slideSize = CGSize(width: 1_920, height: 1_080)
 
@@ -42,7 +42,7 @@ final class HomeHeroBackdropTests: XCTestCase {
         let container = HeroWipeContainerView(
             bleed: 8,
             parallaxIn: 1_200,
-            driftOut: 320
+            driftFraction: 0.625
         )
         container.slideSize = CGSize(width: 1_920, height: 1_080)
         container.setInitialImage(image(.red))
@@ -67,7 +67,7 @@ final class HomeHeroBackdropTests: XCTestCase {
         let container = HeroWipeContainerView(
             bleed: 8,
             parallaxIn: 1_200,
-            driftOut: 320
+            driftFraction: 0.625
         )
         container.slideSize = CGSize(width: 1_920, height: 1_080)
         container.setInitialImage(image(.red))
@@ -85,7 +85,7 @@ final class HomeHeroBackdropTests: XCTestCase {
         let container = HeroWipeContainerView(
             bleed: 8,
             parallaxIn: 1_200,
-            driftOut: 320
+            driftFraction: 0.625
         )
         container.slideSize = CGSize(width: 1_920, height: 1_080)
         container.setInitialImage(image(.red))

@@ -53,6 +53,10 @@ struct DetailHeroView: View {
     /// When provided, a "… left" remaining-time line is shown inside the Play
     /// button, after the progress bar.
     var playRemainingText: String? = nil
+    /// The episode the Play button will play, as `S{n}, E{m}` — appended to the plain
+    /// label ("Play S21, E8") and prefixed to the resume trailing ("S5, E12 • 43m").
+    /// For a series hero this is the next-up/resume episode's S/E, not the series.
+    var playSeasonEpisodeText: String? = nil
     /// When provided, a secondary "Trailer" button is shown next to Play.
     var onPlayTrailer: (() -> Void)? = nil
     /// The selectable versions for this title. When more than one exists and
@@ -617,6 +621,7 @@ struct DetailHeroView: View {
                     title: title,
                     progress: playProgress,
                     remainingText: playRemainingText,
+                    seasonEpisodeText: playSeasonEpisodeText,
                     onLight: playButtonHasFocus || colorScheme == .light
                 )
             }
@@ -739,20 +744,21 @@ struct DetailHeroView: View {
         }
     }
 
-    /// The live resume "… left" text when the item has a real partial position
-    /// (0 < progress < 1), else `nil`.
+    /// The live resume trailing text — `S{n}, E{m} • {remaining}` (or just the
+    /// remaining time for a movie) — when the item has a real partial position
+    /// (0 < progress < 1), else `nil`. Used to reserve the Play button's width.
     private var resumeText: String? {
         guard let playRemainingText, let playProgress, playProgress > 0, playProgress < 1 else { return nil }
-        return playRemainingText
+        return playSeasonEpisodeText.map { "\($0) • \(playRemainingText)" } ?? playRemainingText
     }
 
     /// An invisible copy of the resume form used purely to reserve the Play
     /// button's width. The progress capsule is a fixed width, so any progress
-    /// value sizes identically; only the variable "… left" text matters.
+    /// value sizes identically; only the variable trailing text matters.
     private func playResumeSizer(remaining: String) -> some View {
         HStack(spacing: 16) {
             Image(systemName: "play.fill")
-            ResumeProgressCapsule(progress: 1, onLight: playButtonHasFocus || colorScheme == .light)
+            ResumeProgressCapsule(progress: 1, onLight: playButtonHasFocus || colorScheme == .light, width: 75)
             Text(remaining)
                 .lineLimit(1)
         }

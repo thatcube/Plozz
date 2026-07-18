@@ -900,7 +900,8 @@ struct HomeHeroView: View {
                     kind: .play,
                     resumeProgress: resume,
                     isResume: resume != nil,
-                    resumeRemainingText: item.resumeRemainingText
+                    resumeRemainingText: item.resumeRemainingText,
+                    seasonEpisodeText: HeroForegroundModelBuilder.seasonEpisodeButtonText(for: item)
                 )
             case .request:
                 return .init(kind: .request)
@@ -1436,6 +1437,7 @@ struct HomeHeroView: View {
                     title: item.resumeProgressFraction != nil ? "Resume" : "Play",
                     progress: item.resumeProgressFraction,
                     remainingText: item.resumeRemainingText,
+                    seasonEpisodeText: HeroForegroundModelBuilder.seasonEpisodeButtonText(for: item),
                     onLight: selected || colorScheme == .light
                 )
                 .font(.system(size: 28, weight: .semibold))

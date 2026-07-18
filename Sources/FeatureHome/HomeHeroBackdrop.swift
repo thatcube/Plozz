@@ -251,8 +251,10 @@ private struct WipeImageView: UIViewRepresentable {
     let height: CGFloat
 
     /// Slightly longer than a push so the easeOut "settle" tail reads clearly.
-    /// 0.85 → 0.95 → 1.20: a couple of user-requested slow-downs (~+0.1s, then +0.25s).
-    private static let duration: TimeInterval = 1.20
+    /// Tuned by feel: 0.85 → 0.95 → 1.20 → 1.05. Both the wipe and the (slightly
+    /// slower) leaving-image drift scale with this, so changing it speeds/slows the
+    /// whole transition uniformly and preserves their relative trail.
+    private static let duration: TimeInterval = 1.05
     /// Tiny horizontal overscan, purely to avoid a sub-pixel seam shimmer during the
     /// wipe. It is intentionally small: in the wipe model the incoming content is
     /// shifted *into* the revealed area and the outgoing only drifts a little, so

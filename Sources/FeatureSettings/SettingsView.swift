@@ -53,6 +53,11 @@ public struct SettingsView: View {
     /// "Reset to First Run (Debug)" row without changing source between runs.
     private static let showDebugResetFirstRunRow =
         ProcessInfo.processInfo.environment["PLOZZ_SHOW_FIRST_RUN_RESET"] == "1"
+
+    /// Live A/B override for the Home hero foreground renderer, shared with
+    /// `HomeHeroView` via this UserDefaults key. `0` = launch default, `1` = force
+    /// UIKit, `2` = force SwiftUI. Changing it applies live on return to Home.
+    @AppStorage("PLZDebugHeroForegroundMode") private var heroForegroundMode = 0
     #endif
 
     /// Caps the root "Settings" page content and centers it, so the profile
@@ -522,6 +527,10 @@ public struct SettingsView: View {
             }
 
             #if DEBUG
+            // DEBUG-only: flip the Home hero foreground renderer live (UIKit vs
+            // SwiftUI) for A/B comparison. Applies on return to Home; no restart.
+            debugHeroForegroundRow
+
             // DEBUG-only: wipe accounts, profiles, recents, and the first-run
             // flag so the next server add reproduces a genuine first run.
             // Hidden unless PLOZZ_SHOW_FIRST_RUN_RESET=1 is set at launch.
@@ -531,6 +540,41 @@ public struct SettingsView: View {
             #endif
         }
     }
+
+    #if DEBUG
+    /// DEBUG-only row that cycles the Home hero foreground renderer override
+    /// (Default → UIKit → SwiftUI). Writes the shared `PLZDebugHeroForegroundMode`
+    /// key that `HomeHeroView` reads, so the change takes effect live on Home.
+    private var debugHeroForegroundRow: some View {
+        Button {
+            heroForegroundMode = (heroForegroundMode + 1) % 3
+        } label: {
+            HStack(spacing: 16) {
+                Image(systemName: "rectangle.on.rectangle.angled")
+                    .font(.system(size: 22, weight: .regular))
+                    .frame(width: 30, height: 30)
+                Text("Hero Foreground (Debug)").font(.callout.weight(.medium))
+                Spacer()
+                Text(heroForegroundModeLabel)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+            .foregroundStyle(.orange)
+            .padding(.vertical, 12)
+            .padding(.horizontal, 12)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(SettingsFocusButtonStyle())
+    }
+
+    private var heroForegroundModeLabel: String {
+        switch heroForegroundMode {
+        case 1: return "UIKit (forced)"
+        case 2: return "SwiftUI (forced)"
+        default: return "Default"
+        }
+    }
+    #endif
 
     #if DEBUG
     /// DEBUG-only "Reset to First Run" row. Collapses profiles to a pristine

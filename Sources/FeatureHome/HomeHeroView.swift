@@ -207,12 +207,8 @@ struct HomeHeroView: View {
     /// implementations can be A/B-compared on the SAME slide without a rebuild or an
     /// app restart. `0` = follow the launch default (``HeroForegroundConfig``), `1` =
     /// force the imperative UIKit foreground, `2` = force the SwiftUI foreground.
-    /// Toggled with the remote's Play/Pause button while the hero is focused.
+    /// Set from Settings › "Hero Foreground (Debug)"; applies live on return to Home.
     @AppStorage("PLZDebugHeroForegroundMode") private var heroForegroundModeRaw = 0
-    /// Shows a brief corner badge naming the active renderer after a flip (the two
-    /// render near-identically, so the badge is the only way to tell them apart).
-    @State private var heroModeBadgeShown = false
-    @State private var heroModeBadgeToken = 0
     #endif
 
     /// The renderer actually used this session: the launch default unless a DEBUG
@@ -230,17 +226,12 @@ struct HomeHeroView: View {
     }
 
     #if DEBUG
-    /// Flips the live foreground override between UIKit and SwiftUI (relative to
-    /// whatever is currently effective) and flashes the mode badge. Debug builds only.
-    private func toggleHeroForegroundMode() {
-        heroForegroundModeRaw = usesUIKitForeground ? 2 : 1
-        withAnimation(.easeInOut(duration: 0.2)) { heroModeBadgeShown = true }
-        heroModeBadgeToken &+= 1
-    }
-
+    /// A small, persistent corner badge naming the active renderer whenever a forced
+    /// override is in effect (the two render near-identically, so it's the only way to
+    /// tell them apart during a comparison). Hidden when following the launch default.
     @ViewBuilder
     private var heroModeBadge: some View {
-        if heroModeBadgeShown {
+        if heroForegroundModeRaw != 0 {
             Text("Hero: \(usesUIKitForeground ? "UIKit" : "SwiftUI")")
                 .font(.system(size: 22, weight: .semibold))
                 .foregroundStyle(.white)
@@ -248,7 +239,6 @@ struct HomeHeroView: View {
                 .padding(.vertical, 9)
                 .background(.black.opacity(0.55), in: Capsule())
                 .padding(24)
-                .transition(.opacity)
                 .allowsHitTesting(false)
         }
     }
@@ -429,12 +419,6 @@ struct HomeHeroView: View {
         .opacity(heroVisible ? 1 : 0)
         #if DEBUG
         .overlay(alignment: .topTrailing) { heroModeBadge }
-        .onPlayPauseCommand { toggleHeroForegroundMode() }
-        .task(id: heroModeBadgeToken) {
-            guard heroModeBadgeShown else { return }
-            try? await Task.sleep(nanoseconds: 2_000_000_000)
-            withAnimation(.easeInOut(duration: 0.3)) { heroModeBadgeShown = false }
-        }
         #endif
         .onAppear {
             // Start the first dwell from appearance so the initial slide's gauge

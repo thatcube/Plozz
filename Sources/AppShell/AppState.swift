@@ -63,12 +63,6 @@ public final class AppState {
     /// choice, not a per-profile persona. See `CrashReportingSettings`.
     public let crashReportingModel = CrashReportingSettingsModel()
 
-    /// Live status of media-share background scans/enrichment, so Home can show an
-    /// "Updating library…" banner and Settings can show last-scanned / Scan now.
-    /// App-wide (a share and its scan are household-global, not per-profile). Its
-    /// reporter is wired into the share catalog registry in `configureShareScanReporting()`.
-    public let shareScanStatusModel = ShareScanStatusModel()
-
     /// The household's profiles + active selection. Owned at the app level and
     /// layered on top of the multi-account core.
     public let profilesModel: ProfilesModel
@@ -510,20 +504,12 @@ public final class AppState {
         switchProfile: { [weak self] id in self?.switchProfile(to: id) }
     )
     public let authenticatedHTTPResolver: any AuthenticatedHTTPResourceResolving
-    /// The one atomic media-share runtime generation (coordinator + transport
-    /// composition + network-file resolver). AppState forwards every media-share
-    /// concern to it rather than storing the pieces independently.
-    private let mediaShareRuntime: any MediaShareRuntime
-    /// Media-share account lifecycle policy (retire/invalidate) routed through
-    /// the same runtime generation.
-    private let mediaShareAccountService: MediaShareAccountService
 
-    /// The network-file resolver used for direct-file share playback. Forwards
-    /// to the runtime so there is a single owner of the resolver instance.
-    public var networkFileResolver: any MediaTransportNetworkFileResolving {
-        mediaShareRuntime.networkFileResolver
-    }
-    private var sharePriorityRevision: UInt64 = 0
+    /// The media-share runtime facet — owns the share runtime/coordinator, its
+    /// network-file resolver, the account-lifecycle service, the app-wide scan
+    /// status, the active-share set, and the "Scan now" entry point. Built in
+    /// `init` once the accounts hub exists (it depends into the hub for rescans).
+    public let mediaShare: MediaShareRuntimeFacet
     private let durableLocalStateStore: DurableLocalStateStore?
     /// Optional tvOS system-user seam (default app-owned no-op). See
     /// `SystemProfileBridging`.
@@ -581,8 +567,6 @@ public final class AppState {
         self.durableLocalStateStore = resolvedDurableLocalStateStore
         let resolvedRuntime: any MediaShareRuntime = mediaShareRuntime
             ?? DefaultMediaShareRuntime.make(accountStore: resolvedAccountStore)
-        self.mediaShareRuntime = resolvedRuntime
-        self.mediaShareAccountService = MediaShareAccountService(runtime: resolvedRuntime)
         let defaultAuthenticatedHTTPResolver: AppAuthenticatedHTTPResourceResolver?
         let resolvedAuthenticatedHTTPResolver: any AuthenticatedHTTPResourceResolving
         if let authenticatedHTTPResolver {
@@ -609,6 +593,13 @@ public final class AppState {
             accountStore: resolvedAccountStore,
             registry: resolvedRegistry,
             profilesModel: resolvedProfilesModel
+        )
+        // The media-share runtime facet, built once the hub exists (it depends
+        // into the hub for the rescan path). Owns the runtime, account service,
+        // scan status, and the scan-reporter wiring.
+        self.mediaShare = MediaShareRuntimeFacet(
+            runtime: resolvedRuntime,
+            accountsProviders: self.accountsProviders
         )
         self.systemBridge = systemBridge ?? Self.makeDefaultSystemBridge()
         self.ratingsProvider = ratingsProvider ?? RatingsServiceFactory.make()
@@ -664,14 +655,6 @@ public final class AppState {
             )
         }
 
-        // Wire the media-share scan/enrich progress reporter into the app-owned
-        // catalog coordinator, so the first share query (from Home) reports into
-        // this model and the "Updating library…" banner + Settings last-scanned line
-        // light up. The reporter is a Sendable value; capture it before the Task.
-        let scanReporter = self.shareScanStatusModel.reporter()
-        Task {
-            await resolvedRuntime.configure(reporter: scanReporter)
-        }
         defaultAuthenticatedHTTPResolver?.configure { [weak self] locator in
             guard let self,
                   let account = self.accountsProviders.accountStore.loadAccounts().first(where: {
@@ -720,23 +703,8 @@ public final class AppState {
             self?.plexHomeUsers.effectiveCredentialRevision(for: account) ?? account.credentialRevision
         }
         accountsProviders.onActiveAccountsChanged = { [weak self] resolved, accounts in
-            self?.propagatePreferredShareAccounts(resolved, accounts)
+            self?.mediaShare.setActiveShareAccounts(resolved, accounts: accounts)
         }
-    }
-
-    /// Force a fresh scan + enrichment of a media share now (Settings "Scan now").
-    /// Builds the share's provider directly from its account (tolerating an empty
-    /// token for a guest share, which `provider(forAccountID:)` would reject) and
-    /// asks it to rescan — registering its catalog/scanner if needed, so this works
-    /// even when Home never queried the share, and it drives the scan indicator.
-    public func rescanShare(accountID: String) {
-        guard let account = accountsProviders.accounts.first(where: { $0.id == accountID }),
-              account.server.provider == .mediaShare else { return }
-        let token = plexHomeUsers.resolvedToken(for: account.id) ?? ""
-        guard let shareProvider = try? accountsProviders.registry.provider(
-            for: accountsProviders.providerResolutionContext(for: account, token: token)
-        ) as? ShareProvider else { return }
-        Task { await shareProvider.rescan() }
     }
 
     private static func makeDefaultAccountStore() -> AccountPersisting {
@@ -1004,7 +972,7 @@ public final class AppState {
         if let previousAccount,
            let persisted = accountsProviders.accountStore.loadAccounts().first(where: { $0.id == account.id }),
            previousAccount.credentialRevision != persisted.credentialRevision {
-            mediaShareAccountService.retireCredential(for: previousAccount)
+            mediaShare.accountService.retireCredential(for: previousAccount)
         }
         accountsProviders.reloadAccounts()
         // Flow finished — next add-account starts at the chooser.
@@ -1030,7 +998,7 @@ public final class AppState {
                 try accountsProviders.accountStore.add(account, token: session.accessToken)
                 if let previousAccount,
                    previousAccount.credentialRevision != account.credentialRevision {
-                    mediaShareAccountService.retireCredential(for: previousAccount)
+                    mediaShare.accountService.retireCredential(for: previousAccount)
                 }
                 addedIDs.append(account.id)
             } catch {
@@ -1836,7 +1804,7 @@ public final class AppState {
     /// Removes one account; drops to onboarding if it was the last.
     public func removeAccount(id: String) {
         let removedAccount = accountsProviders.accounts.first { $0.id == id }
-        let shareAccountKey = mediaShareAccountService.mediaShareAccountKey(for: removedAccount)
+        let shareAccountKey = mediaShare.accountService.mediaShareAccountKey(for: removedAccount)
         do {
             try accountsProviders.accountStore.remove(id: id)
         } catch {
@@ -1848,11 +1816,11 @@ public final class AppState {
             return
         }
         if let removedAccount {
-            mediaShareAccountService.retireCredential(for: removedAccount)
+            mediaShare.accountService.retireCredential(for: removedAccount)
         }
         if let shareAccountKey {
-            shareScanStatusModel.removeShare(shareID: shareAccountKey)
-            mediaShareAccountService.invalidate(shareAccountKey: shareAccountKey)
+            mediaShare.scanStatus.removeShare(shareID: shareAccountKey)
+            mediaShare.accountService.invalidate(shareAccountKey: shareAccountKey)
         }
         plexHomeUsers.forgetAccount(id)
         apply(.accountsChanged(accountsProviders.accounts))
@@ -1868,7 +1836,7 @@ public final class AppState {
     /// Removes every account (full reset).
     public func signOutAll() {
         let removedAccounts = accountsProviders.accounts
-        let shareAccountKeys = mediaShareAccountService.mediaShareAccountKeys(in: removedAccounts)
+        let shareAccountKeys = mediaShare.accountService.mediaShareAccountKeys(in: removedAccounts)
         do {
             try accountsProviders.accountStore.clearAll()
         } catch {
@@ -1882,12 +1850,12 @@ public final class AppState {
         let confirmedShareAccountKeys = shareAccountKeys.filter {
             !retainedAccountIDs.contains($0)
         }
-        confirmedRemovedAccounts.forEach(mediaShareAccountService.retireCredential)
+        confirmedRemovedAccounts.forEach(mediaShare.accountService.retireCredential)
         confirmedShareAccountKeys.forEach {
-            shareScanStatusModel.removeShare(shareID: $0)
+            mediaShare.scanStatus.removeShare(shareID: $0)
         }
         for accountKey in confirmedShareAccountKeys {
-            mediaShareAccountService.invalidate(shareAccountKey: accountKey)
+            mediaShare.accountService.invalidate(shareAccountKey: accountKey)
         }
         for account in confirmedRemovedAccounts {
             plexHomeUsers.forgetAccount(account.id)
@@ -1901,7 +1869,7 @@ public final class AppState {
     /// reproduces a genuine first run. Surfaced from a DEBUG-only Settings row.
     public func resetToFirstRunForDebugging() {
         let removedAccounts = accountsProviders.accounts
-        let shareAccountKeys = mediaShareAccountService.mediaShareAccountKeys(in: removedAccounts)
+        let shareAccountKeys = mediaShare.accountService.mediaShareAccountKeys(in: removedAccounts)
         do {
             try accountsProviders.accountStore.clearAll()
         } catch {
@@ -1915,12 +1883,12 @@ public final class AppState {
         let confirmedShareAccountKeys = shareAccountKeys.filter {
             !retainedAccountIDs.contains($0)
         }
-        confirmedRemovedAccounts.forEach(mediaShareAccountService.retireCredential)
+        confirmedRemovedAccounts.forEach(mediaShare.accountService.retireCredential)
         confirmedShareAccountKeys.forEach {
-            shareScanStatusModel.removeShare(shareID: $0)
+            mediaShare.scanStatus.removeShare(shareID: $0)
         }
         for accountKey in confirmedShareAccountKeys {
-            mediaShareAccountService.invalidate(shareAccountKey: accountKey)
+            mediaShare.accountService.invalidate(shareAccountKey: accountKey)
         }
         guard accountsProviders.accounts.isEmpty else {
             apply(.accountsChanged(accountsProviders.accounts))
@@ -2119,29 +2087,6 @@ public final class AppState {
     }
 
     // MARK: Internals
-
-    /// Media-share preferred-account-key propagation, fired by the accounts hub
-    /// after it recomputes the active set in `reloadAccounts`. Kept on `AppState`
-    /// so the accounts hub stays free of media-share concerns; moves to the
-    /// media-share facet in a later batch.
-    private func propagatePreferredShareAccounts(_ resolved: Set<String>, _ accounts: [Account]) {
-        sharePriorityRevision &+= 1
-        let priorityRevision = sharePriorityRevision
-        let preferredShareIDs = Set(
-            accounts
-                .filter {
-                    resolved.contains($0.id)
-                        && $0.server.provider == .mediaShare
-                }
-                .map(\.id)
-        )
-        Task { [mediaShareRuntime] in
-            await mediaShareRuntime.setPreferredAccountKeys(
-                preferredShareIDs,
-                revision: priorityRevision
-            )
-        }
-    }
 
     /// Rebuilds the settings models scoped to the active profile's
     /// namespace. Delegates to `profileSettings`; a no-op there when settings

@@ -487,7 +487,7 @@ final class ServerToggleTests: XCTestCase {
             )
         )
         state.bootstrap()
-        state.shareScanStatusModel.scanStarted(
+        state.mediaShare.scanStatus.scanStarted(
             shareID: account.id,
             name: account.server.name
         )
@@ -496,7 +496,7 @@ final class ServerToggleTests: XCTestCase {
 
         XCTAssertTrue(state.accountsProviders.accounts.contains { $0.id == account.id })
         XCTAssertTrue(
-            state.shareScanStatusModel.state(forShareID: account.id)?.isScanning
+            state.mediaShare.scanStatus.state(forShareID: account.id)?.isScanning
                 == true
         )
     }

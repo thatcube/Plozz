@@ -194,7 +194,7 @@ final class MediaShareRuntimeOwnershipTests: XCTestCase {
     func testNetworkFileResolverForwardsToRuntime() throws {
         let harness = try makeHarness()
         XCTAssertTrue(
-            harness.state.networkFileResolver as AnyObject === harness.runtime.fakeResolver,
+            harness.state.mediaShare.networkFileResolver as AnyObject === harness.runtime.fakeResolver,
             "AppState.networkFileResolver must forward to the runtime's resolver instance"
         )
     }

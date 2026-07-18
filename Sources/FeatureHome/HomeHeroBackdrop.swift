@@ -251,7 +251,8 @@ private struct WipeImageView: UIViewRepresentable {
     let height: CGFloat
 
     /// Slightly longer than a push so the easeOut "settle" tail reads clearly.
-    private static let duration: TimeInterval = 0.85
+    /// Bumped 0.85 → 0.95 to slow the whole page transition ~0.1s overall.
+    private static let duration: TimeInterval = 0.95
     /// Tiny horizontal overscan, purely to avoid a sub-pixel seam shimmer during the
     /// wipe. It is intentionally small: in the wipe model the incoming content is
     /// shifted *into* the revealed area and the outgoing only drifts a little, so
@@ -538,8 +539,9 @@ private struct WipeImageView: UIViewRepresentable {
 
             // Incoming page: a strong ease-OUT (starts fast, then eases softly into
             // the landing) via a custom "expo-out" cubic. Owns completion. Its curve
-            // stays well above the diagonal, hence >= the outgoing ease-in at every
-            // instant, so the reveal window always stays ahead of the drifting art.
+            // is more aggressive than the outgoing ease-out (it rises to ~1 almost
+            // immediately), so the reveal window stays ahead of the outgoing drift at
+            // every instant and no uncovered seam is exposed.
             let incomingAnimator = UIViewPropertyAnimator(
                 duration: duration,
                 timingParameters: UICubicTimingParameters(
@@ -559,13 +561,16 @@ private struct WipeImageView: UIViewRepresentable {
                 }
             }
 
-            // Outgoing page: ease-IN (lingers, then accelerates away) — a distinct
+            // Outgoing page: ease-OUT so the leaving art starts drifting IMMEDIATELY
+            // (fast off the mark, then settles) rather than lingering — a distinct
             // motion character from the incoming page. It animates a nested content
             // wrapper, so an outgoing drift never interrupts that page's own reveal.
+            // The incoming reveal uses a still-more-aggressive expo-out, so it stays
+            // ahead of this drift at every instant and no seam is exposed.
             let outgoingAnimator = prepared.outgoing.map { outgoing in
                 let animator = UIViewPropertyAnimator(
                     duration: duration,
-                    timingParameters: UICubicTimingParameters(animationCurve: .easeIn)
+                    timingParameters: UICubicTimingParameters(animationCurve: .easeOut)
                 )
                 animator.addAnimations {
                     container.animateOutgoing(outgoing, forward: forward)

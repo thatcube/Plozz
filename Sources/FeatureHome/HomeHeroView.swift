@@ -613,9 +613,9 @@ struct HomeHeroView: View {
     /// Lowers the entire UIKit hero content column (metadata / buttons / pagination)
     /// by this much. Applied as reduced bottom padding on the whole UIKit column so
     /// the imperative visual layer AND the SwiftUI focus overlay move down together.
-    /// Net 60pt: lowered 80, then shifted back up 20 to add air between the pagination
+    /// Net 40pt: lowered 80, then shifted back up 40 to add air between the pagination
     /// and the Continue Watching row below.
-    private static let uikitContentDrop: CGFloat = 60
+    private static let uikitContentDrop: CGFloat = 40
 
     /// The base of the action row: the visible SwiftUI pills (standard path) or a
     /// reserved clear focus region (UIKit-foreground path, which draws the pills).

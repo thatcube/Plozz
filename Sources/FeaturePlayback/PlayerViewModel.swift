@@ -743,6 +743,7 @@ public final class PlayerViewModel {
     private func resolveNeighbors() async {
         guard let neighborResolver else { return }
         let (prev, next) = await neighborResolver()
+        guard !didStop else { return }
         previousEpisode = prev
         nextEpisode = next
         controls.hasPreviousEpisode = prev != nil
@@ -753,8 +754,15 @@ public final class PlayerViewModel {
         // moment it's known, for a near-instant hand-off. Jellyfin (a
         // session-minting POST) defers to the hand-off window instead; see
         // ``maybeStartWindowedNextPrefetch``.
-        if next != nil, provider.kind.playbackInfoIsIdempotent {
-            startNextEpisodePrefetch(trigger: "eager")
+        if next != nil {
+            if provider.kind.playbackInfoIsIdempotent {
+                startNextEpisodePrefetch(trigger: "eager")
+            } else {
+                // Playback may already be inside the hand-off window if neighbor
+                // resolution completed after a seek/progress tick. Re-evaluate
+                // here so that ordering cannot strand the prefetch until EOF.
+                maybeStartWindowedNextPrefetch(trigger: "neighbor-windowed")
+            }
         }
     }
 
@@ -766,7 +774,8 @@ public final class PlayerViewModel {
     /// (idempotent providers) calls this from ``resolveNeighbors``; the windowed
     /// path (Jellyfin) calls it from ``maybeStartWindowedNextPrefetch``.
     private func startNextEpisodePrefetch(trigger: String) {
-        guard let next = nextEpisode, !didStartNextEpisodePrefetch, prefetchedNext == nil,
+        guard !didStop, let next = nextEpisode,
+              !didStartNextEpisodePrefetch, prefetchedNext == nil,
               nextEpisodePrefetchTask == nil else { return }
         didStartNextEpisodePrefetch = true
         HandoffDiagnostics.emit("prefetch START trigger=\(trigger) next=\(next.id) provider=\(provider.kind.rawValue) idempotent=\(provider.kind.playbackInfoIsIdempotent)")
@@ -813,9 +822,13 @@ public final class PlayerViewModel {
     /// once the hand-off window has opened — the closing-credits marker (Up Next
     /// active) or, as a fallback for marker-less servers, the last
     /// ``windowedNextPrefetchLeadTime`` seconds. Keeps the minted session fresh.
-    /// Called on the progress cadence. Idempotent providers use the eager path.
-    private func maybeStartWindowedNextPrefetch() {
-        guard nextEpisode != nil, prefetchedNext == nil, !didStartNextEpisodePrefetch,
+    /// Called on the progress cadence and when neighbor resolution completes.
+    /// Idempotent providers use the eager path.
+    private func maybeStartWindowedNextPrefetch(
+        trigger: String = "windowed"
+    ) {
+        guard !didStop, nextEpisode != nil, prefetchedNext == nil,
+              !didStartNextEpisodePrefetch,
               nextEpisodePrefetchTask == nil else { return }
         guard !provider.kind.playbackInfoIsIdempotent else { return }
         let duration = engine.duration
@@ -823,7 +836,7 @@ public final class PlayerViewModel {
         let windowOpen = controls.upNextActive
             || (duration > 0 && remaining > 0 && remaining <= Self.windowedNextPrefetchLeadTime)
         guard windowOpen else { return }
-        startNextEpisodePrefetch(trigger: "windowed")
+        startNextEpisodePrefetch(trigger: trigger)
     }
 
     /// Emits the Up Next card decision state on the progress cadence when we're

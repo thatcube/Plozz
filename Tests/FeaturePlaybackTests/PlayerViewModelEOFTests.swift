@@ -650,6 +650,106 @@ final class PlayerViewModelEOFTests: XCTestCase {
         XCTAssertNil(viewModel.prefetchedNext)
     }
 
+    func testLateNeighborResolutionStartsNonIdempotentPrefetchInsideWindow() async throws {
+        let current = try makeNetworkFileRequest(
+            itemID: "current",
+            title: "Episode 1",
+            kind: .episode,
+            relativePath: "Shows/Show/S01E01.mkv",
+            playSessionID: "current-session"
+        )
+        let next = try makeNetworkFileRequest(
+            metadata: MediaSourceMetadata(
+                video: .init(videoRangeType: "DOVIWithHDR10")
+            ),
+            itemID: "next",
+            title: "Episode 2",
+            kind: .episode,
+            relativePath: "Shows/Show/S01E02.mkv",
+            playSessionID: "next-session"
+        )
+        let provider = RecordingPlaybackProvider(
+            request: current,
+            kind: .emby,
+            requestsByItemID: ["next": next]
+        )
+        let neighbors = NeighborResolverGate(next: next.item)
+        let engine = SpyVideoEngine()
+        let viewModel = PlayerViewModel(
+            provider: provider,
+            itemID: current.item.id,
+            engineFactory: EngineFactory(
+                makeNative: { _ in SpyVideoEngine() },
+                makePlozzigen: { engine }
+            ),
+            neighborResolver: { await neighbors.resolve() }
+        )
+        await viewModel.load()
+        await neighbors.waitUntilEntered()
+
+        engine.duration = 120
+        engine.currentTime = 60
+        engine.onProgress?()
+        let callsBeforeNeighbors = await provider.playbackInfoCallCountValue()
+        XCTAssertEqual(callsBeforeNeighbors, 1)
+
+        await neighbors.release()
+        await waitForPrefetchedNext(viewModel)
+
+        XCTAssertEqual(viewModel.prefetchedNext?.itemID, next.item.id)
+        let callsAfterNeighbors = await provider.playbackInfoCallCountValue()
+        XCTAssertEqual(callsAfterNeighbors, 2)
+        await viewModel.stop()
+    }
+
+    func testNeighborResolutionAfterStopCannotStartNonIdempotentPrefetch() async throws {
+        let current = try makeNetworkFileRequest(
+            itemID: "current",
+            title: "Episode 1",
+            kind: .episode,
+            relativePath: "Shows/Show/S01E01.mkv",
+            playSessionID: "current-session"
+        )
+        let next = try makeNetworkFileRequest(
+            itemID: "next",
+            title: "Episode 2",
+            kind: .episode,
+            relativePath: "Shows/Show/S01E02.mkv",
+            playSessionID: "next-session"
+        )
+        let provider = RecordingPlaybackProvider(
+            request: current,
+            kind: .jellyfin,
+            requestsByItemID: ["next": next]
+        )
+        let neighbors = NeighborResolverGate(next: next.item)
+        let engine = SpyVideoEngine()
+        let viewModel = PlayerViewModel(
+            provider: provider,
+            itemID: current.item.id,
+            engineFactory: EngineFactory(
+                makeNative: { _ in SpyVideoEngine() },
+                makePlozzigen: { engine }
+            ),
+            neighborResolver: { await neighbors.resolve() }
+        )
+        await viewModel.load()
+        await neighbors.waitUntilEntered()
+        engine.duration = 120
+        engine.currentTime = 60
+
+        await viewModel.stop()
+        await neighbors.release()
+        for _ in 0..<100 {
+            await Task.yield()
+        }
+
+        let playbackInfoCalls = await provider.playbackInfoCallCountValue()
+        XCTAssertEqual(playbackInfoCalls, 1)
+        XCTAssertNil(viewModel.nextEpisode)
+        XCTAssertNil(viewModel.prefetchedNext)
+    }
+
     func testForegroundReloadRetainsAuthoritativeProbeTruth() async throws {
         let request = try makeNetworkFileRequest()
         let provider = RecordingPlaybackProvider(request: request)
@@ -848,6 +948,7 @@ private actor RecordingPlaybackProvider: MediaProvider {
     }
 
     func itemCallCountValue() -> Int { itemCallCount }
+    func playbackInfoCallCountValue() -> Int { playbackInfoCallCount }
     func hasReport(itemID: String, event: PlaybackEvent) -> Bool {
         reports.contains {
             $0.progress.itemID == itemID && $0.event == event
@@ -902,6 +1003,35 @@ private actor RangeProbeGate {
 
     func release() {
         continuation?.resume()
+        continuation = nil
+    }
+}
+
+private actor NeighborResolverGate {
+    private let next: MediaItem
+    private var didEnter = false
+    private var continuation:
+        CheckedContinuation<(previous: MediaItem?, next: MediaItem?), Never>?
+
+    init(next: MediaItem) {
+        self.next = next
+    }
+
+    func resolve() async -> (previous: MediaItem?, next: MediaItem?) {
+        didEnter = true
+        return await withCheckedContinuation { continuation in
+            self.continuation = continuation
+        }
+    }
+
+    func waitUntilEntered() async {
+        while !didEnter {
+            await Task.yield()
+        }
+    }
+
+    func release() {
+        continuation?.resume(returning: (nil, next))
         continuation = nil
     }
 }

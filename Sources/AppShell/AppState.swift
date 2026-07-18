@@ -43,14 +43,6 @@ public final class AppState {
     /// rather than the provider chooser. `nil` starts the flow at the chooser.
     public private(set) var pendingOnboardingProvider: ProviderKind?
 
-    /// All signed-in accounts, in stable order.
-    public private(set) var accounts: [Account] = []
-    /// The subset of `accounts` currently included in the active set. Sourced
-    /// from the **active profile** (falling back to the household-global active
-    /// set for the default profile). Branch H (aggregated Home) fans out over
-    /// this; this branch uses the primary one.
-    public private(set) var activeAccountIDs: Set<String> = []
-
     /// A Jellyfin item id requested via a Top Shelf deep link
     /// (`plozz://item/<id>`) that the signed-in UI should open for playback.
     /// Set when the app is launched/foregrounded from a Top Shelf card and
@@ -367,7 +359,7 @@ public final class AppState {
                 await MainActor.run {
                     guard self?.profilesModel.activeProfileID == profileID
                     else { return nil }
-                    return self?.provider(forAccountID: accountID)
+                    return self?.accountsProviders.provider(forAccountID: accountID)
                 }
             },
             traktScrobbler: {
@@ -390,7 +382,7 @@ public final class AppState {
                 // never empty (expansion perpetually "inconclusive" until the retry
                 // cap) and episode expansion would probe servers outside the active
                 // profile. Scope must match what gets indexed.
-                await MainActor.run { self?.homeAccounts.map(\.account.id) ?? [] }
+                await MainActor.run { self?.accountsProviders.homeAccounts.map(\.account.id) ?? [] }
             },
             indexedSeriesSources: { [identitySnapshotStore = identityIndex.identitySnapshotStore] originSeries in
                 identitySnapshotStore.current.sources(for: originSeries).filter { $0.kind == .series }
@@ -539,7 +531,7 @@ public final class AppState {
     /// capture `self` for those closures, mirroring `mediaItemActionHandler`.
     @ObservationIgnored
     public private(set) lazy var identityIndex: IdentityIndexModel = IdentityIndexModel(
-        activeAccounts: { [weak self] in self?.homeAccounts ?? [] },
+        activeAccounts: { [weak self] in self?.accountsProviders.homeAccounts ?? [] },
         namespace: { [weak self] in self?.profilesModel.activeNamespace },
         onPublish: { [weak self] in self?.drainWatchOutbox() }
     )
@@ -550,8 +542,13 @@ public final class AppState {
     private var perfHitchProbeTask: Task<Void, Never>?
 
     private var machine = SessionStateMachine()
-    private let accountStore: AccountPersisting
-    private let registry: ProviderRegistry
+
+    /// The accounts + providers hub — owns the account store, provider registry,
+    /// signed-in `accounts`, the active-account subset, and all provider
+    /// resolution. The Plex-home-user / media-share / profile-flow / household
+    /// concerns sit downstream of this hub. Its Plex-override token/credential
+    /// seams and media-share preferred-keys hook are wired in `init`.
+    public let accountsProviders: AccountsProvidersModel
     public let authenticatedHTTPResolver: any AuthenticatedHTTPResourceResolving
     /// The one atomic media-share runtime generation (coordinator + transport
     /// composition + network-file resolver). AppState forwards every media-share
@@ -663,7 +660,6 @@ public final class AppState {
         lastfmService: LastFmService? = nil
     ) {
         let resolvedAccountStore = accountStore ?? Self.makeDefaultAccountStore()
-        self.accountStore = resolvedAccountStore
         let resolvedDurableLocalStateStore: DurableLocalStateStore?
         if let durableLocalStateStore {
             resolvedDurableLocalStateStore = durableLocalStateStore
@@ -697,12 +693,21 @@ public final class AppState {
             resolvedAuthenticatedHTTPResolver = resolver
             defaultAuthenticatedHTTPResolver = resolver
         }
-        self.registry = registry ?? Self.makeDefaultRegistry(
+        let resolvedRegistry = registry ?? Self.makeDefaultRegistry(
             runtime: resolvedRuntime,
             authenticatedHTTPResolver: resolvedAuthenticatedHTTPResolver,
             durableLocalStateStore: resolvedDurableLocalStateStore
         )
-        self.profilesModel = profilesModel ?? Self.makeDefaultProfilesModel()
+        let resolvedProfilesModel = profilesModel ?? Self.makeDefaultProfilesModel()
+        self.profilesModel = resolvedProfilesModel
+        // The accounts + providers hub. Its Plex-override token/credential seams
+        // and media-share preferred-keys hook are wired below, once `self` is
+        // fully initialized (phase 2).
+        self.accountsProviders = AccountsProvidersModel(
+            accountStore: resolvedAccountStore,
+            registry: resolvedRegistry,
+            profilesModel: resolvedProfilesModel
+        )
         self.systemBridge = systemBridge ?? Self.makeDefaultSystemBridge()
         self.ratingsProvider = ratingsProvider ?? RatingsServiceFactory.make()
         self.plexHomeUserTokenCache = .makeDefault()
@@ -768,7 +773,7 @@ public final class AppState {
         }
         defaultAuthenticatedHTTPResolver?.configure { [weak self] locator in
             guard let self,
-                  let account = self.accountStore.loadAccounts().first(where: {
+                  let account = self.accountsProviders.accountStore.loadAccounts().first(where: {
                       $0.id == locator.accountID
                   }),
                   account.server.provider == locator.provider,
@@ -782,8 +787,8 @@ public final class AppState {
             }
             let baseURL: URL
             if account.server.provider == .plex {
-                let provider = try self.registry.provider(
-                    for: self.providerResolutionContext(for: account, token: token)
+                let provider = try self.accountsProviders.registry.provider(
+                    for: self.accountsProviders.providerResolutionContext(for: account, token: token)
                 )
                 guard let originProvider = provider as? AuthenticatedHTTPOriginProviding else {
                     throw MediaTransportError.unsupportedCapability(
@@ -802,6 +807,20 @@ public final class AppState {
                 token: token
             )
         }
+
+        // Wire the accounts hub's Plex-override token/credential seams and its
+        // media-share preferred-keys hook now that `self` is fully initialized.
+        // These keep Plex-home-user and media-share state out of the hub while
+        // preserving exact resolution behavior.
+        accountsProviders.tokenResolver = { [weak self] accountID in
+            self?.resolvedToken(for: accountID)
+        }
+        accountsProviders.credentialRevision = { [weak self] account in
+            self?.effectiveCredentialRevision(for: account) ?? account.credentialRevision
+        }
+        accountsProviders.onActiveAccountsChanged = { [weak self] resolved, accounts in
+            self?.propagatePreferredShareAccounts(resolved, accounts)
+        }
     }
 
     /// Force a fresh scan + enrichment of a media share now (Settings "Scan now").
@@ -810,11 +829,11 @@ public final class AppState {
     /// asks it to rescan — registering its catalog/scanner if needed, so this works
     /// even when Home never queried the share, and it drives the scan indicator.
     public func rescanShare(accountID: String) {
-        guard let account = accounts.first(where: { $0.id == accountID }),
+        guard let account = accountsProviders.accounts.first(where: { $0.id == accountID }),
               account.server.provider == .mediaShare else { return }
         let token = resolvedToken(for: account.id) ?? ""
-        guard let shareProvider = try? registry.provider(
-            for: providerResolutionContext(for: account, token: token)
+        guard let shareProvider = try? accountsProviders.registry.provider(
+            for: accountsProviders.providerResolutionContext(for: account, token: token)
         ) as? ShareProvider else { return }
         Task { await shareProvider.rescan() }
     }
@@ -933,12 +952,12 @@ public final class AppState {
             perfHitchProbeTask = BrowseDiagnostics.startMainThreadHitchProbe()
         }
         do {
-            try accountStore.recoverCredentialMutations()
+            try accountsProviders.accountStore.recoverCredentialMutations()
         } catch {
             PlozzLog.auth.error("Credential recovery failed; incomplete shares remain hidden")
         }
-        reloadAccounts()
-        PlozzLog.boot("bootstrap accounts=\(accounts.count) activeIDs=\(activeAccountIDs.count)")
+        accountsProviders.reloadAccounts()
+        PlozzLog.boot("bootstrap accountsProviders.accounts=\(accountsProviders.accounts.count) activeIDs=\(accountsProviders.activeAccountIDs.count)")
         // The "Ask which profile on startup" toggle is the single source of
         // truth for whether the launch picker appears. When it's ON we MUST
         // show the picker even if the Apple TV system user has a remembered
@@ -953,7 +972,7 @@ public final class AppState {
             && profilesModel.profiles.count > 1
         // The launch picker is mandatory: Back / Cancel must not dismiss it.
         isProfileSelectionCancelable = false
-        apply(.restored(accounts))
+        apply(.restored(accountsProviders.accounts))
         // Honor a remembered/auto-landed profile's Plex Home-user mapping at
         // launch. When the picker is shown, the switch happens once the user
         // picks instead.
@@ -975,9 +994,6 @@ public final class AppState {
         }
     }
 
-    /// Stable per-install device id used for Quick Connect + auth.
-    public var deviceID: String { accountStore.deviceID() }
-
     /// Whether the environment permits remembering the selected profile for the
     /// current Apple TV system user (see `SystemProfileBridging`). Wired in
     /// Phase 1: combined with `ProfilesModel.hasRememberedSelection`, it lets the
@@ -985,96 +1001,6 @@ public final class AppState {
     public var mayRememberProfileSelection: Bool { systemBridge.mayRememberProfileSelection }
 
     public var lastServerStore: LastServerStoring { UserDefaultsLastServerStore() }
-
-    // MARK: Providers
-
-    /// The provider for the primary active account — the single-provider Home in
-    /// this branch. `nil` when not signed in.
-    public var primaryProvider: (any MediaProvider)? {
-        guard let account = primaryActiveAccount,
-              let token = resolvedToken(for: account.id) else { return nil }
-        return try? registry.provider(for: providerResolutionContext(for: account, token: token))
-    }
-
-    /// The active account that drives the current single-provider UI.
-    public var primaryActiveAccount: Account? {
-        accounts.first { activeAccountIDs.contains($0.id) } ?? accounts.first
-    }
-
-    /// The active accounts paired with their resolved providers. Multi-account
-    /// Home/Search fan out over this list (one provider call per account,
-    /// merged by the view model). Tokens are resolved on demand and never
-    /// stored on the value.
-    public var resolvedActiveAccounts: [ResolvedAccount] {
-        accounts.compactMap { account in
-            guard activeAccountIDs.contains(account.id),
-                  let token = resolvedToken(for: account.id),
-                  let provider = try? registry.provider(
-                      for: providerResolutionContext(for: account, token: token)
-                  )
-            else { return nil }
-            return ResolvedAccount(account: account, provider: provider)
-        }
-    }
-
-    /// Resolves specific account ids into `ResolvedAccount`s for the onboarding
-    /// "choose your libraries" step (which fans a library-listing call out over
-    /// the just-added accounts). Tokens are resolved on demand.
-    public func resolvedAccounts(withIDs ids: [String]) -> [ResolvedAccount] {
-        ids.compactMap { id in
-            guard let account = accounts.first(where: { $0.id == id }),
-                  let token = resolvedToken(for: id),
-                  let provider = try? registry.provider(
-                      for: providerResolutionContext(for: account, token: token)
-                  )
-            else { return nil }
-            return ResolvedAccount(account: account, provider: provider)
-        }
-    }
-
-    /// The accounts the unified Home/Search fan out over. Normally the active
-    /// set; falls back to the primary account so the signed-in UI is never empty
-    /// even if the active-id set is somehow empty.
-    public var homeAccounts: [ResolvedAccount] {
-        let active = resolvedActiveAccounts
-        if !active.isEmpty { return active }
-        guard let account = primaryActiveAccount,
-              let token = resolvedToken(for: account.id),
-              let provider = try? registry.provider(
-                  for: providerResolutionContext(for: account, token: token)
-              )
-        else { return [] }
-        return [ResolvedAccount(account: account, provider: provider)]
-    }
-
-    /// Resolves the provider for a specific account id — used to route a tapped
-    /// library/item from the merged Home back to its owning provider. Tokens are
-    /// resolved on demand and never stored on the value.
-    public func provider(forAccountID id: String) -> (any MediaProvider)? {
-        guard let account = accounts.first(where: { $0.id == id }),
-              let token = resolvedToken(for: account.id)
-        else { return nil }
-        return try? registry.provider(for: providerResolutionContext(for: account, token: token))
-    }
-
-    private func providerResolutionContext(
-        for account: Account,
-        token: String
-    ) -> ProviderResolutionContext {
-        let localMediaContext = account.server.provider == .mediaShare
-            ? LocalMediaContext(
-                accountID: account.id,
-                profileID: profilesModel.activeProfileID,
-                profileNamespace: profilesModel.activeNamespace
-            )
-            : nil
-        return ProviderResolutionContext(
-            session: account.session(token: token),
-            accountID: account.id,
-            credentialRevision: effectiveCredentialRevision(for: account),
-            localMediaContext: localMediaContext
-        )
-    }
 
     private func effectiveCredentialRevision(for account: Account) -> CredentialRevision {
         guard account.server.provider == .plex,
@@ -1103,17 +1029,17 @@ public final class AppState {
     /// The auth token to use for `accountID`, preferring an in-memory Plex
     /// Home-user override over the account's stored (admin) token.
     private func resolvedToken(for accountID: String) -> String? {
-        plexTokenOverrides[accountID] ?? accountStore.token(for: accountID)
+        plexTokenOverrides[accountID] ?? accountsProviders.accountStore.token(for: accountID)
     }
 
     /// Lists the Plex Home users for a signed-in Plex account (for the profile
     /// editor's "Plex User" picker). Returns `[]` for non-Plex/unknown accounts
     /// or on failure. Always uses the account's stored (admin) token.
     public func plexHomeUsers(forAccountID accountID: String) async -> [PlexHomeUser] {
-        guard let account = accounts.first(where: { $0.id == accountID }),
+        guard let account = accountsProviders.accounts.first(where: { $0.id == accountID }),
               account.server.provider == .plex,
-              let adminToken = accountStore.token(for: accountID) else { return [] }
-        return (try? await plexHomeUsersFetch(adminToken, deviceID)) ?? []
+              let adminToken = accountsProviders.accountStore.token(for: accountID) else { return [] }
+        return (try? await plexHomeUsersFetch(adminToken, accountsProviders.deviceID)) ?? []
     }
 
     /// Links the active profile to a specific Plex Home user (or clears the
@@ -1188,7 +1114,7 @@ public final class AppState {
     ///   account (back to the admin user).
     private func ensurePlexIdentityForActiveProfile() {
         let profile = profilesModel.activeProfile
-        let plexAccounts = accounts.filter { $0.server.provider == .plex }
+        let plexAccounts = accountsProviders.accounts.filter { $0.server.provider == .plex }
         let boundCount = plexAccounts.filter { profile.homeUserBinding(forPlexAccount: $0.id) != nil }.count
         PlozzLog.boot("ensurePlexIdentity profile=\(profile.id) plexAccounts=\(plexAccounts.count) withBinding=\(boundCount) gen=\(self.plexIdentityGeneration)")
 
@@ -1212,7 +1138,7 @@ public final class AppState {
                     if plexTokenOverrides[account.id] != nil {
                         setPlexTokenOverride(nil, for: account.id)
                         plexResolvedHomeUser[account.id] = nil
-                        registry.invalidate(accountID: account.id)
+                        accountsProviders.registry.invalidate(accountID: account.id)
                         plexIdentityGeneration += 1
                         PlozzLog.boot("genBump=\(self.plexIdentityGeneration) site=ensure.staleOverride acct=\(account.id)")
                     }
@@ -1238,7 +1164,7 @@ public final class AppState {
                     if let cached = plexHomeUserTokenCache.token(account: account.id, homeUser: binding.homeUserID) {
                         setPlexTokenOverride(cached, for: account.id)
                         plexResolvedHomeUser[account.id] = binding.homeUserID
-                        registry.invalidate(accountID: account.id)
+                        accountsProviders.registry.invalidate(accountID: account.id)
                         PlozzLog.boot("ensure.cachedOverride acct=\(account.id) home=\(binding.homeUserID) — instant paint")
                     } else {
                         PlozzLog.boot("ensure.unprotectedSwitch acct=\(account.id) home=\(binding.homeUserID) — cache miss, async")
@@ -1253,7 +1179,7 @@ public final class AppState {
                 if plexTokenOverrides[account.id] != nil {
                     setPlexTokenOverride(nil, for: account.id)
                     plexResolvedHomeUser[account.id] = nil
-                    registry.invalidate(accountID: account.id)
+                    accountsProviders.registry.invalidate(accountID: account.id)
                     plexIdentityGeneration += 1
                     PlozzLog.boot("genBump=\(self.plexIdentityGeneration) site=ensure.dropOverride acct=\(account.id)")
                 }
@@ -1285,7 +1211,7 @@ public final class AppState {
             plexOverrideCredentialRevisions.removeAll()
             plexResolvedHomeUser.removeAll()
             for accountID in accountIDs {
-                registry.invalidate(accountID: accountID)
+                accountsProviders.registry.invalidate(accountID: accountID)
             }
             plexIdentityGeneration += 1
             PlozzLog.boot("genBump=\(self.plexIdentityGeneration) site=clearPlexOverrides")
@@ -1297,7 +1223,7 @@ public final class AppState {
     /// token actually changed (so a warm-cache refresh doesn't force a reload).
     private func performPlexSwitch(accountID: String, homeUserID: String, pin: String?) async {
         PlozzLog.auth.debug("performPlexSwitch acct=\(accountID) home=\(homeUserID) pin?=\(pin != nil)")
-        guard let adminToken = accountStore.token(for: accountID) else {
+        guard let adminToken = accountsProviders.accountStore.token(for: accountID) else {
             // Surface a user-visible error instead of silently returning; otherwise a
             // PIN submission with no cached admin token vanishes (no dismissal, no error)
             // and the user can't tell whether the PIN was accepted.
@@ -1306,7 +1232,7 @@ public final class AppState {
             return
         }
         do {
-            let token = try await plexHomeUserSwitch(homeUserID, pin, adminToken, deviceID)
+            let token = try await plexHomeUserSwitch(homeUserID, pin, adminToken, accountsProviders.deviceID)
             PlozzLog.auth.debug("Plex Home-user switch OK — clearing pendingPlexPINRequest")
             // `token` is the Home user's account-level plex.tv token. Re-resolve
             // it to THIS server's access token (the kind PMS authorizes browsing
@@ -1315,8 +1241,8 @@ public final class AppState {
             // switch never silently dead-ends. See `plexServerTokenResolve`.
             var resolvedToken = token
             var gotServerToken = false
-            if let serverID = accounts.first(where: { $0.id == accountID })?.server.id,
-               let serverToken = await plexServerTokenResolve(serverID, token, deviceID) {
+            if let serverID = accountsProviders.accounts.first(where: { $0.id == accountID })?.server.id,
+               let serverToken = await plexServerTokenResolve(serverID, token, accountsProviders.deviceID) {
                 resolvedToken = serverToken
                 gotServerToken = true
             }
@@ -1346,7 +1272,7 @@ public final class AppState {
             // refresh that returns the same token (the common case on a cache hit)
             // must NOT rebuild, or it reintroduces the startup double-load.
             if previousToken != resolvedToken {
-                registry.invalidate(accountID: accountID)
+                accountsProviders.registry.invalidate(accountID: accountID)
                 plexIdentityGeneration += 1
                 PlozzLog.boot("genBump=\(self.plexIdentityGeneration) site=performPlexSwitch acct=\(accountID) home=\(homeUserID)")
             } else {
@@ -1379,7 +1305,7 @@ public final class AppState {
     public var signedInServers: [SignedInServer] {
         var order: [String] = []
         var byKey: [String: (server: MediaServer, users: [String])] = [:]
-        for account in accounts {
+        for account in accountsProviders.accounts {
             let key = account.server.identityKey
             if byKey[key] == nil {
                 order.append(key)
@@ -1406,7 +1332,7 @@ public final class AppState {
     /// the sign-in identity and detours through the profile confirm step;
     /// otherwise it enters the app directly.
     public func didAuthenticate(_ session: UserSession) {
-        let isFirstRun = accounts.isEmpty && !profilesModel.firstRunProfileSetupComplete
+        let isFirstRun = accountsProviders.accounts.isEmpty && !profilesModel.firstRunProfileSetupComplete
         // Media shares are identified by their share path (host/port/share), not a
         // random UUID, so re-adding the same share — e.g. to fix its password —
         // updates the existing account in place (new credential revision, old one
@@ -1415,9 +1341,9 @@ public final class AppState {
         let account = session.server.provider == .mediaShare
             ? Account(id: session.server.id, from: session)
             : Account(from: session)
-        let previousAccount = accounts.first { $0.id == account.id }
+        let previousAccount = accountsProviders.accounts.first { $0.id == account.id }
         do {
-            try accountStore.add(account, token: session.accessToken)
+            try accountsProviders.accountStore.add(account, token: session.accessToken)
         } catch {
             apply(.authenticationFailed(.unknown("")))
             return
@@ -1445,11 +1371,11 @@ public final class AppState {
         // identical re-add is a no-op that keeps the existing revision, so read the
         // persisted revision back rather than trusting the freshly-minted one.
         if let previousAccount,
-           let persisted = accountStore.loadAccounts().first(where: { $0.id == account.id }),
+           let persisted = accountsProviders.accountStore.loadAccounts().first(where: { $0.id == account.id }),
            previousAccount.credentialRevision != persisted.credentialRevision {
             mediaShareAccountService.retireCredential(for: previousAccount)
         }
-        reloadAccounts()
+        accountsProviders.reloadAccounts()
         // Flow finished — next add-account starts at the chooser.
         pendingOnboardingProvider = nil
         pendingLibrarySelectionAccountIDs = [account.id]
@@ -1464,13 +1390,13 @@ public final class AppState {
     public func didAuthenticatePlexMany(_ sessions: [UserSession]) {
         guard let first = sessions.first else { return }
 
-        let isFirstRun = accounts.isEmpty && !profilesModel.firstRunProfileSetupComplete
+        let isFirstRun = accountsProviders.accounts.isEmpty && !profilesModel.firstRunProfileSetupComplete
         var addedIDs: [String] = []
         for session in sessions {
             let account = Account(from: session)
-            let previousAccount = accounts.first { $0.id == account.id }
+            let previousAccount = accountsProviders.accounts.first { $0.id == account.id }
             do {
-                try accountStore.add(account, token: session.accessToken)
+                try accountsProviders.accountStore.add(account, token: session.accessToken)
                 if let previousAccount,
                    previousAccount.credentialRevision != account.credentialRevision {
                     mediaShareAccountService.retireCredential(for: previousAccount)
@@ -1480,7 +1406,7 @@ public final class AppState {
                 continue // Skip a failed add; keep the rest of the batch.
             }
         }
-        reloadAccounts()
+        accountsProviders.reloadAccounts()
         pendingOnboardingProvider = nil
         guard !addedIDs.isEmpty else {
             apply(.authenticationFailed(.unknown("")))
@@ -1713,7 +1639,7 @@ public final class AppState {
             server: server,
             userID: user,
             userName: username,
-            deviceID: accountStore.deviceID(),
+            deviceID: accountsProviders.accountStore.deviceID(),
             accessToken: password
         )
         apply(.serverSelected(server))
@@ -1919,21 +1845,21 @@ public final class AppState {
             baseURL: baseURL,
             provider: .mediaShare
         )
-        let isFirstRun = accounts.isEmpty && !profilesModel.firstRunProfileSetupComplete
+        let isFirstRun = accountsProviders.accounts.isEmpty && !profilesModel.firstRunProfileSetupComplete
         let userName = auth.accountUserName
         let session = UserSession(
             server: server,
             userID: auth.principal,
             userName: userName,
-            deviceID: accountStore.deviceID(),
+            deviceID: accountsProviders.accountStore.deviceID(),
             // Credential bytes live in the vault envelope, not the token slot.
             accessToken: ""
         )
         let account = Account(id: server.id, from: session)
-        let previousAccount = accounts.first { $0.id == account.id }
+        let previousAccount = accountsProviders.accounts.first { $0.id == account.id }
         apply(.serverSelected(server))
         do {
-            try accountStore.addMediaShare(account, credential: envelope, generatedPrivateKey: nil)
+            try accountsProviders.accountStore.addMediaShare(account, credential: envelope, generatedPrivateKey: nil)
         } catch {
             Self.reportMediaSharePersistenceFailure(error, operation: "webdav-save")
             apply(.authenticationFailed(.unknown("Couldn’t save this WebDAV share")))
@@ -2222,19 +2148,19 @@ public final class AppState {
             baseURL: baseURL,
             provider: .mediaShare
         )
-        let isFirstRun = accounts.isEmpty && !profilesModel.firstRunProfileSetupComplete
+        let isFirstRun = accountsProviders.accounts.isEmpty && !profilesModel.firstRunProfileSetupComplete
         let session = UserSession(
             server: server,
             userID: userID,
             userName: userName,
-            deviceID: accountStore.deviceID(),
+            deviceID: accountsProviders.accountStore.deviceID(),
             accessToken: ""
         )
         let account = Account(id: server.id, from: session)
-        let previousAccount = accounts.first { $0.id == account.id }
+        let previousAccount = accountsProviders.accounts.first { $0.id == account.id }
         apply(.serverSelected(server))
         do {
-            try accountStore.addMediaShare(account, credential: envelope, generatedPrivateKey: nil)
+            try accountsProviders.accountStore.addMediaShare(account, credential: envelope, generatedPrivateKey: nil)
         } catch {
             Self.reportMediaSharePersistenceFailure(
                 error,
@@ -2278,16 +2204,16 @@ public final class AppState {
 
     /// Removes one account; drops to onboarding if it was the last.
     public func removeAccount(id: String) {
-        let removedAccount = accounts.first { $0.id == id }
+        let removedAccount = accountsProviders.accounts.first { $0.id == id }
         let shareAccountKey = mediaShareAccountService.mediaShareAccountKey(for: removedAccount)
         do {
-            try accountStore.remove(id: id)
+            try accountsProviders.accountStore.remove(id: id)
         } catch {
             PlozzLog.auth.error("Account removal failed; account remains signed in")
         }
-        reloadAccounts()
-        guard !accounts.contains(where: { $0.id == id }) else {
-            apply(.accountsChanged(accounts))
+        accountsProviders.reloadAccounts()
+        guard !accountsProviders.accounts.contains(where: { $0.id == id }) else {
+            apply(.accountsChanged(accountsProviders.accounts))
             return
         }
         if let removedAccount {
@@ -2300,27 +2226,27 @@ public final class AppState {
         setPlexTokenOverride(nil, for: id)
         plexResolvedHomeUser[id] = nil
         plexHomeUserTokenCache.removeAll(account: id)
-        apply(.accountsChanged(accounts))
+        apply(.accountsChanged(accountsProviders.accounts))
     }
 
     /// Signs out of the primary active account (the one Settings currently shows).
     public func signOut() {
-        if let account = primaryActiveAccount {
+        if let account = accountsProviders.primaryActiveAccount {
             removeAccount(id: account.id)
         }
     }
 
     /// Removes every account (full reset).
     public func signOutAll() {
-        let removedAccounts = accounts
+        let removedAccounts = accountsProviders.accounts
         let shareAccountKeys = mediaShareAccountService.mediaShareAccountKeys(in: removedAccounts)
         do {
-            try accountStore.clearAll()
+            try accountsProviders.accountStore.clearAll()
         } catch {
             PlozzLog.auth.error("Sign out all was incomplete; retained accounts remain signed in")
         }
-        reloadAccounts()
-        let retainedAccountIDs = Set(accounts.map(\.id))
+        accountsProviders.reloadAccounts()
+        let retainedAccountIDs = Set(accountsProviders.accounts.map(\.id))
         let confirmedRemovedAccounts = removedAccounts.filter {
             !retainedAccountIDs.contains($0.id)
         }
@@ -2339,7 +2265,7 @@ public final class AppState {
             plexResolvedHomeUser[account.id] = nil
             plexHomeUserTokenCache.removeAll(account: account.id)
         }
-        apply(.accountsChanged(accounts))
+        apply(.accountsChanged(accountsProviders.accounts))
     }
 
     /// Debug-only: wipes everything that gates the first-run experience —
@@ -2347,15 +2273,15 @@ public final class AppState {
     /// first-run flag, and the recent-servers list — so the next server add
     /// reproduces a genuine first run. Surfaced from a DEBUG-only Settings row.
     public func resetToFirstRunForDebugging() {
-        let removedAccounts = accounts
+        let removedAccounts = accountsProviders.accounts
         let shareAccountKeys = mediaShareAccountService.mediaShareAccountKeys(in: removedAccounts)
         do {
-            try accountStore.clearAll()
+            try accountsProviders.accountStore.clearAll()
         } catch {
             PlozzLog.auth.error("First-run reset could not remove every account")
         }
-        reloadAccounts()
-        let retainedAccountIDs = Set(accounts.map(\.id))
+        accountsProviders.reloadAccounts()
+        let retainedAccountIDs = Set(accountsProviders.accounts.map(\.id))
         let confirmedRemovedAccounts = removedAccounts.filter {
             !retainedAccountIDs.contains($0.id)
         }
@@ -2369,8 +2295,8 @@ public final class AppState {
         for accountKey in confirmedShareAccountKeys {
             mediaShareAccountService.invalidate(shareAccountKey: accountKey)
         }
-        guard accounts.isEmpty else {
-            apply(.accountsChanged(accounts))
+        guard accountsProviders.accounts.isEmpty else {
+            apply(.accountsChanged(accountsProviders.accounts))
             return
         }
         plexTokenOverrides.removeAll()
@@ -2386,7 +2312,7 @@ public final class AppState {
         pendingPlexUserApplyToAccountIDs = []
         isChoosingProfile = false
         rebuildSettingsModels()
-        apply(.accountsChanged(accounts))
+        apply(.accountsChanged(accountsProviders.accounts))
     }
 
     public func retry() {
@@ -2415,7 +2341,7 @@ public final class AppState {
         profilesModel.select(id)
         rebuildSettingsModels()
         updateTraktForActiveProfile()
-        reloadAccounts()
+        accountsProviders.reloadAccounts()
         isChoosingProfile = false
         ensurePlexIdentityForActiveProfile()
     }
@@ -2451,7 +2377,7 @@ public final class AppState {
             if id == profilesModel.activeProfileID {
                 rebuildSettingsModels()
                 updateTraktForActiveProfile()
-                reloadAccounts()
+                accountsProviders.reloadAccounts()
                 ensurePlexIdentityForActiveProfile()
             }
         } else {
@@ -2481,7 +2407,7 @@ public final class AppState {
             profilesModel.select(created.id)
             rebuildSettingsModels()
             updateTraktForActiveProfile()
-            reloadAccounts()
+            accountsProviders.reloadAccounts()
             isChoosingProfile = false
             isPickingThemeForNewProfile = true
         }
@@ -2522,7 +2448,7 @@ public final class AppState {
         if wasActive {
             rebuildSettingsModels()
             updateTraktForActiveProfile()
-            reloadAccounts()
+            accountsProviders.reloadAccounts()
         }
     }
 
@@ -2549,7 +2475,7 @@ public final class AppState {
     /// Whether `accountID` is included in the active profile's "Use this
     /// server" set. Used by Settings to drive the per-server toggle.
     public func isAccountIncludedInActiveProfile(_ accountID: String) -> Bool {
-        activeAccountIDs.contains(accountID)
+        accountsProviders.activeAccountIDs.contains(accountID)
     }
 
     /// Toggles inclusion of `accountID` in the active profile's account set
@@ -2562,48 +2488,20 @@ public final class AppState {
         // that situation to the current household set. Starting from the stale
         // stored value would make removing a visible account a no-op, then the
         // next reload would fall back to every account and leave the switch On.
-        let current = activeAccountIDs
+        let current = accountsProviders.activeAccountIDs
         var next = current
         if included { next.insert(accountID) } else { next.remove(accountID) }
         profilesModel.setActiveAccountIDs(Array(next), for: profileID)
-        reloadAccounts()
-    }
-
-    /// The account subset currently stored for a profile (for the editor), or
-    /// the resolved fallback when it never chose one.
-    public func activeAccountIDs(forProfile id: String) -> [String] {
-        Array(profilesModel.activeAccountIDs(for: id, fallback: accountStore.activeAccountIDs()))
+        accountsProviders.reloadAccounts()
     }
 
     // MARK: Internals
 
-    private func reloadAccounts() {
-        registry.invalidateCache()
-        accounts = accountStore.loadAccounts()
-        let known = Set(accounts.map(\.id))
-        // The household-global active set is the fallback for a profile that has
-        // never chosen a subset (default profile / upgrade path).
-        let globalActive = accountStore.activeAccountIDs()
-        let resolved: Set<String>
-        if let stored = profilesModel.storedActiveAccountIDs(for: profilesModel.activeProfileID) {
-            // The profile made an *explicit* choice. Honor it exactly — including
-            // an intentional empty set ("watch nothing"), which is what turning
-            // the last server off produces and must not be silently re-expanded
-            // to every account (that's what made the master server toggle appear
-            // to do nothing). Only fall back if every chosen account has since
-            // gone stale (e.g. the servers were signed out household-wide), so a
-            // profile isn't left permanently blank by a removal it didn't make.
-            let valid = Set(stored.filter { known.contains($0) })
-            if valid.isEmpty && !stored.isEmpty {
-                resolved = Set(globalActive.filter { known.contains($0) })
-            } else {
-                resolved = valid
-            }
-        } else {
-            // Never chose → default to the household-global active set.
-            resolved = Set(globalActive.filter { known.contains($0) })
-        }
-        activeAccountIDs = resolved
+    /// Media-share preferred-account-key propagation, fired by the accounts hub
+    /// after it recomputes the active set in `reloadAccounts`. Kept on `AppState`
+    /// so the accounts hub stays free of media-share concerns; moves to the
+    /// media-share facet in a later batch.
+    private func propagatePreferredShareAccounts(_ resolved: Set<String>, _ accounts: [Account]) {
         sharePriorityRevision &+= 1
         let priorityRevision = sharePriorityRevision
         let preferredShareIDs = Set(

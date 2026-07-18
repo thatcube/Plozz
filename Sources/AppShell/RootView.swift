@@ -98,7 +98,7 @@ public struct RootView: View {
     /// (Jellyfin/Plex), version/build/tvOS/device — never server names or tokens.
     private func makeCrashContext() -> CrashReportContext {
         var seen = Set<String>()
-        let providers = appState.accounts
+        let providers = appState.accountsProviders.accounts
             .map { $0.server.provider.displayName }
             .filter { seen.insert($0).inserted }
         return CrashReportContext.make(
@@ -134,7 +134,7 @@ public struct RootView: View {
                     ProfileSelectionView(appState: appState, canCancel: appState.isProfileSelectionCancelable)
                         .transition(.opacity)
                 } else {
-                    let accounts = appState.homeAccounts
+                    let accounts = appState.accountsProviders.homeAccounts
                     if !accounts.isEmpty {
                     let detailCache = detailCacheFactory.cache(
                         for: DetailSnapshotCacheScope(
@@ -148,7 +148,7 @@ public struct RootView: View {
                     MainTabView(
                         accounts: accounts,
                         detailSnapshotCache: detailCache,
-                        currentAccounts: { appState.homeAccounts },
+                        currentAccounts: { appState.accountsProviders.homeAccounts },
                         networkFileResolver: appState.networkFileResolver,
                         authenticatedHTTPResolver: appState.authenticatedHTTPResolver,
                         subtitleBehaviorModel: appState.profileSettings.subtitleBehaviorModel,
@@ -214,8 +214,8 @@ public struct RootView: View {
                         ),
                         pendingWatchMutations: { await appState.pendingWatchMutations() },
                         appliedWatchRecency: { await appState.appliedWatchRecency() },
-                        displayAccounts: appState.accounts,
-                        activeAccountID: appState.primaryActiveAccount?.id,
+                        displayAccounts: appState.accountsProviders.accounts,
+                        activeAccountID: appState.accountsProviders.primaryActiveAccount?.id,
                         profiles: appState.profilesModel.profiles,
                         activeProfile: appState.profilesModel.activeProfile,
                         askProfileOnStartup: appState.profilesModel.askProfileOnStartup,
@@ -515,7 +515,7 @@ private struct OnboardingPageContent: View {
         switch page {
         case let .selectingServer(canReturnToApp):
             AddAccountView(
-                deviceID: appState.deviceID,
+                deviceID: appState.accountsProviders.deviceID,
                 canReturnToApp: canReturnToApp,
                 initialProvider: appState.pendingOnboardingProvider,
                 signedInServers: appState.signedInServers,
@@ -579,7 +579,7 @@ private struct OnboardingPageContent: View {
             } else {
                 AuthView(
                     server: server,
-                    deviceID: appState.deviceID,
+                    deviceID: appState.accountsProviders.deviceID,
                     onAuthenticated: { session in appState.didAuthenticate(session) },
                     onCancel: { appState.cancelAuthentication() }
                 )

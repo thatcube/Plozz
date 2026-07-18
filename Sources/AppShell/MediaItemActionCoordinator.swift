@@ -76,7 +76,7 @@ final class MediaItemActionCoordinator: MediaItemActionHandling {
         guard let mutation = WatchMutationFactory.playedToggle(
             item: item,
             played: played,
-            primaryAccountID: appState.primaryActiveAccount?.id,
+            primaryAccountID: appState.accountsProviders.primaryActiveAccount?.id,
             additionalSources: appState.identityIndex.identitySnapshot.sourceRefs(for: item),
             crossServerSync: appState.profileSettings.playbackModel.settings.syncWatchAcrossServers
         ) else { return }
@@ -185,12 +185,12 @@ final class MediaItemActionCoordinator: MediaItemActionHandling {
         let refs = unionedSourceRefs(for: item)
         guard !refs.isEmpty else {
             // Untagged single-account item: write to the primary as-is.
-            let provider = (item.sourceAccountID.flatMap { appState.provider(forAccountID: $0) }
-                ?? appState.primaryProvider) as? WatchlistProviding
+            let provider = (item.sourceAccountID.flatMap { appState.accountsProviders.provider(forAccountID: $0) }
+                ?? appState.accountsProviders.primaryProvider) as? WatchlistProviding
             return provider.map { [(provider: $0, item: item)] } ?? []
         }
         return refs.compactMap { ref in
-            guard let provider = appState.provider(forAccountID: ref.accountID) as? WatchlistProviding else { return nil }
+            guard let provider = appState.accountsProviders.provider(forAccountID: ref.accountID) as? WatchlistProviding else { return nil }
             // The primary's own ref already points at `item.id`, so `selectingSource`
             // is a no-op there and repoints only the alternate copies.
             return (provider: provider, item: item.selectingSource(ref))
@@ -240,9 +240,9 @@ final class MediaItemActionCoordinator: MediaItemActionHandling {
     /// primary provider for untagged (single-account) items.
     private func provider(for item: MediaItem) -> (any MediaProvider)? {
         if let accountID = item.sourceAccountID,
-           let provider = appState.provider(forAccountID: accountID) {
+           let provider = appState.accountsProviders.provider(forAccountID: accountID) {
             return provider
         }
-        return appState.primaryProvider
+        return appState.accountsProviders.primaryProvider
     }
 }

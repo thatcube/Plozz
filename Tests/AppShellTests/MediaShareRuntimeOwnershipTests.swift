@@ -160,7 +160,7 @@ final class MediaShareRuntimeOwnershipTests: XCTestCase {
             host: host, port: nil, share: share,
             username: username, password: password, displayName: share
         )
-        return state.accounts.first { $0.server.provider == .mediaShare && $0.userName == username }!
+        return state.accountsProviders.accounts.first { $0.server.provider == .mediaShare && $0.userName == username }!
     }
 
     /// Polls the main actor until `condition` holds or a short deadline passes,
@@ -231,13 +231,13 @@ final class MediaShareRuntimeOwnershipTests: XCTestCase {
 
         let failingStore = FailingRemovalAccountStore(wrapped: realStore, failRemove: true)
         let harness = try makeHarness(store: failingStore)
-        XCTAssertTrue(harness.state.accounts.contains { $0.id == account.id })
+        XCTAssertTrue(harness.state.accountsProviders.accounts.contains { $0.id == account.id })
 
         harness.state.removeAccount(id: account.id)
 
         // Give any (incorrectly) dispatched work a chance to land, then assert none did.
         try? await Task.sleep(nanoseconds: 300_000_000)
-        XCTAssertTrue(harness.state.accounts.contains { $0.id == account.id },
+        XCTAssertTrue(harness.state.accountsProviders.accounts.contains { $0.id == account.id },
                       "a failed persistence removal must leave the account signed in")
         XCTAssertEqual(harness.runtime.retireCalls.count, 0,
                        "no retirement may run when persistence removal failed")
@@ -273,7 +273,7 @@ final class MediaShareRuntimeOwnershipTests: XCTestCase {
 
         let failingStore = FailingRemovalAccountStore(wrapped: realStore, failClear: true)
         let harness = try makeHarness(store: failingStore)
-        XCTAssertFalse(harness.state.accounts.isEmpty)
+        XCTAssertFalse(harness.state.accountsProviders.accounts.isEmpty)
 
         harness.state.signOutAll()
 

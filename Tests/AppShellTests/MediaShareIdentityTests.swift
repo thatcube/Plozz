@@ -113,7 +113,7 @@ final class MediaShareIdentityTests: XCTestCase {
             host: "192.168.1.10", port: nil, share: "Media",
             username: "COPILOT2", password: "old-pw", displayName: "Media"
         )
-        let afterFirst = harness.state.accounts.filter { $0.server.provider == .mediaShare }
+        let afterFirst = harness.state.accountsProviders.accounts.filter { $0.server.provider == .mediaShare }
         XCTAssertEqual(afterFirst.count, 1)
         let firstRevision = try XCTUnwrap(afterFirst.first).credentialRevision
 
@@ -123,7 +123,7 @@ final class MediaShareIdentityTests: XCTestCase {
             host: "192.168.1.10", port: nil, share: "Media",
             username: "Copilot2", password: "new-pw", displayName: "Media"
         )
-        let afterSecond = harness.state.accounts.filter { $0.server.provider == .mediaShare }
+        let afterSecond = harness.state.accountsProviders.accounts.filter { $0.server.provider == .mediaShare }
         XCTAssertEqual(afterSecond.count, 1, "Re-adding a share must not create a duplicate account")
 
         let updated = try XCTUnwrap(afterSecond.first)
@@ -140,14 +140,14 @@ final class MediaShareIdentityTests: XCTestCase {
             username: "user", password: "pw", displayName: "Media"
         )
         let first = try XCTUnwrap(
-            harness.state.accounts.first { $0.server.provider == .mediaShare }
+            harness.state.accountsProviders.accounts.first { $0.server.provider == .mediaShare }
         )
 
         harness.state.didConfigureShare(
             host: "host", port: nil, share: "Media",
             username: "user", password: "pw", displayName: "Media"
         )
-        let shares = harness.state.accounts.filter { $0.server.provider == .mediaShare }
+        let shares = harness.state.accountsProviders.accounts.filter { $0.server.provider == .mediaShare }
         XCTAssertEqual(shares.count, 1)
         XCTAssertEqual(try XCTUnwrap(shares.first).credentialRevision, first.credentialRevision,
                        "An identical re-add must not rotate the credential revision")
@@ -165,7 +165,7 @@ final class MediaShareIdentityTests: XCTestCase {
             username: "sister", password: "s-pw", displayName: "Media"
         )
 
-        let shares = harness.state.accounts.filter { $0.server.provider == .mediaShare }
+        let shares = harness.state.accountsProviders.accounts.filter { $0.server.provider == .mediaShare }
         XCTAssertEqual(shares.count, 2, "Distinct users on the same share must each get an account")
         XCTAssertEqual(Set(shares.map(\.id)).count, 2)
         // Each account keeps its own credential.

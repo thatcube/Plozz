@@ -103,7 +103,7 @@ OBSERVABLE_FANOUT_DEFAULT_MAX = 25
 # tracks that shrink (was 62 before the ProfileSettingsModel extraction).
 OBSERVABLE_FANOUT_ALLOWLIST = {
     # Being actively decomposed into single-responsibility facets (this workstream).
-    "AppState": 39,               # 62 -> 44 (ProfileSettingsModel) -> 39 (IdentityIndexModel).
+    "AppState": 36,               # 62 -> 44 (ProfileSettings) -> 39 (IdentityIndex) -> 36 (AccountsProviders).
     # Pre-existing god objects seeded at their current fan-out as debt markers so
     # the ratchet prevents REGRESSION today and flags them as future decomposition
     # targets. Lower these as each is split; never raise them.

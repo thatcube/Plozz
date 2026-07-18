@@ -86,7 +86,7 @@ struct FirstRunProfileView: View {
             ProfileEditorView(
                 editingProfile: profile,
                 canDelete: false,
-                photoSourceAccounts: appState.accounts,
+                photoSourceAccounts: appState.accountsProviders.accounts,
                 plexHomeUsersFetcher: { await appState.plexHomeUsers(forAccountID: $0) },
                 onSave: { draft in
                     appState.saveProfile(draft)
@@ -109,7 +109,7 @@ struct FirstRunProfileView: View {
     /// The provider the seeded identity came from — the first account added on
     /// this fresh install. Defaults to a neutral word if none is resolvable.
     private var providerName: String {
-        appState.accounts.first?.server.provider.displayName ?? "media"
+        appState.accountsProviders.accounts.first?.server.provider.displayName ?? "media"
     }
 }
 #endif

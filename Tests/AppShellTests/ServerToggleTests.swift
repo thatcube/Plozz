@@ -131,7 +131,7 @@ final class ServerToggleTests: XCTestCase {
             )
             state.bootstrap()
 
-            XCTAssertNotNil(state.provider(forAccountID: account.id))
+            XCTAssertNotNil(state.accountsProviders.provider(forAccountID: account.id))
             let first = try XCTUnwrap(recorder.contexts.last)
             XCTAssertEqual(first.accountID, account.id)
             XCTAssertEqual(first.credentialRevision, account.credentialRevision)
@@ -139,7 +139,7 @@ final class ServerToggleTests: XCTestCase {
             XCTAssertNil(first.localMediaContext?.profileNamespace)
 
             state.switchProfile(to: secondProfile.id)
-            XCTAssertNotNil(state.provider(forAccountID: account.id))
+            XCTAssertNotNil(state.accountsProviders.provider(forAccountID: account.id))
             let second = try XCTUnwrap(recorder.contexts.last)
             XCTAssertEqual(second.localMediaContext?.profileID, secondProfile.id)
             XCTAssertEqual(second.localMediaContext?.profileNamespace, secondProfile.id)
@@ -186,7 +186,7 @@ final class ServerToggleTests: XCTestCase {
             }
             state.bootstrap()
 
-            XCTAssertNotNil(state.provider(forAccountID: account.id))
+            XCTAssertNotNil(state.accountsProviders.provider(forAccountID: account.id))
             let ownerContext = try XCTUnwrap(recorder.contexts.last)
             XCTAssertEqual(ownerContext.credentialRevision, persistedAccount.credentialRevision)
             XCTAssertEqual(ownerContext.session.accessToken, "owner-token")
@@ -269,7 +269,7 @@ final class ServerToggleTests: XCTestCase {
             }
 
             state.setPlexHomeUserForActiveProfile(accountID: account.id, user: nil)
-            XCTAssertNotNil(state.provider(forAccountID: account.id))
+            XCTAssertNotNil(state.accountsProviders.provider(forAccountID: account.id))
             let restoredOwner = try XCTUnwrap(recorder.contexts.last)
             XCTAssertEqual(
                 restoredOwner.credentialRevision,
@@ -285,7 +285,7 @@ final class ServerToggleTests: XCTestCase {
             recorder: ContextRecorder
         ) async throws -> ProviderResolutionContext {
             for _ in 0..<100 {
-                _ = state.provider(forAccountID: accountID)
+                _ = state.accountsProviders.provider(forAccountID: accountID)
                 if let context = recorder.contexts.last,
                    context.session.accessToken == token {
                     return context
@@ -494,7 +494,7 @@ final class ServerToggleTests: XCTestCase {
 
         state.removeAccount(id: account.id)
 
-        XCTAssertTrue(state.accounts.contains { $0.id == account.id })
+        XCTAssertTrue(state.accountsProviders.accounts.contains { $0.id == account.id })
         XCTAssertTrue(
             state.shareScanStatusModel.state(forShareID: account.id)?.isScanning
                 == true

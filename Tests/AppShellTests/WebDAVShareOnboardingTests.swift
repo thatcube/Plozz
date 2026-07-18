@@ -62,7 +62,7 @@ final class WebDAVShareOnboardingTests: XCTestCase {
         harness.state.didConfigureWebDAVShare(
             baseURL: url, auth: .bearer(token: "tok-1"), trustPin: nil, displayName: "DAV"
         )
-        let afterFirst = harness.state.accounts.filter { $0.server.provider == .mediaShare }
+        let afterFirst = harness.state.accountsProviders.accounts.filter { $0.server.provider == .mediaShare }
         XCTAssertEqual(afterFirst.count, 1)
         let account = try XCTUnwrap(afterFirst.first)
 
@@ -80,7 +80,7 @@ final class WebDAVShareOnboardingTests: XCTestCase {
         harness.state.didConfigureWebDAVShare(
             baseURL: url, auth: .bearer(token: "tok-2"), trustPin: nil, displayName: "DAV"
         )
-        let afterSecond = harness.state.accounts.filter { $0.server.provider == .mediaShare }
+        let afterSecond = harness.state.accountsProviders.accounts.filter { $0.server.provider == .mediaShare }
         XCTAssertEqual(afterSecond.count, 1, "re-adding the same bearer share must not duplicate")
         XCTAssertNotEqual(try XCTUnwrap(afterSecond.first).credentialRevision, firstRevision)
     }
@@ -96,7 +96,7 @@ final class WebDAVShareOnboardingTests: XCTestCase {
             displayName: "DAV"
         )
         let account = try XCTUnwrap(
-            harness.state.accounts.first { $0.server.provider == .mediaShare }
+            harness.state.accountsProviders.accounts.first { $0.server.provider == .mediaShare }
         )
         let envelope = try harness.store.mediaShareCredential(for: account.id)
         XCTAssertEqual(envelope.trust.tlsLeafCertificateSHA256, pin)
@@ -117,7 +117,7 @@ final class WebDAVShareOnboardingTests: XCTestCase {
             displayName: "DAV"
         )
         XCTAssertEqual(
-            harness.state.accounts.filter { $0.server.provider == .mediaShare }.count, 1,
+            harness.state.accountsProviders.accounts.filter { $0.server.provider == .mediaShare }.count, 1,
             "a credential over http is permitted (LAN media policy)"
         )
     }
@@ -131,7 +131,7 @@ final class WebDAVShareOnboardingTests: XCTestCase {
             displayName: "Public"
         )
         XCTAssertEqual(
-            harness.state.accounts.filter { $0.server.provider == .mediaShare }.count, 1,
+            harness.state.accountsProviders.accounts.filter { $0.server.provider == .mediaShare }.count, 1,
             "anonymous access over plain HTTP is allowed (nothing to leak)"
         )
     }
@@ -145,7 +145,7 @@ final class WebDAVShareOnboardingTests: XCTestCase {
             trustPin: pin,
             displayName: "DAV"
         )
-        XCTAssertTrue(harness.state.accounts.filter { $0.server.provider == .mediaShare }.isEmpty,
+        XCTAssertTrue(harness.state.accountsProviders.accounts.filter { $0.server.provider == .mediaShare }.isEmpty,
                       "a certificate pin over plain HTTP is nonsensical and must be refused")
     }
 
@@ -160,7 +160,7 @@ final class WebDAVShareOnboardingTests: XCTestCase {
                 baseURL: URL(string: bad)!, auth: .anonymous, trustPin: nil, displayName: "DAV"
             )
         }
-        XCTAssertTrue(harness.state.accounts.filter { $0.server.provider == .mediaShare }.isEmpty,
+        XCTAssertTrue(harness.state.accountsProviders.accounts.filter { $0.server.provider == .mediaShare }.isEmpty,
                       "a base URL with userinfo/query/fragment must be refused")
     }
 

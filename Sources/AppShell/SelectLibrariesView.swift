@@ -78,7 +78,7 @@ struct SelectLibrariesView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onExitCommand { appState.confirmLibrarySelection() }
         .task {
-            await discovery.load(from: appState.resolvedAccounts(withIDs: appState.pendingLibrarySelectionAccountIDs))
+            await discovery.load(from: appState.accountsProviders.resolvedAccounts(withIDs: appState.pendingLibrarySelectionAccountIDs))
         }
     }
 
@@ -107,7 +107,7 @@ struct SelectLibrariesView: View {
                     .font(.title3)
                     .foregroundStyle(.secondary)
                 Button {
-                    Task { await discovery.load(from: appState.resolvedAccounts(withIDs: appState.pendingLibrarySelectionAccountIDs)) }
+                    Task { await discovery.load(from: appState.accountsProviders.resolvedAccounts(withIDs: appState.pendingLibrarySelectionAccountIDs)) }
                 } label: {
                     Label("Try Again", systemImage: "arrow.clockwise")
                 }

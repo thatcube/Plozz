@@ -56,16 +56,16 @@ enum HeroForegroundGlass {
     /// The hairline border stroke for the flat capsule. A faint light edge in dark
     /// mode (and a faint dark edge in light mode) to define the pill against art —
     /// deliberately subtle. Alpha is tunable via `PLZHERO_UIKIT_BORDER` (0–1) for live
-    /// eyeballing; defaults to 0.13 and `0` removes the border entirely.
+    /// eyeballing; defaults to 0.10 and `0` removes the border entirely.
     static let borderAlpha: CGFloat = {
         if let raw = ProcessInfo.processInfo.environment["PLZHERO_UIKIT_BORDER"],
            let a = Double(raw), a >= 0 {
             return CGFloat(min(1, a))
         }
-        return 0.13
+        return 0.10
     }()
 
-    static var borderWidth: CGFloat { borderAlpha <= 0 ? 0 : 1 }
+    static var borderWidth: CGFloat { borderAlpha <= 0 ? 0 : 2 }
 
     static func flatBorder() -> UIColor {
         UIColor { traits in

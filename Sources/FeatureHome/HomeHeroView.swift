@@ -711,15 +711,6 @@ struct HomeHeroView: View {
                 }
                 .id("logo-\(item.id)")
 
-                if let seasonEpisode = HeroForegroundModelBuilder.seasonEpisodeText(for: item) {
-                    Text(seasonEpisode)
-                        .font(.system(size: 26, weight: .medium))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .contentTransition(.opacity)
-                        .modifier(HeroTextLegibilityShadow(colorScheme: colorScheme))
-                }
-
                 metadataLine(for: item)
                     .modifier(HeroTextLegibilityShadow(colorScheme: colorScheme))
 

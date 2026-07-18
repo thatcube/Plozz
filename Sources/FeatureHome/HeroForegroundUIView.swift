@@ -16,7 +16,6 @@ final class HeroForegroundUIView: UIView {
     // MARK: Subviews
     private let logoImageView = UIImageView()
     private let titleLabel = UILabel()
-    private let seasonEpisodeLabel = UILabel()
     private let ratingLabel = PaddedLabel()
     private let metadataLabel = UILabel()
     private let overviewLabel = UILabel()
@@ -131,12 +130,6 @@ final class HeroForegroundUIView: UIView {
         titleLabel.font = .systemFont(ofSize: 64, weight: .bold)
         titleLabel.numberOfLines = 2
 
-        // Episode "S{n} · E{m}" subtitle, matching DetailHeroView (26pt medium,
-        // secondary). Hidden for movies/series.
-        seasonEpisodeLabel.font = .systemFont(ofSize: 26, weight: .medium)
-        seasonEpisodeLabel.numberOfLines = 1
-        seasonEpisodeLabel.isHidden = true
-
         ratingLabel.font = UIFont(name: "Bungee-Regular", size: 18)
             ?? .systemFont(ofSize: 18, weight: .semibold)
         ratingLabel.layer.borderWidth = 3
@@ -155,14 +148,14 @@ final class HeroForegroundUIView: UIView {
         // A low-opacity, wide-radius glyph shadow keeps copy readable over bright
         // artwork without looking outlined. It is static layer chrome (no backdrop
         // sampling), so it preserves the flat foreground's transition advantage.
-        for label in [titleLabel, seasonEpisodeLabel, ratingLabel, metadataLabel, overviewLabel] {
+        for label in [titleLabel, ratingLabel, metadataLabel, overviewLabel] {
             label.layer.shadowOpacity = 0.32
             label.layer.shadowRadius = 7
             label.layer.shadowOffset = CGSize(width: 0, height: 2)
         }
         applyThemeColors()
 
-        for v in [logoImageView, titleLabel, seasonEpisodeLabel, ratingLabel, metadataLabel, overviewLabel, pillsContainer, dotsContainer] {
+        for v in [logoImageView, titleLabel, ratingLabel, metadataLabel, overviewLabel, pillsContainer, dotsContainer] {
             addSubview(v)
         }
         dotsContainer.clipsToBounds = true
@@ -196,7 +189,6 @@ final class HeroForegroundUIView: UIView {
         let primary = HeroForegroundGlass.primaryInk()
         let secondary = HeroForegroundGlass.secondaryInk()
         titleLabel.textColor = primary
-        seasonEpisodeLabel.textColor = secondary
         ratingLabel.textColor = primary
         metadataLabel.textColor = secondary
         overviewLabel.textColor = secondary
@@ -204,7 +196,7 @@ final class HeroForegroundUIView: UIView {
         let resolvedPrimary = primary.resolvedColor(with: traitCollection)
         ratingLabel.layer.borderColor = resolvedPrimary.withAlphaComponent(0.65).cgColor
         let shadow = traitCollection.userInterfaceStyle == .light ? UIColor.white : UIColor.black
-        for label in [titleLabel, seasonEpisodeLabel, ratingLabel, metadataLabel, overviewLabel] {
+        for label in [titleLabel, ratingLabel, metadataLabel, overviewLabel] {
             label.layer.shadowColor = shadow.cgColor
         }
     }
@@ -238,9 +230,6 @@ final class HeroForegroundUIView: UIView {
 
         metadataLabel.text = model.metadataText
         metadataLabel.isHidden = (model.metadataText ?? "").isEmpty
-
-        seasonEpisodeLabel.text = model.seasonEpisodeText
-        seasonEpisodeLabel.isHidden = (model.seasonEpisodeText ?? "").isEmpty
 
         overviewLabel.text = model.overview
         overviewLabel.isHidden = (model.overview ?? "").isEmpty
@@ -453,7 +442,7 @@ final class HeroForegroundUIView: UIView {
     /// The set of views that fade with the show description on a page (the SwiftUI
     /// hero fades logo/metadata/overview + pills together; dots stay visible).
     private var fadeViews: [UIView] {
-        [logoImageView, titleLabel, seasonEpisodeLabel, ratingLabel, metadataLabel, overviewLabel, pillsContainer]
+        [logoImageView, titleLabel, ratingLabel, metadataLabel, overviewLabel, pillsContainer]
     }
 
     private func applyFade(metadataVisible: Bool, slideChanged: Bool) {
@@ -524,14 +513,6 @@ final class HeroForegroundUIView: UIView {
             if !metadataLabel.isHidden {
                 metadataLabel.frame = CGRect(x: x, y: y - h, width: maxWidth - (x - leading), height: h)
             }
-            y -= h + columnSpacing
-        }
-
-        // Season/episode subtitle (episodes only), directly beneath the logo and
-        // above the metadata line — matching the detail hero.
-        if !seasonEpisodeLabel.isHidden {
-            let h = ceil(seasonEpisodeLabel.font.lineHeight)
-            seasonEpisodeLabel.frame = CGRect(x: leading, y: y - h, width: maxWidth, height: h)
             y -= h + columnSpacing
         }
 

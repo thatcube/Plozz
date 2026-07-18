@@ -28,10 +28,6 @@ struct HeroForegroundModel: Equatable {
     /// cached image (the CoreUI background-removal logo pipeline is internal), so a
     /// slide with a logo shows the image, otherwise the title text.
     let logoURL: URL?
-    /// For an **episode** slide, the "S{season} · E{episode}" line shown directly
-    /// under the logo (mirroring the detail hero's subtitle); `nil` for movies and
-    /// series, whose season/episode numbers don't apply.
-    let seasonEpisodeText: String?
     /// The dotted metadata line (year · runtime · genres), pre-joined with the
     /// hero's `  ·  ` separator, or `nil` when the slide has none.
     let metadataText: String?
@@ -132,17 +128,6 @@ enum HeroForegroundModelBuilder {
     /// when the full detail record may carry a certification.
     static func ratingBadgeText(for item: MediaItem) -> String? {
         item.ratingBadge?.label
-    }
-
-    /// The "S{season} · E{episode}" subtitle for an **episode** slide, or `nil`.
-    /// Mirrors `MediaItem.subtitle`'s episode branch but is deliberately scoped to
-    /// episodes so a movie/series slide never surfaces a parent-title/year subtitle
-    /// in the hero — matching the detail hero, which shows this line for episodes.
-    static func seasonEpisodeText(for item: MediaItem) -> String? {
-        guard item.kind == .episode,
-              let season = item.seasonNumber,
-              let episode = item.episodeNumber else { return nil }
-        return "S\(season) · E\(episode)"
     }
 
     /// The compact `S{season}, E{episode}` label used **inside Play/Resume buttons**
@@ -263,7 +248,6 @@ enum HeroForegroundModelBuilder {
             itemID: item.id,
             title: titleText(for: item, maskedTitle: maskedTitle),
             logoURL: item.logoURL,
-            seasonEpisodeText: seasonEpisodeText(for: item),
             metadataText: metadataText(for: item),
             ratingBadgeText: ratingBadgeText(for: item),
             overview: overviewVisible ? item.overview : nil,

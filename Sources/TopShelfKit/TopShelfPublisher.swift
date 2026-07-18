@@ -55,15 +55,25 @@ public enum TopShelfPublisher {
 
         for item in media {
             let posterURL = Self.posterArtworkURL(for: item)
-            var imageURL = posterURL
+            let progress = compositeProgress ? item.playedPercentage : nil
+            var imageURL: URL?
 
-            if compositeProgress,
-               let progress = item.playedPercentage,
-               let poster = posterURL,
-               let composited = await TopShelfPosterComposer.compositedPosterURL(
-                   id: item.id, posterURL: poster, progress: progress
-               ) {
-                imageURL = composited
+            if let poster = posterURL {
+                if let progress,
+                   let composited = await TopShelfPosterComposer.compositedPosterURL(
+                       id: item.id, posterURL: poster, progress: progress
+                   ) {
+                    imageURL = composited
+                } else {
+                    imageURL = poster
+                }
+            } else {
+                // No vertical artwork anywhere: render a neutral title-card
+                // placeholder (with the resume bar burned in when mid-playback)
+                // instead of leaving a blank card or a zoomed backdrop.
+                imageURL = TopShelfPosterComposer.placeholderPosterURL(
+                    id: item.id, title: item.title, progress: progress
+                )
             }
 
             result.append(

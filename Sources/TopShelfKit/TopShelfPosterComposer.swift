@@ -87,6 +87,48 @@ public enum TopShelfPosterComposer {
         #endif
     }
 
+    /// Builds (or reuses a cached) neutral placeholder poster for an item that has
+    /// no vertical artwork at all, returning a local file URL in the shared App
+    /// Group container (or `nil` when UIKit is unavailable / the write fails). The
+    /// resume bar is burned in when `progress` is in the `(0.01, 0.99)` band;
+    /// otherwise a plain title-card placeholder is produced.
+    public static func placeholderPosterURL(
+        id: String,
+        title: String,
+        progress: Double?
+    ) -> URL? {
+        #if canImport(UIKit)
+        guard let directory = TopShelfStore.artworkDirectoryURL else { return nil }
+
+        let barProgress: CGFloat? = progress.flatMap {
+            ($0 > 0.01 && $0 < 0.99) ? CGFloat($0) : nil
+        }
+        let bucketPart = barProgress.map { String(Int(($0 * 100).rounded())) } ?? "none"
+        // Key on the title too so a renamed item regenerates its placeholder.
+        let titleKey = String(fnv1a("ph|" + title), radix: 16)
+        let fileName = "\(sanitize(id))_ph_\(bucketPart)_\(titleKey).png"
+        let destination = directory.appendingPathComponent(fileName)
+
+        if FileManager.default.fileExists(atPath: destination.path) {
+            return destination
+        }
+
+        guard let data = renderPlaceholder(title: title, progress: barProgress) else { return nil }
+
+        do {
+            try FileManager.default.createDirectory(
+                at: directory, withIntermediateDirectories: true
+            )
+            try data.write(to: destination, options: .atomic)
+            return destination
+        } catch {
+            return nil
+        }
+        #else
+        return nil
+        #endif
+    }
+
     #if canImport(UIKit)
     private static func loadImage(from url: URL) async -> UIImage? {
         do {
@@ -104,6 +146,80 @@ public enum TopShelfPosterComposer {
         let size = base.size
         guard size.width > 0, size.height > 0 else { return nil }
 
+        let format = UIGraphicsImageRendererFormat.preferred()
+        format.scale = 1
+        format.opaque = true
+        let renderer = UIGraphicsImageRenderer(size: size, format: format)
+
+        return renderer.pngData { context in
+            base.draw(in: CGRect(origin: .zero, size: size))
+            drawProgressBar(in: context.cgContext, size: size, progress: progress)
+        }
+    }
+
+    /// Renders a neutral 2:3 placeholder poster for an item with no vertical
+    /// artwork, mirroring the in-app `PosterCardView.neutralPlaceholder`: a faint
+    /// fill, a centred `play.rectangle` glyph and the title. The resume bar is
+    /// burned in when `progress` is in the `(0.01, 0.99)` band.
+    private static func renderPlaceholder(title: String, progress: CGFloat?) -> Data? {
+        let size = CGSize(width: 400, height: 600)
+        let width = size.width
+        let height = size.height
+
+        let format = UIGraphicsImageRendererFormat.preferred()
+        format.scale = 1
+        format.opaque = true
+        let renderer = UIGraphicsImageRenderer(size: size, format: format)
+
+        return renderer.pngData { context in
+            let cg = context.cgContext
+
+            // Neutral dark card fill (the shelf sits on a dark background, so the
+            // card needs an opaque body rather than the in-app translucent tint).
+            UIColor(white: 0.14, alpha: 1).setFill()
+            cg.fill(CGRect(origin: .zero, size: size))
+
+            // Centred play glyph, mirroring the in-app placeholder symbol.
+            let glyphColor = UIColor(white: 1, alpha: 0.55)
+            let symbolConfig = UIImage.SymbolConfiguration(pointSize: width * 0.16, weight: .regular)
+            if let symbol = UIImage(systemName: "play.rectangle", withConfiguration: symbolConfig)?
+                .withTintColor(glyphColor, renderingMode: .alwaysOriginal) {
+                let glyphSize = symbol.size
+                symbol.draw(in: CGRect(
+                    x: (width - glyphSize.width) / 2,
+                    y: height * 0.34 - glyphSize.height / 2,
+                    width: glyphSize.width,
+                    height: glyphSize.height
+                ))
+            }
+
+            // Title, centred under the glyph, wrapping to at most two lines.
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.alignment = .center
+            paragraph.lineBreakMode = .byTruncatingTail
+            let attributes: [NSAttributedString.Key: Any] = [
+                .font: UIFont.systemFont(ofSize: width * 0.075, weight: .semibold),
+                .foregroundColor: UIColor(white: 1, alpha: 0.9),
+                .paragraphStyle: paragraph,
+            ]
+            let textRect = CGRect(x: width * 0.1, y: height * 0.44, width: width * 0.8, height: height * 0.26)
+            (title as NSString).draw(
+                with: textRect,
+                options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine],
+                attributes: attributes,
+                context: nil
+            )
+
+            if let progress {
+                drawProgressBar(in: cg, size: size, progress: progress)
+            }
+        }
+    }
+
+    /// Draws the resume bar (scrim → track → fill) into `cg` for a card of `size`.
+    /// Shared by the real-poster and placeholder renderers so the bar is identical
+    /// everywhere and matches the in-app `PosterCardView.progressBar`.
+    private static func drawProgressBar(in cg: CGContext, size: CGSize, progress: CGFloat) {
         let width = size.width
         let height = size.height
         let barHeight = width * Bar.heightFraction
@@ -114,58 +230,44 @@ public enum TopShelfPosterComposer {
         let barTop = height - inset - barHeight
         let fillWidth = min(trackWidth, max(barHeight, trackWidth * progress))
 
-        let format = UIGraphicsImageRendererFormat.default()
-        format.scale = 1
-        format.opaque = true
-        let renderer = UIGraphicsImageRenderer(size: size, format: format)
-
-        return renderer.pngData { context in
-            let cg = context.cgContext
-            base.draw(in: CGRect(origin: .zero, size: size))
-
-            // Scrim: clear (top) → black 0.6 (bottom), full width, pinned to the
-            // bottom edge so the bar pops off bright artwork (matches in-app).
-            let scrimRect = CGRect(x: 0, y: height - scrimHeight, width: width, height: scrimHeight)
-            cg.saveGState()
-            cg.clip(to: scrimRect)
-            let space = CGColorSpaceCreateDeviceRGB()
-            let scrimColors = [
-                UIColor.black.withAlphaComponent(0).cgColor,
-                UIColor.black.withAlphaComponent(0.6).cgColor,
-            ] as CFArray
-            if let gradient = CGGradient(
-                colorsSpace: space, colors: scrimColors, locations: [0, 1]
-            ) {
-                cg.drawLinearGradient(
-                    gradient,
-                    start: CGPoint(x: 0, y: scrimRect.minY),
-                    end: CGPoint(x: 0, y: scrimRect.maxY),
-                    options: []
-                )
-            }
-            cg.restoreGState()
-
-            let radius = barHeight / 2
-
-            // Track: translucent white capsule.
-            let trackRect = CGRect(x: inset, y: barTop, width: trackWidth, height: barHeight)
-            UIColor.white.withAlphaComponent(0.22).setFill()
-            UIBezierPath(roundedRect: trackRect, cornerRadius: radius).fill()
-
-            // Fill: brand-blue capsule with a soft drop shadow.
-            let fillRect = CGRect(x: inset, y: barTop, width: fillWidth, height: barHeight)
-            cg.saveGState()
-            cg.setShadow(
-                offset: .zero,
-                blur: shadowBlur,
-                color: UIColor.black.withAlphaComponent(0.35).cgColor
+        // Scrim: clear (top) → black 0.6 (bottom), full width, pinned to the
+        // bottom edge so the bar pops off bright artwork (matches in-app).
+        let scrimRect = CGRect(x: 0, y: height - scrimHeight, width: width, height: scrimHeight)
+        cg.saveGState()
+        cg.clip(to: scrimRect)
+        let space = CGColorSpaceCreateDeviceRGB()
+        let scrimColors = [
+            UIColor.black.withAlphaComponent(0).cgColor,
+            UIColor.black.withAlphaComponent(0.6).cgColor,
+        ] as CFArray
+        if let gradient = CGGradient(colorsSpace: space, colors: scrimColors, locations: [0, 1]) {
+            cg.drawLinearGradient(
+                gradient,
+                start: CGPoint(x: 0, y: scrimRect.minY),
+                end: CGPoint(x: 0, y: scrimRect.maxY),
+                options: []
             )
-            UIColor(
-                red: Bar.fillRed, green: Bar.fillGreen, blue: Bar.fillBlue, alpha: 1
-            ).setFill()
-            UIBezierPath(roundedRect: fillRect, cornerRadius: radius).fill()
-            cg.restoreGState()
         }
+        cg.restoreGState()
+
+        let radius = barHeight / 2
+
+        // Track: translucent white capsule.
+        let trackRect = CGRect(x: inset, y: barTop, width: trackWidth, height: barHeight)
+        UIColor.white.withAlphaComponent(0.22).setFill()
+        UIBezierPath(roundedRect: trackRect, cornerRadius: radius).fill()
+
+        // Fill: brand-blue capsule with a soft drop shadow.
+        let fillRect = CGRect(x: inset, y: barTop, width: fillWidth, height: barHeight)
+        cg.saveGState()
+        cg.setShadow(
+            offset: .zero,
+            blur: shadowBlur,
+            color: UIColor.black.withAlphaComponent(0.35).cgColor
+        )
+        UIColor(red: Bar.fillRed, green: Bar.fillGreen, blue: Bar.fillBlue, alpha: 1).setFill()
+        UIBezierPath(roundedRect: fillRect, cornerRadius: radius).fill()
+        cg.restoreGState()
     }
     #endif
 

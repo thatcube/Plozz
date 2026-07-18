@@ -202,6 +202,58 @@ struct HomeHeroView: View {
 
     @Environment(\.colorScheme) private var colorScheme
 
+    #if DEBUG
+    /// Debug-only live override for the hero foreground renderer, so the two
+    /// implementations can be A/B-compared on the SAME slide without a rebuild or an
+    /// app restart. `0` = follow the launch default (``HeroForegroundConfig``), `1` =
+    /// force the imperative UIKit foreground, `2` = force the SwiftUI foreground.
+    /// Toggled with the remote's Play/Pause button while the hero is focused.
+    @AppStorage("PLZDebugHeroForegroundMode") private var heroForegroundModeRaw = 0
+    /// Shows a brief corner badge naming the active renderer after a flip (the two
+    /// render near-identically, so the badge is the only way to tell them apart).
+    @State private var heroModeBadgeShown = false
+    @State private var heroModeBadgeToken = 0
+    #endif
+
+    /// The renderer actually used this session: the launch default unless a DEBUG
+    /// live override is active.
+    private var usesUIKitForeground: Bool {
+        #if DEBUG
+        switch heroForegroundModeRaw {
+        case 1: return true
+        case 2: return false
+        default: return HeroForegroundConfig.useUIKitForeground
+        }
+        #else
+        return HeroForegroundConfig.useUIKitForeground
+        #endif
+    }
+
+    #if DEBUG
+    /// Flips the live foreground override between UIKit and SwiftUI (relative to
+    /// whatever is currently effective) and flashes the mode badge. Debug builds only.
+    private func toggleHeroForegroundMode() {
+        heroForegroundModeRaw = usesUIKitForeground ? 2 : 1
+        withAnimation(.easeInOut(duration: 0.2)) { heroModeBadgeShown = true }
+        heroModeBadgeToken &+= 1
+    }
+
+    @ViewBuilder
+    private var heroModeBadge: some View {
+        if heroModeBadgeShown {
+            Text("Hero: \(usesUIKitForeground ? "UIKit" : "SwiftUI")")
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 9)
+                .background(.black.opacity(0.55), in: Capsule())
+                .padding(24)
+                .transition(.opacity)
+                .allowsHitTesting(false)
+        }
+    }
+    #endif
+
     private var current: MediaItem? {
         guard items.indices.contains(index) else { return items.first }
         return items[index]
@@ -375,6 +427,15 @@ struct HomeHeroView: View {
             heroBackdrop(height: height)
         }
         .opacity(heroVisible ? 1 : 0)
+        #if DEBUG
+        .overlay(alignment: .topTrailing) { heroModeBadge }
+        .onPlayPauseCommand { toggleHeroForegroundMode() }
+        .task(id: heroModeBadgeToken) {
+            guard heroModeBadgeShown else { return }
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            withAnimation(.easeInOut(duration: 0.3)) { heroModeBadgeShown = false }
+        }
+        #endif
         .onAppear {
             // Start the first dwell from appearance so the initial slide's gauge
             // and auto-advance are anchored to now, not to view construction.
@@ -598,7 +659,7 @@ struct HomeHeroView: View {
 
     @ViewBuilder
     private func content(for item: MediaItem) -> some View {
-        if HeroForegroundConfig.useUIKitForeground {
+        if usesUIKitForeground {
             uikitContent(for: item)
         } else {
             swiftUIContent(for: item)

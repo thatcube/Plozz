@@ -2,6 +2,7 @@ name: Plozz
 options:
   bundleIdPrefix: com.thatcube
   deploymentTarget:
+    iOS: "18.0"
     tvOS: "18.0"
   createIntermediateGroups: true
 
@@ -243,6 +244,45 @@ targets:
         # instantiates ContentProvider.
         LD_ENTRY_POINT: _NSExtensionMain
 
+  PlozziOS:
+    type: application
+    platform: iOS
+    deploymentTarget: "18.0"
+    sources:
+      - path: App/PlozziOS
+    info:
+      path: App/PlozziOS/Info.plist
+      properties:
+        CFBundleDisplayName: Plozz
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        ITSAppUsesNonExemptEncryption: false
+        UILaunchScreen: {}
+        UIRequiresFullScreen: false
+        NSLocalNetworkUsageDescription: "Plozz uses your local network to discover media servers and network shares."
+        NSBonjourServices:
+          - _jellyfin._tcp
+          - _smb._tcp
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+          NSAllowsLocalNetworking: true
+        CFBundleURLTypes:
+          - CFBundleURLName: com.thatcube.Plozz.deeplink
+            CFBundleURLSchemes:
+              - plozz
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.thatcube.Plozz
+        PRODUCT_NAME: Plozz
+        TARGETED_DEVICE_FAMILY: "1,2"
+        CODE_SIGN_ENTITLEMENTS: App/PlozziOS/PlozziOS.entitlements
+        GENERATE_INFOPLIST_FILE: NO
+        SUPPORTS_MACCATALYST: NO
+        SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: YES
+    dependencies:
+      - package: Plozz
+        product: AppShelliOS
+
 schemes:
   Plozz:
     build:
@@ -268,3 +308,9 @@ schemes:
       # wraps `xcodebuild test ... -destination 'platform=tvOS Simulator,...'`
       # for the full set. `swift test` is unusable on macOS because
       # AetherEngine's FFmpeg xcframeworks are tvOS-only.
+  PlozziOS:
+    build:
+      targets:
+        PlozziOS: all
+    run:
+      config: Debug

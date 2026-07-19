@@ -961,22 +961,23 @@ private struct PlozziOSAppearanceSettingsView: View {
                         Label(theme.displayName, systemImage: theme.symbolName)
                             .tag(theme)
                     }
-                    Picker(
-                        "Liquid Glass",
-                        selection: $transparency.preference
-                    ) {
-                        ForEach(TransparencyPreference.allCases) { preference in
-                            Text(
-                                preference == .system
-                                    ? "System"
-                                    : preference.displayName
-                            )
-                            .tag(preference)
-                        }
+                }
+                .settingsListRowSurface()
+                Picker(
+                    "Liquid Glass",
+                    selection: $transparency.preference
+                ) {
+                    ForEach(TransparencyPreference.allCases) { preference in
+                        Text(
+                            preference == .system
+                                ? "System"
+                                : preference.displayName
+                        )
+                        .tag(preference)
                     }
                 }
+                .settingsListRowSurface()
             }
-            .settingsListRowSurface()
 
             Section("Library cards") {
                 Picker("Card style", selection: $cardStyle.style) {
@@ -991,11 +992,13 @@ private struct PlozziOSAppearanceSettingsView: View {
                             .tag(density)
                     }
                 }
+                .settingsListRowSurface()
                 Picker("Watch indicator", selection: $watchIndicator.indicator) {
                     ForEach(WatchStatusIndicator.allCases) { indicator in
                         Text(indicator.displayName).tag(indicator)
                     }
                 }
+                .settingsListRowSurface()
             }
         }
         .frame(maxWidth: 760)
@@ -1006,9 +1009,12 @@ private struct PlozziOSAppearanceSettingsView: View {
 }
 
 private struct PlozziOSSettingsSurface: ViewModifier {
+    @Environment(\.themePalette) private var palette
+
     func body(content: Content) -> some View {
         content
             .scrollContentBackground(.hidden)
+            .background { AppBackground(palette: palette) }
     }
 }
 

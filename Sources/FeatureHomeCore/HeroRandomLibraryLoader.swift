@@ -1,38 +1,23 @@
-#if canImport(SwiftUI)
-import SwiftUI
 import CoreModels
-import CoreUI
-import FeatureHome
-import FeatureMusic
-import FeaturePlayback
-import MediaTransportCore
-import MetadataKit
-import FeatureSearch
-import FeatureSettings
-import FeatureProfiles
-import ProviderTrailers
-import RatingsService
-import TraktService
-import SeerService
-import SimklService
-import AniListService
-import MALService
-import LastFmService
+import Foundation
 
-/// Bounded, order-independent Random source fan-out. A typical Movies + TV setup
-/// now issues both native random queries concurrently instead of serially, while a
-/// large multi-server library set cannot flood the interactive networking pool.
-enum HeroRandomLibraryLoader {
+/// Bounded, order-independent Random source fan-out shared by every Home UI.
+public enum HeroRandomLibraryLoader {
     private static let maxConcurrentFetches = 4
 
-    static func requestLimit(totalLimit: Int, libraryCount: Int) -> Int {
+    public static func requestLimit(
+        totalLimit: Int,
+        libraryCount: Int
+    ) -> Int {
         guard totalLimit > 0, libraryCount > 0 else { return 0 }
         let desiredPool = max(12, Int((Double(totalLimit) * 1.5).rounded(.up)))
-        let distributed = Int((Double(desiredPool) / Double(libraryCount)).rounded(.up))
+        let distributed = Int(
+            (Double(desiredPool) / Double(libraryCount)).rounded(.up)
+        )
         return min(max(totalLimit, 12), max(2, distributed))
     }
 
-    static func load(
+    public static func load(
         libraries: [HeroRandomLibrary],
         limit: Int,
         fetch: @escaping @Sendable (HeroRandomLibrary, Int) async -> [MediaItem]
@@ -40,7 +25,9 @@ enum HeroRandomLibraryLoader {
         guard limit > 0 else { return [] }
         var seen = Set<HeroRandomLibrary>()
         let eligible = libraries.filter { library in
-            guard library.kind == .movie || library.kind == .series else { return false }
+            guard library.kind == .movie || library.kind == .series else {
+                return false
+            }
             return seen.insert(library).inserted
         }
         guard !eligible.isEmpty else { return [] }
@@ -64,7 +51,10 @@ enum HeroRandomLibraryLoader {
                 }
             }
 
-            var byIndex = Array<[MediaItem]?>(repeating: nil, count: eligible.count)
+            var byIndex = Array<[MediaItem]?>(
+                repeating: nil,
+                count: eligible.count
+            )
             while let (index, items) = await group.next() {
                 byIndex[index] = items
                 if nextIndex < eligible.count, !Task.isCancelled {
@@ -82,4 +72,3 @@ enum HeroRandomLibraryLoader {
         return Array(chunks.flatMap { $0 }.shuffled().prefix(limit))
     }
 }
-#endif

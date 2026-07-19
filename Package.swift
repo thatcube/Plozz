@@ -527,6 +527,7 @@ let package = Package(
                 "EnginePlozzigen",
                 "FeatureDiscovery",
                 "FeatureAuth",
+                "FeatureHomeCore",
                 "MediaTransportCore",
                 "MediaTransportHTTP",
                 "MediaTransportSMB",
@@ -605,7 +606,7 @@ let package = Package(
         ),
         .testTarget(
             name: "AppShellTests",
-            dependencies: ["AppRuntime", "AppShell", "CoreModels", "MediaTransportSFTP", "MediaTransportFTP", "MediaTransportNFS", "MediaTransportWebDAV"]
+            dependencies: ["AppRuntime", "AppShell", "CoreModels", "FeatureHomeCore", "MediaTransportSFTP", "MediaTransportFTP", "MediaTransportNFS", "MediaTransportWebDAV"]
         ),
         .testTarget(
             name: "CoreUITests",

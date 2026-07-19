@@ -3,6 +3,7 @@ import SwiftUI
 import CoreModels
 import CoreUI
 import FeatureHome
+import FeatureHomeCore
 import FeatureMusic
 import FeaturePlayback
 import MediaTransportCore

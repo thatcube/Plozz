@@ -646,6 +646,7 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
             let fallback = MediaSourceRef(
                 accountID: backingAccountID,
                 itemID: backingID,
+                kind: item.kind,
                 versions: [version]
             )
             return item.selectingSource(fallback, versionID: nil, explicit: explicit)

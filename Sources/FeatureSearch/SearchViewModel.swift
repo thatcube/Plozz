@@ -251,7 +251,7 @@ public final class SearchViewModel {
         var sources = item.sources
         if let sourceAccountID = item.sourceAccountID,
            !sources.contains(where: { $0.accountID == sourceAccountID && $0.itemID == item.id }) {
-            sources.append(MediaSourceRef(accountID: sourceAccountID, itemID: item.id))
+            sources.append(MediaSourceRef(accountID: sourceAccountID, itemID: item.id, kind: item.kind))
         }
         var seen = Set<String>()
         sources = sources.filter { seen.insert($0.id).inserted }

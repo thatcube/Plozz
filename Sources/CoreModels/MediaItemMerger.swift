@@ -159,7 +159,11 @@ public enum MediaItemMerger {
             let item = items[index]
             let scope = item.sourceAccountID.flatMap { serverInfo($0)?.serverID } ?? item.sourceAccountID
             guard let scope else { continue }
-            let key = "\(scope)\u{1F}\(item.id)"
+            // Include the media kind in the key: two items sharing a (server, id)
+            // but of different kinds are never the same work (defensive — a real
+            // Plex/Jellyfin server ids uniquely per kind, but a stale/cached row
+            // must not bridge kinds here).
+            let key = "\(scope)\u{1F}\(item.kind.rawValue)\u{1F}\(item.id)"
             if let existing = seenServerItem[key] {
                 union(existing, index)
             } else {
@@ -189,6 +193,11 @@ public enum MediaItemMerger {
             for index in items.indices {
                 for ref in identitySources(items[index]) {
                     guard let owner = ownerByRef["\(ref.accountID):\(ref.itemID)"], owner != index else { continue }
+                    // Only union same-kind rows. `identitySources` is kind-scoped and
+                    // an (account,item) pair is kind-unique, so this should already
+                    // hold — but enforce it so a stale/wrong index ref can never
+                    // bridge, say, an episode to a movie that reused its id.
+                    guard items[owner].kind == items[index].kind else { continue }
                     union(index, owner)
                 }
             }
@@ -284,7 +293,23 @@ public enum MediaItemMerger {
         // resolved from the primary's identities. Folded in below so even a
         // single-source card carries its full cross-server set.
         let indexSources = identitySources(primary)
-        guard duplicates.count > 1 || !indexSources.isEmpty else { return primary }
+        // Every co-merged member's own physical identity. Used as the allow-list for
+        // legacy untyped refs when enforcing the cross-kind boundary: an item's own
+        // source is always kept, but an untyped *peer* (a stale cross-kind twin a
+        // pre-`kind` cache may have frozen in) is dropped.
+        let memberSelfIDs = Set(duplicates.compactMap { member in
+            member.sourceAccountID.map { "\($0):\(member.id)" }
+        })
+        guard duplicates.count > 1 || !indexSources.isEmpty else {
+            // Single-source card: still sanitize its own `.sources` so a stale
+            // cross-kind ref frozen in an on-disk cache (e.g. an episode carrying a
+            // movie ref) can't survive to retarget playback / the picker.
+            let cleaned = MediaSourceRef.retainingKindCompatible(
+                primary.sources, itemKind: primary.kind, selfIDs: memberSelfIDs
+            )
+            if cleaned.count != primary.sources.count { primary.sources = cleaned }
+            return primary
+        }
 
         // Union external ids so the merged card carries every catalogue id.
         var providerIDs = primary.providerIDs
@@ -305,17 +330,21 @@ public enum MediaItemMerger {
             sources.append(ref)
         }
         for duplicate in duplicates {
-            if duplicate.sources.isEmpty {
-                if let ref = selfSource(for: duplicate, serverInfo: serverInfo) {
-                    appendSource(ref)
-                }
-            } else {
-                duplicate.sources.forEach(appendSource)
-            }
+            // Sanitize each member's *own carried* sources against the merged kind
+            // before folding them in: a member rehydrated from a stale on-disk cache
+            // can carry a cross-kind twin (the episode↔movie bug), and its own
+            // untyped peers can't be trusted. A member's self-ref is always kept.
+            let contributed: [MediaSourceRef] = duplicate.sources.isEmpty
+                ? [selfSource(for: duplicate, serverInfo: serverInfo)].compactMap { $0 }
+                : MediaSourceRef.retainingKindCompatible(
+                    duplicate.sources, itemKind: primary.kind, selfIDs: memberSelfIDs
+                  )
+            contributed.forEach(appendSource)
         }
         // Append index-only servers LAST so the loaded rows' live watch-state
         // always wins the unified fold (index refs carry no watch-state); they
-        // only add membership that no loaded row surfaced.
+        // only add membership that no loaded row surfaced. These come straight from
+        // the kind-scoped identity index, so they're trusted as-is (no sanitation).
         for ref in indexSources { appendSource(ref) }
         primary.sources = sources
 
@@ -379,6 +408,7 @@ public enum MediaItemMerger {
             accountID: accountID,
             itemID: item.id,
             libraryID: item.libraryID,
+            kind: item.kind,
             providerKind: info?.providerKind,
             serverName: info?.serverName,
             accountName: info?.accountName,

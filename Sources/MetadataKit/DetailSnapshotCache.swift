@@ -70,7 +70,11 @@ public final class DetailSnapshotCache: Sendable {
     /// the wrong sources or watch state). A nil scope maps to a single shared
     /// `default` subdirectory, preserving the unscoped behaviour for callers (tests,
     /// previews) that don't provide an identity.
-    private static let schemaDirName = "plozz-detail-cache-v3"
+    ///
+    /// v4: `MediaSourceRef` gained a `kind` field and sources are now cross-kind
+    /// sanitized — bumping evicts snapshots that froze a stale episode↔movie twin
+    /// in `sources` from a pre-fix build.
+    private static let schemaDirName = "plozz-detail-cache-v4"
     private static let schemaDirPrefix = "plozz-detail-cache"
     private static let defaultScopeComponent = "default"
 

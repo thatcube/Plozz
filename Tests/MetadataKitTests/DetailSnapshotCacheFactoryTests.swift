@@ -67,10 +67,10 @@ final class DetailSnapshotCacheFactoryTests: XCTestCase {
         await cache.awaitPendingPrune()
 
         let scoped = base
-            .appendingPathComponent("plozz-detail-cache-v3")
+            .appendingPathComponent("plozz-detail-cache-v4")
             .appendingPathComponent(scope.directoryComponent)
         let unscopedDefault = base
-            .appendingPathComponent("plozz-detail-cache-v3")
+            .appendingPathComponent("plozz-detail-cache-v4")
             .appendingPathComponent("default")
         XCTAssertTrue(FileManager.default.fileExists(atPath: scoped.path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: unscopedDefault.path))

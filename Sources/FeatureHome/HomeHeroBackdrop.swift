@@ -65,6 +65,10 @@ struct HomeHeroBackdrop: View {
     /// underneath, so opacity can crossfade without a blank frame.
     var trailerController: HeroTrailerController? = nil
     var showsTrailer: Bool = false
+    /// Home relinquishes its scrim during a navigation push while preserving the
+    /// shared video underneath. The incoming detail hero supplies the one visible
+    /// scrim, preventing the two dark overlays from stacking during handoff.
+    var scrimOpacity: Double = 1
 
     init(
         references: [ArtworkReference],
@@ -77,7 +81,8 @@ struct HomeHeroBackdrop: View {
         recedeLift: CGFloat = 0,
         receded: Bool = false,
         trailerController: HeroTrailerController? = nil,
-        showsTrailer: Bool = false
+        showsTrailer: Bool = false,
+        scrimOpacity: Double = 1
     ) {
         self.references = references
         self.asyncFallbackURL = asyncFallbackURL
@@ -90,6 +95,7 @@ struct HomeHeroBackdrop: View {
         self.receded = receded
         self.trailerController = trailerController
         self.showsTrailer = showsTrailer
+        self.scrimOpacity = scrimOpacity
     }
 
     init(
@@ -103,7 +109,8 @@ struct HomeHeroBackdrop: View {
         recedeLift: CGFloat = 0,
         receded: Bool = false,
         trailerController: HeroTrailerController? = nil,
-        showsTrailer: Bool = false
+        showsTrailer: Bool = false,
+        scrimOpacity: Double = 1
     ) {
         self.init(
             references: urls.map(ArtworkReference.remote),
@@ -116,7 +123,8 @@ struct HomeHeroBackdrop: View {
             recedeLift: recedeLift,
             receded: receded,
             trailerController: trailerController,
-            showsTrailer: showsTrailer
+            showsTrailer: showsTrailer,
+            scrimOpacity: scrimOpacity
         )
     }
 
@@ -142,7 +150,8 @@ struct HomeHeroBackdrop: View {
                 }
             }
             .animation(.easeInOut(duration: 0.45), value: showsTrailer)
-            .overlay(scrim)
+            .overlay(scrim.opacity(scrimOpacity))
+            .animation(.easeOut(duration: 0.18), value: scrimOpacity)
             .mask(dissolveMask)
             .frame(maxWidth: .infinity, alignment: .center)
             // The recede rise MUST be applied here, BEFORE .ignoresSafeArea().

@@ -695,7 +695,8 @@ struct HomeHeroView: View {
                 // whole backdrop blends together while browsing the rows below.
                 receded: receded,
                 trailerController: trailerController,
-                showsTrailer: trailerVisible
+                showsTrailer: trailerVisible,
+                scrimOpacity: isFrontmost ? 1 : 0
             )
         } else {
             Color.clear.frame(width: w, height: height)

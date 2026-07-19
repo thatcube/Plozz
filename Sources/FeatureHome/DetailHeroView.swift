@@ -355,6 +355,21 @@ struct DetailHeroView: View {
         return names.isEmpty ? nil : names.joined(separator: ", ")
     }
 
+    /// The film's director(s) for the right-aligned "Director …" line shown just
+    /// below "Starring" on movie heroes. Reads crew from `people` (role kind
+    /// `Director`) in provider order, capped so a rare multi-director credit stays
+    /// on one line. Movies only — episodes/series direction varies per episode, so
+    /// it isn't shown there. `nil` when no director is reported.
+    private var directorNames: String? {
+        guard item.kind == .movie else { return nil }
+        let people = item.people.isEmpty ? backdrop.people : item.people
+        let names = people
+            .filter { $0.kind?.lowercased() == "director" }
+            .prefix(2)
+            .map(\.name)
+        return names.isEmpty ? nil : names.joined(separator: ", ")
+    }
+
     var body: some View {
         let hideText = spoilerSettings.shouldHideText(for: item)
         let heroHeight = Self.screenHeight * heroHeightFraction
@@ -366,11 +381,11 @@ struct DetailHeroView: View {
         // top of `heroLeadingPadding`). Mirror that leading distance on the bottom
         // so the buttons sit the same visible distance from the bottom as from the
         // left. A non-full-height hero (a show) has rows beneath it and keeps the
-        // plain inter-section `screenPadding`.
+        // plain inter-section vertical spacing.
         let isFullScreenHero = heroHeightFraction >= 1.0
         let baseBottomInset = isFullScreenHero
             ? Self.horizontalSafeAreaInset + PlozzTheme.Metrics.heroLeadingPadding
-            : PlozzTheme.Metrics.screenPadding
+            : PlozzTheme.Metrics.screenVerticalPadding
         let unshiftedBottomInset = baseBottomInset
             + (seriesRecedeModel == nil ? 0 : SeriesEpisodeBrowserLayout.heroContentBottomLift)
         // Nudge the whole hero content block (logo → subtitle/metadata → Starring
@@ -528,7 +543,7 @@ struct DetailHeroView: View {
                 }
             }
         }
-        .padding(.top, PlozzTheme.Metrics.screenPadding)
+        .padding(.top, PlozzTheme.Metrics.screenVerticalPadding)
         .padding(.bottom, bottomInset)
         .padding(.trailing, PlozzTheme.Metrics.screenPadding)
         .padding(.leading, PlozzTheme.Metrics.heroLeadingPadding)
@@ -576,18 +591,27 @@ struct DetailHeroView: View {
         // `bottomInset` so the two sit on the same baseline, and is hidden while
         // the hero is receded for the episode browser.
         .overlay(alignment: .bottomTrailing) {
-            if let starringCastNames, seriesRecedeModel?.isReceded != true {
-                (Text("Starring ").foregroundStyle(.secondary)
-                    + Text(starringCastNames).foregroundStyle(.primary))
-                    .font(.system(size: 24, weight: .medium))
-                    .multilineTextAlignment(.leading)
-                    .lineLimit(2)
-                    .frame(maxWidth: 440, alignment: .trailing)
-                    .shadow(color: .black.opacity(0.55), radius: 5, y: 1)
-                    .padding(.trailing, PlozzTheme.Metrics.screenPadding)
-                    .padding(.bottom, bottomInset)
-                    .contentTransition(.opacity)
-                    .allowsHitTesting(false)
+            if seriesRecedeModel?.isReceded != true, starringCastNames != nil || directorNames != nil {
+                VStack(alignment: .leading, spacing: 4) {
+                    if let starringCastNames {
+                        (Text("Starring ").foregroundStyle(.tertiary)
+                            + Text(starringCastNames).foregroundStyle(.primary))
+                            .lineLimit(2)
+                    }
+                    if let directorNames {
+                        (Text("Director ").foregroundStyle(.tertiary)
+                            + Text(directorNames).foregroundStyle(.primary))
+                            .lineLimit(1)
+                    }
+                }
+                .font(.system(size: 24, weight: .semibold))
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: 440, alignment: .trailing)
+                .shadow(color: .black.opacity(colorScheme == .light ? 0.22 : 0.55), radius: 5, y: 1)
+                .padding(.trailing, PlozzTheme.Metrics.screenPadding)
+                .padding(.bottom, bottomInset)
+                .contentTransition(.opacity)
+                .allowsHitTesting(false)
             }
         }
         // Fade the whole hero (backdrop + text) in on first appearance rather
@@ -857,7 +881,7 @@ struct DetailHeroView: View {
             onUserInitiatedSourceSwitch: { userInitiatedSourceSwitch = true }
         )
         .equatable()
-        .modifier(HeroActionButtonStyle(prominent: false))
+        .modifier(HeroActionButtonStyle(prominent: false, circular: true))
         .focused($moreMenuFocused)
         .focused($heroActionRowFocus, equals: .more)
         .accessibilityLabel("Server and version options")
@@ -878,7 +902,7 @@ struct DetailHeroView: View {
                 .symbolEffect(.bounce, value: item.isFavorite)
                 .frame(width: heroIconSize, height: heroIconSize)
         }
-        .modifier(HeroActionButtonStyle(prominent: false))
+        .modifier(HeroActionButtonStyle(prominent: false, circular: true))
         .animation(.easeInOut(duration: 0.2), value: item.isFavorite)
         .focused($heroActionRowFocus, equals: .watchlist)
         .accessibilityLabel(action.title)
@@ -926,7 +950,7 @@ struct DetailHeroView: View {
             .frame(width: heroIconSize, height: heroIconSize)
             .animation(.easeOut(duration: 0.18), value: item.isPlayed)
         }
-        .modifier(HeroActionButtonStyle(prominent: false))
+        .modifier(HeroActionButtonStyle(prominent: false, circular: true))
         .focused($heroActionRowFocus, equals: .watched)
         .accessibilityLabel(action.title)
         .accessibilityValue(item.isPlayed ? "Watched" : "Not watched")
@@ -952,7 +976,7 @@ struct DetailHeroView: View {
         } label: {
             refreshIcon
         }
-        .modifier(HeroActionButtonStyle(prominent: false))
+        .modifier(HeroActionButtonStyle(prominent: false, circular: true))
         .focused($refreshButtonHasFocus)
         .focused($heroActionRowFocus, equals: .refresh)
         .accessibilityLabel(MediaItemAction.refreshMetadata.title)

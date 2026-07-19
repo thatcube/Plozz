@@ -10,21 +10,35 @@ import SwiftUI
 /// back to the classic bordered styles.
 struct HeroActionButtonStyle: ViewModifier {
     let prominent: Bool
+    /// Icon-only buttons (watchlist / watched / refresh / "…" menu) use a circular
+    /// glass shape instead of the default capsule, so a single-glyph button reads
+    /// as a round chip rather than a stubby pill. Labelled buttons (Play, Trailer)
+    /// keep the capsule.
+    var circular: Bool = false
 
     @ViewBuilder
     func body(content: Content) -> some View {
         if #available(tvOS 26.0, *) {
             if prominent {
-                content.buttonStyle(.glassProminent)
+                shaped(content.buttonStyle(.glassProminent))
             } else {
-                content.buttonStyle(.glass)
+                shaped(content.buttonStyle(.glass))
             }
         } else {
             if prominent {
-                content.buttonStyle(.borderedProminent)
+                shaped(content.buttonStyle(.borderedProminent))
             } else {
-                content.buttonStyle(.bordered)
+                shaped(content.buttonStyle(.bordered))
             }
+        }
+    }
+
+    @ViewBuilder
+    private func shaped(_ content: some View) -> some View {
+        if circular {
+            content.buttonBorderShape(.circle)
+        } else {
+            content
         }
     }
 }

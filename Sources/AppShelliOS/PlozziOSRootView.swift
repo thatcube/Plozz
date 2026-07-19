@@ -143,23 +143,46 @@ private enum PlozziOSDestination: String, CaseIterable, Identifiable {
 
 private struct PlozziOSSplitShell: View {
     @Binding var selection: PlozziOSDestination?
+    @State private var homePath = NavigationPath()
+    @State private var searchPath = NavigationPath()
+    @State private var downloadsPath = NavigationPath()
+    @State private var settingsPath = NavigationPath()
+
     let appModel: PlozziOSAppModel
     let onAddServer: () -> Void
 
     var body: some View {
+        let destination = selection ?? .home
+
         NavigationSplitView {
             List(PlozziOSDestination.allCases, selection: $selection) { destination in
                 Label(destination.title, systemImage: destination.systemImage)
             }
             .navigationTitle("Plozz")
         } detail: {
-            NavigationStack {
+            NavigationStack(path: path(for: destination)) {
                 PlozziOSDestinationView(
-                    destination: selection ?? .home,
+                    destination: destination,
                     appModel: appModel,
                     onAddServer: onAddServer
                 )
             }
+            .id(destination)
+        }
+    }
+
+    private func path(
+        for destination: PlozziOSDestination
+    ) -> Binding<NavigationPath> {
+        switch destination {
+        case .home:
+            $homePath
+        case .search:
+            $searchPath
+        case .downloads:
+            $downloadsPath
+        case .settings:
+            $settingsPath
         }
     }
 }

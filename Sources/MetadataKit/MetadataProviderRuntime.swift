@@ -23,6 +23,14 @@ public struct MetadataProviderRuntime: Sendable {
     public let resultCache: ProviderResultCache
     /// One breaker per source. A source absent here is given a fresh breaker at
     /// wrap time (so an incomplete map still works, just without diagnostics for it).
+    ///
+    /// - TODO(Step 9, per-profile BYOK): this registry is keyed on `MetadataSource`
+    ///   alone, so a source's breaker state is a per-provider-global fact (correct
+    ///   today — a TheTVDB 429 applies to every share). Once per-profile credentials
+    ///   land, a 401/credential failure is specific to *that key*, not the source, so
+    ///   this key MUST gain a credential/profile dimension to avoid conflating one
+    ///   profile's bad key with another's healthy one. Safe while credentials are
+    ///   app-global; extend alongside the ``ProviderResultCache`` key.
     public let breakers: [MetadataSource: ProviderCircuitBreaker]
 
     public init(

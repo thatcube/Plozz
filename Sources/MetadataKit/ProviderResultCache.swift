@@ -42,6 +42,13 @@ public actor ProviderResultCache {
     }
 
     /// The namespaced key: `source#version|requestKey`.
+    ///
+    /// - TODO(Step 9, per-profile BYOK): this key is keyed on `source` alone. Once
+    ///   per-profile credentials/API keys land (e.g. a user's own TMDB key), the key
+    ///   MUST gain a credential/profile dimension — otherwise a private result
+    ///   resolved with one profile's key could be served to another profile, and a
+    ///   bad key's negative could mask a good key. App-global credentials today make
+    ///   this safe; do not let Step 9 forget to extend the key.
     static func key(source: MetadataSource, version: Int, requestKey: String) -> String {
         "\(source.rawValue)#\(version)|\(requestKey)"
     }

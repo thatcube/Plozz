@@ -197,7 +197,22 @@ struct HomeTab: View {
                     let item = $0
                     Task { @MainActor in
                         await heroTrailerController.captureHandoffFrame()
-                        navigate(item)
+                        if heroTrailerController.isShowing(item.id),
+                           heroTrailerController.isPlaying {
+                            // A system NavigationStack push snapshots/composites
+                            // the newly-created detail hierarchy before its video
+                            // layer is live, which exposes a backdrop for a few
+                            // frames. A playing hero trailer is a visual continuity
+                            // handoff, not a spatial page move: atomically replace
+                            // only the foreground metadata. Pop remains animated.
+                            var transaction = Transaction()
+                            transaction.disablesAnimations = true
+                            withTransaction(transaction) {
+                                navigate(item)
+                            }
+                        } else {
+                            navigate(item)
+                        }
                     }
                 },
                 onPlayItem: { requestPlay($0) },

@@ -32,15 +32,22 @@ public actor ArtworkRouter {
 
     /// Test-only override for the exact-ID original-language lookup. `nil` in
     /// production, where ``resolveExactOriginalLanguage(_:)`` calls the live TMDb
-    /// tier; injected by tests to exercise the cache/normalization/keying without a
-    /// network call.
-    private let injectedOriginalLanguageResolver: (@Sendable (MetadataQuery) async -> String?)?
+    /// tier; injected by tests to exercise the cache/normalization/keying (and the
+    /// authoritative-vs-transient caching rule) without a network call.
+    private let injectedOriginalLanguageResolver: (@Sendable (MetadataQuery) async -> OriginalLanguageOutcome)?
 
     /// Positive + negative in-memory cache of resolved original languages, keyed by
     /// the query's show-level external-id identity so every episode of a show — and
-    /// every re-play — share a single lookup. A cached `.some(nil)` means "looked,
-    /// found nothing" so a miss is never re-fetched within a run.
+    /// every re-play — share a single lookup. A cached `.some(nil)` means "looked
+    /// AUTHORITATIVELY, found nothing" so a real miss is never re-fetched within a
+    /// run. **Transient failures are never written here** — only authoritative
+    /// answers land, so one flaky play can't pin the container default for the run.
     private var originalLanguageCache: [String: String?] = [:]
+
+    /// In-flight lookups, keyed identically to ``originalLanguageCache``, so
+    /// concurrent first-plays of the same show (the current load and the next-
+    /// episode prefetch) coalesce onto one request instead of firing duplicates.
+    private var originalLanguageTasks: [String: Task<String?, Never>] = [:]
 
     public init(
         config: MetadataProviderConfig = .resolved(),
@@ -52,12 +59,12 @@ public actor ArtworkRouter {
     }
 
     /// Testing seam: injects the exact-ID original-language resolver so unit tests
-    /// can drive ``originalLanguage(for:)``'s cache/normalization/keying without a
-    /// live TMDb request.
+    /// can drive ``originalLanguage(for:)``'s cache/normalization/keying and the
+    /// authoritative-vs-transient caching rule without a live TMDb request.
     init(
         config: MetadataProviderConfig = MetadataProviderConfig(tmdb: .disabled),
         cache: MetadataDiskCache = .shared,
-        exactOriginalLanguageResolver: @escaping @Sendable (MetadataQuery) async -> String?
+        exactOriginalLanguageResolver: @escaping @Sendable (MetadataQuery) async -> OriginalLanguageOutcome
     ) {
         self.tmdb = TMDbMetadataProvider(access: config.tmdb)
         self.cache = cache
@@ -77,16 +84,17 @@ public actor ArtworkRouter {
     /// Best-effort ISO-639-1 original language for a SERVER-backed `item` whose
     /// provider gave none (Plex/Jellyfin/Emby never fill `original_language`),
     /// resolved from an **exact external id** (TMDb, or IMDB via `/find`) with no
-    /// fuzzy title search, normalized to ISO-639-1, and cached (positive +
-    /// negative). Returns `nil` when TMDb is unconfigured, the item is music, it
-    /// carries no usable external id, or nothing was found — the caller then defers
-    /// to the container default.
+    /// fuzzy title search, normalized to ISO-639-1, and cached. Returns `nil` when
+    /// TMDb is unconfigured, the item is music, it carries no usable external id, or
+    /// nothing was found — the caller then defers to the container default.
     ///
-    /// This reuses the same shared, self-configuring, provider-id-keyed external-
-    /// metadata seam the artwork path already uses for server items (one actor +
-    /// the configured TMDb tier), rather than standing up a parallel subsystem, so
-    /// playback's "prefer original language" audio policy works for server items
-    /// exactly as it already does for direct-share items.
+    /// Only **authoritative** answers are cached: a transient failure (offline,
+    /// timeout, 429, 5xx, …) returns `nil` for this call but is NOT written, so a
+    /// later play retries instead of being pinned to the container default. Reuses
+    /// the same shared, self-configuring, provider-id-keyed external-metadata seam
+    /// the artwork path already uses for server items, rather than a parallel
+    /// subsystem, so the "prefer original language" audio policy works for server
+    /// items exactly as it already does for direct-share items.
     public func originalLanguage(for item: MediaItem) async -> String? {
         await originalLanguage(for: MetadataQuery(item))
     }
@@ -94,19 +102,65 @@ public actor ArtworkRouter {
     /// Lower-level entry point taking a prebuilt ``MetadataQuery``.
     public func originalLanguage(for query: MetadataQuery) async -> String? {
         let key = Self.originalLanguageCacheKey(for: query)
+        // An authoritative result (incl. a real miss) is served straight from cache.
         if let hit = originalLanguageCache[key] { return hit }
-        let resolved = OriginalLanguageNormalizer.normalized(
-            await resolveExactOriginalLanguage(query)
-        )
-        originalLanguageCache[key] = resolved
+        // Coalesce concurrent first-plays of the same show onto one lookup.
+        if let inFlight = originalLanguageTasks[key] { return await inFlight.value }
+
+        let task = Task { await self.resolveAndCacheOriginalLanguage(query, key: key) }
+        originalLanguageTasks[key] = task
+        let resolved = await task.value
+        originalLanguageTasks[key] = nil
         return resolved
     }
 
-    private func resolveExactOriginalLanguage(_ query: MetadataQuery) async -> String? {
+    /// Runs the exact-ID lookup and, **only for an authoritative outcome**, writes
+    /// the normalized value (or an authoritative `nil`) into the cache. A transient
+    /// failure returns `nil` without caching so the next play can retry.
+    private func resolveAndCacheOriginalLanguage(_ query: MetadataQuery, key: String) async -> String? {
+        switch await resolveExactOriginalLanguage(query) {
+        case .authoritative(let raw):
+            let normalized = OriginalLanguageNormalizer.normalized(raw)
+            originalLanguageCache[key] = normalized
+            return normalized
+        case .transient:
+            return nil
+        }
+    }
+
+    private func resolveExactOriginalLanguage(_ query: MetadataQuery) async -> OriginalLanguageOutcome {
         if let injectedOriginalLanguageResolver {
             return await injectedOriginalLanguageResolver(query)
         }
-        return await tmdb.originalLanguage(forExactMatchOf: query)
+        return await tmdb.originalLanguageOutcome(forExactMatchOf: query)
+    }
+
+    /// Awaits `operation` but returns `nil` if it doesn't finish within `timeout`,
+    /// **without cancelling it** — so a slow lookup still runs to completion and
+    /// warms the cache for the next call. Keeps the playback bring-up path from
+    /// stalling on a degraded network (where a single request can take the full
+    /// transport timeout): a first uncached play proceeds with the container default
+    /// and the next play/episode gets the resolved language from the warmed cache.
+    ///
+    /// Uses a first-result race (not `withTaskGroup`, which would defer the return
+    /// until the slow child finished): the operation runs as an independent,
+    /// non-cancelled task and the timeout is a separate task; whichever resolves
+    /// first wins, and the loser is never awaited.
+    public static func boundedValue<V: Sendable>(
+        within timeout: Duration,
+        of operation: @escaping @Sendable () async -> V?
+    ) async -> V? {
+        let race = FirstResultBox<V>()
+        // Independent task: dropping the handle does NOT cancel it, so the operation
+        // always runs to completion and warms the cache even after we stop waiting.
+        Task { await race.resolve(await operation()) }
+        let timeoutTask = Task {
+            try? await Task.sleep(for: timeout)
+            await race.resolve(nil)
+        }
+        let result = await race.awaitFirst()
+        timeoutTask.cancel()
+        return result
     }
 
     /// Stable identity for the original-language cache: a concrete **show-level**
@@ -216,5 +270,34 @@ public actor ArtworkRouter {
         let fallback = await musicBrainz.albumCoverURL(artist: artist, album: album)
         await cache.store(fallback, for: key)
         return fallback
+    }
+}
+
+/// A single-shot "first result wins" mailbox used by ``ArtworkRouter/boundedValue``
+/// to race a lookup against a timeout. The first `resolve` sets the value and wakes
+/// any awaiter; later `resolve` calls (the loser of the race) are no-ops, so the
+/// slow lookup can complete harmlessly after the timeout already returned.
+private actor FirstResultBox<V: Sendable> {
+    private var resolved: V??
+    private var waiter: CheckedContinuation<V?, Never>?
+
+    func resolve(_ value: V?) {
+        guard resolved == nil else { return }
+        resolved = .some(value)
+        if let waiter {
+            self.waiter = nil
+            waiter.resume(returning: value)
+        }
+    }
+
+    func awaitFirst() async -> V? {
+        if case let .some(value) = resolved { return value }
+        return await withCheckedContinuation { continuation in
+            if case let .some(value) = resolved {
+                continuation.resume(returning: value)
+            } else {
+                waiter = continuation
+            }
+        }
     }
 }

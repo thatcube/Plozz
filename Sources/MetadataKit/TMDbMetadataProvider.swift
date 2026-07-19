@@ -1,5 +1,27 @@
 import Foundation
 
+/// Status-aware result of an exact-ID original-language lookup. Distinguishes an
+/// **authoritative** answer — a real value, a definitive "none" (decoded 2xx / 404),
+/// or a deterministic no-op (TMDb disabled / music / no external id) — which the
+/// caller may safely cache, from a **transient** failure (offline, DNS, TLS,
+/// timeout, 429, 5xx, 401/403) that must NEVER be cached as a permanent negative.
+/// Mirrors the `nonSuccessIsAuthoritative` discipline the lyrics layer uses so a
+/// single flaky first play can't pin the container default for the whole run.
+public enum OriginalLanguageOutcome: Sendable, Equatable {
+    /// An answer we trust: the associated value is the raw provider language code
+    /// (`nil` = authoritatively "no original language").
+    case authoritative(String?)
+    /// A transient/unauthorized/rate-limited failure — caller must not cache it.
+    case transient
+
+    /// The value when authoritative, else `nil` (a transient failure reads as "no
+    /// value for this call"), for callers that don't need the distinction.
+    public var value: String? {
+        if case .authoritative(let raw) = self { return raw }
+        return nil
+    }
+}
+
 /// A poster URL + original language resolved from one TMDb search response, so the
 /// enrichment adapter can fill both from a single call.
 public struct TMDbSearchSummary: Sendable, Equatable {
@@ -77,21 +99,32 @@ public struct TMDbMetadataProvider: ArtworkProvider {
     /// TMDb movie/tv *details* endpoint for a stamped TMDb id (the show's
     /// `SeriesTmdb` for episodes/seasons, else the item's own `Tmdb` for
     /// movies/series); when only an IMDB id is known it resolves through `/find`,
-    /// which returns the language directly. `nil` when TMDb is disabled, the item
-    /// is music, or it carries no usable external id — so the caller defers to the
-    /// container default rather than guessing from a title match. Used by the
-    /// "prefer original language" audio policy for server-backed items, where a
-    /// wrong fuzzy match would pick the wrong spoken language.
-    public func originalLanguage(forExactMatchOf query: MetadataQuery) async -> String? {
-        guard access.isEnabled, query.contentType != .music else { return nil }
+    /// which returns the language directly.
+    ///
+    /// Returns a status-aware ``OriginalLanguageOutcome`` (not a bare `String?`) so
+    /// the caller can distinguish an **authoritative** answer — a real value, or a
+    /// definitive "none" from a decoded 2xx / 404, or a deterministic no-op
+    /// (disabled / music / no external id) — which is safe to cache, from a
+    /// **transient** failure (offline, DNS, TLS, timeout, 429, 5xx, 401/403) that
+    /// must NEVER be cached as a permanent negative. Without that distinction a
+    /// single flaky first play would pin the container default for the whole run.
+    public func originalLanguageOutcome(forExactMatchOf query: MetadataQuery) async -> OriginalLanguageOutcome {
+        guard access.isEnabled, query.contentType != .music else { return .authoritative(nil) }
         let isTV = query.isTV
         if let id = Self.exactStampedTMDbID(for: query, isTV: isTV) {
-            return await details(id: id, isTV: isTV)?.original_language
+            return await detailsOutcome(id: id, isTV: isTV)
         }
         if let imdb = query.providerIDs.providerID(.imdb), !imdb.isEmpty {
-            return await findOriginalLanguage(imdbID: imdb, isTV: isTV)
+            return await findOutcome(imdbID: imdb, isTV: isTV)
         }
-        return nil
+        return .authoritative(nil)
+    }
+
+    /// Convenience over ``originalLanguageOutcome(forExactMatchOf:)`` for callers
+    /// that don't need the authoritative/transient distinction: a transient failure
+    /// collapses to `nil` exactly like the other accessors.
+    public func originalLanguage(forExactMatchOf query: MetadataQuery) async -> String? {
+        await originalLanguageOutcome(forExactMatchOf: query).value
     }
 
     /// The stamped TMDb id usable for an EXACT details lookup: the show id for
@@ -113,17 +146,25 @@ public struct TMDbMetadataProvider: ArtworkProvider {
         return nil
     }
 
-    private func details(id: String, isTV: Bool) async -> DetailsResponse? {
-        guard let url = url("/3/\(isTV ? "tv" : "movie")/\(id)") else { return nil }
-        return await MetadataHTTP.get(DetailsResponse.self, url: url, headers: authHeaders)
+    private func detailsOutcome(id: String, isTV: Bool) async -> OriginalLanguageOutcome {
+        guard let url = url("/3/\(isTV ? "tv" : "movie")/\(id)") else { return .authoritative(nil) }
+        switch await MetadataHTTP.getOutcome(DetailsResponse.self, url: url, headers: authHeaders) {
+        case .success(let details): return .authoritative(details.original_language)
+        case .empty: return .authoritative(nil)
+        case .unauthorized, .rateLimited, .transient: return .transient
+        }
     }
 
-    private func findOriginalLanguage(imdbID: String, isTV: Bool) async -> String? {
+    private func findOutcome(imdbID: String, isTV: Bool) async -> OriginalLanguageOutcome {
         guard let escaped = metadataEscaped(imdbID),
-              let url = url("/3/find/\(escaped)?external_source=imdb_id") else { return nil }
-        let found = await MetadataHTTP.get(FindResponse.self, url: url, headers: authHeaders)
-        let results = isTV ? found?.tv_results : found?.movie_results
-        return results?.first?.original_language
+              let url = url("/3/find/\(escaped)?external_source=imdb_id") else { return .authoritative(nil) }
+        switch await MetadataHTTP.getOutcome(FindResponse.self, url: url, headers: authHeaders) {
+        case .success(let found):
+            let results = isTV ? found.tv_results : found.movie_results
+            return .authoritative(results?.first?.original_language)
+        case .empty: return .authoritative(nil)
+        case .unauthorized, .rateLimited, .transient: return .transient
+        }
     }
 
     /// Poster URL + original language from a **single** search call, so the

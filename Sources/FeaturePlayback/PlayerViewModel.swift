@@ -914,14 +914,27 @@ public final class PlayerViewModel {
     /// effective preference is `.original` with no remembered per-series language
     /// and the value is still unknown: `.device`/`.language(code)` are unchanged,
     /// and direct-share items (which arrive already enriched) never re-resolve.
+    ///
+    /// The bring-up wait is bounded (``originalLanguageFillTimeout``) so a first
+    /// uncached play on a degraded network never stalls playback START for the full
+    /// request timeout: on timeout this play proceeds with the container default
+    /// while the lookup finishes in the background and warms the cache, so the next
+    /// play/episode gets the resolved language.
     private func fillOriginalLanguageIfNeeded(for request: inout PlaybackRequest) async {
         guard request.item.originalLanguage == nil,
               rememberedAudioLanguage(for: request.item) == nil,
-              case .original = effectiveAudioPreference(for: request.item),
-              let resolved = await ArtworkRouter.shared.originalLanguage(for: request.item)
+              case .original = effectiveAudioPreference(for: request.item)
         else { return }
-        request.item.originalLanguage = resolved
+        let item = request.item
+        let resolved = await ArtworkRouter.boundedValue(within: Self.originalLanguageFillTimeout) {
+            await ArtworkRouter.shared.originalLanguage(for: item)
+        }
+        if let resolved { request.item.originalLanguage = resolved }
     }
+
+    /// Upper bound on how long a first uncached original-language fill may delay
+    /// playback bring-up; the lookup keeps running past this to warm the cache.
+    private static let originalLanguageFillTimeout: Duration = .seconds(2)
 
     /// Resolves the ordered audio-language preference for a load from per-series
     /// memory (when enabled) and the per-content-type audio policy. A remembered

@@ -9,14 +9,16 @@ import CoreModels
 /// items, not just direct shares.
 final class ServerOriginalLanguageTests: XCTestCase {
 
-    /// A counting fake exact-ID resolver so tests can prove one-lookup caching and
-    /// exactly what query the router asked about.
+    /// A counting fake exact-ID resolver so tests can prove one-lookup caching, the
+    /// authoritative-vs-transient caching rule, and exactly what query the router
+    /// asked about. The stub returns an ``OriginalLanguageOutcome`` so tests can
+    /// model transient failures distinctly from authoritative misses.
     private final class CountingResolver: @unchecked Sendable {
         private let lock = NSLock()
         private(set) var calls: [MetadataQuery] = []
-        var stub: @Sendable (MetadataQuery) -> String?
-        init(_ stub: @escaping @Sendable (MetadataQuery) -> String?) { self.stub = stub }
-        func resolve(_ query: MetadataQuery) -> String? {
+        var stub: @Sendable (MetadataQuery) -> OriginalLanguageOutcome
+        init(_ stub: @escaping @Sendable (MetadataQuery) -> OriginalLanguageOutcome) { self.stub = stub }
+        func resolve(_ query: MetadataQuery) -> OriginalLanguageOutcome {
             lock.lock(); defer { lock.unlock() }
             calls.append(query)
             return stub(query)
@@ -31,7 +33,7 @@ final class ServerOriginalLanguageTests: XCTestCase {
     // MARK: - Resolution + normalization
 
     func testResolvesEnglishForPlexMovieWithTMDbID() async {
-        let resolver = CountingResolver { _ in "en" }
+        let resolver = CountingResolver { _ in .authoritative("en") }
         let router = makeRouter(resolver)
         let item = MediaItem(id: "plex-1", title: "Spider-Man", kind: .movie,
                              providerIDs: ["Tmdb": "557"])
@@ -44,7 +46,7 @@ final class ServerOriginalLanguageTests: XCTestCase {
 
     func testNormalizesProviderCodeShapes() async {
         // TheTVDB-style 3-letter code folds to ISO-639-1.
-        let resolver = CountingResolver { _ in "jpn" }
+        let resolver = CountingResolver { _ in .authoritative("jpn") }
         let router = makeRouter(resolver)
         let item = MediaItem(id: "j-1", title: "Show", kind: .series,
                              providerIDs: ["Tmdb": "1"])
@@ -56,7 +58,7 @@ final class ServerOriginalLanguageTests: XCTestCase {
 
     func testSentinelNoLanguageCodeBecomesNil() async {
         // TMDb "xx" (No Language) must NOT become a bogus track request.
-        let resolver = CountingResolver { _ in "xx" }
+        let resolver = CountingResolver { _ in .authoritative("xx") }
         let router = makeRouter(resolver)
         let item = MediaItem(id: "m", title: "Silent", kind: .movie,
                              providerIDs: ["Tmdb": "9"])
@@ -69,7 +71,7 @@ final class ServerOriginalLanguageTests: XCTestCase {
     // MARK: - Caching (one lookup)
 
     func testResultIsCachedSoRepeatPlaysIssueNoSecondLookup() async {
-        let resolver = CountingResolver { _ in "en" }
+        let resolver = CountingResolver { _ in .authoritative("en") }
         let router = makeRouter(resolver)
         let item = MediaItem(id: "plex-1", title: "Spider-Man", kind: .movie,
                              providerIDs: ["Tmdb": "557"])
@@ -81,8 +83,9 @@ final class ServerOriginalLanguageTests: XCTestCase {
         XCTAssertEqual(resolver.callCount, 1, "Repeat resolution must be cache hits")
     }
 
-    func testNegativeResultIsCached() async {
-        let resolver = CountingResolver { _ in nil }
+    func testAuthoritativeMissIsCached() async {
+        // A decoded 2xx / 404 with no language is a real verdict → cache it.
+        let resolver = CountingResolver { _ in .authoritative(nil) }
         let router = makeRouter(resolver)
         let item = MediaItem(id: "m", title: "Unknown", kind: .movie,
                              providerIDs: ["Tmdb": "3"])
@@ -92,11 +95,49 @@ final class ServerOriginalLanguageTests: XCTestCase {
 
         XCTAssertNil(first)
         XCTAssertNil(second)
-        XCTAssertEqual(resolver.callCount, 1, "A miss is cached, never re-fetched")
+        XCTAssertEqual(resolver.callCount, 1, "An authoritative miss is cached, never re-fetched")
+    }
+
+    // MARK: - Transient failures must NOT be cached (re-introduces the bug otherwise)
+
+    func testTransientFailureIsNotCachedAndLaterPlayCanSucceed() async {
+        // First lookup hits a transient hiccup (offline/429/5xx); the second
+        // succeeds. The nil from the transient must NOT be pinned, or every later
+        // play would fall back to the container default until app restart.
+        let attempts = TestCounter()
+        let resolver = CountingResolver { _ in
+            attempts.increment() == 1 ? .transient : .authoritative("en")
+        }
+        let router = makeRouter(resolver)
+        let item = MediaItem(id: "plex-1", title: "Spider-Man", kind: .movie,
+                             providerIDs: ["Tmdb": "557"])
+
+        let first = await router.originalLanguage(for: item)
+        let second = await router.originalLanguage(for: item)
+
+        XCTAssertNil(first, "Transient failure yields no value for this play")
+        XCTAssertEqual(second, "en", "A later play retries and can succeed")
+        XCTAssertEqual(resolver.callCount, 2, "The transient result was not cached")
+    }
+
+    func testTransientFailureThenAuthoritativeMissEventuallyCaches() async {
+        let attempts = TestCounter()
+        let resolver = CountingResolver { _ in
+            attempts.increment() == 1 ? .transient : .authoritative(nil)
+        }
+        let router = makeRouter(resolver)
+        let item = MediaItem(id: "m", title: "Foreign", kind: .movie,
+                             providerIDs: ["Tmdb": "42"])
+
+        _ = await router.originalLanguage(for: item)   // transient, not cached
+        _ = await router.originalLanguage(for: item)   // authoritative miss, cached
+        _ = await router.originalLanguage(for: item)   // cache hit
+
+        XCTAssertEqual(resolver.callCount, 2, "Retry after transient, then the miss sticks")
     }
 
     func testEpisodesOfSameShowShareOneShowLevelLookup() async {
-        let resolver = CountingResolver { _ in "en" }
+        let resolver = CountingResolver { _ in .authoritative("en") }
         let router = makeRouter(resolver)
         let ep1 = MediaItem(id: "e1", title: "Chapter 1", kind: .episode,
                             providerIDs: ["Tmdb": "111", "SeriesTmdb": "999"])
@@ -130,6 +171,64 @@ final class ServerOriginalLanguageTests: XCTestCase {
         let titleOnly = MetadataQuery(
             MediaItem(id: "m", title: "Bare Title", kind: .movie))
         XCTAssertTrue(ArtworkRouter.originalLanguageCacheKey(for: titleOnly).contains("bare title"))
+    }
+
+    // MARK: - In-flight coalescing
+
+    func testConcurrentFirstPlaysOfSameShowCoalesceToOneLookup() async {
+        // Model a slow lookup so the current load and the next-episode prefetch
+        // overlap; they must share one request, not fire duplicates.
+        let resolver = CountingResolver { _ in .authoritative("en") }
+        let router = ArtworkRouter(exactOriginalLanguageResolver: { query in
+            try? await Task.sleep(for: .milliseconds(100))
+            return resolver.resolve(query)
+        })
+        let item = MediaItem(id: "plex-1", title: "Spider-Man", kind: .movie,
+                             providerIDs: ["Tmdb": "557"])
+
+        async let a = router.originalLanguage(for: item)
+        async let b = router.originalLanguage(for: item)
+        let (ra, rb) = await (a, b)
+
+        XCTAssertEqual(ra, "en")
+        XCTAssertEqual(rb, "en")
+        XCTAssertEqual(resolver.callCount, 1, "Concurrent misses coalesce onto one lookup")
+    }
+
+    // MARK: - Bounded play-path wait (Fix 2)
+
+    func testBoundedValueReturnsNilOnTimeoutButLetsWorkFinish() async {
+        let finished = expectation(description: "work completes despite timeout")
+        let start = Date()
+
+        let value = await ArtworkRouter.boundedValue(within: .milliseconds(150)) { () -> String? in
+            try? await Task.sleep(for: .milliseconds(600))
+            finished.fulfill()
+            return "en"
+        }
+
+        XCTAssertNil(value, "A slow lookup does not block past the bound")
+        XCTAssertLessThan(Date().timeIntervalSince(start), 0.5,
+                          "Returned near the bound, not the full operation time")
+        await fulfillment(of: [finished], timeout: 2)
+    }
+
+    func testBoundedValueReturnsValueWhenFastEnough() async {
+        let value = await ArtworkRouter.boundedValue(within: .seconds(2)) { () -> String? in "en" }
+        XCTAssertEqual(value, "en")
+    }
+}
+
+/// A tiny thread-safe call counter for modeling "first attempt fails, later
+/// attempts succeed" without an actor.
+private final class TestCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+    /// Increments and returns the new (1-based) count.
+    @discardableResult func increment() -> Int {
+        lock.lock(); defer { lock.unlock() }
+        count += 1
+        return count
     }
 }
 

@@ -7,6 +7,7 @@ import SeerService
 import SwiftUI
 
 struct PlozziOSItemDetailView: View {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(PlozziOSAppModel.self) private var appModel
     @State private var viewModel: ItemDetailViewModel
     @State private var playbackRequest: PlozziOSPlaybackRequest?
@@ -176,17 +177,22 @@ struct PlozziOSItemDetailView: View {
                         Text("Seasons")
                             .font(.title2.bold())
 
-                        ForEach(detail.children) { season in
-                            NavigationLink {
-                                PlozziOSSeasonEpisodesView(
-                                    viewModel: viewModel,
-                                    season: season,
-                                    onPlay: play
-                                )
-                            } label: {
-                                PlozziOSSeasonRow(season: season)
+                        LazyVGrid(columns: seasonColumns, spacing: 16) {
+                            ForEach(detail.children) { season in
+                                NavigationLink {
+                                    PlozziOSSeasonEpisodesView(
+                                        viewModel: viewModel,
+                                        season: season,
+                                        onPlay: play
+                                    )
+                                } label: {
+                                    PlozziOSSeasonRow(
+                                        season: season,
+                                        isWide: horizontalSizeClass == .regular
+                                    )
+                                }
+                                .buttonStyle(.plain)
                             }
-                            .buttonStyle(.plain)
                         }
                     }
                 }
@@ -197,6 +203,8 @@ struct PlozziOSItemDetailView: View {
             }
             .padding(.horizontal)
             .padding(.bottom, 32)
+            .frame(maxWidth: detailMaximumWidth, alignment: .leading)
+            .frame(maxWidth: .infinity)
         }
         .navigationTitle(detail.item.title)
         .task(id: downloadLookupID(for: detail.item)) {
@@ -208,6 +216,23 @@ struct PlozziOSItemDetailView: View {
             guard let mutation = MediaItemMutation.from(note) else { return }
             viewModel.applyWatchedState(mutation)
         }
+    }
+
+    private var detailMaximumWidth: CGFloat? {
+        horizontalSizeClass == .regular ? 920 : nil
+    }
+
+    private var seasonColumns: [GridItem] {
+        guard horizontalSizeClass == .regular else {
+            return [GridItem(.flexible())]
+        }
+        return [
+            GridItem(
+                .adaptive(minimum: 280, maximum: 420),
+                spacing: 16,
+                alignment: .top
+            )
+        ]
     }
 
     @ViewBuilder
@@ -712,6 +737,7 @@ private struct PlozziOSDetailHero: View {
 
 private struct PlozziOSSeasonRow: View {
     let season: MediaItem
+    let isWide: Bool
 
     var body: some View {
         HStack(spacing: 14) {
@@ -738,6 +764,13 @@ private struct PlozziOSSeasonRow: View {
             Image(systemName: "chevron.right")
                 .font(.caption.bold())
                 .foregroundStyle(.tertiary)
+        }
+        .padding(isWide ? 12 : 0)
+        .background {
+            if isWide {
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(.thinMaterial)
+            }
         }
         .contentShape(Rectangle())
     }

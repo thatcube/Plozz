@@ -593,6 +593,10 @@ let package = Package(
             dependencies: ["AppRuntime", "CoreModels", "FeatureAuthCore"]
         ),
         .testTarget(
+            name: "MediaDownloadsTests",
+            dependencies: ["MediaDownloads", "CoreModels", "MediaTransportCore"]
+        ),
+        .testTarget(
             name: "AppShellTests",
             dependencies: ["AppShell", "CoreModels", "MediaTransportSFTP", "MediaTransportFTP", "MediaTransportNFS", "MediaTransportWebDAV"]
         ),

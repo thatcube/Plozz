@@ -21,15 +21,28 @@ extension HomeHeroView {
     /// detail page. Any resolved art is prepended (it's the server art for whole
     /// titles, or the router hero only when the server gave none).
     func primaryBackdropURLs(for item: MediaItem) -> [URL] {
-        var urls: [URL] = []
-        if let resolved = resolvedBackdrop[item.id] { urls.append(resolved) }
-        urls.append(contentsOf: [
-            item.heroBackdropURL,
-            item.backdropURL,
-            item.fallbackArtworkURL
-        ].compactMap { $0 })
-        var seen = Set<URL>()
-        return urls.filter { seen.insert($0).inserted }
+        primaryBackdropReferences(for: item).compactMap {
+            if case .remote(let url) = $0 { return url }
+            return nil
+        }
+    }
+
+    /// Ordered references preserve direct-share artwork through the same UIKit wipe
+    /// as remote artwork. Local references lead; the router keeps its historic
+    /// precedence over legacy remote references.
+    func primaryBackdropReferences(for item: MediaItem) -> [ArtworkReference] {
+        let explicit = item.artworkReferences(for: .homeHero)
+        var references = explicit.filter {
+            if case .networkFile = $0 { return true }
+            return false
+        }
+        references.append(contentsOf: resolvedBackdrop[item.id].map { [ArtworkReference.remote($0)] } ?? [])
+        references.append(contentsOf: explicit.filter {
+            if case .remote = $0 { return true }
+            return false
+        })
+        var seen = Set<ArtworkReference>()
+        return references.filter { seen.insert($0).inserted }
     }
 
     // MARK: - Artwork routing / preload
@@ -92,12 +105,12 @@ extension HomeHeroView {
         for itemIndex in orderedIndices {
             guard !Task.isCancelled else { return }
             let item = items[itemIndex]
-            let candidates = primaryBackdropURLs(for: item)
+            let candidates = primaryBackdropReferences(for: item)
             guard !candidates.isEmpty else { continue }
             targets.append(
                 HeroPreviewWarmTarget(
                     itemID: item.id,
-                    candidateURLs: candidates,
+                    candidates: candidates,
                     asyncFallbackURL: backdropFallback(for: item)
                 )
             )
@@ -105,7 +118,7 @@ extension HomeHeroView {
 
         #if canImport(UIKit)
         let uncached = targets.filter { target in
-            !HeroBackdropArtworkPolicy.hasUsableCachedArtwork(for: target.candidateURLs)
+            !HeroBackdropArtworkPolicy.hasUsableCachedArtwork(for: target.candidates)
         }
         let batchSize = 4
         var fallbackTargets: [HeroPreviewWarmTarget] = []
@@ -123,7 +136,7 @@ extension HomeHeroView {
                         let usable = await ArtworkSession.warmLimiter.run {
                             guard !Task.isCancelled else { return false }
                             return await HeroBackdropArtworkPolicy.warmFirstUsablePreview(
-                                for: target.candidateURLs
+                                for: target.candidates
                             )
                         }
                         return usable ? nil : target
@@ -156,7 +169,7 @@ extension HomeHeroView {
                               let resolver = target.asyncFallbackURL,
                               let url = await resolver(),
                               !Task.isCancelled,
-                              !target.candidateURLs.contains(url)
+                              !target.candidates.contains(.remote(url))
                         else {
                             return nil
                         }
@@ -181,7 +194,7 @@ extension HomeHeroView {
                         await ArtworkSession.warmLimiter.run {
                             guard !Task.isCancelled else { return }
                             _ = await HeroBackdropArtworkPolicy.warmFirstUsablePreview(
-                                for: [fallback.url]
+                                for: [.remote(fallback.url)]
                             )
                         }
                     }
@@ -201,22 +214,22 @@ extension HomeHeroView {
         try? await Task.sleep(nanoseconds: 350_000_000)
         guard !Task.isCancelled else { return }
 
-        var seen = Set<URL>()
-        let orderedURLs = HeroPreviewWarmOrder.indices(count: items.count, centeredAt: index)
-            .compactMap { items[$0].logoURL }
-            .filter { seen.insert($0).inserted }
+        var seen = Set<String>()
+        let orderedReferences = HeroPreviewWarmOrder.indices(count: items.count, centeredAt: index)
+            .flatMap { items[$0].artworkReferences(for: .logo) }
+            .filter { seen.insert($0.privacySafeIdentity).inserted }
         let batchSize = 2
         var batchStart = 0
-        while batchStart < orderedURLs.count {
+        while batchStart < orderedReferences.count {
             guard !Task.isCancelled else { return }
-            let batchEnd = min(batchStart + batchSize, orderedURLs.count)
+            let batchEnd = min(batchStart + batchSize, orderedReferences.count)
             await withTaskGroup(of: Void.self) { group in
-                for url in orderedURLs[batchStart..<batchEnd] {
+                for reference in orderedReferences[batchStart..<batchEnd] {
                     group.addTask(priority: .utility) {
                         guard !Task.isCancelled else { return }
                         await ArtworkSession.warmLimiter.run {
                             guard !Task.isCancelled else { return }
-                            await HeroLogoPreloader.warm(primaryURL: url)
+                            await HeroLogoPreloader.warm(references: [reference])
                         }
                     }
                 }
@@ -235,6 +248,15 @@ extension HomeHeroView {
     func resolveArtworkURL(for item: MediaItem) async -> URL? {
         guard !Task.isCancelled else { return nil }
         if let resolved = resolvedBackdrop[item.id] { return resolved }
+        // Direct-share candidates already flow through HomeHeroBackdrop's ordered
+        // reference pipeline. Do not prepend a router URL over those explicit local
+        // selections; its async fallback is invoked only after they fail.
+        if item.artworkReferences(for: .homeHero).contains(where: {
+            if case .networkFile = $0 { return true }
+            return false
+        }) {
+            return nil
+        }
         var best: URL? = item.heroBackdropURL ?? item.backdropURL ?? item.fallbackArtworkURL
         switch item.kind {
         case .folder, .collection, .unknown:
@@ -278,9 +300,9 @@ extension HomeHeroView {
 
     func backgroundSample(for item: MediaItem) -> (@Sendable () async -> HeroBackgroundSample?)? {
         #if canImport(UIKit)
-        let urls = [item.heroBackdropURL, item.backdropURL].compactMap { $0 }
+        let references = primaryBackdropReferences(for: item)
         return {
-            if let sample = await HeroBackgroundSampler.sample(urls: urls) { return sample }
+            if let sample = await HeroBackgroundSampler.sample(references: references) { return sample }
             if let tmdb = await ArtworkRouter.shared.artworkURL(.hero, for: item),
                let sample = await HeroBackgroundSampler.sample(urls: [tmdb]) { return sample }
             if let poster = item.posterURL,
@@ -294,7 +316,7 @@ extension HomeHeroView {
 
     struct HeroPreviewWarmTarget: Sendable {
         let itemID: String
-        let candidateURLs: [URL]
+        let candidates: [ArtworkReference]
         let asyncFallbackURL: (@Sendable () async -> URL?)?
     }
 

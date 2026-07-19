@@ -1,6 +1,7 @@
 #if canImport(SwiftUI)
 import SwiftUI
 import CoreUI
+import CoreModels
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -35,8 +36,8 @@ import UIKit
 /// overscan breakout, vertical scroll parallax) — none of which changes between
 /// slides, so none of it animates.
 struct HomeHeroBackdrop: View {
-    /// Ordered candidate backdrop URLs for the **currently fronted** slide.
-    let urls: [URL]
+    /// Ordered candidate backdrop references for the **currently fronted** slide.
+    let references: [ArtworkReference]
     /// Last-resort async art lookup (e.g. TMDb) when none of `urls` load.
     let asyncFallbackURL: (@Sendable () async -> URL?)?
     /// Stable identity of the fronted slide (the item id). A *change* in this is
@@ -60,6 +61,52 @@ struct HomeHeroBackdrop: View {
     /// the whole backdrop blends together as you browse the rows below, instead of
     /// leaving a hard image edge on the right.
     var receded: Bool = false
+
+    init(
+        references: [ArtworkReference],
+        asyncFallbackURL: (@Sendable () async -> URL?)?,
+        slideID: String,
+        forward: Bool,
+        width: CGFloat,
+        height: CGFloat,
+        scrimTone: Color,
+        recedeLift: CGFloat = 0,
+        receded: Bool = false
+    ) {
+        self.references = references
+        self.asyncFallbackURL = asyncFallbackURL
+        self.slideID = slideID
+        self.forward = forward
+        self.width = width
+        self.height = height
+        self.scrimTone = scrimTone
+        self.recedeLift = recedeLift
+        self.receded = receded
+    }
+
+    init(
+        urls: [URL],
+        asyncFallbackURL: (@Sendable () async -> URL?)?,
+        slideID: String,
+        forward: Bool,
+        width: CGFloat,
+        height: CGFloat,
+        scrimTone: Color,
+        recedeLift: CGFloat = 0,
+        receded: Bool = false
+    ) {
+        self.init(
+            references: urls.map(ArtworkReference.remote),
+            asyncFallbackURL: asyncFallbackURL,
+            slideID: slideID,
+            forward: forward,
+            width: width,
+            height: height,
+            scrimTone: scrimTone,
+            recedeLift: recedeLift,
+            receded: receded
+        )
+    }
 
     @Environment(\.colorScheme) private var colorScheme
     private var isLight: Bool { colorScheme == .light }
@@ -98,7 +145,7 @@ struct HomeHeroBackdrop: View {
     private var backdropImage: some View {
         #if canImport(UIKit)
         WipeImageView(
-            urls: urls,
+            references: references,
             asyncFallbackURL: asyncFallbackURL,
             slideID: slideID,
             forward: forward,
@@ -179,23 +226,23 @@ enum HeroBackdropArtworkPolicy {
         return size.width / size.height <= maxAspectRatio
     }
 
-    static func hasUsableCachedArtwork(for urls: [URL]) -> Bool {
+    static func hasUsableCachedArtwork(for references: [ArtworkReference]) -> Bool {
         let cache = ArtworkImageCache.shared
-        return urls.contains { url in
+        return references.contains { reference in
             [.heroBackdrop, .landscapeCard, .heroPreview].contains { variant in
-                cache.cachedImage(for: url, variant: variant).map(isUsable) == true
+                cache.cachedImage(for: reference, variant: variant).map(isUsable) == true
             }
         }
     }
 
     /// Warms candidates in display order until one yields a usable instant frame.
     /// A malformed primary must not prevent a valid fallback from becoming cache-hot.
-    static func warmFirstUsablePreview(for urls: [URL]) async -> Bool {
-        if hasUsableCachedArtwork(for: urls) { return true }
-        for url in urls {
+    static func warmFirstUsablePreview(for references: [ArtworkReference]) async -> Bool {
+        if hasUsableCachedArtwork(for: references) { return true }
+        for reference in references {
             guard !Task.isCancelled else { return false }
             if let image = await ArtworkImageCache.shared.image(
-                for: url,
+                for: reference,
                 variant: .heroPreview,
                 background: true
             ), !Task.isCancelled, isUsable(image) {
@@ -204,6 +251,14 @@ enum HeroBackdropArtworkPolicy {
         }
         return false
     }
+
+    static func hasUsableCachedArtwork(for urls: [URL]) -> Bool {
+        hasUsableCachedArtwork(for: urls.map(ArtworkReference.remote))
+    }
+
+    static func warmFirstUsablePreview(for urls: [URL]) async -> Bool {
+        await warmFirstUsablePreview(for: urls.map(ArtworkReference.remote))
+    }
 }
 
 /// SwiftUI bridge for the parallax-wipe backdrop. The representable is *inert*:
@@ -211,7 +266,7 @@ enum HeroBackdropArtworkPolicy {
 /// which owns the entire Core Animation transition. Because SwiftUI never animates
 /// the image layers, it can never decompose the wipe into wrong-order pieces.
 private struct WipeImageView: UIViewRepresentable {
-    let urls: [URL]
+    let references: [ArtworkReference]
     let asyncFallbackURL: (@Sendable () async -> URL?)?
     let slideID: String
     let forward: Bool
@@ -255,7 +310,7 @@ private struct WipeImageView: UIViewRepresentable {
         context.coordinator.container = view
         context.coordinator.configure(width: width, height: height)
         context.coordinator.update(
-            urls: urls, slideID: slideID, forward: forward, asyncFallbackURL: asyncFallbackURL
+            references: references, slideID: slideID, forward: forward, asyncFallbackURL: asyncFallbackURL
         )
         return view
     }
@@ -264,7 +319,7 @@ private struct WipeImageView: UIViewRepresentable {
         context.coordinator.container = uiView
         context.coordinator.configure(width: width, height: height)
         context.coordinator.update(
-            urls: urls, slideID: slideID, forward: forward, asyncFallbackURL: asyncFallbackURL
+            references: references, slideID: slideID, forward: forward, asyncFallbackURL: asyncFallbackURL
         )
     }
 
@@ -287,13 +342,13 @@ private struct WipeImageView: UIViewRepresentable {
         private var displayedID: String?
         /// URL and resolution tier of the art currently fronted (for same-slide
         /// progressive upgrades).
-        private var displayedURL: URL?
+        private var displayedReference: ArtworkReference?
         private var displayedQuality: ArtworkQuality?
         /// Identity of the latest requested slide (may still be loading).
         private var targetID: String?
         /// Latest candidate URLs for `targetID`, retained so a same-slide artwork
         /// upgrade arriving mid-wipe can be applied when the wipe lands.
-        private var targetURLs: [URL] = []
+        private var targetReferences: [ArtworkReference] = []
         private var targetForward = true
         /// Monotonic load token; only the newest requested art may apply.
         private var loadToken = 0
@@ -328,7 +383,7 @@ private struct WipeImageView: UIViewRepresentable {
         }
 
         func update(
-            urls: [URL],
+            references: [ArtworkReference],
             slideID: String,
             forward: Bool,
             asyncFallbackURL: (@Sendable () async -> URL?)?
@@ -339,22 +394,22 @@ private struct WipeImageView: UIViewRepresentable {
             // we opportunistically upgrade the *displayed* slide's art if a better
             // (higher-res / router-resolved) candidate has since been cached.
             if slideID == targetID {
-                if urls != targetURLs {
-                    targetURLs = urls
+                if references != targetReferences {
+                    targetReferences = references
                     resolveSameSlideUpgrade(
-                        urls: urls,
+                        references: references,
                         slideID: slideID,
                         asyncFallbackURL: asyncFallbackURL
                     )
                 } else {
-                    maybeUpgradeDisplayedArt(urls: urls)
+                    maybeUpgradeDisplayedArt(references: references)
                 }
                 return
             }
             targetID = slideID
-            targetURLs = urls
+            targetReferences = references
             beginProgressiveResolution(
-                urls: urls,
+                references: references,
                 slideID: slideID,
                 forward: forward,
                 asyncFallbackURL: asyncFallbackURL
@@ -366,7 +421,7 @@ private struct WipeImageView: UIViewRepresentable {
         /// resolution. The preview tier first reuses a decoded landscape card (free
         /// when Home already showed it), then the dedicated 768px hero preview.
         private func beginProgressiveResolution(
-            urls: [URL],
+            references: [ArtworkReference],
             slideID: String,
             forward: Bool,
             asyncFallbackURL: (@Sendable () async -> URL?)?
@@ -376,25 +431,30 @@ private struct WipeImageView: UIViewRepresentable {
             loadToken += 1
             let token = loadToken
 
-            if let (image, url) = firstUsableCached(urls, variant: .heroBackdrop) {
+            var provisionalFullApplied = false
+            if let (image, reference) = firstUsableCached(references, variant: .heroBackdrop) {
                 applyResolved(
                     image,
-                    url: url,
+                    reference: reference,
                     quality: .full,
                     id: slideID,
                     forward: forward
                 )
-                return
+                if reference == references.first {
+                    return
+                }
+                provisionalFullApplied = true
             }
 
-            let cachedPreview =
-                firstUsableCached(urls, variant: .landscapeCard) ??
-                firstUsableCached(urls, variant: .heroPreview)
-            let previewWasApplied = cachedPreview != nil
-            if let (image, url) = cachedPreview {
+            let cachedPreview = provisionalFullApplied
+                ? nil
+                : firstUsableCached(references, variant: .landscapeCard)
+                    ?? firstUsableCached(references, variant: .heroPreview)
+            let previewWasApplied = provisionalFullApplied || cachedPreview != nil
+            if let (image, reference) = cachedPreview {
                 applyResolved(
                     image,
-                    url: url,
+                    reference: reference,
                     quality: .preview,
                     id: slideID,
                     forward: forward
@@ -406,15 +466,15 @@ private struct WipeImageView: UIViewRepresentable {
                 var previewApplied = previewWasApplied
                 if !previewApplied {
                     let preview = await self.firstUsableLoaded(
-                        urls,
+                        references,
                         variant: .heroPreview,
                         asyncFallbackURL: asyncFallbackURL
                     )
                     guard !Task.isCancelled, token == self.loadToken else { return }
-                    if let (image, url) = preview {
+                    if let (image, reference) = preview {
                         self.applyResolved(
                             image,
-                            url: url,
+                            reference: reference,
                             quality: .preview,
                             id: slideID,
                             forward: forward
@@ -424,16 +484,16 @@ private struct WipeImageView: UIViewRepresentable {
                 }
 
                 let resolved = await self.firstUsableLoaded(
-                    urls,
+                    references,
                     variant: .heroBackdrop,
                     asyncFallbackURL: asyncFallbackURL
                 )
                 guard !Task.isCancelled, token == self.loadToken else { return }
                 self.loadTask = nil
-                if let (image, url) = resolved {
+                if let (image, reference) = resolved {
                     self.applyResolved(
                         image,
-                        url: url,
+                        reference: reference,
                         quality: .full,
                         id: slideID,
                         forward: forward
@@ -446,7 +506,7 @@ private struct WipeImageView: UIViewRepresentable {
 
         private func applyResolved(
             _ image: UIImage,
-            url: URL,
+            reference: ArtworkReference,
             quality: ArtworkQuality,
             id: String,
             forward: Bool
@@ -458,7 +518,7 @@ private struct WipeImageView: UIViewRepresentable {
             if !container.hasPages {
                 container.setInitialImage(image)
                 displayedID = id
-                displayedURL = url
+                displayedReference = reference
                 displayedQuality = quality
                 return
             }
@@ -469,15 +529,15 @@ private struct WipeImageView: UIViewRepresentable {
             if id == displayedID {
                 let currentQuality = displayedQuality ?? .preview
                 guard quality.rawValue >= currentQuality.rawValue else { return }
-                guard url != displayedURL || quality != displayedQuality else { return }
+                guard reference != displayedReference || quality != displayedQuality else { return }
                 container.frontImage = image
-                displayedURL = url
+                displayedReference = reference
                 displayedQuality = quality
                 return
             }
-            startWipe(to: image, url: url, id: id, forward: forward)
+            startWipe(to: image, reference: reference, id: id, forward: forward)
             displayedID = id
-            displayedURL = url
+            displayedReference = reference
             displayedQuality = quality
         }
 
@@ -487,27 +547,27 @@ private struct WipeImageView: UIViewRepresentable {
             guard id == targetID else { return }
             container?.clear()
             displayedID = id
-            displayedURL = nil
+            displayedReference = nil
             displayedQuality = nil
         }
 
         /// Upgrade the *currently displayed* slide's art in place (no wipe) if a
         /// better candidate is now cached. Guarded to the displayed slide so a
         /// still-loading target can never swap the visible art without its wipe.
-        private func maybeUpgradeDisplayedArt(urls: [URL]) {
+        private func maybeUpgradeDisplayedArt(references: [ArtworkReference]) {
             guard targetID == displayedID, let container else { return }
-            guard let (image, url) = firstUsableCached(urls, variant: .heroBackdrop) else { return }
-            guard displayedQuality != .full || url != displayedURL else { return }
+            guard let (image, reference) = firstUsableCached(references, variant: .heroBackdrop) else { return }
+            guard displayedQuality != .full || reference != displayedReference else { return }
             if container.hasPages {
                 container.frontImage = image
             } else {
                 container.setInitialImage(image)
             }
-            displayedURL = url
+            displayedReference = reference
             displayedQuality = .full
         }
 
-        private func startWipe(to image: UIImage, url: URL, id: String, forward: Bool) {
+        private func startWipe(to image: UIImage, reference: ArtworkReference, id: String, forward: Bool) {
             guard let container else { return }
             let prepared = container.prepareWipe(incomingImage: image, forward: forward)
             let animationID = UUID()
@@ -546,7 +606,7 @@ private struct WipeImageView: UIViewRepresentable {
                 container.finishWipe(prepared.incoming)
                 self.activeAnimations[animationID] = nil
                 if self.targetID == id {
-                    self.maybeUpgradeDisplayedArt(urls: self.targetURLs)
+                    self.maybeUpgradeDisplayedArt(references: self.targetReferences)
                 }
             }
 
@@ -573,12 +633,12 @@ private struct WipeImageView: UIViewRepresentable {
         }
 
         private func resolveSameSlideUpgrade(
-            urls: [URL],
+            references: [ArtworkReference],
             slideID: String,
             asyncFallbackURL: (@Sendable () async -> URL?)?
         ) {
             beginProgressiveResolution(
-                urls: urls,
+                references: references,
                 slideID: slideID,
                 forward: targetForward,
                 asyncFallbackURL: asyncFallbackURL
@@ -588,32 +648,32 @@ private struct WipeImageView: UIViewRepresentable {
         // MARK: - Loading
 
         private func firstUsableCached(
-            _ urls: [URL],
+            _ references: [ArtworkReference],
             variant: ArtworkImageVariant
-        ) -> (UIImage, URL)? {
-            for url in urls {
+        ) -> (UIImage, ArtworkReference)? {
+            for reference in references {
                 guard let cached = ArtworkImageCache.shared.cachedImage(
-                    for: url,
+                    for: reference,
                     variant: variant
                 ) else { continue }
-                if HeroBackdropArtworkPolicy.isUsable(cached) { return (cached, url) }
+                if HeroBackdropArtworkPolicy.isUsable(cached) { return (cached, reference) }
             }
             return nil
         }
 
         private func firstUsableLoaded(
-            _ urls: [URL],
+            _ references: [ArtworkReference],
             variant: ArtworkImageVariant,
             asyncFallbackURL: (@Sendable () async -> URL?)?
-        ) async -> (UIImage, URL)? {
-            for url in urls {
+        ) async -> (UIImage, ArtworkReference)? {
+            for reference in references {
                 guard !Task.isCancelled else { return nil }
                 guard let loaded = await ArtworkImageCache.shared.image(
-                    for: url,
+                    for: reference,
                     variant: variant
                 ) else { continue }
                 guard !Task.isCancelled else { return nil }
-                if HeroBackdropArtworkPolicy.isUsable(loaded) { return (loaded, url) }
+                if HeroBackdropArtworkPolicy.isUsable(loaded) { return (loaded, reference) }
             }
             guard !Task.isCancelled else { return nil }
             if let asyncFallbackURL, let url = await asyncFallbackURL() {
@@ -621,7 +681,7 @@ private struct WipeImageView: UIViewRepresentable {
                 if let loaded = await ArtworkImageCache.shared.image(for: url, variant: variant),
                    !Task.isCancelled,
                    HeroBackdropArtworkPolicy.isUsable(loaded) {
-                    return (loaded, url)
+                    return (loaded, .remote(url))
                 }
             }
             return nil

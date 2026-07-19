@@ -119,6 +119,7 @@ final class ShareCatalogStoreTests: XCTestCase {
           ('f:Movies/Exhausted.mkv',NULL,NULL,NULL,NULL,NULL,NULL,NULL,3456,7,3,NULL),
           ('f:Movies/Retry.mkv',NULL,NULL,NULL,NULL,NULL,NULL,NULL,4567,7,2,NULL),
           ('series:anime-show','{"AniList":"100","Tvdb":"200"}',NULL,NULL,NULL,NULL,NULL,NULL,5678,7,0,'Anime Show');
+        PRAGMA user_version=2;
         """
         guard sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK else {
             throw NSError(
@@ -239,10 +240,9 @@ final class ShareCatalogStoreTests: XCTestCase {
         XCTAssertEqual(pending.map(\.itemID), ["f:Movies/Retry.mkv"])
 
         let state = try queryMigrationState(at: url)
-        // v2 adds the Step 3 NFO/explicit-id sidecar inventory schema; the legacy
-        // catalog's Step 2 normalized rows/state must still migrate/read exactly
-        // as before.
-        XCTAssertEqual(state.userVersion, 2)
+        // v3 adds local-artwork inventory without changing the legacy normalized
+        // metadata/enrichment lanes.
+        XCTAssertEqual(state.userVersion, 3)
         XCTAssertEqual(state.metadataValueCount, 14)
         XCTAssertEqual(state.enrichmentStateCount, 5)
         XCTAssertEqual(state.richLegacyValueCount, 10)
@@ -257,7 +257,7 @@ final class ShareCatalogStoreTests: XCTestCase {
         XCTAssertEqual(reopenedPending.map(\.itemID), [
             "f:Movies/Retry.mkv"
         ])
-        XCTAssertEqual(try queryMigrationState(at: url).userVersion, 2)
+        XCTAssertEqual(try queryMigrationState(at: url).userVersion, 3)
     }
 
     func testPartiallyMigratedCatalogDecodesValidProvenanceAndInfersMissingEntries() async throws {

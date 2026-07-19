@@ -145,7 +145,7 @@ public struct EpisodeColumnCard: View {
 
     private var realArtwork: some View {
         FallbackAsyncImage(
-            urls: item.artworkCandidates(for: .landscape),
+            references: item.artworkReferences(for: .episodeThumbnail),
             variant: .landscapeCard,
             asyncFallbackURL: asyncArtworkFallback
         ) {

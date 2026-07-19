@@ -6,13 +6,13 @@ import MetadataKit
 import XCTest
 
 final class MetadataFoundationCharacterizationTests: XCTestCase {
-    func testFreshCatalogUsesSchemaVersionTwoAcrossReopen() async throws {
+    func testFreshCatalogUsesSchemaVersionThreeAcrossReopen() async throws {
         let fixture = ShareCatalogSQLiteFixture()
         defer { fixture.cleanup() }
 
         let first = fixture.makeStore()
         _ = await first.libraryCounts()
-        XCTAssertEqual(try fixture.integer("PRAGMA user_version;"), 2)
+        XCTAssertEqual(try fixture.integer("PRAGMA user_version;"), 3)
         XCTAssertEqual(
             try fixture.integer(
                 "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='metadata_values';"
@@ -28,7 +28,7 @@ final class MetadataFoundationCharacterizationTests: XCTestCase {
 
         let reopened = fixture.makeStore()
         _ = await reopened.libraryCounts()
-        XCTAssertEqual(try fixture.integer("PRAGMA user_version;"), 2)
+        XCTAssertEqual(try fixture.integer("PRAGMA user_version;"), 3)
     }
 
     func testNoNFOProjectionPreservesScannerFieldsWithoutSourcedMetadata() async throws {

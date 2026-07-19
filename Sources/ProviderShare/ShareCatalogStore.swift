@@ -36,6 +36,7 @@ actor ShareCatalogStore {
     private var reconciler: ShareSeriesReconciler { ShareSeriesReconciler(connection: connection) }
     private var scanWriter: ScanCatalogWriter { ScanCatalogWriter(connection: connection) }
     private var localRepo: LocalMetadataRepository { LocalMetadataRepository(connection: connection) }
+    private var artworkRepo: LocalArtworkRepository { LocalArtworkRepository(connection: connection) }
     private var enrichmentRepo: EnrichmentRepository { EnrichmentRepository(connection: connection) }
     /// Pure, transaction-free read-query composition over the same actor-confined
     /// connection. A cheap value type constructed on demand; it holds no state of its
@@ -64,6 +65,13 @@ actor ShareCatalogStore {
     private let localMetadataPresence = LocalMetadataPresence()
     private var activeScanGeneration: UUID?
     private var pendingMergedSeriesLocalRepairs = Set<String>()
+    /// Runtime-only credential-safe context used solely to materialize transport
+    /// references. The SQLite inventory never stores credentials, endpoints, or URLs.
+    private var artworkReferenceContext: (accountID: String, credentialRevision: CredentialRevision)?
+    /// Persisted only as an opaque hash of account identity + credential revision.
+    /// This avoids rematerializing every item after a process relaunch while never
+    /// storing credentials or artwork paths in catalog metadata.
+    private static let artworkReferenceContextMetaKey = "artwork_reference_context_v1"
 
     /// Bounded catalog writes keep the actor cooperative with Home/grid/search
     /// reads while a large share is scanning.
@@ -209,6 +217,7 @@ actor ShareCatalogStore {
             index = end
             if index < assets.count { await Task.yield() }
         }
+        reassociateArtwork(afterUpserting: assets)
         if slowestChunkMs >= 20 {
             PlozzLog.boot(
                 "share.catalog slow upsert files=\(assets.count) total=\(Int(Date().timeIntervalSince(started) * 1_000))ms maxChunk=\(slowestChunkMs)ms"
@@ -383,6 +392,536 @@ actor ShareCatalogStore {
     private func admits(_ scanGeneration: UUID?) -> Bool {
         guard let scanGeneration else { return true }
         return activeScanGeneration == scanGeneration
+    }
+
+    /// Internal coordinator handoff. The public catalog reader contract stays frozen;
+    /// this is available exactly where the account credential revision already exists.
+    func configureArtworkReferenceContext(accountID: String, credentialRevision: CredentialRevision) {
+        ensureOpen()
+        guard db != nil else { return }
+        artworkReferenceContext = (accountID, credentialRevision)
+        let marker = opaqueArtworkRevision(
+            accountID: accountID,
+            path: Self.artworkReferenceContextMetaKey,
+            fingerprint: credentialRevision.rawValue.uuidString
+        )
+        guard meta(Self.artworkReferenceContextMetaKey) != marker else { return }
+
+        let itemIDs = allArtworkAssociatedItemIDs().sorted()
+        guard exec("BEGIN IMMEDIATE;") else { return }
+        for itemID in itemIDs {
+            guard materializeArtworkSelectionsInTransaction(itemID: itemID) else {
+                _ = exec("ROLLBACK;")
+                return
+            }
+        }
+        setMeta(Self.artworkReferenceContextMetaKey, marker)
+        guard exec("COMMIT;") else { _ = exec("ROLLBACK;"); return }
+    }
+
+    // MARK: - Local artwork inventory (Step 4)
+
+    /// Artwork transport failures get the same bounded retry posture as NFOs.
+    /// Terminal header outcomes are settled against their exact fingerprint.
+    static let maxArtworkProbeAttempts = 3
+
+    func pendingArtworkProbes(limit: Int) -> [PendingLocalArtworkFile] {
+        ensureOpen()
+        return artworkRepo.pendingArtworkFiles(limit: limit, maxAttempts: Self.maxArtworkProbeAttempts)
+    }
+
+    func recordArtworkProbeTransientFailure(_ file: PendingLocalArtworkFile) {
+        ensureOpen()
+        guard db != nil else { return }
+        let terminal = file.attempts + 1 >= Self.maxArtworkProbeAttempts
+        if terminal {
+            guard exec("BEGIN IMMEDIATE;") else { return }
+        }
+        let affected = terminal ? artworkAssociatedItemIDs(paths: [file.relPath]) : []
+        guard artworkRepo.updateProbe(
+            relPath: file.relPath,
+            fingerprint: file.fingerprint,
+            status: terminal ? "transientExhausted" : "pending",
+            probeVersion: nil,
+            width: nil,
+            height: nil,
+            contentType: nil,
+            incrementAttempts: true,
+            now: Date()
+        ) else {
+            if terminal { _ = exec("ROLLBACK;") }
+            return
+        }
+        guard terminal else { return }
+        for itemID in affected.sorted() {
+            guard materializeArtworkSelectionsInTransaction(itemID: itemID) else {
+                _ = exec("ROLLBACK;")
+                return
+            }
+        }
+        guard exec("COMMIT;") else { _ = exec("ROLLBACK;"); return }
+    }
+
+    func resetArtworkProbeTransientFailures() {
+        ensureOpen()
+        guard db != nil, exec("BEGIN IMMEDIATE;") else { return }
+        var affected = Set<String>()
+        query("""
+        SELECT DISTINCT a.item_id
+        FROM local_artwork_associations a
+        JOIN local_artwork_files f ON f.rel_path=a.artwork_rel_path
+        WHERE f.probe_status='transientExhausted';
+        """) { stmt in
+            if let itemID = self.columnText(stmt, 0) { affected.insert(itemID) }
+        }
+        guard artworkRepo.resetTransientProbeFailures() else {
+            _ = exec("ROLLBACK;")
+            return
+        }
+        for itemID in affected.sorted() {
+            guard materializeArtworkSelectionsInTransaction(itemID: itemID) else {
+                _ = exec("ROLLBACK;")
+                return
+            }
+        }
+        guard exec("COMMIT;") else { _ = exec("ROLLBACK;"); return }
+    }
+
+    /// Persist an inspected header only when the exact scanned fingerprint remains
+    /// current, then rematerialize just its associated catalog items.
+    func setArtworkProbeResult(
+        _ file: PendingLocalArtworkFile,
+        result: ShareArtworkHeaderInspection
+    ) {
+        ensureOpen()
+        guard db != nil, exec("BEGIN IMMEDIATE;") else { return }
+        let affected = artworkAssociatedItemIDs(paths: [file.relPath])
+        let update: (status: String, version: Int?, width: Int?, height: Int?, type: String?)
+        switch result {
+        case .validated(let width, let height, let contentType):
+            update = ("validated", ShareLocalArtworkProbeWorker.version, width, height, contentType)
+        case .incomplete:
+            update = ("unvalidated", ShareLocalArtworkProbeWorker.version, nil, nil, nil)
+        case .empty:
+            update = ("empty", ShareLocalArtworkProbeWorker.version, nil, nil, nil)
+        case .unsupported:
+            update = ("unsupported", ShareLocalArtworkProbeWorker.version, nil, nil, nil)
+        case .malformed:
+            update = ("malformed", ShareLocalArtworkProbeWorker.version, nil, nil, nil)
+        case .tooLarge:
+            update = ("rejected", ShareLocalArtworkProbeWorker.version, nil, nil, nil)
+        }
+        guard artworkRepo.updateProbe(
+            relPath: file.relPath,
+            fingerprint: file.fingerprint,
+            status: update.status,
+            probeVersion: update.version,
+            width: update.width,
+            height: update.height,
+            contentType: update.type,
+            incrementAttempts: false,
+            now: Date()
+        ) else {
+            _ = exec("ROLLBACK;")
+            return
+        }
+        for itemID in affected.sorted() {
+            guard materializeArtworkSelectionsInTransaction(itemID: itemID) else {
+                _ = exec("ROLLBACK;")
+                return
+            }
+        }
+        guard exec("COMMIT;") else { _ = exec("ROLLBACK;"); return }
+    }
+
+    func upsertArtwork(
+        _ artwork: [LocalArtworkCandidate],
+        scanID: Int64,
+        now: Date = Date(),
+        scanGeneration: UUID? = nil
+    ) async {
+        ensureOpen()
+        guard admits(scanGeneration), db != nil, !artwork.isEmpty,
+              exec("BEGIN IMMEDIATE;") else { return }
+        let priorItems = artworkAssociatedItemIDs(paths: artwork.map(\.relPath))
+        guard artworkRepo.upsert(artwork, scanID: scanID, now: now),
+              associateArtworkInTransaction(artwork) else {
+            _ = exec("ROLLBACK;")
+            return
+        }
+        let currentItems = artworkAssociatedItemIDs(paths: artwork.map(\.relPath))
+        for itemID in priorItems.union(currentItems).sorted() {
+            guard materializeArtworkSelectionsInTransaction(itemID: itemID) else {
+                _ = exec("ROLLBACK;")
+                return
+            }
+        }
+        guard exec("COMMIT;") else { _ = exec("ROLLBACK;"); return }
+    }
+
+    /// Clean scans rebuild only the local-artwork lane after pruning stale inventory.
+    /// Partial scans never call this path, so they cannot delete or globally
+    /// re-associate unseen artwork.
+    private func finalizeArtworkInTransaction(scanID: Int64) -> Bool {
+        let previous = allArtworkAssociatedItemIDs()
+        guard artworkRepo.deleteStale(inScan: scanID) else { return false }
+        let candidates = storedArtworkCandidates()
+        let assets = artworkCatalogAssets()
+        guard artworkRepo.replaceAllAssociations(
+            candidates.flatMap {
+                ShareArtworkAssociationPolicy.associations(candidate: $0, assets: assets)
+            }
+        ) else { return false }
+        let current = artworkAssociatedItemIDs(paths: candidates.map(\.relPath))
+        for itemID in previous.union(current).sorted() {
+            guard materializeArtworkSelectionsInTransaction(itemID: itemID) else { return false }
+        }
+        return true
+    }
+
+    private func associateArtworkInTransaction(_ artwork: [LocalArtworkCandidate]) -> Bool {
+        let assets = artworkCatalogAssets()
+        return artworkRepo.replaceAssociations(
+            forArtworkPaths: artwork.map(\.relPath),
+            values: artwork.flatMap {
+                ShareArtworkAssociationPolicy.associations(candidate: $0, assets: assets)
+            }
+        )
+    }
+
+    private func reassociateArtwork(afterUpserting assets: [CatalogAsset]) {
+        var directories = Set(assets.map { ($0.relPath as NSString).deletingLastPathComponent })
+        directories.formUnion(assets.compactMap(\.metadataRoot))
+        let directArtworkDirectories = directories.flatMap {
+            $0.isEmpty
+                ? ["", "backdrops", "extrafanart"]
+                : [$0, "\($0)/backdrops", "\($0)/extrafanart"]
+        }
+        let candidates = storedArtworkCandidates(inDirectories: Set(directArtworkDirectories))
+        guard !candidates.isEmpty, exec("BEGIN IMMEDIATE;") else { return }
+        let prior = artworkAssociatedItemIDs(paths: candidates.map(\.relPath))
+        guard associateArtworkInTransaction(candidates) else {
+            _ = exec("ROLLBACK;")
+            return
+        }
+        let current = artworkAssociatedItemIDs(paths: candidates.map(\.relPath))
+        for itemID in prior.union(current).sorted() {
+            guard materializeArtworkSelectionsInTransaction(itemID: itemID) else {
+                _ = exec("ROLLBACK;")
+                return
+            }
+        }
+        guard exec("COMMIT;") else { _ = exec("ROLLBACK;"); return }
+    }
+
+    private func reassociateAllArtworkInTransaction() -> Bool {
+        let previous = allArtworkAssociatedItemIDs()
+        let candidates = storedArtworkCandidates()
+        let assets = artworkCatalogAssets()
+        guard artworkRepo.replaceAllAssociations(
+            candidates.flatMap {
+                ShareArtworkAssociationPolicy.associations(candidate: $0, assets: assets)
+            }
+        ) else { return false }
+        let current = artworkAssociatedItemIDs(paths: candidates.map(\.relPath))
+        for itemID in previous.union(current).sorted() {
+            guard materializeArtworkSelectionsInTransaction(itemID: itemID) else { return false }
+        }
+        return true
+    }
+
+    private func artworkCatalogAssets() -> [ShareArtworkCatalogAsset] {
+        struct Row {
+            var relPath: String
+            var kind: CatalogAssetKind
+            var group: String?
+            var seriesKey: String?
+            var season: Int?
+            var metadataRoot: String?
+        }
+        var rows: [Row] = []
+        query("""
+        SELECT rel_path, kind, COALESCE(movie_group_key,movie_key), series_key, season, metadata_root
+        FROM assets;
+        """) { stmt in
+            guard let path = self.columnText(stmt, 0),
+                  let kind = CatalogAssetKind(rawValue: self.columnText(stmt, 1) ?? "") else { return }
+            rows.append(.init(relPath: path, kind: kind, group: self.columnText(stmt, 2),
+                              seriesKey: self.columnText(stmt, 3), season: self.columnOptInt(stmt, 4),
+                              metadataRoot: self.columnText(stmt, 5)))
+        }
+        let reps = Dictionary(grouping: rows.filter { $0.kind == .movie && $0.group != nil }, by: { $0.group! })
+            .mapValues { $0.map(\.relPath).min()! }
+        return rows.map {
+            .init(
+                relPath: $0.relPath, kind: $0.kind,
+                movieOwnerID: $0.group.flatMap { reps[$0] }.map(ShareCatalogID.file),
+                seriesKey: $0.seriesKey, season: $0.season, metadataRoot: $0.metadataRoot
+            )
+        }
+    }
+
+    private func storedArtworkCandidates(
+        inDirectories directories: Set<String>? = nil
+    ) -> [LocalArtworkCandidate] {
+        var output: [LocalArtworkCandidate] = []
+        var sql = """
+        SELECT rel_path,parent_dir,basename,name_stem,name_role,explicit_media_stem,
+               numbered_alternative,language,season,is_specials,folder_kind,size,modified_at,
+               stable_file_id,strong_etag,change_token
+        FROM local_artwork_files
+        """
+        let orderedDirectories = directories.map { Array($0).sorted() } ?? []
+        if !orderedDirectories.isEmpty {
+            sql += " WHERE parent_dir IN (\(Array(repeating: "?", count: orderedDirectories.count).joined(separator: ",")))"
+        }
+        sql += " ORDER BY rel_path;"
+        query(sql, bind: { stmt in
+            for (offset, directory) in orderedDirectories.enumerated() {
+                self.bindText(stmt, Int32(offset + 1), directory)
+            }
+        }) { stmt in
+            guard let relPath = self.columnText(stmt, 0),
+                  let parentDir = self.columnText(stmt, 1),
+                  let basename = self.columnText(stmt, 2),
+                  let stem = self.columnText(stmt, 3) else { return }
+            output.append(.init(
+                relPath: relPath, parentDir: parentDir, basename: basename,
+                facts: .init(
+                    stem: stem, role: self.columnText(stmt, 4).flatMap(ShareArtworkRole.init(rawValue:)),
+                    explicitMediaStem: self.columnText(stmt, 5),
+                    numberedAlternative: self.columnOptInt(stmt, 6),
+                    language: self.columnText(stmt, 7), season: self.columnOptInt(stmt, 8),
+                    isSpecialsSeason: sqlite3_column_int64(stmt, 9) != 0
+                ),
+                size: sqlite3_column_int64(stmt, 11),
+                modifiedAt: Date(timeIntervalSince1970: sqlite3_column_double(stmt, 12)),
+                stableFileID: self.columnText(stmt, 13), strongETag: self.columnText(stmt, 14),
+                changeToken: self.columnText(stmt, 15), isBackdropFolder: self.columnText(stmt, 10) == "backdropFolder"
+            ))
+        }
+        return output
+    }
+
+    private func artworkAssociatedItemIDs(paths: [String]) -> Set<String> {
+        guard !paths.isEmpty else { return [] }
+        let placeholders = Array(repeating: "?", count: paths.count).joined(separator: ",")
+        var result = Set<String>()
+        query("SELECT DISTINCT item_id FROM local_artwork_associations WHERE artwork_rel_path IN (\(placeholders));",
+              bind: { stmt in
+            for (offset, path) in paths.enumerated() { self.bindText(stmt, Int32(offset + 1), path) }
+        }) { stmt in
+            if let id = self.columnText(stmt, 0) { result.insert(id) }
+        }
+        return result
+    }
+
+    private func allArtworkAssociatedItemIDs() -> Set<String> {
+        var result = Set<String>()
+        query("SELECT DISTINCT item_id FROM local_artwork_associations;") { stmt in
+            if let id = self.columnText(stmt, 0) { result.insert(id) }
+        }
+        return result
+    }
+
+    func rejectArtworkReference(_ reference: NetworkArtworkReference) {
+        ensureOpen()
+        guard let context = artworkReferenceContext,
+              context.accountID == reference.accountID,
+              context.credentialRevision == reference.credentialRevision
+        else { return }
+        var fingerprint: String?
+        var scanGenerationBound = false
+        var lastScan: Int64 = 0
+        query("""
+        SELECT fingerprint,scan_generation_bound,last_scan
+        FROM local_artwork_files WHERE rel_path=?;
+        """, bind: { self.bindText($0, 1, reference.relativePath) }) { stmt in
+            fingerprint = self.columnText(stmt, 0)
+            scanGenerationBound = sqlite3_column_int64(stmt, 1) != 0
+            lastScan = sqlite3_column_int64(stmt, 2)
+        }
+        guard let fingerprint,
+              reference.sourceRevision == opaqueArtworkRevision(
+                accountID: context.accountID,
+                path: reference.relativePath,
+                fingerprint: artworkSourceFingerprint(
+                    fingerprint: fingerprint,
+                    scanGenerationBound: scanGenerationBound,
+                    lastScan: lastScan
+                )
+              ),
+              exec("BEGIN IMMEDIATE;")
+        else { return }
+        let affected = artworkAssociatedItemIDs(paths: [reference.relativePath])
+        guard connection.runUpdate("""
+        UPDATE local_artwork_files
+        SET probe_status='rejected',
+            processed_fingerprint=fingerprint,
+            probe_attempts=probe_attempts+1,
+            updated_at=?
+        WHERE rel_path=? AND fingerprint=?;
+        """, bind: {
+            sqlite3_bind_double($0, 1, Date().timeIntervalSince1970)
+            self.bindText($0, 2, reference.relativePath)
+            self.bindText($0, 3, fingerprint)
+        }) else {
+            _ = exec("ROLLBACK;")
+            return
+        }
+        for itemID in affected.sorted() {
+            guard materializeArtworkSelectionsInTransaction(itemID: itemID) else {
+                _ = exec("ROLLBACK;")
+                return
+            }
+        }
+        guard exec("COMMIT;") else { _ = exec("ROLLBACK;"); return }
+    }
+
+    @discardableResult
+    private func materializeArtworkSelections(itemID: String) -> Bool {
+        guard exec("BEGIN IMMEDIATE;"),
+              materializeArtworkSelectionsInTransaction(itemID: itemID),
+              exec("COMMIT;") else {
+            _ = exec("ROLLBACK;")
+            return false
+        }
+        return true
+    }
+
+    @discardableResult
+    private func materializeArtworkSelectionsInTransaction(itemID: String) -> Bool {
+        guard let context = artworkReferenceContext else {
+            return artworkRepo.replaceSelections(itemID: itemID, fields: [], now: Date())
+        }
+        struct Row {
+            var placement: ArtworkPlacement
+            var path: String
+            var size: Int64
+            var modifiedAt: Date
+            var stableID: String?
+            var etag: String?
+            var fingerprint: String
+            var contentType: String?
+            var width: Int?
+            var height: Int?
+            var rank: Int
+            var scanGenerationBound: Bool
+            var lastScan: Int64
+        }
+        var rows: [Row] = []
+        query("""
+        SELECT a.placement,f.rel_path,f.size,f.modified_at,f.stable_file_id,f.strong_etag,
+               f.fingerprint,f.content_type,f.width,f.height,a.rank,
+               f.scan_generation_bound,f.last_scan
+        FROM local_artwork_associations a
+        JOIN local_artwork_files f ON f.rel_path=a.artwork_rel_path
+        WHERE a.item_id=? AND f.probe_status IN ('pending','unvalidated','validated')
+          AND NOT (
+            f.probe_status='validated'
+            AND f.width > 3 * f.height
+            AND a.placement IN ('homeHero','detailBackdrop')
+          )
+        ORDER BY a.placement,a.rank,f.rel_path;
+        """, bind: { self.bindText($0, 1, itemID) }) { stmt in
+            guard let placement = self.columnText(stmt, 0).map(ArtworkPlacement.init(rawValue:)),
+                  let path = self.columnText(stmt, 1), let fingerprint = self.columnText(stmt, 6) else { return }
+            rows.append(.init(
+                placement: placement, path: path, size: sqlite3_column_int64(stmt, 2),
+                modifiedAt: Date(timeIntervalSince1970: sqlite3_column_double(stmt, 3)),
+                stableID: self.columnText(stmt, 4), etag: self.columnText(stmt, 5),
+                fingerprint: fingerprint, contentType: self.columnText(stmt, 7),
+                width: self.columnOptInt(stmt, 8), height: self.columnOptInt(stmt, 9),
+                rank: Int(sqlite3_column_int64(stmt, 10)),
+                scanGenerationBound: sqlite3_column_int64(stmt, 11) != 0,
+                lastScan: sqlite3_column_int64(stmt, 12)
+            ))
+        }
+        let byPlacement = Dictionary(grouping: rows, by: \.placement)
+        var detailOrder: [ShareArtworkRankedCandidate]?
+        if let home = byPlacement[.homeHero], let detail = byPlacement[.detailBackdrop] {
+            let homeRanked = ShareArtworkRankingPolicy.ordered(home.map {
+                ShareArtworkRankedCandidate(relPath: $0.path, rank: $0.rank)
+            }, placement: .homeHero)
+            let detailRanked = ShareArtworkRankingPolicy.distinctDetail(
+                home: homeRanked,
+                detail: ShareArtworkRankingPolicy.ordered(detail.map {
+                    ShareArtworkRankedCandidate(relPath: $0.path, rank: $0.rank)
+                }, placement: .detailBackdrop)
+            )
+            detailOrder = detailRanked
+        }
+        let fields = byPlacement.keys.sorted { $0.rawValue < $1.rawValue }.compactMap { placement -> (String, String, String)? in
+            let ranked = ShareArtworkRankingPolicy.ordered(
+                (byPlacement[placement] ?? []).map {
+                    ShareArtworkRankedCandidate(relPath: $0.path, rank: $0.rank)
+                },
+                placement: placement
+            )
+            let ordered = placement == .detailBackdrop ? (detailOrder ?? ranked) : ranked
+            let references = ordered.compactMap { ranked -> ArtworkReference? in
+                guard let row = (byPlacement[placement] ?? []).first(where: { $0.path == ranked.relPath }),
+                      let identity = artworkIdentity(
+                        stableID: row.stableID, etag: row.etag, modifiedAt: row.modifiedAt
+                      ),
+                      let representation = try? RemoteFileRepresentation(
+                        size: row.size, identity: identity, consistency: .changeDetecting
+                      ),
+                      let reference = try? NetworkArtworkReference(
+                        accountID: context.accountID, credentialRevision: context.credentialRevision,
+                        relativePath: row.path, representation: representation,
+                        sourceRevision: opaqueArtworkRevision(
+                            accountID: context.accountID,
+                            path: row.path,
+                            fingerprint: artworkSourceFingerprint(
+                                fingerprint: row.fingerprint,
+                                scanGenerationBound: row.scanGenerationBound,
+                                lastScan: row.lastScan
+                            )
+                        ),
+                        contentType: row.contentType,
+                        dimensions: dimensions(width: row.width, height: row.height)
+                      ) else { return nil }
+                return .networkFile(reference)
+            }
+            guard !references.isEmpty,
+                  let json = encodeJSON(ArtworkSelection(placement: placement, references: references)) else { return nil }
+            let revisions = references.compactMap { reference -> String? in
+                guard case .networkFile(let network) = reference else { return nil }
+                return network.sourceRevision
+            }.joined(separator: ",")
+            return ("artwork.\(placement.rawValue)", json, opaqueArtworkRevision(
+                accountID: context.accountID, path: itemID, fingerprint: revisions
+            ))
+        }
+        return artworkRepo.replaceSelections(itemID: itemID, fields: fields, now: Date())
+    }
+
+    private func artworkSourceFingerprint(
+        fingerprint: String,
+        scanGenerationBound: Bool,
+        lastScan: Int64
+    ) -> String {
+        scanGenerationBound ? "\(fingerprint)|scan:\(lastScan)" : fingerprint
+    }
+
+    private func artworkIdentity(stableID: String?, etag: String?, modifiedAt: Date) -> RemoteFileIdentity? {
+        if let etag, let identity = try? RemoteFileIdentity(kind: .strongETag, value: etag) { return identity }
+        if let stableID, let identity = try? RemoteFileIdentity(kind: .fileIdentifier, value: stableID) { return identity }
+        return try? RemoteFileIdentity(kind: .modificationTime, modifiedAt: modifiedAt)
+    }
+
+    private func dimensions(width: Int?, height: Int?) -> ArtworkDimensions? {
+        guard let width, let height else { return nil }
+        return try? ArtworkDimensions(width: width, height: height)
+    }
+
+    private func opaqueArtworkRevision(accountID: String, path: String, fingerprint: String) -> String {
+        var hash: UInt64 = 0xcbf29ce484222325
+        for byte in "\(accountID)|\(path)|\(fingerprint)|artwork-v1".utf8 {
+            hash = (hash ^ UInt64(byte)) &* 0x100000001b3
+        }
+        return "la-\(String(hash, radix: 16))"
     }
 
     // MARK: - Local NFO / explicit-id sidecar inventory (Step 3)
@@ -593,6 +1132,11 @@ actor ShareCatalogStore {
               WHERE f.rel_path = local_metadata_file_values.rel_path
             );
             """), failurePoint != .afterSidecarCleanup else { return rollback() }
+
+        // Local artwork is a separate source lane. Its inventory and associations
+        // obey the same clean-only delete invariant, but it never touches external
+        // enrichment rows or their retry state.
+        guard finalizeArtworkInTransaction(scanID: scanID) else { return rollback() }
 
         // P5 — Clean only alias/reconciliation rows proven to have no live logical
         // asset; aliases still backing a surviving version/group are preserved.
@@ -1448,6 +1992,9 @@ actor ShareCatalogStore {
                enrichmentSaveFailurePoint == .afterDerivedCatalogMutations {
                 derivedCatalogWritten = false
             }
+        }
+        if derivedCatalogWritten, !pendingMergedSeriesLocalRepairs.isEmpty {
+            derivedCatalogWritten = reassociateAllArtworkInTransaction()
         }
         let ok = derivedCatalogWritten && exec("COMMIT;")
         if ok {

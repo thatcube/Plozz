@@ -139,7 +139,7 @@ private struct SeriesRecededLogo: View {
     var body: some View {
         let revealed = recedeModel.isReceded
         HeroLogoArtwork(
-            primaryURL: series.logoURL,
+            references: series.artworkReferences(for: .logo),
             asyncFallbackURL: logoFallback,
             backgroundSample: backgroundSample,
             maxWidth: 620,

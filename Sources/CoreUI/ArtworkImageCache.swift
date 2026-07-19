@@ -19,17 +19,63 @@ import CoreModels
 public final class ArtworkImageCache: NSObject, @unchecked Sendable {
     public static let shared = ArtworkImageCache()
 
+    private enum Source: Hashable {
+        case url(URL)
+        case network(NetworkArtworkReference)
+    }
+
     private struct CacheKey: Hashable {
-        let url: URL
+        let source: Source
         let variant: ArtworkImageVariant
 
+        init(url: URL, variant: ArtworkImageVariant) {
+            self.source = .url(url)
+            self.variant = variant
+        }
+
+        init(reference: NetworkArtworkReference, variant: ArtworkImageVariant) {
+            self.source = .network(reference)
+            self.variant = variant
+        }
+
         var cacheKey: NSString {
-            variant.cacheKey(for: url) as NSString
+            switch source {
+            case let .url(url):
+                return variant.cacheKey(for: url) as NSString
+            case let .network(reference):
+                // This decoded-memory key contains no transport path. Source
+                // revision changes naturally invalidate the image.
+                return "\(variant.rawValue)|network|\(reference.accountID)|\(reference.credentialRevision.rawValue.uuidString)|\(reference.sourceRevision)" as NSString
+            }
+        }
+
+    }
+
+    private struct NetworkRevisionScope: Hashable {
+        let accountID: String
+        let credentialRevision: CredentialRevision
+    }
+
+    private struct NetworkInvalidationToken: Equatable {
+        let accountGeneration: UInt64
+        let revisionGeneration: UInt64
+    }
+
+    private final class CachedImageEntry: NSObject {
+        let image: UIImage
+        let key: CacheKey
+        let cost: Int
+
+        init(image: UIImage, key: CacheKey, cost: Int) {
+            self.image = image
+            self.key = key
+            self.cost = cost
         }
     }
 
-    private let cache = NSCache<NSString, UIImage>()
+    private let cache = NSCache<NSString, CachedImageEntry>()
     private let lock = NSLock()
+    private let decodedIndexLock = NSLock()
 
     /// Live decoded-cache accounting (diagnostic). Tracks resident image count and
     /// approximate decoded byte cost so the browse memory sampler can separate
@@ -108,6 +154,11 @@ public final class ArtworkImageCache: NSObject, @unchecked Sendable {
         var continuations: [UUID: CheckedContinuation<UIImage?, Never>] = [:]
         var foregroundWaiterCount = 0
         var decodeJob: DecodeJob?
+        let networkInvalidationToken: NetworkInvalidationToken?
+
+        init(networkInvalidationToken: NetworkInvalidationToken?) {
+            self.networkInvalidationToken = networkInvalidationToken
+        }
     }
 
     private struct ImageWaiter: @unchecked Sendable {
@@ -266,6 +317,15 @@ public final class ArtworkImageCache: NSObject, @unchecked Sendable {
     /// In-flight image loads keyed by URL+variant so a card's own load and the
     /// rail's prefetch never decode the same target twice.
     private var inFlight: [CacheKey: ImageLoad] = [:]
+    private var decodedNetworkKeys = Set<CacheKey>()
+    private var accountInvalidationGenerations: [String: UInt64] = [:]
+    private var revisionInvalidationGenerations: [NetworkRevisionScope: UInt64] = [:]
+    private var purgingAccountCounts: [String: Int] = [:]
+    private var purgingRevisionCounts: [NetworkRevisionScope: Int] = [:]
+    private var networkFileService: ArtworkNetworkFileService?
+    private let derivedCache = LocalArtworkDerivedCache()
+    private static let networkForegroundLimiter = ConcurrencyLimiter(limit: 2)
+    private static let networkBackgroundLimiter = ConcurrencyLimiter(limit: 2)
 
     private override init() {
         super.init()
@@ -285,20 +345,84 @@ public final class ArtworkImageCache: NSObject, @unchecked Sendable {
             forName: UIApplication.didReceiveMemoryWarningNotification,
             object: nil,
             queue: nil
-        ) { [weak cache] _ in
-            cache?.removeAllObjects()
+        ) { [weak self] _ in
+            guard let self else { return }
+            self.lock.withLock {
+                self.cache.removeAllObjects()
+                self.decodedIndexLock.withLock {
+                    self.decodedNetworkKeys.removeAll()
+                }
+            }
             // NSCache does NOT call `willEvictObject:` for `removeAllObjects()`
             // (only for automatic cost/pressure eviction), so reset the diagnostic
             // accounting directly here — otherwise the PLZXMEM sampler would stay
             // over-counted after a memory warning.
             Self.noteFlushedAll()
+            Task { [weak self] in
+                guard let self else { return }
+                self.cancelBackgroundPrefetches()
+                await self.derivedCache.trimForMemoryWarning()
+            }
         }
+    }
+
+    /// Configured once at the app composition boundary. `CoreUI` never imports the
+    /// transport implementation or has access to media-share credentials.
+    public func configure(networkFileService: ArtworkNetworkFileService?) {
+        lock.withLock { self.networkFileService = networkFileService }
+    }
+
+    public func setPreferredNetworkArtworkAccounts(_ accounts: Set<String>, revision: UInt64) async {
+        await derivedCache.setPreferredAccounts(accounts, revision: revision)
+    }
+
+    public func purgeNetworkArtwork(accountID: String) async {
+        let tasks = beginNetworkArtworkInvalidation(
+            accountID: accountID,
+            credentialRevision: nil
+        )
+        for task in tasks { await task.value }
+        await derivedCache.purge(accountID: accountID)
+        await HeroLogoPipeline.shared.purgeNetworkArtwork(
+            accountID: accountID,
+            credentialRevision: nil
+        )
+        endNetworkArtworkInvalidation(accountID: accountID, credentialRevision: nil)
+    }
+
+    public func purgeNetworkArtwork(accountID: String, credentialRevision: CredentialRevision) async {
+        let tasks = beginNetworkArtworkInvalidation(
+            accountID: accountID,
+            credentialRevision: credentialRevision
+        )
+        for task in tasks { await task.value }
+        await derivedCache.purge(accountID: accountID, credentialRevision: credentialRevision.rawValue.uuidString)
+        await HeroLogoPipeline.shared.purgeNetworkArtwork(
+            accountID: accountID,
+            credentialRevision: credentialRevision
+        )
+        endNetworkArtworkInvalidation(
+            accountID: accountID,
+            credentialRevision: credentialRevision
+        )
     }
 
     /// The decoded image for `url`+`variant` if one is already resident, read
     /// synchronously.
     public func cachedImage(for url: URL, variant: ArtworkImageVariant = .original) -> UIImage? {
-        cache.object(forKey: CacheKey(url: url, variant: variant).cacheKey)
+        cache.object(forKey: CacheKey(url: url, variant: variant).cacheKey)?.image
+    }
+
+    /// Synchronous decoded-cache lookup for a direct-share reference.
+    public func cachedImage(
+        for reference: ArtworkReference,
+        variant: ArtworkImageVariant = .original
+    ) -> UIImage? {
+        guard case let .networkFile(network) = reference else {
+            if case let .remote(url) = reference { return cachedImage(for: url, variant: variant) }
+            return nil
+        }
+        return cache.object(forKey: CacheKey(reference: network, variant: variant).cacheKey)?.image
     }
 
     /// Returns the decoded image for `url`+`variant`, serving a cached copy
@@ -309,13 +433,40 @@ public final class ArtworkImageCache: NSObject, @unchecked Sendable {
     public func image(for url: URL, variant: ArtworkImageVariant = .original, background: Bool = false) async -> UIImage? {
         if let cached = cachedImage(for: url, variant: variant) { return cached }
         let key = CacheKey(url: url, variant: variant)
-        let waiter = registerWaiter(for: key, background: background)
+        guard let waiter = registerWaiter(for: key, background: background) else { return nil }
         return await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
                 install(continuation, for: waiter)
             }
         } onCancel: {
             unregisterWaiter(waiter)
+        }
+    }
+
+    /// Loads one ordered reference. Remote URLs intentionally keep their existing
+    /// ArtworkSession path; direct-share references use the injected narrow model
+    /// abstraction and report terminal failures for their exact fingerprint.
+    @discardableResult
+    public func image(
+        for reference: ArtworkReference,
+        variant: ArtworkImageVariant = .original,
+        background: Bool = false
+    ) async -> UIImage? {
+        switch reference {
+        case let .remote(url):
+            return await image(for: url, variant: variant, background: background)
+        case let .networkFile(network):
+            guard networkArtworkIsAdmitted(network) else { return nil }
+            if let cached = cache.object(forKey: CacheKey(reference: network, variant: variant).cacheKey)?.image {
+                return cached
+            }
+            let key = CacheKey(reference: network, variant: variant)
+            guard let waiter = registerWaiter(for: key, background: background) else { return nil }
+            return await withTaskCancellationHandler {
+                await withCheckedContinuation { continuation in install(continuation, for: waiter) }
+            } onCancel: {
+                unregisterWaiter(waiter)
+            }
         }
     }
 
@@ -332,9 +483,146 @@ public final class ArtworkImageCache: NSObject, @unchecked Sendable {
         }
     }
 
-    private func registerWaiter(for key: CacheKey, background: Bool) -> ImageWaiter {
+    public func prefetch(_ reference: ArtworkReference, variant: ArtworkImageVariant = .original) {
+        guard cachedImage(for: reference, variant: variant) == nil else { return }
+        Task.detached(priority: .utility) {
+            await ArtworkSession.warmLimiter.run {
+                _ = await ArtworkImageCache.shared.image(for: reference, variant: variant, background: true)
+            }
+        }
+    }
+
+    private func cancelBackgroundPrefetches() {
+        lock.withLock {
+            for load in inFlight.values where load.foregroundWaiterCount == 0 {
+                load.task.cancel()
+                load.decodeJob?.cancel()
+            }
+            inFlight = inFlight.filter { $0.value.foregroundWaiterCount > 0 }
+        }
+    }
+
+    private func beginNetworkArtworkInvalidation(
+        accountID: String,
+        credentialRevision: CredentialRevision?
+    ) -> [Task<Void, Never>] {
+        var decodedKeys: [CacheKey] = []
+        var cancelledLoads: [(CacheKey, ImageLoad)] = []
+        lock.lock()
+        if let credentialRevision {
+            let scope = NetworkRevisionScope(
+                accountID: accountID,
+                credentialRevision: credentialRevision
+            )
+            purgingRevisionCounts[scope, default: 0] += 1
+            revisionInvalidationGenerations[scope, default: 0] &+= 1
+        } else {
+            purgingAccountCounts[accountID, default: 0] += 1
+            accountInvalidationGenerations[accountID, default: 0] &+= 1
+        }
+        decodedKeys = decodedIndexLock.withLock {
+            let matches = decodedNetworkKeys.filter {
+                networkKey($0, matches: accountID, credentialRevision: credentialRevision)
+            }
+            decodedNetworkKeys.subtract(matches)
+            return Array(matches)
+        }
+        cancelledLoads = inFlight.compactMap { key, load in
+            networkKey(key, matches: accountID, credentialRevision: credentialRevision)
+                ? (key, load)
+                : nil
+        }
+        for (key, _) in cancelledLoads {
+            inFlight[key] = nil
+        }
+        lock.unlock()
+
+        for key in decodedKeys {
+            cache.removeObject(forKey: key.cacheKey)
+        }
+        for (key, load) in cancelledLoads {
+            load.task.cancel()
+            load.decodeJob?.cancel()
+            finishLoad(load, for: key, with: nil)
+        }
+        return cancelledLoads.map { $0.1.task }
+    }
+
+    private func endNetworkArtworkInvalidation(
+        accountID: String,
+        credentialRevision: CredentialRevision?
+    ) {
+        lock.withLock {
+            if let credentialRevision {
+                let scope = NetworkRevisionScope(
+                    accountID: accountID,
+                    credentialRevision: credentialRevision
+                )
+                let next = max(0, purgingRevisionCounts[scope, default: 1] - 1)
+                purgingRevisionCounts[scope] = next == 0 ? nil : next
+            } else {
+                let next = max(0, purgingAccountCounts[accountID, default: 1] - 1)
+                purgingAccountCounts[accountID] = next == 0 ? nil : next
+            }
+        }
+    }
+
+    private func networkKey(
+        _ key: CacheKey,
+        matches accountID: String,
+        credentialRevision: CredentialRevision?
+    ) -> Bool {
+        guard case let .network(reference) = key.source,
+              reference.accountID == accountID else { return false }
+        return credentialRevision == nil || reference.credentialRevision == credentialRevision
+    }
+
+    /// Must be called while `lock` is held.
+    private func networkInvalidationToken(for key: CacheKey) -> NetworkInvalidationToken? {
+        guard case let .network(reference) = key.source else { return nil }
+        let scope = NetworkRevisionScope(
+            accountID: reference.accountID,
+            credentialRevision: reference.credentialRevision
+        )
+        return NetworkInvalidationToken(
+            accountGeneration: accountInvalidationGenerations[reference.accountID, default: 0],
+            revisionGeneration: revisionInvalidationGenerations[scope, default: 0]
+        )
+    }
+
+    private func networkLoadIsCurrent(_ load: ImageLoad, for key: CacheKey) -> Bool {
+        lock.withLock {
+            load.networkInvalidationToken == networkInvalidationToken(for: key)
+                && networkArtworkIsAdmittedLocked(for: key)
+        }
+    }
+
+    private func networkArtworkIsAdmitted(_ reference: NetworkArtworkReference) -> Bool {
+        lock.withLock {
+            networkArtworkIsAdmittedLocked(reference)
+        }
+    }
+
+    /// Must be called while `lock` is held.
+    private func networkArtworkIsAdmittedLocked(_ reference: NetworkArtworkReference) -> Bool {
+        let scope = NetworkRevisionScope(
+            accountID: reference.accountID,
+            credentialRevision: reference.credentialRevision
+        )
+        return purgingAccountCounts[reference.accountID, default: 0] == 0
+            && purgingRevisionCounts[scope, default: 0] == 0
+    }
+
+    /// Must be called while `lock` is held.
+    private func networkArtworkIsAdmittedLocked(for key: CacheKey) -> Bool {
+        guard case let .network(reference) = key.source else { return true }
+        return networkArtworkIsAdmittedLocked(reference)
+    }
+
+    private func registerWaiter(for key: CacheKey, background: Bool) -> ImageWaiter? {
         lock.lock()
         defer { lock.unlock() }
+        guard networkArtworkIsAdmittedLocked(for: key) else { return nil }
         let waiterID = UUID()
         if let existing = inFlight[key] {
             if !background {
@@ -344,7 +632,7 @@ public final class ArtworkImageCache: NSObject, @unchecked Sendable {
             existing.waiterIsForeground[waiterID] = !background
             return ImageWaiter(id: waiterID, key: key, load: existing)
         }
-        let load = ImageLoad()
+        let load = ImageLoad(networkInvalidationToken: networkInvalidationToken(for: key))
         load.waiterIsForeground[waiterID] = !background
         load.foregroundWaiterCount = background ? 0 : 1
         // Detached so the download + decode never inherit (and block) the MainActor
@@ -413,17 +701,92 @@ public final class ArtworkImageCache: NSObject, @unchecked Sendable {
 
     private func performLoad(for key: CacheKey, load: ImageLoad) async -> UIImage? {
         if Task.isCancelled { return nil }
-        let requestURL = key.variant.requestURL(for: key.url)
-        guard let data = await Self.downloadData(requestURL), !Task.isCancelled else { return nil }
-        guard let image = await decodeImageOffPool(
+        let data: Data?
+        switch key.source {
+        case let .url(url):
+            data = await Self.downloadData(key.variant.requestURL(for: url))
+        case let .network(reference):
+            data = await networkData(for: reference, variant: key.variant, background: load.foregroundWaiterCount == 0)
+        }
+        guard let data, !Task.isCancelled else { return nil }
+        let image = await decodeImageOffPool(
             from: data,
             variant: key.variant,
             load: load
-        ), !Task.isCancelled else {
+        )
+        guard !Task.isCancelled else { return nil }
+        guard let image else {
+            if case let .network(reference) = key.source {
+                guard networkLoadIsCurrent(load, for: key) else { return nil }
+                let service = lock.withLock { networkFileService }
+                await service?.failureReporter?.reportArtworkFailure(.malformed, for: reference)
+            }
             return nil
         }
-        store(image, for: key)
+        guard store(image, for: key, load: load) else { return nil }
+        if case let .network(reference) = key.source, key.variant.maxPixelSize != nil {
+            await derivedCache.store(
+                image,
+                key: key.cacheKey as String,
+                accountID: reference.accountID,
+                credentialRevision: reference.credentialRevision.rawValue.uuidString,
+                sourceFingerprint: reference.sourceRevision,
+                variant: key.variant
+            )
+            guard networkLoadIsCurrent(load, for: key) else {
+                await derivedCache.purge(
+                    accountID: reference.accountID,
+                    credentialRevision: reference.credentialRevision.rawValue.uuidString
+                )
+                return nil
+            }
+        }
         return image
+    }
+
+    private func networkData(
+        for reference: NetworkArtworkReference,
+        variant: ArtworkImageVariant,
+        background: Bool
+    ) async -> Data? {
+        guard !Task.isCancelled else { return nil }
+        let cacheKey = CacheKey(reference: reference, variant: variant)
+        let service = lock.withLock { networkFileService }
+        guard let service else { return nil }
+        let key = cacheKey.cacheKey as String
+        if let cached = await derivedCache.data(
+            for: key,
+            accountID: reference.accountID,
+            credentialRevision: reference.credentialRevision.rawValue.uuidString,
+            sourceFingerprint: reference.sourceRevision,
+            markUsed: !background
+        ) {
+            return cached
+        }
+        let limiter = background ? Self.networkBackgroundLimiter : Self.networkForegroundLimiter
+        do {
+            let data = try await limiter.run {
+                try await service.loader.loadArtwork(reference, maximumBytes: 32 * 1024 * 1024)
+            }
+            guard !data.isEmpty else {
+                await service.failureReporter?.reportArtworkFailure(.empty, for: reference)
+                return nil
+            }
+            if let failure = Self.stillImageFailure(data) {
+                await service.failureReporter?.reportArtworkFailure(failure, for: reference)
+                return nil
+            }
+            return data
+        } catch is CancellationError {
+            await service.failureReporter?.reportArtworkFailure(.cancelled, for: reference)
+            return nil
+        } catch let error as ArtworkNetworkFileLoadError {
+            await service.failureReporter?.reportArtworkFailure(error.failure, for: reference)
+            return nil
+        } catch {
+            await service.failureReporter?.reportArtworkFailure(.unavailable, for: reference)
+            return nil
+        }
     }
 
     private func finishLoad(_ load: ImageLoad, for key: CacheKey, with image: UIImage?) {
@@ -445,11 +808,30 @@ public final class ArtworkImageCache: NSObject, @unchecked Sendable {
         }
     }
 
-    private func store(_ image: UIImage, for key: CacheKey) {
+    @discardableResult
+    private func store(_ image: UIImage, for key: CacheKey, load: ImageLoad) -> Bool {
         let scale = image.scale
         let cost = max(Int(image.size.width * scale * image.size.height * scale * 4), 1)
-        cache.setObject(image, forKey: key.cacheKey, cost: cost)
+        lock.lock()
+        if case .network = key.source,
+           (load.networkInvalidationToken != networkInvalidationToken(for: key)
+                || !networkArtworkIsAdmittedLocked(for: key)) {
+            lock.unlock()
+            return false
+        }
+        if case .network = key.source {
+            decodedIndexLock.withLock {
+                decodedNetworkKeys.insert(key)
+            }
+        }
+        cache.setObject(
+            CachedImageEntry(image: image, key: key, cost: cost),
+            forKey: key.cacheKey,
+            cost: cost
+        )
+        lock.unlock()
         Self.noteStored(cost: cost)
+        return true
     }
 
     private static func downloadData(_ url: URL) async -> Data? {
@@ -503,16 +885,42 @@ public final class ArtworkImageCache: NSObject, @unchecked Sendable {
     }
 
     private static func decodeImage(from data: Data, variant: ArtworkImageVariant) -> UIImage? {
+        guard validateStillImage(data) else { return nil }
         if let maxPixelSize = variant.maxPixelSize {
             // `kCGImageSourceShouldCacheImmediately` already materializes the
             // thumbnail's pixels. Calling `preparingForDisplay()` again here creates
             // a redundant second prepared image and repeats work on the hot path.
             return downsampledImage(from: data, maxPixelSize: maxPixelSize)
         }
+
         let image = UIImage(data: data)
         guard let image else { return nil }
         // Force-decode now (off the main thread) so the cached image is render-ready.
         return image.preparingForDisplay() ?? image
+    }
+
+    private static func validateStillImage(_ data: Data) -> Bool {
+        stillImageFailure(data) == nil
+    }
+
+    private static func stillImageFailure(_ data: Data) -> ArtworkNetworkFileFailure? {
+        guard !data.isEmpty else { return .empty }
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              CGImageSourceGetCount(source) == 1,
+              let type = CGImageSourceGetType(source) as String?
+        else { return .malformed }
+        guard ["public.jpeg", "public.png", "org.webmproject.webp"].contains(type) else {
+            return .unsupported
+        }
+        guard let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let width = properties[kCGImagePropertyPixelWidth] as? Int,
+              let height = properties[kCGImagePropertyPixelHeight] as? Int,
+              width > 0, height > 0
+        else { return .malformed }
+        guard width <= 16_384, height <= 16_384, width <= 64_000_000 / height else {
+            return .unsafeDimensions
+        }
+        return nil
     }
 
     private static func downsampledImage(from data: Data, maxPixelSize: Int) -> UIImage? {
@@ -554,10 +962,13 @@ extension ArtworkImageCache: NSCacheDelegate {
     /// for `removeAllObjects()` — the memory-warning flush resets the counters
     /// itself via `noteFlushedAll()`.
     public func cache(_ cache: NSCache<AnyObject, AnyObject>, willEvictObject obj: Any) {
-        guard let image = obj as? UIImage else { return }
-        let scale = image.scale
-        let cost = max(Int(image.size.width * scale * image.size.height * scale * 4), 1)
-        Self.noteEvicted(cost: cost)
+        guard let entry = obj as? CachedImageEntry else { return }
+        if case .network = entry.key.source {
+            decodedIndexLock.withLock {
+                decodedNetworkKeys.remove(entry.key)
+            }
+        }
+        Self.noteEvicted(cost: entry.cost)
     }
 }
 #endif

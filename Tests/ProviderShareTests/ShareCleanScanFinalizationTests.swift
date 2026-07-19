@@ -405,7 +405,7 @@ final class ShareCleanScanFinalizationTests: XCTestCase {
             XCTAssertEqual(before, after, "rollback at \(point) must restore the complete pre-finalize state")
             XCTAssertEqual(try metadataRowCount(fixture, itemID: goneID), goneMetaBefore,
                            "the deleted item's metadata is intact after rollback at \(point)")
-            XCTAssertEqual(try fixture.integer("SELECT user_version FROM pragma_user_version;"), 2)
+            XCTAssertEqual(try fixture.integer("SELECT user_version FROM pragma_user_version;"), 3)
             XCTAssertEqual(try fixture.text("PRAGMA integrity_check;"), "ok")
         }
     }
@@ -454,7 +454,7 @@ final class ShareCleanScanFinalizationTests: XCTestCase {
         await store.upsert([movieAsset("Movies/B/B.mkv", title: "B", year: 2001)], scanID: 2)
         await finalizeExpectingSuccess(store, inScan: 2)
 
-        XCTAssertEqual(try fixture.integer("SELECT user_version FROM pragma_user_version;"), 2)
+        XCTAssertEqual(try fixture.integer("SELECT user_version FROM pragma_user_version;"), 3)
         XCTAssertEqual(try fixture.text("PRAGMA integrity_check;"), "ok")
         XCTAssertEqual(try fixture.integer("SELECT COUNT(*) FROM pragma_foreign_key_check;"), 0)
     }

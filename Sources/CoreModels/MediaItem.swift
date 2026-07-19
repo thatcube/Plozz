@@ -179,6 +179,9 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
     public var providerIDs: [String: String]
     /// Field-level origin and optional attribution URL for metadata values.
     public var metadataProvenance: MetadataProvenance
+    /// Presentation-aware artwork references. Direct-share local artwork lives here
+    /// while the legacy URL fields remain intact as remote fallback.
+    public var artworkSelections: [ArtworkSelection]
 
     /// Library-availability of this title as reported by a discovery backend
     /// (Seerr/Overseerr's `mediaInfo.status`). `nil` for ordinary library items
@@ -335,6 +338,7 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         ratings: [ExternalRating] = [],
         providerIDs: [String: String] = [:],
         metadataProvenance: MetadataProvenance = MetadataProvenance(),
+        artworkSelections: [ArtworkSelection] = [],
         availability: MediaAvailabilityStatus? = nil,
         downloadProgress: Double? = nil,
         mediaInfo: MediaSourceMetadata? = nil,
@@ -380,6 +384,7 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         self.ratings = ratings
         self.providerIDs = providerIDs
         self.metadataProvenance = metadataProvenance
+        self.artworkSelections = artworkSelections
         self.availability = availability
         self.downloadProgress = downloadProgress
         self.mediaInfo = mediaInfo
@@ -405,7 +410,8 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         case productionYear, officialRating, genres, people, studios, tags, taglines
         case seriesID, seasonID, runtime, resumePosition, playedPercentage, isPlayed, hasBeenPlayed
         case posterURL, seriesPosterURL, backdropURL, heroBackdropURL
-        case fallbackArtworkURL, logoURL, ratings, providerIDs, metadataProvenance, mediaInfo
+        case fallbackArtworkURL, logoURL, ratings, providerIDs, metadataProvenance
+        case artworkSelections, mediaInfo
         case availability
         case downloadProgress
         case sourceAccountID, additionalSourceAccountIDs, versions, isFavorite
@@ -451,6 +457,10 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
             MetadataProvenance.self,
             forKey: .metadataProvenance
         )) ?? MetadataProvenance()
+        artworkSelections = (try? container.decodeIfPresent(
+            [ArtworkSelection].self,
+            forKey: .artworkSelections
+        )) ?? []
         availability = try container.decodeIfPresent(MediaAvailabilityStatus.self, forKey: .availability)
         downloadProgress = try container.decodeIfPresent(Double.self, forKey: .downloadProgress)
         mediaInfo = try container.decodeIfPresent(MediaSourceMetadata.self, forKey: .mediaInfo)
@@ -464,6 +474,38 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         selectedVersionID = nil
         selectedSourceAccountID = nil
         explicitSourceSelection = false
+    }
+
+    /// Ordered explicit candidates followed by source-compatible legacy URL
+    /// fallbacks for the requested presentation role.
+    public func artworkReferences(for placement: ArtworkPlacement) -> [ArtworkReference] {
+        var references = artworkSelections
+            .first(where: { $0.placement == placement })?
+            .references ?? []
+        references.append(contentsOf: legacyArtworkURLs(for: placement).map(ArtworkReference.remote))
+        var seen = Set<ArtworkReference>()
+        return references.filter { seen.insert($0).inserted }
+    }
+
+    private func legacyArtworkURLs(for placement: ArtworkPlacement) -> [URL] {
+        switch placement {
+        case .homeHero, .detailBackdrop:
+            return [heroBackdropURL, backdropURL, fallbackArtworkURL].compactMap { $0 }
+        case .poster:
+            return [posterURL, fallbackArtworkURL].compactMap { $0 }
+        case .seriesPoster:
+            return [seriesPosterURL, posterURL, fallbackArtworkURL].compactMap { $0 }
+        case .logo:
+            return [logoURL].compactMap { $0 }
+        case .episodeThumbnail:
+            return [posterURL, backdropURL].compactMap { $0 }
+        case .seasonPoster:
+            return [posterURL, seriesPosterURL].compactMap { $0 }
+        case .seasonBanner, .banner:
+            return []
+        default:
+            return []
+        }
     }
 
     /// Returns a copy of this item tagged as belonging to `accountID`, used by the

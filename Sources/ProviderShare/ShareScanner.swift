@@ -289,6 +289,13 @@ actor ShareScanner {
                             scanGeneration: scanGeneration
                         )
                     }
+                    if !result.artwork.isEmpty {
+                        await store.upsertArtwork(
+                            result.artwork,
+                            scanID: scanID,
+                            scanGeneration: scanGeneration
+                        )
+                    }
                     let now = progressClock.now
                     if dirsWalked == 1
                         || lastProgressReport.duration(to: now) >= .milliseconds(250) {
@@ -426,6 +433,7 @@ actor ShareScanner {
         let subdirs: [String]
         let assets: [CatalogAsset]
         let sidecars: [LocalSidecarCandidate]
+        let artwork: [LocalArtworkCandidate]
         let ok: Bool
         /// Set only when `ok == false`: a bounded, PATH-FREE classification of the
         /// listing failure for aggregate diagnostics (never the directory, basename,
@@ -448,7 +456,7 @@ actor ShareScanner {
             // error's localized description (either can embed a share path). Classify
             // the failure into a bounded category; the caller aggregates counts.
             return DirResult(
-                lister: lister, subdirs: [], assets: [], sidecars: [], ok: false,
+                lister: lister, subdirs: [], assets: [], sidecars: [], artwork: [], ok: false,
                 failureCategory: ShareScanListFailureCategory(error)
             )
         }
@@ -510,7 +518,13 @@ actor ShareScanner {
             ))
         }
 
-        return DirResult(lister: lister, subdirs: subdirs, assets: assets, sidecars: sidecars, ok: true)
+        // This is deliberately computed only from the directory listing. No stat,
+        // readSmallFile, source lease, ImageIO, or metadata work is admitted here.
+        let artwork = ShareArtworkInventoryPolicy.candidates(entries: entries, parentDir: dir)
+        return DirResult(
+            lister: lister, subdirs: subdirs, assets: assets, sidecars: sidecars,
+            artwork: artwork, ok: true
+        )
     }
 
     /// A supported NFO sidecar filename (any casing).

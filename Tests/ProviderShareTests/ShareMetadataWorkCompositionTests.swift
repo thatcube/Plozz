@@ -72,16 +72,32 @@ final class ShareMetadataWorkCompositionTests: XCTestCase {
         }
     }
 
+    private actor FakeArtwork: ShareLocalArtworkProbing {
+        private(set) var sliceCalls = 0
+        private let result: ShareEnrichmentSliceResult
+
+        init(result: ShareEnrichmentSliceResult = .init(attempted: 0, hasMore: false)) {
+            self.result = result
+        }
+
+        func resolvePendingSlice(maxItems: Int, maxDuration: Duration) async -> ShareEnrichmentSliceResult {
+            sliceCalls += 1
+            return result
+        }
+    }
+
     // MARK: - runSlice
 
     func testRunSliceRunsExternalWhenNotCancelled() async {
         let local = FakeLocal(sliceResult: .init(attempted: 2, hasMore: false))
+        let artwork = FakeArtwork()
         let external = FakeExternal()
         let result = await ShareMetadataWorkComposition.runSlice(
             accountKey: "a",
             maxItems: 10,
             maxDuration: .seconds(1),
             local: local,
+            artwork: artwork,
             external: external,
             isCancelled: { false }
         )
@@ -94,12 +110,14 @@ final class ShareMetadataWorkCompositionTests: XCTestCase {
 
     func testRunSliceSkipsExternalWhenCancelledAfterLocal() async {
         let local = FakeLocal(sliceResult: .init(attempted: 2, hasMore: false))
+        let artwork = FakeArtwork()
         let external = FakeExternal()
         let result = await ShareMetadataWorkComposition.runSlice(
             accountKey: "a",
             maxItems: 10,
             maxDuration: .seconds(1),
             local: local,
+            artwork: artwork,
             external: external,
             isCancelled: { true }
         )
@@ -112,18 +130,21 @@ final class ShareMetadataWorkCompositionTests: XCTestCase {
     }
 
     func testRunSliceBeforeResolveSkipsLocalOnCancellation() async {
-        // isCancelled is false at the post-local gate (call 1) but true when
-        // beforeResolve fires (call 2), proving the per-item boundary is fenced too.
+        // isCancelled is false at the post-NFO and post-artwork gates (calls 1–2)
+        // but true when beforeResolve fires (call 3), proving the per-item boundary
+        // is fenced too.
         let flag = LockedFlag()
         let local = FakeLocal()
+        let artwork = FakeArtwork()
         let external = FakeExternal(invokeBeforeResolve: true)
         _ = await ShareMetadataWorkComposition.runSlice(
             accountKey: "a",
             maxItems: 10,
             maxDuration: .seconds(1),
             local: local,
+            artwork: artwork,
             external: external,
-            isCancelled: { flag.trueFrom(2) }
+            isCancelled: { flag.trueFrom(3) }
         )
         let externalSlices = await external.sliceCalls
         let beforeResults = await external.beforeResolveResults
@@ -131,6 +152,25 @@ final class ShareMetadataWorkCompositionTests: XCTestCase {
         XCTAssertEqual(externalSlices, 1, "the external pass started before the cancellation")
         XCTAssertEqual(beforeResults, [false], "beforeResolve short-circuits to false on cancellation")
         XCTAssertEqual(resolveOneCalls, 0, "a cancelled beforeResolve must not call local resolveOne")
+    }
+
+    func testLocalArtworkAndNFOShareTheSchedulerItemBudget() async {
+        let local = FakeLocal(sliceResult: .init(attempted: 6, hasMore: false))
+        let artwork = FakeArtwork(result: .init(attempted: 4, hasMore: false))
+        let external = FakeExternal()
+        let result = await ShareMetadataWorkComposition.runSlice(
+            accountKey: "a",
+            maxItems: 10,
+            maxDuration: .seconds(1),
+            local: local,
+            artwork: artwork,
+            external: external,
+            isCancelled: { false }
+        )
+        XCTAssertEqual(result.attempted, 10)
+        XCTAssertTrue(result.hasMore, "external work must remain scheduled when local artwork exhausts the shared slice")
+        let externalSlices = await external.sliceCalls
+        XCTAssertEqual(externalSlices, 0)
     }
 
     // MARK: - runItem

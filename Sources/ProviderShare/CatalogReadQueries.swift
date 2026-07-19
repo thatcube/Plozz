@@ -884,16 +884,61 @@ struct CatalogReadQueries {
     /// only ever targets the series-level id). `sourceURL` is always nil for
     /// these sources — the local-provenance-privacy invariant.
     private func withLocalOverlay(_ items: [MediaItem]) -> [MediaItem] {
-        guard normalizedMetadataReady, hasAnyLocalMetadata() else { return items }
+        guard normalizedMetadataReady, hasAnyLocalMetadata() else { return withLocalArtwork(items) }
         let keyed = items.map { item in (item, localMetadataKey(for: item)) }
         let itemIDs = Array(Set(keyed.compactMap { $0.1 })).sorted()
-        guard !itemIDs.isEmpty else { return items }
+        guard !itemIDs.isEmpty else { return withLocalArtwork(items) }
         let rows = localMetadataRows(itemIDs: itemIDs)
-        guard !rows.isEmpty else { return items }
-        return keyed.map { item, key in
+        guard !rows.isEmpty else { return withLocalArtwork(items) }
+        return withLocalArtwork(keyed.map { item, key in
             guard let key, let fields = rows[key], !fields.isEmpty else { return item }
             return ShareCatalogReadProjection.applyLocalMetadata(item, fields)
+        })
+    }
+
+    private func withLocalArtwork(_ items: [MediaItem]) -> [MediaItem] {
+        guard normalizedMetadataReady, !items.isEmpty else { return items }
+        let keys = Array(Set(items.flatMap { item -> [String] in
+            var keys = localArtworkKey(for: item).map { [$0] } ?? []
+            if item.kind == .episode, let seriesID = item.seriesID {
+                keys.append(seriesID)
+            }
+            return keys
+        })).sorted()
+        guard !keys.isEmpty else { return items }
+        let placeholders = Array(repeating: "?", count: keys.count).joined(separator: ",")
+        var selections: [String: [ArtworkSelection]] = [:]
+        query("""
+        SELECT item_id,value_json FROM metadata_values
+        WHERE source='localArtwork' AND field LIKE 'artwork.%' AND item_id IN (\(placeholders))
+        ORDER BY item_id,field;
+        """, bind: { statement in
+            for (offset, key) in keys.enumerated() { self.bindText(statement, Int32(offset + 1), key) }
+        }) { statement in
+            guard let itemID = self.columnText(statement, 0),
+                  let json = self.columnText(statement, 1),
+                  let selection = CatalogJSON.decode(ArtworkSelection.self, json) else { return }
+            selections[itemID, default: []].append(selection)
         }
+        return items.map { item in
+            var values = localArtworkKey(for: item).flatMap { selections[$0] } ?? []
+            if item.kind == .episode,
+               let seriesID = item.seriesID,
+               let seriesPoster = selections[seriesID]?.first(where: { $0.placement == .poster }) {
+                values.append(
+                    ArtworkSelection(
+                        placement: .seriesPoster,
+                        references: seriesPoster.references
+                    )
+                )
+            }
+            guard !values.isEmpty else { return item }
+            return ShareCatalogReadProjection.applyLocalArtwork(item, values)
+        }
+    }
+
+    private func localArtworkKey(for item: MediaItem) -> String? {
+        item.kind == .movie ? movieEnrichmentKey(forID: item.id) : item.id
     }
 
     /// Cheap, cached "does this catalog have ANY local metadata at all" check —

@@ -54,6 +54,7 @@ final class ShareCatalogRuntime {
     var scannerRevision: CredentialRevision?
     var enricher: ShareEnricher?
     var localEnricher: ShareLocalMetadataEnricher?
+    var artworkProbeWorker: ShareLocalArtworkProbeWorker?
 
     // MARK: Scan-task bookkeeping
 

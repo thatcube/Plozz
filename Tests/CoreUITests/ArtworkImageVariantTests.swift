@@ -1,4 +1,5 @@
 import XCTest
+import CoreModels
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -103,6 +104,111 @@ final class ArtworkImageVariantTests: XCTestCase {
     }
 
     #if canImport(UIKit)
+    private struct ImmediateArtworkLoader: ArtworkNetworkFileLoading {
+        let data: Data
+
+        func loadArtwork(
+            _ reference: NetworkArtworkReference,
+            maximumBytes: Int
+        ) async throws -> Data {
+            data
+        }
+    }
+
+    private actor BlockingArtworkLoader: ArtworkNetworkFileLoading {
+        let data: Data
+        private var started = false
+        private var released = false
+        private var startWaiters: [CheckedContinuation<Void, Never>] = []
+        private var releaseWaiters: [CheckedContinuation<Void, Never>] = []
+
+        init(data: Data) {
+            self.data = data
+        }
+
+        func loadArtwork(
+            _ reference: NetworkArtworkReference,
+            maximumBytes: Int
+        ) async throws -> Data {
+            started = true
+            startWaiters.forEach { $0.resume() }
+            startWaiters.removeAll()
+            if !released {
+                await withCheckedContinuation { releaseWaiters.append($0) }
+            }
+            return data
+        }
+
+        func waitUntilStarted() async {
+            guard !started else { return }
+            await withCheckedContinuation { startWaiters.append($0) }
+        }
+
+        func release() {
+            released = true
+            releaseWaiters.forEach { $0.resume() }
+            releaseWaiters.removeAll()
+        }
+    }
+
+    private actor CountingArtworkLoader: ArtworkNetworkFileLoading {
+        let data: Data
+        private(set) var loadCount = 0
+
+        init(data: Data) {
+            self.data = data
+        }
+
+        func loadArtwork(
+            _ reference: NetworkArtworkReference,
+            maximumBytes: Int
+        ) async throws -> Data {
+            loadCount += 1
+            return data
+        }
+    }
+
+    private func networkReference(
+        accountID: String = "art-cache-account",
+        revision: CredentialRevision = CredentialRevision(),
+        sourceRevision: String = UUID().uuidString
+    ) throws -> NetworkArtworkReference {
+        try NetworkArtworkReference(
+            accountID: accountID,
+            credentialRevision: revision,
+            relativePath: "Private/poster.jpg",
+            representation: RemoteFileRepresentation(
+                size: 1_024,
+                identity: RemoteFileIdentity(kind: .modificationTime, modifiedAt: .distantPast),
+                consistency: .changeDetecting
+            ),
+            sourceRevision: sourceRevision
+        )
+    }
+
+    private func jpegFixture() throws -> Data {
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 32, height: 32)).image {
+            UIColor.red.setFill()
+            $0.fill(CGRect(x: 0, y: 0, width: 32, height: 32))
+        }
+        return try XCTUnwrap(image.jpegData(compressionQuality: 0.9))
+    }
+
+    private func transparentLogoFixture() throws -> Data {
+        let format = UIGraphicsImageRendererFormat()
+        format.opaque = false
+        let image = UIGraphicsImageRenderer(
+            size: CGSize(width: 64, height: 32),
+            format: format
+        ).image {
+            UIColor.clear.setFill()
+            $0.fill(CGRect(x: 0, y: 0, width: 64, height: 32))
+            UIColor.white.setFill()
+            $0.fill(CGRect(x: 8, y: 8, width: 48, height: 16))
+        }
+        return try XCTUnwrap(image.pngData())
+    }
+
     func testSharedDownsamplerBoundsLongestEdge() throws {
         let source = UIGraphicsImageRenderer(size: CGSize(width: 1_600, height: 900)).image {
             UIColor.red.setFill()
@@ -113,6 +219,84 @@ final class ArtworkImageVariantTests: XCTestCase {
 
         XCTAssertEqual(max(downsampled.size.width, downsampled.size.height), 768, accuracy: 1)
         XCTAssertEqual(downsampled.size.width / downsampled.size.height, 16.0 / 9.0, accuracy: 0.01)
+    }
+
+    func testCredentialPurgeRemovesDecodedNetworkArtwork() async throws {
+        let cache = ArtworkImageCache.shared
+        let revision = CredentialRevision()
+        let reference = try networkReference(revision: revision)
+        cache.configure(
+            networkFileService: ArtworkNetworkFileService(
+                loader: ImmediateArtworkLoader(data: try jpegFixture())
+            )
+        )
+        defer { cache.configure(networkFileService: nil) }
+
+        let loaded = await cache.image(for: .networkFile(reference))
+        XCTAssertNotNil(loaded)
+        XCTAssertNotNil(cache.cachedImage(for: .networkFile(reference)))
+
+        await cache.purgeNetworkArtwork(
+            accountID: reference.accountID,
+            credentialRevision: revision
+        )
+
+        XCTAssertNil(cache.cachedImage(for: .networkFile(reference)))
+    }
+
+    func testAccountPurgeFencesLateInFlightNetworkArtworkCompletion() async throws {
+        let cache = ArtworkImageCache.shared
+        let reference = try networkReference()
+        let loader = BlockingArtworkLoader(data: try jpegFixture())
+        cache.configure(networkFileService: ArtworkNetworkFileService(loader: loader))
+        defer { cache.configure(networkFileService: nil) }
+
+        let request = Task {
+            await cache.image(for: .networkFile(reference))
+        }
+        await loader.waitUntilStarted()
+        let purge = Task {
+            await cache.purgeNetworkArtwork(accountID: reference.accountID)
+        }
+        let result = await request.value
+        XCTAssertNil(result)
+        let blockedDuringPurge = await cache.image(for: .networkFile(reference))
+        XCTAssertNil(blockedDuringPurge)
+
+        await loader.release()
+        await purge.value
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertNil(cache.cachedImage(for: .networkFile(reference)))
+    }
+
+    func testCredentialPurgeAlsoEvictsPreparedHeroLogo() async throws {
+        let cache = ArtworkImageCache.shared
+        let revision = CredentialRevision()
+        let reference = try networkReference(
+            revision: revision,
+            sourceRevision: "hero-logo-\(UUID().uuidString)"
+        )
+        let artworkReference = ArtworkReference.networkFile(reference)
+        let loader = CountingArtworkLoader(data: try transparentLogoFixture())
+        cache.configure(networkFileService: ArtworkNetworkFileService(loader: loader))
+        defer { cache.configure(networkFileService: nil) }
+
+        let first = await HeroLogoPipeline.shared.preparedLogo(for: artworkReference)
+        let second = await HeroLogoPipeline.shared.preparedLogo(for: artworkReference)
+        let initialLoads = await loader.loadCount
+        XCTAssertNotNil(first)
+        XCTAssertNotNil(second)
+        XCTAssertEqual(initialLoads, 1)
+
+        await cache.purgeNetworkArtwork(
+            accountID: reference.accountID,
+            credentialRevision: revision
+        )
+
+        let reloaded = await HeroLogoPipeline.shared.preparedLogo(for: artworkReference)
+        let finalLoads = await loader.loadCount
+        XCTAssertNotNil(reloaded)
+        XCTAssertEqual(finalLoads, 2)
     }
     #endif
 }

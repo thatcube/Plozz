@@ -10,6 +10,12 @@ protocol ShareLocalMetadataRunning: Sendable {
     func resolveOne(itemID: String) async -> ShareLocalMetadataOutcome
 }
 
+/// Scheduler-only local artwork inspection. Unlike NFO work this intentionally
+/// has no opened-item fast path, so Home/grid/detail reads never open artwork.
+protocol ShareLocalArtworkProbing: Sendable {
+    func resolvePendingSlice(maxItems: Int, maxDuration: Duration) async -> ShareEnrichmentSliceResult
+}
+
 /// External fill-missing enrichment capability the composition falls through to
 /// with the slice budget remaining after local work.
 ///
@@ -24,6 +30,7 @@ protocol ShareExternalMetadataRunning: Sendable {
 }
 
 extension ShareLocalMetadataEnricher: ShareLocalMetadataRunning {}
+extension ShareLocalArtworkProbeWorker: ShareLocalArtworkProbing {}
 extension ShareEnricher: ShareExternalMetadataRunning {}
 
 /// Composes "local NFO/explicit-id work first, then external fill-missing with the
@@ -46,6 +53,7 @@ enum ShareMetadataWorkComposition {
         maxItems: Int,
         maxDuration: Duration,
         local: some ShareLocalMetadataRunning,
+        artwork: some ShareLocalArtworkProbing,
         external: some ShareExternalMetadataRunning,
         isCancelled: @escaping @Sendable () -> Bool = { Task.isCancelled }
     ) async -> ShareEnrichmentSliceResult {
@@ -65,19 +73,40 @@ enum ShareMetadataWorkComposition {
         BrowseDiagnostics.event(
             "local-slice- \(accountKey) attempted=\(localResult.attempted) more=\(localResult.hasMore)"
         )
-        // Cancellation after local work must not start an external resolver pass.
+        // Local NFO and local artwork share one scheduler-slice item/time budget.
         if isCancelled() {
             return ShareEnrichmentSliceResult(attempted: localResult.attempted, hasMore: true)
         }
         let elapsed = sliceStart.duration(to: clock.now)
         let remaining = maxDuration > elapsed ? maxDuration - elapsed : .zero
-        guard remaining > .zero else {
+        let remainingItems = max(0, maxItems - localResult.attempted)
+        guard remaining > .zero, remainingItems > 0 else {
             return ShareEnrichmentSliceResult(attempted: localResult.attempted, hasMore: true)
+        }
+        let artworkResult = await artwork.resolvePendingSlice(
+            maxItems: remainingItems,
+            maxDuration: remaining
+        )
+        if isCancelled() {
+            return ShareEnrichmentSliceResult(
+                attempted: localResult.attempted + artworkResult.attempted,
+                hasMore: true
+            )
+        }
+        let afterArtwork = sliceStart.duration(to: clock.now)
+        let externalDuration = maxDuration > afterArtwork ? maxDuration - afterArtwork : .zero
+        let externalItems = max(0, remainingItems - artworkResult.attempted)
+        guard externalDuration > .zero, externalItems > 0 else {
+            return ShareEnrichmentSliceResult(
+                attempted: localResult.attempted + artworkResult.attempted,
+                hasMore: true,
+                retryAfter: artworkResult.retryAfter
+            )
         }
         BrowseDiagnostics.event("enrich-slice+ \(accountKey)")
         let result = await external.enrichPendingSlice(
-            maxItems: maxItems,
-            maxDuration: remaining,
+            maxItems: externalItems,
+            maxDuration: externalDuration,
             beforeResolve: { itemID in
                 if isCancelled() { return false }
                 let outcome = await local.resolveOne(itemID: itemID)
@@ -88,9 +117,9 @@ enum ShareMetadataWorkComposition {
             "enrich-slice- \(accountKey) attempted=\(result.attempted) more=\(result.hasMore)"
         )
         return ShareEnrichmentSliceResult(
-            attempted: localResult.attempted + result.attempted,
-            hasMore: localResult.hasMore || result.hasMore,
-            retryAfter: result.retryAfter
+            attempted: localResult.attempted + artworkResult.attempted + result.attempted,
+            hasMore: localResult.hasMore || artworkResult.hasMore || result.hasMore,
+            retryAfter: artworkResult.retryAfter ?? result.retryAfter
         )
     }
 

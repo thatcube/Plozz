@@ -24,10 +24,10 @@ enum ShareMediaParser {
     /// Bumped when the SIDECAR/explicit-id inventory the scanner records changes
     /// shape (new sidecar kinds recognized, new explicit-id namespaces extracted),
     /// so an already-indexed share gets exactly ONE forced re-walk to discover
-    /// existing NFO files / backfill explicit ids — independent of
+    /// existing NFO files, explicit ids, and local artwork — independent of
     /// `classifierVersion` (which governs movie/episode classification) and never
     /// forcing external re-enrichment (see `ShareScanner.scanIfStale`).
-    static let localInventoryVersion = 1
+    static let localInventoryVersion = 2
 
     /// File extensions we treat as playable video.
     static let videoExtensions: Set<String> = [

@@ -98,11 +98,6 @@ public final class MediaShareRuntimeFacet {
                 .map(\.id)
         )
         activeShareAccounts = preferredShareIDs
-        // Step 4 (Metadata): device-wide media-share cache policy hook goes here —
-        // the active-share set is exactly the input a cache-eviction/retention
-        // policy would key off. Intentionally NOT implemented in this facet; its
-        // design is the Metadata team's Step-4 scope, co-designed with them. Do not
-        // fabricate cache-policy state here.
         Task { [runtime] in
             await runtime.setPreferredAccountKeys(
                 preferredShareIDs,

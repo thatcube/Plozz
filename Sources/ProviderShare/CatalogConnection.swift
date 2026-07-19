@@ -28,7 +28,7 @@ final class CatalogConnection {
 
     // MARK: - Open / schema
 
-    /// Idempotently opens the database and migrates its schema to `user_version = 2`
+    /// Idempotently opens the database and migrates its schema to `user_version = 3`
     /// inside one `BEGIN IMMEDIATE` transaction. `legacyMetadataMigration` runs
     /// inside that same transaction at the exact point the original monolithic
     /// `ensureOpen` ran it (after the v1 enrichment schema, before the Step-3 v2
@@ -240,7 +240,59 @@ final class CatalogConnection {
         if !hasColumn(table: "assets", column: "explicit_ids_json") {
             apply("ALTER TABLE assets ADD COLUMN explicit_ids_json TEXT;")
         }
-        apply("PRAGMA user_version=2;")
+        // MARK: Step 4 — local artwork inventory / associations (v3)
+        //
+        // This remains additive: v2 catalog content and external enrichment lanes
+        // are intentionally untouched. Probe state is present for the later bounded
+        // ImageIO worker, but listing-only scans leave every row pending.
+        apply("""
+        CREATE TABLE IF NOT EXISTS local_artwork_files(
+            rel_path TEXT PRIMARY KEY,
+            parent_dir TEXT NOT NULL,
+            basename TEXT NOT NULL,
+            extension TEXT NOT NULL,
+            name_stem TEXT NOT NULL,
+            name_role TEXT,
+            explicit_media_stem TEXT,
+            numbered_alternative INTEGER,
+            language TEXT,
+            season INTEGER,
+            is_specials INTEGER NOT NULL DEFAULT 0,
+            folder_kind TEXT NOT NULL,
+            size INTEGER NOT NULL,
+            modified_at REAL NOT NULL,
+            stable_file_id TEXT,
+            strong_etag TEXT,
+            change_token TEXT,
+            fingerprint TEXT NOT NULL,
+            scan_generation_bound INTEGER NOT NULL DEFAULT 0,
+            last_scan INTEGER NOT NULL,
+            probe_status TEXT NOT NULL DEFAULT 'pending',
+            probe_version INTEGER,
+            processed_fingerprint TEXT,
+            width INTEGER,
+            height INTEGER,
+            content_type TEXT,
+            probe_attempts INTEGER NOT NULL DEFAULT 0,
+            updated_at REAL
+        );
+        """)
+        apply("CREATE INDEX IF NOT EXISTS idx_local_artwork_files_status ON local_artwork_files(probe_status, last_scan);")
+        apply("CREATE INDEX IF NOT EXISTS idx_local_artwork_files_parent ON local_artwork_files(parent_dir);")
+        apply("CREATE INDEX IF NOT EXISTS idx_local_artwork_files_scan ON local_artwork_files(last_scan);")
+        apply("""
+        CREATE TABLE IF NOT EXISTS local_artwork_associations(
+            item_id TEXT NOT NULL,
+            placement TEXT NOT NULL,
+            artwork_rel_path TEXT NOT NULL,
+            rank INTEGER NOT NULL,
+            selected_order INTEGER NOT NULL,
+            PRIMARY KEY(item_id, placement, artwork_rel_path)
+        );
+        """)
+        apply("CREATE INDEX IF NOT EXISTS idx_local_artwork_associations_item ON local_artwork_associations(item_id, placement, selected_order);")
+        apply("CREATE INDEX IF NOT EXISTS idx_local_artwork_associations_path ON local_artwork_associations(artwork_rel_path);")
+        apply("PRAGMA user_version=3;")
         if migrationSucceeded, exec("COMMIT;") {
             return true
         }

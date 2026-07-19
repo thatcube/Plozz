@@ -1,5 +1,6 @@
 #if canImport(SwiftUI)
 import SwiftUI
+import CoreModels
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -63,7 +64,7 @@ public enum HeroLogoPresentationPolicy: Sendable, Equatable {
 /// decoded; arrival-sensitive callers can suppress a late replacement.
 /// Unlike poster art there is no aspect-ratio guard — logos are legitimately wide.
 public struct HeroLogoArtwork<TextFallback: View>: View {
-    private let primaryURL: URL?
+    private let references: [ArtworkReference]
     private let asyncFallbackURL: (@Sendable () async -> URL?)?
     private let backgroundSample: (@Sendable () async -> HeroBackgroundSample?)?
     private let maxWidth: CGFloat
@@ -82,7 +83,30 @@ public struct HeroLogoArtwork<TextFallback: View>: View {
         alignment: Alignment = .leading,
         @ViewBuilder textFallback: @escaping () -> TextFallback
     ) {
-        self.primaryURL = primaryURL
+        self.references = primaryURL.map { [.remote($0)] } ?? []
+        self.asyncFallbackURL = asyncFallbackURL
+        self.backgroundSample = backgroundSample
+        self.maxWidth = maxWidth
+        self.maxHeight = maxHeight
+        self.presentationPolicy = presentationPolicy
+        self.alignment = alignment
+        self.textFallback = textFallback
+    }
+
+    /// Reference-aware logo entry point. URL-only callers keep using the original
+    /// initializer; direct-share logos use the shared decoded cache and ordered
+    /// fallback loader without exposing a transport dependency to SwiftUI.
+    public init(
+        references: [ArtworkReference],
+        asyncFallbackURL: (@Sendable () async -> URL?)? = nil,
+        backgroundSample: (@Sendable () async -> HeroBackgroundSample?)? = nil,
+        maxWidth: CGFloat = 620,
+        maxHeight: CGFloat = 200,
+        presentationPolicy: HeroLogoPresentationPolicy = .whenReady,
+        alignment: Alignment = .leading,
+        @ViewBuilder textFallback: @escaping () -> TextFallback
+    ) {
+        self.references = references
         self.asyncFallbackURL = asyncFallbackURL
         self.backgroundSample = backgroundSample
         self.maxWidth = maxWidth
@@ -95,7 +119,7 @@ public struct HeroLogoArtwork<TextFallback: View>: View {
     public var body: some View {
         #if canImport(UIKit)
         LoadedLogo(
-            primaryURL: primaryURL,
+            references: references,
             asyncFallbackURL: asyncFallbackURL,
             backgroundSample: backgroundSample,
             maxWidth: maxWidth,
@@ -112,7 +136,7 @@ public struct HeroLogoArtwork<TextFallback: View>: View {
 
 #if canImport(UIKit)
 private struct LoadedLogo<TextFallback: View>: View {
-    let primaryURL: URL?
+    let references: [ArtworkReference]
     let asyncFallbackURL: (@Sendable () async -> URL?)?
     let backgroundSample: (@Sendable () async -> HeroBackgroundSample?)?
     let maxWidth: CGFloat
@@ -184,7 +208,8 @@ private struct LoadedLogo<TextFallback: View>: View {
 
     /// Re-run resolution whenever the candidate sources change.
     private var taskKey: String {
-        "\(primaryURL?.absoluteString ?? "")|\(asyncFallbackURL == nil ? "0" : "1")"
+        (references.map(\.privacySafeIdentity) + [asyncFallbackURL == nil ? "0" : "1"])
+            .joined(separator: "|")
     }
 
     private func resolve() async {
@@ -194,7 +219,7 @@ private struct LoadedLogo<TextFallback: View>: View {
         // pixel work off the main actor, so re-appears / scheme changes / fast
         // scrolling reuse the prepared logo instead of reprocessing it.
         guard let prepared = await loadPreparedHeroLogo(
-            primaryURL: primaryURL,
+            references: references,
             asyncFallbackURL: asyncFallbackURL,
             priority: .userInitiated
         ) else { return }
@@ -343,25 +368,35 @@ public enum HeroLogoPreloader {
     public static func warm(primaryURL: URL?) async {
         guard let primaryURL else { return }
         _ = await loadPreparedHeroLogo(
-            primaryURL: primaryURL,
+           references: [.remote(primaryURL)],
             asyncFallbackURL: nil,
             priority: .utility
         )
     }
+
+    public static func warm(references: [ArtworkReference]) async {
+       _ = await loadPreparedHeroLogo(
+           references: references,
+           asyncFallbackURL: nil,
+           priority: .utility
+       )
+    }
 }
 
 private func loadPreparedHeroLogo(
-    primaryURL: URL?,
+    references: [ArtworkReference],
     asyncFallbackURL: (@Sendable () async -> URL?)?,
     priority: TaskPriority
 ) async -> PreparedLogo? {
     guard !Task.isCancelled else { return nil }
-    if let primaryURL,
-       let prepared = await HeroLogoPipeline.shared.preparedLogo(
-           for: primaryURL,
+    for reference in references {
+       guard !Task.isCancelled else { return nil }
+       if let prepared = await HeroLogoPipeline.shared.preparedLogo(
+           for: reference,
            priority: priority
        ) {
-        return prepared
+           return prepared
+       }
     }
     guard !Task.isCancelled,
           let asyncFallbackURL,
@@ -370,7 +405,7 @@ private func loadPreparedHeroLogo(
     else {
         return nil
     }
-    return await HeroLogoPipeline.shared.preparedLogo(for: url, priority: priority)
+    return await HeroLogoPipeline.shared.preparedLogo(for: .remote(url), priority: priority)
 }
 
 /// A logo after background removal/trim, carrying the mean luminance *and* mean
@@ -433,41 +468,101 @@ struct ProcessedLogo {
 ///   * runs the decode + pixel passes on a detached task so the main actor is
 ///     never blocked.
 /// A small LRU bound keeps memory flat across a large library.
-private actor HeroLogoPipeline {
+actor HeroLogoPipeline {
     static let shared = HeroLogoPipeline()
 
-    private var cache: [String: PreparedLogo] = [:]
+    private struct CacheEntry {
+        let logo: PreparedLogo
+        let reference: ArtworkReference
+    }
+
+    private struct NetworkToken: Equatable {
+        let accountGeneration: UInt64
+        let revisionGeneration: UInt64
+    }
+
+    private struct Running {
+        let id: UUID
+        let task: Task<PreparedLogo?, Never>
+        let reference: ArtworkReference
+        let token: NetworkToken?
+    }
+
+    private var cache: [String: CacheEntry] = [:]
     private var order: [String] = []
-    private var inFlight: [String: Task<PreparedLogo?, Never>] = [:]
+    private var inFlight: [String: Running] = [:]
+    private var accountGenerations: [String: UInt64] = [:]
+    private var revisionGenerations: [String: UInt64] = [:]
     private let capacity = 48
 
     func preparedLogo(
-        for url: URL,
+        for reference: ArtworkReference,
         priority: TaskPriority = .userInitiated
     ) async -> PreparedLogo? {
-        let key = url.absoluteString
+        let key = reference.privacySafeIdentity
         if let hit = cache[key] {
             promote(key)
-            return hit
+            return hit.logo
         }
         if let running = inFlight[key] {
-            return await running.value
+            return await running.task.value
         }
+        let token = networkToken(for: reference)
+        let id = UUID()
         let task = Task.detached(priority: priority) {
-            await HeroLogoPipeline.fetchAndPrepare(url)
+            await HeroLogoPipeline.fetchAndPrepare(reference)
         }
-        inFlight[key] = task
+        inFlight[key] = Running(id: id, task: task, reference: reference, token: token)
         let result = await task.value
-        inFlight.removeValue(forKey: key)
+        if inFlight[key]?.id == id {
+            inFlight.removeValue(forKey: key)
+        }
+        guard token == networkToken(for: reference) else { return nil }
         if let result {
-            store(result, key: key)
+            store(result, reference: reference, key: key)
         }
         return result
     }
 
-    private func store(_ value: PreparedLogo, key: String) {
+    func purgeNetworkArtwork(
+        accountID: String,
+        credentialRevision: CredentialRevision?
+    ) async {
+        if let credentialRevision {
+            revisionGenerations[revisionKey(accountID, credentialRevision), default: 0] &+= 1
+        } else {
+            accountGenerations[accountID, default: 0] &+= 1
+        }
+        let cachedKeys = cache.compactMap { key, entry in
+            matches(
+                entry.reference,
+                accountID: accountID,
+                credentialRevision: credentialRevision
+            ) ? key : nil
+        }
+        for key in cachedKeys {
+            cache.removeValue(forKey: key)
+            order.removeAll { $0 == key }
+        }
+        let running = inFlight.compactMap { key, running in
+            matches(
+                running.reference,
+                accountID: accountID,
+                credentialRevision: credentialRevision
+            ) ? (key, running) : nil
+        }
+        for (key, running) in running {
+            inFlight.removeValue(forKey: key)
+            running.task.cancel()
+        }
+        for (_, running) in running {
+            _ = await running.task.value
+        }
+    }
+
+    private func store(_ value: PreparedLogo, reference: ArtworkReference, key: String) {
         if cache[key] == nil { order.append(key) }
-        cache[key] = value
+        cache[key] = CacheEntry(logo: value, reference: reference)
         while order.count > capacity {
             let evicted = order.removeFirst()
             cache.removeValue(forKey: evicted)
@@ -480,14 +575,53 @@ private actor HeroLogoPipeline {
         order.append(key)
     }
 
-    private static func fetchAndPrepare(_ url: URL) async -> PreparedLogo? {
-        guard let (data, response) = try? await ArtworkSession.shared.data(from: url) else {
-            return nil
+    private func networkToken(for reference: ArtworkReference) -> NetworkToken? {
+        guard case let .networkFile(network) = reference else { return nil }
+        return NetworkToken(
+            accountGeneration: accountGenerations[network.accountID, default: 0],
+            revisionGeneration: revisionGenerations[
+                revisionKey(network.accountID, network.credentialRevision),
+                default: 0
+            ]
+        )
+    }
+
+    private func matches(
+        _ reference: ArtworkReference,
+        accountID: String,
+        credentialRevision: CredentialRevision?
+    ) -> Bool {
+        guard case let .networkFile(network) = reference,
+              network.accountID == accountID else { return false }
+        return credentialRevision == nil || network.credentialRevision == credentialRevision
+    }
+
+    private func revisionKey(
+        _ accountID: String,
+        _ credentialRevision: CredentialRevision
+    ) -> String {
+        "\(accountID)|\(credentialRevision.rawValue.uuidString)"
+    }
+
+    private static func fetchAndPrepare(_ reference: ArtworkReference) async -> PreparedLogo? {
+        switch reference {
+        case .remote(let url):
+            guard let (data, response) = try? await ArtworkSession.shared.data(from: url) else {
+                return nil
+            }
+            if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+                return nil
+            }
+            return decodeAndPrepare(data)
+        case .networkFile:
+            guard let image = await ArtworkImageCache.shared.image(
+                for: reference,
+                variant: .heroPreview
+            ) else {
+                return nil
+            }
+            return image.preparedAsHeroLogo()
         }
-        if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
-            return nil
-        }
-        return decodeAndPrepare(data)
     }
 
     /// Downsample the logo to a hero-appropriate size before the halo/contrast
@@ -818,8 +952,20 @@ public enum HeroBackgroundSampler {
         urls: [URL],
         region: CGRect = CGRect(x: 0.0, y: 0.28, width: 0.5, height: 0.40)
     ) async -> HeroBackgroundSample? {
-        for url in urls {
-            if let sample = await Cache.shared.sample(url, region: region) { return sample }
+        await sample(
+            references: urls.map(ArtworkReference.remote),
+            region: region
+        )
+    }
+
+    /// Samples ordered references through the same decoded-art cache used by the
+    /// hero. Network reference keys remain path-free.
+    public static func sample(
+        references: [ArtworkReference],
+        region: CGRect = CGRect(x: 0.0, y: 0.28, width: 0.5, height: 0.40)
+    ) async -> HeroBackgroundSample? {
+        for reference in references {
+            if let sample = await Cache.shared.sample(reference, region: region) { return sample }
         }
         return nil
     }
@@ -839,8 +985,8 @@ public enum HeroBackgroundSampler {
         private var inFlight: [String: Task<HeroBackgroundSample?, Never>] = [:]
         private let capacity = 32
 
-        func sample(_ url: URL, region: CGRect) async -> HeroBackgroundSample? {
-            let key = "\(url.absoluteString)|\(region.minX),\(region.minY),\(region.width),\(region.height)"
+        func sample(_ reference: ArtworkReference, region: CGRect) async -> HeroBackgroundSample? {
+            let key = "\(reference.privacySafeIdentity)|\(region.minX),\(region.minY),\(region.width),\(region.height)"
             if let hit = entries[key] {
                 promote(key)
                 return hit
@@ -849,7 +995,7 @@ public enum HeroBackgroundSampler {
                 return await running.value
             }
             let task = Task.detached(priority: .utility) {
-                await HeroBackgroundSampler.sampleOne(url, region: region)
+                await HeroBackgroundSampler.sampleOne(reference, region: region)
             }
             inFlight[key] = task
             let result = await task.value
@@ -876,8 +1022,8 @@ public enum HeroBackgroundSampler {
         }
     }
 
-    private static func sampleOne(_ url: URL, region: CGRect) async -> HeroBackgroundSample? {
-        guard let image = await ArtworkImageCache.shared.image(for: url, variant: .heroBackdrop),
+    private static func sampleOne(_ reference: ArtworkReference, region: CGRect) async -> HeroBackgroundSample? {
+        guard let image = await ArtworkImageCache.shared.image(for: reference, variant: .heroBackdrop),
               let cg = image.cgImage,
               cg.width > 0,
               cg.height > 0 else {

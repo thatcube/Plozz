@@ -6,6 +6,7 @@ import CoreModels
 struct ShareMetadataPipeline: Sendable {
     let external: ShareEnricher
     let local: ShareLocalMetadataEnricher
+    let artwork: ShareLocalArtworkProbeWorker
 }
 
 /// Constructs a ``ShareMetadataPipeline`` for a share. Injected into the coordinator
@@ -15,6 +16,7 @@ protocol ShareMetadataPipelineFactory: Sendable {
     func makePipeline(
         store: ShareCatalogStore,
         accountKey: String,
+        credentialRevision: CredentialRevision,
         reporter: ShareScanReporter,
         sessionFactory: @escaping ShareTransportSessionFactory
     ) -> ShareMetadataPipeline
@@ -31,17 +33,25 @@ struct DefaultShareMetadataPipelineFactory: ShareMetadataPipelineFactory {
     func makePipeline(
         store: ShareCatalogStore,
         accountKey: String,
+        credentialRevision: CredentialRevision,
         reporter: ShareScanReporter,
         sessionFactory: @escaping ShareTransportSessionFactory
     ) -> ShareMetadataPipeline {
-        ShareMetadataPipeline(
+        let browser = ShareTransportBrowser(role: .metadata, sessionFactory: sessionFactory)
+        return ShareMetadataPipeline(
             external: ShareEnricher(
                 store: store,
                 resolver: makeExternalResolver(),
                 shareID: accountKey,
                 reporter: reporter
             ),
-            local: ShareLocalMetadataEnricher(store: store, sessionFactory: sessionFactory)
+            local: ShareLocalMetadataEnricher(store: store, browser: browser),
+            artwork: ShareLocalArtworkProbeWorker(
+                store: store,
+                browser: browser,
+                accountID: accountKey,
+                credentialRevision: credentialRevision
+            )
         )
     }
 

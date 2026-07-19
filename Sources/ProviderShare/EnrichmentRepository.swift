@@ -95,7 +95,7 @@ struct EnrichmentRepository {
             // to its own source the mirror-opposite way.
             guard sqlite3_prepare_v2(
                 db,
-                "DELETE FROM metadata_values WHERE item_id=? AND source NOT IN ('localNFO','filename');",
+                "DELETE FROM metadata_values WHERE item_id=? AND source NOT IN ('localNFO','filename','localArtwork');",
                 -1,
                 &delete,
                 nil

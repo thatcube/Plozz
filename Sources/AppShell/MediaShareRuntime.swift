@@ -1,5 +1,6 @@
 import Foundation
 import CoreModels
+import CoreUI
 import FeatureAuth
 import MediaTransportCore
 import ProviderShare
@@ -52,15 +53,18 @@ public protocol MediaShareRuntime: Sendable {
 final class DefaultMediaShareRuntime: MediaShareRuntime {
     private let coordinator: ShareCatalogCoordinator
     private let composition: MediaShareTransportComposition
+    private let artworkCacheLifecycle: any ShareLocalArtworkCacheLifecycle
     let networkFileResolver: any MediaTransportNetworkFileResolving
 
     private init(
         coordinator: ShareCatalogCoordinator,
         composition: MediaShareTransportComposition,
+        artworkCacheLifecycle: any ShareLocalArtworkCacheLifecycle,
         networkFileResolver: any MediaTransportNetworkFileResolving
     ) {
         self.coordinator = coordinator
         self.composition = composition
+        self.artworkCacheLifecycle = artworkCacheLifecycle
         self.networkFileResolver = networkFileResolver
     }
 
@@ -69,7 +73,10 @@ final class DefaultMediaShareRuntime: MediaShareRuntime {
     /// comes from that same coordinator and whose session key comes from that
     /// same composition. Nothing outside this method assembles the three pieces.
     static func make(accountStore: any AccountPersisting) -> DefaultMediaShareRuntime {
-        let coordinator = ShareCatalogCoordinator()
+        let artworkCacheLifecycle = MediaShareLocalArtworkCacheLifecycle()
+        let coordinator = ShareCatalogCoordinator(
+            artworkCacheLifecycle: artworkCacheLifecycle
+        )
         let composition = MediaShareTransportComposition.make(accountStore: accountStore)
         let resolver = MediaTransportNetworkFileResolver(
             registry: composition.resolverRegistry,
@@ -91,11 +98,22 @@ final class DefaultMediaShareRuntime: MediaShareRuntime {
                 accountStore: accountStore
             )
         }
-        return DefaultMediaShareRuntime(
+        let runtime = DefaultMediaShareRuntime(
             coordinator: coordinator,
             composition: composition,
+            artworkCacheLifecycle: artworkCacheLifecycle,
             networkFileResolver: resolver
         )
+        // AppShell is the only layer that sees both the transport resolver and
+        // CoreUI. Configure the narrow artwork boundary here; CoreUI never imports
+        // MediaTransportCore and remote URLs remain on ArtworkSession.
+        ArtworkImageCache.shared.configure(
+            networkFileService: ArtworkNetworkFileService(
+                loader: MediaShareArtworkLoader(resolver: resolver),
+                failureReporter: MediaShareArtworkFailureReporter(coordinator: coordinator)
+            )
+        )
+        return runtime
     }
 
     func registerProvider(
@@ -134,6 +152,7 @@ final class DefaultMediaShareRuntime: MediaShareRuntime {
 
     func invalidate(accountKey: String) async {
         await coordinator.invalidate(accountKey: accountKey)
+        await artworkCacheLifecycle.purge(accountID: accountKey)
     }
 
     func retire(accountID: String, credentialRevision: CredentialRevision) async {
@@ -141,9 +160,33 @@ final class DefaultMediaShareRuntime: MediaShareRuntime {
             accountID: accountID,
             credentialRevision: credentialRevision
         )
+        await artworkCacheLifecycle.purge(
+            accountID: accountID,
+            credentialRevision: credentialRevision
+        )
     }
 
     func setPreferredAccountKeys(_ accountKeys: Set<String>, revision: UInt64) async {
         await coordinator.setPreferredAccountKeys(accountKeys, revision: revision)
+    }
+}
+
+private struct MediaShareLocalArtworkCacheLifecycle: ShareLocalArtworkCacheLifecycle {
+    func setPreferredAccountKeys(_ accountKeys: Set<String>, revision: UInt64) async {
+        await ArtworkImageCache.shared.setPreferredNetworkArtworkAccounts(
+            accountKeys,
+            revision: revision
+        )
+    }
+
+    func purge(accountID: String) async {
+        await ArtworkImageCache.shared.purgeNetworkArtwork(accountID: accountID)
+    }
+
+    func purge(accountID: String, credentialRevision: CredentialRevision) async {
+        await ArtworkImageCache.shared.purgeNetworkArtwork(
+            accountID: accountID,
+            credentialRevision: credentialRevision
+        )
     }
 }

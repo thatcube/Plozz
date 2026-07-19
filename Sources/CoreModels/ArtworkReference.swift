@@ -1,0 +1,160 @@
+import Foundation
+
+/// A stable, open identifier for the presentation role of an artwork candidate.
+public struct ArtworkPlacement: RawRepresentable, Codable, Hashable, Sendable {
+    public let rawValue: String
+
+    public init(rawValue: String) {
+        self.rawValue = rawValue
+    }
+
+    public static let homeHero = Self(rawValue: "homeHero")
+    public static let detailBackdrop = Self(rawValue: "detailBackdrop")
+    public static let poster = Self(rawValue: "poster")
+    public static let seriesPoster = Self(rawValue: "seriesPoster")
+    public static let logo = Self(rawValue: "logo")
+    public static let episodeThumbnail = Self(rawValue: "episodeThumbnail")
+    public static let seasonPoster = Self(rawValue: "seasonPoster")
+    public static let seasonBanner = Self(rawValue: "seasonBanner")
+    public static let banner = Self(rawValue: "banner")
+}
+
+public struct ArtworkDimensions: Codable, Hashable, Sendable {
+    public let width: Int
+    public let height: Int
+
+    public init(width: Int, height: Int) throws {
+        guard width > 0, height > 0 else {
+            throw ArtworkReferenceError.invalidDimensions
+        }
+        self.width = width
+        self.height = height
+    }
+
+    public var aspectRatio: Double {
+        Double(width) / Double(height)
+    }
+}
+
+/// Credential-free identity for one artwork file on a media-share account.
+///
+/// The account's credentials remain in the account store. The credential revision
+/// only prevents a reference created under retired credentials from opening a new
+/// transport session.
+public struct NetworkArtworkReference: Codable, Hashable, Sendable {
+    public let accountID: String
+    public let credentialRevision: CredentialRevision
+    public let relativePath: String
+    public let representation: RemoteFileRepresentation
+    public let sourceRevision: String
+    public let contentType: String?
+    public let dimensions: ArtworkDimensions?
+
+    public init(
+        accountID: String,
+        credentialRevision: CredentialRevision,
+        relativePath: String,
+        representation: RemoteFileRepresentation,
+        sourceRevision: String,
+        contentType: String? = nil,
+        dimensions: ArtworkDimensions? = nil
+    ) throws {
+        self.accountID = try ModelIdentifier.validated(accountID, field: "accountID")
+        self.credentialRevision = credentialRevision
+        self.relativePath = try MediaPathPolicy.normalizedRelative(relativePath)
+        let normalizedRevision = sourceRevision.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedRevision.isEmpty else {
+            throw ArtworkReferenceError.invalidSourceRevision
+        }
+        self.representation = representation
+        self.sourceRevision = normalizedRevision
+        let normalizedType = contentType?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        self.contentType = normalizedType?.isEmpty == false ? normalizedType : nil
+        self.dimensions = dimensions
+    }
+
+    public func networkFileLocator() throws -> NetworkFileLocator {
+        try NetworkFileLocator(
+            accountID: accountID,
+            sourceID: accountID,
+            credentialRevision: credentialRevision,
+            relativePath: relativePath,
+            representation: representation,
+            formatHint: MediaFormatHint(
+                container: (relativePath as NSString).pathExtension,
+                mimeType: contentType
+            )
+        )
+    }
+}
+
+public enum ArtworkReference: Codable, Hashable, Sendable {
+    case remote(URL)
+    case networkFile(NetworkArtworkReference)
+
+    private enum CodingKeys: String, CodingKey {
+        case kind
+        case remoteURL
+        case networkFile
+    }
+
+    private enum Kind: String, Codable {
+        case remote
+        case networkFile
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        switch try container.decode(Kind.self, forKey: .kind) {
+        case .remote:
+            self = .remote(try container.decode(URL.self, forKey: .remoteURL))
+        case .networkFile:
+            self = .networkFile(
+                try container.decode(NetworkArtworkReference.self, forKey: .networkFile)
+            )
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .remote(let url):
+            try container.encode(Kind.remote, forKey: .kind)
+            try container.encode(url, forKey: .remoteURL)
+        case .networkFile(let reference):
+            try container.encode(Kind.networkFile, forKey: .kind)
+            try container.encode(reference, forKey: .networkFile)
+        }
+    }
+}
+
+public extension ArtworkReference {
+    /// Stable identity suitable for UI task/cache keys. Network references deliberately
+    /// exclude their relative path so UI diagnostics and identifiers never expose it.
+    var privacySafeIdentity: String {
+        switch self {
+        case .remote(let url):
+            return "remote|\(url.absoluteString)"
+        case .networkFile(let reference):
+            return "network|\(reference.accountID)|\(reference.credentialRevision.rawValue.uuidString)|\(reference.sourceRevision)"
+        }
+    }
+}
+
+/// Ordered candidates for one placement. The first entry is the deterministic
+/// winner; later entries are local fallbacks tried before legacy remote artwork.
+public struct ArtworkSelection: Codable, Hashable, Sendable {
+    public let placement: ArtworkPlacement
+    public let references: [ArtworkReference]
+
+    public init(placement: ArtworkPlacement, references: [ArtworkReference]) {
+        self.placement = placement
+        var seen = Set<ArtworkReference>()
+        self.references = references.filter { seen.insert($0).inserted }
+    }
+}
+
+public enum ArtworkReferenceError: Error, Equatable {
+    case invalidDimensions
+    case invalidSourceRevision
+}

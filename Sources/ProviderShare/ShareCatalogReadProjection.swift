@@ -169,6 +169,34 @@ enum ShareCatalogReadProjection {
         return copy
     }
 
+    /// Local artwork references are credential-free payloads from the catalog. The
+    /// attribution intentionally carries no URL: relative paths never escape into
+    /// portable provenance.
+    static func applyLocalArtwork(
+        _ item: MediaItem,
+        _ selections: [ArtworkSelection]
+    ) -> MediaItem {
+        var copy = item
+        guard !selections.isEmpty else { return copy }
+        var byPlacement = Dictionary(uniqueKeysWithValues: copy.artworkSelections.map { ($0.placement, $0) })
+        for selection in selections where !selection.references.isEmpty {
+            byPlacement[selection.placement] = selection
+            let field: MetadataField
+            switch selection.placement {
+            case .homeHero: field = .homeHero
+            case .detailBackdrop: field = .detailBackdrop
+            case .episodeThumbnail: field = .episodeThumbnail
+            case .poster, .seriesPoster, .seasonPoster: field = .posterURL
+            case .logo: field = .logoURL
+            case .banner, .seasonBanner: continue
+            default: continue
+            }
+            copy.metadataProvenance[field] = MetadataAttribution(source: .localArtwork, sourceURL: nil)
+        }
+        copy.artworkSelections = byPlacement.values.sorted { $0.placement.rawValue < $1.placement.rawValue }
+        return copy
+    }
+
     /// Merge an already-fetched enrichment record onto an item. Extracted from
     /// `withEnrichment` so the JOINed grid queries can reuse the exact same merge.
     static func applyEnrichment(_ item: MediaItem, _ rec: EnrichmentRecord) -> MediaItem {

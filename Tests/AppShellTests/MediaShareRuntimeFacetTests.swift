@@ -143,6 +143,7 @@ final class MediaShareRuntimeFacetTests: XCTestCase {
         // And the observable active set still reflects the final call.
         XCTAssertEqual(facet.activeShareAccounts, ["share-a", "share-b"])
     }
+
 }
 
 // MARK: - Test doubles

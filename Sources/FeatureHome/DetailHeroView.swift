@@ -411,7 +411,7 @@ struct DetailHeroView: View {
             // fallback respects masking, so a show with no logo still hides an
             // unwatched episode's title rather than leaking it.
             HeroLogoArtwork(
-                primaryURL: backdrop.logoURL,
+                references: backdrop.artworkReferences(for: .logo),
                 asyncFallbackURL: tmdbLogoFallback,
                 backgroundSample: heroBackgroundSample,
                 maxHeight: heroLogoHeight
@@ -667,7 +667,7 @@ struct DetailHeroView: View {
         // render an identical backdrop. Hero artwork is never spoiler-blurred;
         // episode spoiler masking remains limited to episode text and cards.
         SeriesDetailHeroBackdrop(
-            urls: [backdrop.heroBackdropURL, backdrop.backdropURL].compactMap { $0 },
+            references: backdrop.artworkReferences(for: .detailBackdrop),
             asyncFallbackURL: tmdbBackdropFallback,
             height: Self.screenHeight * heroHeightFraction,
             scrimTone: scrimTone,
@@ -1283,7 +1283,7 @@ private struct SeriesHeroContentRecedeModifier: ViewModifier {
 }
 
 private struct SeriesDetailHeroBackdrop: View {
-    let urls: [URL]
+    let references: [ArtworkReference]
     let asyncFallbackURL: (@Sendable () async -> URL?)?
     let height: CGFloat
     let scrimTone: Color
@@ -1294,7 +1294,7 @@ private struct SeriesDetailHeroBackdrop: View {
     var body: some View {
         let receded = recedeModel?.isReceded == true
         HeroBackdropLayer(
-            urls: urls,
+            references: references,
             asyncFallbackURL: asyncFallbackURL,
             height: height,
             scrimTone: scrimTone,

@@ -102,6 +102,7 @@ final class PipelineFactorySpy: ShareMetadataPipelineFactory, @unchecked Sendabl
     func makePipeline(
         store: ShareCatalogStore,
         accountKey: String,
+        credentialRevision: CredentialRevision,
         reporter: ShareScanReporter,
         sessionFactory: @escaping ShareTransportSessionFactory
     ) -> ShareMetadataPipeline {
@@ -109,6 +110,7 @@ final class PipelineFactorySpy: ShareMetadataPipelineFactory, @unchecked Sendabl
             makeCountStorage += 1
             identitiesStorage.append(ObjectIdentifier(resolver as AnyObject))
         }
+        let browser = ShareTransportBrowser(role: .metadata, sessionFactory: sessionFactory)
         return ShareMetadataPipeline(
             external: ShareEnricher(
                 store: store,
@@ -116,7 +118,11 @@ final class PipelineFactorySpy: ShareMetadataPipelineFactory, @unchecked Sendabl
                 shareID: accountKey,
                 reporter: reporter
             ),
-            local: ShareLocalMetadataEnricher(store: store, sessionFactory: sessionFactory)
+            local: ShareLocalMetadataEnricher(store: store, browser: browser),
+            artwork: ShareLocalArtworkProbeWorker(
+                store: store, browser: browser, accountID: accountKey,
+                credentialRevision: credentialRevision
+            )
         )
     }
 }
@@ -134,17 +140,23 @@ struct TestPipelineFactory: ShareMetadataPipelineFactory {
     func makePipeline(
         store: ShareCatalogStore,
         accountKey: String,
+        credentialRevision: CredentialRevision,
         reporter: ShareScanReporter,
         sessionFactory: @escaping ShareTransportSessionFactory
     ) -> ShareMetadataPipeline {
-        ShareMetadataPipeline(
+        let browser = ShareTransportBrowser(role: .metadata, sessionFactory: sessionFactory)
+        return ShareMetadataPipeline(
             external: ShareEnricher(
                 store: store,
                 resolver: makeResolver(),
                 shareID: accountKey,
                 reporter: reporter
             ),
-            local: ShareLocalMetadataEnricher(store: store, sessionFactory: sessionFactory)
+            local: ShareLocalMetadataEnricher(store: store, browser: browser),
+            artwork: ShareLocalArtworkProbeWorker(
+                store: store, browser: browser, accountID: accountKey,
+                credentialRevision: credentialRevision
+            )
         )
     }
 }

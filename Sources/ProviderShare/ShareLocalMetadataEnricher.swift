@@ -39,25 +39,21 @@ actor ShareLocalMetadataEnricher {
     static let version = 1
 
     private let store: ShareCatalogStore
-    private let sessionFactory: ShareTransportSessionFactory
-    private var browser: ShareTransportBrowser?
+    private let browser: ShareTransportBrowser
     private var isRunning = false
 
     init(store: ShareCatalogStore, sessionFactory: @escaping ShareTransportSessionFactory) {
         self.store = store
-        self.sessionFactory = sessionFactory
+        self.browser = ShareTransportBrowser(role: .metadata, sessionFactory: sessionFactory)
+    }
+
+    init(store: ShareCatalogStore, browser: ShareTransportBrowser) {
+        self.store = store
+        self.browser = browser
     }
 
     func close() async {
-        await browser?.close()
-        browser = nil
-    }
-
-    private func transportBrowser() -> ShareTransportBrowser {
-        if let browser { return browser }
-        let created = ShareTransportBrowser(role: .metadata, sessionFactory: sessionFactory)
-        browser = created
-        return created
+        await browser.close()
     }
 
     /// Resolves one bounded scheduler slice of pending sidecars. Mirrors
@@ -163,7 +159,7 @@ actor ShareLocalMetadataEnricher {
             if Task.isCancelled { return .cancelled }
             ShareBackgroundActivity.listStarted()
             defer { ShareBackgroundActivity.listFinished() }
-            data = try await transportBrowser().readFile(
+            data = try await browser.readFile(
                 file.relPath, maximumBytes: ShareNFOParser.maxBytes
             )
         } catch {

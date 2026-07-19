@@ -1,4 +1,5 @@
 import Foundation
+import CoreModels
 import MediaTransportCore
 
 public typealias ShareTransportSessionFactory =
@@ -41,6 +42,37 @@ actor ShareTransportBrowser {
                 relativePath: path,
                 maximumBytes: maximumBytes
             )
+        }
+    }
+
+    /// Reads only an initial source range. This intentionally opens a byte source
+    /// instead of using `readSmallFile`: artwork commonly exceeds the header budget
+    /// even though its first few KiB are sufficient for ImageIO inspection.
+    func readSourcePrefix(
+        _ locator: NetworkFileLocator,
+        maximumBytes: Int
+    ) async throws -> Data {
+        precondition(maximumBytes > 0)
+        return try await enqueue { fileSystem in
+            try Task.checkCancellation()
+            let lease = try await fileSystem.openSource(for: locator)
+            guard let cursor = lease.makeCursor() else {
+                lease.close()
+                await lease.waitForFinalShutdown()
+                throw MediaTransportError.cancelled
+            }
+            do {
+                let length = min(maximumBytes, max(0, Int(lease.byteSize)))
+                let data = length == 0 ? Data() : try await cursor.read(at: 0, length: length)
+                cursor.close()
+                await lease.waitForFinalShutdown()
+                try Task.checkCancellation()
+                return data
+            } catch {
+                cursor.close()
+                await lease.waitForFinalShutdown()
+                throw error
+            }
         }
     }
 

@@ -553,7 +553,7 @@ struct HomeHeroView: View {
         let w = Self.screenWidth
         if let item = current {
             HomeHeroBackdrop(
-                urls: primaryBackdropURLs(for: item),
+                references: primaryBackdropReferences(for: item),
                 asyncFallbackURL: backdropFallback(for: item),
                 slideID: item.id,
                 forward: lastPageForward,
@@ -685,7 +685,7 @@ struct HomeHeroView: View {
             // the scroll in place.
             VStack(alignment: .leading, spacing: 12) {
                 HeroLogoArtwork(
-                    primaryURL: item.logoURL,
+                    references: item.artworkReferences(for: .logo),
                     asyncFallbackURL: logoFallback(for: item),
                     backgroundSample: backgroundSample(for: item),
                     // Cap the logo image to the action-button row width (measured

@@ -39,6 +39,7 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
     private var preferredAccountRevision: UInt64 = 0
     private let arbiterFactory: ArbiterFactory
     private let pipelineFactory: any ShareMetadataPipelineFactory
+    private let artworkCacheLifecycle: any ShareLocalArtworkCacheLifecycle
     /// Minimum gap between background scan *spawns* for one share. Kept equal to
     /// `ShareScanner.scanIfStale`'s default `minInterval` so a spawn is only
     /// allowed once the walk would actually run — anything sooner is a guaranteed
@@ -59,16 +60,30 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
         self.arbiterFactory = arbiterFactory
         self.diagnostics = DefaultShareScanDiagnostics()
         self.pipelineFactory = DefaultShareMetadataPipelineFactory(clients: .production)
+        self.artworkCacheLifecycle = NoopShareLocalArtworkCacheLifecycle()
+    }
+
+    public init(
+        arbiterFactory: @escaping ArbiterFactory = { MediaIOArbiter(accountID: $0) },
+        artworkCacheLifecycle: any ShareLocalArtworkCacheLifecycle
+    ) {
+        self.arbiterFactory = arbiterFactory
+        self.diagnostics = DefaultShareScanDiagnostics()
+        self.pipelineFactory = DefaultShareMetadataPipelineFactory(clients: .production)
+        self.artworkCacheLifecycle = artworkCacheLifecycle
     }
 
     init(
         arbiterFactory: @escaping ArbiterFactory = { MediaIOArbiter(accountID: $0) },
         diagnostics: ShareScanDiagnostics = DefaultShareScanDiagnostics(),
-        pipelineFactory: any ShareMetadataPipelineFactory
+        pipelineFactory: any ShareMetadataPipelineFactory,
+        artworkCacheLifecycle: any ShareLocalArtworkCacheLifecycle =
+            NoopShareLocalArtworkCacheLifecycle()
     ) {
         self.arbiterFactory = arbiterFactory
         self.diagnostics = diagnostics
         self.pipelineFactory = pipelineFactory
+        self.artworkCacheLifecycle = artworkCacheLifecycle
     }
 
     /// Inject the app's scan-status reporter (call once at startup). Applies to
@@ -93,6 +108,19 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
         guard revision >= preferredAccountRevision else { return }
         preferredAccountRevision = revision
         await metadataScheduler.setPreferredAccountKeys(accountKeys)
+        await artworkCacheLifecycle.setPreferredAccountKeys(accountKeys, revision: revision)
+    }
+
+    /// Removes one display-rejected local artwork fingerprint from future catalog
+    /// projections. The reference is never logged and is accepted only by its owning
+    /// account runtime.
+    public func rejectArtwork(
+        accountKey: String,
+        reference: NetworkArtworkReference
+    ) async {
+        guard reference.accountID == accountKey,
+              let store = runtimes[accountKey]?.store else { return }
+        await store.rejectArtworkReference(reference)
     }
 
     /// Public capability seam: vends the read-only catalog for a share without
@@ -137,15 +165,23 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
                 return created
             }()
             let store = runtime.store
+            await store.configureArtworkReferenceContext(
+                accountID: accountKey,
+                credentialRevision: credentialRevision
+            )
 
             if let activeRevision = runtime.scannerRevision,
                activeRevision != credentialRevision {
                 let staleLocalEnricher = runtime.localEnricher
+                let staleArtworkProbeWorker = runtime.artworkProbeWorker
                 runtime.localEnricher = nil
+                runtime.artworkProbeWorker = nil
                 runtime.enricher = nil
                 await metadataScheduler.remove(accountKey: accountKey)
                 await staleLocalEnricher?.close()
+                await staleArtworkProbeWorker?.close()
                 await store.resetPendingLocalMetadataAttempts()
+                await store.resetArtworkProbeTransientFailures()
                 await invalidateScanner(
                     accountKey: accountKey,
                     runtime: runtime,
@@ -187,6 +223,7 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
                 let pipeline = pipelineFactory.makePipeline(
                     store: store,
                     accountKey: accountKey,
+                    credentialRevision: credentialRevision,
                     reporter: reporter,
                     sessionFactory: sessionFactory
                 )
@@ -198,6 +235,8 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
                 // Home/grid/detail read (only scheduler slices + the urgent path).
                 let localEnricher = pipeline.local
                 runtime.localEnricher = localEnricher
+                let artworkProbeWorker = pipeline.artwork
+                runtime.artworkProbeWorker = artworkProbeWorker
                 // Bind the account's Sendable sub-capabilities into the scheduler
                 // closures; the runtime itself is never captured.
                 let arbiter = runtime.arbiter
@@ -210,6 +249,7 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
                             maxItems: maxItems,
                             maxDuration: maxDuration,
                             local: localEnricher,
+                            artwork: artworkProbeWorker,
                             external: enricher
                         )
                     },
@@ -648,9 +688,12 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
             }
             runtime.enricher = nil
             let removedLocalEnricher = runtime.localEnricher
+            let removedArtworkProbeWorker = runtime.artworkProbeWorker
             runtime.localEnricher = nil
+            runtime.artworkProbeWorker = nil
             await metadataScheduler.remove(accountKey: accountKey)
             await removedLocalEnricher?.close()
+            await removedArtworkProbeWorker?.close()
             reporter.shareRemoved(accountKey)
             // Retire the per-account arbiter (finding A7): reject new admission, drain
             // any active scanner under the bounded deadline, and wait for already-issued

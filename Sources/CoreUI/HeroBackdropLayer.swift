@@ -1,5 +1,6 @@
 #if canImport(SwiftUI)
 import SwiftUI
+import CoreModels
 
 /// The shared, full-bleed hero **backdrop** treatment: a wide landscape image
 /// with a mode-appropriate legibility scrim and a bottom dissolve that melts the
@@ -20,7 +21,7 @@ import SwiftUI
 /// same as the detail hero's original backdrop.
 public struct HeroBackdropLayer<Video: View>: View {
     /// Ordered candidate backdrop URLs (first that loads and is wide enough wins).
-    private let urls: [URL]
+    private let references: [ArtworkReference]
     /// Last-resort async art lookup (e.g. TMDb fanart) when none of `urls` load.
     private let asyncFallbackURL: (@Sendable () async -> URL?)?
     /// The backdrop's rendered height (the caller scales this by any hero-height
@@ -59,7 +60,27 @@ public struct HeroBackdropLayer<Video: View>: View {
         ignoresOverscan: Bool = true,
         @ViewBuilder backgroundVideo: @escaping () -> Video
     ) {
-        self.urls = urls
+        self.references = urls.map(ArtworkReference.remote)
+        self.asyncFallbackURL = asyncFallbackURL
+        self.height = height
+        self.scrimTone = scrimTone
+        self.verticalOffset = verticalOffset
+        self.dissolveStart = dissolveStart
+        self.ignoresOverscan = ignoresOverscan
+        self.backgroundVideo = backgroundVideo
+    }
+
+    public init(
+        references: [ArtworkReference],
+        asyncFallbackURL: (@Sendable () async -> URL?)? = nil,
+        height: CGFloat,
+        scrimTone: Color,
+        verticalOffset: CGFloat = 0,
+        dissolveStart: CGFloat = 0.33,
+        ignoresOverscan: Bool = true,
+        @ViewBuilder backgroundVideo: @escaping () -> Video
+    ) {
+        self.references = references
         self.asyncFallbackURL = asyncFallbackURL
         self.height = height
         self.scrimTone = scrimTone
@@ -71,7 +92,7 @@ public struct HeroBackdropLayer<Video: View>: View {
 
     public var body: some View {
         FallbackAsyncImage(
-            urls: urls,
+            references: references,
             maxAspectRatio: 3.0,
             variant: .heroBackdrop,
             asyncFallbackURL: asyncFallbackURL
@@ -163,6 +184,27 @@ public extension HeroBackdropLayer where Video == EmptyView {
     ) {
         self.init(
             urls: urls,
+            asyncFallbackURL: asyncFallbackURL,
+            height: height,
+            scrimTone: scrimTone,
+            verticalOffset: verticalOffset,
+            dissolveStart: dissolveStart,
+            ignoresOverscan: ignoresOverscan,
+            backgroundVideo: { EmptyView() }
+        )
+    }
+
+    init(
+        references: [ArtworkReference],
+        asyncFallbackURL: (@Sendable () async -> URL?)? = nil,
+        height: CGFloat,
+        scrimTone: Color,
+        verticalOffset: CGFloat = 0,
+        dissolveStart: CGFloat = 0.33,
+        ignoresOverscan: Bool = true
+    ) {
+        self.init(
+            references: references,
             asyncFallbackURL: asyncFallbackURL,
             height: height,
             scrimTone: scrimTone,

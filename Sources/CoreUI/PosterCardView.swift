@@ -331,8 +331,25 @@ public struct PosterCardView: View {
     // MARK: Artwork
 
     /// Ordered list of real-image candidates to try before showing a placeholder.
-    private var artworkCandidates: [URL] {
-        item.artworkCandidates(for: style)
+    private var artworkReferences: [ArtworkReference] {
+        switch style {
+        case .poster:
+            return item.artworkReferences(for: item.kind == .episode ? .seriesPoster : .poster)
+        case .landscape:
+            if item.kind == .episode {
+                return item.artworkReferences(for: .episodeThumbnail)
+            }
+            // Local landscape/detail selections are explicit presentation candidates.
+            // The remote rail order remains the long-standing backdrop → poster →
+            // fallback sequence; a full-resolution hero must never jump the rail.
+            let explicit = item.artworkSelections
+                .first(where: { $0.placement == .detailBackdrop })?
+                .references ?? []
+            let legacy = [item.backdropURL, item.posterURL, item.fallbackArtworkURL]
+                .compactMap { $0.map(ArtworkReference.remote) }
+            var seen = Set<ArtworkReference>()
+            return (explicit + legacy).filter { seen.insert($0).inserted }
+        }
     }
 
     @ViewBuilder
@@ -351,7 +368,7 @@ public struct PosterCardView: View {
             case .placeholder:
                 placeholderArtwork
             }
-        } else if artworkCandidates.isEmpty && asyncArtworkFallback == nil {
+        } else if artworkReferences.isEmpty && asyncArtworkFallback == nil {
             // No real art candidates and no last-resort resolver — e.g. an
             // un-enriched SMB card in the browse grid (async fallback disabled).
             // Render the neutral placeholder DIRECTLY instead of going through
@@ -366,7 +383,7 @@ public struct PosterCardView: View {
 
     private var realArtwork: some View {
         FallbackAsyncImage(
-            urls: artworkCandidates,
+            references: artworkReferences,
             maxAspectRatio: posterAspectGuard,
             variant: artworkVariant,
             asyncFallbackURL: asyncArtworkFallback

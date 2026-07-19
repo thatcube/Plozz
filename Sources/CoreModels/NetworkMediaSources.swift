@@ -209,12 +209,12 @@ public struct MediaShareEndpoint: Hashable, Sendable {
     }
 }
 
-public enum RepresentationConsistency: String, Hashable, Sendable {
+public enum RepresentationConsistency: String, Codable, Hashable, Sendable {
     case stronglyBound
     case changeDetecting
 }
 
-public enum RemoteFileIdentityKind: String, Hashable, Sendable {
+public enum RemoteFileIdentityKind: String, Codable, Hashable, Sendable {
     case strongETag
     case fileIdentifier
     case modificationTime
@@ -222,7 +222,7 @@ public enum RemoteFileIdentityKind: String, Hashable, Sendable {
 }
 
 /// Strongest transport-provided identity captured for one remote file.
-public struct RemoteFileIdentity: Hashable, Sendable {
+public struct RemoteFileIdentity: Codable, Hashable, Sendable {
     public let kind: RemoteFileIdentityKind
     public let value: String?
     public let modifiedAt: Date?
@@ -256,7 +256,7 @@ public struct RemoteFileIdentity: Hashable, Sendable {
     }
 }
 
-public struct RemoteFileRepresentation: Hashable, Sendable {
+public struct RemoteFileRepresentation: Codable, Hashable, Sendable {
     public let size: Int64
     public let identity: RemoteFileIdentity
     public let consistency: RepresentationConsistency
@@ -690,7 +690,7 @@ public enum PlaybackSource: Hashable, Sendable {
     }
 }
 
-private enum ModelIdentifier {
+enum ModelIdentifier {
     static func validated(_ value: String, field: String) throws -> String {
         let result = value.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !result.isEmpty else {
@@ -700,7 +700,7 @@ private enum ModelIdentifier {
     }
 }
 
-private enum MediaPathPolicy {
+enum MediaPathPolicy {
     static func normalizedRoot(_ value: String) throws -> String {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         let candidate = trimmed.isEmpty ? "/" : trimmed

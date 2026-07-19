@@ -184,6 +184,29 @@ final class EpisodeTwinSplitGuardTests: XCTestCase {
         ))
     }
 
+    func testPrimitiveDoesNotContradictWhenOneSideMissingSeasonEpisode() {
+        // Partial signal: one side exposes no season/episode number but shares a
+        // legit series id. A missing S/E is ABSENT signal, not a conflict, so the
+        // guard must not fire — the real twin stays merged (no over-eager split).
+        XCTAssertFalse(MediaItemIdentity.episodesPlausiblyContradict(
+            seasonA: 3, episodeA: 15, seriesIDsA: ["tvdb": "111"],
+            seasonB: nil, episodeB: nil, seriesIDsB: ["tvdb": "111"]
+        ))
+    }
+
+    func testRefineComponentDoesNotSplitPartialSignalTwin() {
+        // The same partial-signal twin, exercised through the actual split path: if a
+        // union folds these two together (one side missing S/E, shared legit series
+        // id), the split-guard must keep them in ONE group rather than eject either.
+        let full = ep("epA", account: "A", title: "The Boiling Rock",
+                      season: 3, episode: 15, seriesIDs: ["tvdb": "111"])
+        let partial = ep("epB", account: "B", title: "The Boiling Rock",
+                         season: nil, episode: nil, seriesIDs: ["tvdb": "111"])
+        let groups = MediaItemMerger.refineComponent([full, partial])
+        XCTAssertEqual(groups.count, 1, "A partial-signal legit twin must not be split")
+        XCTAssertEqual(Set(groups[0].map(\.id)), ["epA", "epB"])
+    }
+
     func testSeriesExternalIDsExtractsShowLevelIds() {
         let episode = ep("e", account: "A", title: "x", season: 1, episode: 1,
                          seriesIDs: ["tvdb": "111", "imdb": "tt0417299"])

@@ -33,6 +33,12 @@ public struct ItemDetailView: View {
     private let spoilerSettings: SpoilerSettings
     private let onPlay: (MediaItem) -> Void
     private let onSelectChild: (MediaItem) -> Void
+    /// Fast/local trailer resolver. A nil result leaves the static detail hero;
+    /// online YouTube autoplay remains deliberately out of the first version.
+    private let heroTrailerResolver: HeroTrailerResolving
+    /// Home-pushed details return to a hero that may reclaim the same shared
+    /// player. Other entry points (Search, library-only flows) stop on disappear.
+    private let preservesHeroTrailerOnDisappear: Bool
     /// Whether the opened item is a not-in-library **discovery** (Seerr) title.
     /// When `true` the page renders a request-focused hero (no children rail,
     /// server/version pickers, watchlist/watched actions) instead of the library
@@ -109,6 +115,8 @@ public struct ItemDetailView: View {
     /// request — intentionally requesting as admin is a legitimate choice. Mapping
     /// a profile to a Seerr user avoids the admin path (and this prompt) entirely.
     @AppStorage("seerr.adminRequestAcknowledged") private var adminRequestAcknowledged = false
+    @Environment(HeroTrailerController.self) private var heroTrailerController
+    @Environment(HeroBackgroundSettingsModel.self) private var heroBackground
 
     /// A user-facing request failure, wrapped for `.alert(item:)`.
     private struct RequestFailureAlert: Identifiable {
@@ -127,6 +135,8 @@ public struct ItemDetailView: View {
         spoilerSettings: SpoilerSettings = .default,
         onPlay: @escaping (MediaItem) -> Void,
         onSelectChild: @escaping (MediaItem) -> Void,
+        heroTrailerResolver: @escaping HeroTrailerResolving = { _ in nil },
+        preservesHeroTrailerOnDisappear: Bool = false,
         initialSeasonID: String? = nil,
         initialEpisode: MediaItem? = nil,
         isDiscoveryItem: Bool = false,
@@ -143,6 +153,8 @@ public struct ItemDetailView: View {
         self.spoilerSettings = spoilerSettings
         self.onPlay = onPlay
         self.onSelectChild = onSelectChild
+        self.heroTrailerResolver = heroTrailerResolver
+        self.preservesHeroTrailerOnDisappear = preservesHeroTrailerOnDisappear
         self.initialSeasonID = initialSeasonID
         self.initialEpisode = initialEpisode
         self.isDiscoveryItem = isDiscoveryItem
@@ -221,7 +233,16 @@ public struct ItemDetailView: View {
         // it for seeded opens stranded series pages with no seasons/episodes/Play
         // button. load() guards against flashing `.loading` over a seeded hero.
         .task { await viewModel.load() }
-        .onDisappear { viewModel.suspendEnrichment() }
+        .onDisappear {
+            viewModel.suspendEnrichment()
+            let itemID = viewModel.state.value?.item.id
+            if let itemID {
+                heroTrailerController.clearEndHandler(ownerID: "detail-\(itemID)")
+                if !preservesHeroTrailerOnDisappear {
+                    heroTrailerController.stop(ifShowing: itemID)
+                }
+            }
+        }
         .onAppear { viewModel.resumeEnrichmentIfNeeded() }
         .onReceive(NotificationCenter.default.publisher(for: .mediaItemDidMutate)) { note in
             if let mutation = MediaItemMutation.from(note) {
@@ -232,6 +253,36 @@ public struct ItemDetailView: View {
         }
         .task(id: seasonRequestRefreshKey) {
             await refreshSeasonRequestAvailability()
+        }
+        .task(id: heroTrailerTaskID) {
+            guard heroBackground.settings.mode == .trailer,
+                  let item = viewModel.state.value?.item else { return }
+            if let currentID = heroTrailerController.currentItemID,
+               currentID != item.id {
+                heroTrailerController.stop()
+            }
+            // Detail owns end-of-item while it is frontmost. This replaces Home's
+            // page-advance callback so the hidden carousel cannot start a
+            // different title behind this detail page.
+            heroTrailerController.setEndHandler(ownerID: "detail-\(item.id)") {
+                heroTrailerController.stop()
+            }
+            // Home→detail continuity: if the shared controller already has this
+            // item, do nothing — the picture keeps rolling while metadata swaps.
+            guard !heroTrailerController.isShowing(item.id) else {
+                heroTrailerController.setMuted(heroBackground.settings.trailerMuted)
+                return
+            }
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled else { return }
+            guard let source = await heroTrailerResolver(item),
+                  !Task.isCancelled,
+                  viewModel.state.value?.item.id == item.id else { return }
+            heroTrailerController.play(
+                itemID: item.id,
+                resolvedURL: source.url,
+                muted: heroBackground.settings.trailerMuted
+            )
         }
         .confirmationDialog(
             "Request as Admin?",
@@ -264,6 +315,11 @@ public struct ItemDetailView: View {
             resolve: { await viewModel.resolveThemeMusic() }
         )
         #endif
+    }
+
+    private var heroTrailerTaskID: String {
+        let itemID = viewModel.state.value?.item.id ?? "-"
+        return "\(itemID)|\(heroBackground.settings.mode.rawValue)"
     }
 
     /// Layout for non-series detail: a hero plus, for seasons/folders/collections,

@@ -27,6 +27,7 @@ struct SearchTab: View {
     /// Detail-snapshot cache scoped to the active content identity, threaded from
     /// `MainTabView` so revisit paints never cross a profile/account/credential.
     let detailSnapshotCache: DetailSnapshotCache
+    let authenticatedHTTPResolver: any AuthenticatedHTTPResourceResolving
     /// Seerr discovery service, backing the "Not in Your Library" search section
     /// and the discovery detail page's one-tap Request.
     let seer: SeerService
@@ -61,6 +62,43 @@ struct SearchTab: View {
     @Binding var resumePrompt: MediaItem?
 
     @State private var path = NavigationPath()
+
+    private func makeHeroTrailerResolver() -> HeroTrailerResolving {
+        { item in
+            var sources = identitySources(item)
+            if let accountID = item.sourceAccountID,
+               !sources.contains(where: { $0.accountID == accountID && $0.itemID == item.id }) {
+                sources.insert(
+                    MediaSourceRef(accountID: accountID, itemID: item.id, kind: item.kind),
+                    at: 0
+                )
+            }
+            for source in sources {
+                guard let provider = resolveOptionalProvider(source.accountID, in: accounts) else { continue }
+                let trailers = (try? await provider.trailers(for: source.itemID)) ?? []
+                guard let local = trailers.first(where: { !$0.isYouTubeTrailer }) else { continue }
+                guard let request = try? await provider.playbackInfo(for: local.id) else { continue }
+                let url: URL?
+                if let streamURL = request.streamURL {
+                    url = streamURL
+                } else if case .some(.authenticatedHTTP(let locator)) = request.playbackSource {
+                    url = try? await authenticatedHTTPResolver.resolve(locator)
+                } else {
+                    url = request.playbackSource?.publicURL
+                }
+                if let url,
+                   let duration = await HeroTrailerController.resolvedDuration(of: url) {
+                    return HeroTrailerSource(
+                        ownerItemID: item.id,
+                        trailerItemID: local.id,
+                        url: url,
+                        duration: duration
+                    )
+                }
+            }
+            return nil
+        }
+    }
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -104,6 +142,7 @@ struct SearchTab: View {
                     spoilerSettings: spoilerSettings,
                     onPlay: { requestPlay($0) },
                     onSelectChild: { open($0) },
+                    heroTrailerResolver: makeHeroTrailerResolver(),
                     initialSeasonID: item.seasonID,
                     isDiscoveryItem: isDiscovery,
                     seerConnected: seer.isConfigured,
@@ -140,6 +179,7 @@ struct SearchTab: View {
                     spoilerSettings: spoilerSettings,
                     onPlay: { requestPlay($0) },
                     onSelectChild: { open($0) },
+                    heroTrailerResolver: makeHeroTrailerResolver(),
                     initialEpisode: route.episode,
                     seerConnected: seer.isConfigured,
                     requestAvailabilityRefresh: { await seer.requestAvailability(for: $0) },
@@ -171,6 +211,7 @@ struct SearchTab: View {
                     spoilerSettings: spoilerSettings,
                     onPlay: { requestPlay($0) },
                     onSelectChild: { open($0) },
+                    heroTrailerResolver: makeHeroTrailerResolver(),
                     initialSeasonID: route.season.id,
                     seerConnected: seer.isConfigured,
                     requestAvailabilityRefresh: { await seer.requestAvailability(for: $0) },

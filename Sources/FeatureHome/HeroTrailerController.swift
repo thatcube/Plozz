@@ -9,6 +9,30 @@ import UIKit
 import SwiftUI
 #endif
 
+/// A fast hero-trailer source already resolved to a directly playable URL.
+/// Home intentionally accepts only local/server-resolved sources here — never
+/// a YouTube id that would require the slow/heavy on-device extraction path.
+public struct HeroTrailerSource: Sendable, Equatable {
+    public let ownerItemID: String
+    public let trailerItemID: String
+    public let url: URL
+    public let duration: TimeInterval
+
+    public init(
+        ownerItemID: String,
+        trailerItemID: String,
+        url: URL,
+        duration: TimeInterval
+    ) {
+        self.ownerItemID = ownerItemID
+        self.trailerItemID = trailerItemID
+        self.url = url
+        self.duration = duration
+    }
+}
+
+public typealias HeroTrailerResolving = @Sendable (MediaItem) async -> HeroTrailerSource?
+
 /// Shared, app-level owner of the **hero trailer** — one muted (by default)
 /// `AVPlayer` whose video layer is rendered by both the Home hero carousel and
 /// the detail-page hero. Hoisting it above both surfaces (like
@@ -28,6 +52,7 @@ public final class HeroTrailerController {
     public private(set) var currentItemID: String?
     /// Whether a trailer item is actively playing (has begun, not ended/stopped).
     public private(set) var isPlaying = false
+    public private(set) var isReady = false
     /// The resolved trailer duration in seconds once known (`0` until ready).
     /// Drives the hero's dwell length so the progress bar spans the full trailer.
     public private(set) var duration: TimeInterval = 0
@@ -38,16 +63,29 @@ public final class HeroTrailerController {
 
     /// Fired on the main actor when the current trailer plays through to its end,
     /// so the hero can advance to the next item. Reset per load.
-    public var onEnded: (@MainActor () -> Void)?
+    private var endHandlerOwnerID: String?
+    private var endHandler: (@MainActor () -> Void)?
 
     private var endObserver: NSObjectProtocol?
     private var statusObservation: NSKeyValueObservation?
     private var hasStartedPlayback = false
+    private var autoplayWhenReady = false
+    private var requestedPaused = false
 
     public init() {
         // Never let the trailer claim the Now-Playing transport or interrupt
         // music; it's ambient. Muting is applied per play() call.
         player.actionAtItemEnd = .pause
+    }
+
+    /// Reads the source's actual AVFoundation duration before the hero timeline
+    /// starts. Using the real stream duration keeps the wall-clock gauge and
+    /// end-of-item advance on the same clock.
+    public static func resolvedDuration(of url: URL) async -> TimeInterval? {
+        let asset = AVURLAsset(url: url)
+        guard let duration = try? await asset.load(.duration) else { return nil }
+        let seconds = duration.seconds
+        return seconds.isFinite && seconds > 0 ? seconds : nil
     }
 
     /// Whether this controller is already presenting `itemID` (so a hero→detail
@@ -56,10 +94,35 @@ public final class HeroTrailerController {
         currentItemID == itemID && currentItemID != nil
     }
 
+    /// Installs the current frontmost surface's end handler. Ownership prevents
+    /// a hidden Home carousel from clearing/replacing the detail page's handler.
+    public func setEndHandler(
+        ownerID: String,
+        _ handler: @escaping @MainActor () -> Void
+    ) {
+        endHandlerOwnerID = ownerID
+        endHandler = handler
+    }
+
+    public func clearEndHandler(ownerID: String) {
+        guard endHandlerOwnerID == ownerID else { return }
+        endHandlerOwnerID = nil
+        endHandler = nil
+    }
+
     /// Loads and plays `resolvedURL` as the trailer for `itemID`. No-op (keeps
     /// playing) if the same item is already showing. `muted` follows the profile's
     /// trailer-audio preference.
     public func play(itemID: String, resolvedURL: URL, muted: Bool) {
+        prepare(itemID: itemID, resolvedURL: resolvedURL, muted: muted)
+        autoplayWhenReady = true
+        beginPlaybackIfReady()
+    }
+
+    /// Queues and preloads a trailer without starting it. Home uses this to make
+    /// the item ready behind the still image, then starts one exact 3s+duration
+    /// timeline only after readiness is known.
+    public func prepare(itemID: String, resolvedURL: URL, muted: Bool) {
         if currentItemID == itemID, player.currentItem != nil {
             player.isMuted = muted
             return
@@ -71,6 +134,9 @@ public final class HeroTrailerController {
         let item = AVPlayerItem(url: resolvedURL)
         player.isMuted = muted
         hasStartedPlayback = false
+        autoplayWhenReady = false
+        requestedPaused = false
+        isReady = false
         duration = 0
         observeEnd(of: item)
         observeStatus(of: item)
@@ -80,10 +146,29 @@ public final class HeroTrailerController {
         PlozzLog.app.info("Hero trailer: queued item=\(itemID) muted=\(muted) url=\(PlozzLog.redact(url: resolvedURL))")
     }
 
+    /// Starts a previously prepared item (or arms it to start when ready).
+    public func startPrepared() {
+        autoplayWhenReady = true
+        beginPlaybackIfReady()
+    }
+
     /// Applies a live mute change (e.g. the user flips the muted toggle) without
     /// reloading.
     public func setMuted(_ muted: Bool) {
         player.isMuted = muted
+    }
+
+    /// Freezes/resumes the ambient trailer in lockstep with the hero's
+    /// auto-advance pause so the wall-clock progress gauge and picture never
+    /// drift apart during remote interaction or recede.
+    public func setPaused(_ paused: Bool) {
+        requestedPaused = paused
+        guard currentItemID != nil else { return }
+        if paused {
+            player.pause()
+        } else if hasStartedPlayback {
+            player.play()
+        }
     }
 
     /// Stops playback and releases the item. Called on navigate-away / advance /
@@ -113,13 +198,14 @@ public final class HeroTrailerController {
         if resetItem {
             player.replaceCurrentItem(with: nil)
             isPlaying = false
+            isReady = false
             currentItemID = nil
             duration = 0
         }
     }
 
     private func beginPlaybackIfReady() {
-        guard !hasStartedPlayback else { return }
+        guard autoplayWhenReady, isReady, !requestedPaused, !hasStartedPlayback else { return }
         hasStartedPlayback = true
         isPlaying = true
         player.seek(to: .zero)
@@ -138,7 +224,7 @@ public final class HeroTrailerController {
             MainActor.assumeIsolated {
                 guard let self else { return }
                 self.isPlaying = false
-                self.onEnded?()
+                self.endHandler?()
             }
         }
     }
@@ -146,12 +232,13 @@ public final class HeroTrailerController {
     private func observeStatus(of item: AVPlayerItem) {
         statusObservation?.invalidate()
         statusObservation = item.observe(\.status, options: [.new]) { [weak self] item, _ in
-            MainActor.assumeIsolated {
+            Task { @MainActor [weak self] in
                 guard let self else { return }
                 switch item.status {
                 case .readyToPlay:
                     let seconds = item.duration.seconds
                     if seconds.isFinite, seconds > 0 { self.duration = seconds }
+                    self.isReady = true
                     self.beginPlaybackIfReady()
                 case .failed:
                     let detail = item.error.map(String.init(describing:)) ?? "unknown"

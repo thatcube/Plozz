@@ -89,16 +89,34 @@ public protocol HeroBackgroundSettingsStoring: Sendable {
 public final class HeroBackgroundSettingsStore: HeroBackgroundSettingsStoring, @unchecked Sendable {
     private let defaults: UserDefaults
     private let key: String
+    private let legacyThemeMusicKey: String
 
     public init(defaults: UserDefaults = .standard, namespace: String? = nil) {
         self.defaults = defaults
         self.key = SettingsKey.scoped("com.plozz.heroBackgroundSettings", namespace: namespace)
+        self.legacyThemeMusicKey = SettingsKey.scoped(
+            "com.plozz.themeMusicSettings",
+            namespace: namespace
+        )
     }
 
     public func load() -> HeroBackgroundSettings {
         guard let data = defaults.data(forKey: key),
               let decoded = try? JSONDecoder().decode(HeroBackgroundSettings.self, from: data)
-        else { return .default }
+        else {
+            // One-time upgrade migration: preserve a profile that already opted
+            // into theme music instead of silently switching it to the new
+            // default (muted trailer).
+            if let legacyData = defaults.data(forKey: legacyThemeMusicKey),
+               let legacy = try? JSONDecoder().decode(
+                   ThemeMusicSettings.self,
+                   from: legacyData
+               ),
+               legacy.isEnabled {
+                return HeroBackgroundSettings(mode: .themeMusic)
+            }
+            return .default
+        }
         return decoded
     }
 

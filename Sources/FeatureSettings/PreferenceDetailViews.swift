@@ -177,6 +177,8 @@ struct PlaybackDetailView: View {
     @Bindable var audioPolicy: AudioPolicyModel
     /// Background theme audio for movie and series detail pages.
     @Bindable var themeMusic: ThemeMusicSettingsModel
+    /// Structural hero-background arbitration (off / trailer / theme music).
+    @Bindable var heroBackground: HeroBackgroundSettingsModel
     /// Whether the active profile has a server that can download subtitles
     /// (Jellyfin or Plex). A share-only profile can't — so the whole "Downloading
     /// subtitles" row (auto-download + SDH/Forced ranking, all of which only act on
@@ -436,17 +438,23 @@ struct PlaybackDetailView: View {
     }
 
     private var themeMusicSection: SettingsSplitSection {
-        SettingsSplitSection(id: "theme-music", header: "Detail Pages", rows: [
+        SettingsSplitSection(id: "hero-background", header: "Hero Background", rows: [
             SettingsSplitRow(
-                id: "theme-music",
-                title: "Theme music",
-                description: "Play a movie or show's theme softly while you browse its detail page."
+                id: "hero-background-mode",
+                title: "Background",
+                description: "Choose one background experience. Trailer and theme music never play together."
             ) {
-                SettingsRevealSection(
-                    isOn: $themeMusic.settings.isEnabled,
-                    masterLabel: "Play theme music"
-                ) {
-                    VStack(alignment: .leading, spacing: SettingsMetrics.sectionSpacing) {
+                VStack(alignment: .leading, spacing: SettingsMetrics.sectionSpacing) {
+                    DescribedSegmentedPicker(
+                        options: HeroBackgroundMode.allCases,
+                        selection: $heroBackground.settings.mode,
+                        title: { $0.displayName },
+                        detail: { $0.detail }
+                    )
+                    if heroBackground.settings.mode == .trailer {
+                        Toggle("Mute trailer audio", isOn: $heroBackground.settings.trailerMuted)
+                    }
+                    if heroBackground.settings.mode == .themeMusic {
                         SettingsDetailGroup(title: "Volume") {
                             DescribedSegmentedPicker(
                                 options: ThemeMusicVolume.allCases,

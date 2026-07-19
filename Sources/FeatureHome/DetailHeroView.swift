@@ -15,6 +15,8 @@ import UIKit
 /// whole hero animates to reflect the newly focused context.
 struct DetailHeroView: View {
     let item: MediaItem
+    @Environment(HeroTrailerController.self) private var heroTrailerController
+    @Environment(HeroBackgroundSettingsModel.self) private var heroBackground
     /// The item whose artwork fills the backdrop *and* supplies the branded title
     /// logo. Defaults to `item`. A series page pins this to the series itself so
     /// the background and logo stay a single, stable, show-level identity even as
@@ -671,7 +673,11 @@ struct DetailHeroView: View {
             asyncFallbackURL: tmdbBackdropFallback,
             height: Self.screenHeight * heroHeightFraction,
             scrimTone: scrimTone,
-            recedeModel: seriesRecedeModel
+            recedeModel: seriesRecedeModel,
+            trailerController: heroTrailerController,
+            showsTrailer: heroBackground.settings.mode == .trailer
+                && heroTrailerController.isShowing((backdropItem ?? item).id)
+                && heroTrailerController.isPlaying
         )
     }
 
@@ -1288,6 +1294,8 @@ private struct SeriesDetailHeroBackdrop: View {
     let height: CGFloat
     let scrimTone: Color
     let recedeModel: SeriesHeroRecedeModel?
+    let trailerController: HeroTrailerController
+    let showsTrailer: Bool
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -1299,7 +1307,12 @@ private struct SeriesDetailHeroBackdrop: View {
             height: height,
             scrimTone: scrimTone,
             verticalOffset: reduceMotion ? 0 : (receded ? -260 : 0)
-        )
+        ) {
+            if showsTrailer {
+                HeroTrailerVideoLayer(controller: trailerController)
+                    .transition(.opacity)
+            }
+        }
         .animation(reduceMotion ? nil : .smooth(duration: 0.9), value: receded)
     }
 }

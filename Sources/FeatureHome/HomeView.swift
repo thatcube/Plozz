@@ -67,6 +67,10 @@ public struct HomeView: View {
     /// Per-profile hero configuration. `nil` (or an inactive config) leaves Home
     /// rendering its classic rows unchanged.
     private var heroSettings: HeroSettingsModel?
+    private var heroBackground: HeroBackgroundSettingsModel
+    private let heroTrailerController: HeroTrailerController
+    private let heroTrailerResolver: HeroTrailerResolving
+    private let heroIsFrontmost: Bool
     private let heroCurator: HeroCurator
     private let heroFeaturedProvider: FeaturedContentProviding
     /// Lightweight Seerr-only status polling. Kept separate from the curated
@@ -149,6 +153,9 @@ public struct HomeView: View {
         activeShareIDs: Set<String>,
         spoilerSettings: SpoilerSettings = .default,
         heroSettings: HeroSettingsModel? = nil,
+        heroBackground: HeroBackgroundSettingsModel,
+        heroTrailerController: HeroTrailerController,
+        heroIsFrontmost: Bool,
         heroRuntime: HomeHeroRuntimeState,
         heroCurator: HeroCurator = HeroCurator(),
         heroFeaturedProvider: @escaping FeaturedContentProviding = HeroFeaturedProvider.none,
@@ -165,6 +172,7 @@ public struct HomeView: View {
         heroArtworkValidator: HeroArtworkValidating? = nil,
         heroWatchStateRefresher: @escaping @Sendable ([MediaItem]) async -> [MediaItem] = { $0 },
         heroMetadataEnricher: @escaping @Sendable ([MediaItem]) async -> [MediaItem] = { $0 },
+        heroTrailerResolver: @escaping HeroTrailerResolving = { _ in nil },
         homePerfOverlayEnabled: Bool = false,
         seerConnected: Bool = false,
         onRequestItem: ((MediaItem) async -> MediaAvailabilityStatus?)? = nil,
@@ -178,6 +186,10 @@ public struct HomeView: View {
         self.activeShareIDs = activeShareIDs
         self.spoilerSettings = spoilerSettings
         self.heroSettings = heroSettings
+        self.heroBackground = heroBackground
+        self.heroTrailerController = heroTrailerController
+        self.heroTrailerResolver = heroTrailerResolver
+        self.heroIsFrontmost = heroIsFrontmost
         self.heroRuntime = heroRuntime
         self.heroCurator = heroCurator
         self.heroFeaturedProvider = heroFeaturedProvider
@@ -299,6 +311,10 @@ public struct HomeView: View {
                             HomeHeroView(
                                 items: displayHeroItems,
                                 settings: heroSettings.settings,
+                                backgroundSettings: heroBackground.settings,
+                                trailerController: heroTrailerController,
+                                trailerResolver: heroTrailerResolver,
+                                isFrontmost: heroIsFrontmost,
                                 spoilerSettings: spoilerSettings,
                                 navigationStyle: navigationStyle,
                                 watchlistedKeys: watchlistedKeys,

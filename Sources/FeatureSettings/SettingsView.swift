@@ -72,6 +72,7 @@ public struct SettingsView: View {
     private let audioPolicy: AudioPolicyModel
     private let theme: ThemeSettingsModel
     private let themeMusic: ThemeMusicSettingsModel
+    private let heroBackground: HeroBackgroundSettingsModel
     private let nightShift: NightShiftSettingsModel
     private let homeVisibility: HomeLibraryVisibilityModel
     private let diagnostics: DiagnosticsSettingsModel
@@ -120,6 +121,7 @@ public struct SettingsView: View {
         audioPolicy: AudioPolicyModel,
         theme: ThemeSettingsModel,
         themeMusic: ThemeMusicSettingsModel,
+        heroBackground: HeroBackgroundSettingsModel,
         nightShift: NightShiftSettingsModel,
         homeVisibility: HomeLibraryVisibilityModel,
         diagnostics: DiagnosticsSettingsModel,
@@ -167,6 +169,7 @@ public struct SettingsView: View {
         self.audioPolicy = audioPolicy
         self.theme = theme
         self.themeMusic = themeMusic
+        self.heroBackground = heroBackground
         self.nightShift = nightShift
         self.homeVisibility = homeVisibility
         self.diagnostics = diagnostics
@@ -653,6 +656,7 @@ public struct SettingsView: View {
                 subtitlePolicy: subtitlePolicy,
                 audioPolicy: audioPolicy,
                 themeMusic: themeMusic,
+                heroBackground: heroBackground,
                 canDownloadSubtitles: activeProfileCanDownloadSubtitles
             )
         case .spoilers:

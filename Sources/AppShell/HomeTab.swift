@@ -27,6 +27,7 @@ struct HomeTab: View {
     /// Detail-snapshot cache scoped to the active content identity, threaded from
     /// `MainTabView` so revisit paints never cross a profile/account/credential.
     let detailSnapshotCache: DetailSnapshotCache
+    let authenticatedHTTPResolver: any AuthenticatedHTTPResourceResolving
     /// Seerr discovery service backing the hero's featured content seam.
     let seer: SeerService
     /// The active profile's linked Seerr user (`X-API-User`) for requests, or
@@ -45,6 +46,8 @@ struct HomeTab: View {
     let homeContentStore: HomeContentStoring
     /// Per-profile hero carousel settings driving the Home featured section.
     let heroSettings: HeroSettingsModel
+    let heroBackground: HeroBackgroundSettingsModel
+    let heroTrailerController: HeroTrailerController
     let heroRuntime: HomeHeroRuntimeState
     /// App-wide navigation style, so the carousel's left-edge focus behaviour
     /// (escape to sidebar vs. wrap) matches the surrounding chrome.
@@ -86,6 +89,45 @@ struct HomeTab: View {
 
     @State private var path = NavigationPath()
 
+    /// Resolves only a FAST hero trailer: a real local/server extra from any
+    /// cross-server copy. Online YouTube ids are deliberately rejected on Home.
+    private func makeHeroTrailerResolver() -> HeroTrailerResolving {
+        { item in
+            var sources = identitySources(item)
+            if let accountID = item.sourceAccountID,
+               !sources.contains(where: { $0.accountID == accountID && $0.itemID == item.id }) {
+                sources.insert(
+                    MediaSourceRef(accountID: accountID, itemID: item.id, kind: item.kind),
+                    at: 0
+                )
+            }
+            for source in sources {
+                guard let provider = resolveOptionalProvider(source.accountID, in: accounts) else { continue }
+                let trailers = (try? await provider.trailers(for: source.itemID)) ?? []
+                guard let local = trailers.first(where: { !$0.isYouTubeTrailer }) else { continue }
+                guard let request = try? await provider.playbackInfo(for: local.id) else { continue }
+                let url: URL?
+                if let streamURL = request.streamURL {
+                    url = streamURL
+                } else if case .some(.authenticatedHTTP(let locator)) = request.playbackSource {
+                    url = try? await authenticatedHTTPResolver.resolve(locator)
+                } else {
+                    url = request.playbackSource?.publicURL
+                }
+                if let url,
+                   let duration = await HeroTrailerController.resolvedDuration(of: url) {
+                    return HeroTrailerSource(
+                        ownerItemID: item.id,
+                        trailerItemID: local.id,
+                        url: url,
+                        duration: duration
+                    )
+                }
+            }
+            return nil
+        }
+    }
+
     var body: some View {
         NavigationStack(path: $path) {
             HomeView(
@@ -106,6 +148,9 @@ struct HomeTab: View {
                 ),
                 spoilerSettings: spoilerSettings,
                 heroSettings: heroSettings,
+                heroBackground: heroBackground,
+                heroTrailerController: heroTrailerController,
+                heroIsFrontmost: path.isEmpty,
                 heroRuntime: heroRuntime,
                 heroFeaturedProvider: makeHeroFeaturedProvider(
                     seer: seer,
@@ -131,6 +176,7 @@ struct HomeTab: View {
                     accounts: accounts,
                     identitySources: identitySources
                 ),
+                heroTrailerResolver: makeHeroTrailerResolver(),
                 homePerfOverlayEnabled: homePerfOverlayEnabled,
                 seerConnected: seer.isConfigured,
                 onRequestItem: { item in
@@ -208,6 +254,8 @@ struct HomeTab: View {
                     spoilerSettings: spoilerSettings,
                     onPlay: { requestPlay($0) },
                     onSelectChild: { navigate($0, libraryOrigin: route.originAccountID) },
+                    heroTrailerResolver: makeHeroTrailerResolver(),
+                    preservesHeroTrailerOnDisappear: true,
                     initialEpisode: route.episode,
                     seerConnected: seer.isConfigured,
                     requestAvailabilityRefresh: { await seer.requestAvailability(for: $0) },
@@ -240,6 +288,8 @@ struct HomeTab: View {
                     spoilerSettings: spoilerSettings,
                     onPlay: { requestPlay($0) },
                     onSelectChild: { navigate($0, libraryOrigin: route.originAccountID) },
+                    heroTrailerResolver: makeHeroTrailerResolver(),
+                    preservesHeroTrailerOnDisappear: true,
                     initialSeasonID: route.season.id,
                     seerConnected: seer.isConfigured,
                     requestAvailabilityRefresh: { await seer.requestAvailability(for: $0) },
@@ -332,6 +382,8 @@ struct HomeTab: View {
             spoilerSettings: spoilerSettings,
             onPlay: { requestPlay($0) },
             onSelectChild: { navigate($0, libraryOrigin: libraryOrigin) },
+            heroTrailerResolver: makeHeroTrailerResolver(),
+            preservesHeroTrailerOnDisappear: true,
             initialSeasonID: item.seasonID,
             isDiscoveryItem: isDiscovery,
             seerConnected: seer.isConfigured,

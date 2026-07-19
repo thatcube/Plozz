@@ -5,6 +5,22 @@ import CoreModels
 import CoreUI
 import MetadataKit
 
+/// Pure timeline policy for the hero's single linear progress gauge.
+enum HeroTrailerTimeline {
+    static let leadIn: TimeInterval = 3
+
+    static func duration(
+        autoAdvanceSeconds: Int,
+        mode: HeroBackgroundMode,
+        trailerDuration: TimeInterval
+    ) -> TimeInterval {
+        if mode == .trailer, trailerDuration > 0 {
+            return leadIn + trailerDuration
+        }
+        return Double(autoAdvanceSeconds)
+    }
+}
+
 /// The Home **hero** carousel: a cinematic, rotating spotlight at the top of
 /// Home, functionally near-identical to the Apple TV app. Each slide shows a
 /// full-bleed backdrop plus the title logo, metadata and Play / More Info /
@@ -36,6 +52,10 @@ struct HomeHeroView: View {
 
     let items: [MediaItem]
     let settings: HeroSettings
+    let backgroundSettings: HeroBackgroundSettings
+    let trailerController: HeroTrailerController
+    let trailerResolver: HeroTrailerResolving
+    let isFrontmost: Bool
     let spoilerSettings: SpoilerSettings
     let navigationStyle: NavigationStyle
     /// Account-scoped ids of every title currently on the user's watchlist (built
@@ -164,6 +184,15 @@ struct HomeHeroView: View {
     /// restarts it to sleep for the remaining dwell. Slide changes / manual pages
     /// go through `advanceToken`; this is purely the pause/resume lifecycle.
     @State private var runEpoch = 0
+    /// Resolved fast trailer for the fronted item. `nil` keeps today's static
+    /// image/timer behavior.
+    @State private var activeTrailerSource: HeroTrailerSource?
+    @State private var activeTrailerDuration: TimeInterval = 0
+    @State private var trailerVisible = false
+    /// Per-carousel memo so wrapping back to a slide never re-runs provider
+    /// trailer/playback resolution. Bounded by the curated item set (max 20).
+    @State private var trailerSourceCache: [String: HeroTrailerSource] = [:]
+    @State private var noFastTrailerIDs: Set<String> = []
     /// Drives the first-appearance fade-in, matching the detail hero's polish.
     @State private var heroVisible = false
     /// Optimistic watchlist state the user just toggled from the hero, keyed by
@@ -451,6 +480,8 @@ struct HomeHeroView: View {
             HeroFocusDiagnostics.emit("items SET-SWAP count \(oldIDs.count)->\(newIDs.count) index \(oldIdx)->\(index) frontedSurvived=\(frontedID.map { newIDs.contains($0) } ?? false) | \(hfState())")
             let present = Set(newIDs)
             resolvedBackdrop = resolvedBackdrop.filter { present.contains($0.key) }
+            trailerSourceCache = trailerSourceCache.filter { present.contains($0.key) }
+            noFastTrailerIDs.formIntersection(present)
             // A set swap is not a page: cancel any pending metadata fade-in and
             // show the (possibly relocated) current item. The backdrop tracks
             // `current`'s id, so if the fronted item survived the swap its art is
@@ -518,6 +549,94 @@ struct HomeHeroView: View {
         .task(id: artworkSetToken) {
             await warmHeroLogos()
         }
+        // Fast/local trailers only: resolution and the three-second still-image
+        // lead-in overlap. The same single player persists into detail navigation.
+        .task(id: trailerTaskKey) {
+            guard isFrontmost, backgroundSettings.mode == .trailer,
+                  let item = current else {
+                // When detail is pushed over Home, relinquish control without
+                // stopping the shared player — the detail hero owns it now.
+                trailerController.clearEndHandler(ownerID: "home-hero")
+                if isFrontmost { resetTrailer(stopPlayer: true) }
+                return
+            }
+            if trailerController.isShowing(item.id) {
+                trailerController.setEndHandler(ownerID: "home-hero") { [itemID = item.id] in
+                    guard current?.id == itemID, items.count > 1 else { return }
+                    page(
+                        to: (index + 1) % items.count,
+                        keepButton: selectedButton,
+                        forward: true
+                    )
+                }
+                trailerController.setMuted(backgroundSettings.trailerMuted)
+                trailerVisible = trailerController.isPlaying
+                return
+            }
+            resetTrailer(stopPlayer: !trailerController.isShowing(item.id))
+            let source: HeroTrailerSource?
+            if let cached = trailerSourceCache[item.id] {
+                source = cached
+            } else if noFastTrailerIDs.contains(item.id) {
+                source = nil
+            } else {
+                source = await trailerResolver(item)
+                if let source {
+                    trailerSourceCache[item.id] = source
+                } else {
+                    noFastTrailerIDs.insert(item.id)
+                }
+            }
+            guard let source,
+                  !Task.isCancelled,
+                  current?.id == item.id else { return }
+            // Fix the timeline BEFORE the visible 3-second lead-in starts. The
+            // progress gauge now has one immutable duration from 0→end and never
+            // jumps when the player becomes ready or the video crossfades in.
+            activeTrailerSource = source
+            activeTrailerDuration = source.duration
+            trailerController.prepare(
+                itemID: item.id,
+                resolvedURL: source.url,
+                muted: backgroundSettings.trailerMuted
+            )
+            // Do not start the progress timeline until AVPlayer is ready. This
+            // absorbs startup latency behind the static image, so 3s + duration
+            // is exact and the timer cannot cut the trailer short.
+            while !trailerController.isReady {
+                try? await Task.sleep(for: .milliseconds(50))
+                guard !Task.isCancelled, current?.id == item.id else { return }
+            }
+            restartDwell()
+            runEpoch &+= 1
+            try? await Task.sleep(for: .seconds(HeroTrailerTimeline.leadIn))
+            guard !Task.isCancelled, current?.id == item.id else { return }
+            trailerController.setEndHandler(ownerID: "home-hero") { [itemID = item.id] in
+                guard current?.id == itemID, items.count > 1 else { return }
+                page(
+                    to: (index + 1) % items.count,
+                    keepButton: selectedButton,
+                    forward: true
+                )
+            }
+            trailerController.startPrepared()
+            trailerController.setPaused(pausedAt != nil)
+            trailerVisible = trailerController.isPlaying
+        }
+        .onChange(of: trailerController.isPlaying) { _, playing in
+            guard trailerController.currentItemID == current?.id else { return }
+            if playing {
+                trailerVisible = true
+            } else {
+                trailerVisible = false
+            }
+        }
+        .onChange(of: pausedAt) { _, paused in
+            trailerController.setPaused(paused != nil)
+        }
+        .onChange(of: backgroundSettings.trailerMuted) { _, muted in
+            trailerController.setMuted(muted)
+        }
         // Auto-advance: the fire is rescheduled whenever `autoAdvanceKey` changes
         // (slide change, manual page, pause/resume, or the item count settling).
         // It runs REGARDLESS of focus — focus lands on the hero action row by
@@ -531,7 +650,7 @@ struct HomeHeroView: View {
             guard pausedAt == nil else { return }
             // Fire after the *remaining* dwell so that resuming after a pause
             // finishes the countdown from where it froze instead of restarting it.
-            let duration = Double(settings.autoAdvanceSeconds)
+            let duration = currentDwellDuration
             let remaining = max(0, duration - Date().timeIntervalSince(dwellStart))
             try? await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000))
             guard !Task.isCancelled else { return }
@@ -570,7 +689,9 @@ struct HomeHeroView: View {
                 recedeLift: receded ? Self.recedeBackdropRise : 0,
                 // On recede, melt the right side into the page like the left so the
                 // whole backdrop blends together while browsing the rows below.
-                receded: receded
+                receded: receded,
+                trailerController: trailerController,
+                showsTrailer: trailerVisible
             )
         } else {
             Color.clear.frame(width: w, height: height)
@@ -586,7 +707,22 @@ struct HomeHeroView: View {
     /// carousel cycles whether or not the hero holds focus; only real remote input
     /// pauses it.
     private var autoAdvanceKey: String {
-        "\(index)-\(advanceToken)-\(runEpoch)-\(slideToken)"
+        "\(index)-\(advanceToken)-\(runEpoch)-\(slideToken)-\(activeTrailerDuration)"
+    }
+
+    /// One continuous wall-clock timeline from initial still through trailer end.
+    /// The gauge never switches progress sources at the crossfade, so it cannot
+    /// jump or jitter when video becomes visible.
+    private var currentDwellDuration: TimeInterval {
+        HeroTrailerTimeline.duration(
+            autoAdvanceSeconds: settings.autoAdvanceSeconds,
+            mode: backgroundSettings.mode,
+            trailerDuration: activeTrailerDuration
+        )
+    }
+
+    private var trailerTaskKey: String {
+        "\(current?.id ?? "-")|\(backgroundSettings.mode.rawValue)|\(isFrontmost)"
     }
 
     // MARK: - Content column
@@ -851,7 +987,7 @@ struct HomeHeroView: View {
             heroFocused: focus != nil,
             dotsAutoAdvance: settings.autoAdvance && items.count > 1,
             dotsDwellStart: dwellStart,
-            dotsDwellDuration: Double(settings.autoAdvanceSeconds),
+            dotsDwellDuration: currentDwellDuration,
             dotsPausedAt: pausedAt
         )
     }
@@ -1615,6 +1751,7 @@ struct HomeHeroView: View {
         // fade the new show's text back in once the wipe has landed.
         beginTransition()
 
+        resetTrailer(stopPlayer: true)
         index = toItem
         advanceToken &+= 1
         // A page is a fresh dwell: reset the progress gauge (so the newly-active
@@ -1642,6 +1779,16 @@ struct HomeHeroView: View {
         pausedAt = nil
         resumeWork?.cancel()
         resumeWork = nil
+    }
+
+    private func resetTrailer(stopPlayer: Bool) {
+        trailerVisible = false
+        activeTrailerDuration = 0
+        activeTrailerSource = nil
+        trailerController.clearEndHandler(ownerID: "home-hero")
+        if stopPlayer {
+            trailerController.stop()
+        }
     }
 
     /// Records a remote interaction: freezes the auto-advance so it can't page out

@@ -41,6 +41,9 @@ public final class ProfileSettingsModel {
     public private(set) var themeModel: ThemeSettingsModel
     /// Opt-in background theme music for movie and series detail pages.
     public private(set) var themeMusicModel: ThemeMusicSettingsModel
+    /// Mutually-exclusive hero background mode (off / trailer / theme music)
+    /// plus the trailer mute preference.
+    public private(set) var heroBackgroundModel: HeroBackgroundSettingsModel
     public private(set) var diagnosticsModel: DiagnosticsSettingsModel
     /// The full-screen music player's per-profile look + "show extra info"
     /// preference. Scoped per profile (rebuilt on profile switch) like the theme.
@@ -103,6 +106,7 @@ public final class ProfileSettingsModel {
         audioPolicyModel: AudioPolicyModel? = nil,
         themeModel: ThemeSettingsModel? = nil,
         themeMusicModel: ThemeMusicSettingsModel? = nil,
+        heroBackgroundModel: HeroBackgroundSettingsModel? = nil,
         diagnosticsModel: DiagnosticsSettingsModel? = nil,
         musicPlayerModel: MusicPlayerSettingsModel? = nil,
         homeLibraryVisibilityModel: HomeLibraryVisibilityModel? = nil,
@@ -120,7 +124,8 @@ public final class ProfileSettingsModel {
         let injected = subtitleBehaviorModel != nil || subtitleStyleModel != nil
             || spoilerModel != nil || playbackModel != nil
             || subtitlePolicyModel != nil || audioPolicyModel != nil
-            || themeModel != nil || themeMusicModel != nil || diagnosticsModel != nil
+            || themeModel != nil || themeMusicModel != nil || heroBackgroundModel != nil
+            || diagnosticsModel != nil
             || musicPlayerModel != nil || homeLibraryVisibilityModel != nil
             || uiDensityModel != nil || cardStyleModel != nil
             || watchStatusIndicatorModel != nil || navigationStyleModel != nil
@@ -141,6 +146,7 @@ public final class ProfileSettingsModel {
             audioPolicyModel: audioPolicyModel,
             themeModel: themeModel,
             themeMusicModel: themeMusicModel,
+            heroBackgroundModel: heroBackgroundModel,
             diagnosticsModel: diagnosticsModel,
             musicPlayerModel: musicPlayerModel,
             homeLibraryVisibilityModel: homeLibraryVisibilityModel,
@@ -160,6 +166,7 @@ public final class ProfileSettingsModel {
         self.audioPolicyModel = models.audioPolicyModel
         self.themeModel = models.themeModel
         self.themeMusicModel = models.themeMusicModel
+        self.heroBackgroundModel = models.heroBackgroundModel
         self.diagnosticsModel = models.diagnosticsModel
         self.musicPlayerModel = models.musicPlayerModel
         self.homeLibraryVisibilityModel = models.homeLibraryVisibilityModel
@@ -187,6 +194,7 @@ public final class ProfileSettingsModel {
         audioPolicyModel = models.audioPolicyModel
         themeModel = models.themeModel
         themeMusicModel = models.themeMusicModel
+        heroBackgroundModel = models.heroBackgroundModel
         diagnosticsModel = models.diagnosticsModel
         musicPlayerModel = models.musicPlayerModel
         homeLibraryVisibilityModel = models.homeLibraryVisibilityModel
@@ -210,6 +218,7 @@ public final class ProfileSettingsModel {
         var audioPolicyModel: AudioPolicyModel
         var themeModel: ThemeSettingsModel
         var themeMusicModel: ThemeMusicSettingsModel
+        var heroBackgroundModel: HeroBackgroundSettingsModel
         var diagnosticsModel: DiagnosticsSettingsModel
         var musicPlayerModel: MusicPlayerSettingsModel
         var homeLibraryVisibilityModel: HomeLibraryVisibilityModel
@@ -235,6 +244,7 @@ public final class ProfileSettingsModel {
         audioPolicyModel: AudioPolicyModel? = nil,
         themeModel: ThemeSettingsModel? = nil,
         themeMusicModel: ThemeMusicSettingsModel? = nil,
+        heroBackgroundModel: HeroBackgroundSettingsModel? = nil,
         diagnosticsModel: DiagnosticsSettingsModel? = nil,
         musicPlayerModel: MusicPlayerSettingsModel? = nil,
         homeLibraryVisibilityModel: HomeLibraryVisibilityModel? = nil,
@@ -255,6 +265,9 @@ public final class ProfileSettingsModel {
             audioPolicyModel: audioPolicyModel ?? AudioPolicyModel(store: AudioPolicyStore(namespace: ns)),
             themeModel: themeModel ?? ThemeSettingsModel(store: ThemeSettingsStore(namespace: ns)),
             themeMusicModel: themeMusicModel ?? ThemeMusicSettingsModel(store: ThemeMusicSettingsStore(namespace: ns)),
+            heroBackgroundModel: heroBackgroundModel ?? HeroBackgroundSettingsModel(
+                store: HeroBackgroundSettingsStore(namespace: ns)
+            ),
             diagnosticsModel: diagnosticsModel ?? DiagnosticsSettingsModel(store: DiagnosticsSettingsStore(namespace: ns)),
             musicPlayerModel: musicPlayerModel ?? MusicPlayerSettingsModel(store: MusicPlayerSettingsStore(namespace: ns)),
             homeLibraryVisibilityModel: homeLibraryVisibilityModel ?? HomeLibraryVisibilityModel(store: HomeLibraryVisibilityStore(namespace: ns)),

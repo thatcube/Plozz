@@ -61,6 +61,10 @@ struct HomeHeroBackdrop: View {
     /// the whole backdrop blends together as you browse the rows below, instead of
     /// leaving a hard image edge on the right.
     var receded: Bool = false
+    /// Shared trailer player rendered above the still image. The still remains
+    /// underneath, so opacity can crossfade without a blank frame.
+    var trailerController: HeroTrailerController? = nil
+    var showsTrailer: Bool = false
 
     init(
         references: [ArtworkReference],
@@ -71,7 +75,9 @@ struct HomeHeroBackdrop: View {
         height: CGFloat,
         scrimTone: Color,
         recedeLift: CGFloat = 0,
-        receded: Bool = false
+        receded: Bool = false,
+        trailerController: HeroTrailerController? = nil,
+        showsTrailer: Bool = false
     ) {
         self.references = references
         self.asyncFallbackURL = asyncFallbackURL
@@ -82,6 +88,8 @@ struct HomeHeroBackdrop: View {
         self.scrimTone = scrimTone
         self.recedeLift = recedeLift
         self.receded = receded
+        self.trailerController = trailerController
+        self.showsTrailer = showsTrailer
     }
 
     init(
@@ -93,7 +101,9 @@ struct HomeHeroBackdrop: View {
         height: CGFloat,
         scrimTone: Color,
         recedeLift: CGFloat = 0,
-        receded: Bool = false
+        receded: Bool = false,
+        trailerController: HeroTrailerController? = nil,
+        showsTrailer: Bool = false
     ) {
         self.init(
             references: urls.map(ArtworkReference.remote),
@@ -104,7 +114,9 @@ struct HomeHeroBackdrop: View {
             height: height,
             scrimTone: scrimTone,
             recedeLift: recedeLift,
-            receded: receded
+            receded: receded,
+            trailerController: trailerController,
+            showsTrailer: showsTrailer
         )
     }
 
@@ -123,6 +135,13 @@ struct HomeHeroBackdrop: View {
         backdropImage
             .frame(width: width, height: height)
             .clipped()
+            .overlay {
+                if showsTrailer, let trailerController {
+                    HeroTrailerVideoLayer(controller: trailerController)
+                        .transition(.opacity)
+                }
+            }
+            .animation(.easeInOut(duration: 0.45), value: showsTrailer)
             .overlay(scrim)
             .mask(dissolveMask)
             .frame(maxWidth: .infinity, alignment: .center)

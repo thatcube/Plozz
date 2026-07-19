@@ -65,6 +65,7 @@ struct MainTabView: View {
     private var audioPolicyModel: AudioPolicyModel { profileSettings.audioPolicyModel }
     private var themeModel: ThemeSettingsModel { profileSettings.themeModel }
     private var themeMusicModel: ThemeMusicSettingsModel { profileSettings.themeMusicModel }
+    private var heroBackgroundModel: HeroBackgroundSettingsModel { profileSettings.heroBackgroundModel }
     /// Per-profile remembered per-series audio/subtitle selections, threaded into
     /// the player so a manual track switch sticks across that show's episodes.
     let seriesTrackStore: any SeriesTrackPreferenceStoring
@@ -185,6 +186,9 @@ struct MainTabView: View {
     @State private var libraryReloadRevision = 0
     @State private var musicAvailability = MusicAvailabilityModel()
     @State private var themeMusicController = ThemeMusicController()
+    /// One app-level trailer player shared by the Home and detail heroes so
+    /// hero→detail navigation can keep the same trailer rolling.
+    @State private var heroTrailerController = HeroTrailerController()
     /// Retains loaded Hero content across tvOS tab subtree recreation.
     @State private var homeHeroRuntime = HomeHeroRuntimeState()
     /// Hosts the full-screen Now Playing player as a `fullScreenCover` on the root
@@ -236,6 +240,7 @@ struct MainTabView: View {
             HomeTab(
                 accounts: accounts,
                 detailSnapshotCache: detailSnapshotCache,
+                authenticatedHTTPResolver: authenticatedHTTPResolver,
                 seer: seer,
                 activeSeerrUserID: activeProfile.seerrUserID,
                 activeSeerrUserName: activeProfile.seerrUserName,
@@ -244,6 +249,8 @@ struct MainTabView: View {
                 homeLayoutStore: homeLayoutStore,
                 homeContentStore: homeContentStore,
                 heroSettings: heroSettingsModel,
+                heroBackground: heroBackgroundModel,
+                heroTrailerController: heroTrailerController,
                 heroRuntime: homeHeroRuntime,
                 navigationStyle: navigationStyle,
                 behavior: subtitleBehaviorModel.settings,
@@ -278,6 +285,7 @@ struct MainTabView: View {
             SearchTab(
                 accounts: accounts,
                 detailSnapshotCache: detailSnapshotCache,
+                authenticatedHTTPResolver: authenticatedHTTPResolver,
                 seer: seer,
                 activeSeerrUserID: activeProfile.seerrUserID,
                 activeSeerrUserName: activeProfile.seerrUserName,
@@ -330,6 +338,7 @@ struct MainTabView: View {
                 audioPolicy: audioPolicyModel,
                 theme: themeModel,
                 themeMusic: themeMusicModel,
+                heroBackground: heroBackgroundModel,
                 nightShift: nightShiftModel,
                 homeVisibility: homeVisibility,
                 diagnostics: diagnosticsModel,
@@ -423,6 +432,8 @@ struct MainTabView: View {
         )
         .environment(\.themeMusicController, themeMusicController)
         .environment(\.themeMusicSettings, themeMusicModel.settings)
+        .environment(heroTrailerController)
+        .environment(heroBackgroundModel)
         .environment(
             \.themeMusicAuthenticatedHTTPResolver,
             authenticatedHTTPResolver
@@ -433,10 +444,31 @@ struct MainTabView: View {
         .onChange(of: playRequest != nil) { _, videoStarting in
             if videoStarting {
                 themeMusicController.stop()
+                heroTrailerController.stop()
             }
+        }
+        .onChange(of: heroBackgroundModel.settings, initial: true) { _, settings in
+            // Keep the legacy theme-music settings/controller in sync with the
+            // new structural XOR setting. Volume remains owned by its existing
+            // model; only enabled state moves here.
+            themeMusicModel.settings.isEnabled = settings.themeMusicEnabled
+            if settings.mode != .trailer {
+                heroTrailerController.stop()
+            } else {
+                heroTrailerController.setMuted(settings.trailerMuted)
+            }
+            themeMusicController.setBlocked(
+                settings.mode == .trailer && heroTrailerController.isPlaying
+            )
+        }
+        .onChange(of: heroTrailerController.isPlaying) { _, playing in
+            themeMusicController.setBlocked(
+                heroBackgroundModel.settings.mode == .trailer && playing
+            )
         }
         .onChange(of: selectedTabRaw) {
             themeMusicController.stop()
+            heroTrailerController.stop()
         }
         .environment(musicPlayerModel)
         .environment(uiDensityModel)

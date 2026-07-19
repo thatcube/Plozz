@@ -620,7 +620,7 @@ public struct HomeAggregator: Sendable {
     /// > genuine progress — the reported "Continue Watching keeps shifting / isn't
     /// > what I watched last" symptom. Provider-side series stamping now handles the
     /// > legitimate case correctly, so the positional carry-forward was removed.
-    static func sortedByRecency(_ items: [MediaItem]) -> [MediaItem] {
+    public static func sortedByRecency(_ items: [MediaItem]) -> [MediaItem] {
         items.enumerated().sorted { lhs, rhs in
             switch (lhs.element.lastPlayedAt, rhs.element.lastPlayedAt) {
             case let (l?, r?):

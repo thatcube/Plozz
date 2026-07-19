@@ -1,6 +1,6 @@
 import XCTest
 import CoreModels
-@testable import FeatureHome
+@testable import FeatureHomeCore
 
 /// Verifies the Home aggregator's per-account fetch-scoping decision that powers
 /// "hide a library everywhere": when an account has **no** hidden library it keeps

@@ -1,6 +1,6 @@
 import XCTest
 import CoreModels
-@testable import FeatureHome
+@testable import FeatureHomeCore
 
 /// Feature B: the unified Watchlist row merges every `WatchlistProviding`
 /// account (cross-provider / cross-server) and degrades gracefully when an

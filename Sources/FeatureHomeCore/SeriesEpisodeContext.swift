@@ -3,24 +3,24 @@ import MetadataKit
 
 /// Series-level context that should be propagated onto episode items so fallback
 /// artwork/routing stays accurate without per-focus remapping.
-struct SeriesEpisodeContext: Sendable {
-    let seriesTMDbID: String?
-    let animeIDs: [String: String]
-    let isAnime: Bool
+public struct SeriesEpisodeContext: Sendable {
+    public let seriesTMDbID: String?
+    public let animeIDs: [String: String]
+    public let isAnime: Bool
 
-    init(series: MediaItem) {
+    public init(series: MediaItem) {
         seriesTMDbID = series.providerIDs["Tmdb"]
         animeIDs = series.providerIDs.filter { ContentClassifier.isAnimeProviderIDKey($0.key) }
         isAnime = ContentClassifier.isAnime(series)
     }
 
-    init(seriesTMDbID: String?, animeIDs: [String: String], isAnime: Bool) {
+    public init(seriesTMDbID: String?, animeIDs: [String: String], isAnime: Bool) {
         self.seriesTMDbID = seriesTMDbID
         self.animeIDs = animeIDs
         self.isAnime = isAnime
     }
 
-    var isEmpty: Bool {
+    public var isEmpty: Bool {
         (seriesTMDbID?.isEmpty != false) && animeIDs.isEmpty && !isAnime
     }
 
@@ -28,7 +28,7 @@ struct SeriesEpisodeContext: Sendable {
     ///  * parent TMDb id under `SeriesTmdb` when missing;
     ///  * anime provider ids (AniList/AniDB/MAL/...) when missing;
     ///  * an "Anime" genre marker when the parent series is anime.
-    func stamping(_ episodes: [MediaItem]) -> [MediaItem] {
+    public func stamping(_ episodes: [MediaItem]) -> [MediaItem] {
         guard !isEmpty else { return episodes }
         return episodes.map { episode in
             var copy = episode

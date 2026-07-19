@@ -101,7 +101,8 @@ private struct PlozziOSLibraryList: View {
                                     containerKind: library.kind,
                                     sourceAccountID: library.sourceAccountID
                                 ),
-                                title: library.title
+                                title: library.title,
+                                provider: provider
                             )
                         } label: {
                             PlozziOSLibraryCard(library: library)
@@ -148,10 +149,16 @@ private struct PlozziOSLibraryCard: View {
 struct PlozziOSLibraryGridView: View {
     @State private var viewModel: LibraryBrowseViewModel
     private let title: String
+    private let provider: any MediaProvider
 
-    init(viewModel: LibraryBrowseViewModel, title: String) {
+    init(
+        viewModel: LibraryBrowseViewModel,
+        title: String,
+        provider: any MediaProvider
+    ) {
         _viewModel = State(initialValue: viewModel)
         self.title = title
+        self.provider = provider
     }
 
     var body: some View {
@@ -182,6 +189,7 @@ struct PlozziOSLibraryGridView: View {
                                 PlozziOSLibraryItemCell(
                                     slot: viewModel.slot(at: index),
                                     index: index,
+                                    provider: provider,
                                     onAppear: { await viewModel.itemAppeared(at: index) },
                                     onDisappear: { viewModel.itemDisappeared(at: index) }
                                 )
@@ -211,10 +219,28 @@ struct PlozziOSLibraryGridView: View {
 private struct PlozziOSLibraryItemCell: View {
     let slot: LibrarySlot?
     let index: Int
+    let provider: any MediaProvider
     let onAppear: () async -> Void
     let onDisappear: () -> Void
 
     var body: some View {
+        Group {
+            if let item = slot?.item {
+                NavigationLink {
+                    PlozziOSItemDetailView(provider: provider, item: item)
+                } label: {
+                    card
+                }
+                .buttonStyle(.plain)
+            } else {
+                card
+            }
+        }
+        .task(id: index) { await onAppear() }
+        .onDisappear(perform: onDisappear)
+    }
+
+    private var card: some View {
         VStack(alignment: .leading, spacing: 7) {
             AsyncImage(url: slot?.item?.posterURL) { image in
                 image
@@ -240,8 +266,6 @@ private struct PlozziOSLibraryItemCell: View {
                 .lineLimit(2)
                 .redacted(reason: slot?.item == nil ? .placeholder : [])
         }
-        .task(id: index) { await onAppear() }
-        .onDisappear(perform: onDisappear)
     }
 }
 #endif

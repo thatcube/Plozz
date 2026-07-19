@@ -1,6 +1,6 @@
 import XCTest
 import CoreModels
-@testable import FeatureHome
+@testable import FeatureHomeCore
 
 final class SeriesResumeTests: XCTestCase {
     private func episode(

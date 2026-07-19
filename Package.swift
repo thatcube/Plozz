@@ -256,7 +256,13 @@ let package = Package(
         ),
         .target(
             name: "FeatureHomeCore",
-            dependencies: ["CoreModels", "CoreNetworking"]
+            dependencies: [
+                "CoreModels",
+                "CoreNetworking",
+                "MetadataKit",
+                "RatingsService",
+                "ProviderTrailers"
+            ]
         ),
         .target(
             name: "FeatureHome",
@@ -610,6 +616,10 @@ let package = Package(
         .testTarget(
             name: "FeatureHomeTests",
             dependencies: ["FeatureHome", "CoreModels"]
+        ),
+        .testTarget(
+            name: "FeatureHomeCoreTests",
+            dependencies: ["FeatureHomeCore", "CoreModels", "MetadataKit"]
         ),
         .testTarget(
             name: "FeatureSearchTests",

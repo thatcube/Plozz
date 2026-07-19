@@ -68,8 +68,13 @@ private struct CastMemberCard: View {
 
     @Environment(\.plozzMetrics) private var metrics
 
+    /// Cast cards read a touch small on the detail page, so scale the whole tile
+    /// (avatar + caption type) up 25%. `CastRowView` is detail-page-only, so this
+    /// doesn't affect any other surface.
+    private static let scale: CGFloat = 1.25
+
     var body: some View {
-        let diameter = metrics.castTileDiameter
+        let diameter = metrics.castTileDiameter * Self.scale
         let slot = diameter + metrics.circleFocusPadding * 2
         CircularFocusTile(
             diameter: diameter,
@@ -82,12 +87,12 @@ private struct CastMemberCard: View {
             caption: { _ in
                 VStack(spacing: 2) {
                     Text(person.name)
-                        .font(.system(size: 22, weight: .semibold))
+                        .font(.system(size: 22 * Self.scale, weight: .semibold))
                         .foregroundStyle(.primary)
                         .lineLimit(1)
                     if let role = person.role {
                         Text(role)
-                            .font(.system(size: 19))
+                            .font(.system(size: 19 * Self.scale))
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                     }
@@ -111,7 +116,7 @@ private struct CastMemberCard: View {
         ZStack {
             Circle().fill(Color.primary.opacity(0.12))
             Text(initials)
-                .font(.system(size: 48, weight: .semibold))
+                .font(.system(size: 48 * Self.scale, weight: .semibold))
                 .foregroundStyle(.secondary)
         }
     }

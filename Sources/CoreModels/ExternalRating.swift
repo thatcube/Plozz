@@ -188,7 +188,8 @@ public struct ExternalRating: Codable, Hashable, Sendable, Identifiable {
     public var displayValue: String {
         switch scale {
         case .outOfTen:
-            return Self.trimmed(value)
+            // Always one decimal so a whole score reads as "7.0", not "7".
+            return String(format: "%.1f", value)
         case .percent:
             return "\(Int(value.rounded()))%"
         case .outOfHundred:

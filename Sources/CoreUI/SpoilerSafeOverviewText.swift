@@ -11,6 +11,11 @@ public struct SpoilerSafeOverviewText: View {
     private let lineCount: Int
     private let fontSize: CGFloat
     private let maxWidth: CGFloat?
+    /// When `true` the view always reserves `lineCount` lines of height (via a
+    /// hidden placeholder) so it keeps a fixed footprint — needed where several
+    /// cards must align in a grid (episode columns). The detail hero sets this
+    /// `false` so a short synopsis doesn't leave a tall empty gap.
+    private let reservesSpace: Bool
 
     public init(
         overview: String?,
@@ -18,7 +23,8 @@ public struct SpoilerSafeOverviewText: View {
         mode: SpoilerSettings.Mode,
         lineCount: Int = 3,
         fontSize: CGFloat = 22,
-        maxWidth: CGFloat? = nil
+        maxWidth: CGFloat? = nil,
+        reservesSpace: Bool = true
     ) {
         self.overview = overview
         self.hidesSpoilers = hidesSpoilers
@@ -26,13 +32,16 @@ public struct SpoilerSafeOverviewText: View {
         self.lineCount = lineCount
         self.fontSize = fontSize
         self.maxWidth = maxWidth
+        self.reservesSpace = reservesSpace
     }
 
     public var body: some View {
         ZStack(alignment: .topLeading) {
-            Text(verbatim: layoutReservation)
-                .hidden()
-                .accessibilityHidden(true)
+            if reservesSpace {
+                Text(verbatim: layoutReservation)
+                    .hidden()
+                    .accessibilityHidden(true)
+            }
 
             if hidesSpoilers {
                 hiddenOverview

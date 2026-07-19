@@ -451,7 +451,7 @@ struct DetailHeroView: View {
                         if !genreParts.isEmpty {
                             Text(genreParts.joined(separator: "  ·  "))
                                 .font(.system(size: 23, weight: .medium))
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(.primary)
                                 .lineLimit(1)
                                 .contentTransition(.opacity)
                         }
@@ -464,7 +464,8 @@ struct DetailHeroView: View {
                 hidesSpoilers: hideText,
                 mode: spoilerSettings.mode,
                 lineCount: 3,
-                maxWidth: 960
+                maxWidth: 800,
+                reservesSpace: false
             )
             // Bottom facts line just above the action buttons: year · runtime,
             // then the ratings, then the capability badges (4K / Atmos / HDR …),
@@ -604,7 +605,7 @@ struct DetailHeroView: View {
         // the hero is receded for the episode browser.
         .overlay(alignment: .bottomTrailing) {
             if seriesRecedeModel?.isReceded != true, starringCastNames != nil || directorNames != nil {
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 8) {
                     if let starringCastNames {
                         (Text("Starring ").foregroundStyle(.tertiary)
                             + Text(starringCastNames).foregroundStyle(.primary))

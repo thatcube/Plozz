@@ -32,7 +32,7 @@ final class ExternalRatingTests: XCTestCase {
     // MARK: Display formatting
 
     func testDisplayValueOutOfTenTrimsWholeNumbers() {
-        XCTAssertEqual(ExternalRating(source: .imdb, value: 8.0, scale: .outOfTen).displayValue, "8")
+        XCTAssertEqual(ExternalRating(source: .imdb, value: 8.0, scale: .outOfTen).displayValue, "8.0")
         XCTAssertEqual(ExternalRating(source: .imdb, value: 8.8, scale: .outOfTen).displayValue, "8.8")
     }
 

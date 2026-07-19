@@ -690,9 +690,9 @@ final class PlexProviderMappingTests: XCTestCase {
         // first, so Atmos sits before the HDR10 pill.
         XCTAssertEqual(item.technicalBadges.map(\.label), ["4K", "Dolby Atmos", "HDR10"])
         XCTAssertEqual(item.mediaInfo?.video?.isInterlaced, true)
-        // RT critic rendered as a percentage; IMDb audience stays 0–10.
+        // RT critic rendered as a percentage; IMDb audience stays 0–10 (one decimal).
         XCTAssertEqual(item.ratings.first(where: { $0.source == .rottenTomatoes })?.displayValue, "83%")
-        XCTAssertEqual(item.ratings.first(where: { $0.source == .imdb })?.displayValue, "9")
+        XCTAssertEqual(item.ratings.first(where: { $0.source == .imdb })?.displayValue, "9.0")
     }
 
     func testItemMapsFullRatingArrayImdbRottenTomatoesAndTMDB() async throws {

@@ -221,7 +221,64 @@ struct PlozziOSLibraryGridView: View {
         }
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                sortControl
+            }
+        }
         .task { await viewModel.loadFirstPage() }
+    }
+
+    private var sortControl: some View {
+        Menu {
+            Picker("Sort By", selection: sortFieldBinding) {
+                ForEach(SortField.allCases, id: \.self) { field in
+                    Text(field.displayName).tag(field)
+                }
+            }
+            Picker("Order", selection: sortDirectionBinding) {
+                ForEach(SortDirection.allCases, id: \.self) { direction in
+                    Text(direction.displayName).tag(direction)
+                }
+            }
+        } label: {
+            Label(
+                "Sort: \(viewModel.sort.field.displayName)",
+                systemImage: "arrow.up.arrow.down"
+            )
+        }
+    }
+
+    private var sortFieldBinding: Binding<SortField> {
+        Binding(
+            get: { viewModel.sort.field },
+            set: { field in
+                Task {
+                    await viewModel.setSort(
+                        CoreModels.SortDescriptor(
+                            field: field,
+                            direction: viewModel.sort.direction
+                        )
+                    )
+                }
+            }
+        )
+    }
+
+    private var sortDirectionBinding: Binding<SortDirection> {
+        Binding(
+            get: { viewModel.sort.direction },
+            set: { direction in
+                Task {
+                    await viewModel.setSort(
+                        CoreModels.SortDescriptor(
+                            field: viewModel.sort.field,
+                            direction: direction
+                        )
+                    )
+                }
+            }
+        )
     }
 }
 

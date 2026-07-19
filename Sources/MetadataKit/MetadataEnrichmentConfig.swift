@@ -137,15 +137,20 @@ public struct MetadataEnrichmentConfig: Sendable {
 
         var mergedRoles = roles
         for (raw, state) in overrides.roleOverrides {
-            mergedRoles[MetadataSource(rawValue: raw)] = ProviderRole(rawValue: state.rawValue) ?? .primary
+            mergedRoles[MetadataSource(rawValue: raw)] = Self.providerRole(forOverrideStateRawValue: state.rawValue)
         }
 
         var mergedOrder = baseOrder
         if !overrides.order.isEmpty {
+            // Only honor order tokens for sources this build actually knows (the
+            // baseline set). A stale token left by an older/newer build — or a
+            // foreign string — is dropped rather than materializing as a phantom,
+            // default-primary (enabled) source in the fallback tail.
+            let known = Set(baseOrder)
             var seen: Set<MetadataSource> = []
             var ordered: [MetadataSource] = []
             for source in overrides.order.map({ MetadataSource(rawValue: $0) })
-            where seen.insert(source).inserted {
+            where known.contains(source) && seen.insert(source).inserted {
                 ordered.append(source)
             }
             for source in baseOrder where seen.insert(source).inserted {
@@ -155,6 +160,18 @@ public struct MetadataEnrichmentConfig: Sendable {
         }
 
         return MetadataEnrichmentConfig(roles: mergedRoles, baseOrder: mergedOrder, priority: priority)
+    }
+
+    /// Maps a persisted override state (by raw value) onto a ``ProviderRole``.
+    ///
+    /// A recognized state maps 1:1. An **unrecognized** state — e.g. one a future
+    /// build persisted that this build's ``ProviderRole`` has no counterpart for —
+    /// resolves to ``ProviderRole/disabled``, **never** ``ProviderRole/primary``, so a
+    /// user's explicit restriction can never be silently upgraded to an enabled
+    /// primary source. (Disabling is the safe failure direction: fewer results, never
+    /// a re-enabled provider the user turned off.)
+    static func providerRole(forOverrideStateRawValue raw: String) -> ProviderRole {
+        ProviderRole(rawValue: raw) ?? .disabled
     }
 
     // MARK: - Bundle resolution

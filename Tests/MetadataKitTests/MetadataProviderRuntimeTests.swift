@@ -33,6 +33,17 @@ final class MetadataProviderRuntimeTests: XCTestCase {
         XCTAssertEqual(states.first { $0.source == .tvdb }?.trippedReason, "rate limited")
     }
 
+    func testTrippedStateReadsAtomically() async {
+        let breaker = ProviderCircuitBreaker()
+        let closed = await breaker.trippedState
+        XCTAssertFalse(closed.isTripped)
+        XCTAssertNil(closed.reason)
+        _ = await breaker.record(.failure(.unauthorized))
+        let open = await breaker.trippedState
+        XCTAssertTrue(open.isTripped)
+        XCTAssertEqual(open.reason, .unauthorized)
+    }
+
     func testResultCacheEntryCountReadsSharedCache() async {
         let cache = ProviderResultCache()
         await cache.store(nil, source: .tmdb, version: 1, requestKey: "k")

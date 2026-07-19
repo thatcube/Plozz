@@ -28,6 +28,16 @@ final class MetadataProviderListLogicTests: XCTestCase {
         XCTAssertEqual(order, [.tmdb, .tvdb, .anilist, .tvmaze])
     }
 
+    func testDisplayOrderIgnoresForeignTokens() {
+        // A stale/foreign persisted token is filtered against the known baseline set,
+        // so it never appears as a phantom row; real sources still order correctly.
+        let order = MetadataProviderListLogic.displayOrder(
+            userOrder: ["tvmaze", "ghostsource", "tmdb"], baselineOrder: baseline
+        )
+        XCTAssertEqual(order, [.tvmaze, .tmdb, .tvdb, .anilist])
+        XCTAssertFalse(order.contains(MetadataSource(rawValue: "ghostsource")))
+    }
+
     func testMovedSwapsWithinBounds() {
         let moved = MetadataProviderListLogic.moved(.anilist, by: -1, in: baseline)
         XCTAssertEqual(moved, [.tvdb, .anilist, .tmdb, .tvmaze])

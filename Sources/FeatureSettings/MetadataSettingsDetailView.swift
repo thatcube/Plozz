@@ -43,12 +43,16 @@ public struct MetadataSettingsDependencies {
 /// Pure ordering/role helpers for the metadata providers list, factored out of the
 /// view so they're unit-testable without a running SwiftUI hierarchy.
 enum MetadataProviderListLogic {
-    /// The order to display sources in: the user's explicit order first (deduped),
-    /// then any baseline source the user hasn't placed, so none is ever hidden.
+    /// The order to display sources in: the user's explicit order first (deduped and
+    /// filtered to sources this build knows), then any baseline source the user
+    /// hasn't placed, so none is ever hidden and a stale/foreign persisted token
+    /// can't materialize as a phantom row.
     static func displayOrder(userOrder: [String], baselineOrder: [MetadataSource]) -> [MetadataSource] {
+        let known = Set(baselineOrder)
         var seen: Set<MetadataSource> = []
         var result: [MetadataSource] = []
-        for source in userOrder.map({ MetadataSource(rawValue: $0) }) where seen.insert(source).inserted {
+        for source in userOrder.map({ MetadataSource(rawValue: $0) })
+        where known.contains(source) && seen.insert(source).inserted {
             result.append(source)
         }
         for source in baselineOrder where seen.insert(source).inserted {

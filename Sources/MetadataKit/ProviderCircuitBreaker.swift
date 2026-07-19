@@ -74,6 +74,14 @@ public actor ProviderCircuitBreaker {
     /// The reason the breaker is open, if tripped.
     public var trippedReason: ProviderFailureKind? { isTripped ? openReason : nil }
 
+    /// The breaker's tripped state **and** reason read together in one actor hop, so
+    /// a caller can't observe a torn `isTripped: true` / `reason: nil` across two
+    /// separate awaits (Step 6 diagnostics read these together).
+    public var trippedState: (isTripped: Bool, reason: ProviderFailureKind?) {
+        let tripped = isTripped
+        return (tripped, tripped ? openReason : nil)
+    }
+
     /// Records the outcome of a call.
     /// - Returns: `true` when this recorded a *recovery* — the breaker was open and a
     ///   healthy result (ok / authoritative empty) closed it — so the caller can

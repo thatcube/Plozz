@@ -55,6 +55,27 @@ final class MetadataEnrichmentConfigOverrideTests: XCTestCase {
         XCTAssertEqual(reset.baseOrder, baseline.baseOrder)
     }
 
+    func testUnknownOverrideStateNeverResolvesToPrimary() {
+        // Known states map 1:1.
+        XCTAssertEqual(MetadataEnrichmentConfig.providerRole(forOverrideStateRawValue: "primary"), .primary)
+        XCTAssertEqual(MetadataEnrichmentConfig.providerRole(forOverrideStateRawValue: "secondary"), .secondary)
+        XCTAssertEqual(MetadataEnrichmentConfig.providerRole(forOverrideStateRawValue: "disabled"), .disabled)
+        // An unrecognized/future state must NOT silently become primary (re-enabling
+        // a source the user restricted); it falls back to disabled.
+        XCTAssertEqual(MetadataEnrichmentConfig.providerRole(forOverrideStateRawValue: "hidden"), .disabled)
+        XCTAssertNotEqual(MetadataEnrichmentConfig.providerRole(forOverrideStateRawValue: "hidden"), .primary)
+    }
+
+    func testOrderOverrideIgnoresUnknownTokens() {
+        let baseline = MetadataEnrichmentConfig(baseOrder: [.tvdb, .tmdb, .anilist])
+        // A persisted order carrying a stale/foreign token must not add a phantom,
+        // default-primary source; real sources still order correctly.
+        let overrides = MetadataProviderSettings(order: ["anilist", "ghostsource", "tvdb"])
+        let merged = baseline.merged(withUserOverrides: overrides)
+        XCTAssertEqual(merged.baseOrder, [.anilist, .tvdb, .tmdb])
+        XCTAssertFalse(merged.baseOrder.contains(MetadataSource(rawValue: "ghostsource")))
+    }
+
     func testOverrideAffectsOrderedSourcesOutput() {
         let baseline = MetadataEnrichmentConfig(baseOrder: [.tvdb, .tmdb])
         var overrides = MetadataProviderSettings()

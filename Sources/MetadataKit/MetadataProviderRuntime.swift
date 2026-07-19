@@ -61,13 +61,12 @@ public struct MetadataProviderRuntime: Sendable {
         var states: [MetadataEnrichmentDiagnosticsSnapshot.ProviderBreakerState] = []
         for source in ProductionMetadataProviders.defaultSources {
             guard let breaker = breakers[source] else { continue }
-            let tripped = await breaker.isTripped
-            let reason = await breaker.trippedReason
+            let state = await breaker.trippedState
             states.append(
                 MetadataEnrichmentDiagnosticsSnapshot.ProviderBreakerState(
                     source: source,
-                    isTripped: tripped,
-                    trippedReason: reason.map(Self.describe)
+                    isTripped: state.isTripped,
+                    trippedReason: state.reason.map(Self.describe)
                 )
             )
         }

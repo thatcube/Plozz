@@ -151,6 +151,7 @@ public struct RootView: View {
                         currentAccounts: { appState.accountsProviders.homeAccounts },
                         networkFileResolver: appState.mediaShare.networkFileResolver,
                         authenticatedHTTPResolver: appState.authenticatedHTTPResolver,
+                        offlinePlaybackResolver: appState.offlinePlaybackResolver,
                         profileSettings: appState.profileSettings,
                         syncServices: SyncServices(
                             ratingsProvider: appState.ratingsProvider,

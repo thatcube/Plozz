@@ -43,6 +43,7 @@ let package = Package(
         .library(name: "FeatureMusic", targets: ["FeatureMusic"]),
         .library(name: "TopShelfKit", targets: ["TopShelfKit"]),
         .library(name: "CrashReporting", targets: ["CrashReporting"]),
+        .library(name: "MediaDownloads", targets: ["MediaDownloads"]),
         .library(name: "MediaTransportCore", targets: ["MediaTransportCore"]),
         .library(name: "MediaTransportHTTP", targets: ["MediaTransportHTTP"]),
         .library(name: "MediaTransportSMB", targets: ["MediaTransportSMB"]),
@@ -319,6 +320,18 @@ let package = Package(
             swiftSettings: [.unsafeFlags(["-strict-concurrency=complete"])]
         ),
 
+        // MARK: Offline downloads (headless, shared, platform-neutral)
+        //
+        // The offline-download FOUNDATION: a durable, resumable, transport-agnostic
+        // download registry + queue + policy that both future iOS/iPadOS apps and
+        // the tvOS app inherit. Depends only on CoreModels + the protocol-neutral
+        // MediaTransportCore (the cursor byte API it downloads through). No UI /
+        // Feature / provider modules — arch-guard keeps it a clean lower layer.
+        .target(
+            name: "MediaDownloads",
+            dependencies: ["CoreModels", "MediaTransportCore"]
+        ),
+
         // MARK: WebDAV/HTTP transport
         //
         // Foundation-only WebDAV/plain-HTTP adapter primitives built on the
@@ -477,6 +490,7 @@ let package = Package(
                 "MediaTransportSFTP",
                 "MediaTransportNFS",
                 "MediaTransportFTP",
+                "MediaDownloads",
                 "MetadataKit",
                 "ProviderJellyfin",
                 "ProviderPlex",
@@ -504,6 +518,10 @@ let package = Package(
         .testTarget(
             name: "CoreModelsTests",
             dependencies: ["CoreModels", "CoreUI"]
+        ),
+        .testTarget(
+            name: "MediaDownloadsTests",
+            dependencies: ["MediaDownloads", "CoreModels", "MediaTransportCore"]
         ),
         .testTarget(
             name: "AppShellTests",

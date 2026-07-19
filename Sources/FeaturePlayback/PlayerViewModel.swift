@@ -168,6 +168,10 @@ public final class PlayerViewModel {
     @ObservationIgnored private var subtitleOverlay: SubtitleOverlayLoader!
 
     private let provider: any MediaProvider
+    /// Optional offline-download seam. When it reports a completed local copy for
+    /// the item, `resolveAndRoute` rewrites the request to play that `file://`
+    /// asset. `nil` (the default) makes offline resolution a strict no-op.
+    private let offlinePlaybackResolver: (any OfflinePlaybackResolving)?
     private let itemID: String
     /// The chosen `MediaVersion.id` (Jellyfin `MediaSourceId` / Plex `Media` id)
     /// to play when the title has multiple versions; `nil` plays the default.
@@ -390,6 +394,7 @@ public final class PlayerViewModel {
         provider: any MediaProvider,
         itemID: String,
         mediaSourceID: String? = nil,
+        offlinePlaybackResolver: (any OfflinePlaybackResolving)? = nil,
         behavior: SubtitleBehavior = .default,
         style: SubtitleStyle = .default,
         subtitlePolicy: SubtitlePolicy? = nil,
@@ -415,6 +420,7 @@ public final class PlayerViewModel {
         adoptedResolved: PrefetchedPlayback? = nil
     ) {
         self.provider = provider
+        self.offlinePlaybackResolver = offlinePlaybackResolver
         self.itemID = itemID
         self.mediaSourceID = mediaSourceID
         self.behavior = behavior
@@ -838,6 +844,13 @@ public final class PlayerViewModel {
     ) async throws -> PrefetchedPlayback {
         var request = try await provider.playbackInfo(
             for: itemID, mediaSourceID: mediaSourceID, forceTranscode: forceTranscode)
+        // Offline choke point: if a completed download exists for this item,
+        // rewrite the request to play the local `file://` asset so BOTH engines
+        // play it with zero engine changes. Strictly additive — a no-op when no
+        // resolver is injected or no local copy exists (proven byte-identical by
+        // `OfflineRequestRewriteTests`).
+        let localURL = await offlinePlaybackResolver?.localPlaybackURL(for: request.item)
+        request = Self.applyingOfflineRewrite(to: request, localURL: localURL)
         // Steer the engine's INITIAL active audio track by language (no reload)
         // from the prefer-original-language policy. Computed here so every
         // playResolved entry (initial, adopted prefetch, and cross-engine
@@ -847,6 +860,33 @@ public final class PlayerViewModel {
         request.preferredAudioLanguages = preferredAudioLanguages(for: request.item)
         let kind = routeEngine(for: request, forceTranscode: forceTranscode)
         return PrefetchedPlayback(itemID: itemID, request: request, engineKind: kind)
+    }
+
+    /// Rewrites a resolved request to play a local `file://` asset when a completed
+    /// offline download exists (`localURL != nil`), otherwise returns the request
+    /// UNCHANGED (byte-identical) so default behavior is preserved.
+    ///
+    /// The rewrite swaps only the *source*: it moves the local file into the legacy
+    /// `streamURL` field — the direct-play field BOTH engines already consume —
+    /// clears every network/managed source (`playbackSource`, `externalAudioURL`,
+    /// `localRemuxSource`), and marks it a non-manifest direct play. All other
+    /// resolved facts (item, tracks, start position, source metadata used for
+    /// engine routing) are preserved, so engine selection stays consistent with a
+    /// direct-played copy of the same media.
+    nonisolated static func applyingOfflineRewrite(
+        to request: PlaybackRequest,
+        localURL: URL?
+    ) -> PlaybackRequest {
+        guard let localURL else { return request }
+        var rewritten = request
+        rewritten.streamURL = localURL
+        rewritten.playbackSource = nil
+        rewritten.externalAudioURL = nil
+        rewritten.localRemuxSource = nil
+        rewritten.isManifestStream = false
+        rewritten.isTranscoding = false
+        rewritten.deliveryMode = .directPlay
+        return rewritten
     }
 
     /// Picks the engine for a resolved request — the pure routing decision, no

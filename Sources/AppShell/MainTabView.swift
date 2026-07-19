@@ -45,6 +45,9 @@ struct MainTabView: View {
     let currentAccounts: @MainActor () -> [ResolvedAccount]
     let networkFileResolver: any MediaTransportNetworkFileResolving
     let authenticatedHTTPResolver: any AuthenticatedHTTPResourceResolving
+    /// Offline-download seam: when a completed download exists for the item,
+    /// playback is rewritten to the local file. `nil` = offline is a no-op.
+    let offlinePlaybackResolver: (any OfflinePlaybackResolving)?
     /// Subtitle behaviour (mode / language / auto-download) and appearance
     /// (`SubtitleStyle`) split out of the retired `CaptionSettings`. Behaviour
     /// feeds the policy resolver; style seeds the player + live overlay.
@@ -403,6 +406,7 @@ struct MainTabView: View {
             accounts: accounts,
             networkFileResolver: networkFileResolver,
             authenticatedHTTPResolver: authenticatedHTTPResolver,
+            offlinePlaybackResolver: offlinePlaybackResolver,
             behavior: subtitleBehaviorModel.settings,
             style: subtitleStyleModel.style,
             playbackSettings: playbackModel.settings,

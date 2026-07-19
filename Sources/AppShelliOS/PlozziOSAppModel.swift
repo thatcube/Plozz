@@ -228,6 +228,35 @@ final class PlozziOSAppModel {
             return false
         }
     }
+
+    @discardableResult
+    func addSFTPShare(
+        host: String,
+        port: Int?,
+        path: String,
+        username: String,
+        password: String,
+        hostKeyPin: SHA256Fingerprint,
+        displayName: String
+    ) -> Bool {
+        do {
+            _ = try mediaShareConfigurationService.saveSFTP(
+                host: host,
+                port: port,
+                path: path,
+                username: username,
+                password: password,
+                hostKeyPin: hostKeyPin,
+                displayName: displayName
+            )
+            accountsProviders.reloadAccounts()
+            accountError = nil
+            return true
+        } catch {
+            accountError = error.localizedDescription
+            return false
+        }
+    }
 }
 
 private struct PlozziOSMediaShareArtworkCacheLifecycle:

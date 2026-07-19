@@ -245,6 +245,105 @@ public struct MediaShareAccountConfigurationService: Sendable {
         return prepared
     }
 
+    public func prepareSFTP(
+        host: String,
+        port: Int?,
+        path: String,
+        username: String,
+        password: String,
+        hostKeyPin: SHA256Fingerprint,
+        displayName: String
+    ) throws -> PreparedMediaShareAccount {
+        let trimmedHost = host.trimmingCharacters(in: .whitespaces)
+        let trimmedUser = username.trimmingCharacters(in: .whitespaces)
+        guard !trimmedHost.isEmpty, !trimmedUser.isEmpty else {
+            throw MediaShareAccountConfigurationError.invalidAddress
+        }
+
+        let normalizedPath = Self.normalizedFilesystemPath(path)
+        var components = URLComponents()
+        components.scheme = "sftp"
+        components.host = ShareProvider.bracketedHostIfIPv6(trimmedHost)
+        components.port = port
+        components.path = normalizedPath
+        guard let baseURL = components.url else {
+            throw MediaShareAccountConfigurationError.invalidAddress
+        }
+
+        let credential: MediaShareCredentialEnvelope
+        do {
+            credential = try MediaShareCredentialEnvelope(
+                transport: .sftp,
+                authentication: .password(
+                    username: trimmedUser,
+                    password: password
+                ),
+                trust: MediaShareTrustMaterial(
+                    sshHostKeySHA256: hostKeyPin
+                )
+            )
+        } catch {
+            throw MediaShareAccountConfigurationError.invalidShare
+        }
+
+        let serverID = Self.filesystemID(
+            scheme: "sftp",
+            host: trimmedHost,
+            port: port,
+            path: normalizedPath,
+            principal: trimmedUser
+        )
+        let trimmedName = displayName.trimmingCharacters(in: .whitespaces)
+        let server = MediaServer(
+            id: serverID,
+            name: trimmedName.isEmpty
+                ? Self.defaultShareName(
+                    path: normalizedPath,
+                    host: trimmedHost,
+                    transport: .sftp
+                )
+                : trimmedName,
+            baseURL: baseURL,
+            provider: .mediaShare
+        )
+        let session = UserSession(
+            server: server,
+            userID: trimmedUser,
+            userName: trimmedUser,
+            deviceID: accountStore.deviceID(),
+            accessToken: ""
+        )
+        let account = Account(id: server.id, from: session)
+        return PreparedMediaShareAccount(
+            session: session,
+            account: account,
+            previousAccount: accountStore.loadAccounts().first { $0.id == account.id },
+            credential: credential
+        )
+    }
+
+    public func saveSFTP(
+        host: String,
+        port: Int?,
+        path: String,
+        username: String,
+        password: String,
+        hostKeyPin: SHA256Fingerprint,
+        displayName: String
+    ) throws -> PreparedMediaShareAccount {
+        let prepared = try prepareSFTP(
+            host: host,
+            port: port,
+            path: path,
+            username: username,
+            password: password,
+            hostKeyPin: hostKeyPin,
+            displayName: displayName
+        )
+        try persist(prepared)
+        return prepared
+    }
+
     public func prepareNFS(
         host: String,
         port: Int?,

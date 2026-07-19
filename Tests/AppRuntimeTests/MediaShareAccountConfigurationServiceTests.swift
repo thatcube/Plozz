@@ -4,6 +4,37 @@ import FeatureAuthCore
 import XCTest
 
 final class MediaShareAccountConfigurationServiceTests: XCTestCase {
+    func testSaveSFTPPersistsPasswordAndMandatoryHostKeyPin() throws {
+        let store = try makeStore()
+        let service = MediaShareAccountConfigurationService(accountStore: store)
+        let pin = try SHA256Fingerprint(bytes: Data(repeating: 9, count: 32))
+
+        let prepared = try service.saveSFTP(
+            host: "SFTP.Example",
+            port: 22,
+            path: "Media/Movies/",
+            username: "Brandon",
+            password: "secret",
+            hostKeyPin: pin,
+            displayName: ""
+        )
+
+        XCTAssertEqual(
+            prepared.account.id,
+            "share:sftp://sftp.example:22/Media/Movies#Brandon"
+        )
+        XCTAssertEqual(prepared.account.server.name, "Movies (SFTP)")
+        let credential = try store.mediaShareCredential(
+            for: prepared.account.id,
+            revision: prepared.account.credentialRevision
+        )
+        XCTAssertEqual(
+            credential.authentication,
+            .password(username: "Brandon", password: "secret")
+        )
+        XCTAssertEqual(credential.trust.sshHostKeySHA256, pin)
+    }
+
     func testSaveWebDAVPersistsBearerAndPinnedTrust() throws {
         let store = try makeStore()
         let service = MediaShareAccountConfigurationService(accountStore: store)

@@ -1452,50 +1452,43 @@ public final class AppState {
         hostKeyPin: SHA256Fingerprint,
         displayName: String
     ) {
-        let trimmedHost = host.trimmingCharacters(in: .whitespaces)
-        let trimmedUser = username.trimmingCharacters(in: .whitespaces)
-        guard !trimmedHost.isEmpty, !trimmedUser.isEmpty else {
-            apply(.authenticationFailed(.unknown("SFTP needs a host and username")))
-            return
-        }
-        var comps = URLComponents()
-        comps.scheme = "sftp"
-        comps.host = ShareProvider.bracketedHostIfIPv6(trimmedHost)
-        comps.port = port
-        let normalizedPath = Self.normalizedFilesystemPath(path)
-        comps.path = normalizedPath
-        guard let baseURL = comps.url else {
-            apply(.authenticationFailed(.unknown("Invalid SFTP address")))
-            return
-        }
-        let envelope: MediaShareCredentialEnvelope
+        let service = MediaShareAccountConfigurationService(
+            accountStore: accountsProviders.accountStore
+        )
+        let prepared: PreparedMediaShareAccount
         do {
-            let trust = MediaShareTrustMaterial(sshHostKeySHA256: hostKeyPin)
-            envelope = try MediaShareCredentialEnvelope(
-                transport: .sftp,
-                authentication: .password(username: trimmedUser, password: password),
-                trust: trust
+            prepared = try service.prepareSFTP(
+                host: host,
+                port: port,
+                path: path,
+                username: username,
+                password: password,
+                hostKeyPin: hostKeyPin,
+                displayName: displayName
             )
         } catch {
-            apply(.authenticationFailed(.unknown("Invalid SFTP credentials")))
+            apply(.authenticationFailed(.unknown("Invalid SFTP address or credentials")))
             return
         }
-        let serverID = Self.mediaShareFilesystemID(
-            scheme: "sftp",
-            host: trimmedHost,
-            port: port,
-            path: normalizedPath,
-            principal: trimmedUser
-        )
-        persistMediaShare(
-            serverID: serverID,
-            baseURL: baseURL,
-            envelope: envelope,
-            userID: trimmedUser,
-            userName: trimmedUser,
-            defaultName: Self.defaultShareName(path: normalizedPath, host: trimmedHost, transport: .sftp),
-            displayName: displayName,
-            invalidMessage: "Couldn’t save this SFTP share"
+        let isFirstRun =
+            accountsProviders.accounts.isEmpty
+            && !profilesModel.firstRunProfileSetupComplete
+        apply(.serverSelected(prepared.session.server))
+        do {
+            try service.persist(prepared)
+        } catch {
+            Self.reportMediaSharePersistenceFailure(
+                error,
+                operation: "media-share-save"
+            )
+            apply(.authenticationFailed(.unknown("Couldn’t save this SFTP share")))
+            return
+        }
+        finalizeAddedAccount(
+            session: prepared.session,
+            account: prepared.account,
+            previousAccount: prepared.previousAccount,
+            isFirstRun: isFirstRun
         )
     }
 

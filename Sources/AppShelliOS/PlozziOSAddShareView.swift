@@ -22,6 +22,11 @@ struct PlozziOSAddShareView: View {
                 } label: {
                     Label("WebDAV", systemImage: "network")
                 }
+                NavigationLink {
+                    PlozziOSAddSFTPShareView(appModel: appModel)
+                } label: {
+                    Label("SFTP", systemImage: "lock.shield")
+                }
             }
         }
         .navigationTitle("Add Network Share")

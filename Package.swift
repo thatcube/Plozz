@@ -571,6 +571,7 @@ let package = Package(
                 "MediaTransportCore",
                 "MediaTransportHTTP",
                 "MediaTransportNFS",
+                "MediaTransportSFTP",
                 "MediaTransportWebDAV",
                 "ProviderPlex",
                 "ProviderShare",

@@ -33,7 +33,7 @@ struct PlozzGlassPillButtonModifier: ViewModifier {
             content
                 .buttonStyle(PlozzOpaquePillButtonStyle(isSelected: isSelected, shape: shape))
                 .focusEffectDisabled()
-        } else if #available(tvOS 26.0, *) {
+        } else if #available(iOS 26.0, tvOS 26.0, *) {
             // Native Liquid Glass — identical to the player controls. The
             // prominent variant marks the selected pill with the app tint.
             if isSelected {
@@ -151,7 +151,7 @@ public struct PlozzSeasonTabStyle: ButtonStyle {
         private func basePill(_ shape: Capsule) -> some View {
             if reduceTransparency {
                 shape.fill(palette.cardSurface)
-            } else if #available(tvOS 26.0, *) {
+            } else if #available(iOS 26.0, tvOS 26.0, *) {
                 shape.fill(.clear).glassEffect(.regular, in: shape)
             } else {
                 shape.fill(.ultraThinMaterial)

@@ -275,11 +275,13 @@ struct PlayerControls: View {
             guard openPanel == .subtitles, subtitleScreen == .download else { return }
             if case .results = state { restoreFocus(.row(0)) }
         }
-        .onExitCommand { handleExit() }
-        .onPlayPauseCommand { actions.togglePlayPause() }
-        .onMoveCommand { direction in
-            if direction == .up && openPanel == nil { onExitToSurface() }
-        }
+        .plozzRemoteCommands(
+            onExit: handleExit,
+            onPlayPause: actions.togglePlayPause,
+            onMove: { direction in
+                if direction == .up && openPanel == nil { onExitToSurface() }
+            }
+        )
     }
 
     // MARK: Bottom cluster (title + scrubber + buttons)
@@ -294,7 +296,7 @@ struct PlayerControls: View {
                     .opacity(titleVisible ? 1 : 0)
                 if let openPanel {
                     panelContainer(for: openPanel)
-                        .focusSection()
+                        .plozzFocusSection()
                         // Grow + fade from the corner nearest the button that opened
                         // it so it reads as springing from the control rather than
                         // zooming out of screen-centre. Panels that pin to the trailing
@@ -924,7 +926,7 @@ struct PlayerControls: View {
         // Group the header as a focus section so directional focus can reach it
         // from anywhere below — e.g. pressing Up from the right (+) chip of the
         // sync stepper lands on Back even though nothing is geometrically above it.
-        .focusSection()
+        .plozzFocusSection()
     }
 
     private func headerTitle(for category: Category) -> String {

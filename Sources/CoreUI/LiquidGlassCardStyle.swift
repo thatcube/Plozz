@@ -34,7 +34,7 @@ public struct PlozzGlassCardModifier: ViewModifier {
     /// focus halo has always drawn glass this way (`Color.clear.glassEffect`) and
     /// never hangs on the same OS — proof the underlay structure is safe. So every
     /// glass card now matches it, on both tvOS 26 and 27.
-    @available(tvOS 26.0, *)
+    @available(iOS 26.0, tvOS 26.0, *)
     @ViewBuilder
     private func glassUnderlay() -> some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
@@ -68,7 +68,7 @@ public struct PlozzGlassCardModifier: ViewModifier {
                     )
                 }
                 .clipShape(shape)
-        } else if #available(tvOS 26.0, *) {
+        } else if #available(iOS 26.0, tvOS 26.0, *) {
             // Glass drawn as a BACKGROUND underlay (see `glassUnderlay`), NOT
             // wrapped around the content — the latter hangs on tvOS 27 focus.
             //
@@ -319,7 +319,7 @@ private struct GlassSurface: ViewModifier {
     func body(content: Content) -> some View {
         if reduceTransparency {
             content.background { shape.fill(palette.cardSurface) }
-        } else if #available(tvOS 26.0, *) {
+        } else if #available(iOS 26.0, tvOS 26.0, *) {
             content.glassEffect(.regular, in: shape)
         } else {
             content.background(.ultraThinMaterial, in: shape)

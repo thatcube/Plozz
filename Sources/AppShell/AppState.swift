@@ -76,94 +76,6 @@ public final class AppState {
     /// on profile switch so a new profile starts silent.
     public let audioController = AudioPlaybackController()
 
-
-    @MainActor
-    private final class AppAuthenticatedHTTPResourceResolver: AuthenticatedHTTPResourceResolving {
-        struct Context {
-            let provider: ProviderKind
-            let accountID: String
-            let credentialRevision: CredentialRevision
-            let baseURL: URL
-            let token: String
-        }
-
-        typealias ContextProvider = @MainActor @Sendable (
-            AuthenticatedHTTPPlaybackLocator
-        ) throws -> Context
-
-        private var contextProvider: ContextProvider?
-
-        func configure(contextProvider: @escaping ContextProvider) {
-            self.contextProvider = contextProvider
-        }
-
-        func resolve(_ locator: AuthenticatedHTTPPlaybackLocator) async throws -> URL {
-            guard let contextProvider else {
-                throw MediaTransportError.unsupportedCapability(
-                    "authenticated HTTP resolver"
-                )
-            }
-            let context = try contextProvider(locator)
-            guard context.provider == locator.provider,
-                  context.accountID == locator.accountID,
-                  context.credentialRevision == locator.credentialRevision,
-                  var components = URLComponents(
-                      url: context.baseURL,
-                      resolvingAgainstBaseURL: false
-                  ) else {
-                throw MediaTransportError.authentication(
-                    reason: "authenticated HTTP identity mismatch"
-                )
-            }
-
-            let encodedPath = locator.resource.path
-            switch locator.resource.pathBase {
-            case .configuredBaseURL:
-                let basePath = components.percentEncodedPath.hasSuffix("/")
-                    ? String(components.percentEncodedPath.dropLast())
-                    : components.percentEncodedPath
-                components.percentEncodedPath = basePath + "/" + encodedPath
-            case .serverRoot:
-                components.percentEncodedPath = encodedPath
-            }
-
-            var queryItems = locator.resource.queryItems.map {
-                URLQueryItem(name: $0.name, value: $0.value)
-            }
-            switch locator.provider {
-            case .jellyfin, .emby:
-                queryItems.append(URLQueryItem(name: "api_key", value: context.token))
-                if let playSessionID = locator.playSessionID {
-                    queryItems.append(
-                        URLQueryItem(name: "playSessionId", value: playSessionID)
-                    )
-                }
-            case .plex:
-                queryItems.append(URLQueryItem(name: "X-Plex-Token", value: context.token))
-                if let playSessionID = locator.playSessionID {
-                    queryItems.append(URLQueryItem(name: "session", value: playSessionID))
-                    queryItems.append(
-                        URLQueryItem(
-                            name: "X-Plex-Session-Identifier",
-                            value: playSessionID
-                        )
-                    )
-                }
-            case .mediaShare:
-                throw MediaTransportError.invalidInput(
-                    reason: "media shares cannot resolve authenticated HTTP resources"
-                )
-            }
-            components.queryItems = queryItems
-            guard let url = components.url else {
-                throw MediaTransportError.invalidInput(
-                    reason: "invalid authenticated HTTP resource"
-                )
-            }
-            return url
-        }
-    }
-
     /// Accounts just added in the current add flow whose libraries the
     /// "choose your libraries" step should offer. `RootView` renders that step
     /// from this; empty when none is pending.
@@ -618,14 +530,14 @@ public final class AppState {
         self.durableLocalStateStore = resolvedDurableLocalStateStore
         let resolvedRuntime: any MediaShareRuntime = mediaShareRuntime
             ?? DefaultMediaShareRuntime.make(accountStore: resolvedAccountStore)
-        let defaultAuthenticatedHTTPResolver: AppAuthenticatedHTTPResourceResolver?
+        let defaultAuthenticatedHTTPResolver: ManagedAuthenticatedHTTPResolver?
         let resolvedAuthenticatedHTTPResolver: any AuthenticatedHTTPResourceResolving
         if let authenticatedHTTPResolver {
             self.authenticatedHTTPResolver = authenticatedHTTPResolver
             resolvedAuthenticatedHTTPResolver = authenticatedHTTPResolver
             defaultAuthenticatedHTTPResolver = nil
         } else {
-            let resolver = AppAuthenticatedHTTPResourceResolver()
+            let resolver = ManagedAuthenticatedHTTPResolver()
             self.authenticatedHTTPResolver = resolver
             resolvedAuthenticatedHTTPResolver = resolver
             defaultAuthenticatedHTTPResolver = resolver
@@ -734,7 +646,7 @@ public final class AppState {
             } else {
                 baseURL = account.server.baseURL
             }
-            return AppAuthenticatedHTTPResourceResolver.Context(
+            return ManagedAuthenticatedHTTPResolver.Context(
                 provider: account.server.provider,
                 accountID: account.id,
                 credentialRevision: self.plexHomeUsers.effectiveCredentialRevision(for: account),

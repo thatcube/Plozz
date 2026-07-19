@@ -503,6 +503,7 @@ let package = Package(
                 "CoreModels",
                 "CoreNetworking",
                 "FeatureAuthCore",
+                "MediaTransportCore",
                 "ProviderJellyfin",
                 "ProviderPlex",
             ]
@@ -557,7 +558,9 @@ let package = Package(
                 "CoreNetworking",
                 "FeatureAuthCore",
                 "FeatureHomeCore",
+                "FeaturePlayback",
                 "FeatureSearchCore",
+                "MediaTransportCore",
                 "ProviderPlex",
             ]
         ),

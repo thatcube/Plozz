@@ -25,6 +25,7 @@ public struct PlozziOSRootView: View {
                 )
             }
         }
+        .environment(appModel)
         .sheet(isPresented: $showingAddServer) {
             AddServerView(appModel: appModel)
         }

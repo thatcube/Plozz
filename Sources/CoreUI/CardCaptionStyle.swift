@@ -17,7 +17,7 @@ public enum PlozzCardCaption {
     public static func usesLiftText(isFocused: Bool, reduceTransparency: Bool) -> Bool {
         guard isFocused else { return false }
         if reduceTransparency { return true }
-        if #available(tvOS 26.0, *) { return false }
+        if #available(iOS 26.0, tvOS 26.0, *) { return false }
         return true
     }
 

@@ -5,8 +5,11 @@ import SwiftUI
 
 struct PlozziOSItemDetailView: View {
     @State private var viewModel: ItemDetailViewModel
+    @State private var playbackRequest: PlozziOSPlaybackRequest?
+    private let provider: any MediaProvider
 
     init(provider: any MediaProvider, item: MediaItem) {
+        self.provider = provider
         _viewModel = State(
             initialValue: ItemDetailViewModel(
                 provider: provider,
@@ -43,12 +46,19 @@ struct PlozziOSItemDetailView: View {
         }
         .navigationBarTitleDisplayMode(.inline)
         .task { await viewModel.load() }
+        .fullScreenCover(item: $playbackRequest) {
+            PlozziOSPlayerView(request: $0, provider: provider)
+        }
     }
 
     private func detailContent(_ detail: ItemDetailViewModel.Detail) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 PlozziOSDetailHero(item: detail.item)
+
+                if detail.item.kind == .movie || detail.item.kind == .episode {
+                    PlozziOSPlaybackActions(item: detail.item, onPlay: play)
+                }
 
                 if detail.item.kind == .series, !detail.children.isEmpty {
                     VStack(alignment: .leading, spacing: 12) {
@@ -59,7 +69,8 @@ struct PlozziOSItemDetailView: View {
                             NavigationLink {
                                 PlozziOSSeasonEpisodesView(
                                     viewModel: viewModel,
-                                    season: season
+                                    season: season,
+                                    onPlay: play
                                 )
                             } label: {
                                 PlozziOSSeasonRow(season: season)
@@ -77,6 +88,48 @@ struct PlozziOSItemDetailView: View {
             .padding(.bottom, 32)
         }
         .navigationTitle(detail.item.title)
+    }
+
+    private func play(_ item: MediaItem, fromBeginning: Bool = false) {
+        playbackRequest = PlozziOSPlaybackRequest(
+            item: item,
+            startPosition: fromBeginning ? 0 : (item.resumePosition ?? 0)
+        )
+    }
+}
+
+private struct PlozziOSPlaybackActions: View {
+    let item: MediaItem
+    let onPlay: (MediaItem, Bool) -> Void
+
+    var body: some View {
+        HStack {
+            Button {
+                onPlay(item, false)
+            } label: {
+                Label(primaryTitle, systemImage: "play.fill")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+
+            if hasResumePosition {
+                Button {
+                    onPlay(item, true)
+                } label: {
+                    Label("Start Over", systemImage: "arrow.counterclockwise")
+                }
+                .buttonStyle(.bordered)
+            }
+        }
+        .controlSize(.large)
+    }
+
+    private var hasResumePosition: Bool {
+        (item.resumePosition ?? 0) > 1
+    }
+
+    private var primaryTitle: LocalizedStringKey {
+        hasResumePosition ? "Resume" : "Play"
     }
 }
 
@@ -183,6 +236,7 @@ private struct PlozziOSSeasonRow: View {
 private struct PlozziOSSeasonEpisodesView: View {
     let viewModel: ItemDetailViewModel
     let season: MediaItem
+    let onPlay: (MediaItem, Bool) -> Void
 
     var body: some View {
         Group {
@@ -194,7 +248,12 @@ private struct PlozziOSSeasonEpisodesView: View {
                     )
                 } else {
                     List(episodes) { episode in
-                        PlozziOSEpisodeRow(episode: episode)
+                        Button {
+                            onPlay(episode, false)
+                        } label: {
+                            PlozziOSEpisodeRow(episode: episode)
+                        }
+                        .buttonStyle(.plain)
                     }
                     .listStyle(.plain)
                 }

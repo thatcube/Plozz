@@ -99,7 +99,9 @@ struct SubtitleStylePanel: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 6)
         .frame(maxWidth: .infinity, alignment: .top)
-        .onMoveCommand { direction in handleStyleMove(direction, rows: rows) }
+        .plozzMoveCommand { direction in
+            handleStyleMove(direction, rows: rows)
+        }
     }
 
     /// One rendered row, laid out to match the track/audio rows exactly: a full-width
@@ -183,7 +185,7 @@ struct SubtitleStylePanel: View {
     /// Container-level ←/→ handler: looks up the focused slot's row and steps it.
     /// Up/down are left to the native focus engine (single column → left/right
     /// find no sibling, so focus stays put and this handler fires instead).
-    private func handleStyleMove(_ direction: MoveCommandDirection, rows: [StyleRowSpec]) {
+    private func handleStyleMove(_ direction: PlozzMoveCommandDirection, rows: [StyleRowSpec]) {
         guard case let .row(slot)? = focus,
               let row = rows.first(where: { $0.slot == slot }) else { return }
         switch (direction, row.kind) {

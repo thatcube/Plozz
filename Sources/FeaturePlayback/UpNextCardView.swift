@@ -55,7 +55,7 @@ struct UpNextCardView: View {
 
     @ViewBuilder
     private func card(for info: UpNextInfo) -> some View {
-        Button(action: onPlayNext) {
+        let button = Button(action: onPlayNext) {
             HStack(spacing: 22) {
                 thumbnail(for: info)
 
@@ -99,16 +99,21 @@ struct UpNextCardView: View {
         .onPreferenceChange(UpNextMediaHeightKey.self) { height in
             if height > 0 { mediaHeight = height }
         }
-        .onExitCommand { onDismiss() }
+        #if os(tvOS)
+        button
+            .onExitCommand { onDismiss() }
         // Play/Pause works while the card holds focus: toggle playback in place
         // (the auto-advance ring freezes because it tracks playback position)
         // without dismissing the card or losing focus.
-        .onPlayPauseCommand { onPlayPause() }
-        .onMoveCommand { direction in
-            // An upward swipe dismisses the card, matching the player's other Up
-            // gestures (which surface the transport / leave focusable overlays).
-            if direction == .up { onDismiss() }
-        }
+            .onPlayPauseCommand { onPlayPause() }
+            .onMoveCommand { direction in
+                // An upward swipe dismisses the card, matching the player's other Up
+                // gestures (which surface the transport / leave focusable overlays).
+                if direction == .up { onDismiss() }
+            }
+        #else
+        button
+        #endif
     }
 
     @ViewBuilder

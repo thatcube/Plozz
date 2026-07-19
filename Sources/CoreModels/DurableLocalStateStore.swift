@@ -13,6 +13,7 @@ public protocol DurableLocalStateValue: Codable, Sendable {
 public enum DurableLocalStateCollection: String, Codable, CaseIterable, Sendable {
     case accountRemovalJournal
     case credentialMutationIndex
+    case localMediaDownloads
     case localMediaWatch
     case migrationMarker
     case sourceIdentity

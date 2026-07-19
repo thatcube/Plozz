@@ -7,6 +7,7 @@ import FeatureDiscovery
 import FeatureMusic
 import FeatureProfiles
 import MediaTransportCore
+import MediaDownloads
 import MediaTransportFTP
 import MediaTransportHTTP
 import MediaTransportSMB
@@ -232,6 +233,51 @@ public final class AppState {
         let created = makeWatchReconciler(profileID: profileID)
         watchReconcilers[profileID] = created
         return created
+    }
+
+    /// Per-profile offline-download registries (durable, non-evictable), created
+    /// lazily and kept per profile so switching profiles never crosses catalogs —
+    /// the same isolation discipline as `watchReconcilers`.
+    @ObservationIgnored
+    private var offlineDownloadRegistries: [String: DownloadedMediaRegistry] = [:]
+    @ObservationIgnored
+    private let downloadStorageLocator: any DownloadStorageLocating =
+        PlatformDownloadStorageLocator()
+
+    /// The offline-playback resolver for the active profile, injected into the
+    /// player so a completed download plays from disk. `nil` when durable state is
+    /// unavailable (the player then behaves exactly as if offline never existed).
+    public var offlinePlaybackResolver: (any OfflinePlaybackResolving)? {
+        guard let durableLocalStateStore else { return nil }
+        let profileID = profilesModel.activeProfileID
+        let registry: DownloadedMediaRegistry
+        if let existing = offlineDownloadRegistries[profileID] {
+            registry = existing
+        } else {
+            let store: any DownloadedMediaStoring
+            do {
+                store = try DurableDownloadedMediaStore(
+                    store: durableLocalStateStore,
+                    profileID: profileID,
+                    onLoadFailure: {
+                        PlozzLog.app.error(
+                            "Durable download catalog unavailable; preserving corrupt state"
+                        )
+                    }
+                )
+            } catch {
+                PlozzLog.app.error(
+                    "Durable download catalog address invalid; using memory only"
+                )
+                store = InMemoryDownloadedMediaStore()
+            }
+            registry = DownloadedMediaRegistry(store: store)
+            offlineDownloadRegistries[profileID] = registry
+        }
+        return RegistryOfflinePlaybackResolver(
+            registry: registry,
+            storage: downloadStorageLocator
+        )
     }
 
     /// Builds the reconciler with profile-scoped durable state and an applier that

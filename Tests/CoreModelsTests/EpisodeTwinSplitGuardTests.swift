@@ -156,6 +156,30 @@ final class EpisodeTwinSplitGuardTests: XCTestCase {
                        "Legit twins kept; the cross-kind movie ref dropped")
     }
 
+    func testDifferentShowsSharingOnlyTheBadNamespaceStayMerged() {
+        // INTENDED LIMITATION (documents the boundary, not a bug): two genuinely
+        // different shows that overlap in ONLY the single mis-tagged series namespace
+        // — same bad tvdb id, same S/E, and NO other distinguishing series id — have
+        // no positive evidence to split on, so the false merge persists. This is the
+        // deliberate "never split on absent/insufficient signal" tradeoff: a false
+        // split of a legit cross-server twin is worse than this residual, and any
+        // second correct shared series id (or a differing S/E) immediately splits
+        // them (see testDifferentShowsEpisodesSharingBadSeriesIDAreSplit). Do NOT
+        // "fix" this by requiring ALL namespaces to conflict — that would weaken the
+        // guard against the exact mis-tag bug this suite protects against.
+        let showX = ep("epX", account: "A", title: "The Day of Black Sun",
+                       season: 3, episode: 10, seriesIDs: ["tvdb": "111"])
+        let showY = ep("epY", account: "B", title: "Caballo Sin Nombre",
+                       season: 3, episode: 10, seriesIDs: ["tvdb": "111"])
+        let groups = MediaItemMerger.refineComponent([showX, showY])
+        XCTAssertEqual(groups.count, 1,
+                       "With only the single bad shared namespace and no other signal, the pair stays merged (documented residual)")
+        XCTAssertFalse(MediaItemIdentity.episodesPlausiblyContradict(
+            seasonA: 3, episodeA: 10, seriesIDsA: ["tvdb": "111"],
+            seasonB: 3, episodeB: 10, seriesIDsB: ["tvdb": "111"]
+        ))
+    }
+
     // MARK: - episodesPlausiblyContradict primitive
 
     func testPrimitiveContradictsOnConflictingSeriesID() {

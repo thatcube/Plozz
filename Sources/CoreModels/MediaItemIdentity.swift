@@ -210,6 +210,14 @@ public enum MediaItemIdentity {
     /// sparse twin — or two copies that merged on an episode-level id and expose no
     /// series ids — always stays merged, matching the movie/series guards' "a false
     /// merge is worse than a missed split" stance.
+    ///
+    /// Intended limitation: if two genuinely different shows overlap in ONLY the
+    /// single mis-tagged namespace (they share the one bad id and expose no OTHER
+    /// distinguishing series id, with matching/absent S/E), this returns false and
+    /// the false merge persists — there is no positive evidence to split on. This is
+    /// the deliberate "never split on absent/insufficient signal" tradeoff: a false
+    /// split of a legitimate cross-server twin is worse than this residual, and any
+    /// second, correct shared series id (or a differing S/E) immediately splits them.
     public static func episodesPlausiblyContradict(
         seasonA: Int?, episodeA: Int?, seriesIDsA: [String: String],
         seasonB: Int?, episodeB: Int?, seriesIDsB: [String: String]

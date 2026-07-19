@@ -245,15 +245,20 @@ private struct PlozziOSTabShell: View {
         .tabViewStyle(.sidebarAdaptable)
         .background { AppBackground(palette: palette) }
         .sheet(isPresented: $showingSettings) {
-            PlozziOSSettingsView(
-                appModel: appModel,
-                onAddServer: showAddServerFromSettings,
-                onClose: { showingSettings = false }
+            ZStack {
+                AppBackground(palette: palette)
+                PlozziOSSettingsView(
+                    appModel: appModel,
+                    onAddServer: showAddServerFromSettings,
+                    onClose: { showingSettings = false }
+                )
+            }
+            .clipShape(
+                RoundedRectangle(cornerRadius: 32, style: .continuous)
             )
             .presentationSizing(.page)
-            .presentationBackground {
-                AppBackground(palette: palette)
-            }
+            .presentationBackground(.clear)
+            .presentationCornerRadius(32)
             .presentationDragIndicator(.visible)
         }
     }

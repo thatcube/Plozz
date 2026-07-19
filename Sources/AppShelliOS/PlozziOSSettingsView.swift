@@ -5,6 +5,7 @@ import SwiftUI
 
 struct PlozziOSSettingsView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.themePalette) private var palette
     let appModel: PlozziOSAppModel
     let onAddServer: () -> Void
 
@@ -21,6 +22,8 @@ struct PlozziOSSettingsView: View {
                     onAddServer: onAddServer
                 )
             }
+            .toolbarBackground(.hidden, for: .navigationBar)
+            .background { AppBackground(palette: palette) }
         }
     }
 }
@@ -44,6 +47,7 @@ private enum PlozziOSSettingsDestination: Hashable {
 }
 
 private struct PlozziOSSettingsSplitView: View {
+    @Environment(\.themePalette) private var palette
     let appModel: PlozziOSAppModel
     let onAddServer: () -> Void
     @State private var selection: PlozziOSSettingsDestination? = .profiles
@@ -163,6 +167,8 @@ private struct PlozziOSSettingsSplitView: View {
             .id(selection)
         }
         .navigationSplitViewStyle(.balanced)
+        .toolbarBackground(.hidden, for: .navigationBar)
+        .background { AppBackground(palette: palette) }
         .alert("Sign out of all accounts?", isPresented: $confirmSignOutAll) {
             Button("Cancel", role: .cancel) {}
             Button("Sign Out", role: .destructive) {

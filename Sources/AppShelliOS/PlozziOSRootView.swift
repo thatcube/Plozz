@@ -199,6 +199,7 @@ private enum PlozziOSDestination: String, CaseIterable, Identifiable {
 }
 
 private struct PlozziOSTabShell: View {
+    @Environment(\.themePalette) private var palette
     let appModel: PlozziOSAppModel
     let onAddServer: () -> Void
 
@@ -212,6 +213,8 @@ private struct PlozziOSTabShell: View {
                         onAddServer: onAddServer
                     )
                 }
+                .toolbarBackground(.hidden, for: .navigationBar)
+                .background { AppBackground(palette: palette) }
             }
 
             Tab("Search", systemImage: "magnifyingglass") {
@@ -222,6 +225,8 @@ private struct PlozziOSTabShell: View {
                         onAddServer: onAddServer
                     )
                 }
+                .toolbarBackground(.hidden, for: .navigationBar)
+                .background { AppBackground(palette: palette) }
             }
 
             Tab("Downloads", systemImage: "arrow.down.circle") {
@@ -232,6 +237,8 @@ private struct PlozziOSTabShell: View {
                         onAddServer: onAddServer
                     )
                 }
+                .toolbarBackground(.hidden, for: .navigationBar)
+                .background { AppBackground(palette: palette) }
             }
 
             Tab("Settings", systemImage: "gear") {
@@ -240,9 +247,11 @@ private struct PlozziOSTabShell: View {
                     appModel: appModel,
                     onAddServer: onAddServer
                 )
+                .background { AppBackground(palette: palette) }
             }
         }
         .tabViewStyle(.sidebarAdaptable)
+        .background { AppBackground(palette: palette) }
     }
 }
 

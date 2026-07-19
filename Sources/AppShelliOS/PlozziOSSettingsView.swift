@@ -156,6 +156,8 @@ struct PlozziOSSettingsView: View {
                 }
             }
         }
+        .frame(maxWidth: 760)
+        .frame(maxWidth: .infinity)
         .navigationTitle("Settings")
         .alert("Sign out of all accounts?", isPresented: $confirmSignOutAll) {
             Button("Cancel", role: .cancel) {}
@@ -547,6 +549,8 @@ private struct PlozziOSAppearanceSettingsView: View {
                 }
             }
         }
+        .frame(maxWidth: 760)
+        .frame(maxWidth: .infinity)
         .navigationTitle("Appearance")
     }
 }
@@ -819,6 +823,8 @@ private struct PlozziOSPlaybackSettingsView: View {
                 )
             }
         }
+        .frame(maxWidth: 760)
+        .frame(maxWidth: .infinity)
         .navigationTitle("Playback")
     }
 
@@ -883,11 +889,11 @@ private struct PlozziOSSubtitleSettingsView: View {
                 }
                 LabeledContent("Size") {
                     Slider(value: $style.style.fontScale, in: 0.6...2.0)
-                        .frame(maxWidth: 220)
+                        .frame(maxWidth: 360)
                 }
                 LabeledContent("Opacity") {
                     Slider(value: $style.style.opacity, in: 0.2...1.0)
-                        .frame(maxWidth: 220)
+                        .frame(maxWidth: 360)
                 }
                 Toggle("Background", isOn: $style.style.background.isEnabled)
             }
@@ -947,6 +953,8 @@ private struct PlozziOSSubtitleSettingsView: View {
                 }
             }
         }
+        .frame(maxWidth: 760)
+        .frame(maxWidth: .infinity)
         .navigationTitle("Subtitles")
     }
 

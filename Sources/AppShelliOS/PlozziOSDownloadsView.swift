@@ -3,6 +3,7 @@ import MediaDownloads
 import SwiftUI
 
 struct PlozziOSDownloadsView: View {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Bindable var model: PlozziOSDownloadsModel
 
     var body: some View {
@@ -21,6 +22,8 @@ struct PlozziOSDownloadsView: View {
                         "Download a movie or episode from its detail page to watch offline."
                     )
                 )
+            } else if horizontalSizeClass == .regular {
+                regularWidthContent
             } else {
                 List(model.records) { record in
                     DownloadRow(record: record, model: model)
@@ -29,17 +32,53 @@ struct PlozziOSDownloadsView: View {
         }
         .navigationTitle("Downloads")
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Menu {
-                    Toggle("Allow Cellular Downloads", isOn: $model.allowsCellular)
-                    Toggle(
-                        "Pause in Low Data Mode",
-                        isOn: $model.pausesOnLowDataMode
-                    )
-                } label: {
-                    Label("Download Settings", systemImage: "ellipsis.circle")
+            if horizontalSizeClass != .regular {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Toggle("Allow Cellular Downloads", isOn: $model.allowsCellular)
+                        Toggle(
+                            "Pause in Low Data Mode",
+                            isOn: $model.pausesOnLowDataMode
+                        )
+                    } label: {
+                        Label("Download Settings", systemImage: "ellipsis.circle")
+                    }
                 }
             }
+        }
+    }
+
+    private var regularWidthContent: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                GroupBox("Download Settings") {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Toggle(
+                            "Allow Cellular Downloads",
+                            isOn: $model.allowsCellular
+                        )
+                        Toggle(
+                            "Pause in Low Data Mode",
+                            isOn: $model.pausesOnLowDataMode
+                        )
+                    }
+                    .padding(.top, 6)
+                }
+
+                LazyVStack(spacing: 12) {
+                    ForEach(model.records) { record in
+                        DownloadRow(record: record, model: model)
+                            .padding(14)
+                            .background(
+                                .thinMaterial,
+                                in: RoundedRectangle(cornerRadius: 16)
+                            )
+                    }
+                }
+            }
+            .padding()
+            .frame(maxWidth: 920)
+            .frame(maxWidth: .infinity)
         }
     }
 }
@@ -75,6 +114,8 @@ struct PlozziOSDownloadSettingsView: View {
                 }
             }
         }
+        .frame(maxWidth: 760)
+        .frame(maxWidth: .infinity)
         .navigationTitle("Downloads")
     }
 }

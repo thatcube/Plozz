@@ -1148,33 +1148,36 @@ private struct PlozziOSAttributionsView: View {
     var body: some View {
         List {
             Section {
-                Text("Plozz is free and open source under GPL-3.0 with an App Store exception.")
-                Text("Plozz is an unofficial client and is not affiliated with Jellyfin or Plex.")
+                Text(PlozzAttributions.introduction)
             }
-            attribution(
-                "AetherEngine & FFmpeg",
-                "Playback is powered by AetherEngine. Media processing uses FFmpeg under LGPL licenses."
-            )
-            attribution(
-                "Networking",
-                "Network shares use AMSMB2, SwiftNIO SSH, Network.framework, and protocol-specific open-source components."
-            )
-            attribution(
-                "Media metadata",
-                "This product may use TMDB metadata but is not endorsed or certified by TMDB."
-            )
-            attribution(
-                "Open-source licenses",
-                "Third-party components retain their respective MIT, BSD, Apache, ISC, LGPL, and other licenses."
-            )
+            ForEach(PlozzAttributions.entries) { entry in
+                Section(entry.title) {
+                    Text(entry.detail)
+                    if !entry.licenses.isEmpty {
+                        PlozziOSLicenseBadges(licenses: entry.licenses)
+                    }
+                }
+            }
         }
         .navigationTitle("Attributions")
     }
+}
 
-    private func attribution(_ title: String, _ detail: String) -> some View {
-        Section(title) {
-            Text(detail)
+private struct PlozziOSLicenseBadges: View {
+    let licenses: [PlozzAttributionLicense]
+
+    var body: some View {
+        HStack {
+            ForEach(licenses) { license in
+                Text(license.label)
+                    .font(.caption2.weight(.semibold))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(.tint.opacity(0.14), in: Capsule())
+            }
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(licenses.map(\.label).joined(separator: ", "))
     }
 }
 #endif

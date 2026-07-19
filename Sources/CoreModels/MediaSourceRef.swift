@@ -28,6 +28,14 @@ public struct MediaSourceRef: Codable, Hashable, Identifiable, Sendable {
     /// shows if *any* contributing library is visible). `nil` ⇒ this source is
     /// fail-open (not attributable to a hidden library).
     public var libraryID: String?
+    /// The **media kind** of the underlying item this source addresses (movie /
+    /// series / episode …). Stamped from the item/`IndexedSource` at construction so
+    /// every consumer can enforce the cross-kind boundary: an episode's source set
+    /// must never contain a movie ref (and vice versa). `nil` for a ref decoded from
+    /// a cache written before this field existed — treated as **untyped**, trusted
+    /// only when it is the item's own self-ref (see ``retainingKindCompatible``), so
+    /// a stale cross-kind twin frozen in an old cache can't route playback/fan-out.
+    public var kind: MediaItemKind?
     /// The backend this source lives on — drives the server-picker icon/label.
     /// Optional because the merge core can run without an account→kind resolver
     /// (e.g. Search), in which case the picker falls back to a neutral label.
@@ -68,6 +76,7 @@ public struct MediaSourceRef: Codable, Hashable, Identifiable, Sendable {
         accountID: String,
         itemID: String,
         libraryID: String? = nil,
+        kind: MediaItemKind? = nil,
         providerKind: ProviderKind? = nil,
         serverName: String? = nil,
         accountName: String? = nil,
@@ -83,6 +92,7 @@ public struct MediaSourceRef: Codable, Hashable, Identifiable, Sendable {
         self.accountID = accountID
         self.itemID = itemID
         self.libraryID = libraryID
+        self.kind = kind
         self.providerKind = providerKind
         self.serverName = serverName
         self.accountName = accountName
@@ -97,7 +107,7 @@ public struct MediaSourceRef: Codable, Hashable, Identifiable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case accountID, itemID, libraryID, providerKind, serverName, accountName
+        case accountID, itemID, libraryID, kind, providerKind, serverName, accountName
         case locality, versions, resumePosition, playedPercentage, isPlayed
         case hasBeenPlayed, isFavorite, lastPlayedAt
     }
@@ -107,6 +117,7 @@ public struct MediaSourceRef: Codable, Hashable, Identifiable, Sendable {
         accountID = try container.decode(String.self, forKey: .accountID)
         itemID = try container.decode(String.self, forKey: .itemID)
         libraryID = try container.decodeIfPresent(String.self, forKey: .libraryID)
+        kind = try container.decodeIfPresent(MediaItemKind.self, forKey: .kind)
         providerKind = try container.decodeIfPresent(ProviderKind.self, forKey: .providerKind)
         serverName = try container.decodeIfPresent(String.self, forKey: .serverName)
         accountName = try container.decodeIfPresent(String.self, forKey: .accountName)
@@ -139,9 +150,28 @@ public struct MediaSourceRef: Codable, Hashable, Identifiable, Sendable {
         return providerKind?.displayName ?? "Server"
     }
 
-    /// Whether this source carries in-progress resume state (started, not yet
-    /// finished). Used by the unified-state fold and "Continue Watching" logic.
-    public var hasResume: Bool {
-        (resumePosition ?? 0) > 0 && !isPlayed
+    /// Whether this source ref may legitimately belong to a merged item of
+    /// `itemKind` whose own (and any co-merged members') physical identities are in
+    /// `selfIDs` ("account:item"). The cross-kind boundary that keeps an episode's
+    /// source set free of an unrelated movie (and vice versa):
+    ///  * a ref that IS one of `selfIDs` is always kept (never strip an item's own
+    ///    source, even a legacy untyped one, so we can't leave a card sourceless);
+    ///  * a **typed** peer is kept only when its `kind` matches `itemKind`;
+    ///  * an **untyped** peer (legacy `nil` kind, not a self-ref) is rejected — that
+    ///    is the stale cross-kind twin a pre-`kind` cache may have frozen in.
+    public func isKindCompatible(with itemKind: MediaItemKind, selfIDs: Set<String>) -> Bool {
+        if selfIDs.contains(id) { return true }
+        if let kind { return kind == itemKind }
+        return false
+    }
+
+    /// Filters `refs` to those kind-compatible with an item of `itemKind` whose own
+    /// (and co-merged members') self-ids are `selfIDs`. See ``isKindCompatible``.
+    public static func retainingKindCompatible(
+        _ refs: [MediaSourceRef],
+        itemKind: MediaItemKind,
+        selfIDs: Set<String>
+    ) -> [MediaSourceRef] {
+        refs.filter { $0.isKindCompatible(with: itemKind, selfIDs: selfIDs) }
     }
 }

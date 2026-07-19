@@ -53,7 +53,10 @@ public final class HomeContentStore: HomeContentStoring, @unchecked Sendable {
 
     /// **Bump when `MediaItem` / `AggregatedLibrary` coding changes** so devices
     /// with an older snapshot shape start fresh instead of decode-missing forever.
-    private static let schemaDirName = "plozz-home-content-v1"
+    /// v2: `MediaSourceRef` gained a `kind` field and the merger now drops
+    /// cross-kind source refs — bumping evicts snapshots that froze a stale
+    /// episode↔movie twin from a pre-fix build.
+    private static let schemaDirName = "plozz-home-content-v2"
     private static let schemaDirPrefix = "plozz-home-content"
 
     /// Process-wide guards. `HomeContentStore` is (re)constructed inline in

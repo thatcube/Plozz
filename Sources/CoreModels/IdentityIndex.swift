@@ -78,6 +78,7 @@ public struct IndexedSource: Hashable, Sendable, Codable {
         MediaSourceRef(
             accountID: accountID,
             itemID: itemID,
+            kind: kind,
             providerKind: providerKind,
             serverName: serverName,
             accountName: accountName,
@@ -561,6 +562,12 @@ public actor IdentityIndex {
             guard byAccount[accountID]?.isEmpty ?? true, !warmAccounts.contains(accountID) else { continue }
             var bucket: [MediaIdentity: [String: IndexedSource]] = [:]
             for entry in entries {
+                // Uphold the same invariant as `ingest`: only movies and series carry
+                // a stable cross-server identity. An older build (or a corrupt
+                // snapshot) may have persisted an episode/other-kind source; restoring
+                // it would let a kind-scoped lookup serve a wrong same-kind membership
+                // (and is how a stale cross-kind twin could re-enter). Reject it here.
+                guard entry.source.kind == .movie || entry.source.kind == .series else { continue }
                 bucket[entry.identity, default: [:]][entry.source.id] = entry.source
             }
             guard !bucket.isEmpty else { continue }
@@ -809,7 +816,10 @@ public final class FileIdentityIndexStore: IdentityIndexStoring, @unchecked Send
         // v5 uses authoritative Series* IDs plus exact S/E for cross-provider
         // episode membership. Do not restore an older snapshot that used title
         // heuristics or may have collapsed show-level IDs;
-        // this is a purgeable cache and is rebuilt from active providers.
+        // this is a purgeable cache and is rebuilt from active providers. Only
+        // movie/series sources are ever exported (see `export`), and `restore`
+        // additionally rejects any non-movie/series entry, so a corrupt snapshot
+        // can't reintroduce a cross-kind membership — no schema bump needed.
         self.url = base.appendingPathComponent("identity-index-v5\(suffix).json")
         try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
     }

@@ -530,7 +530,9 @@ func bestSourcePlayItem(
     }
 
     // Union the card's own sources with any twin the live index knows. The card's
-    // refs come first and win on id collision (live versions/watch-state).
+    // refs come first and win on id collision (live versions/watch-state). The
+    // card's own sources are already cross-kind sanitized by `MediaItemMerger`
+    // (and stale caches are schema-bumped), so no further filtering is needed here.
     var unioned = item.sources
     var seen = Set(unioned.map(\.id))
     for ref in identitySources(item) where seen.insert(ref.id).inserted {

@@ -629,12 +629,13 @@ struct DetailHeroView: View {
                 .allowsHitTesting(false)
             }
         }
-        // Fade the whole hero (backdrop + text) in on first appearance rather
-        // than hard-cutting, for a more polished open.
-        .opacity(heroVisible ? 1 : 0)
+        // Normal detail opens fade the whole hero in. A live Home-trailer handoff
+        // must be fully opaque on its very first frame; fading the inherited video
+        // from zero exposes the navigation/container background as a dark flash.
+        .opacity(isContinuingHeroTrailer || heroVisible ? 1 : 0)
         .onAppear {
             guard !heroVisible else { return }
-            if reduceMotion {
+            if reduceMotion || isContinuingHeroTrailer {
                 heroVisible = true
             } else {
                 withAnimation(.easeInOut(duration: 0.35)) { heroVisible = true }
@@ -656,6 +657,14 @@ struct DetailHeroView: View {
             userInitiatedSourceSwitch = false
             if showsMoreMenu { moreMenuFocused = true }
         }
+
+    }
+
+    private var isContinuingHeroTrailer: Bool {
+        let heroItem = backdropItem ?? item
+        return heroBackground.settings.mode == .trailer
+            && heroTrailerController.isShowing(heroItem.id)
+            && heroTrailerController.isPlaying
     }
 
     /// The full-bleed backdrop image with its legibility scrim and bottom

@@ -198,6 +198,7 @@ public final class NativeVideoEngine: VideoEngine {
         let injectableSubtitles = await resolveInjectableSubtitles(for: request)
         let asset: AVURLAsset
         if let audioURL = request.externalAudioURL {
+            PlaybackTrace.note("trailer mux: extAudio present video=\(Self.itagOf(streamURL)) audio=\(Self.itagOf(audioURL))")
             // Adaptive trailer: a video-only stream paired with a separate
             // audio-only stream. AVPlayer can't take two bare URLs, so wrap them
             // in a synthesized HLS master and let it mux + sync them itself. Falls
@@ -207,6 +208,7 @@ public final class NativeVideoEngine: VideoEngine {
             asset = await makeTrailerMuxAsset(videoURL: streamURL, audioURL: audioURL)
                 ?? makeAsset(for: request, streamURL: streamURL, injectableSubtitles: injectableSubtitles)
         } else {
+            PlaybackTrace.note("trailer/native load: no extAudio (progressive) url=\(Self.itagOf(streamURL))")
             asset = makeAsset(
                 for: request,
                 streamURL: streamURL,
@@ -381,14 +383,17 @@ public final class NativeVideoEngine: VideoEngine {
         subtitleLoader = nil
         trailerMuxLoader = nil
 
+        let probeStart = Date()
         let seconds: Double
         do {
             let duration = try await AVURLAsset(url: videoURL).load(.duration)
             seconds = duration.seconds
         } catch {
+            PlaybackTrace.note("trailer mux: duration probe FAILED after \(Self.ms(since: probeStart))ms err=\(error)")
             PlozzLog.playback.debug("Trailer mux: duration probe failed; falling back to plain asset")
             return nil
         }
+        PlaybackTrace.note("trailer mux: duration probe ok \(String(format: "%.1f", seconds))s in \(Self.ms(since: probeStart))ms")
         guard seconds.isFinite, seconds > 0 else { return nil }
 
         let composer = TrailerAudioMuxComposer(
@@ -399,6 +404,18 @@ public final class NativeVideoEngine: VideoEngine {
         let loader = TrailerAudioMuxResourceLoader(composer: composer)
         trailerMuxLoader = loader
         return loader.makeAsset()
+    }
+
+    /// Milliseconds elapsed since `start`, for diagnostic timing.
+    private static func ms(since start: Date) -> Int {
+        Int(Date().timeIntervalSince(start) * 1000)
+    }
+
+    /// The `itag` query value of a googlevideo URL (e.g. `137`), for diagnostics;
+    /// `?` when absent.
+    private static func itagOf(_ url: URL) -> String {
+        URLComponents(url: url, resolvingAgainstBaseURL: false)?
+            .queryItems?.first(where: { $0.name == "itag" })?.value ?? "?"
     }
 
     private func resolveInjectableSubtitles(
@@ -532,14 +549,17 @@ public final class NativeVideoEngine: VideoEngine {
     /// load.
     private func monitorForTranscodeFallback(item: AVPlayerItem) {
         fallbackMonitorTask?.cancel()
+        let monitorStart = Date()
         fallbackMonitorTask = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
                 switch item.status {
                 case .failed:
+                    PlaybackTrace.note("native item FAILED after \(Self.ms(since: monitorStart))ms err=\(String(describing: item.error))")
                     self.onFailure?(self.currentPlayerError())
                     return
                 case .readyToPlay:
+                    PlaybackTrace.note("native item readyToPlay in \(Self.ms(since: monitorStart))ms dur=\(String(format: "%.1f", item.duration.seconds))s")
                     return
                 default:
                     try? await Task.sleep(nanoseconds: 200_000_000)

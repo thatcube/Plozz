@@ -40,10 +40,13 @@ public final class TrailerAudioMuxResourceLoader: NSObject, AVAssetResourceLoade
 
         switch url.lastPathComponent {
         case "master.m3u8":
+            PlaybackTrace.note("trailer mux loader: serve master")
             fulfil(loadingRequest, text: composer.masterPlaylist())
         case "video.m3u8":
+            PlaybackTrace.note("trailer mux loader: serve video playlist")
             fulfil(loadingRequest, text: composer.videoMediaPlaylist())
         case "audio.m3u8":
+            PlaybackTrace.note("trailer mux loader: serve audio playlist")
             fulfil(loadingRequest, text: composer.audioMediaPlaylist())
         default:
             loadingRequest.finishLoading(with: URLError(.badURL))

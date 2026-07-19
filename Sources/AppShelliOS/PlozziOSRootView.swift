@@ -251,6 +251,9 @@ private struct PlozziOSTabShell: View {
                 onClose: { showingSettings = false }
             )
             .presentationSizing(.page)
+            .presentationBackground {
+                AppBackground(palette: palette)
+            }
             .presentationDragIndicator(.visible)
         }
     }

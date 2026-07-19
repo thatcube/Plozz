@@ -13,6 +13,7 @@ public struct PlozziOSRootView: View {
 
     public var body: some View {
         let pinRequest = appModel.plexHomeUsers.pendingPlexPINRequest
+        let plexUserSelection = appModel.plexHomeUsers.pendingPlexUserSelection
 
         Group {
             if appModel.requiresLaunchProfileSelection
@@ -42,6 +43,21 @@ public struct PlozziOSRootView: View {
         .id(shellIdentity)
         .sheet(isPresented: $showingAddServer) {
             AddServerView(appModel: appModel)
+        }
+        .sheet(
+            item: Binding(
+                get: { plexUserSelection },
+                set: { selection in
+                    if selection == nil {
+                        appModel.plexHomeUsers.clearUserSelection()
+                    }
+                }
+            )
+        ) { selection in
+            PlozziOSPlexUserSelectionView(
+                selection: selection,
+                onSelect: appModel.selectPlexUserDuringOnboarding
+            )
         }
         .sheet(
             item: Binding(

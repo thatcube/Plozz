@@ -67,6 +67,7 @@ final class PlozziOSAppModel {
     private let mediaShareConfigurationService: MediaShareAccountConfigurationService
     private let mediaShareRescanService: MediaShareRescanService
     @ObservationIgnored private var trackerProfileGeneration: UInt64 = 0
+    @ObservationIgnored private var plexUserSelectionGeneration: UInt64 = 0
     @ObservationIgnored private var watchReconcilers: [String: WatchStateReconciler] = [:]
     @ObservationIgnored
     private(set) lazy var identityIndex = IdentityIndexModel(
@@ -714,14 +715,72 @@ final class PlozziOSAppModel {
 
     func persist(_ sessions: [UserSession]) {
         do {
+            let plexAccounts = sessions
+                .filter { $0.server.provider == .plex }
+                .map { Account(from: $0) }
             for session in sessions {
                 try accountStore.add(Account(from: session), token: session.accessToken)
             }
             accountError = nil
             reloadAccountsAndCrashContext()
             identityIndex.warmIdentityIndex()
+            preparePlexUserSelection(for: plexAccounts)
         } catch {
             accountError = error.localizedDescription
+        }
+    }
+
+    func selectPlexUserDuringOnboarding(_ user: PlexHomeUser) {
+        guard let pending = plexHomeUsers.pendingPlexUserSelection else { return }
+        let binding = PlexHomeUserBinding(
+            homeUserID: user.id,
+            name: user.name,
+            avatarURL: user.avatarURL?.absoluteString,
+            requiresPIN: user.requiresPIN
+        )
+        var profile = profiles.activeProfile
+        for accountID in pending.applyToAccountIDs {
+            profile = profile.settingHomeUserBinding(
+                binding,
+                forPlexAccount: accountID
+            )
+        }
+        profiles.update(profile)
+        plexHomeUsers.clearUserSelection()
+        Task {
+            await Task.yield()
+            plexHomeUsers.ensurePlexIdentityForActiveProfile()
+        }
+    }
+
+    private func preparePlexUserSelection(for accounts: [Account]) {
+        plexUserSelectionGeneration &+= 1
+        let generation = plexUserSelectionGeneration
+        guard let account = accounts.first(where: {
+            profiles.activeProfile.homeUserBinding(forPlexAccount: $0.id) == nil
+        }) else {
+            return
+        }
+        Task {
+            let users = await plexHomeUsers.plexHomeUsers(
+                forAccountID: account.id
+            )
+            guard generation == plexUserSelectionGeneration else { return }
+            guard users.count >= 2,
+                  accountsProviders.accounts.contains(where: {
+                      $0.id == account.id
+                  }) else {
+                return
+            }
+            plexHomeUsers.presentUserSelection(
+                PlexHomeUsersModel.PendingPlexUserSelection(
+                    accountID: account.id,
+                    serverName: account.server.name,
+                    users: users,
+                    isFirstRun: false,
+                    applyToAccountIDs: accounts.map(\.id)
+                )
+            )
         }
     }
 

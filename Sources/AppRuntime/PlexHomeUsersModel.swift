@@ -23,19 +23,30 @@ import ProviderPlex
 @Observable
 public final class PlexHomeUsersModel {
     /// Context for the "Which Plex user are you?" onboarding step.
-    public struct PendingPlexUserSelection: Equatable, Sendable {
+    public struct PendingPlexUserSelection: Equatable, Identifiable, Sendable {
         public let accountID: String
         public let serverName: String
         public let users: [PlexHomeUser]
+        /// Plex accounts from the same sign-in batch that should receive the
+        /// selected Home-user binding.
+        public let applyToAccountIDs: [String]
         /// Whether this selection is happening during a brand-new-install first
         /// run (drives whether we continue to profile-setup or the app).
         public let isFirstRun: Bool
+        public var id: String { accountID }
 
-        public init(accountID: String, serverName: String, users: [PlexHomeUser], isFirstRun: Bool) {
+        public init(
+            accountID: String,
+            serverName: String,
+            users: [PlexHomeUser],
+            isFirstRun: Bool,
+            applyToAccountIDs: [String]? = nil
+        ) {
             self.accountID = accountID
             self.serverName = serverName
             self.users = users
             self.isFirstRun = isFirstRun
+            self.applyToAccountIDs = applyToAccountIDs ?? [accountID]
         }
     }
 

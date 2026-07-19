@@ -1,79 +1,98 @@
 import Foundation
 import CoreModels
 
-/// Ordering and enablement of external metadata sources — expressed as **data**, so
-/// a source can be promoted, demoted, or switched off from configuration with no
-/// code change (the Step 5 "ordering as configuration" requirement).
+/// Ordering and enablement of external metadata sources — expressed as **data**, so a
+/// source can be promoted, demoted, or switched off from configuration with no code
+/// change.
+///
+/// The user model is a **single ordered list with a "Disabled" divider**: enabled
+/// sources sit above the divider in priority order (top = highest), disabled sources
+/// below. Position expresses **both** priority and enablement — there is no separate
+/// Primary/Secondary/Off role any more.
 ///
 /// It layers two inputs:
-///   1. a per-field / per-content-type ``MetadataPriorityPolicy`` (the Step 3
-///      tables — which sources serve which field, in what order), and
-///   2. a ``ProviderRole`` map (primary / secondary / disabled) applied on top.
+///   1. a per-field / per-content-type ``MetadataPriorityPolicy`` (the Step 3 tables —
+///      which sources serve which field, in what order), used as the **default** order
+///      before the user reorders anything, and
+///   2. the user's single global ``order`` + a ``disabledSources`` set.
 ///
 /// ``orderedSources(for:query:)`` combines them into the concrete fallback order the
-/// pipeline walks: disabled sources are dropped, and `primary` sources are stably
-/// hoisted ahead of `secondary` ones without disturbing the base table order.
+/// pipeline walks. Its key safety property: **an un-reordered config is byte-identical
+/// to the pre-reorder per-field behavior** — the per-field policy chains drive ordering
+/// until the user actually reorders, at which point the single global ``order`` takes
+/// over for every field (``usesGlobalOrder``). Disabled sources are always excluded.
 public struct MetadataEnrichmentConfig: Sendable {
-    /// Explicit role overrides. A source absent from the map defaults to
-    /// ``ProviderRole/primary`` (i.e. the base policy order is used unchanged).
-    public var roles: [MetadataSource: ProviderRole]
-    /// Content-agnostic fallback order for fields the priority policy has no rule
-    /// for (ids, taglines, canonical text). Also supplies sources the per-field rule
-    /// omitted, appended after the ruled ones.
-    public var baseOrder: [MetadataSource]
-    /// The per-field / per-content-type source-priority tables.
+    /// Sources removed from enrichment entirely (below the divider, or build-disabled).
+    public var disabledSources: Set<MetadataSource>
+    /// The single global source order (top = highest priority). Enabled sources lead,
+    /// in priority order; disabled sources trail (they are filtered out of enrichment
+    /// but kept for a stable, complete order). Seeded from the Step-3-policy-derived
+    /// ``defaultBaseOrder``; user reordering permutes it.
+    public var order: [MetadataSource]
+    /// Whether the user has supplied an explicit reorder. When `false` (default or
+    /// disable-only), ``orderedSources(for:query:)`` follows the per-field priority
+    /// policy (byte-identical to the pre-reorder behavior). When `true`, the single
+    /// global ``order`` drives every field's candidate order.
+    public var usesGlobalOrder: Bool
+    /// The per-field / per-content-type source-priority tables (the Step 3 policy).
     public var priority: MetadataPriorityPolicy
 
     public init(
-        roles: [MetadataSource: ProviderRole] = [:],
-        baseOrder: [MetadataSource] = MetadataEnrichmentConfig.defaultBaseOrder,
+        disabledSources: Set<MetadataSource> = [],
+        order: [MetadataSource] = MetadataEnrichmentConfig.defaultBaseOrder,
+        usesGlobalOrder: Bool = false,
         priority: MetadataPriorityPolicy = MetadataEnrichmentConfig.defaultPriority
     ) {
-        self.roles = roles
-        self.baseOrder = baseOrder
+        self.disabledSources = disabledSources
+        self.order = order
+        self.usesGlobalOrder = usesGlobalOrder
         self.priority = priority
     }
 
     /// The default per-field / per-content-type priority tables (the Step 3 policy).
     public static let defaultPriority: MetadataPriorityPolicy = CurrentMetadataPriority.policy
 
-    /// The recommended global fallback order used when no per-field rule applies:
-    /// canonical/ids/poster from TheTVDB, then TMDb artwork, the keyless anime/TV
-    /// sources, and the factual/last-mile fallbacks and isolated extras last.
+    /// The recommended global fallback order used when no per-field rule applies, and
+    /// the default seed for the single global order: canonical/ids/poster from TheTVDB,
+    /// then TMDb artwork, the keyless anime/TV sources, and the factual/last-mile
+    /// fallbacks and isolated extras last.
     public static let defaultBaseOrder: [MetadataSource] = [
         .tvdb, .tmdb, .anilist, .tvmaze, .kitsu, .wikidata, .wikipedia, .omdb, .deezer, .musicbrainz,
     ]
 
-    public func role(of source: MetadataSource) -> ProviderRole {
-        roles[source] ?? .primary
-    }
-
+    /// Whether `source` participates in enrichment (not disabled).
     public func isEnabled(_ source: MetadataSource) -> Bool {
-        role(of: source) != .disabled
+        !disabledSources.contains(source)
     }
 
-    /// The ordered, role-filtered sources to try for `field` given `query`'s content
-    /// type. Starts from the per-field priority rule, appends any base-order sources
-    /// the rule omitted, drops disabled sources, and stably partitions primary ahead
-    /// of secondary.
+    /// The ordered, enabled sources to try for `field` given `query`'s content type.
+    ///
+    /// * **Default / disable-only** (``usesGlobalOrder`` == false): starts from the
+    ///   per-field priority rule, appends any global-order sources the rule omitted,
+    ///   and drops disabled sources — byte-identical to the pre-reorder behavior.
+    /// * **Reordered** (``usesGlobalOrder`` == true): the single global ``order`` (minus
+    ///   disabled) governs every field. Capability is still enforced downstream by the
+    ///   pipeline frontier — an incapable frontmost source is asked, returns nothing,
+    ///   and the field falls through — so a provider can never win a field it can't
+    ///   serve.
     public func orderedSources(for field: MetadataField, query: MetadataQuery) -> [MetadataSource] {
+        if usesGlobalOrder {
+            return order.filter { !disabledSources.contains($0) }
+        }
         let context = MetadataPriorityContext(rawValue: Self.contextRawValue(for: field, query: query))
         let ruled = priority.sources(for: Self.ruleField(for: field), context: context)
         var ordered: [MetadataSource] = []
         var seen: Set<MetadataSource> = []
-        for source in ruled + baseOrder where seen.insert(source).inserted {
+        for source in ruled + order where seen.insert(source).inserted {
             ordered.append(source)
         }
-        let enabled = ordered.filter(isEnabled)
-        let primary = enabled.filter { role(of: $0) == .primary }
-        let secondary = enabled.filter { role(of: $0) == .secondary }
-        return primary + secondary
+        return ordered.filter { !disabledSources.contains($0) }
     }
 
     /// The raw priority-context string for a `field` + `query`, mirroring the scheme
     /// ``CurrentMetadataPriority`` builds (`artwork.<type>.<kind>`,
     /// `overview.<type>`). Fields without a dedicated table fall back to
-    /// `<field>.<type>` (usually unruled → base order).
+    /// `<field>.<type>` (usually unruled → global order).
     static func contextRawValue(for field: MetadataField, query: MetadataQuery) -> String {
         let type = query.contentType.rawValue
         if let kind = artworkKind(for: field) {
@@ -101,7 +120,7 @@ public struct MetadataEnrichmentConfig: Sendable {
     /// The canonical field a priority *rule* is keyed on for `field`. The Step 3
     /// tables key every wide-backdrop variant (`homeHero`, `detailBackdrop`,
     /// `backdropURL`) on `.backdropURL`, so those all look up the same hero rule
-    /// instead of falling through to the base order.
+    /// instead of falling through to the global order.
     static func ruleField(for field: MetadataField) -> MetadataField {
         switch artworkKind(for: field) {
         case .hero: return .backdropURL
@@ -115,92 +134,104 @@ public struct MetadataEnrichmentConfig: Sendable {
     // MARK: - User overrides
 
     /// Returns a copy of this (Info.plist / code-default) baseline with a user's
-    /// persisted ``MetadataProviderSettings`` layered on top — the Step 6 override
-    /// layer. `AppShell` applies this at composition time; Step 5's own read-only,
-    /// Info.plist-sourced semantics are unchanged (this never mutates the baseline
-    /// and is a no-op unless the user actually overrode something).
+    /// persisted ``MetadataProviderSettings`` layered on top — the reorder/enable
+    /// override. `AppShell` applies this at composition time; the Info.plist-sourced
+    /// baseline is never mutated and the merge is a no-op unless the user actually
+    /// customized something.
     ///
     /// Layering rules, chosen so the baseline is preserved wherever the user hasn't
     /// spoken:
-    ///   * **Roles:** each user role override replaces the baseline role for exactly
-    ///     that source; every other source keeps its baseline role. (`MetadataProviderState`
-    ///     shares raw values with ``ProviderRole``, so the mapping is exact.)
-    ///   * **Order:** when the user supplied an explicit order, it leads — in the
-    ///     user's sequence — and any baseline source the user omitted is appended in
-    ///     its original baseline order, so a provider a newer build adds is never
-    ///     dropped by an older saved order. An empty user order keeps the baseline order.
+    ///   * **Disabled set:** the build baseline's disabled sources, plus the user's
+    ///     explicitly-disabled sources, minus the user's explicitly-enabled sources (so
+    ///     a user can re-enable a build-disabled source by placing it above the
+    ///     divider). Only tokens this build knows (the baseline ``order`` set) are
+    ///     honored — a stale/foreign token is dropped, never materialized as a phantom
+    ///     source.
+    ///   * **Order:** the user's placed enabled sources lead in their sequence; any
+    ///     baseline source the user didn't place keeps its baseline position, appended
+    ///     after; disabled sources trail. So a provider a newer build adds is never
+    ///     dropped by an older saved order.
+    ///   * **``usesGlobalOrder``:** set only when the user's effective *enabled* order
+    ///     actually differs from the baseline enabled order — a real reorder. Merely
+    ///     disabling a source keeps the per-field policy chains (nothing was reordered),
+    ///     preserving byte-identical ordering for the sources that remain.
     ///
-    /// An **empty** override returns `self` unchanged, so a user who has customized
-    /// nothing runs a config identical to the pure Step 5 baseline.
+    /// An **empty** override returns `self` unchanged.
     public func merged(withUserOverrides overrides: MetadataProviderSettings) -> MetadataEnrichmentConfig {
         guard !overrides.isEmpty else { return self }
 
-        var mergedRoles = roles
-        for (raw, state) in overrides.roleOverrides {
-            mergedRoles[MetadataSource(rawValue: raw)] = Self.providerRole(forOverrideStateRawValue: state.rawValue)
+        let known = Set(order)
+        let userEnabled = overrides.enabledOrder.map { MetadataSource(rawValue: $0) }.filter { known.contains($0) }
+        let userDisabled = overrides.disabledOrder.map { MetadataSource(rawValue: $0) }.filter { known.contains($0) }
+        let userEnabledSet = Set(userEnabled)
+
+        var effectiveDisabled = disabledSources
+        for source in userDisabled { effectiveDisabled.insert(source) }
+        for source in userEnabledSet { effectiveDisabled.remove(source) }
+
+        // Effective global order: user-placed enabled sources first (their sequence),
+        // then any baseline source the user didn't place (baseline order), then the
+        // disabled sources trailing.
+        var seen: Set<MetadataSource> = []
+        var enabledEffective: [MetadataSource] = []
+        for source in userEnabled where !effectiveDisabled.contains(source) && seen.insert(source).inserted {
+            enabledEffective.append(source)
         }
-
-        var mergedOrder = baseOrder
-        if !overrides.order.isEmpty {
-            // Only honor order tokens for sources this build actually knows (the
-            // baseline set). A stale token left by an older/newer build — or a
-            // foreign string — is dropped rather than materializing as a phantom,
-            // default-primary (enabled) source in the fallback tail.
-            let known = Set(baseOrder)
-            var seen: Set<MetadataSource> = []
-            var ordered: [MetadataSource] = []
-            for source in overrides.order.map({ MetadataSource(rawValue: $0) })
-            where known.contains(source) && seen.insert(source).inserted {
-                ordered.append(source)
-            }
-            for source in baseOrder where seen.insert(source).inserted {
-                ordered.append(source)
-            }
-            mergedOrder = ordered
+        for source in order where !effectiveDisabled.contains(source) && seen.insert(source).inserted {
+            enabledEffective.append(source)
         }
+        var disabledTrail: [MetadataSource] = []
+        for source in userDisabled where effectiveDisabled.contains(source) && seen.insert(source).inserted {
+            disabledTrail.append(source)
+        }
+        for source in order where effectiveDisabled.contains(source) && seen.insert(source).inserted {
+            disabledTrail.append(source)
+        }
+        let effectiveOrder = enabledEffective + disabledTrail
 
-        return MetadataEnrichmentConfig(roles: mergedRoles, baseOrder: mergedOrder, priority: priority)
-    }
+        // A real reorder (vs a disable-only change) is detected by comparing the
+        // effective enabled order to the baseline enabled order (same set, disabled
+        // removed). Only a real reorder switches enrichment onto the single global order.
+        let baselineEnabled = order.filter { !effectiveDisabled.contains($0) }
+        let reordered = enabledEffective != baselineEnabled
 
-    /// Maps a persisted override state (by raw value) onto a ``ProviderRole``.
-    ///
-    /// A recognized state maps 1:1. An **unrecognized** state — e.g. one a future
-    /// build persisted that this build's ``ProviderRole`` has no counterpart for —
-    /// resolves to ``ProviderRole/disabled``, **never** ``ProviderRole/primary``, so a
-    /// user's explicit restriction can never be silently upgraded to an enabled
-    /// primary source. (Disabling is the safe failure direction: fewer results, never
-    /// a re-enabled provider the user turned off.)
-    static func providerRole(forOverrideStateRawValue raw: String) -> ProviderRole {
-        ProviderRole(rawValue: raw) ?? .disabled
+        return MetadataEnrichmentConfig(
+            disabledSources: effectiveDisabled,
+            order: effectiveOrder,
+            usesGlobalOrder: reordered,
+            priority: priority
+        )
     }
 
     // MARK: - Bundle resolution
 
-    /// Reads role overrides from the app bundle so a build can promote/demote/disable
-    /// a source without code. The `MetadataProviderRoles` Info.plist key holds a
-    /// comma-separated `source:role` list, e.g. `"tmdb:disabled,wikipedia:secondary"`.
-    /// Unknown tokens are ignored; the rest of the config uses the defaults.
+    /// Reads the build baseline from the app bundle so a build can disable a source
+    /// without code. The `MetadataProviderRoles` Info.plist key holds a comma-separated
+    /// `source:role` list, e.g. `"tmdb:disabled"`. In the enabled+order model only
+    /// `disabled` is meaningful (it removes the source); any other role leaves the
+    /// source enabled. Unknown/foreign tokens are ignored.
     public static func resolved(bundle: Bundle = .main) -> MetadataEnrichmentConfig {
-        var roles: [MetadataSource: ProviderRole] = [:]
+        var disabled: Set<MetadataSource> = []
         if let raw = bundle.object(forInfoDictionaryKey: "MetadataProviderRoles") as? String {
-            roles = parseRoles(raw)
+            disabled = parseDisabledSources(raw)
         }
-        return MetadataEnrichmentConfig(roles: roles)
+        return MetadataEnrichmentConfig(disabledSources: disabled)
     }
 
-    /// Parses a `"source:role,source:role"` string into a role map. Whitespace is
-    /// tolerated; malformed or unknown-role entries are skipped.
-    static func parseRoles(_ raw: String) -> [MetadataSource: ProviderRole] {
-        var roles: [MetadataSource: ProviderRole] = [:]
+    /// Parses a `"source:role,source:role"` string into the set of sources the build
+    /// disables. Whitespace is tolerated; only `disabled` removes a source, so a typo in
+    /// the role never silently disables one.
+    static func parseDisabledSources(_ raw: String) -> Set<MetadataSource> {
+        var disabled: Set<MetadataSource> = []
         for pair in raw.split(separator: ",") {
             let parts = pair.split(separator: ":", maxSplits: 1).map {
                 $0.trimmingCharacters(in: .whitespaces)
             }
-            guard parts.count == 2, !parts[0].isEmpty,
-                  let role = ProviderRole(rawValue: parts[1].lowercased())
-            else { continue }
-            roles[MetadataSource(rawValue: parts[0])] = role
+            guard parts.count == 2, !parts[0].isEmpty else { continue }
+            if parts[1].lowercased() == "disabled" {
+                disabled.insert(MetadataSource(rawValue: parts[0]))
+            }
         }
-        return roles
+        return disabled
     }
 }

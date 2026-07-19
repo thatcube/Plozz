@@ -45,7 +45,7 @@ private final class FakePipelineProvider: MetadataEnrichmentProvider, @unchecked
 
 final class PipelineShareResolverTests: XCTestCase {
     private func flatConfig(_ order: [MetadataSource]) -> MetadataEnrichmentConfig {
-        MetadataEnrichmentConfig(roles: [:], baseOrder: order, priority: MetadataPriorityPolicy(rules: []))
+        MetadataEnrichmentConfig(order: order, priority: MetadataPriorityPolicy(rules: []))
     }
 
     private func request(

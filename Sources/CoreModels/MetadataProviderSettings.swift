@@ -1,98 +1,153 @@
 import Foundation
 import Observation
 
-/// A user-facing enablement/prominence choice for a metadata source.
+/// A persisted **user override** for metadata-source ordering + enablement, layered
+/// on top of the build's Info.plist provider baseline (the Step 5
+/// `MetadataEnrichmentConfig`).
 ///
-/// This deliberately mirrors MetadataKit's `ProviderRole` **by raw value**
-/// (`primary` / `secondary` / `disabled`) so `CoreModels` — the leaf module that
-/// owns persistence and cannot import `MetadataKit` — can record a user's override
-/// without a layering violation. `MetadataEnrichmentConfig.merged(withUserOverrides:)`
-/// maps these back onto the real `ProviderRole` at composition time.
-public enum MetadataProviderState: String, Codable, Sendable, CaseIterable {
-    /// Consulted ahead of `secondary` sources for the same field.
-    case primary
-    /// Consulted only after every `primary` source for the same field.
-    case secondary
-    /// Removed from the running set entirely.
-    case disabled
-}
-
-/// A persisted **user override** layered on top of the build's Info.plist provider
-/// baseline (the Step 5 `MetadataEnrichmentConfig`).
+/// The user-facing model is a **single ordered list with a "Disabled" divider**:
+/// everything above the divider is enabled and shown in priority order (top = highest
+/// priority); everything below is disabled. Position expresses **both** priority and
+/// enabled/disabled — there is no separate role (Primary/Secondary/Off) any more.
+///
+/// This is stored as two ordered `MetadataSource.rawValue` lists so the persisted JSON
+/// is stable and human-readable, and so a record written by a newer build that knows a
+/// source this build doesn't still decodes without loss:
+///   * ``enabledOrder`` — enabled sources, highest priority first (above the divider);
+///   * ``disabledOrder`` — disabled sources, in order (below the divider).
 ///
 /// Scope note: the ``MetadataProviderSettingsStore`` below *supports* per-profile
 /// namespacing, but the app wires a single instance **household-global** (app-wide,
 /// un-namespaced) — see `AppState.metadataProviderSettingsModel` — because a share and
-/// its scan are household-global, so provider ordering/roles are too. Keep this in mind
-/// before assuming per-profile behavior.
+/// its scan are household-global, so provider ordering/enablement is too.
 ///
 /// It is intentionally *sparse*: an empty value means "use the build defaults
-/// unchanged", and any source not named here inherits its baseline role and
-/// position. This is what lets the merge preserve the Info.plist baseline where the
-/// user hasn't overridden, and lets "reset to build defaults" be a single
-/// assignment back to ``default``.
-///
-/// Roles and order are stored keyed by `MetadataSource.rawValue` (a plain string)
-/// rather than by `MetadataSource`, so the persisted JSON is a stable, readable
-/// object — and so records written by a newer build that knows a source this build
-/// doesn't decode without loss.
+/// unchanged", and any source named in neither list inherits its baseline position and
+/// enabled state. This is what lets the merge preserve the Info.plist baseline where the
+/// user hasn't spoken, and lets "reset to build defaults" be a single assignment back to
+/// ``default``.
 public struct MetadataProviderSettings: Codable, Equatable, Sendable {
-    /// Per-source role overrides, keyed by `MetadataSource.rawValue`. A source
-    /// absent from the map inherits the build baseline's role for it.
-    public var roleOverrides: [String: MetadataProviderState]
+    /// Enabled sources, highest-priority first (above the divider), as
+    /// `MetadataSource.rawValue`s. A source absent from both lists inherits the
+    /// baseline's position + enabled state.
+    public var enabledOrder: [String]
 
-    /// The user's explicit source ordering, as `MetadataSource.rawValue`s. Empty
-    /// means "inherit the baseline order". Sources the user omitted keep their
-    /// baseline position, appended after the user-ordered ones (so a new provider a
-    /// later build adds is never silently dropped from an older saved order).
-    public var order: [String]
+    /// Disabled sources, in order (below the divider), as `MetadataSource.rawValue`s.
+    public var disabledOrder: [String]
 
     public init(
-        roleOverrides: [String: MetadataProviderState] = [:],
-        order: [String] = []
+        enabledOrder: [String] = [],
+        disabledOrder: [String] = []
     ) {
-        self.roleOverrides = roleOverrides
-        self.order = order
+        self.enabledOrder = enabledOrder
+        self.disabledOrder = disabledOrder
     }
 
     /// Whether this override is empty — i.e. the merge is a no-op and the running
     /// config equals the pure Info.plist baseline.
-    public var isEmpty: Bool { roleOverrides.isEmpty && order.isEmpty }
+    public var isEmpty: Bool { enabledOrder.isEmpty && disabledOrder.isEmpty }
 
-    /// The user's role override for `source`, or `nil` when it inherits the baseline.
-    public func role(for source: MetadataSource) -> MetadataProviderState? {
-        roleOverrides[source.rawValue]
+    /// Whether the user has explicitly disabled `source`.
+    public func isDisabled(_ source: MetadataSource) -> Bool {
+        disabledOrder.contains(source.rawValue)
     }
 
-    /// Sets (or clears, when `role` is `nil`) the user's role override for `source`.
-    public mutating func setRole(_ role: MetadataProviderState?, for source: MetadataSource) {
-        if let role {
-            roleOverrides[source.rawValue] = role
-        } else {
-            roleOverrides.removeValue(forKey: source.rawValue)
-        }
+    /// Whether the user has explicitly placed `source` in the enabled list.
+    public func isExplicitlyEnabled(_ source: MetadataSource) -> Bool {
+        enabledOrder.contains(source.rawValue)
     }
 
-    /// Replaces the explicit ordering with `sources` (typed convenience).
-    public mutating func setOrder(_ sources: [MetadataSource]) {
-        order = sources.map(\.rawValue)
+    /// Replaces the enabled list with `sources` (typed convenience).
+    public mutating func setEnabledOrder(_ sources: [MetadataSource]) {
+        enabledOrder = sources.map(\.rawValue)
+    }
+
+    /// Replaces the disabled list with `sources` (typed convenience).
+    public mutating func setDisabledOrder(_ sources: [MetadataSource]) {
+        disabledOrder = sources.map(\.rawValue)
+    }
+
+    /// Replaces both lists at once (the single-list divider model: `enabled` above,
+    /// `disabled` below).
+    public mutating func setLists(enabled: [MetadataSource], disabled: [MetadataSource]) {
+        enabledOrder = enabled.map(\.rawValue)
+        disabledOrder = disabled.map(\.rawValue)
     }
 
     /// The build-default (empty) override — the "reset to build defaults" value.
     public static let `default` = MetadataProviderSettings()
 
     private enum CodingKeys: String, CodingKey {
+        // Current schema.
+        case enabledOrder, disabledOrder
+        // Legacy Step-6 schema (role model) — decoded for one-way migration only.
         case roleOverrides, order
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(enabledOrder, forKey: .enabledOrder)
+        try container.encode(disabledOrder, forKey: .disabledOrder)
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        // decodeIfPresent so a blob written before a field existed decodes to its
-        // default instead of failing the whole decode.
-        roleOverrides = try container.decodeIfPresent(
-            [String: MetadataProviderState].self, forKey: .roleOverrides
-        ) ?? [:]
-        order = try container.decodeIfPresent([String].self, forKey: .order) ?? []
+        // Current schema. decodeIfPresent so a blob written before a field existed
+        // decodes to its default instead of failing the whole decode.
+        enabledOrder = try container.decodeIfPresent([String].self, forKey: .enabledOrder) ?? []
+        disabledOrder = try container.decodeIfPresent([String].self, forKey: .disabledOrder) ?? []
+
+        // One-way migration of the legacy Step-6 role blob ({roleOverrides, order}) —
+        // only when this build finds no current-schema data (so a re-encode never keeps
+        // re-migrating). previously .disabled -> disabled; .primary/.secondary ->
+        // enabled at their persisted order position; an unknown role -> disabled (never
+        // silently enabled).
+        if enabledOrder.isEmpty, disabledOrder.isEmpty {
+            let legacyRoles = try container.decodeIfPresent([String: String].self, forKey: .roleOverrides) ?? [:]
+            if !legacyRoles.isEmpty {
+                let legacyOrder = try container.decodeIfPresent([String].self, forKey: .order) ?? []
+                (enabledOrder, disabledOrder) = Self.migrate(roleOverrides: legacyRoles, order: legacyOrder)
+            }
+        }
+    }
+
+    /// Deterministically maps a legacy role override map + explicit order onto the
+    /// enabled/disabled lists. Disabled roles (and any unrecognized role — the safe
+    /// direction) go below the divider; every other placed source stays enabled at its
+    /// order position. Sources with a disabling role but no order entry are appended
+    /// after the placed ones (by raw value, for stability).
+    static func migrate(
+        roleOverrides: [String: String],
+        order: [String]
+    ) -> (enabled: [String], disabled: [String]) {
+        func isDisabledRole(_ raw: String) -> Bool {
+            // "disabled" disables; unknown/foreign roles disable too (never silently
+            // enable a source the user restricted).
+            raw != "primary" && raw != "secondary"
+        }
+
+        var enabled: [String] = []
+        var disabled: [String] = []
+        var seen: Set<String> = []
+
+        // Honor the user's explicit order first.
+        for token in order where seen.insert(token).inserted {
+            if let role = roleOverrides[token], isDisabledRole(role) {
+                disabled.append(token)
+            } else {
+                enabled.append(token)
+            }
+        }
+        // Any disabling role-only source (not in `order`) still needs recording so its
+        // restriction survives the migration; deterministic by raw value. A
+        // primary/secondary role with no order entry inherits the baseline (enabled at
+        // its baseline position), so it needs no explicit list entry.
+        for token in roleOverrides.keys.sorted() where seen.insert(token).inserted {
+            if let role = roleOverrides[token], isDisabledRole(role) {
+                disabled.append(token)
+            }
+        }
+        return (enabled, disabled)
     }
 }
 

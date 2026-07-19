@@ -74,11 +74,13 @@ final class MetadataEnrichmentPipelineTests: XCTestCase {
     /// table ⇒ base order drives every field), so tests are fully deterministic.
     private func makeConfig(
         order: [MetadataSource],
-        roles: [MetadataSource: ProviderRole] = [:]
+        disabled: Set<MetadataSource> = [],
+        usesGlobalOrder: Bool = false
     ) -> MetadataEnrichmentConfig {
         MetadataEnrichmentConfig(
-            roles: roles,
-            baseOrder: order,
+            disabledSources: disabled,
+            order: order,
+            usesGlobalOrder: usesGlobalOrder,
             priority: MetadataPriorityPolicy(rules: [])
         )
     }
@@ -114,6 +116,36 @@ final class MetadataEnrichmentPipelineTests: XCTestCase {
         XCTAssertEqual(result.overview?.value, "A overview")
         XCTAssertEqual(a.callCount, 1)
         XCTAssertEqual(b.callCount, 0, "The second provider must not run once overview is filled")
+    }
+
+    func testGlobalOrderStillEnforcesCapability() async {
+        // Even at the TOP of the global order, a provider incapable of a field cannot
+        // win it: the frontier asks it, gets nothing, and the field falls through to the
+        // next capable source.
+        let posterOnly = FakeEnrichmentProvider(
+            id: .tmdb,
+            capabilities: [.poster],
+            output: MetadataEnrichment(
+                posterURL: SourcedValue(value: URL(string: "https://p/p.jpg")!, source: .tmdb)
+            )
+        )
+        let textProvider = FakeEnrichmentProvider(
+            id: .tvmaze,
+            capabilities: [.canonicalText],
+            output: MetadataEnrichment(overview: sourced("tvmaze overview", .tvmaze))
+        )
+        let pipeline = MetadataEnrichmentPipeline(
+            providers: [posterOnly, textProvider],
+            config: makeConfig(order: [.tmdb, .tvmaze], usesGlobalOrder: true)
+        )
+
+        let result = await pipeline.enrich(
+            makeQuery(),
+            requesting: [.overview],
+            tier: .foregroundFill
+        )
+
+        XCTAssertEqual(result.overview?.source, .tvmaze, "poster-only source can't win overview")
     }
 
     // MARK: Provenance / priority merge
@@ -157,7 +189,7 @@ final class MetadataEnrichmentPipelineTests: XCTestCase {
         )
         let pipeline = MetadataEnrichmentPipeline(
             providers: [a, b],
-            config: makeConfig(order: [.tvdb, .tmdb], roles: [.tvdb: .disabled])
+            config: makeConfig(order: [.tvdb, .tmdb], disabled: [.tvdb])
         )
 
         let result = await pipeline.enrich(
@@ -170,21 +202,22 @@ final class MetadataEnrichmentPipelineTests: XCTestCase {
         XCTAssertEqual(a.callCount, 0)
     }
 
-    func testSecondaryRoleIsDemotedBelowPrimary() async {
-        // tvdb listed first, but demoted to secondary — tmdb (primary) should win.
+    func testGlobalOrderReordersWinner() async {
+        // With usesGlobalOrder, the single global order drives every field: tmdb leads
+        // even though tvdb is listed elsewhere, so tmdb wins overview.
         let a = FakeEnrichmentProvider(
             id: .tvdb,
             capabilities: [.canonicalText],
-            output: MetadataEnrichment(overview: sourced("secondary", .tvdb))
+            output: MetadataEnrichment(overview: sourced("tvdb", .tvdb))
         )
         let b = FakeEnrichmentProvider(
             id: .tmdb,
             capabilities: [.canonicalText],
-            output: MetadataEnrichment(overview: sourced("primary", .tmdb))
+            output: MetadataEnrichment(overview: sourced("tmdb", .tmdb))
         )
         let pipeline = MetadataEnrichmentPipeline(
             providers: [a, b],
-            config: makeConfig(order: [.tvdb, .tmdb], roles: [.tvdb: .secondary])
+            config: makeConfig(order: [.tmdb, .tvdb], usesGlobalOrder: true)
         )
 
         let result = await pipeline.enrich(
@@ -194,6 +227,7 @@ final class MetadataEnrichmentPipelineTests: XCTestCase {
         )
 
         XCTAssertEqual(result.overview?.source, .tmdb)
+        XCTAssertEqual(a.callCount, 0)
     }
 
     // MARK: Backdrop candidate set (one response serves both screens)
@@ -338,7 +372,7 @@ final class MetadataEnrichmentPipelineTests: XCTestCase {
                 field: .backdropURL, sources: [.tvdb]
             ),
         ])
-        let config = MetadataEnrichmentConfig(roles: [:], baseOrder: [.tvdb, .tvmaze], priority: policy)
+        let config = MetadataEnrichmentConfig(order: [.tvdb, .tvmaze], priority: policy)
 
         let tvdb = FakeEnrichmentProvider(
             id: .tvdb,
@@ -380,7 +414,7 @@ final class MetadataEnrichmentPipelineTests: XCTestCase {
                 field: .overview, sources: [.tvmaze, .tvdb]
             ),
         ])
-        let config = MetadataEnrichmentConfig(roles: [:], baseOrder: [.tvmaze, .tvdb], priority: policy)
+        let config = MetadataEnrichmentConfig(order: [.tvmaze, .tvdb], priority: policy)
         let tvmaze = FakeEnrichmentProvider(id: .tvmaze, capabilities: [.canonicalText], output: MetadataEnrichment())
         let tvdb = FakeEnrichmentProvider(
             id: .tvdb, capabilities: [.canonicalText],

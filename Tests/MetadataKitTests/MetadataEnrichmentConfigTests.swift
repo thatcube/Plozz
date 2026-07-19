@@ -43,7 +43,7 @@ final class MetadataEnrichmentConfigTests: XCTestCase {
     }
 
     func testDisabledRoleRemovesSourceEverywhere() {
-        let config = MetadataEnrichmentConfig(roles: [.tmdb: .disabled])
+        let config = MetadataEnrichmentConfig(disabledSources: [.tmdb])
         let order = config.orderedSources(for: .posterURL, query: makeQuery(.movie))
         XCTAssertFalse(order.contains(.tmdb))
     }
@@ -55,11 +55,11 @@ final class MetadataEnrichmentConfigTests: XCTestCase {
         XCTAssertEqual(order.first, MetadataEnrichmentConfig.defaultBaseOrder.first)
     }
 
-    func testParseRolesToleratesWhitespaceAndBadTokens() {
-        let roles = MetadataEnrichmentConfig.parseRoles("tmdb:disabled, wikipedia : secondary ,garbage,tvdb:nope")
-        XCTAssertEqual(roles[.tmdb], .disabled)
-        XCTAssertEqual(roles[.wikipedia], .secondary)
-        XCTAssertNil(roles[MetadataSource(rawValue: "garbage")])
-        XCTAssertNil(roles[.tvdb], "An unknown role value is skipped")
+    func testParseDisabledSourcesToleratesWhitespaceAndBadTokens() {
+        let disabled = MetadataEnrichmentConfig.parseDisabledSources("tmdb:disabled, wikipedia : secondary ,garbage,tvdb:nope")
+        XCTAssertTrue(disabled.contains(.tmdb))
+        XCTAssertFalse(disabled.contains(.wikipedia), "Only 'disabled' removes a source")
+        XCTAssertFalse(disabled.contains(MetadataSource(rawValue: "garbage")))
+        XCTAssertFalse(disabled.contains(.tvdb), "An unknown role value leaves the source enabled")
     }
 }

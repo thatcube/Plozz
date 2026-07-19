@@ -8,7 +8,7 @@ import CoreModels
 /// independent per-provider recovery.
 final class MetadataOutageMatrixTests: XCTestCase {
     private func flatConfig() -> MetadataEnrichmentConfig {
-        MetadataEnrichmentConfig(roles: [:], baseOrder: [.tvdb, .tmdb], priority: MetadataPriorityPolicy(rules: []))
+        MetadataEnrichmentConfig(order: [.tvdb, .tmdb], priority: MetadataPriorityPolicy(rules: []))
     }
 
     private struct Rig {

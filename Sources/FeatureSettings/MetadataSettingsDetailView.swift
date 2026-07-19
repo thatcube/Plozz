@@ -15,10 +15,12 @@ public struct MetadataSettingsDependencies {
     public var cacheBudget: CacheBudgetSettingsModel
     /// Step 9: the household TMDB bring-your-own-key model (opt-in, verify, remove).
     public var tmdbKey: TMDBUserKeyModel
-    /// The build's baseline source order (Info.plist / code defaults).
+    /// The build's baseline source order (Info.plist / code defaults) — seeds the
+    /// single list and its default priority order.
     public var baselineOrder: [MetadataSource]
-    /// The build's baseline role per source (used to show baseline-vs-override).
-    public var baselineRoles: [MetadataSource: MetadataProviderState]
+    /// The sources the build disables by default (below the divider at baseline) —
+    /// used to show baseline-vs-override.
+    public var baselineDisabled: Set<MetadataSource>
     public var diagnosticsSnapshot: @MainActor () async -> MetadataEnrichmentDiagnosticsSnapshot
     public var applyCacheBudgets: @MainActor (CacheBudgetSettings) async -> Void
     public var clearCaches: @MainActor () async -> Void
@@ -28,7 +30,7 @@ public struct MetadataSettingsDependencies {
         cacheBudget: CacheBudgetSettingsModel,
         tmdbKey: TMDBUserKeyModel,
         baselineOrder: [MetadataSource],
-        baselineRoles: [MetadataSource: MetadataProviderState],
+        baselineDisabled: Set<MetadataSource>,
         diagnosticsSnapshot: @escaping @MainActor () async -> MetadataEnrichmentDiagnosticsSnapshot,
         applyCacheBudgets: @escaping @MainActor (CacheBudgetSettings) async -> Void,
         clearCaches: @escaping @MainActor () async -> Void
@@ -37,32 +39,61 @@ public struct MetadataSettingsDependencies {
         self.cacheBudget = cacheBudget
         self.tmdbKey = tmdbKey
         self.baselineOrder = baselineOrder
-        self.baselineRoles = baselineRoles
+        self.baselineDisabled = baselineDisabled
         self.diagnosticsSnapshot = diagnosticsSnapshot
         self.applyCacheBudgets = applyCacheBudgets
         self.clearCaches = clearCaches
     }
 }
 
-/// Pure ordering/role helpers for the metadata providers list, factored out of the
-/// view so they're unit-testable without a running SwiftUI hierarchy.
+/// Pure ordering/enablement helpers for the metadata providers list, factored out of
+/// the view so they're unit-testable without a running SwiftUI hierarchy. The user
+/// model is a single ordered list split by a "Disabled" divider: ``enabled`` above (in
+/// priority order), ``disabled`` below.
 enum MetadataProviderListLogic {
-    /// The order to display sources in: the user's explicit order first (deduped and
-    /// filtered to sources this build knows), then any baseline source the user
-    /// hasn't placed, so none is ever hidden and a stale/foreign persisted token
-    /// can't materialize as a phantom row.
-    static func displayOrder(userOrder: [String], baselineOrder: [MetadataSource]) -> [MetadataSource] {
+    /// The two sections the UI shows, derived from the sparse override + the build
+    /// baseline so no source is ever hidden and a stale/foreign persisted token can't
+    /// materialize a phantom row.
+    struct Sections: Equatable {
+        var enabled: [MetadataSource]
+        var disabled: [MetadataSource]
+    }
+
+    /// Splits the known sources into enabled (above divider, priority order) and
+    /// disabled (below), honoring the user's explicit lists first, then the baseline.
+    static func sections(
+        settings: MetadataProviderSettings,
+        baselineOrder: [MetadataSource],
+        baselineDisabled: Set<MetadataSource>
+    ) -> Sections {
         let known = Set(baselineOrder)
+        let userEnabled = settings.enabledOrder.map { MetadataSource(rawValue: $0) }.filter { known.contains($0) }
+        let userDisabled = settings.disabledOrder.map { MetadataSource(rawValue: $0) }.filter { known.contains($0) }
+        let userEnabledSet = Set(userEnabled)
+        let userDisabledSet = Set(userDisabled)
+
+        func isDisabled(_ source: MetadataSource) -> Bool {
+            if userDisabledSet.contains(source) { return true }
+            if userEnabledSet.contains(source) { return false }
+            return baselineDisabled.contains(source)
+        }
+
         var seen: Set<MetadataSource> = []
-        var result: [MetadataSource] = []
-        for source in userOrder.map({ MetadataSource(rawValue: $0) })
-        where known.contains(source) && seen.insert(source).inserted {
-            result.append(source)
+        var enabled: [MetadataSource] = []
+        for source in userEnabled where !isDisabled(source) && seen.insert(source).inserted {
+            enabled.append(source)
         }
-        for source in baselineOrder where seen.insert(source).inserted {
-            result.append(source)
+        for source in baselineOrder where !isDisabled(source) && seen.insert(source).inserted {
+            enabled.append(source)
         }
-        return result
+        var disabled: [MetadataSource] = []
+        for source in userDisabled where isDisabled(source) && seen.insert(source).inserted {
+            disabled.append(source)
+        }
+        for source in baselineOrder where isDisabled(source) && seen.insert(source).inserted {
+            disabled.append(source)
+        }
+        return Sections(enabled: enabled, disabled: disabled)
     }
 
     /// `order` with `source` moved by `delta` (clamped: out-of-range is a no-op).
@@ -73,6 +104,24 @@ enum MetadataProviderListLogic {
         guard order.indices.contains(target) else { return order }
         order.swapAt(index, target)
         return order
+    }
+
+    /// Moves `source` from the enabled section to the top of the disabled section.
+    static func disabling(_ source: MetadataSource, in sections: Sections) -> Sections {
+        guard sections.enabled.contains(source) else { return sections }
+        var s = sections
+        s.enabled.removeAll { $0 == source }
+        s.disabled.insert(source, at: 0)
+        return s
+    }
+
+    /// Moves `source` from the disabled section to the bottom of the enabled section.
+    static func enabling(_ source: MetadataSource, in sections: Sections) -> Sections {
+        guard sections.disabled.contains(source) else { return sections }
+        var s = sections
+        s.disabled.removeAll { $0 == source }
+        s.enabled.append(source)
+        return s
     }
 }
 
@@ -97,12 +146,13 @@ struct MetadataSettingsDetailView: View {
                     subtitle: "Artwork and details for your libraries — shared across every profile on this Apple TV."
                 )
                 providersSection
+                requiredAttributionNote
                 tmdbKeySection
-                attributionSection
                 diagnosticsSection
                 cacheSection
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: PlozzTheme.Metrics.settingsContentMaxWidth, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .center)
             .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
             .padding(.vertical, 24)
         }
@@ -112,47 +162,63 @@ struct MetadataSettingsDetailView: View {
 
     // MARK: - Providers
 
-    /// The order the UI shows sources in: the user's explicit order (if any) first,
-    /// then any baseline source the user hasn't placed, so a provider is never hidden.
-    private var displayOrder: [MetadataSource] {
-        MetadataProviderListLogic.displayOrder(
-            userOrder: providers.settings.order,
-            baselineOrder: deps.baselineOrder
+    /// The single-list sections (enabled above the divider, disabled below) derived
+    /// from the user override + the build baseline, so a provider is never hidden.
+    private var sections: MetadataProviderListLogic.Sections {
+        MetadataProviderListLogic.sections(
+            settings: providers.settings,
+            baselineOrder: deps.baselineOrder,
+            baselineDisabled: deps.baselineDisabled
         )
     }
 
-    private func baselineRole(_ source: MetadataSource) -> MetadataProviderState {
-        deps.baselineRoles[source] ?? .primary
-    }
-
-    private func effectiveRole(_ source: MetadataSource) -> MetadataProviderState {
-        providers.settings.role(for: source) ?? baselineRole(source)
-    }
-
     private func isOverridden(_ source: MetadataSource) -> Bool {
-        providers.settings.role(for: source) != nil
+        providers.settings.isExplicitlyEnabled(source) || providers.settings.isDisabled(source)
     }
 
     private var providersSection: some View {
-        SettingsPanel(
+        let split = sections
+        return SettingsPanel(
             title: "Metadata Providers",
-            subtitle: "Choose which sources fill artwork and details, and in what order. Changes apply as your libraries refresh.",
+            subtitle: "Drag providers into the order you want. Sources above the divider fill artwork and details, top first; move a source below the divider to stop using it. Changes apply as your libraries refresh.",
             footer: providers.settings.isEmpty ? "Using the app's built-in defaults." : nil,
             contentPadding: .settingsPanelRowContent
         ) {
             VStack(spacing: 10) {
-                ForEach(Array(displayOrder.enumerated()), id: \.element) { index, source in
+                ForEach(Array(split.enabled.enumerated()), id: \.element) { index, source in
                     ProviderRow(
                         name: displayName(source),
-                        role: effectiveRole(source),
+                        isEnabled: true,
                         isOverridden: isOverridden(source),
+                        rank: index + 1,
                         canMoveUp: index > 0,
-                        canMoveDown: index < displayOrder.count - 1,
-                        onSetRole: { setRole($0, for: source) },
-                        onMoveUp: { move(source, by: -1) },
-                        onMoveDown: { move(source, by: 1) }
+                        canMoveDown: index < split.enabled.count - 1,
+                        onToggleEnabled: { setEnabled(false, for: source) },
+                        onMoveUp: { moveEnabled(source, by: -1) },
+                        onMoveDown: { moveEnabled(source, by: 1) }
                     )
                 }
+
+                MetadataDisabledDivider()
+
+                if split.disabled.isEmpty {
+                    MetadataDisabledPlaceholder()
+                } else {
+                    ForEach(Array(split.disabled.enumerated()), id: \.element) { index, source in
+                        ProviderRow(
+                            name: displayName(source),
+                            isEnabled: false,
+                            isOverridden: isOverridden(source),
+                            rank: nil,
+                            canMoveUp: index > 0,
+                            canMoveDown: index < split.disabled.count - 1,
+                            onToggleEnabled: { setEnabled(true, for: source) },
+                            onMoveUp: { moveDisabled(source, by: -1) },
+                            onMoveDown: { moveDisabled(source, by: 1) }
+                        )
+                    }
+                }
+
                 if !providers.settings.isEmpty {
                     Button(role: .destructive) {
                         providers.resetToBuildDefaults()
@@ -167,16 +233,27 @@ struct MetadataSettingsDetailView: View {
         }
     }
 
-    private func setRole(_ role: MetadataProviderState, for source: MetadataSource) {
-        // Clearing an override that matches the baseline keeps the row reading
-        // "baseline"; otherwise record the explicit user choice.
-        providers.settings.setRole(role == baselineRole(source) ? nil : role, for: source)
+    private func persist(_ next: MetadataProviderListLogic.Sections) {
+        providers.settings.setLists(enabled: next.enabled, disabled: next.disabled)
     }
 
-    private func move(_ source: MetadataSource, by delta: Int) {
-        providers.settings.setOrder(
-            MetadataProviderListLogic.moved(source, by: delta, in: displayOrder)
-        )
+    private func setEnabled(_ enabled: Bool, for source: MetadataSource) {
+        let current = sections
+        persist(enabled
+            ? MetadataProviderListLogic.enabling(source, in: current)
+            : MetadataProviderListLogic.disabling(source, in: current))
+    }
+
+    private func moveEnabled(_ source: MetadataSource, by delta: Int) {
+        var next = sections
+        next.enabled = MetadataProviderListLogic.moved(source, by: delta, in: next.enabled)
+        persist(next)
+    }
+
+    private func moveDisabled(_ source: MetadataSource, by delta: Int) {
+        var next = sections
+        next.disabled = MetadataProviderListLogic.moved(source, by: delta, in: next.disabled)
+        persist(next)
     }
 
     // MARK: - TMDB bring-your-own-key (Step 9)
@@ -283,32 +360,21 @@ struct MetadataSettingsDetailView: View {
 
     // MARK: - Attribution
 
-    private var attributionSection: some View {
-        SettingsPanel(
-            title: "Attribution",
-            subtitle: "Plozz is not affiliated with, endorsed, or certified by these services."
-        ) {
-            VStack(alignment: .leading, spacing: 16) {
-                ForEach(MetadataSourceAttribution.all) { attribution in
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack(spacing: 8) {
-                            Text(attribution.name).font(.headline.weight(.semibold))
-                            if attribution.isRequired {
-                                Text("Required")
-                                    .font(.caption2.weight(.semibold))
-                                    .padding(.horizontal, 8).padding(.vertical, 3)
-                                    .background(Capsule().fill(Color.primary.opacity(0.12)))
-                            }
-                        }
-                        Text(attribution.notice)
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-            }
-        }
+    /// A compact required-attribution line under the providers list. TheTVDB and TMDB
+    /// require visible credit whenever their APIs are used; the full per-service credits
+    /// live on the dedicated Settings → Attributions & Licensing page, so this only
+    /// surfaces the required notice and points there rather than duplicating the section.
+    private var requiredAttributionNote: some View {
+        let required = MetadataSourceAttribution.all
+            .filter(\.isRequired)
+            .map(\.name)
+            .joined(separator: " and ")
+        return Text("\(required) require visible credit when their data is used. Full credits are in Settings → Attributions & Licensing.")
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, -12)
     }
 
     // MARK: - Diagnostics
@@ -494,54 +560,100 @@ struct MetadataSettingsDetailView: View {
     }
 }
 
-/// One provider row: a Primary / Secondary / Off stepper, an override tag, and
-/// up/down reorder buttons.
+/// One provider row in the single ordered list: an always-visible reorder handle, an
+/// enable/disable action, an override tag, and up/down reorder buttons. (Phase 1 is a
+/// straightforward chevron+toggle bridge over the enabled+order model; the tvOS
+/// lifted-row click-to-activate-move interaction replaces this in Phase 2.)
 private struct ProviderRow: View {
     let name: String
-    let role: MetadataProviderState
+    let isEnabled: Bool
     let isOverridden: Bool
+    /// 1-based priority rank when enabled; `nil` when disabled.
+    let rank: Int?
     let canMoveUp: Bool
     let canMoveDown: Bool
-    let onSetRole: (MetadataProviderState) -> Void
+    let onToggleEnabled: () -> Void
     let onMoveUp: () -> Void
     let onMoveDown: () -> Void
 
-    private static let roleOptions: [MetadataProviderState] = [.disabled, .secondary, .primary]
-
-    private var roleBinding: Binding<MetadataProviderState> {
-        Binding(get: { role }, set: { onSetRole($0) })
-    }
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                Text(name).font(.headline.weight(.semibold))
-                if isOverridden {
-                    Text("Custom")
-                        .font(.caption2.weight(.semibold))
-                        .padding(.horizontal, 8).padding(.vertical, 3)
-                        .background(Capsule().fill(Color.accentColor.opacity(0.20)))
-                }
-                Spacer()
-                Button(action: onMoveUp) { Image(systemName: "chevron.up") }
-                    .buttonStyle(SettingsFocusButtonStyle())
-                    .disabled(!canMoveUp)
-                Button(action: onMoveDown) { Image(systemName: "chevron.down") }
-                    .buttonStyle(SettingsFocusButtonStyle())
-                    .disabled(!canMoveDown)
+        HStack(spacing: 12) {
+            Image(systemName: "line.3.horizontal")
+                .font(.headline)
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+
+            if let rank {
+                Text("\(rank)")
+                    .font(.caption.weight(.bold).monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .frame(minWidth: 22)
             }
-            SettingsStepper(options: Self.roleOptions, selection: roleBinding) { label(for: $0) }
+
+            Text(name)
+                .font(.headline.weight(.semibold))
+                .foregroundStyle(isEnabled ? .primary : .secondary)
+
+            if isOverridden {
+                Text("Custom")
+                    .font(.caption2.weight(.semibold))
+                    .padding(.horizontal, 8).padding(.vertical, 3)
+                    .background(Capsule().fill(Color.accentColor.opacity(0.20)))
+            }
+
+            Spacer()
+
+            Button(action: onMoveUp) { Image(systemName: "chevron.up") }
+                .buttonStyle(SettingsFocusButtonStyle())
+                .disabled(!canMoveUp)
+            Button(action: onMoveDown) { Image(systemName: "chevron.down") }
+                .buttonStyle(SettingsFocusButtonStyle())
+                .disabled(!canMoveDown)
+            Button(action: onToggleEnabled) {
+                Image(systemName: isEnabled ? "minus.circle" : "plus.circle")
+            }
+            .buttonStyle(SettingsFocusButtonStyle())
+            .accessibilityLabel(isEnabled ? "Disable \(name)" : "Enable \(name)")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 4)
     }
+}
 
-    private func label(for state: MetadataProviderState) -> String {
-        switch state {
-        case .primary: return "Primary"
-        case .secondary: return "Secondary"
-        case .disabled: return "Off"
+/// The "Disabled" divider that separates enabled (above) from disabled (below).
+private struct MetadataDisabledDivider: View {
+    var body: some View {
+        HStack(spacing: 12) {
+            Text("Disabled")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .textCase(.uppercase)
+            Rectangle()
+                .fill(Color.secondary.opacity(0.3))
+                .frame(height: 1)
         }
+        .padding(.vertical, 6)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Disabled providers")
+    }
+}
+
+/// Shown in the disabled area when nothing is disabled, so the disable target is
+/// discoverable. (Phase 2 makes this a dashed, focusable drop target reachable by the
+/// remote.)
+private struct MetadataDisabledPlaceholder: View {
+    var body: some View {
+        Text("Move a provider here to stop using it.")
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 12)
+            .padding(.horizontal, 14)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [6, 4]))
+                    .foregroundStyle(.secondary.opacity(0.5))
+            )
     }
 }
 #endif

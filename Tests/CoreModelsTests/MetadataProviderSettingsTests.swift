@@ -1,46 +1,84 @@
 import XCTest
 @testable import CoreModels
 
-/// Locks the ``MetadataProviderSettings`` persistence + override-shape contract used
-/// by the Step 6 provider enable/disable + ordering surface.
+/// Locks the ``MetadataProviderSettings`` persistence + override-shape contract for the
+/// single-ordered-list (enabled + order, "Disabled" divider) provider surface, including
+/// one-way migration from the legacy Step-6 role blob.
 final class MetadataProviderSettingsTests: XCTestCase {
     func testDefaultIsEmpty() {
         XCTAssertTrue(MetadataProviderSettings.default.isEmpty)
-        XCTAssertTrue(MetadataProviderSettings().roleOverrides.isEmpty)
-        XCTAssertTrue(MetadataProviderSettings().order.isEmpty)
+        XCTAssertTrue(MetadataProviderSettings().enabledOrder.isEmpty)
+        XCTAssertTrue(MetadataProviderSettings().disabledOrder.isEmpty)
     }
 
-    func testSetAndClearRole() {
+    func testSetLists() {
         var settings = MetadataProviderSettings()
-        settings.setRole(.disabled, for: .tmdb)
-        XCTAssertEqual(settings.role(for: .tmdb), .disabled)
+        settings.setLists(enabled: [.tmdb, .tvdb], disabled: [.omdb])
+        XCTAssertEqual(settings.enabledOrder, ["tmdb", "tvdb"])
+        XCTAssertEqual(settings.disabledOrder, ["omdb"])
+        XCTAssertTrue(settings.isExplicitlyEnabled(.tmdb))
+        XCTAssertTrue(settings.isDisabled(.omdb))
         XCTAssertFalse(settings.isEmpty)
-        settings.setRole(nil, for: .tmdb)
-        XCTAssertNil(settings.role(for: .tmdb))
-        XCTAssertTrue(settings.isEmpty)
-    }
-
-    func testSetOrderStoresRawValues() {
-        var settings = MetadataProviderSettings()
-        settings.setOrder([.tmdb, .tvdb])
-        XCTAssertEqual(settings.order, ["tmdb", "tvdb"])
     }
 
     func testRoundTrips() throws {
         var original = MetadataProviderSettings()
-        original.setRole(.secondary, for: .wikipedia)
-        original.setRole(.disabled, for: .omdb)
-        original.setOrder([.anilist, .tvdb, .tmdb])
+        original.setLists(enabled: [.anilist, .tvdb, .tmdb], disabled: [.omdb, .wikipedia])
         let data = try JSONEncoder().encode(original)
         let decoded = try JSONDecoder().decode(MetadataProviderSettings.self, from: data)
         XCTAssertEqual(decoded, original)
     }
 
-    func testDecodesLegacyBlobWithoutOrder() throws {
-        let legacy = Data(#"{"roleOverrides":{"tmdb":"disabled"}}"#.utf8)
+    func testEncodedShapeIsCurrentSchema() throws {
+        var settings = MetadataProviderSettings()
+        settings.setLists(enabled: [.tvdb], disabled: [.omdb])
+        let json = String(data: try JSONEncoder().encode(settings), encoding: .utf8)!
+        XCTAssertTrue(json.contains("enabledOrder"))
+        XCTAssertTrue(json.contains("disabledOrder"))
+        XCTAssertFalse(json.contains("roleOverrides"), "legacy schema must not be re-emitted")
+    }
+
+    // MARK: Legacy migration
+
+    func testMigratesLegacyDisabledRoleBelowDivider() throws {
+        let legacy = Data(#"{"roleOverrides":{"tmdb":"disabled"},"order":["tvdb","tmdb","anilist"]}"#.utf8)
         let decoded = try JSONDecoder().decode(MetadataProviderSettings.self, from: legacy)
-        XCTAssertEqual(decoded.role(for: .tmdb), .disabled)
-        XCTAssertTrue(decoded.order.isEmpty)
+        // tmdb (disabled) drops below the divider; the rest stay enabled in order.
+        XCTAssertEqual(decoded.enabledOrder, ["tvdb", "anilist"])
+        XCTAssertEqual(decoded.disabledOrder, ["tmdb"])
+    }
+
+    func testMigratesPrimaryAndSecondaryToEnabledPreservingOrder() throws {
+        // primary/secondary both become plain enabled at their persisted order position
+        // (secondary just becomes lower in the single order — no separate demotion).
+        let legacy = Data(#"{"roleOverrides":{"tvdb":"primary","tmdb":"secondary"},"order":["tvdb","tmdb","anilist"]}"#.utf8)
+        let decoded = try JSONDecoder().decode(MetadataProviderSettings.self, from: legacy)
+        XCTAssertEqual(decoded.enabledOrder, ["tvdb", "tmdb", "anilist"])
+        XCTAssertTrue(decoded.disabledOrder.isEmpty)
+    }
+
+    func testMigrationTreatsUnknownRoleAsDisabled() throws {
+        // An unrecognized/future role must NOT silently enable a source the user
+        // restricted; it falls below the divider (disabled).
+        let legacy = Data(#"{"roleOverrides":{"tmdb":"hidden"},"order":["tvdb","tmdb"]}"#.utf8)
+        let decoded = try JSONDecoder().decode(MetadataProviderSettings.self, from: legacy)
+        XCTAssertEqual(decoded.disabledOrder, ["tmdb"])
+        XCTAssertEqual(decoded.enabledOrder, ["tvdb"])
+    }
+
+    func testMigratesDisabledRoleWithoutOrderEntry() throws {
+        let legacy = Data(#"{"roleOverrides":{"omdb":"disabled"}}"#.utf8)
+        let decoded = try JSONDecoder().decode(MetadataProviderSettings.self, from: legacy)
+        XCTAssertEqual(decoded.disabledOrder, ["omdb"])
+        XCTAssertTrue(decoded.enabledOrder.isEmpty)
+    }
+
+    func testCurrentSchemaWinsOverLegacyKeys() throws {
+        // A blob carrying both schemas prefers the current one (no re-migration).
+        let mixed = Data(#"{"enabledOrder":["tvdb"],"disabledOrder":[],"roleOverrides":{"tmdb":"disabled"}}"#.utf8)
+        let decoded = try JSONDecoder().decode(MetadataProviderSettings.self, from: mixed)
+        XCTAssertEqual(decoded.enabledOrder, ["tvdb"])
+        XCTAssertTrue(decoded.disabledOrder.isEmpty)
     }
 
     func testStoreRoundTripAndScoping() {
@@ -48,20 +86,12 @@ final class MetadataProviderSettingsTests: XCTestCase {
         let store = MetadataProviderSettingsStore(defaults: defaults)
         XCTAssertTrue(store.load().isEmpty)
         var settings = MetadataProviderSettings()
-        settings.setRole(.disabled, for: .kitsu)
+        settings.setDisabledOrder([.kitsu])
         store.save(settings)
-        XCTAssertEqual(store.load().role(for: .kitsu), .disabled)
+        XCTAssertTrue(store.load().isDisabled(.kitsu))
 
         // A namespaced (non-default profile) store is isolated from the default one.
         let scoped = MetadataProviderSettingsStore(defaults: defaults, namespace: "profile-2")
         XCTAssertTrue(scoped.load().isEmpty)
-    }
-
-    func testStateRawValuesMatchProviderRoleContract() {
-        // The merge maps MetadataProviderState -> ProviderRole by raw value, so the
-        // three raw values must stay stable and identical to ProviderRole's.
-        XCTAssertEqual(MetadataProviderState.primary.rawValue, "primary")
-        XCTAssertEqual(MetadataProviderState.secondary.rawValue, "secondary")
-        XCTAssertEqual(MetadataProviderState.disabled.rawValue, "disabled")
     }
 }

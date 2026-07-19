@@ -8,12 +8,14 @@ struct PlozziOSSettingsView: View {
     @Environment(\.themePalette) private var palette
     let appModel: PlozziOSAppModel
     let onAddServer: () -> Void
+    let onClose: () -> Void
 
     var body: some View {
         if horizontalSizeClass == .regular {
             PlozziOSSettingsSplitView(
                 appModel: appModel,
-                onAddServer: onAddServer
+                onAddServer: onAddServer,
+                onClose: onClose
             )
         } else {
             NavigationStack {
@@ -23,6 +25,11 @@ struct PlozziOSSettingsView: View {
                 )
             }
             .toolbarBackground(.hidden, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done", action: onClose)
+                }
+            }
             .background { AppBackground(palette: palette) }
         }
     }
@@ -50,6 +57,7 @@ private struct PlozziOSSettingsSplitView: View {
     @Environment(\.themePalette) private var palette
     let appModel: PlozziOSAppModel
     let onAddServer: () -> Void
+    let onClose: () -> Void
     @State private var selection: PlozziOSSettingsDestination? = .profiles
     @State private var confirmSignOutAll = false
 
@@ -174,6 +182,11 @@ private struct PlozziOSSettingsSplitView: View {
         }
         .navigationSplitViewStyle(.balanced)
         .toolbarBackground(.hidden, for: .navigationBar)
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Done", action: onClose)
+            }
+        }
         .background { AppBackground(palette: palette) }
         .alert("Sign out of all accounts?", isPresented: $confirmSignOutAll) {
             Button("Cancel", role: .cancel) {}

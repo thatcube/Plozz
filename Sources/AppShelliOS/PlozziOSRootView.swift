@@ -175,7 +175,6 @@ private enum PlozziOSDestination: String, CaseIterable, Identifiable {
     case home
     case search
     case downloads
-    case settings
 
     var id: Self { self }
 
@@ -184,7 +183,6 @@ private enum PlozziOSDestination: String, CaseIterable, Identifiable {
         case .home: "Home"
         case .search: "Search"
         case .downloads: "Downloads"
-        case .settings: "Settings"
         }
     }
 
@@ -193,13 +191,13 @@ private enum PlozziOSDestination: String, CaseIterable, Identifiable {
         case .home: "house"
         case .search: "magnifyingglass"
         case .downloads: "arrow.down.circle"
-        case .settings: "gear"
         }
     }
 }
 
 private struct PlozziOSTabShell: View {
     @Environment(\.themePalette) private var palette
+    @State private var showingSettings = false
     let appModel: PlozziOSAppModel
     let onAddServer: () -> Void
 
@@ -214,6 +212,9 @@ private struct PlozziOSTabShell: View {
                     )
                 }
                 .toolbarBackground(.hidden, for: .navigationBar)
+                .plozziOSSettingsToolbar {
+                    showingSettings = true
+                }
                 .background { AppBackground(palette: palette) }
             }
 
@@ -226,6 +227,9 @@ private struct PlozziOSTabShell: View {
                     )
                 }
                 .toolbarBackground(.hidden, for: .navigationBar)
+                .plozziOSSettingsToolbar {
+                    showingSettings = true
+                }
                 .background { AppBackground(palette: palette) }
             }
 
@@ -238,20 +242,30 @@ private struct PlozziOSTabShell: View {
                     )
                 }
                 .toolbarBackground(.hidden, for: .navigationBar)
-                .background { AppBackground(palette: palette) }
-            }
-
-            Tab("Settings", systemImage: "gear") {
-                PlozziOSDestinationView(
-                    destination: .settings,
-                    appModel: appModel,
-                    onAddServer: onAddServer
-                )
+                .plozziOSSettingsToolbar {
+                    showingSettings = true
+                }
                 .background { AppBackground(palette: palette) }
             }
         }
         .tabViewStyle(.sidebarAdaptable)
         .background { AppBackground(palette: palette) }
+        .sheet(isPresented: $showingSettings) {
+            PlozziOSSettingsView(
+                appModel: appModel,
+                onAddServer: showAddServerFromSettings,
+                onClose: { showingSettings = false }
+            )
+            .presentationSizing(.page)
+            .presentationDragIndicator(.visible)
+        }
+    }
+
+    private func showAddServerFromSettings() {
+        showingSettings = false
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            onAddServer()
+        }
     }
 }
 
@@ -283,12 +297,27 @@ private struct PlozziOSDestinationView: View {
         case .downloads:
             PlozziOSDownloadsView(model: appModel.downloads)
                 .id(appModel.profiles.activeProfileID)
-        case .settings:
-            PlozziOSSettingsView(
-                appModel: appModel,
-                onAddServer: onAddServer
-            )
         }
+    }
+}
+
+private struct PlozziOSSettingsToolbarModifier: ViewModifier {
+    let action: () -> Void
+
+    func body(content: Content) -> some View {
+        content.toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("Settings", systemImage: "gear", action: action)
+            }
+        }
+    }
+}
+
+private extension View {
+    func plozziOSSettingsToolbar(
+        action: @escaping () -> Void
+    ) -> some View {
+        modifier(PlozziOSSettingsToolbarModifier(action: action))
     }
 }
 

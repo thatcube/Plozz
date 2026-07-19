@@ -130,6 +130,7 @@ struct PlozziOSPlayerView: View {
             spoilerSettings: appModel.settings.spoilers.settings,
             seriesAccountFallbackID: item.sourceAccountID,
             startPosition: startPosition,
+            scrobbler: appModel.trackerScrobbler,
             engineFactory: EngineFactory(
                 makeNative: {
                     NativeVideoEngine(

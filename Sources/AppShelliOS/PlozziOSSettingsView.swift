@@ -56,6 +56,11 @@ struct PlozziOSSettingsView: View {
 
             Section("Preferences") {
                 NavigationLink {
+                    PlozziOSTrackerSettingsView(appModel: appModel)
+                } label: {
+                    Label("Trackers", systemImage: "arrow.triangle.2.circlepath")
+                }
+                NavigationLink {
                     PlozziOSAppearanceSettingsView(
                         theme: appModel.settings.theme,
                         cardStyle: appModel.settings.cardStyle,

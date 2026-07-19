@@ -270,6 +270,13 @@ targets:
           - CFBundleURLName: com.thatcube.Plozz.deeplink
             CFBundleURLSchemes:
               - plozz
+        TraktClientID: "$(TRAKT_CLIENT_ID)"
+        TraktClientSecret: "$(TRAKT_CLIENT_SECRET)"
+        SimklClientID: "$(SIMKL_CLIENT_ID)"
+        SimklClientSecret: "$(SIMKL_CLIENT_SECRET)"
+        AniListClientID: "$(ANILIST_CLIENT_ID)"
+        AniListClientSecret: "$(ANILIST_CLIENT_SECRET)"
+        MALClientID: "$(MAL_CLIENT_ID)"
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.thatcube.Plozz
@@ -279,6 +286,9 @@ targets:
         GENERATE_INFOPLIST_FILE: NO
         SUPPORTS_MACCATALYST: NO
         SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: YES
+    configFiles:
+      Debug: Config/Secrets.xcconfig
+      Release: Config/Secrets.xcconfig
     dependencies:
       - package: Plozz
         product: AppShelliOS

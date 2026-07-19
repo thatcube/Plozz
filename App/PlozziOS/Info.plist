@@ -2,6 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>AniListClientID</key>
+	<string>$(ANILIST_CLIENT_ID)</string>
+	<key>AniListClientSecret</key>
+	<string>$(ANILIST_CLIENT_SECRET)</string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
@@ -33,6 +37,8 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>MALClientID</key>
+	<string>$(MAL_CLIENT_ID)</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>
@@ -47,6 +53,14 @@
 	</array>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Plozz uses your local network to discover media servers and network shares.</string>
+	<key>SimklClientID</key>
+	<string>$(SIMKL_CLIENT_ID)</string>
+	<key>SimklClientSecret</key>
+	<string>$(SIMKL_CLIENT_SECRET)</string>
+	<key>TraktClientID</key>
+	<string>$(TRAKT_CLIENT_ID)</string>
+	<key>TraktClientSecret</key>
+	<string>$(TRAKT_CLIENT_SECRET)</string>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UIRequiresFullScreen</key>

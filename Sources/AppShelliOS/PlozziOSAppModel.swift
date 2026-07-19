@@ -1,13 +1,17 @@
 #if os(iOS)
+import AniListService
 import AppRuntime
 import CoreModels
 import CoreUI
 import FeatureAuthCore
 import Foundation
+import MALService
 import MediaDownloads
 import MediaTransportCore
 import Observation
 import ProviderShare
+import SimklService
+import TraktService
 
 @MainActor
 @Observable
@@ -16,6 +20,11 @@ final class PlozziOSAppModel {
     let profiles: ProfilesModel
     let authenticatedHTTPResolver: ManagedAuthenticatedHTTPResolver
     let mediaShareRuntime: DefaultMediaShareRuntime
+    let traktService: TraktService
+    let simklService: SimklService
+    let anilistService: AniListService
+    let malService: MALService
+    let trackerScrobbler: PlozziOSTrackerScrobbler
     private(set) var settings: PlozziOSSettingsModel
     private(set) var downloads: PlozziOSDownloadsModel
     @ObservationIgnored
@@ -25,6 +34,7 @@ final class PlozziOSAppModel {
     private let durableLocalStateStore: DurableLocalStateStore?
     private let mediaShareAccountService: MediaShareAccountService
     private let mediaShareConfigurationService: MediaShareAccountConfigurationService
+    @ObservationIgnored private var trackerProfileGeneration: UInt64 = 0
 
     var accountError: String?
 
@@ -72,12 +82,27 @@ final class PlozziOSAppModel {
             registry: registry,
             profilesModel: profiles
         )
+        let trackerNamespace = profiles.activeNamespace
+        let traktService = TraktServiceFactory.make(namespace: trackerNamespace)
+        let simklService = SimklServiceFactory.make(namespace: trackerNamespace)
+        let anilistService = AniListServiceFactory.make(namespace: trackerNamespace)
+        let malService = MALServiceFactory.make(namespace: trackerNamespace)
         self.accountStore = accountStore
         self.profiles = profiles
         self.accountsProviders = accountsProviders
         self.authenticatedHTTPResolver = authenticatedHTTPResolver
         self.mediaShareRuntime = mediaShareRuntime
         self.durableLocalStateStore = durableLocalStateStore
+        self.traktService = traktService
+        self.simklService = simklService
+        self.anilistService = anilistService
+        self.malService = malService
+        self.trackerScrobbler = PlozziOSTrackerScrobbler(
+            trakt: traktService.scrobbler,
+            simkl: simklService.scrobbler,
+            anilist: anilistService.scrobbler,
+            mal: malService.scrobbler
+        )
         self.settings = PlozziOSSettingsModel(
             namespace: profiles.activeNamespace
         )
@@ -148,6 +173,7 @@ final class PlozziOSAppModel {
         }
         accountsProviders.reloadAccounts()
         plexHomeUsers.ensurePlexIdentityForActiveProfile()
+        updateTrackersForActiveProfile()
     }
 
     var accounts: [Account] {
@@ -170,6 +196,23 @@ final class PlozziOSAppModel {
         )
         plexHomeUsers.ensurePlexIdentityForActiveProfile()
         accountsProviders.reloadAccounts()
+        updateTrackersForActiveProfile()
+    }
+
+    private func updateTrackersForActiveProfile() {
+        let namespace = profiles.activeNamespace
+        trackerProfileGeneration &+= 1
+        let generation = trackerProfileGeneration
+        Task {
+            guard generation == trackerProfileGeneration else { return }
+            await traktService.setActiveProfile(namespace: namespace)
+            guard generation == trackerProfileGeneration else { return }
+            await simklService.setActiveProfile(namespace: namespace)
+            guard generation == trackerProfileGeneration else { return }
+            await anilistService.setActiveProfile(namespace: namespace)
+            guard generation == trackerProfileGeneration else { return }
+            await malService.setActiveProfile(namespace: namespace)
+        }
     }
 
     private static func makeDownloadsModel(
@@ -244,6 +287,7 @@ final class PlozziOSAppModel {
     func removeProfile(_ id: String) {
         profiles.remove(id)
         accountsProviders.reloadAccounts()
+        updateTrackersForActiveProfile()
     }
 
     func activeAccountIDs(for profileID: String) -> Set<String> {

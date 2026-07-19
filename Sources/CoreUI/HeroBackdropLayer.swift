@@ -95,31 +95,13 @@ public struct HeroBackdropLayer<Video: View>: View {
         .modifier(OverscanBreakout(enabled: ignoresOverscan))
     }
 
-    /// Legibility scrim: fades a mode-appropriate tone in over the leading side so
-    /// the title/logo/overview read clearly against the artwork, while leaving the
-    /// right side (the hero subject) clear. Lives *under* the dissolve mask so it
-    /// fades away with the image and never tints the revealed background.
+    /// Legibility scrim: a seamless edge vignette (same darkening on every side)
+    /// plus a faint all-over wash, so the title/logo/overview read clearly against
+    /// the artwork while the darkening blends evenly across the whole hero instead
+    /// of pooling on one side — matching the Home hero. Lives *under* the dissolve
+    /// mask so it fades away with the image and never tints the revealed background.
     private var scrim: some View {
-        LinearGradient(
-            stops: [
-                .init(color: .clear, location: 0.0),
-                .init(color: .clear, location: 0.20),
-                .init(color: scrimTone.opacity(0.72), location: 1.0)
-            ],
-            startPoint: .top,
-            endPoint: .bottom
-        )
-        .mask(
-            LinearGradient(
-                stops: [
-                    .init(color: .white, location: 0.0),
-                    .init(color: .white, location: 0.40),
-                    .init(color: .clear, location: 0.85)
-                ],
-                startPoint: .leading,
-                endPoint: .trailing
-            )
-        )
+        HeroLegibilityScrim(tone: scrimTone, edgePeak: 0.55)
     }
 
     /// Dissolves the backdrop's own alpha to transparent over the lower portion

@@ -64,21 +64,13 @@ struct HomeHeroBackdrop: View {
     @Environment(\.colorScheme) private var colorScheme
     private var isLight: Bool { colorScheme == .light }
 
-    /// Right-side "keep the image" strength for the dissolve. Full at rest, low when
-    /// receded so the right melts into the page like the left.
-    private var rightKeep: CGFloat { receded ? 0.12 : 1.0 }
-
-    /// Height fraction at which the bottom melt BEGINS on the left. Theme-aware:
-    /// light mode starts much higher (a taller, gentler fade) because the revealed
-    /// **white** background contrasts hard with the artwork and needs a long runway
-    /// to hide the edge; dark mode reveals **black**, which blends with dark image
-    /// edges, so it can start lower and stay compact.
+    /// Height fraction at which the bottom melt BEGINS. Theme-aware: light mode
+    /// starts much higher (a taller, gentler fade) because the revealed **white**
+    /// background contrasts hard with the artwork and needs a long runway to hide
+    /// the edge; dark mode reveals **black**, which blends with dark image edges,
+    /// so it can start lower and stay compact. Applied uniformly across the whole
+    /// width (see `dissolveMask`).
     private var meltStart: CGFloat { isLight ? 0.38 : 0.62 }
-
-    /// Where the RIGHT side begins melting — lower than `meltStart` so the subject
-    /// on the right keeps more image, but sharing the exact same eased tail (both
-    /// reach clear at the very bottom) so the two fades blend with no seam.
-    private var rightMeltStart: CGFloat { isLight ? 0.60 : 0.80 }
 
     var body: some View {
         backdropImage
@@ -118,23 +110,15 @@ struct HomeHeroBackdrop: View {
         #endif
     }
 
-    /// Legibility scrim — a horizontal left→right wash. Darkest at the very left
-    /// edge (0.55), fading to clear 40pt past the horizontal screen center, and
-    /// uniform top-to-bottom (no vertical shaping). Lives under the dissolve mask so
-    /// it still fades away with the image at the bottom melt and never tints the
+    /// Legibility scrim: a seamless edge vignette (same darkening on every side)
+    /// plus a faint all-over wash, replacing the old left-only horizontal wash so
+    /// the darkening blends evenly across the whole hero instead of pooling on the
+    /// left — especially over bright art. `edgePeak` matches the old left strength
+    /// (0.55) so the content side is never lightened. Lives under the dissolve
+    /// mask so it fades away with the image at the bottom and never tints the
     /// revealed background. Static across slides, so it never animates.
     private var scrim: some View {
-        // Clear point: 40pt past screen center (center 960 -> 1000 on the 1920 width),
-        // expressed as a width fraction.
-        let clearLocation = max(0, min(1, (width * 0.5 + 40) / width))
-        return LinearGradient(
-            stops: [
-                .init(color: scrimTone.opacity(0.55), location: 0.0),
-                .init(color: .clear, location: clearLocation)
-            ],
-            startPoint: .leading,
-            endPoint: .trailing
-        )
+        HeroLegibilityScrim(tone: scrimTone, edgePeak: 0.55)
     }
 
     /// A smooth, EASED vertical fade from opaque (`white × peak`) down to `clear`,
@@ -167,28 +151,19 @@ struct HomeHeroBackdrop: View {
     /// with NO blur, so the top / left / right image edges stay crisp (a blurred
     /// mask bled transparency in from those edges). Static per appearance; only
     /// `rightKeep` (recede) and the theme change it.
+    /// Dissolves the backdrop into the page along the bottom. A single, SYMMETRIC
+    /// vertical melt across the entire width, so the artwork fades gradually into
+    /// the background along the whole bottom edge — not higher on the left than the
+    /// right (the old left-weighted melt). When receded the melt begins higher so
+    /// more of the backdrop blends into the rows below. Static per appearance; only
+    /// `receded` and the theme change it.
     private var dissolveMask: some View {
-        ZStack {
-            // Base vertical melt — the strong LEFT-side dissolve to the background.
-            easedVerticalFade(start: meltStart)
-            // Adds the image back toward the RIGHT: a very gradual left→right lean
-            // (full only at the far right, so no vertical seam) gated by an eased
-            // fade that shares the base's tail. `rightKeep` drops it toward 0 on
-            // recede, so the right then melts like the left.
-            easedVerticalFade(start: rightMeltStart, peak: rightKeep)
-                .mask(
-                    LinearGradient(
-                        stops: [
-                            .init(color: .clear, location: 0.0),
-                            .init(color: .clear, location: 0.22),
-                            .init(color: .white, location: 0.85)
-                        ],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    )
-                )
-        }
+        easedVerticalFade(start: receded ? recededMeltStart : meltStart)
     }
+
+    /// Where the uniform melt begins when receded — higher up than at rest, so the
+    /// whole backdrop blends further into the page as you browse the rows below.
+    private var recededMeltStart: CGFloat { max(0.1, meltStart - 0.2) }
 }
 
 #if canImport(UIKit)

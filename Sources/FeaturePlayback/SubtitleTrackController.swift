@@ -326,7 +326,8 @@ final class SubtitleTrackController {
         let rule = host.trackRequest.map { host.trackEffectiveSubtitleRule(for: $0.item) }
         let chosen = tracks.defaultSubtitleSelection(
             mode: rule?.mode ?? host.trackBehavior.subtitleMode,
-            preferredLanguage: rule?.preferredLanguage ?? host.trackBehavior.resolvedPreferredLanguage
+            preferredLanguage: rule?.preferredLanguage ?? host.trackBehavior.resolvedPreferredLanguage,
+            audioLanguage: activeAudioLanguage()
         )
         guard let chosen, !chosen.isImageBasedSubtitle else {
             engine.selectSubtitleTrack(nil)
@@ -336,6 +337,32 @@ final class SubtitleTrackController {
             return
         }
         selectSubtitleOption(id: chosen.id, userInitiated: false)
+    }
+
+    /// The language of the audio the viewer is actually hearing, used to keep the
+    /// `.forcedOnly` default from auto-enabling a forced subtitle in a language
+    /// foreign to the audio (e.g. a Turkish forced track under English audio).
+    /// Prefers the engine's authoritatively-resolved active audio track; falls back
+    /// to the language the audio policy requested, then the container's default
+    /// audio track. `nil` when nothing is known — the selector then keeps its
+    /// historical "any forced" behavior.
+    private func activeAudioLanguage() -> String? {
+        guard let host else { return nil }
+        let audio = host.trackEngine.audioTracks
+        if let activeID = host.trackEngine.currentAudioTrackID,
+           let active = audio.first(where: { $0.id == activeID }),
+           let language = active.language, !language.isEmpty {
+            return language
+        }
+        if let requested = host.trackRequest?.preferredAudioLanguages.first,
+           !requested.isEmpty {
+            return requested
+        }
+        if let byDefault = (audio.first(where: { $0.isDefault }) ?? audio.first)?.language,
+           !byDefault.isEmpty {
+            return byDefault
+        }
+        return nil
     }
 
     #if DEBUG

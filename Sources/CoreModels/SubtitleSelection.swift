@@ -105,8 +105,11 @@ public enum SubtitleSelector {
     /// loaded item, given the user's mode and preferred language.
     ///
     /// * `.off` → never auto-enable anything (the viewer can still pick manually).
-    /// * `.forcedOnly` → prefer a forced option in the preferred language, then
-    ///   any forced option, else nothing.
+    /// * `.forcedOnly` → prefer a forced option in the preferred language, then a
+    ///   forced option that is untagged or matches the active `audioLanguage`
+    ///   (forced subs translate foreign dialogue *within* the audio you hear, so a
+    ///   forced track in a different language is never auto-enabled when the audio
+    ///   language is known), else nothing.
     /// * `.all` → prefer a non-forced option in the preferred language, then a
     ///   forced option in that language, then — only for an *untagged* default
     ///   track — the stream's default option, else nothing (a tagged
@@ -115,7 +118,8 @@ public enum SubtitleSelector {
     public static func decide(
         candidates: [SubtitleCandidate],
         mode: SubtitleMode,
-        preferredLanguage: String?
+        preferredLanguage: String?,
+        audioLanguage: String? = nil
     ) -> SubtitleDecision {
         guard !candidates.isEmpty else { return .none }
 
@@ -129,11 +133,23 @@ public enum SubtitleSelector {
 
         case .forcedOnly:
             let forced = candidates.filter(\.isForced)
+            // A forced subtitle in the subtitle preferred language is always right.
             if let inLanguage = forced.first(where: matchingLanguage) {
                 return .select(id: inLanguage.id)
             }
-            if let anyForced = forced.first {
-                return .select(id: anyForced.id)
+            // "Any forced" fallback: forced subtitles translate foreign dialogue/signs
+            // *within the audio you are hearing*, so a forced track tagged for a
+            // language other than the active audio (e.g. a Turkish forced track while
+            // English audio plays) is wrong and must not be auto-enabled. Enable a
+            // forced track only when it is untagged, matches the active audio language,
+            // or when the audio language is unknown (historical behavior — we can't
+            // prove the track is foreign to what the viewer hears).
+            if let safeForced = forced.first(where: { candidate in
+                audioLanguage == nil
+                    || LanguageMatch.normalized(candidate.languageCode) == nil
+                    || LanguageMatch.matches(candidate.languageCode, audioLanguage)
+            }) {
+                return .select(id: safeForced.id)
             }
             return .none
 
@@ -182,7 +198,8 @@ public extension Array where Element == MediaTrack {
     /// reason about which subtitle the user will actually get.
     func defaultSubtitleSelection(
         mode: SubtitleMode,
-        preferredLanguage: String?
+        preferredLanguage: String?,
+        audioLanguage: String? = nil
     ) -> MediaTrack? {
         let subtitles = filter { $0.kind == .subtitle }
         guard !subtitles.isEmpty else { return nil }
@@ -191,7 +208,8 @@ public extension Array where Element == MediaTrack {
                               isForced: $0.isForced, isDefault: $0.isDefault)
         }
         guard case .select(let id) = SubtitleSelector.decide(
-            candidates: candidates, mode: mode, preferredLanguage: preferredLanguage
+            candidates: candidates, mode: mode, preferredLanguage: preferredLanguage,
+            audioLanguage: audioLanguage
         ) else { return nil }
         return subtitles.first { $0.id == id }
     }

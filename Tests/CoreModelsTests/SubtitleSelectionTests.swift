@@ -41,6 +41,53 @@ final class SubtitleSelectionTests: XCTestCase {
         )
     }
 
+    func testForcedOnlyDoesNotEnableForeignForcedAgainstAudioLanguage() {
+        // The Spider-Man subtitle case: English audio, a Turkish forced track, and a
+        // subtitle preference that isn't Turkish. The Turkish forced track must NOT be
+        // auto-enabled just because it's the only forced option.
+        let candidates = [sub(0, "en"), sub(1, "tr", forced: true)]
+        XCTAssertEqual(
+            SubtitleSelector.decide(
+                candidates: candidates, mode: .forcedOnly, preferredLanguage: "en", audioLanguage: "en"
+            ),
+            .none
+        )
+    }
+
+    func testForcedOnlyEnablesForcedMatchingAudioLanguage() {
+        // A forced track in the audio language (English forced under English audio)
+        // is the correct forced-subtitle behavior and is auto-enabled.
+        let candidates = [sub(0, "en", forced: true), sub(1, "tr", forced: true)]
+        XCTAssertEqual(
+            SubtitleSelector.decide(
+                candidates: candidates, mode: .forcedOnly, preferredLanguage: "de", audioLanguage: "en"
+            ),
+            .select(id: 0)
+        )
+    }
+
+    func testForcedOnlyEnablesUntaggedForcedRegardlessOfAudio() {
+        // An untagged forced track can't be proven foreign, so it is still honored.
+        let candidates = [sub(0, nil, forced: true)]
+        XCTAssertEqual(
+            SubtitleSelector.decide(
+                candidates: candidates, mode: .forcedOnly, preferredLanguage: "en", audioLanguage: "en"
+            ),
+            .select(id: 0)
+        )
+    }
+
+    func testForcedOnlyUnknownAudioPreservesAnyForcedFallback() {
+        // With an unknown audio language the historical "any forced" behavior stands.
+        let candidates = [sub(0, "en"), sub(1, "tr", forced: true)]
+        XCTAssertEqual(
+            SubtitleSelector.decide(
+                candidates: candidates, mode: .forcedOnly, preferredLanguage: "en", audioLanguage: nil
+            ),
+            .select(id: 1)
+        )
+    }
+
     func testAllPrefersFullSubtitleInLanguageOverForced() {
         let candidates = [sub(0, "en", forced: true), sub(1, "en")]
         XCTAssertEqual(

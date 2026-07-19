@@ -110,16 +110,13 @@ struct PlozziOSPlayerControlsOverlay: View {
                 .padding(24)
             }
 
-            if viewModel.controls.upNextActive,
+            if viewModel.controls.isPresentingUpNext,
                let upNext = viewModel.controls.upNext {
                 PlozziOSUpNextCard(
                     info: upNext,
-                    onPlay: {
-                        viewModel.playEpisode(upNext.episode)
-                    },
-                    onDismiss: {
-                        viewModel.dismissUpNextCard()
-                    }
+                    countdownRemaining: upNextCountdownRemaining,
+                    onPlay: { viewModel.playEpisode(upNext.episode) },
+                    onDismiss: { viewModel.dismissUpNextCard() }
                 )
             }
         }
@@ -150,6 +147,11 @@ struct PlozziOSPlayerControlsOverlay: View {
 
     private var skipTitle: String {
         viewModel.controls.activeSkipSegment?.kind.skipActionLabel ?? "Skip"
+    }
+
+    private var upNextCountdownRemaining: TimeInterval? {
+        guard let deadline = viewModel.controls.upNextAdvanceAtSeconds else { return nil }
+        return max(deadline - viewModel.controls.currentSeconds, 0)
     }
 
     private func toggleControls() {
@@ -784,6 +786,7 @@ private struct PlozziOSPlaybackSyncSheet: View {
 
 private struct PlozziOSUpNextCard: View {
     let info: UpNextInfo
+    let countdownRemaining: TimeInterval?
     let onPlay: () -> Void
     let onDismiss: () -> Void
 
@@ -803,7 +806,40 @@ private struct PlozziOSUpNextCard: View {
                 }
             }
 
-            Button("Play", systemImage: "play.fill", action: onPlay)
+            Button(action: onPlay) {
+                HStack(spacing: 8) {
+                    ZStack {
+                        if let countdownRemaining, countdownRemaining > 0.05 {
+                            Circle()
+                                .stroke(.white.opacity(0.25), lineWidth: 3)
+                            Circle()
+                                .trim(
+                                    from: 0,
+                                    to: min(
+                                        max(
+                                            countdownRemaining
+                                                / SkipIntrosMode.autoSkipDelay,
+                                            0
+                                        ),
+                                        1
+                                    )
+                                )
+                                .stroke(
+                                    .white,
+                                    style: StrokeStyle(lineWidth: 3, lineCap: .round)
+                                )
+                                .rotationEffect(.degrees(-90))
+                            Text("\(Int(ceil(countdownRemaining)))")
+                                .font(.caption2.monospacedDigit().bold())
+                        } else {
+                            Image(systemName: "play.fill")
+                        }
+                    }
+                    .frame(width: 28, height: 28)
+
+                    Text(countdownRemaining == nil ? "Play" : "Play Now")
+                }
+            }
                 .buttonStyle(.borderedProminent)
 
             Button(action: onDismiss) {

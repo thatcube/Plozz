@@ -227,6 +227,7 @@ public struct RootView: View {
                         plexHomeUsersFetcher: { await appState.plexHomeUsers.plexHomeUsers(forAccountID: $0) },
                         onSelectPlexHomeUser: { appState.plexHomeUsers.setPlexHomeUserForActiveProfile(accountID: $0, user: $1) },
                         onSetSeerrUser: { appState.setSeerrUserForProfile(profileID: $0, user: $1) },
+                        metadataSettings: appState.makeMetadataSettingsDependencies(),
                         identitySources: appState.identityIndex.identitySourcesProvider,
                         onWarmIdentityIndex: { appState.identityIndex.warmIdentityIndex() }
                     )

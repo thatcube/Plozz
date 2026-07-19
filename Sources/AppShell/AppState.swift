@@ -64,6 +64,15 @@ public final class AppState {
     /// choice, not a per-profile persona. See `CrashReportingSettings`.
     public let crashReportingModel = CrashReportingSettingsModel()
 
+    /// Household-wide (Step 6) user override of the metadata provider roles/order.
+    /// App-wide like the enrichment pipeline itself (a share and its scan are
+    /// household-global), so created once and stored under an un-namespaced key.
+    public let metadataProviderSettingsModel = MetadataProviderSettingsModel()
+
+    /// Household-wide (Step 6) metadata/artwork cache byte budgets. Device-level,
+    /// created once.
+    public let cacheBudgetSettingsModel = CacheBudgetSettingsModel()
+
     /// The household's profiles + active selection. Owned at the app level and
     /// layered on top of the multi-account core.
     public let profilesModel: ProfilesModel

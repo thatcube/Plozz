@@ -56,6 +56,7 @@ enum SettingsRoute: Hashable {
     case playback
     case spoilers
     case integrations
+    case metadata
     case seerr
     case seerUserPicker(profileID: String)
     case attributions

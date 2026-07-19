@@ -2,6 +2,7 @@ import XCTest
 import CoreModels
 import FeatureAuth
 import MediaTransportCore
+import MetadataKit
 @testable import AppShell
 
 /// Locks the Step 6 facet forwarding: the metadata settings surface delegates
@@ -42,6 +43,30 @@ final class MediaShareRuntimeFacetMetadataTests: XCTestCase {
         let (facet, spy) = makeFacet()
         await facet.clearMetadataCaches()
         XCTAssertEqual(spy.clearCalls, 1)
+    }
+
+    func testMetadataConfigCacheInvalidatesWhenSettingsChange() {
+        let defaults = makeDefaults()
+        let store = MetadataProviderSettingsStore(defaults: defaults)
+        let baseline = MetadataEnrichmentConfig(order: [.tvdb, .tmdb])
+        let cache = MetadataEnrichmentConfigCache(
+            baseline: baseline,
+            settingsStore: store
+        )
+        XCTAssertFalse(cache.value().preferOnlineArtwork)
+        XCTAssertFalse(cache.value().usesGlobalOrder)
+
+        store.save(
+            MetadataProviderSettings(
+                orderMode: .custom,
+                preferOnlineArtwork: true,
+                enabledOrder: ["tmdb", "tvdb"]
+            )
+        )
+
+        XCTAssertTrue(cache.value().preferOnlineArtwork)
+        XCTAssertTrue(cache.value().usesGlobalOrder)
+        XCTAssertEqual(cache.value().order, [.tmdb, .tvdb])
     }
 }
 

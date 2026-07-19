@@ -130,8 +130,8 @@ public struct MetadataProviderSettings: Codable, Equatable, Sendable {
         // silently enabled).
         if enabledOrder.isEmpty, disabledOrder.isEmpty {
             let legacyRoles = try container.decodeIfPresent([String: String].self, forKey: .roleOverrides) ?? [:]
-            if !legacyRoles.isEmpty {
-                let legacyOrder = try container.decodeIfPresent([String].self, forKey: .order) ?? []
+            let legacyOrder = try container.decodeIfPresent([String].self, forKey: .order) ?? []
+            if !legacyRoles.isEmpty || !legacyOrder.isEmpty {
                 (enabledOrder, disabledOrder) = Self.migrate(roleOverrides: legacyRoles, order: legacyOrder)
             }
         }
@@ -213,8 +213,15 @@ public final class MetadataProviderSettingsStore: MetadataProviderSettingsStorin
     public func save(_ settings: MetadataProviderSettings) {
         if let data = try? JSONEncoder().encode(settings) {
             defaults.set(data, forKey: key)
+            NotificationCenter.default.post(name: .metadataProviderSettingsDidChange, object: nil)
         }
     }
+}
+
+public extension Notification.Name {
+    static let metadataProviderSettingsDidChange = Notification.Name(
+        "com.plozz.metadataProviderSettingsDidChange"
+    )
 }
 
 /// Observable wrapper so a Settings screen can two-way bind the provider override

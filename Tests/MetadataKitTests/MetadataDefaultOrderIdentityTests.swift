@@ -15,16 +15,16 @@ final class MetadataDefaultOrderIdentityTests: XCTestCase {
     // policy changes, this test must be updated deliberately — that is the lock.
     private func ruled(field: MetadataField, type: ContentType) -> [MetadataSource] {
         switch (field, type) {
-        // artwork.hero  (backdropURL / homeHero / detailBackdrop)
-        case (.backdropURL, .anime), (.homeHero, .anime), (.detailBackdrop, .anime): return [.tmdb, .anilist, .kitsu]
-        case (.backdropURL, .tvShow), (.homeHero, .tvShow), (.detailBackdrop, .tvShow): return [.tvdb, .tmdb, .wikidata, .wikipedia]
-        case (.backdropURL, .movie), (.homeHero, .movie), (.detailBackdrop, .movie): return [.tvdb, .tmdb, .wikidata, .wikipedia]
-        case (.backdropURL, .unknown), (.homeHero, .unknown), (.detailBackdrop, .unknown): return [.tvdb, .tmdb, .wikidata, .wikipedia]
-        // artwork.poster
-        case (.posterURL, .anime): return [.anilist, .kitsu, .tmdb]
-        case (.posterURL, .tvShow): return [.tmdb, .tvmaze, .tvdb, .wikidata, .wikipedia]
-        case (.posterURL, .movie): return [.tmdb, .tvdb, .wikidata, .wikipedia]
-        case (.posterURL, .unknown): return [.tmdb, .tvdb, .wikidata, .wikipedia]
+        // artwork.hero  (backdropURL / homeHero / detailBackdrop / banner)
+        case (.backdropURL, .anime), (.homeHero, .anime), (.detailBackdrop, .anime), (.banner, .anime): return [.tmdb, .anilist, .kitsu]
+        case (.backdropURL, .tvShow), (.homeHero, .tvShow), (.detailBackdrop, .tvShow), (.banner, .tvShow): return [.tvdb, .tmdb, .wikidata, .wikipedia]
+        case (.backdropURL, .movie), (.homeHero, .movie), (.detailBackdrop, .movie), (.banner, .movie): return [.tvdb, .tmdb, .wikidata, .wikipedia]
+        case (.backdropURL, .unknown), (.homeHero, .unknown), (.detailBackdrop, .unknown), (.banner, .unknown): return [.tvdb, .tmdb, .wikidata, .wikipedia]
+        // artwork.poster (posterURL / seasonPoster)
+        case (.posterURL, .anime), (.seasonPoster, .anime): return [.anilist, .kitsu, .tmdb]
+        case (.posterURL, .tvShow), (.seasonPoster, .tvShow): return [.tmdb, .tvmaze, .tvdb, .wikidata, .wikipedia]
+        case (.posterURL, .movie), (.seasonPoster, .movie): return [.tmdb, .tvdb, .wikidata, .wikipedia]
+        case (.posterURL, .unknown), (.seasonPoster, .unknown): return [.tmdb, .tvdb, .wikidata, .wikipedia]
         // artwork.thumbnail (episodeThumbnail)
         case (.episodeThumbnail, .anime): return [.tmdb]
         case (.episodeThumbnail, .tvShow): return [.tmdb, .tvmaze]
@@ -78,8 +78,9 @@ final class MetadataDefaultOrderIdentityTests: XCTestCase {
         XCTAssertFalse(config.usesGlobalOrder)
 
         let fields: [MetadataField] = [
-            .backdropURL, .homeHero, .detailBackdrop, .posterURL, .episodeThumbnail,
-            .logoURL, .overview, .nextAiringEpisode,
+            .backdropURL, .homeHero, .detailBackdrop, .banner,
+            .posterURL, .seasonPoster, .episodeThumbnail, .logoURL,
+            .overview, .nextAiringEpisode,
             .title, .genres, .taglines, .ratings, .providerID("Imdb"),
         ]
         let types: [ContentType] = [.movie, .tvShow, .anime, .unknown, .music]

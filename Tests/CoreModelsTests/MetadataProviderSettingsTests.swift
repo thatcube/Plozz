@@ -66,6 +66,14 @@ final class MetadataProviderSettingsTests: XCTestCase {
         XCTAssertEqual(decoded.orderMode, .custom)
     }
 
+    func testMigratesLegacyReorderWithoutRoles() throws {
+        let legacy = Data(#"{"order":["anilist","tvdb","tmdb"],"roleOverrides":{}}"#.utf8)
+        let decoded = try JSONDecoder().decode(MetadataProviderSettings.self, from: legacy)
+        XCTAssertEqual(decoded.enabledOrder, ["anilist", "tvdb", "tmdb"])
+        XCTAssertTrue(decoded.disabledOrder.isEmpty)
+        XCTAssertEqual(decoded.orderMode, .custom)
+    }
+
     func testMigrationTreatsUnknownRoleAsDisabled() throws {
         // An unrecognized/future role must NOT silently enable a source the user
         // restricted; it falls below the divider (disabled).

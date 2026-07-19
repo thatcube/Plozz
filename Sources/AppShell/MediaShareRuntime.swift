@@ -7,6 +7,52 @@ import MetadataKit
 import ProviderShare
 import EnginePlozzigen
 
+final class MetadataEnrichmentConfigCache: @unchecked Sendable {
+    private let baseline: MetadataEnrichmentConfig
+    private let settingsStore: any MetadataProviderSettingsStoring
+    private let center: NotificationCenter
+    private let lock = NSLock()
+    private var cached: MetadataEnrichmentConfig
+    private var observer: NSObjectProtocol?
+
+    init(
+        baseline: MetadataEnrichmentConfig,
+        settingsStore: any MetadataProviderSettingsStoring,
+        center: NotificationCenter = .default
+    ) {
+        self.baseline = baseline
+        self.settingsStore = settingsStore
+        self.center = center
+        self.cached = baseline.merged(withUserOverrides: settingsStore.load())
+        self.observer = center.addObserver(
+            forName: .metadataProviderSettingsDidChange,
+            object: nil,
+            queue: nil
+        ) { [weak self] _ in
+            self?.reload()
+        }
+    }
+
+    deinit {
+        if let observer {
+            center.removeObserver(observer)
+        }
+    }
+
+    func value() -> MetadataEnrichmentConfig {
+        lock.lock()
+        defer { lock.unlock() }
+        return cached
+    }
+
+    private func reload() {
+        let updated = baseline.merged(withUserOverrides: settingsStore.load())
+        lock.lock()
+        cached = updated
+        lock.unlock()
+    }
+}
+
 /// The atomic, app-wide ownership bundle for one media-share runtime
 /// generation. It ties together the single share catalog coordinator used by
 /// both catalog providers and playback leases, the transport composition
@@ -123,10 +169,12 @@ final class DefaultMediaShareRuntime: MediaShareRuntime {
         // read diagnostics + apply cache budgets. Empty overrides => Step 5 config.
         let providerRuntime = MetadataProviderRuntime.makeDefault()
         let providerSettingsStore = MetadataProviderSettingsStore()
+        let enrichmentConfigCache = MetadataEnrichmentConfigCache(
+            baseline: MetadataEnrichmentConfig.resolved(),
+            settingsStore: providerSettingsStore
+        )
         let enrichmentConfig: @Sendable () -> MetadataEnrichmentConfig = {
-            MetadataEnrichmentConfig.resolved().merged(
-                withUserOverrides: providerSettingsStore.load()
-            )
+            enrichmentConfigCache.value()
         }
         // Step 9: the household-global TMDB BYOK key. Read per pipeline build (like the
         // enrichment override) so entering/removing a key applies on the next share

@@ -59,6 +59,47 @@ enum MetadataProviderListLogic {
         var disabled: [MetadataSource]
     }
 
+    /// The flattened native-List representation used by iOS/iPadOS. The divider stays
+    /// in the collection so dragging a provider across it changes enablement.
+    enum ListItem: Hashable {
+        case provider(MetadataSource)
+        case divider
+    }
+
+    static func listItems(for sections: Sections) -> [ListItem] {
+        sections.enabled.map(ListItem.provider)
+            + [.divider]
+            + sections.disabled.map(ListItem.provider)
+    }
+
+    /// Applies native `List.onMove` offsets to the flattened list, then splits it back
+    /// at the divider. The divider itself is immovable; providers dropped before it are
+    /// enabled, providers dropped after it are disabled.
+    static func moving(
+        fromOffsets offsets: IndexSet,
+        toOffset destination: Int,
+        in sections: Sections
+    ) -> Sections {
+        var items = listItems(for: sections)
+        let movableOffsets = offsets
+            .filter { items.indices.contains($0) && items[$0] != .divider }
+            .sorted()
+        guard !movableOffsets.isEmpty else { return sections }
+
+        let moving = movableOffsets.map { items[$0] }
+        for index in movableOffsets.reversed() {
+            items.remove(at: index)
+        }
+        let removedBeforeDestination = movableOffsets.filter { $0 < destination }.count
+        let insertion = max(0, min(items.count, destination - removedBeforeDestination))
+        items.insert(contentsOf: moving, at: insertion)
+
+        guard let divider = items.firstIndex(of: .divider) else { return sections }
+        let enabled = items[..<divider].compactMap(\.source)
+        let disabled = items[items.index(after: divider)...].compactMap(\.source)
+        return Sections(enabled: enabled, disabled: disabled)
+    }
+
     /// Splits the known sources into enabled (above divider, priority order) and
     /// disabled (below), honoring the user's explicit lists first, then the baseline.
     static func sections(
@@ -123,6 +164,49 @@ enum MetadataProviderListLogic {
         s.enabled.append(source)
         return s
     }
+
+    /// One step of the lifted-row move, treating the whole thing as a single ordered
+    /// list with the divider between `enabled` (above) and `disabled` (below). Moving a
+    /// source up raises its priority; crossing the divider upward re-enables it (at the
+    /// bottom of enabled). Moving down lowers priority; crossing the divider downward
+    /// disables it (at the top of disabled). At the very top/bottom it's a no-op.
+    static func stepped(_ source: MetadataSource, up: Bool, in sections: Sections) -> Sections {
+        var s = sections
+        if let i = s.enabled.firstIndex(of: source) {
+            if up {
+                guard i > 0 else { return sections }          // already highest
+                s.enabled.swapAt(i, i - 1)
+            } else if i < s.enabled.count - 1 {
+                s.enabled.swapAt(i, i + 1)
+            } else {
+                // Crossing the divider downward → disable at the top of disabled.
+                s.enabled.remove(at: i)
+                s.disabled.insert(source, at: 0)
+            }
+            return s
+        }
+        if let j = s.disabled.firstIndex(of: source) {
+            if !up {
+                guard j < s.disabled.count - 1 else { return sections }  // already lowest
+                s.disabled.swapAt(j, j + 1)
+            } else if j > 0 {
+                s.disabled.swapAt(j, j - 1)
+            } else {
+                // Crossing the divider upward → re-enable at the bottom of enabled.
+                s.disabled.remove(at: j)
+                s.enabled.append(source)
+            }
+            return s
+        }
+        return sections
+    }
+}
+
+private extension MetadataProviderListLogic.ListItem {
+    var source: MetadataSource? {
+        guard case let .provider(source) = self else { return nil }
+        return source
+    }
 }
 
 /// The "Metadata" Settings page: provider enable/disable + ordering (over the
@@ -134,6 +218,11 @@ struct MetadataSettingsDetailView: View {
     @State private var snapshot: MetadataEnrichmentDiagnosticsSnapshot?
     @State private var isRefreshing = false
     @State private var confirmClear = false
+    /// The source currently "lifted" for reordering (nil = none lifted).
+    @State private var liftedSource: MetadataSource?
+    @State private var isRestoringLiftedFocus = false
+    @FocusState private var focusedSource: MetadataSource?
+    @FocusState private var isDisabledPlaceholderFocused: Bool
 
     private var providers: MetadataProviderSettingsModel { deps.providers }
     private var cacheBudget: CacheBudgetSettingsModel { deps.cacheBudget }
@@ -141,15 +230,14 @@ struct MetadataSettingsDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
-                SettingsPageHeader(
-                    "Metadata",
-                    subtitle: "Artwork and details for your libraries — shared across every profile on this Apple TV."
-                )
+                SettingsPageHeader("Metadata")
                 providersSection
-                requiredAttributionNote
                 tmdbKeySection
+                    .disabled(liftedSource != nil)
                 diagnosticsSection
+                    .disabled(liftedSource != nil)
                 cacheSection
+                    .disabled(liftedSource != nil)
             }
             .frame(maxWidth: PlozzTheme.Metrics.settingsContentMaxWidth, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .center)
@@ -172,88 +260,187 @@ struct MetadataSettingsDetailView: View {
         )
     }
 
-    private func isOverridden(_ source: MetadataSource) -> Bool {
-        providers.settings.isExplicitlyEnabled(source) || providers.settings.isDisabled(source)
-    }
-
+    #if os(tvOS)
     private var providersSection: some View {
         let split = sections
         return SettingsPanel(
             title: "Metadata Providers",
-            subtitle: "Drag providers into the order you want. Sources above the divider fill artwork and details, top first; move a source below the divider to stop using it. Changes apply as your libraries refresh.",
-            footer: providers.settings.isEmpty ? "Using the app's built-in defaults." : nil,
             contentPadding: .settingsPanelRowContent
         ) {
-            VStack(spacing: 10) {
+            VStack(spacing: 6) {
                 ForEach(Array(split.enabled.enumerated()), id: \.element) { index, source in
-                    ProviderRow(
-                        name: displayName(source),
-                        isEnabled: true,
-                        isOverridden: isOverridden(source),
-                        rank: index + 1,
-                        canMoveUp: index > 0,
-                        canMoveDown: index < split.enabled.count - 1,
-                        onToggleEnabled: { setEnabled(false, for: source) },
-                        onMoveUp: { moveEnabled(source, by: -1) },
-                        onMoveDown: { moveEnabled(source, by: 1) }
-                    )
+                    row(source, isEnabled: true, rank: index + 1)
                 }
 
-                MetadataDisabledDivider()
+                MetadataDisabledDivider(isDropTarget: liftedSource != nil)
 
                 if split.disabled.isEmpty {
-                    MetadataDisabledPlaceholder()
+                    MetadataDisabledPlaceholder(isReordering: liftedSource != nil)
+                        .focused($isDisabledPlaceholderFocused)
+                        .onChange(of: isDisabledPlaceholderFocused) { _, isFocused in
+                            handleEmptyDisabledDropTargetFocus(isFocused)
+                        }
                 } else {
-                    ForEach(Array(split.disabled.enumerated()), id: \.element) { index, source in
-                        ProviderRow(
-                            name: displayName(source),
-                            isEnabled: false,
-                            isOverridden: isOverridden(source),
-                            rank: nil,
-                            canMoveUp: index > 0,
-                            canMoveDown: index < split.disabled.count - 1,
-                            onToggleEnabled: { setEnabled(true, for: source) },
-                            onMoveUp: { moveDisabled(source, by: -1) },
-                            onMoveDown: { moveDisabled(source, by: 1) }
-                        )
+                    ForEach(split.disabled, id: \.self) { source in
+                        row(source, isEnabled: false, rank: nil)
                     }
                 }
 
                 if !providers.settings.isEmpty {
                     Button(role: .destructive) {
+                        liftedSource = nil
                         providers.resetToBuildDefaults()
                     } label: {
                         Label("Reset to Built-in Defaults", systemImage: "arrow.uturn.backward")
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(SettingsFocusButtonStyle())
-                    .padding(.top, 4)
+                    .disabled(liftedSource != nil)
+                    .padding(.top, 6)
                 }
+            }
+            // Reorder rides the NATIVE focus move (instant, no gesture-recognizer
+            // latency): while a row is lifted, moving focus to a neighbor is translated
+            // into a one-step reorder of the lifted row toward that neighbor, then focus
+            // is snapped back onto the lifted row at its new slot. Result: d-pad Up/Down
+            // moves the lifted row immediately, with focus following it.
+            .onChange(of: focusedSource) { _, newValue in
+                handleFocusMoveWhileLifted(to: newValue)
             }
         }
     }
 
+    private func row(_ source: MetadataSource, isEnabled: Bool, rank: Int?) -> some View {
+        let lifting = liftedSource != nil
+        return ProviderRow(
+            name: displayName(source),
+            isEnabled: isEnabled,
+            isLifted: liftedSource == source,
+            isDimmed: lifting && liftedSource != source,
+            rank: rank,
+            onPrimary: { toggleLift(source) }
+        )
+        .focused($focusedSource, equals: source)
+    }
+
+    /// Click handler: lift the focused row, or drop it if it's already lifted.
+    private func toggleLift(_ source: MetadataSource) {
+        withAnimation(.snappy(duration: 0.16)) {
+            liftedSource = (liftedSource == source) ? nil : source
+        }
+    }
+
+    /// When a row is lifted and focus moves to a different row (a d-pad press), reorder
+    /// the lifted row one step toward that row. Focus is restored on the next layout
+    /// pass: restoring it synchronously targets the row's old frame and can make a
+    /// subsequent Down press appear to move upward.
+    private func handleFocusMoveWhileLifted(to newValue: MetadataSource?) {
+        guard !isRestoringLiftedFocus,
+              let lifted = liftedSource,
+              let target = newValue,
+              target != lifted else { return }
+        let combined = sections.enabled + sections.disabled
+        guard let from = combined.firstIndex(of: lifted),
+              let to = combined.firstIndex(of: target) else { return }
+        let up = to < from
+        let next = MetadataProviderListLogic.stepped(lifted, up: up, in: sections)
+        guard next != sections else {
+            restoreFocusAfterLayout(to: lifted)
+            return
+        }
+        isRestoringLiftedFocus = true
+        withAnimation(.easeOut(duration: 0.10)) {
+            persist(next)
+        }
+        restoreFocusAfterLayout(to: lifted)
+    }
+
+    /// The dashed empty-disabled row is a real focus target. Landing on it while a
+    /// provider is lifted means "move across the divider": disable the provider, then
+    /// keep focus on that same provider in its new disabled position.
+    private func handleEmptyDisabledDropTargetFocus(_ isFocused: Bool) {
+        guard isFocused,
+              !isRestoringLiftedFocus,
+              let lifted = liftedSource else { return }
+        let next = MetadataProviderListLogic.stepped(lifted, up: false, in: sections)
+        guard next != sections else { return }
+        isRestoringLiftedFocus = true
+        withAnimation(.easeOut(duration: 0.10)) {
+            persist(next)
+        }
+        restoreFocusAfterLayout(to: lifted)
+    }
+
+    /// Wait one run-loop turn for the reordered `ForEach` frames to settle before
+    /// asking the focus engine to follow the lifted provider to its new slot.
+    private func restoreFocusAfterLayout(to source: MetadataSource) {
+        Task { @MainActor in
+            await Task.yield()
+            isDisabledPlaceholderFocused = false
+            focusedSource = source
+            isRestoringLiftedFocus = false
+        }
+    }
+    #else
+    /// iOS/iPadOS uses the native always-editing List reorder affordance over the same
+    /// flattened model. The immovable divider separates enabled and disabled sources;
+    /// dragging a provider across it changes enablement.
+    private var providersSection: some View {
+        let split = sections
+        let items = MetadataProviderListLogic.listItems(for: split)
+        return SettingsPanel(
+            title: "Metadata Providers",
+            contentPadding: .settingsPanelRowContent
+        ) {
+            List {
+                ForEach(items, id: \.self) { item in
+                    iosProviderListRow(item, split: split)
+                        .moveDisabled(item == .divider)
+                }
+                .onMove { offsets, destination in
+                    persist(
+                        MetadataProviderListLogic.moving(
+                            fromOffsets: offsets,
+                            toOffset: destination,
+                            in: sections
+                        )
+                    )
+                }
+            }
+            .listStyle(.plain)
+            .scrollDisabled(true)
+            .environment(\.editMode, .constant(.active))
+            .frame(height: CGFloat(items.count) * 54)
+        }
+    }
+
+    @ViewBuilder
+    private func iosProviderListRow(
+        _ item: MetadataProviderListLogic.ListItem,
+        split: MetadataProviderListLogic.Sections
+    ) -> some View {
+        switch item {
+        case let .provider(source):
+            HStack {
+                if let index = split.enabled.firstIndex(of: source) {
+                    Text(index + 1, format: .number)
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+                Text(displayName(source))
+                    .foregroundStyle(split.enabled.contains(source) ? .primary : .secondary)
+            }
+        case .divider:
+            Text("Disabled")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .textCase(.uppercase)
+        }
+    }
+    #endif
+
     private func persist(_ next: MetadataProviderListLogic.Sections) {
         providers.settings.setLists(enabled: next.enabled, disabled: next.disabled)
-    }
-
-    private func setEnabled(_ enabled: Bool, for source: MetadataSource) {
-        let current = sections
-        persist(enabled
-            ? MetadataProviderListLogic.enabling(source, in: current)
-            : MetadataProviderListLogic.disabling(source, in: current))
-    }
-
-    private func moveEnabled(_ source: MetadataSource, by delta: Int) {
-        var next = sections
-        next.enabled = MetadataProviderListLogic.moved(source, by: delta, in: next.enabled)
-        persist(next)
-    }
-
-    private func moveDisabled(_ source: MetadataSource, by delta: Int) {
-        var next = sections
-        next.disabled = MetadataProviderListLogic.moved(source, by: delta, in: next.disabled)
-        persist(next)
     }
 
     // MARK: - TMDB bring-your-own-key (Step 9)
@@ -269,7 +456,6 @@ struct MetadataSettingsDetailView: View {
     private var tmdbKeySection: some View {
         SettingsPanel(
             title: "Your Own TMDB Key",
-            subtitle: "Optional. Add a TMDB API Read Access Token (v4) to fetch TMDB artwork and details under your own TMDB account.",
             footer: nil,
             contentPadding: .settingsPanelRowContent
         ) {
@@ -317,11 +503,6 @@ struct MetadataSettingsDetailView: View {
                         .buttonStyle(SettingsFocusButtonStyle())
                     }
                 }
-
-                Text(Self.tmdbKeyDisclosure)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
@@ -346,43 +527,11 @@ struct MetadataSettingsDetailView: View {
         }
     }
 
-    /// Required disclosure: BYOK changes credential / attribution / rate-limit
-    /// ownership only — never TMDB's licensing terms — and keeps the "not endorsed"
-    /// notice with a link to TMDB's terms.
-    private static let tmdbKeyDisclosure = """
-    Using your own key changes only whose TMDB credentials, rate limit, and attribution \
-    are used — it does not change TMDB's licensing terms or how you may use the artwork. \
-    Your key is stored securely on this Apple TV and never leaves it. Plozz uses the TMDB \
-    API but is not endorsed or certified by TMDB. See TMDB's Terms of Use at \
-    themoviedb.org/terms-of-use and get a token at themoviedb.org/settings/api.
-    """
-
-
-    // MARK: - Attribution
-
-    /// A compact required-attribution line under the providers list. TheTVDB and TMDB
-    /// require visible credit whenever their APIs are used; the full per-service credits
-    /// live on the dedicated Settings → Attributions & Licensing page, so this only
-    /// surfaces the required notice and points there rather than duplicating the section.
-    private var requiredAttributionNote: some View {
-        let required = MetadataSourceAttribution.all
-            .filter(\.isRequired)
-            .map(\.name)
-            .joined(separator: " and ")
-        return Text("\(required) require visible credit when their data is used. Full credits are in Settings → Attributions & Licensing.")
-            .font(.footnote)
-            .foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.top, -12)
-    }
-
     // MARK: - Diagnostics
 
     private var diagnosticsSection: some View {
         SettingsPanel(
-            title: "Diagnostics",
-            subtitle: "A point-in-time snapshot — values are gathered live and may differ by a moment."
+            title: "Diagnostics"
         ) {
             VStack(alignment: .leading, spacing: 14) {
                 HStack {
@@ -465,7 +614,6 @@ struct MetadataSettingsDetailView: View {
     private var cacheSection: some View {
         SettingsPanel(
             title: "Cache",
-            subtitle: "Limit how much space cached artwork and lookups may use. Lowering a limit frees space immediately.",
             contentPadding: .settingsPanelRowContent
         ) {
             VStack(spacing: 16) {
@@ -560,68 +708,89 @@ struct MetadataSettingsDetailView: View {
     }
 }
 
-/// One provider row in the single ordered list: an always-visible reorder handle, an
-/// enable/disable action, an override tag, and up/down reorder buttons. (Phase 1 is a
-/// straightforward chevron+toggle bridge over the enabled+order model; the tvOS
-/// lifted-row click-to-activate-move interaction replaces this in Phase 2.)
+/// One focusable provider row in the single ordered list. The **whole row** is the
+/// focus target (no per-row buttons). Click to "lift" it; while lifted, d-pad Up/Down
+/// moves it (across the divider to enable/disable) as focus follows; click again to
+/// drop. An always-visible reorder handle sits on the trailing edge.
 private struct ProviderRow: View {
     let name: String
     let isEnabled: Bool
-    let isOverridden: Bool
+    let isLifted: Bool
+    let isDimmed: Bool
     /// 1-based priority rank when enabled; `nil` when disabled.
     let rank: Int?
-    let canMoveUp: Bool
-    let canMoveDown: Bool
-    let onToggleEnabled: () -> Void
-    let onMoveUp: () -> Void
-    let onMoveDown: () -> Void
+    let onPrimary: () -> Void
 
     var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "line.3.horizontal")
-                .font(.headline)
-                .foregroundStyle(.secondary)
-                .accessibilityHidden(true)
-
-            if let rank {
-                Text("\(rank)")
-                    .font(.caption.weight(.bold).monospacedDigit())
-                    .foregroundStyle(.secondary)
-                    .frame(minWidth: 22)
+        Button(action: onPrimary) {
+            HStack(spacing: 14) {
+                if let rank {
+                    Text("\(rank)")
+                        .font(.callout.weight(.bold).monospacedDigit())
+                        .frame(minWidth: 26, alignment: .trailing)
+                }
+                Text(name)
+                    .font(.headline.weight(.semibold))
+                Spacer(minLength: 12)
+                Image(systemName: "line.3.horizontal")
+                    .font(.title3)
+                    .accessibilityHidden(true)
             }
-
-            Text(name)
-                .font(.headline.weight(.semibold))
-                .foregroundStyle(isEnabled ? .primary : .secondary)
-
-            if isOverridden {
-                Text("Custom")
-                    .font(.caption2.weight(.semibold))
-                    .padding(.horizontal, 8).padding(.vertical, 3)
-                    .background(Capsule().fill(Color.accentColor.opacity(0.20)))
-            }
-
-            Spacer()
-
-            Button(action: onMoveUp) { Image(systemName: "chevron.up") }
-                .buttonStyle(SettingsFocusButtonStyle())
-                .disabled(!canMoveUp)
-            Button(action: onMoveDown) { Image(systemName: "chevron.down") }
-                .buttonStyle(SettingsFocusButtonStyle())
-                .disabled(!canMoveDown)
-            Button(action: onToggleEnabled) {
-                Image(systemName: isEnabled ? "minus.circle" : "plus.circle")
-            }
-            .buttonStyle(SettingsFocusButtonStyle())
-            .accessibilityLabel(isEnabled ? "Disable \(name)" : "Enable \(name)")
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.vertical, 4)
+        .buttonStyle(
+            LiftableRowButtonStyle(
+                isEnabled: isEnabled,
+                isLifted: isLifted,
+                suppressFocusAppearance: isDimmed
+            )
+        )
+        .opacity(isDimmed ? 0.4 : 1)
+        .scaleEffect(isLifted ? 1.04 : 1)
+        .shadow(color: .black.opacity(isLifted ? 0.5 : 0), radius: isLifted ? 18 : 0, y: isLifted ? 9 : 0)
+        .zIndex(isLifted ? 1 : 0)
+    }
+}
+
+/// Row chrome using ONLY the existing Settings design language — no new colors. A
+/// lifted (grabbed) or focused row both render as the standard tvOS inverted card
+/// (white fill / black text in dark mode); "grabbed" is distinguished by the row's
+/// scale + shadow and its dimmed neighbors (the tvOS Home-screen rearrange idiom),
+/// not a tint. Foreground is set here so it always matches the fill.
+private struct LiftableRowButtonStyle: ButtonStyle {
+    let isEnabled: Bool
+    let isLifted: Bool
+    /// During reordering, native focus briefly visits the adjacent row to communicate
+    /// direction. Hide that row's focus card so only the lifted row ever highlights.
+    let suppressFocusAppearance: Bool
+    @Environment(\.isFocused) private var isFocused
+    @Environment(\.colorScheme) private var colorScheme
+
+    func makeBody(configuration: Configuration) -> some View {
+        let inverted = isLifted || (isFocused && !suppressFocusAppearance)
+        let invertedFill: Color = colorScheme == .dark ? .white : .black
+        let invertedText: Color = colorScheme == .dark ? .black : .white
+
+        let foreground: AnyShapeStyle = inverted
+            ? AnyShapeStyle(invertedText)
+            : (isEnabled ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+        let fill: AnyShapeStyle = inverted ? AnyShapeStyle(invertedFill) : AnyShapeStyle(Color.clear)
+
+        return configuration.label
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .foregroundStyle(foreground)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous).fill(fill)
+            )
     }
 }
 
 /// The "Disabled" divider that separates enabled (above) from disabled (below).
 private struct MetadataDisabledDivider: View {
+    let isDropTarget: Bool
+
     var body: some View {
         HStack(spacing: 12) {
             Text("Disabled")
@@ -629,30 +798,63 @@ private struct MetadataDisabledDivider: View {
                 .foregroundStyle(.secondary)
                 .textCase(.uppercase)
             Rectangle()
-                .fill(Color.secondary.opacity(0.3))
+                .fill(Color.secondary.opacity(isDropTarget ? 0.6 : 0.3))
                 .frame(height: 1)
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, 8)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Disabled providers")
     }
 }
 
-/// Shown in the disabled area when nothing is disabled, so the disable target is
-/// discoverable. (Phase 2 makes this a dashed, focusable drop target reachable by the
-/// remote.)
+/// Shown in the disabled area when nothing is disabled, so the disable target stays
+/// discoverable: a lifted row moved down here becomes disabled.
 private struct MetadataDisabledPlaceholder: View {
+    let isReordering: Bool
+
     var body: some View {
-        Text("Move a provider here to stop using it.")
-            .font(.callout)
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.vertical, 12)
-            .padding(.horizontal, 14)
+        Button(action: {}) {
+            Text("Move a provider here to stop using it.")
+                .font(.callout)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 14)
+                .padding(.horizontal, 16)
+        }
+        .buttonStyle(
+            DisabledPlaceholderButtonStyle(
+                suppressFocusAppearance: isReordering
+            )
+        )
+    }
+}
+
+private struct DisabledPlaceholderButtonStyle: ButtonStyle {
+    let suppressFocusAppearance: Bool
+    @Environment(\.isFocused) private var isFocused
+    @Environment(\.colorScheme) private var colorScheme
+
+    func makeBody(configuration: Configuration) -> some View {
+        let showFocus = isFocused && !suppressFocusAppearance
+        configuration.label
+            .foregroundStyle(
+                showFocus
+                    ? (colorScheme == .dark ? Color.black : Color.white)
+                    : Color.secondary
+            )
             .background(
-                RoundedRectangle(cornerRadius: 10)
-                    .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [6, 4]))
-                    .foregroundStyle(.secondary.opacity(0.5))
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(
+                        showFocus
+                            ? (colorScheme == .dark ? Color.white : Color.black)
+                            : Color.clear
+                    )
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 14)
+                    .strokeBorder(
+                        style: StrokeStyle(lineWidth: 1, dash: [6, 4])
+                    )
+                    .foregroundStyle(showFocus ? Color.clear : Color.secondary.opacity(0.5))
             )
     }
 }

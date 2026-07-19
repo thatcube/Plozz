@@ -84,5 +84,116 @@ final class MetadataProviderListLogicTests: XCTestCase {
         XCTAssertEqual(next.enabled, [.tvdb, .tmdb, .anilist])
         XCTAssertEqual(next.disabled, [.omdb])
     }
+
+    // MARK: Lifted-row single-step move (continuous list across the divider)
+
+    func testStepUpWithinEnabled() {
+        let s = MetadataProviderListLogic.Sections(enabled: [.tvdb, .tmdb, .anilist], disabled: [])
+        let next = MetadataProviderListLogic.stepped(.anilist, up: true, in: s)
+        XCTAssertEqual(next.enabled, [.tvdb, .anilist, .tmdb])
+    }
+
+    func testStepDownWithinEnabled() {
+        let s = MetadataProviderListLogic.Sections(enabled: [.tvdb, .tmdb, .anilist], disabled: [])
+        let next = MetadataProviderListLogic.stepped(.tvdb, up: false, in: s)
+        XCTAssertEqual(next.enabled, [.tmdb, .tvdb, .anilist])
+    }
+
+    func testStepUpAtTopIsNoOp() {
+        let s = MetadataProviderListLogic.Sections(enabled: [.tvdb, .tmdb], disabled: [])
+        XCTAssertEqual(MetadataProviderListLogic.stepped(.tvdb, up: true, in: s), s)
+    }
+
+    func testStepDownFromLastEnabledCrossesDividerToDisable() {
+        let s = MetadataProviderListLogic.Sections(enabled: [.tvdb, .tmdb], disabled: [.omdb])
+        let next = MetadataProviderListLogic.stepped(.tmdb, up: false, in: s)
+        XCTAssertEqual(next.enabled, [.tvdb])
+        XCTAssertEqual(next.disabled, [.tmdb, .omdb], "disabled at top of the disabled group")
+    }
+
+    func testStepUpFromFirstDisabledCrossesDividerToEnable() {
+        let s = MetadataProviderListLogic.Sections(enabled: [.tvdb], disabled: [.tmdb, .omdb])
+        let next = MetadataProviderListLogic.stepped(.tmdb, up: true, in: s)
+        XCTAssertEqual(next.enabled, [.tvdb, .tmdb], "re-enabled at the bottom of enabled")
+        XCTAssertEqual(next.disabled, [.omdb])
+    }
+
+    func testStepDownAtBottomIsNoOp() {
+        let s = MetadataProviderListLogic.Sections(enabled: [.tvdb], disabled: [.tmdb, .omdb])
+        XCTAssertEqual(MetadataProviderListLogic.stepped(.omdb, up: false, in: s), s)
+    }
+
+    func testStepWithinDisabled() {
+        let s = MetadataProviderListLogic.Sections(enabled: [.tvdb], disabled: [.tmdb, .omdb, .anilist])
+        XCTAssertEqual(
+            MetadataProviderListLogic.stepped(.omdb, up: false, in: s).disabled,
+            [.tmdb, .anilist, .omdb]
+        )
+        XCTAssertEqual(
+            MetadataProviderListLogic.stepped(.omdb, up: true, in: s).disabled,
+            [.omdb, .tmdb, .anilist]
+        )
+    }
+
+    // MARK: Native iOS/iPadOS onMove
+
+    func testNativeMoveReordersWithinEnabled() {
+        let s = MetadataProviderListLogic.Sections(
+            enabled: [.tvdb, .tmdb, .anilist],
+            disabled: [.omdb]
+        )
+        let next = MetadataProviderListLogic.moving(
+            fromOffsets: IndexSet(integer: 2),
+            toOffset: 1,
+            in: s
+        )
+        XCTAssertEqual(next.enabled, [.tvdb, .anilist, .tmdb])
+        XCTAssertEqual(next.disabled, [.omdb])
+    }
+
+    func testNativeMoveAcrossDividerDisables() {
+        let s = MetadataProviderListLogic.Sections(
+            enabled: [.tvdb, .tmdb],
+            disabled: [.omdb]
+        )
+        // Flattened: tvdb, tmdb, divider, omdb. Move tmdb after divider.
+        let next = MetadataProviderListLogic.moving(
+            fromOffsets: IndexSet(integer: 1),
+            toOffset: 3,
+            in: s
+        )
+        XCTAssertEqual(next.enabled, [.tvdb])
+        XCTAssertEqual(next.disabled, [.tmdb, .omdb])
+    }
+
+    func testNativeMoveAcrossDividerEnables() {
+        let s = MetadataProviderListLogic.Sections(
+            enabled: [.tvdb],
+            disabled: [.tmdb, .omdb]
+        )
+        // Flattened: tvdb, divider, tmdb, omdb. Move tmdb before divider.
+        let next = MetadataProviderListLogic.moving(
+            fromOffsets: IndexSet(integer: 2),
+            toOffset: 1,
+            in: s
+        )
+        XCTAssertEqual(next.enabled, [.tvdb, .tmdb])
+        XCTAssertEqual(next.disabled, [.omdb])
+    }
+
+    func testNativeMoveCannotMoveDivider() {
+        let s = MetadataProviderListLogic.Sections(
+            enabled: [.tvdb],
+            disabled: [.tmdb]
+        )
+        XCTAssertEqual(
+            MetadataProviderListLogic.moving(
+                fromOffsets: IndexSet(integer: 1),
+                toOffset: 0,
+                in: s
+            ),
+            s
+        )
+    }
 }
 #endif

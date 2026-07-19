@@ -18,6 +18,8 @@ final class PlozziOSAppModel {
     let mediaShareRuntime: DefaultMediaShareRuntime
     private(set) var settings: PlozziOSSettingsModel
     private(set) var downloads: PlozziOSDownloadsModel
+    @ObservationIgnored
+    private(set) var plexHomeUsers: PlexHomeUsersModel!
 
     private let accountStore: AccountPersisting
     private let durableLocalStateStore: DurableLocalStateStore?
@@ -70,8 +72,6 @@ final class PlozziOSAppModel {
             registry: registry,
             profilesModel: profiles
         )
-        accountsProviders.tokenResolver = { accountStore.token(for: $0) }
-
         self.accountStore = accountStore
         self.profiles = profiles
         self.accountsProviders = accountsProviders
@@ -92,6 +92,21 @@ final class PlozziOSAppModel {
         self.mediaShareConfigurationService = MediaShareAccountConfigurationService(
             accountStore: accountStore
         )
+        self.plexHomeUsers = PlexHomeUsersModel(
+            accountsProviders: accountsProviders,
+            profilesModel: profiles,
+            switchProfile: { [weak self] profileID in
+                self?.selectProfile(profileID)
+            }
+        )
+        accountsProviders.tokenResolver = { [weak self] accountID in
+            self?.plexHomeUsers.resolvedToken(for: accountID)
+                ?? accountStore.token(for: accountID)
+        }
+        accountsProviders.credentialRevision = { [weak self] account in
+            self?.plexHomeUsers.effectiveCredentialRevision(for: account)
+                ?? account.credentialRevision
+        }
         accountError = launchErrors.isEmpty ? nil : launchErrors.joined(separator: "\n")
         authenticatedHTTPResolver.configure { [weak accountsProviders] locator in
             guard let accountsProviders,
@@ -99,8 +114,8 @@ final class PlozziOSAppModel {
                       $0.id == locator.accountID
                   }),
                   account.server.provider == locator.provider,
-                  account.credentialRevision == locator.credentialRevision,
-                  let token = accountStore.token(for: account.id),
+                  accountsProviders.credentialRevision(account) == locator.credentialRevision,
+                  let token = accountsProviders.tokenResolver(account.id),
                   !token.isEmpty else {
                 throw MediaTransportError.authentication(
                     reason: "inactive authenticated HTTP identity"
@@ -126,12 +141,13 @@ final class PlozziOSAppModel {
             return ManagedAuthenticatedHTTPResolver.Context(
                 provider: account.server.provider,
                 accountID: account.id,
-                credentialRevision: account.credentialRevision,
+                credentialRevision: accountsProviders.credentialRevision(account),
                 baseURL: baseURL,
                 token: token
             )
         }
         accountsProviders.reloadAccounts()
+        plexHomeUsers.ensurePlexIdentityForActiveProfile()
     }
 
     var accounts: [Account] {
@@ -152,6 +168,7 @@ final class PlozziOSAppModel {
             accountsProviders: accountsProviders,
             authenticatedHTTPResolver: authenticatedHTTPResolver
         )
+        plexHomeUsers.ensurePlexIdentityForActiveProfile()
         accountsProviders.reloadAccounts()
     }
 
@@ -270,6 +287,7 @@ final class PlozziOSAppModel {
         )
         do {
             try accountStore.remove(id: id)
+            plexHomeUsers.forgetAccount(id)
             accountsProviders.reloadAccounts()
             guard !accountsProviders.accounts.contains(where: { $0.id == id }) else {
                 return

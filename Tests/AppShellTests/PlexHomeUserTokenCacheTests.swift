@@ -1,6 +1,7 @@
 import XCTest
 import CoreModels
 import FeatureAuth
+@testable import AppRuntime
 @testable import AppShell
 
 /// Unit tests for ``PlexHomeUserTokenCache`` — the persisted cache of resolved

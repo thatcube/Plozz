@@ -11,6 +11,8 @@ public struct PlozziOSRootView: View {
     public init() {}
 
     public var body: some View {
+        let pinRequest = appModel.plexHomeUsers.pendingPlexPINRequest
+
         Group {
             if horizontalSizeClass == .regular {
                 PlozziOSSplitShell(
@@ -26,8 +28,27 @@ public struct PlozziOSRootView: View {
             }
         }
         .environment(appModel)
+        .id(
+            "\(appModel.profiles.activeProfileID)#"
+                + "\(appModel.plexHomeUsers.plexIdentityGeneration)"
+        )
         .sheet(isPresented: $showingAddServer) {
             AddServerView(appModel: appModel)
+        }
+        .sheet(
+            item: Binding(
+                get: { pinRequest },
+                set: { request in
+                    if request == nil {
+                        appModel.plexHomeUsers.dismissPlexPINIfPresented()
+                    }
+                }
+            )
+        ) { request in
+            PlozziOSPlexPINView(
+                model: appModel.plexHomeUsers,
+                request: request
+            )
         }
         .preferredColorScheme(appModel.settings.theme.theme.preferredColorScheme)
     }

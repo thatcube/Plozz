@@ -2,6 +2,7 @@ import XCTest
 import CoreModels
 import FeatureAuth
 import FeatureProfiles
+@testable import AppRuntime
 @testable import AppShell
 
 /// Unit tests for ``PlexHomeUsersModel`` — the Plex Home users / "who's watching"

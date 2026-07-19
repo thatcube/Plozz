@@ -1,5 +1,5 @@
 import Foundation
-import FeatureAuth
+import FeatureAuthCore
 
 /// Persists the **server-scoped access tokens** resolved for *unprotected* Plex
 /// Home users so subsequent launches (and profile picks) can install the right
@@ -19,16 +19,16 @@ import FeatureAuth
 /// Keychain service. A small JSON index (account → home-user ids) is kept
 /// alongside them so an account removal / full sign-out can purge every cached
 /// token for an account without a Keychain enumeration API.
-struct PlexHomeUserTokenCache {
+public struct PlexHomeUserTokenCache {
     private let secureStore: SecureStore
     private static let indexKey = "__index__"
 
-    init(store: SecureStore) {
+    public init(store: SecureStore) {
         self.secureStore = store
     }
 
     /// Default Keychain-backed cache, household-shared to match account scope.
-    static func makeDefault() -> PlexHomeUserTokenCache {
+    public static func makeDefault() -> PlexHomeUserTokenCache {
         #if canImport(Security)
         return PlexHomeUserTokenCache(store: KeychainStore(service: "com.plozz.app.plexhomeuser"))
         #else

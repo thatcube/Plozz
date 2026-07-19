@@ -1,10 +1,7 @@
 import Foundation
 import Observation
-import AppRuntime
 import CoreModels
 import CoreNetworking
-import FeatureAuth
-import FeatureProfiles
 import ProviderPlex
 
 /// The Plex Home users ("Who's watching?") facet, extracted from `AppState`.
@@ -148,7 +145,7 @@ public final class PlexHomeUsersModel {
         return servers?.first { $0.id == serverID }?.accessToken
     }
 
-    init(
+    public init(
         accountsProviders: AccountsProvidersModel,
         profilesModel: ProfilesModel,
         plexHomeUserTokenCache: PlexHomeUserTokenCache = .makeDefault(),
@@ -316,9 +313,14 @@ public final class PlexHomeUsersModel {
                     // once when the switch lands; that token is then cached so it
                     // never happens again.
                     if let cached = plexHomeUserTokenCache.token(account: account.id, homeUser: binding.homeUserID) {
+                        let identityChanged = plexTokenOverrides[account.id] != cached
+                            || plexResolvedHomeUser[account.id] != binding.homeUserID
                         setPlexTokenOverride(cached, for: account.id)
                         plexResolvedHomeUser[account.id] = binding.homeUserID
                         accountsProviders.registry.invalidate(accountID: account.id)
+                        if identityChanged {
+                            plexIdentityGeneration += 1
+                        }
                         PlozzLog.boot("ensure.cachedOverride acct=\(account.id) home=\(binding.homeUserID) — instant paint")
                     } else {
                         PlozzLog.boot("ensure.unprotectedSwitch acct=\(account.id) home=\(binding.homeUserID) — cache miss, async")

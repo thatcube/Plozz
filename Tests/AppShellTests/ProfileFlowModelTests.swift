@@ -2,6 +2,7 @@ import XCTest
 import CoreModels
 import FeatureAuth
 import FeatureMusic
+@testable import AppRuntime
 @testable import AppShell
 
 /// Unit tests for ``ProfileFlowModel`` — the profile-flow + household facet split

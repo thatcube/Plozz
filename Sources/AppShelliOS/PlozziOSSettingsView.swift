@@ -24,6 +24,7 @@ struct PlozziOSSettingsView: View {
                 ForEach(appModel.accounts) { account in
                     NavigationLink {
                         PlozziOSAccountDetailView(
+                            appModel: appModel,
                             account: account,
                             onRemove: {
                                 appModel.removeAccount(id: account.id)
@@ -269,6 +270,7 @@ private struct PlozziOSAddProfileView: View {
 private struct PlozziOSAccountDetailView: View {
     @Environment(\.dismiss) private var dismiss
 
+    let appModel: PlozziOSAppModel
     let account: Account
     let onRemove: () -> Void
     @State private var confirmRemoval = false
@@ -282,6 +284,19 @@ private struct PlozziOSAccountDetailView: View {
                 }
                 LabeledContent("Server", value: account.server.name)
                 LabeledContent("Address", value: account.server.baseURL.absoluteString)
+            }
+
+            if account.server.provider == .plex {
+                Section("Plex Home") {
+                    NavigationLink {
+                        PlozziOSPlexHomeUserSettingsView(
+                            appModel: appModel,
+                            account: account
+                        )
+                    } label: {
+                        Label("Plex User", systemImage: "person.crop.circle")
+                    }
+                }
             }
 
             Section {
@@ -301,6 +316,112 @@ private struct PlozziOSAccountDetailView: View {
         } message: {
             Text("Credentials and locally cached data for this source will be removed.")
         }
+    }
+}
+
+private struct PlozziOSPlexHomeUserSettingsView: View {
+    let appModel: PlozziOSAppModel
+    let account: Account
+    @State private var users: [PlexHomeUser] = []
+    @State private var isLoading = false
+
+    var body: some View {
+        List {
+            Section {
+                userButton(
+                    name: account.userName.isEmpty ? "Plex Account Owner" : account.userName,
+                    avatarURL: nil,
+                    requiresPIN: false,
+                    user: nil
+                )
+            } header: {
+                Text("Account owner")
+            }
+
+            Section {
+                if isLoading {
+                    HStack {
+                        ProgressView()
+                        Text("Loading Plex Home…")
+                    }
+                } else if users.isEmpty {
+                    Text("No additional Plex Home users were found.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(users.filter { !$0.isAdmin }) { user in
+                        userButton(
+                            name: user.name,
+                            avatarURL: user.avatarURL,
+                            requiresPIN: user.requiresPIN,
+                            user: user
+                        )
+                    }
+                }
+            } header: {
+                Text("Home users")
+            } footer: {
+                Text("PIN-protected users must unlock when their Plozz profile becomes active.")
+            }
+        }
+        .navigationTitle("Plex User")
+        .navigationBarTitleDisplayMode(.inline)
+        .task {
+            isLoading = true
+            users = await appModel.plexHomeUsers.plexHomeUsers(
+                forAccountID: account.id
+            )
+            isLoading = false
+        }
+    }
+
+    private func userButton(
+        name: String,
+        avatarURL: URL?,
+        requiresPIN: Bool,
+        user: PlexHomeUser?
+    ) -> some View {
+        Button {
+            appModel.plexHomeUsers.setPlexHomeUserForActiveProfile(
+                accountID: account.id,
+                user: user
+            )
+        } label: {
+            HStack(spacing: 12) {
+                AsyncImage(url: avatarURL) { image in
+                    image.resizable().scaledToFill()
+                } placeholder: {
+                    Image(systemName: "person.crop.circle.fill")
+                        .resizable()
+                        .foregroundStyle(.secondary)
+                }
+                .frame(width: 40, height: 40)
+                .clipShape(Circle())
+
+                Text(name)
+                    .foregroundStyle(.primary)
+                if requiresPIN {
+                    Image(systemName: "lock.fill")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                if isSelected(user) {
+                    Image(systemName: "checkmark")
+                        .foregroundStyle(.tint)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func isSelected(_ user: PlexHomeUser?) -> Bool {
+        let binding = appModel.profiles.activeProfile.homeUserBinding(
+            forPlexAccount: account.id
+        )
+        if let user {
+            return binding?.homeUserID == user.id
+        }
+        return binding == nil
     }
 }
 

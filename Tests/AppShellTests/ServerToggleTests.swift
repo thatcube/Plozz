@@ -2,6 +2,7 @@ import XCTest
 import CoreModels
 import FeatureAuth
 import MediaTransportCore
+@testable import AppRuntime
 @testable import AppShell
 
 /// End-to-end coverage for the per-profile "Your Servers & Libraries" master

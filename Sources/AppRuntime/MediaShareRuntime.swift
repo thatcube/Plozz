@@ -116,7 +116,10 @@ public final class DefaultMediaShareRuntime: MediaShareRuntime {
 
     public var artworkNetworkFileService: ArtworkNetworkFileService {
         ArtworkNetworkFileService(
-            loader: MediaShareArtworkLoader(resolver: networkFileResolver),
+            loader: MediaShareArtworkLoader(
+                resolver: networkFileResolver,
+                catalogCoordinator: coordinator
+            ),
             failureReporter: self
         )
     }

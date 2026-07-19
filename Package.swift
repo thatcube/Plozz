@@ -601,10 +601,6 @@ let package = Package(
             dependencies: ["CoreModels", "CoreUI"]
         ),
         .testTarget(
-            name: "MediaDownloadsTests",
-            dependencies: ["MediaDownloads", "CoreModels", "MediaTransportCore"]
-        ),
-        .testTarget(
             name: "AppRuntimeTests",
             dependencies: ["AppRuntime", "CoreModels", "FeatureAuthCore"]
         ),

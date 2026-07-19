@@ -1,6 +1,7 @@
 import CoreModels
 import Foundation
 import MediaTransportCore
+import ProviderShare
 
 /// Credential-safe AppShell adapter from CoreModels' artwork boundary to the
 /// existing direct-file resolver. It is deliberately display-time only: no path,

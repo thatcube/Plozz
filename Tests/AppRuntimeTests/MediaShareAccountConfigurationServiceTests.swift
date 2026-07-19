@@ -4,6 +4,36 @@ import FeatureAuthCore
 import XCTest
 
 final class MediaShareAccountConfigurationServiceTests: XCTestCase {
+    func testSaveSMBPersistsPasswordCredentialAndStableIdentity() throws {
+        let store = try makeStore()
+        let service = MediaShareAccountConfigurationService(accountStore: store)
+
+        let prepared = try service.saveSMB(
+            host: "NAS.Local",
+            port: nil,
+            share: "/Media/",
+            username: "Brandon",
+            password: "secret",
+            displayName: ""
+        )
+
+        XCTAssertEqual(
+            prepared.account.id,
+            "share:nas.local/media#brandon"
+        )
+        XCTAssertEqual(prepared.account.server.name, "Media (SMB)")
+        XCTAssertEqual(prepared.account.server.baseURL.absoluteString, "smb://NAS.Local/Media")
+        let credential = try store.mediaShareCredential(
+            for: prepared.account.id,
+            revision: prepared.account.credentialRevision
+        )
+        XCTAssertEqual(credential.transport, .smb)
+        XCTAssertEqual(
+            credential.authentication,
+            .password(username: "Brandon", password: "secret")
+        )
+    }
+
     func testSaveNFSPersistsStableAccountAndCredentialEnvelope() throws {
         let store = try makeStore()
         let service = MediaShareAccountConfigurationService(accountStore: store)

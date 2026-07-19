@@ -31,8 +31,8 @@ struct PlozziOSHomeView: View {
                     Text("Add media to your server or connect another source.")
                 } actions: {
                     Button("Add Server", action: onAddServer)
-                    NavigationLink("Add NFS Share") {
-                        PlozziOSAddNFSShareView(appModel: appModel)
+                    NavigationLink("Add Network Share") {
+                        PlozziOSAddShareView(appModel: appModel)
                     }
                 }
             case let .failed(error):
@@ -55,9 +55,9 @@ struct PlozziOSHomeView: View {
                 Menu {
                     Button("Add Server", systemImage: "server.rack", action: onAddServer)
                     NavigationLink {
-                        PlozziOSAddNFSShareView(appModel: appModel)
+                        PlozziOSAddShareView(appModel: appModel)
                     } label: {
-                        Label("Add NFS Share", systemImage: "externaldrive")
+                        Label("Add Network Share", systemImage: "externaldrive")
                     }
                 } label: {
                     Label("Add Source", systemImage: "plus")

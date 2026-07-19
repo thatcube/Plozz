@@ -43,6 +43,93 @@ public struct MediaShareAccountConfigurationService: Sendable {
         self.accountStore = accountStore
     }
 
+    public func prepareSMB(
+        host: String,
+        port: Int?,
+        share: String,
+        username: String,
+        password: String,
+        displayName: String
+    ) throws -> PreparedMediaShareAccount {
+        let trimmedHost = host.trimmingCharacters(in: .whitespaces)
+        let trimmedShare = share.trimmingCharacters(in: CharacterSet(charactersIn: "/ "))
+        let trimmedUsername = username.trimmingCharacters(in: .whitespaces)
+        guard !trimmedHost.isEmpty, !trimmedShare.isEmpty else {
+            throw MediaShareAccountConfigurationError.invalidAddress
+        }
+
+        var components = URLComponents()
+        components.scheme = "smb"
+        components.host = ShareProvider.bracketedHostIfIPv6(trimmedHost)
+        components.port = port
+        components.path = "/" + trimmedShare
+        guard let baseURL = components.url else {
+            throw MediaShareAccountConfigurationError.invalidAddress
+        }
+
+        let authentication: MediaShareAuthentication =
+            trimmedUsername.isEmpty && password.isEmpty
+                ? .anonymous
+                : .password(username: trimmedUsername, password: password)
+        let credential = try MediaShareCredentialEnvelope(
+            transport: .smb,
+            authentication: authentication
+        )
+        let serverID = Self.smbID(
+            host: trimmedHost,
+            port: port,
+            share: trimmedShare,
+            username: trimmedUsername
+        )
+        let trimmedName = displayName.trimmingCharacters(in: .whitespaces)
+        let server = MediaServer(
+            id: serverID,
+            name: trimmedName.isEmpty
+                ? Self.defaultShareName(
+                    path: trimmedShare,
+                    host: trimmedHost,
+                    transport: .smb
+                )
+                : trimmedName,
+            baseURL: baseURL,
+            provider: .mediaShare
+        )
+        let session = UserSession(
+            server: server,
+            userID: trimmedUsername.isEmpty ? "guest" : trimmedUsername,
+            userName: trimmedUsername,
+            deviceID: accountStore.deviceID(),
+            accessToken: ""
+        )
+        let account = Account(id: server.id, from: session)
+        return PreparedMediaShareAccount(
+            session: session,
+            account: account,
+            previousAccount: accountStore.loadAccounts().first { $0.id == account.id },
+            credential: credential
+        )
+    }
+
+    public func saveSMB(
+        host: String,
+        port: Int?,
+        share: String,
+        username: String,
+        password: String,
+        displayName: String
+    ) throws -> PreparedMediaShareAccount {
+        let prepared = try prepareSMB(
+            host: host,
+            port: port,
+            share: share,
+            username: username,
+            password: password,
+            displayName: displayName
+        )
+        try persist(prepared)
+        return prepared
+    }
+
     public func prepareNFS(
         host: String,
         port: Int?,
@@ -147,7 +234,20 @@ public struct MediaShareAccountConfigurationService: Sendable {
         if normalizedPath.count > 1, normalizedPath.hasSuffix("/") {
             normalizedPath.removeLast()
         }
+
         return "share:\(normalizedScheme)://\(host.lowercased())\(portKey)\(normalizedPath)#\(principal)"
+    }
+
+    public static func smbID(
+        host: String,
+        port: Int?,
+        share: String,
+        username: String
+    ) -> String {
+        let portKey = port.map { ":\($0)" } ?? ""
+        let normalizedUser = username.trimmingCharacters(in: .whitespaces).lowercased()
+        let user = normalizedUser.isEmpty ? "guest" : normalizedUser
+        return "share:\(host.lowercased())\(portKey)/\(share.lowercased())#\(user)"
     }
 
     public static func defaultShareName(

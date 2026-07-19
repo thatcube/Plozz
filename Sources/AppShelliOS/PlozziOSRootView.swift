@@ -156,8 +156,8 @@ private struct PlozziOSHomeLandingView: View {
             } actions: {
                 Button("Add Server", action: onAddServer)
                     .buttonStyle(.borderedProminent)
-                NavigationLink("Add NFS Share") {
-                    PlozziOSAddNFSShareView(appModel: appModel)
+                NavigationLink("Add Network Share") {
+                    PlozziOSAddShareView(appModel: appModel)
                 }
             }
             .navigationTitle("Home")

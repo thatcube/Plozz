@@ -1166,35 +1166,43 @@ public final class AppState {
         password: String,
         displayName: String
     ) {
-        var comps = URLComponents()
-        comps.scheme = "smb"
-        comps.host = ShareProvider.bracketedHostIfIPv6(host)
-        comps.port = port
-        comps.path = "/" + share
-        guard let baseURL = comps.url else {
+        let service = MediaShareAccountConfigurationService(
+            accountStore: accountsProviders.accountStore
+        )
+        let prepared: PreparedMediaShareAccount
+        do {
+            prepared = try service.prepareSMB(
+                host: host,
+                port: port,
+                share: share,
+                username: username,
+                password: password,
+                displayName: displayName
+            )
+        } catch {
             apply(.authenticationFailed(.unknown("Invalid share address")))
             return
         }
-        let trimmedName = displayName.trimmingCharacters(in: .whitespaces)
-        let name = trimmedName.isEmpty ? Self.defaultShareName(path: share, host: host, transport: .smb) : trimmedName
-        let server = MediaServer(
-            id: Self.mediaShareServerID(host: host, port: port, share: share, username: username),
-            name: name,
-            baseURL: baseURL,
-            provider: .mediaShare
+        let isFirstRun =
+            accountsProviders.accounts.isEmpty
+            && !profilesModel.firstRunProfileSetupComplete
+        apply(.serverSelected(prepared.session.server))
+        do {
+            try service.persist(prepared)
+        } catch {
+            Self.reportMediaSharePersistenceFailure(
+                error,
+                operation: "media-share-save"
+            )
+            apply(.authenticationFailed(.unknown("Couldn’t save this SMB share")))
+            return
+        }
+        finalizeAddedAccount(
+            session: prepared.session,
+            account: prepared.account,
+            previousAccount: prepared.previousAccount,
+            isFirstRun: isFirstRun
         )
-        // A guest/anonymous share has no user identity; use "guest" as a stable
-        // per-share user id so the account key is deterministic.
-        let user = username.isEmpty ? "guest" : username
-        let session = UserSession(
-            server: server,
-            userID: user,
-            userName: username,
-            deviceID: accountsProviders.accountStore.deviceID(),
-            accessToken: password
-        )
-        apply(.serverSelected(server))
-        didAuthenticate(session)
     }
 
     /// The stable identity for a media share, used as BOTH the `MediaServer.id`
@@ -1218,10 +1226,12 @@ public final class AppState {
         share: String,
         username: String
     ) -> String {
-        let portKey = port.map { ":\($0)" } ?? ""
-        let normalizedUser = username.trimmingCharacters(in: .whitespaces).lowercased()
-        let user = normalizedUser.isEmpty ? "guest" : normalizedUser
-        return "share:\(host.lowercased())\(portKey)/\(share.lowercased())#\(user)"
+        MediaShareAccountConfigurationService.smbID(
+            host: host,
+            port: port,
+            share: share,
+            username: username
+        )
     }
 
     /// The credential a WebDAV share is being added with. Mirrors the vault's

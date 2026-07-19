@@ -178,6 +178,33 @@ final class PlozziOSAppModel {
             return false
         }
     }
+
+    @discardableResult
+    func addSMBShare(
+        host: String,
+        port: Int?,
+        share: String,
+        username: String,
+        password: String,
+        displayName: String
+    ) -> Bool {
+        do {
+            _ = try mediaShareConfigurationService.saveSMB(
+                host: host,
+                port: port,
+                share: share,
+                username: username,
+                password: password,
+                displayName: displayName
+            )
+            accountsProviders.reloadAccounts()
+            accountError = nil
+            return true
+        } catch {
+            accountError = error.localizedDescription
+            return false
+        }
+    }
 }
 
 private struct PlozziOSMediaShareArtworkCacheLifecycle:

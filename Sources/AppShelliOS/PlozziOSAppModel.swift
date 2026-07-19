@@ -289,6 +289,94 @@ final class PlozziOSAppModel {
         }
     }
 
+    func beginPlayback(for item: MediaItem) {
+        guard let accountID = item.sourceAccountID
+            ?? accountsProviders.primaryActiveAccount?.id else {
+            return
+        }
+        let reconciler = watchReconciler
+        Task {
+            await reconciler.beginLiveSession(
+                accountID: accountID,
+                itemID: item.id
+            )
+        }
+    }
+
+    func checkpointPlayback(
+        for item: MediaItem,
+        position: TimeInterval,
+        watchedPercent: Double
+    ) {
+        guard let mutation = WatchMutationFactory.playbackStop(
+            item: item,
+            position: position,
+            watchedPercent: watchedPercent,
+            primaryAccountID: accountsProviders.primaryActiveAccount?.id,
+            crossServerSync: settings.playback.settings.syncWatchAcrossServers
+        ) else {
+            return
+        }
+        let reconciler = watchReconciler
+        Task {
+            await reconciler.enqueue(mutation)
+            await reconciler.drain()
+        }
+    }
+
+    func finishPlayback(
+        for item: MediaItem,
+        position: TimeInterval,
+        watchedPercent: Double
+    ) {
+        let accountID = item.sourceAccountID
+            ?? accountsProviders.primaryActiveAccount?.id
+        let mutation = WatchMutationFactory.playbackStop(
+            item: item,
+            position: position,
+            watchedPercent: watchedPercent,
+            primaryAccountID: accountsProviders.primaryActiveAccount?.id,
+            crossServerSync: settings.playback.settings.syncWatchAcrossServers
+        )
+        publishPlaybackMutation(
+            mutation,
+            itemID: item.id,
+            watchedPercent: watchedPercent
+        )
+        let reconciler = watchReconciler
+        Task {
+            if let accountID {
+                await reconciler.endLiveSession(
+                    accountID: accountID,
+                    itemID: item.id
+                )
+            }
+            if let mutation {
+                await reconciler.enqueue(mutation)
+            }
+            await reconciler.drain()
+        }
+    }
+
+    private func publishPlaybackMutation(
+        _ mutation: WatchMutation?,
+        itemID: String,
+        watchedPercent: Double
+    ) {
+        guard let mutation else { return }
+        var itemIDs = Set(mutation.optimisticTargets.map(\.itemID))
+        itemIDs.insert(itemID)
+        MediaItemMutation(
+            itemIDs: itemIDs,
+            scopedItemIDs: Set(mutation.optimisticTargets.map(\.id)),
+            played: mutation.played,
+            resumePosition: mutation.resumePosition,
+            playedPercentage: mutation.played == true
+                ? 1
+                : max(0, min(1, watchedPercent / 100))
+        ).post()
+    }
+
     private func drainWatchOutbox() {
         let reconciler = watchReconciler
         Task { await reconciler.drain() }

@@ -113,6 +113,7 @@ struct PlozziOSPlayerView: View {
     ) -> PlayerViewModel {
         let resolver = appModel.authenticatedHTTPResolver
         let playbackSettings = appModel.settings.playback.settings
+        let model = appModel
         let neighborResolver = makeNeighborResolver(for: item)
         let seriesIDResolver = makeSeriesIDResolver(for: item)
         let viewModel = PlayerViewModel(
@@ -145,6 +146,29 @@ struct PlozziOSPlayerView: View {
             authenticatedHTTPResolver: resolver,
             neighborResolver: neighborResolver,
             seriesIDResolver: seriesIDResolver,
+            onPlaybackStopped: { [weak model] position, watchedPercent in
+                Task { @MainActor in
+                    model?.finishPlayback(
+                        for: item,
+                        position: position,
+                        watchedPercent: watchedPercent
+                    )
+                }
+            },
+            onPlaybackStarted: { [weak model] in
+                Task { @MainActor in
+                    model?.beginPlayback(for: item)
+                }
+            },
+            onPlaybackCheckpoint: { [weak model] position, watchedPercent in
+                Task { @MainActor in
+                    model?.checkpointPlayback(
+                        for: item,
+                        position: position,
+                        watchedPercent: watchedPercent
+                    )
+                }
+            },
             adoptedResolved: adoptedResolved
         )
         viewModel.onSubtitleStyleChanged = {

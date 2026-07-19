@@ -227,14 +227,11 @@ private extension MetadataProviderListLogic.ListItem {
 }
 
 /// The "Metadata" Settings page: provider enable/disable + ordering (over the
-/// Info.plist baseline), required attribution, live diagnostics, and cache budgets.
+/// Info.plist baseline), TMDB credentials, and a focused diagnostics destination.
 /// A household-wide concern (like Servers/Seerr), so it lives under "This Apple TV".
 struct MetadataSettingsDetailView: View {
     let deps: MetadataSettingsDependencies
 
-    @State private var snapshot: MetadataEnrichmentDiagnosticsSnapshot?
-    @State private var isRefreshing = false
-    @State private var confirmClear = false
     /// The source currently "lifted" for reordering (nil = none lifted).
     @State private var liftedSource: MetadataSource?
     @State private var isRestoringLiftedFocus = false
@@ -242,7 +239,6 @@ struct MetadataSettingsDetailView: View {
     @FocusState private var isDisabledPlaceholderFocused: Bool
 
     private var providers: MetadataProviderSettingsModel { deps.providers }
-    private var cacheBudget: CacheBudgetSettingsModel { deps.cacheBudget }
 
     var body: some View {
         ScrollView {
@@ -251,9 +247,7 @@ struct MetadataSettingsDetailView: View {
                 providersSection
                 tmdbKeySection
                     .disabled(liftedSource != nil)
-                diagnosticsSection
-                    .disabled(liftedSource != nil)
-                cacheSection
+                diagnosticsLink
                     .disabled(liftedSource != nil)
             }
             .frame(maxWidth: PlozzTheme.Metrics.settingsContentMaxWidth, alignment: .leading)
@@ -262,7 +256,6 @@ struct MetadataSettingsDetailView: View {
             .padding(.vertical, 24)
         }
         .scrollClipDisabled()
-        .task { await refreshDiagnostics() }
     }
 
     // MARK: - Providers
@@ -597,118 +590,273 @@ struct MetadataSettingsDetailView: View {
 
     // MARK: - Diagnostics
 
-    private var diagnosticsSection: some View {
-        SettingsPanel(
-            title: "Diagnostics"
-        ) {
-            VStack(alignment: .leading, spacing: 14) {
+    private var diagnosticsLink: some View {
+        SettingsPanel(contentPadding: .settingsPanelRowContent) {
+            NavigationLink(value: SettingsRoute.metadataDiagnostics) {
+                SettingsRowLabel(
+                    icon: "chart.bar.xaxis",
+                    title: "Diagnostics"
+                ) {
+                    Text("Cache and provider health")
+                        .font(.subheadline)
+                        .settingsRowSecondary()
+                } trailing: {
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .settingsRowSecondary()
+                }
+            }
+            .buttonStyle(SettingsFocusButtonStyle())
+        }
+    }
+
+    private func displayName(_ source: MetadataSource) -> String {
+        MetadataSourceAttribution.for(source)?.name ?? source.rawValue.capitalized
+    }
+}
+
+struct MetadataDiagnosticsDetailView: View {
+    let deps: MetadataSettingsDependencies
+
+    @State private var snapshot: MetadataEnrichmentDiagnosticsSnapshot?
+    @State private var isRefreshing = false
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                SettingsPageHeader("Diagnostics")
+                MetadataDiagnosticsOverviewPanel(
+                    snapshot: snapshot,
+                    isRefreshing: isRefreshing,
+                    onRefresh: { Task { await refresh() } }
+                )
+                MetadataDiagnosticsSourcesPanel(
+                    counts: sortedCounts,
+                    unavailable: snapshot?.providerBreakers.filter(\.isTripped) ?? []
+                )
+                MetadataDiagnosticsCachePanel(
+                    cacheBudget: deps.cacheBudget,
+                    applyCacheBudgets: deps.applyCacheBudgets,
+                    clearCaches: deps.clearCaches,
+                    refreshDiagnostics: refresh
+                )
+            }
+            .frame(maxWidth: PlozzTheme.Metrics.settingsContentMaxWidth, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .center)
+            .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
+            .padding(.vertical, 24)
+        }
+        .scrollClipDisabled()
+        .task { await refresh() }
+    }
+
+    private var sortedCounts: [(source: MetadataSource, count: Int)] {
+        (snapshot?.metadataCountPerSource ?? [:])
+            .sorted {
+                $0.value != $1.value
+                    ? $0.value > $1.value
+                    : $0.key.rawValue < $1.key.rawValue
+            }
+            .map { (source: $0.key, count: $0.value) }
+    }
+
+    @MainActor
+    private func refresh() async {
+        isRefreshing = true
+        snapshot = await deps.diagnosticsSnapshot()
+        isRefreshing = false
+    }
+}
+
+private struct MetadataDiagnosticsOverviewPanel: View {
+    let snapshot: MetadataEnrichmentDiagnosticsSnapshot?
+    let isRefreshing: Bool
+    let onRefresh: () -> Void
+
+    private let columns = [
+        GridItem(.flexible(), spacing: 36),
+        GridItem(.flexible(), spacing: 36),
+    ]
+
+    var body: some View {
+        SettingsPanel(title: "Overview") {
+            VStack(alignment: .leading, spacing: 16) {
                 HStack {
-                    Text(lastUpdatedText).font(.footnote).foregroundStyle(.secondary)
+                    if let capturedAt = snapshot?.capturedAt {
+                        Text("Updated \(capturedAt, format: .dateTime.hour().minute().second())")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("Loading…")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
                     Spacer()
-                    Button {
-                        Task { await refreshDiagnostics() }
-                    } label: {
+                    Button(action: onRefresh) {
                         Label("Refresh", systemImage: "arrow.clockwise")
                     }
                     .buttonStyle(SettingsFocusButtonStyle())
                     .disabled(isRefreshing)
                 }
 
-                if let snapshot {
-                    diagnosticsRows(snapshot)
-                } else {
-                    Text("Loading…").font(.callout).foregroundStyle(.secondary)
+                LazyVGrid(columns: columns, alignment: .leading, spacing: 12) {
+                    MetadataDiagnosticMetric(
+                        title: "Artwork cache",
+                        value: byteText(snapshot?.artworkCacheBytes)
+                    )
+                    MetadataDiagnosticMetric(
+                        title: "URL cache",
+                        value: byteText(snapshot?.metadataCacheBytes)
+                    )
+                    MetadataDiagnosticMetric(
+                        title: "Results",
+                        value: snapshot?.resultCacheEntryCount.map(String.init) ?? "—"
+                    )
+                    MetadataDiagnosticMetric(
+                        title: "Work",
+                        value: snapshot.map { workText($0.work) } ?? "—"
+                    )
+                }
+
+                Divider()
+                MetadataDiagnosticMetric(
+                    title: "Provider health",
+                    value: healthText
+                )
+            }
+        }
+    }
+
+    private var healthText: String {
+        guard let snapshot else { return "—" }
+        let count = snapshot.providerBreakers.lazy.filter(\.isTripped).count
+        return count == 0 ? "All sources healthy" : "\(count) unavailable"
+    }
+
+    private func byteText(_ bytes: Int?) -> String {
+        guard let bytes else { return "—" }
+        return ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
+    }
+
+    private func workText(_ work: MetadataEnrichmentDiagnosticsSnapshot.WorkStatus) -> String {
+        if work.isRunning { return "Running" }
+        let queued = work.queuedItems + work.queuedBacklogs
+        return queued > 0 ? "\(queued) queued" : "Idle"
+    }
+}
+
+private struct MetadataDiagnosticMetric: View {
+    let title: String
+    let value: String
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 16) {
+            Text(title)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 12)
+            Text(value)
+                .font(.callout.weight(.medium).monospacedDigit())
+                .multilineTextAlignment(.trailing)
+        }
+    }
+}
+
+private struct MetadataDiagnosticsSourcesPanel: View {
+    let counts: [(source: MetadataSource, count: Int)]
+    let unavailable: [MetadataEnrichmentDiagnosticsSnapshot.ProviderBreakerState]
+
+    private let columns = [
+        GridItem(.flexible(), spacing: 36),
+        GridItem(.flexible(), spacing: 36),
+    ]
+
+    var body: some View {
+        FocusableSettingsPanel(title: "Stored Fields") {
+            if counts.isEmpty {
+                Text("None yet")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            } else {
+                LazyVGrid(columns: columns, alignment: .leading, spacing: 10) {
+                    ForEach(counts, id: \.source) { item in
+                        MetadataDiagnosticMetric(
+                            title: displayName(item.source),
+                            value: item.count.formatted()
+                        )
+                    }
+                }
+            }
+
+            if !unavailable.isEmpty {
+                Divider()
+                VStack(spacing: 10) {
+                    Text("Unavailable")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    ForEach(unavailable) { breaker in
+                        MetadataDiagnosticMetric(
+                            title: displayName(breaker.source),
+                            value: (breaker.trippedReason ?? "Unavailable").capitalized
+                        )
+                    }
                 }
             }
         }
     }
 
-    @ViewBuilder
-    private func diagnosticsRows(_ snapshot: MetadataEnrichmentDiagnosticsSnapshot) -> some View {
-        infoRow("Artwork cache", byteText(snapshot.artworkCacheBytes))
-        infoRow("Resolved-URL cache", byteText(snapshot.metadataCacheBytes))
-        if let count = snapshot.resultCacheEntryCount {
-            infoRow("In-memory results", "\(count)")
-        }
-        infoRow("Background work", workText(snapshot.work))
-
-        if !snapshot.metadataCountPerSource.isEmpty {
-            Divider()
-            Text("Stored fields by source").font(.subheadline.weight(.semibold))
-            ForEach(sortedCounts(snapshot.metadataCountPerSource), id: \.0) { source, count in
-                infoRow(displayName(source), "\(count)")
-            }
-        }
-
-        let tripped = snapshot.providerBreakers.filter(\.isTripped)
-        Divider()
-        if tripped.isEmpty {
-            infoRow("Provider health", "All sources healthy")
-        } else {
-            Text("Unavailable sources").font(.subheadline.weight(.semibold))
-            ForEach(tripped) { breaker in
-                infoRow(displayName(breaker.source), (breaker.trippedReason ?? "unavailable").capitalized)
-            }
-        }
+    private func displayName(_ source: MetadataSource) -> String {
+        MetadataSourceAttribution.for(source)?.name ?? source.rawValue.capitalized
     }
+}
 
-    private func infoRow(_ label: String, _ value: String) -> some View {
-        HStack(alignment: .firstTextBaseline) {
-            Text(label).font(.callout).foregroundStyle(.secondary)
-            Spacer()
-            Text(value).font(.callout.weight(.medium)).multilineTextAlignment(.trailing)
-        }
-    }
+private struct MetadataDiagnosticsCachePanel: View {
+    let cacheBudget: CacheBudgetSettingsModel
+    let applyCacheBudgets: @MainActor (CacheBudgetSettings) async -> Void
+    let clearCaches: @MainActor () async -> Void
+    let refreshDiagnostics: @MainActor () async -> Void
 
-    private var lastUpdatedText: String {
-        guard let snapshot else { return "Not yet loaded" }
-        let formatter = DateFormatter()
-        formatter.timeStyle = .medium
-        formatter.dateStyle = .none
-        return "Updated \(formatter.string(from: snapshot.capturedAt))"
-    }
+    @State private var confirmClear = false
 
-    private func refreshDiagnostics() async {
-        isRefreshing = true
-        snapshot = await deps.diagnosticsSnapshot()
-        isRefreshing = false
-    }
+    private static let artworkBudgetOptions = [16, 32, 64, 128, 256]
+    private static let metadataBudgetOptions = [4, 8, 16, 32, 64]
 
-    // MARK: - Cache
-
-    private static let artworkBudgetOptions = [16, 32, 64, 128, 256]   // MiB
-    private static let metadataBudgetOptions = [4, 8, 16, 32, 64]      // MiB
-
-    private var cacheSection: some View {
+    var body: some View {
         SettingsPanel(
             title: "Cache",
             contentPadding: .settingsPanelRowContent
         ) {
             VStack(spacing: 16) {
-                budgetRow(
-                    title: "Artwork cache",
-                    options: Self.artworkBudgetOptions,
-                    selection: artworkBudgetBinding
-                )
-                budgetRow(
-                    title: "Lookup cache",
-                    options: Self.metadataBudgetOptions,
-                    selection: metadataBudgetBinding
-                )
+                HStack(alignment: .top, spacing: 28) {
+                    budgetControl(
+                        title: "Artwork",
+                        options: Self.artworkBudgetOptions,
+                        selection: artworkBudgetBinding
+                    )
+                    budgetControl(
+                        title: "Lookups",
+                        options: Self.metadataBudgetOptions,
+                        selection: metadataBudgetBinding
+                    )
+                }
+
                 Button(role: .destructive) {
                     confirmClear = true
                 } label: {
-                    Label("Clear Cache Now", systemImage: "trash")
+                    Label("Clear Cache", systemImage: "trash")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(SettingsFocusButtonStyle())
-                .padding(.top, 4)
             }
         }
-        .confirmationDialog("Clear cached metadata and artwork?", isPresented: $confirmClear, titleVisibility: .visible) {
+        .confirmationDialog(
+            "Clear cached metadata and artwork?",
+            isPresented: $confirmClear,
+            titleVisibility: .visible
+        ) {
             Button("Clear Cache", role: .destructive) {
                 Task {
-                    await deps.clearCaches()
+                    await clearCaches()
                     await refreshDiagnostics()
                 }
             }
@@ -718,9 +866,14 @@ struct MetadataSettingsDetailView: View {
         }
     }
 
-    private func budgetRow(title: String, options: [Int], selection: Binding<Int>) -> some View {
+    private func budgetControl(
+        title: String,
+        options: [Int],
+        selection: Binding<Int>
+    ) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(title).font(.headline.weight(.semibold))
+            Text(title)
+                .font(.headline.weight(.semibold))
             SettingsStepper(options: options, selection: selection) { "\($0) MB" }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -748,31 +901,7 @@ struct MetadataSettingsDetailView: View {
 
     private func applyBudgets() {
         let settings = cacheBudget.settings
-        Task { await deps.applyCacheBudgets(settings) }
-    }
-
-    // MARK: - Helpers
-
-    private func sortedCounts(_ counts: [MetadataSource: Int]) -> [(MetadataSource, Int)] {
-        counts.sorted { $0.value != $1.value ? $0.value > $1.value : $0.key.rawValue < $1.key.rawValue }
-            .map { ($0.key, $0.value) }
-    }
-
-    private func byteText(_ bytes: Int?) -> String {
-        guard let bytes else { return "—" }
-        return ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
-    }
-
-    private func workText(_ work: MetadataEnrichmentDiagnosticsSnapshot.WorkStatus) -> String {
-        if work.isRunning { return "Running" }
-        if work.queuedBacklogs > 0 || work.queuedItems > 0 {
-            return "\(work.queuedItems + work.queuedBacklogs) queued"
-        }
-        return "Idle"
-    }
-
-    private func displayName(_ source: MetadataSource) -> String {
-        MetadataSourceAttribution.for(source)?.name ?? source.rawValue.capitalized
+        Task { await applyCacheBudgets(settings) }
     }
 }
 

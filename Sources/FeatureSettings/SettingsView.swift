@@ -682,6 +682,10 @@ public struct SettingsView: View {
             if let metadataSettings {
                 MetadataSettingsDetailView(deps: metadataSettings)
             }
+        case .metadataDiagnostics:
+            if let metadataSettings {
+                MetadataDiagnosticsDetailView(deps: metadataSettings)
+            }
         case .seerr:
             SeerDetailView(seer: seer, knownServerHosts: knownServerHosts, profiles: profiles, onSetSeerrUser: onSetSeerrUser)
         case let .seerUserPicker(profileID):

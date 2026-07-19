@@ -2,6 +2,7 @@
 import CoreModels
 import CoreNetworking
 import FeatureAuthCore
+import FeatureDiscoveryCore
 import ProviderPlex
 import SwiftUI
 
@@ -10,6 +11,8 @@ struct AddServerView: View {
     @State private var provider: ProviderKind = .jellyfin
     @State private var address = ""
     @State private var server: MediaServer?
+    @State private var jellyfinDiscovery = ServerPickerViewModel(provider: .jellyfin)
+    @State private var embyDiscovery = ServerPickerViewModel(provider: .emby)
     @State private var showingPlexSignIn = false
     @State private var validationMessage: String?
 
@@ -26,6 +29,11 @@ struct AddServerView: View {
                     }
 
                     if provider != .plex {
+                        ManagedServerDiscoverySection(
+                            model: discoveryModel,
+                            onSelect: selectDiscoveredServer
+                        )
+
                         TextField("Server address", text: $address)
                             .textContentType(.URL)
                             .keyboardType(.URL)
@@ -75,6 +83,13 @@ struct AddServerView: View {
                     onComplete: { dismiss() }
                 )
             }
+            .task(id: provider) {
+                guard provider != .plex else { return }
+                let model = discoveryModel
+                model.startScan()
+                defer { model.stopScan() }
+                try? await Task.sleep(for: .seconds(86_400))
+            }
         }
     }
 
@@ -94,6 +109,77 @@ struct AddServerView: View {
             baseURL: url,
             provider: provider
         )
+    }
+
+    private var discoveryModel: ServerPickerViewModel {
+        provider == .emby ? embyDiscovery : jellyfinDiscovery
+    }
+
+    private func selectDiscoveredServer(_ selectedServer: MediaServer) {
+        address = selectedServer.baseURL.absoluteString
+        validationMessage = nil
+    }
+}
+
+private struct ManagedServerDiscoverySection: View {
+    let model: ServerPickerViewModel
+    let onSelect: (MediaServer) -> Void
+
+    var body: some View {
+        if !discoveryServers.isEmpty || model.phase == .scanning {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Label("Nearby servers", systemImage: "dot.radiowaves.left.and.right")
+                        .font(.headline)
+
+                    Spacer()
+
+                    if model.phase == .scanning {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Button("Scan Again") {
+                            model.startScan()
+                        }
+                        .font(.subheadline)
+                    }
+                }
+
+                ForEach(discoveryServers) { server in
+                    Button {
+                        model.select(server)
+                        onSelect(server)
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: server.provider == .emby
+                                ? "play.rectangle.on.rectangle"
+                                : "play.tv")
+                                .foregroundStyle(.tint)
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(server.name)
+                                    .foregroundStyle(.primary)
+                                Text(server.baseURL.absoluteString)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+
+                            Spacer()
+
+                            Image(systemName: "arrow.up.left")
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.vertical, 4)
+        }
+    }
+
+    private var discoveryServers: [MediaServer] {
+        model.recentServers + model.discoveredServers
     }
 }
 

@@ -1,6 +1,6 @@
 import XCTest
 import CoreModels
-@testable import FeatureDiscovery
+@testable import FeatureDiscoveryCore
 
 final class JellyfinDiscoveryParserTests: XCTestCase {
     func testParsesValidAnnouncement() {

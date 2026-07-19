@@ -28,15 +28,15 @@ public extension LastServerStoring {
 /// Server-identity matching shared by the store and the picker view model:
 /// prefer the backend server id when both sides have one, else fall back to
 /// host + port so the same box entered two ways still de-duplicates.
-enum ServerIdentity {
-    static func isSame(_ a: MediaServer, _ b: MediaServer) -> Bool {
+public enum ServerIdentity {
+    public static func isSame(_ a: MediaServer, _ b: MediaServer) -> Bool {
         guard a.provider == b.provider else { return false }
         if !a.id.isEmpty, !b.id.isEmpty, a.id == b.id { return true }
         return a.baseURL.host == b.baseURL.host && a.baseURL.port == b.baseURL.port
     }
 
     /// A stable dictionary key for a server (id when present, else host:port).
-    static func key(for server: MediaServer) -> String {
+    public static func key(for server: MediaServer) -> String {
         "\(server.provider.rawValue):\(server.identityKey)"
     }
 }

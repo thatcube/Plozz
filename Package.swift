@@ -24,6 +24,7 @@ let package = Package(
         .library(name: "CoreNetworking", targets: ["CoreNetworking"]),
         .library(name: "CoreUI", targets: ["CoreUI"]),
         .library(name: "MetadataKit", targets: ["MetadataKit"]),
+        .library(name: "FeatureDiscoveryCore", targets: ["FeatureDiscoveryCore"]),
         .library(name: "FeatureDiscovery", targets: ["FeatureDiscovery"]),
         .library(name: "ProviderJellyfin", targets: ["ProviderJellyfin"]),
         .library(name: "ProviderPlex", targets: ["ProviderPlex"]),
@@ -244,8 +245,12 @@ let package = Package(
 
         // MARK: Features
         .target(
+            name: "FeatureDiscoveryCore",
+            dependencies: ["CoreModels", "CoreNetworking"]
+        ),
+        .target(
             name: "FeatureDiscovery",
-            dependencies: ["CoreModels", "CoreNetworking", "CoreUI"]
+            dependencies: ["CoreModels", "CoreUI", "FeatureDiscoveryCore"]
         ),
         .target(
             name: "FeatureAuthCore",
@@ -526,6 +531,7 @@ let package = Package(
                 "CoreUI",
                 "EnginePlozzigen",
                 "FeatureDiscovery",
+                "FeatureDiscoveryCore",
                 "FeatureAuth",
                 "FeatureHomeCore",
                 "MediaTransportCore",
@@ -567,6 +573,7 @@ let package = Package(
                 "CoreUI",
                 "CrashReporting",
                 "FeatureAuthCore",
+                "FeatureDiscoveryCore",
                 "FeatureHomeCore",
                 "FeaturePlayback",
                 "FeatureSearchCore",
@@ -622,7 +629,7 @@ let package = Package(
         ),
         .testTarget(
             name: "FeatureDiscoveryTests",
-            dependencies: ["FeatureDiscovery", "CoreModels"]
+            dependencies: ["FeatureDiscoveryCore", "CoreModels"]
         ),
         .testTarget(
             name: "ProviderJellyfinTests",

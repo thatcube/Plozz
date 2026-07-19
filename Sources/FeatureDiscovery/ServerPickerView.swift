@@ -2,6 +2,7 @@
 import SwiftUI
 import CoreModels
 import CoreUI
+import FeatureDiscoveryCore
 
 /// tvOS server picker: discovered servers, last-used reconnect, and manual entry.
 ///

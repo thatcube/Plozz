@@ -10,6 +10,7 @@ import CoreUI
 import CrashReporting
 import FeatureAuth
 import FeatureDiscovery
+import FeatureDiscoveryCore
 import FeatureHome
 import FeaturePlayback
 import MetadataKit

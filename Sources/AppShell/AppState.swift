@@ -5,6 +5,7 @@ import CoreModels
 import CoreNetworking
 import FeatureAuth
 import FeatureDiscovery
+import FeatureDiscoveryCore
 import FeatureMusic
 import FeatureProfiles
 import MediaTransportCore

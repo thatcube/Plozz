@@ -5,7 +5,6 @@ import SwiftUI
 
 struct PlozziOSSettingsView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
-    @Environment(\.themePalette) private var palette
     let appModel: PlozziOSAppModel
     let onAddServer: () -> Void
     let onClose: () -> Void
@@ -30,7 +29,6 @@ struct PlozziOSSettingsView: View {
                     Button("Done", action: onClose)
                 }
             }
-            .background { AppBackground(palette: palette) }
         }
     }
 }
@@ -54,7 +52,6 @@ private enum PlozziOSSettingsDestination: Hashable {
 }
 
 private struct PlozziOSSettingsSplitView: View {
-    @Environment(\.themePalette) private var palette
     let appModel: PlozziOSAppModel
     let onAddServer: () -> Void
     let onClose: () -> Void
@@ -75,8 +72,8 @@ private struct PlozziOSSettingsSplitView: View {
                 Section("Services") {
                     settingsRow(
                         .requests,
-                        title: "Requests",
-                        systemImage: "plus.rectangle.on.folder"
+                        title: "Seerr",
+                        systemImage: "sparkles.tv"
                     )
                 }
 
@@ -109,14 +106,18 @@ private struct PlozziOSSettingsSplitView: View {
                     settingsRow(
                         .trackers,
                         title: "Trackers",
-                        systemImage: "arrow.triangle.2.circlepath"
+                        systemImage: "link"
                     )
                     settingsRow(
                         .appearance,
                         title: "Appearance",
                         systemImage: "paintpalette"
                     )
-                    settingsRow(.home, title: "Home", systemImage: "house")
+                    settingsRow(
+                        .home,
+                        title: "Customize Home",
+                        systemImage: "house"
+                    )
                     settingsRow(
                         .playback,
                         title: "Playback",
@@ -139,16 +140,16 @@ private struct PlozziOSSettingsSplitView: View {
                     )
                     settingsRow(
                         .nightShift,
-                        title: "Night Shift",
-                        systemImage: "moon.stars"
+                        title: "Circadian Mode",
+                        systemImage: "moon.stars.fill"
                     )
                 }
 
                 Section("Support") {
                     settingsRow(
                         .diagnostics,
-                        title: "Diagnostics",
-                        systemImage: "waveform.path.ecg"
+                        title: "Help & Diagnostics",
+                        systemImage: "ladybug"
                     )
                     settingsRow(
                         .attributions,
@@ -163,20 +164,15 @@ private struct PlozziOSSettingsSplitView: View {
                 }
             }
             .navigationTitle("Settings")
-            .scrollContentBackground(.hidden)
-            .background { AppBackground(palette: palette) }
+            .scrollContentBackground(.visible)
         } detail: {
             NavigationStack {
-                ZStack {
-                    AppBackground(palette: palette)
-                    Group {
-                        settingsDetail
-                    }
-                    .frame(maxWidth: 760)
-                    .frame(maxWidth: .infinity)
-                    .plozziOSSettingsSurface()
+                Group {
+                    settingsDetail
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .frame(maxWidth: 760)
+                .frame(maxWidth: .infinity)
+                .plozziOSSettingsSurface()
             }
             .id(selection)
         }
@@ -187,7 +183,6 @@ private struct PlozziOSSettingsSplitView: View {
                 Button("Done", action: onClose)
             }
         }
-        .background { AppBackground(palette: palette) }
         .alert("Sign out of all accounts?", isPresented: $confirmSignOutAll) {
             Button("Cancel", role: .cancel) {}
             Button("Sign Out", role: .destructive) {
@@ -349,7 +344,7 @@ private struct PlozziOSSettingsCompactMenu: View {
                 NavigationLink {
                     PlozziOSSeerrSettingsView(appModel: appModel)
                 } label: {
-                    Label("Requests", systemImage: "plus.rectangle.on.folder")
+                    Label("Seerr", systemImage: "sparkles.tv")
                 }
             }
 
@@ -391,7 +386,7 @@ private struct PlozziOSSettingsCompactMenu: View {
                 NavigationLink {
                     PlozziOSTrackerSettingsView(appModel: appModel)
                 } label: {
-                    Label("Trackers", systemImage: "arrow.triangle.2.circlepath")
+                    Label("Trackers", systemImage: "link")
                 }
                 NavigationLink {
                     PlozziOSAppearanceSettingsView(
@@ -412,7 +407,7 @@ private struct PlozziOSSettingsCompactMenu: View {
                         seerConfigured: appModel.seerService.isConfigured
                     )
                 } label: {
-                    Label("Home", systemImage: "house")
+                    Label("Customize Home", systemImage: "house")
                 }
                 NavigationLink {
                     PlozziOSPlaybackSettingsView(
@@ -446,7 +441,7 @@ private struct PlozziOSSettingsCompactMenu: View {
                 NavigationLink {
                     PlozziOSNightShiftSettingsView(model: appModel.settings.nightShift)
                 } label: {
-                    Label("Night Shift", systemImage: "moon.stars")
+                    Label("Circadian Mode", systemImage: "moon.stars.fill")
                 }
             }
 
@@ -458,7 +453,7 @@ private struct PlozziOSSettingsCompactMenu: View {
                         crashReporting: appModel.crashReporting
                     )
                 } label: {
-                    Label("Diagnostics", systemImage: "waveform.path.ecg")
+                    Label("Help & Diagnostics", systemImage: "ladybug")
                 }
                 NavigationLink {
                     PlozziOSAttributionsView()
@@ -948,7 +943,7 @@ private struct PlozziOSAppearanceSettingsView: View {
 private struct PlozziOSSettingsSurface: ViewModifier {
     func body(content: Content) -> some View {
         content
-            .scrollContentBackground(.hidden)
+            .scrollContentBackground(.visible)
     }
 }
 
@@ -1103,7 +1098,7 @@ private struct PlozziOSHomeSettingsView: View {
         }
         .frame(maxWidth: 760)
         .frame(maxWidth: .infinity)
-        .navigationTitle("Home")
+        .navigationTitle("Customize Home")
         .task(id: accounts.map(\.account.id)) {
             await loadLibraries()
         }
@@ -1543,7 +1538,7 @@ private struct PlozziOSNightShiftSettingsView: View {
     var body: some View {
         Form {
             Section {
-                Toggle("Night Shift", isOn: $model.settings.isEnabled)
+                Toggle("Circadian Mode", isOn: $model.settings.isEnabled)
                 Picker("Schedule", selection: $model.settings.scheduleMode) {
                     ForEach(NightShiftScheduleMode.allCases) {
                         Text($0.displayName).tag($0)
@@ -1595,7 +1590,7 @@ private struct PlozziOSNightShiftSettingsView: View {
                 }
             }
         }
-        .navigationTitle("Night Shift")
+        .navigationTitle("Circadian Mode")
         .onChange(of: model.settings.isEnabled) { _, enabled in
             if !enabled {
                 model.isPreviewing = false

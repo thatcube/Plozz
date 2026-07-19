@@ -100,7 +100,7 @@ struct PlozziOSDiagnosticsSettingsView: View {
                 Text("Troubleshooting overlays stay on this device and are off by default.")
             }
         }
-        .navigationTitle("Diagnostics")
+        .navigationTitle("Help & Diagnostics")
         .onChange(of: crashReporting.settings.isEnabled) {
             appModel.applyCrashReportingPreference()
             sendStatus = nil

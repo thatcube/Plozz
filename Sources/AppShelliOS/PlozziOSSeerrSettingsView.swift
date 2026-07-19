@@ -47,7 +47,7 @@ struct PlozziOSSeerrSettingsView: View {
                 }
             }
         }
-        .navigationTitle("Requests")
+        .navigationTitle("Seerr")
         .task {
             await appModel.seerService.refreshStatus()
             if appModel.seerService.isConfigured {

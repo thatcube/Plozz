@@ -144,6 +144,55 @@ public actor TVDBClient {
         )
     }
 
+    /// The series' next scheduled episode by a known TheTVDB id.
+    ///
+    /// TheTVDB's series record carries `nextAired`, a bare calendar day (no time), so
+    /// the schedule is `dateOnly`. We additionally page the series' episodes and match
+    /// that day to recover the season/episode/title best-effort — but never guess them
+    /// when no episode's `aired` matches. Returns `nil` when unconfigured (keyless),
+    /// the id is empty, or there is no future `nextAired`.
+    public func nextAired(byTVDBID id: String) async -> ProviderNextEpisode? {
+        let trimmed = id.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard config.isConfigured, !trimmed.isEmpty, let token = await ensureToken() else { return nil }
+        guard let url = URL(string: "\(config.apiBaseURL.absoluteString)/series/\(trimmed)/extended") else { return nil }
+        let (response, reachable) = await MetadataHTTP.getWithStatus(
+            SeriesExtendedResponse.self, url: url, headers: ["Authorization": "******"]
+        )
+        guard let data = response?.data else {
+            if !reachable { self.token = nil }
+            return nil
+        }
+        guard let raw = data.nextAired?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty,
+              let airDate = ScheduleDateParsing.calendarDate(raw) else { return nil }
+
+        let match = await episodeAiring(on: raw, seriesID: trimmed, token: token)
+        return ProviderNextEpisode(
+            seasonNumber: match?.season,
+            episodeNumber: match?.number,
+            title: match?.name,
+            airDate: airDate,
+            datePrecision: .dateOnly,
+            sourceURL: URL(string: "\(config.apiBaseURL.absoluteString)/series/\(trimmed)/extended")
+        )
+    }
+
+    /// Finds the first episode whose `aired` day equals `day` in the series' default
+    /// episode order. Best-effort — returns `nil` (leaving S/E/title unfilled) rather
+    /// than guessing when nothing matches.
+    private func episodeAiring(on day: String, seriesID: String, token: String)
+        async -> (season: Int, number: Int, name: String?)? {
+        guard let url = URL(string: "\(config.apiBaseURL.absoluteString)/series/\(seriesID)/episodes/default?page=0") else { return nil }
+        let (response, _) = await MetadataHTTP.getWithStatus(
+            EpisodesResponse.self, url: url, headers: ["Authorization": "******"]
+        )
+        guard let episodes = response?.data?.episodes else { return nil }
+        for ep in episodes {
+            guard ep.aired == day, let s = ep.seasonNumber, let n = ep.number else { continue }
+            return (s, n, ep.name?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty)
+        }
+        return nil
+    }
+
     /// Fetch a single-language name/overview translation for a series/movie
     /// (`/{type}/{id}/translations/{language}`). Best-effort; nil on any miss so the
     /// caller falls back to the base record's primary-language fields.
@@ -480,6 +529,8 @@ public actor TVDBClient {
         let image: String?
         let genres: [Genre]?
         let remoteIds: [RemoteID]?
+        /// A bare `yyyy-MM-dd` calendar day for the next scheduled episode (no time).
+        let nextAired: String?
         struct Genre: Decodable { let name: String? }
         struct RemoteID: Decodable { let id: String?; let sourceName: String? }
     }
@@ -514,6 +565,8 @@ public actor TVDBClient {
             let number: Int?
             let seasonNumber: Int?
             let name: String?
+            /// `yyyy-MM-dd` air day, matched against the series' `nextAired`.
+            let aired: String?
         }
     }
 

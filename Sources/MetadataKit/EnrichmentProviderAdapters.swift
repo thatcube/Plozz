@@ -62,6 +62,11 @@ public protocol TVDBEnriching: Sendable {
     func resolve(byTVDBID id: String, isMovie: Bool) async -> TVDBMetadata?
     func resolve(titles: [String], year: Int?, isMovie: Bool, episodeHints: [SeriesEpisodeHint]) async -> TVDBMetadata?
     func backdropURL(title: String, year: Int?, isMovie: Bool, tvdbID: String?) async -> URL?
+    /// The series' next scheduled episode by a known TheTVDB id. TheTVDB's `nextAired`
+    /// is a bare calendar day (`dateOnly`); the season/episode/title are filled
+    /// best-effort by matching that day against the series' episode list. Returns
+    /// `nil` when unconfigured (keyless) or the series has no scheduled next episode.
+    func nextAired(byTVDBID id: String) async -> ProviderNextEpisode?
 }
 
 extension TVDBClient: TVDBEnriching {}
@@ -72,7 +77,7 @@ extension TVDBClient: TVDBEnriching {}
 /// a title search, so no duplicate work is done.
 public struct TVDBEnrichmentProvider: MetadataEnrichmentProvider {
     public let id: MetadataSource = .tvdb
-    public let capabilities: Set<MetadataCapability> = [.externalIDs, .canonicalText, .poster, .backdrop]
+    public let capabilities: Set<MetadataCapability> = [.externalIDs, .canonicalText, .poster, .backdrop, .nextAiringEpisode]
     public let policy: ProviderPolicy
     private let client: any TVDBEnriching
 
@@ -84,47 +89,64 @@ public struct TVDBEnrichmentProvider: MetadataEnrichmentProvider {
     public func enrich(_ query: MetadataQuery, missing: Set<MetadataField>) async -> MetadataEnrichment {
         guard query.contentType != .music else { return MetadataEnrichment() }
         let isMovie = !query.isTV
+        let knownTVDB = query.providerIDs.providerID(.tvdb).flatMap { $0.isEmpty ? nil : $0 }
 
-        let meta: TVDBMetadata?
-        if let known = query.providerIDs.providerID(.tvdb), !known.isEmpty,
-           let byID = await client.resolve(byTVDBID: known, isMovie: isMovie) {
-            meta = byID
-        } else {
-            meta = await client.resolve(
-                titles: [query.title], year: query.year, isMovie: isMovie, episodeHints: []
-            )
-        }
-        guard let meta else { return MetadataEnrichment() }
-        let sourceURL = Self.sourceURL(tvdbID: meta.tvdbID, isMovie: isMovie)
+        // Only the schedule is being asked for and there's nothing else to resolve —
+        // TheTVDB schedule needs a concrete id, so skip the show resolve entirely.
+        let wantsResolveFields = missing.contains(.title) || missing.contains(.overview)
+            || missing.contains(.genres) || missing.contains(.posterURL) || requestsBackdrop(missing)
+            || missing.contains { $0.rawValue.hasPrefix("providerID.") }
 
         var out = MetadataEnrichment()
-        if let t = meta.tvdbID, !t.isEmpty {
-            out.externalIDs["Tvdb"] = SourcedValue(value: t, source: .tvdb, sourceURL: sourceURL)
+        var meta: TVDBMetadata?
+        if wantsResolveFields {
+            if let known = knownTVDB, let byID = await client.resolve(byTVDBID: known, isMovie: isMovie) {
+                meta = byID
+            } else if knownTVDB == nil {
+                meta = await client.resolve(titles: [query.title], year: query.year, isMovie: isMovie, episodeHints: [])
+            }
         }
-        if let i = meta.imdbID, !i.isEmpty {
-            out.externalIDs["Imdb"] = SourcedValue(value: i, source: .tvdb, sourceURL: sourceURL)
+
+        if let meta {
+            let sourceURL = Self.sourceURL(tvdbID: meta.tvdbID, isMovie: isMovie)
+            if let t = meta.tvdbID, !t.isEmpty {
+                out.externalIDs["Tvdb"] = SourcedValue(value: t, source: .tvdb, sourceURL: sourceURL)
+            }
+            if let i = meta.imdbID, !i.isEmpty {
+                out.externalIDs["Imdb"] = SourcedValue(value: i, source: .tvdb, sourceURL: sourceURL)
+            }
+            if let m = meta.tmdbID, !m.isEmpty {
+                out.externalIDs["Tmdb"] = SourcedValue(value: m, source: .tvdb, sourceURL: sourceURL)
+            }
+            if missing.contains(.title), let title = meta.title, !title.isEmpty {
+                out.title = SourcedValue(value: title, source: .tvdb, sourceURL: sourceURL)
+            }
+            if missing.contains(.overview), let overview = meta.overview, !overview.isEmpty {
+                out.overview = SourcedValue(value: overview, source: .tvdb, sourceURL: sourceURL)
+            }
+            if missing.contains(.genres), !meta.genres.isEmpty {
+                out.genres = SourcedValue(value: meta.genres, source: .tvdb, sourceURL: sourceURL)
+            }
+            if missing.contains(.posterURL), let poster = meta.posterURL {
+                out.posterURL = SourcedValue(value: poster, source: .tvdb, sourceURL: sourceURL)
+            }
+            if requestsBackdrop(missing),
+               let backdrop = await client.backdropURL(
+                   title: meta.title ?? query.title, year: meta.year ?? query.year,
+                   isMovie: isMovie, tvdbID: meta.tvdbID
+               ) {
+                out.backdropCandidates = [SourcedValue(value: backdrop, source: .tvdb, sourceURL: sourceURL)]
+            }
         }
-        if let m = meta.tmdbID, !m.isEmpty {
-            out.externalIDs["Tmdb"] = SourcedValue(value: m, source: .tvdb, sourceURL: sourceURL)
-        }
-        if missing.contains(.title), let title = meta.title, !title.isEmpty {
-            out.title = SourcedValue(value: title, source: .tvdb, sourceURL: sourceURL)
-        }
-        if missing.contains(.overview), let overview = meta.overview, !overview.isEmpty {
-            out.overview = SourcedValue(value: overview, source: .tvdb, sourceURL: sourceURL)
-        }
-        if missing.contains(.genres), !meta.genres.isEmpty {
-            out.genres = SourcedValue(value: meta.genres, source: .tvdb, sourceURL: sourceURL)
-        }
-        if missing.contains(.posterURL), let poster = meta.posterURL {
-            out.posterURL = SourcedValue(value: poster, source: .tvdb, sourceURL: sourceURL)
-        }
-        if requestsBackdrop(missing),
-           let backdrop = await client.backdropURL(
-               title: meta.title ?? query.title, year: meta.year ?? query.year,
-               isMovie: isMovie, tvdbID: meta.tvdbID
-           ) {
-            out.backdropCandidates = [SourcedValue(value: backdrop, source: .tvdb, sourceURL: sourceURL)]
+
+        if missing.contains(.nextAiringEpisode), query.isTV,
+           let tvdbID = meta?.tvdbID ?? knownTVDB,
+           let next = await client.nextAired(byTVDBID: tvdbID) {
+            out.upcomingEpisode = next.upcomingEpisode(
+                seriesIdentity: .external(source: "tvdb", value: tvdbID),
+                source: .tvdb,
+                refreshedAt: Date()
+            )
         }
         return out
     }
@@ -197,7 +219,7 @@ extension AniListArtworkProvider: AniListEnriching {}
 /// backdrop. Anime only.
 public struct AniListEnrichmentProvider: MetadataEnrichmentProvider {
     public let id: MetadataSource = .anilist
-    public let capabilities: Set<MetadataCapability> = [.externalIDs, .score, .poster, .banner, .backdrop]
+    public let capabilities: Set<MetadataCapability> = [.externalIDs, .score, .poster, .banner, .backdrop, .nextAiringEpisode]
     public let policy: ProviderPolicy
     private let client: any AniListEnriching
 
@@ -230,6 +252,23 @@ public struct AniListEnrichmentProvider: MetadataEnrichmentProvider {
             if requestsBackdrop(missing) {
                 out.backdropCandidates = [SourcedValue(value: url, source: .anilist, sourceURL: sourceURL)]
             }
+        }
+        if missing.contains(.nextAiringEpisode), let anilistID = media.id,
+           let schedule = media.nextAiringEpisode,
+           let airingAt = schedule.airingAt {
+            // AniList uses absolute episode numbering within the media entry, and
+            // `airingAt` is an exact Unix timestamp — never a per-season (S, E), so
+            // the season/episode fields stay nil (never guessed).
+            out.upcomingEpisode = ProviderNextEpisode(
+                absoluteEpisodeNumber: schedule.episode,
+                airDate: Date(timeIntervalSince1970: TimeInterval(airingAt)),
+                datePrecision: .dateAndTime,
+                sourceURL: sourceURL
+            ).upcomingEpisode(
+                seriesIdentity: .external(source: "anilist", value: String(anilistID)),
+                source: .anilist,
+                refreshedAt: Date()
+            )
         }
         return out
     }

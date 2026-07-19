@@ -33,6 +33,21 @@ public struct TVmazeResolved: Sendable, Equatable {
 /// Seam over TVmaze so the enrichment adapter's mapping is testable without network.
 public protocol TVmazeEnriching: Sendable {
     func resolve(_ query: MetadataQuery, wantEpisodeStill: Bool, wantOverview: Bool) async -> TVmazeResolved?
+    /// The show's next scheduled episode (TVmaze `?embed=nextepisode`), tagged with
+    /// the resolved show id so the adapter can key a series identity. `nil` when the
+    /// show can't be resolved or has no scheduled next episode (ended/on hiatus).
+    func nextEpisode(_ query: MetadataQuery) async -> TVmazeNextEpisode?
+}
+
+/// TVmaze's next scheduled episode plus the show id it belongs to.
+public struct TVmazeNextEpisode: Sendable, Equatable {
+    public var showID: Int
+    public var next: ProviderNextEpisode
+
+    public init(showID: Int, next: ProviderNextEpisode) {
+        self.showID = showID
+        self.next = next
+    }
 }
 
 /// Keyless TVmaze client that resolves a western-TV show once and reads its ids,
@@ -83,6 +98,39 @@ public struct TVmazeClient: TVmazeEnriching {
         return await MetadataHTTP.get(Episode.self, url: url)
     }
 
+    public func nextEpisode(_ query: MetadataQuery) async -> TVmazeNextEpisode? {
+        guard query.contentType == .tvShow, let showID = await fetchShowID(for: query) else { return nil }
+        guard let url = URL(string: "https://api.tvmaze.com/shows/\(showID)?embed=nextepisode"),
+              let show = await MetadataHTTP.get(ShowWithNext.self, url: url),
+              let next = show.embedded?.nextepisode else { return nil }
+
+        let airDate: Date
+        let precision: AirDatePrecision
+        if let stamp = ScheduleDateParsing.instant(next.airstamp) {
+            airDate = stamp
+            precision = .dateAndTime
+        } else if let day = ScheduleDateParsing.calendarDate(next.airdate) {
+            airDate = day
+            precision = .dateOnly
+        } else {
+            return nil
+        }
+
+        let raw = ProviderNextEpisode(
+            seasonNumber: next.season,
+            episodeNumber: next.number,
+            title: next.name?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmptyOrNil,
+            airDate: airDate,
+            datePrecision: precision,
+            sourceURL: URL(string: "https://api.tvmaze.com/shows/\(showID)")
+        )
+        return TVmazeNextEpisode(showID: showID, next: raw)
+    }
+
+    private func fetchShowID(for query: MetadataQuery) async -> Int? {
+        await fetchShow(for: query)?.id
+    }
+
     private struct Show: Decodable {
         let id: Int
         let summary: String?
@@ -99,16 +147,37 @@ public struct TVmazeClient: TVmazeEnriching {
         let image: Image?
     }
 
+    private struct ShowWithNext: Decodable {
+        let embedded: Embedded?
+        enum CodingKeys: String, CodingKey {
+            case embedded = "_embedded"
+        }
+        struct Embedded: Decodable {
+            let nextepisode: NextEpisode?
+        }
+        struct NextEpisode: Decodable {
+            let season: Int?
+            let number: Int?
+            let name: String?
+            let airstamp: String?
+            let airdate: String?
+        }
+    }
+
     private struct Image: Decodable {
         let original: String?
     }
+}
+
+private extension String {
+    var nonEmptyOrNil: String? { isEmpty ? nil : self }
 }
 
 /// TVmaze as the western-TV id / episode-summary / episode-still / poster-fallback
 /// source. TV only; anime is served by AniList/Kitsu.
 public struct TVmazeEnrichmentProvider: MetadataEnrichmentProvider {
     public let id: MetadataSource = .tvmaze
-    public let capabilities: Set<MetadataCapability> = [.externalIDs, .canonicalText, .episodeStill, .poster]
+    public let capabilities: Set<MetadataCapability> = [.externalIDs, .canonicalText, .episodeStill, .poster, .nextAiringEpisode]
     public let policy: ProviderPolicy
     private let client: any TVmazeEnriching
 
@@ -119,14 +188,27 @@ public struct TVmazeEnrichmentProvider: MetadataEnrichmentProvider {
 
     public func enrich(_ query: MetadataQuery, missing: Set<MetadataField>) async -> MetadataEnrichment {
         guard query.contentType == .tvShow else { return MetadataEnrichment() }
+        var out = MetadataEnrichment()
+
+        if missing.contains(.nextAiringEpisode), let schedule = await client.nextEpisode(query) {
+            out.upcomingEpisode = schedule.next.upcomingEpisode(
+                seriesIdentity: .external(source: "tvmaze", value: String(schedule.showID)),
+                source: .tvmaze,
+                refreshedAt: Date()
+            )
+        }
+
+        // The remaining TVmaze capabilities need the show resolve; skip it entirely
+        // for a schedule-only request so "Airing Soon" adds no extra work.
         let wantStill = missing.contains(.episodeThumbnail)
         let wantOverview = missing.contains(.overview)
-        guard let resolved = await client.resolve(
+        let wantsShowResolve = wantStill || wantOverview || missing.contains(.posterURL)
+            || missing.contains { $0.rawValue.hasPrefix("providerID.") }
+        guard wantsShowResolve, let resolved = await client.resolve(
             query, wantEpisodeStill: wantStill, wantOverview: wantOverview
-        ) else { return MetadataEnrichment() }
+        ) else { return out }
 
         let sourceURL = URL(string: "https://api.tvmaze.com/shows/\(resolved.showID)")
-        var out = MetadataEnrichment()
         if let imdb = resolved.imdbID {
             out.externalIDs["Imdb"] = SourcedValue(value: imdb, source: .tvmaze, sourceURL: sourceURL)
         }

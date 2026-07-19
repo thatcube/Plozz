@@ -8,6 +8,7 @@ private struct FakeTVDB: TVDBEnriching {
     var byID: TVDBMetadata?
     var byTitle: TVDBMetadata?
     var backdrop: URL?
+    var next: ProviderNextEpisode?
     let log = CallLog()
 
     func resolve(byTVDBID id: String, isMovie: Bool) async -> TVDBMetadata? {
@@ -20,6 +21,10 @@ private struct FakeTVDB: TVDBEnriching {
     }
     func backdropURL(title: String, year: Int?, isMovie: Bool, tvdbID: String?) async -> URL? {
         backdrop
+    }
+    func nextAired(byTVDBID id: String) async -> ProviderNextEpisode? {
+        log.record("nextAired:\(id)")
+        return next
     }
 }
 
@@ -48,8 +53,12 @@ private struct FakeAniList: AniListEnriching {
 
 private struct FakeTVmaze: TVmazeEnriching {
     var resolved: TVmazeResolved?
+    var next: TVmazeNextEpisode?
     func resolve(_ query: MetadataQuery, wantEpisodeStill: Bool, wantOverview: Bool) async -> TVmazeResolved? {
         resolved
+    }
+    func nextEpisode(_ query: MetadataQuery) async -> TVmazeNextEpisode? {
+        next
     }
 }
 

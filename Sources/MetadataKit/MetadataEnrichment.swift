@@ -26,6 +26,10 @@ public struct MetadataEnrichment: Sendable, Equatable, Codable {
     /// Ordered wide-backdrop candidates, best first. Retained as a set (not one URL)
     /// so both ``homeHero`` and ``detailBackdrop`` can be served from one response.
     public var backdropCandidates: [SourcedValue<URL>]
+    /// A series-level upcoming-episode schedule (Step 8). Self-sourced (it carries
+    /// its own ``UpcomingEpisode/source``), so it is stored directly rather than as a
+    /// ``SourcedValue``. Filled only when a caller requests ``MetadataField/nextAiringEpisode``.
+    public var upcomingEpisode: UpcomingEpisode?
 
     public init(
         externalIDs: [String: SourcedValue<String>] = [:],
@@ -38,7 +42,8 @@ public struct MetadataEnrichment: Sendable, Equatable, Codable {
         episodeStillURL: SourcedValue<URL>? = nil,
         bannerURL: SourcedValue<URL>? = nil,
         score: SourcedValue<Double>? = nil,
-        backdropCandidates: [SourcedValue<URL>] = []
+        backdropCandidates: [SourcedValue<URL>] = [],
+        upcomingEpisode: UpcomingEpisode? = nil
     ) {
         self.externalIDs = externalIDs
         self.title = title
@@ -51,13 +56,14 @@ public struct MetadataEnrichment: Sendable, Equatable, Codable {
         self.bannerURL = bannerURL
         self.score = score
         self.backdropCandidates = backdropCandidates
+        self.upcomingEpisode = upcomingEpisode
     }
 
     public var isEmpty: Bool {
         externalIDs.isEmpty && title == nil && overview == nil && genres == nil
             && tagline == nil && posterURL == nil && logoURL == nil
             && episodeStillURL == nil && bannerURL == nil && score == nil
-            && backdropCandidates.isEmpty
+            && backdropCandidates.isEmpty && upcomingEpisode == nil
     }
 
     /// The best backdrop for the full-bleed home hero (the top-ranked candidate).
@@ -85,6 +91,7 @@ public struct MetadataEnrichment: Sendable, Equatable, Codable {
         if !backdropCandidates.isEmpty {
             fields.formUnion([.backdropURL, .homeHero, .detailBackdrop])
         }
+        if upcomingEpisode != nil { fields.insert(.nextAiringEpisode) }
         return fields
     }
 
@@ -114,6 +121,11 @@ public struct MetadataEnrichment: Sendable, Equatable, Codable {
         // still first-writer-wins, and never blocked by `present`.
         if bannerURL == nil { bannerURL = other.bannerURL }
         if score == nil { score = other.score }
+        // Schedule: first provider (in configured order) to report a next episode
+        // wins, mirroring the priority-respecting merge used for fields above.
+        if upcomingEpisode == nil, !present.contains(.nextAiringEpisode) {
+            upcomingEpisode = other.upcomingEpisode
+        }
         // Keep the first non-empty candidate set (one response serves both screens),
         // unless the caller already has a backdrop from a higher-priority source.
         if backdropCandidates.isEmpty,

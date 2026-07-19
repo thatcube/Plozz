@@ -42,6 +42,11 @@ public struct MetadataCapability: RawRepresentable, Codable, Hashable, Sendable 
     public static let banner = Self(rawValue: "banner")
     /// Structured external ratings (IMDb / RT / TMDb …).
     public static let ratings = Self(rawValue: "ratings")
+    /// A series-level upcoming-episode schedule (next known air date + numbering).
+    /// Supplied by the free schedule providers (AniList / TVmaze / TheTVDB) and used
+    /// by the Step 8 "Airing Soon" / missing-episode features — not a per-item field
+    /// written back onto a ``MediaItem``.
+    public static let nextAiringEpisode = Self(rawValue: "nextAiringEpisode")
 }
 
 public extension MetadataCapability {
@@ -86,5 +91,6 @@ public extension MetadataCapability {
         .logoURL: .logo,
         .episodeThumbnail: .episodeStill,
         .ratings: .ratings,
+        .nextAiringEpisode: .nextAiringEpisode,
     ]
 }

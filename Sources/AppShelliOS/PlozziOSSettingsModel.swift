@@ -1,5 +1,6 @@
 #if os(iOS)
 import CoreModels
+import Foundation
 
 @MainActor
 final class PlozziOSSettingsModel {
@@ -46,6 +47,12 @@ final class PlozziOSSettingsModel {
         subtitleStyle = SubtitleStyleModel(
             store: SubtitleStyleStore(namespace: namespace)
         )
+        let scaleMigrationKey =
+            "ios.subtitleBaseFontSize.v2.\(namespace ?? "default")"
+        if !UserDefaults.standard.bool(forKey: scaleMigrationKey) {
+            subtitleStyle.style.fontScale = 1
+            UserDefaults.standard.set(true, forKey: scaleMigrationKey)
+        }
         spoilers = SpoilerSettingsModel(
             store: SpoilerSettingsStore(namespace: namespace)
         )

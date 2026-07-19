@@ -1136,13 +1136,14 @@ private func subtitleColorPicker(
 private func subtitlePreviewFont(
     for family: SubtitleFontFamily
 ) -> Font {
+    let size: CGFloat = family == .openDyslexic ? 17 : 22
     if family.usesRoundedDesign {
-        return .system(size: 22, design: .rounded)
+        return .system(size: size, design: .rounded)
     }
     if let stem = family.postScriptStem {
-        return .custom("\(stem)-Regular", size: 22)
+        return .custom("\(stem)-Regular", size: size)
     }
-    return .system(size: 22)
+    return .system(size: size)
 }
 
 private func subtitlePositionLabel(_ value: Double) -> String {

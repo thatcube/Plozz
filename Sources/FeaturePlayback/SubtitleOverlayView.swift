@@ -60,9 +60,16 @@ public struct SubtitleOverlayView: View {
         self.videoRect = videoRect
     }
 
-    /// Base point size of subtitle text at `fontScale == 1.0`, tuned for the
-    /// 10-foot tvOS experience.
-    static let baseFontSize: CGFloat = 42
+    /// Platform baseline at `fontScale == 1.0`: 42 points for the 10-foot tvOS
+    /// experience and 25 points on iPhone/iPad. The iOS value matches the former
+    /// 60% rendering size, which is the appropriate native-device default.
+    static var baseFontSize: CGFloat {
+        #if os(iOS)
+        25
+        #else
+        42
+        #endif
+    }
 
     private var lumaScale: Double { isHDR ? style.hdrLuminanceScale : 1.0 }
 

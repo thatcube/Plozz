@@ -868,8 +868,9 @@ public final class PlayerViewModel {
     ///
     /// The rewrite swaps only the *source*: it moves the local file into the legacy
     /// `streamURL` field — the direct-play field BOTH engines already consume —
-    /// clears every network/managed source (`playbackSource`, `externalAudioURL`,
-    /// `localRemuxSource`), and marks it a non-manifest direct play. All other
+    /// clears every network/managed source (`playbackSource`, `originalFileSource`,
+    /// `externalAudioURL`, `localRemuxSource`), and marks it a non-manifest direct
+    /// play. All other
     /// resolved facts (item, tracks, start position, source metadata used for
     /// engine routing) are preserved, so engine selection stays consistent with a
     /// direct-played copy of the same media.
@@ -881,6 +882,7 @@ public final class PlayerViewModel {
         var rewritten = request
         rewritten.streamURL = localURL
         rewritten.playbackSource = nil
+        rewritten.originalFileSource = nil
         rewritten.externalAudioURL = nil
         rewritten.localRemuxSource = nil
         rewritten.isManifestStream = false

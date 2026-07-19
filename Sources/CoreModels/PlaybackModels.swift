@@ -273,6 +273,9 @@ public struct PlaybackRequest: Hashable, Sendable {
     /// Credential-free source resolved at the engine boundary. Network files
     /// use this path and never carry a diagnostic or placeholder URL.
     public var playbackSource: PlaybackSource?
+    /// Provider-supplied original media bytes for offline download. This is
+    /// independent of `playbackSource`, which may intentionally be a transcode.
+    public var originalFileSource: PlaybackSource?
     /// Legacy resolved media stream URL (HLS or direct file) while managed
     /// providers migrate to typed authenticated-HTTP locators.
     public var streamURL: URL?
@@ -348,6 +351,7 @@ public struct PlaybackRequest: Hashable, Sendable {
         isTranscoding: Bool = false,
         deliveryMode: PlaybackDiagnostics.PlaybackMode? = nil,
         sourceMetadata: MediaSourceMetadata? = nil,
+        originalFileSource: PlaybackSource? = nil,
         localRemuxSource: LocalRemuxSourceDescriptor? = nil,
         scrubPreview: ScrubPreviewSource? = nil,
         sourceProvider: ProviderKind? = nil,
@@ -365,6 +369,7 @@ public struct PlaybackRequest: Hashable, Sendable {
         self.isTranscoding = isTranscoding
         self.deliveryMode = deliveryMode ?? (isTranscoding ? .transcode : .directPlay)
         self.sourceMetadata = sourceMetadata
+        self.originalFileSource = originalFileSource
         self.localRemuxSource = localRemuxSource
         self.scrubPreview = scrubPreview
         self.isManifestStream = isTranscoding || streamURL.pathExtension.lowercased() == "m3u8"
@@ -384,6 +389,7 @@ public struct PlaybackRequest: Hashable, Sendable {
         isTranscoding: Bool? = nil,
         deliveryMode: PlaybackDiagnostics.PlaybackMode = .directPlay,
         sourceMetadata: MediaSourceMetadata? = nil,
+        originalFileSource: PlaybackSource? = nil,
         localRemuxSource: LocalRemuxSourceDescriptor? = nil,
         scrubPreview: ScrubPreviewSource? = nil,
         sourceProvider: ProviderKind? = nil,
@@ -401,12 +407,33 @@ public struct PlaybackRequest: Hashable, Sendable {
         self.isTranscoding = isTranscoding ?? (deliveryMode == .transcode)
         self.deliveryMode = deliveryMode
         self.sourceMetadata = sourceMetadata
+        self.originalFileSource = originalFileSource
         self.localRemuxSource = localRemuxSource
         self.scrubPreview = scrubPreview
         self.isManifestStream = playbackSource.isManifestStream
         self.sourceProvider = sourceProvider
         self.serverName = serverName
         self.sourceFileName = sourceFileName
+    }
+
+    /// The provider's best original-file source for offline use. Older provider
+    /// requests can still fall back to their local-remux original or a direct
+    /// playback source while migrating to `originalFileSource`.
+    public var downloadableOriginalSource: PlaybackSource? {
+        if let originalFileSource {
+            return originalFileSource
+        }
+        if let originalSource = localRemuxSource?.originalSource {
+            return originalSource
+        }
+        switch playbackSource {
+        case .authenticatedHTTP(let locator) where locator.deliveryMode == .directFile:
+            return playbackSource
+        case .networkFile:
+            return playbackSource
+        case .publicURL, .dlnaResource, .authenticatedHTTP, .none:
+            return nil
+        }
     }
 
     /// Basename from either POSIX or Windows server paths. Darwin's

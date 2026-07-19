@@ -126,7 +126,7 @@ final class PlozziOSDownloadsModel {
             forceTranscode: false
         )
         let request: DownloadRequest
-        switch playback.playbackSource {
+        switch playback.downloadableOriginalSource {
         case .networkFile(let locator):
             request = DownloadRequest.directShare(
                 identity: identity,
@@ -146,7 +146,7 @@ final class PlozziOSDownloadsModel {
                 provider: kind,
                 accountID: accountID,
                 itemID: item.id,
-                mediaSourceID: item.selectedVersionID
+                mediaSourceID: locator.mediaSourceID ?? item.selectedVersionID
             )
             let fileExtension = playback.sourceFileName.map {
                 ($0 as NSString).pathExtension

@@ -633,7 +633,8 @@ final class PlozziOSAppModel {
                         mediaSourceID: source.mediaSourceID,
                         forceTranscode: false
                     )
-                    guard case .authenticatedHTTP(let locator) = playback.playbackSource,
+                    guard case .authenticatedHTTP(let locator) =
+                            playback.downloadableOriginalSource,
                           locator.deliveryMode == .directFile else {
                         throw MediaTransportError.unsupportedCapability(
                             "managed background download requires a direct file"

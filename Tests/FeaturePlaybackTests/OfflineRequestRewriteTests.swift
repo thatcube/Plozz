@@ -43,6 +43,7 @@ final class OfflineRequestRewriteTests: XCTestCase {
             streamURL: URL(string: "https://example.test/movie.m3u8")!,
             isTranscoding: true)
         request.playbackSource = .networkFile(try networkFileLocator())
+        request.originalFileSource = .networkFile(try networkFileLocator())
         request.externalAudioURL = URL(string: "https://example.test/audio.m4a")!
 
         let rewritten = PlayerViewModel.applyingOfflineRewrite(to: request, localURL: localURL())
@@ -52,6 +53,7 @@ final class OfflineRequestRewriteTests: XCTestCase {
         // cleared and it is a non-manifest direct play.
         XCTAssertEqual(rewritten.streamURL, localURL())
         XCTAssertNil(rewritten.playbackSource)
+        XCTAssertNil(rewritten.originalFileSource)
         XCTAssertNil(rewritten.externalAudioURL)
         XCTAssertNil(rewritten.localRemuxSource)
         XCTAssertFalse(rewritten.isManifestStream)

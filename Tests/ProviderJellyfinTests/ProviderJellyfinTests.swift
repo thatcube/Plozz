@@ -676,6 +676,13 @@ final class JellyfinProviderMappingTests: XCTestCase {
         let provider = JellyfinProvider(session: makeSession(), http: stub)
 
         let request = try await provider.playbackInfo(for: "i1")
+        guard case .some(.authenticatedHTTP(let downloadableOriginal)) =
+            request.originalFileSource else {
+            return XCTFail("expected downloadable original source")
+        }
+        XCTAssertEqual(downloadableOriginal.deliveryMode, .directFile)
+        XCTAssertEqual(downloadableOriginal.purpose, .originalFile)
+        XCTAssertEqual(downloadableOriginal.resource.path, "Videos/i1/stream.mkv")
         let source = try XCTUnwrap(request.localRemuxSource)
         guard case .authenticatedHTTP(let locator) = source.originalSource else {
             return XCTFail("expected typed original source")

@@ -3,6 +3,7 @@ import SwiftUI
 import CoreModels
 import CoreNetworking
 import CoreUI
+import FeatureHomeCore
 import MetadataKit
 
 /// Profile-scoped Hero state owned above the transient Home tab subtree. tvOS may

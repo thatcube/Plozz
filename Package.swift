@@ -653,7 +653,7 @@ let package = Package(
         ),
         .testTarget(
             name: "FeatureHomeTests",
-            dependencies: ["FeatureHome", "CoreModels"]
+            dependencies: ["FeatureHome", "FeatureHomeCore", "CoreModels"]
         ),
         .testTarget(
             name: "FeatureHomeCoreTests",

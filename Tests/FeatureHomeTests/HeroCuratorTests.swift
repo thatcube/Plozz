@@ -1,5 +1,6 @@
 import XCTest
 import CoreModels
+import FeatureHomeCore
 @testable import FeatureHome
 
 /// Locks down `HeroCurator` composition: source ordering, concurrent async

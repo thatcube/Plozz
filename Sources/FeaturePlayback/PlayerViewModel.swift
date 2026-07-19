@@ -1468,6 +1468,13 @@ public final class PlayerViewModel {
     /// Scrubbing-preview source for the playing item, if the server has previews.
     public var scrubPreview: ScrubPreviewSource? { request?.scrubPreview }
 
+    public func makeScrubPreviewCoordinator() -> ScrubPreviewCoordinator? {
+        ScrubPreviewCoordinator(
+            source: scrubPreview,
+            authenticatedHTTPResolver: authenticatedHTTPResolver
+        )
+    }
+
     /// The active engine, exposed so the shared transport overlay can drive
     /// playback (play/pause/seek/state/tracks) and host the engine's bare video
     /// surface — without knowing the concrete engine type.

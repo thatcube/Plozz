@@ -1,4 +1,5 @@
 #if os(iOS)
+import CoreGraphics
 import CoreModels
 import FeaturePlayback
 import SwiftUI
@@ -19,6 +20,7 @@ struct PlozziOSPlayerControlsOverlay: View {
     @State private var controlsVisible = true
     @State private var scrubSeconds: TimeInterval = 0
     @State private var isScrubbing = false
+    @State private var scrubPreviewCoordinator: ScrubPreviewCoordinator?
     @State private var presentedSheet: PlozziOSPlayerSheet?
     @State private var autoHideTask: Task<Void, Never>?
 
@@ -49,8 +51,12 @@ struct PlozziOSPlayerControlsOverlay: View {
                     displayedSeconds: isScrubbing
                         ? scrubSeconds
                         : viewModel.controls.currentSeconds,
+                    isScrubbing: isScrubbing,
+                    scrubPreviewImage: scrubPreviewCoordinator?.image,
+                    showsScrubPreview: scrubPreviewCoordinator != nil,
                     onScrubChanged: { value in
                         scrubSeconds = value
+                        scrubPreviewCoordinator?.update(for: value)
                         noteInteraction()
                     },
                     onScrubEditingChanged: { editing in
@@ -60,6 +66,7 @@ struct PlozziOSPlayerControlsOverlay: View {
                             cancelAutoHide()
                         } else {
                             viewModel.requestSeek(to: scrubSeconds)
+                            scrubPreviewCoordinator?.clear()
                             scheduleAutoHide()
                         }
                     },
@@ -122,7 +129,14 @@ struct PlozziOSPlayerControlsOverlay: View {
         }
         .animation(.easeInOut(duration: 0.2), value: controlsVisible)
         .onAppear { scheduleAutoHide() }
-        .onDisappear { cancelAutoHide() }
+        .onAppear { configureScrubPreview() }
+        .onDisappear {
+            cancelAutoHide()
+            scrubPreviewCoordinator?.clear()
+        }
+        .onChange(of: viewModel.scrubPreview) {
+            configureScrubPreview()
+        }
         .onChange(of: viewModel.controls.intendsPause) { _, paused in
             if paused {
                 controlsVisible = true
@@ -193,6 +207,12 @@ struct PlozziOSPlayerControlsOverlay: View {
         autoHideTask?.cancel()
         autoHideTask = nil
     }
+
+    private func configureScrubPreview() {
+        scrubPreviewCoordinator?.clear()
+        scrubPreviewCoordinator = viewModel.makeScrubPreviewCoordinator()
+        scrubPreviewCoordinator?.prefetch()
+    }
 }
 
 private struct PlozziOSPlayerTopBar: View {
@@ -234,6 +254,9 @@ private struct PlozziOSPlayerTopBar: View {
 private struct PlozziOSPlayerTransport: View {
     let viewModel: PlayerViewModel
     let displayedSeconds: TimeInterval
+    let isScrubbing: Bool
+    let scrubPreviewImage: CGImage?
+    let showsScrubPreview: Bool
     let onScrubChanged: (TimeInterval) -> Void
     let onScrubEditingChanged: (Bool) -> Void
     let onSkipBackward: () -> Void
@@ -247,6 +270,29 @@ private struct PlozziOSPlayerTransport: View {
 
     var body: some View {
         VStack(spacing: 12) {
+            if isScrubbing, showsScrubPreview {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(.black.opacity(0.72))
+
+                    if let scrubPreviewImage {
+                        Image(decorative: scrubPreviewImage, scale: 1)
+                            .resizable()
+                            .scaledToFit()
+                    } else {
+                        ProgressView()
+                            .tint(.white)
+                    }
+                }
+                .frame(width: 240, height: 135)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(.white.opacity(0.2), lineWidth: 1)
+                }
+                .shadow(color: .black.opacity(0.45), radius: 12, y: 4)
+            }
+
             HStack {
                 Text(playbackTime(displayedSeconds))
                 Spacer()

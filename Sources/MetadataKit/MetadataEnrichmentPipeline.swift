@@ -2,6 +2,22 @@ import Foundation
 import CoreModels
 
 public extension MetadataQuery {
+    /// A stable, whole-item cache identity for pipeline/provider result caching:
+    /// prefers a concrete external id (so every episode of a show shares one lookup)
+    /// and otherwise a normalized title+year, with SxE appended for a specific
+    /// episode. Distinct from ``cacheKey(for:)`` which is per-``ArtworkKind``.
+    var enrichmentCacheKey: String {
+        var parts: [String] = [contentType.rawValue]
+        if let anilist = animeIDs.anilist { parts.append("anilist:\(anilist)") }
+        else if let mal = animeIDs.mal { parts.append("mal:\(mal)") }
+        else if let tmdb = providerIDs.providerID(.tmdb) ?? providerIDs.providerID(.seriesTmdb) { parts.append("tmdb:\(tmdb)") }
+        else if let tvdb = providerIDs.providerID(.tvdb) { parts.append("tvdb:\(tvdb)") }
+        else if let imdb = providerIDs.providerID(.imdb) { parts.append("imdb:\(imdb)") }
+        else { parts.append("t:\(title.lowercased())|y:\(year.map(String.init) ?? "")") }
+        if let s = seasonNumber, let e = episodeNumber { parts.append("s\(s)e\(e)") }
+        return parts.joined(separator: "|")
+    }
+
     /// A copy with `additionalIDs` merged into ``providerIDs``, **without overwriting
     /// ids the query already carries** (a local/NFO/server id is authoritative and
     /// keeps priority). Used by the pipeline to thread ids a provider just resolved

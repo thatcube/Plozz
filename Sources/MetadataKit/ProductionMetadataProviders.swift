@@ -12,12 +12,15 @@ import CoreModels
 /// source is primary/secondary/disabled, is data in ``MetadataEnrichmentConfig``.
 public enum ProductionMetadataProviders {
     /// The default provider set. Wikidata/Wikipedia are confined to idle backlog via
-    /// their policy so they never sit on the foreground path.
+    /// their policy so they never sit on the foreground path. When `cache` is
+    /// supplied, every provider is wrapped so its results are cached under its own
+    /// provider+version namespace.
     public static func make(
         providerConfig: MetadataProviderConfig = .resolved(),
-        tvdbConfig: TVDBConfig = .resolved()
+        tvdbConfig: TVDBConfig = .resolved(),
+        cache: ProviderResultCache? = nil
     ) -> [any MetadataEnrichmentProvider] {
-        [
+        let providers: [any MetadataEnrichmentProvider] = [
             TVDBEnrichmentProvider(client: TVDBClient(config: tvdbConfig)),
             TMDbEnrichmentProvider(provider: TMDbMetadataProvider(access: providerConfig.tmdb)),
             AniListEnrichmentProvider(client: AniListArtworkProvider()),
@@ -40,17 +43,20 @@ public enum ProductionMetadataProviders {
                 provider: WikipediaArtworkProvider()
             ),
         ]
+        guard let cache else { return providers }
+        return providers.map { CachedEnrichmentProvider(base: $0, cache: cache) }
     }
 
-    /// A pipeline wired with the production provider set and the resolved ordering
-    /// configuration.
+    /// A pipeline wired with the production provider set (each result-cached under its
+    /// own namespace) and the resolved ordering configuration.
     public static func makePipeline(
         providerConfig: MetadataProviderConfig = .resolved(),
         tvdbConfig: TVDBConfig = .resolved(),
-        enrichmentConfig: MetadataEnrichmentConfig = .resolved()
+        enrichmentConfig: MetadataEnrichmentConfig = .resolved(),
+        cache: ProviderResultCache = ProviderResultCache()
     ) -> MetadataEnrichmentPipeline {
         MetadataEnrichmentPipeline(
-            providers: make(providerConfig: providerConfig, tvdbConfig: tvdbConfig),
+            providers: make(providerConfig: providerConfig, tvdbConfig: tvdbConfig, cache: cache),
             config: enrichmentConfig
         )
     }

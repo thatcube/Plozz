@@ -10,7 +10,7 @@ import CoreModels
 /// screens (home hero vs detail backdrop) is kept as an **ordered candidate set**
 /// (``backdropCandidates``) so a single provider response serves both without a
 /// second search.
-public struct MetadataEnrichment: Sendable, Equatable {
+public struct MetadataEnrichment: Sendable, Equatable, Codable {
     /// Strong external ids keyed by canonical namespace (`Imdb`, `Tvdb`, `Tmdb`,
     /// `AniList`, `Mal`, …), each with the source that resolved it.
     public var externalIDs: [String: SourcedValue<String>]

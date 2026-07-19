@@ -18,7 +18,15 @@ final class PlozziOSAppModel {
     var accountError: String?
 
     init() {
-        let accountStore = AccountStore()
+        let accountStore: AccountStore
+        let accountStoreError: String?
+        do {
+            accountStore = try DefaultAccountStoreFactory.make()
+            accountStoreError = nil
+        } catch {
+            accountStore = DefaultAccountStoreFactory.makeCredentialOnlyFallback()
+            accountStoreError = "Network-share credential storage is unavailable: \(error.localizedDescription)"
+        }
         let profiles = ProfilesModel(
             defaultActiveAccountIDs: accountStore.activeAccountIDs()
         )
@@ -31,6 +39,7 @@ final class PlozziOSAppModel {
 
         self.accountStore = accountStore
         self.accountsProviders = accountsProviders
+        accountError = accountStoreError
         authenticatedHTTPResolver.configure { [weak accountsProviders] locator in
             guard let accountsProviders,
                   let account = accountsProviders.accounts.first(where: {

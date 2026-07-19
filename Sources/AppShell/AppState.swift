@@ -671,25 +671,15 @@ public final class AppState {
     }
 
     private static func makeDefaultAccountStore() -> AccountPersisting {
-        #if canImport(Security)
-        let secureStore = KeychainStore()
         do {
-            let localStateStore = try DurableLocalStateStoreFactory.userIndependent()
-            return AccountStore(
-                secureStore: secureStore,
-                mediaCredentialVault: MediaCredentialVault(secureStore: secureStore),
-                credentialJournal: try CredentialMutationJournal(store: localStateStore)
-            )
+            return try DefaultAccountStoreFactory.make()
         } catch {
             reportMediaSharePersistenceFailure(
                 error,
                 operation: "credential-infrastructure-init"
             )
-            return AccountStore(secureStore: secureStore)
+            return DefaultAccountStoreFactory.makeCredentialOnlyFallback()
         }
-        #else
-        return AccountStore(secureStore: InMemorySecureStore())
-        #endif
     }
 
     /// Builds the shared-household `SeerService`. The connection (URL + admin key)

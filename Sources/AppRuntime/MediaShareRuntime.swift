@@ -1,10 +1,8 @@
 import Foundation
 import CoreModels
-import CoreUI
-import FeatureAuth
+import FeatureAuthCore
 import MediaTransportCore
 import ProviderShare
-import EnginePlozzigen
 
 /// The atomic, app-wide ownership bundle for one media-share runtime
 /// generation. It ties together the single share catalog coordinator used by
@@ -50,30 +48,39 @@ public protocol MediaShareRuntime: Sendable {
 /// The single production `MediaShareRuntime`. Construct it only through
 /// ``make(accountStore:)`` — that is the one default construction path the
 /// Batch 11 gate requires.
-final class DefaultMediaShareRuntime: MediaShareRuntime {
+public final class DefaultMediaShareRuntime: MediaShareRuntime {
     private let coordinator: ShareCatalogCoordinator
     private let composition: MediaShareTransportComposition
     private let artworkCacheLifecycle: any ShareLocalArtworkCacheLifecycle
-    let networkFileResolver: any MediaTransportNetworkFileResolving
+    public let networkFileResolver: any MediaTransportNetworkFileResolving
+    private let streamProber: (any NetworkFileStreamProbing)?
 
     private init(
         coordinator: ShareCatalogCoordinator,
         composition: MediaShareTransportComposition,
         artworkCacheLifecycle: any ShareLocalArtworkCacheLifecycle,
-        networkFileResolver: any MediaTransportNetworkFileResolving
+        networkFileResolver: any MediaTransportNetworkFileResolving,
+        streamProber: (any NetworkFileStreamProbing)?
     ) {
         self.coordinator = coordinator
         self.composition = composition
         self.artworkCacheLifecycle = artworkCacheLifecycle
         self.networkFileResolver = networkFileResolver
+        self.streamProber = streamProber
     }
 
     /// The one default construction path: a fresh coordinator, the media-share
     /// transport composition, and a network-file resolver whose playback lease
     /// comes from that same coordinator and whose session key comes from that
     /// same composition. Nothing outside this method assembles the three pieces.
-    static func make(accountStore: any AccountPersisting) -> DefaultMediaShareRuntime {
-        let artworkCacheLifecycle = MediaShareLocalArtworkCacheLifecycle()
+    public static func make(
+        accountStore: any AccountPersisting,
+        artworkCacheLifecycle: any ShareLocalArtworkCacheLifecycle =
+            NoopShareLocalArtworkCacheLifecycle(),
+        streamProberFactory: @Sendable (
+            any MediaTransportNetworkFileResolving
+        ) -> (any NetworkFileStreamProbing)? = { _ in nil }
+    ) -> DefaultMediaShareRuntime {
         let coordinator = ShareCatalogCoordinator(
             artworkCacheLifecycle: artworkCacheLifecycle
         )
@@ -98,34 +105,29 @@ final class DefaultMediaShareRuntime: MediaShareRuntime {
                 accountStore: accountStore
             )
         }
-        let runtime = DefaultMediaShareRuntime(
+        return DefaultMediaShareRuntime(
             coordinator: coordinator,
             composition: composition,
             artworkCacheLifecycle: artworkCacheLifecycle,
-            networkFileResolver: resolver
+            networkFileResolver: resolver,
+            streamProber: streamProberFactory(resolver)
         )
-        // AppShell is the only layer that sees both the transport resolver and
-        // CoreUI. Configure the narrow artwork boundary here; CoreUI never imports
-        // MediaTransportCore and remote URLs remain on ArtworkSession.
-        ArtworkImageCache.shared.configure(
-            networkFileService: ArtworkNetworkFileService(
-                loader: MediaShareArtworkLoader(
-                    resolver: resolver,
-                    catalogCoordinator: coordinator
-                ),
-                failureReporter: MediaShareArtworkFailureReporter(coordinator: coordinator)
-            )
-        )
-        return runtime
     }
 
-    func registerProvider(
+    public var artworkNetworkFileService: ArtworkNetworkFileService {
+        ArtworkNetworkFileService(
+            loader: MediaShareArtworkLoader(resolver: networkFileResolver),
+            failureReporter: self
+        )
+    }
+
+    public func registerProvider(
         into registry: ProviderRegistry,
         durableLocalStateStore: DurableLocalStateStore?
     ) {
         let composition = self.composition
         let coordinator = self.coordinator
-        let networkFileResolver = self.networkFileResolver
+        let streamProber = self.streamProber
         registry.register(.mediaShare) { context in
             guard let localMediaContext = context.localMediaContext else {
                 throw ProviderResolutionError.localMediaContextRequired(.mediaShare)
@@ -142,23 +144,21 @@ final class DefaultMediaShareRuntime: MediaShareRuntime {
                 sessionFactory: sessionFactory,
                 catalogCoordinator: coordinator,
                 durableLocalStateStore: durableLocalStateStore,
-                streamProber: PlozzigenNetworkFileStreamProber(
-                    resolver: networkFileResolver
-                )
+                streamProber: streamProber
             )
         }
     }
 
-    func configure(reporter: ShareScanReporter) async {
+    public func configure(reporter: ShareScanReporter) async {
         await coordinator.configure(reporter: reporter)
     }
 
-    func invalidate(accountKey: String) async {
+    public func invalidate(accountKey: String) async {
         await coordinator.invalidate(accountKey: accountKey)
         await artworkCacheLifecycle.purge(accountID: accountKey)
     }
 
-    func retire(accountID: String, credentialRevision: CredentialRevision) async {
+    public func retire(accountID: String, credentialRevision: CredentialRevision) async {
         await composition.resolverRegistry.retire(
             accountID: accountID,
             credentialRevision: credentialRevision
@@ -169,27 +169,24 @@ final class DefaultMediaShareRuntime: MediaShareRuntime {
         )
     }
 
-    func setPreferredAccountKeys(_ accountKeys: Set<String>, revision: UInt64) async {
+    public func setPreferredAccountKeys(_ accountKeys: Set<String>, revision: UInt64) async {
         await coordinator.setPreferredAccountKeys(accountKeys, revision: revision)
     }
 }
 
-private struct MediaShareLocalArtworkCacheLifecycle: ShareLocalArtworkCacheLifecycle {
-    func setPreferredAccountKeys(_ accountKeys: Set<String>, revision: UInt64) async {
-        await ArtworkImageCache.shared.setPreferredNetworkArtworkAccounts(
-            accountKeys,
-            revision: revision
-        )
-    }
-
-    func purge(accountID: String) async {
-        await ArtworkImageCache.shared.purgeNetworkArtwork(accountID: accountID)
-    }
-
-    func purge(accountID: String, credentialRevision: CredentialRevision) async {
-        await ArtworkImageCache.shared.purgeNetworkArtwork(
-            accountID: accountID,
-            credentialRevision: credentialRevision
-        )
+extension DefaultMediaShareRuntime: ArtworkNetworkFileFailureReporting {
+    public func reportArtworkFailure(
+        _ failure: ArtworkNetworkFileFailure,
+        for reference: NetworkArtworkReference
+    ) async {
+        switch failure {
+        case .empty, .tooLarge, .malformed, .unsupported, .unsafeDimensions:
+            await coordinator.rejectArtwork(
+                accountKey: reference.accountID,
+                reference: reference
+            )
+        case .unavailable, .cancelled:
+            break
+        }
     }
 }

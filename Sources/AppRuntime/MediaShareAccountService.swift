@@ -17,22 +17,22 @@ import CoreModels
 /// Retirement and invalidation are dispatched as detached asynchronous work,
 /// exactly as AppState previously wrapped them in `Task { … }`, preserving the
 /// established non-blocking removal/sign-out ordering.
-struct MediaShareAccountService: Sendable {
+public struct MediaShareAccountService: Sendable {
     private let runtime: any MediaShareRuntime
 
-    init(runtime: any MediaShareRuntime) {
+    public init(runtime: any MediaShareRuntime) {
         self.runtime = runtime
     }
 
     /// The media-share account key for one account (its id), or `nil` if the
     /// account is not a media share.
-    func mediaShareAccountKey(for account: Account?) -> String? {
+    public func mediaShareAccountKey(for account: Account?) -> String? {
         guard let account, account.server.provider == .mediaShare else { return nil }
         return account.id
     }
 
     /// The media-share account keys within a set of accounts, in order.
-    func mediaShareAccountKeys(in accounts: [Account]) -> [String] {
+    public func mediaShareAccountKeys(in accounts: [Account]) -> [String] {
         accounts
             .filter { $0.server.provider == .mediaShare }
             .map(\.id)
@@ -42,7 +42,7 @@ struct MediaShareAccountService: Sendable {
     /// credential revision. A no-op for non-media-share accounts. Used both on a
     /// real credential rotation (retire the previous revision) and on account
     /// removal.
-    func retireCredential(for account: Account) {
+    public func retireCredential(for account: Account) {
         guard account.server.provider == .mediaShare else { return }
         let runtime = self.runtime
         let accountID = account.id
@@ -57,7 +57,7 @@ struct MediaShareAccountService: Sendable {
 
     /// Invalidates all cached catalog/scan/playback state for a removed
     /// media-share account key against the vending runtime generation.
-    func invalidate(shareAccountKey: String) {
+    public func invalidate(shareAccountKey: String) {
         let runtime = self.runtime
         Task {
             await runtime.invalidate(accountKey: shareAccountKey)

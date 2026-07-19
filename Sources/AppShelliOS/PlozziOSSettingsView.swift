@@ -32,6 +32,11 @@ struct PlozziOSSettingsView: View {
                 }
 
                 Button("Add Server", systemImage: "plus", action: onAddServer)
+                NavigationLink {
+                    PlozziOSAddNFSShareView(appModel: appModel)
+                } label: {
+                    Label("Add NFS Share", systemImage: "externaldrive.connected.to.line.below")
+                }
             }
 
             Section("Preferences") {

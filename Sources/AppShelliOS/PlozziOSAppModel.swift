@@ -1,45 +1,77 @@
 #if os(iOS)
 import AppRuntime
 import CoreModels
+import CoreUI
 import FeatureAuthCore
 import Foundation
 import MediaTransportCore
 import Observation
+import ProviderShare
 
 @MainActor
 @Observable
 final class PlozziOSAppModel {
     let accountsProviders: AccountsProvidersModel
     let authenticatedHTTPResolver = ManagedAuthenticatedHTTPResolver()
+    let mediaShareRuntime: DefaultMediaShareRuntime
     let settings = PlozziOSSettingsModel()
 
     private let accountStore: AccountPersisting
+    private let mediaShareAccountService: MediaShareAccountService
+    private let mediaShareConfigurationService: MediaShareAccountConfigurationService
 
     var accountError: String?
 
     init() {
         let accountStore: AccountStore
-        let accountStoreError: String?
+        var launchErrors: [String] = []
         do {
             accountStore = try DefaultAccountStoreFactory.make()
-            accountStoreError = nil
         } catch {
             accountStore = DefaultAccountStoreFactory.makeCredentialOnlyFallback()
-            accountStoreError = "Network-share credential storage is unavailable: \(error.localizedDescription)"
+            launchErrors.append(
+                "Network-share credential storage is unavailable: \(error.localizedDescription)"
+            )
         }
+        let mediaShareRuntime = DefaultMediaShareRuntime.make(
+            accountStore: accountStore,
+            artworkCacheLifecycle: PlozziOSMediaShareArtworkCacheLifecycle()
+        )
+        ArtworkImageCache.shared.configure(
+            networkFileService: mediaShareRuntime.artworkNetworkFileService
+        )
+        let registry = ManagedProviderRegistry.make()
+        let durableLocalStateStore: DurableLocalStateStore?
+        do {
+            durableLocalStateStore = try DurableLocalStateStoreFactory.userIndependent()
+        } catch {
+            durableLocalStateStore = nil
+            launchErrors.append(
+                "Local network-share library storage is unavailable: \(error.localizedDescription)"
+            )
+        }
+        mediaShareRuntime.registerProvider(
+            into: registry,
+            durableLocalStateStore: durableLocalStateStore
+        )
         let profiles = ProfilesModel(
             defaultActiveAccountIDs: accountStore.activeAccountIDs()
         )
         let accountsProviders = AccountsProvidersModel(
             accountStore: accountStore,
-            registry: ManagedProviderRegistry.make(),
+            registry: registry,
             profilesModel: profiles
         )
         accountsProviders.tokenResolver = { accountStore.token(for: $0) }
 
         self.accountStore = accountStore
         self.accountsProviders = accountsProviders
-        accountError = accountStoreError
+        self.mediaShareRuntime = mediaShareRuntime
+        self.mediaShareAccountService = MediaShareAccountService(runtime: mediaShareRuntime)
+        self.mediaShareConfigurationService = MediaShareAccountConfigurationService(
+            accountStore: accountStore
+        )
+        accountError = launchErrors.isEmpty ? nil : launchErrors.joined(separator: "\n")
         authenticatedHTTPResolver.configure { [weak accountsProviders] locator in
             guard let accountsProviders,
                   let account = accountsProviders.accounts.first(where: {
@@ -102,13 +134,71 @@ final class PlozziOSAppModel {
     }
 
     func removeAccount(id: String) {
+        let removedAccount = accountsProviders.accounts.first { $0.id == id }
+        let shareAccountKey = mediaShareAccountService.mediaShareAccountKey(
+            for: removedAccount
+        )
         do {
             try accountStore.remove(id: id)
-            accountError = nil
             accountsProviders.reloadAccounts()
+            guard !accountsProviders.accounts.contains(where: { $0.id == id }) else {
+                return
+            }
+            if let removedAccount {
+                mediaShareAccountService.retireCredential(for: removedAccount)
+            }
+            if let shareAccountKey {
+                mediaShareAccountService.invalidate(shareAccountKey: shareAccountKey)
+            }
+            accountError = nil
         } catch {
             accountError = error.localizedDescription
         }
+    }
+
+    @discardableResult
+    func addNFSShare(
+        host: String,
+        port: Int?,
+        exportPath: String,
+        displayName: String
+    ) -> Bool {
+        do {
+            _ = try mediaShareConfigurationService.saveNFS(
+                host: host,
+                port: port,
+                exportPath: exportPath,
+                displayName: displayName
+            )
+            accountsProviders.reloadAccounts()
+            accountError = nil
+            return true
+        } catch {
+            accountError = error.localizedDescription
+            return false
+        }
+    }
+}
+
+private struct PlozziOSMediaShareArtworkCacheLifecycle:
+    ShareLocalArtworkCacheLifecycle
+{
+    func setPreferredAccountKeys(_ accountKeys: Set<String>, revision: UInt64) async {
+        await ArtworkImageCache.shared.setPreferredNetworkArtworkAccounts(
+            accountKeys,
+            revision: revision
+        )
+    }
+
+    func purge(accountID: String) async {
+        await ArtworkImageCache.shared.purgeNetworkArtwork(accountID: accountID)
+    }
+
+    func purge(accountID: String, credentialRevision: CredentialRevision) async {
+        await ArtworkImageCache.shared.purgeNetworkArtwork(
+            accountID: accountID,
+            credentialRevision: credentialRevision
+        )
     }
 }
 #endif

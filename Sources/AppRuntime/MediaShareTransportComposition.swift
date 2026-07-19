@@ -1,6 +1,6 @@
 import Foundation
 import CoreModels
-import FeatureAuth
+import FeatureAuthCore
 import MediaTransportCore
 import MediaTransportFTP
 import MediaTransportHTTP

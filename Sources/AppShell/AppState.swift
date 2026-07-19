@@ -529,7 +529,7 @@ public final class AppState {
         }
         self.durableLocalStateStore = resolvedDurableLocalStateStore
         let resolvedRuntime: any MediaShareRuntime = mediaShareRuntime
-            ?? DefaultMediaShareRuntime.make(accountStore: resolvedAccountStore)
+            ?? AppShellMediaShareRuntimeFactory.make(accountStore: resolvedAccountStore)
         let defaultAuthenticatedHTTPResolver: ManagedAuthenticatedHTTPResolver?
         let resolvedAuthenticatedHTTPResolver: any AuthenticatedHTTPResourceResolving
         if let authenticatedHTTPResolver {
@@ -1437,12 +1437,11 @@ public final class AppState {
         host: String,
         transport: MediaShareTransportKind
     ) -> String {
-        let lastComponent = path
-            .split(separator: "/", omittingEmptySubsequences: true)
-            .last
-            .map(String.init)
-        let base = (lastComponent?.isEmpty == false) ? lastComponent! : host
-        return "\(base) (\(transport.badgeLabel))"
+        MediaShareAccountConfigurationService.defaultShareName(
+            path: path,
+            host: host,
+            transport: transport
+        )
     }
 
     /// Stable identity for a filesystem media share whose paths are case-sensitive
@@ -1459,13 +1458,13 @@ public final class AppState {
         path: String,
         principal: String
     ) -> String {
-        let normalizedScheme = scheme.lowercased()
-        let portKey = port.map { ":\($0)" } ?? ""
-        var normalizedPath = path.isEmpty ? "/" : path
-        if normalizedPath.count > 1, normalizedPath.hasSuffix("/") {
-            normalizedPath.removeLast()
-        }
-        return "share:\(normalizedScheme)://\(host.lowercased())\(portKey)\(normalizedPath)#\(principal)"
+        MediaShareAccountConfigurationService.filesystemID(
+            scheme: scheme,
+            host: host,
+            port: port,
+            path: path,
+            principal: principal
+        )
     }
 
     /// Adds (or updates in place) an NFS export as a media share. NFS is
@@ -1477,47 +1476,40 @@ public final class AppState {
         exportPath: String,
         displayName: String
     ) {
-        let trimmedHost = host.trimmingCharacters(in: .whitespaces)
-        guard !trimmedHost.isEmpty else {
-            apply(.authenticationFailed(.unknown("Invalid NFS address")))
-            return
-        }
-        var comps = URLComponents()
-        comps.scheme = "nfs"
-        comps.host = ShareProvider.bracketedHostIfIPv6(trimmedHost)
-        comps.port = port
-        let normalizedPath = Self.normalizedFilesystemPath(exportPath)
-        comps.path = normalizedPath
-        guard let baseURL = comps.url else {
-            apply(.authenticationFailed(.unknown("Invalid NFS address")))
-            return
-        }
-        let envelope: MediaShareCredentialEnvelope
+        let service = MediaShareAccountConfigurationService(
+            accountStore: accountsProviders.accountStore
+        )
+        let prepared: PreparedMediaShareAccount
         do {
-            envelope = try MediaShareCredentialEnvelope(
-                transport: .nfs,
-                authentication: .noCredentials
+            prepared = try service.prepareNFS(
+                host: host,
+                port: port,
+                exportPath: exportPath,
+                displayName: displayName
             )
         } catch {
-            apply(.authenticationFailed(.unknown("Invalid NFS share")))
+            apply(.authenticationFailed(.unknown("Invalid NFS address")))
             return
         }
-        let serverID = Self.mediaShareFilesystemID(
-            scheme: "nfs",
-            host: trimmedHost,
-            port: port,
-            path: normalizedPath,
-            principal: "anon"
-        )
-        persistMediaShare(
-            serverID: serverID,
-            baseURL: baseURL,
-            envelope: envelope,
-            userID: "anon",
-            userName: "",
-            defaultName: Self.defaultShareName(path: normalizedPath, host: trimmedHost, transport: .nfs),
-            displayName: displayName,
-            invalidMessage: "Couldn’t save this NFS share"
+        let isFirstRun =
+            accountsProviders.accounts.isEmpty
+            && !profilesModel.firstRunProfileSetupComplete
+        apply(.serverSelected(prepared.session.server))
+        do {
+            try service.persist(prepared)
+        } catch {
+            Self.reportMediaSharePersistenceFailure(
+                error,
+                operation: "media-share-save"
+            )
+            apply(.authenticationFailed(.unknown("Couldn’t save this NFS share")))
+            return
+        }
+        finalizeAddedAccount(
+            session: prepared.session,
+            account: prepared.account,
+            previousAccount: prepared.previousAccount,
+            isFirstRun: isFirstRun
         )
     }
 
@@ -1672,9 +1664,7 @@ public final class AppState {
     }
 
     private static func normalizedFilesystemPath(_ raw: String) -> String {
-        let trimmed = raw.trimmingCharacters(in: .whitespaces)
-        if trimmed.isEmpty { return "/" }
-        return trimmed.hasPrefix("/") ? trimmed : "/" + trimmed
+        MediaShareAccountConfigurationService.normalizedFilesystemPath(raw)
     }
 
     /// Shared persistence tail for the credential-envelope transports (NFS/SFTP/

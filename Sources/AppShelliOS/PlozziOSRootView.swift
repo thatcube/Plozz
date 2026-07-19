@@ -152,10 +152,13 @@ private struct PlozziOSHomeLandingView: View {
             ContentUnavailableView {
                 Label("Build your library", systemImage: "play.rectangle.on.rectangle")
             } description: {
-                Text("Connect Jellyfin, Emby, or Plex to start watching.")
+                Text("Connect a media server or an NFS network share to start watching.")
             } actions: {
                 Button("Add Server", action: onAddServer)
                     .buttonStyle(.borderedProminent)
+                NavigationLink("Add NFS Share") {
+                    PlozziOSAddNFSShareView(appModel: appModel)
+                }
             }
             .navigationTitle("Home")
         } else {

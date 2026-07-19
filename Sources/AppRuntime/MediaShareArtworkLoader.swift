@@ -1,7 +1,6 @@
 import CoreModels
 import Foundation
 import MediaTransportCore
-import ProviderShare
 
 /// Credential-safe AppShell adapter from CoreModels' artwork boundary to the
 /// existing direct-file resolver. It is deliberately display-time only: no path,
@@ -49,21 +48,5 @@ struct MediaShareArtworkLoader: ArtworkNetworkFileLoading {
             offset += Int64(chunk.count)
         }
         return result
-    }
-}
-
-struct MediaShareArtworkFailureReporter: ArtworkNetworkFileFailureReporting {
-    let coordinator: ShareCatalogCoordinator
-
-    func reportArtworkFailure(
-        _ failure: ArtworkNetworkFileFailure,
-        for reference: NetworkArtworkReference
-    ) async {
-        switch failure {
-        case .empty, .tooLarge, .malformed, .unsupported, .unsafeDimensions:
-            await coordinator.rejectArtwork(accountKey: reference.accountID, reference: reference)
-        case .unavailable, .cancelled:
-            break
-        }
     }
 }

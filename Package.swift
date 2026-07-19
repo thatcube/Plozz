@@ -504,8 +504,15 @@ let package = Package(
                 "CoreNetworking",
                 "FeatureAuthCore",
                 "MediaTransportCore",
+                "MediaTransportFTP",
+                "MediaTransportHTTP",
+                "MediaTransportNFS",
+                "MediaTransportSFTP",
+                "MediaTransportSMB",
+                "MediaTransportWebDAV",
                 "ProviderJellyfin",
                 "ProviderPlex",
+                "ProviderShare",
             ]
         ),
 
@@ -556,12 +563,15 @@ let package = Package(
                 "AppRuntime",
                 "CoreModels",
                 "CoreNetworking",
+                "CoreUI",
                 "FeatureAuthCore",
                 "FeatureHomeCore",
                 "FeaturePlayback",
                 "FeatureSearchCore",
                 "MediaTransportCore",
+                "MediaTransportNFS",
                 "ProviderPlex",
+                "ProviderShare",
             ]
         ),
 
@@ -573,6 +583,10 @@ let package = Package(
         .testTarget(
             name: "MediaDownloadsTests",
             dependencies: ["MediaDownloads", "CoreModels", "MediaTransportCore"]
+        ),
+        .testTarget(
+            name: "AppRuntimeTests",
+            dependencies: ["AppRuntime", "CoreModels", "FeatureAuthCore"]
         ),
         .testTarget(
             name: "AppShellTests",

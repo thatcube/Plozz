@@ -1,7 +1,7 @@
 import CoreModels
 import Foundation
 import MediaTransportCore
-@testable import AppShell
+@testable import AppRuntime
 import XCTest
 
 /// Coverage for the transport-neutral routing helper that replaced the two

@@ -250,6 +250,7 @@ targets:
     deploymentTarget: "18.0"
     sources:
       - path: App/PlozziOS
+      - path: App/Resources/Fonts
     info:
       path: App/PlozziOS/Info.plist
       properties:
@@ -260,6 +261,29 @@ targets:
         PlozzSentryDSN: "$(PLOZZ_SENTRY_DSN)"
         UILaunchScreen: {}
         UIRequiresFullScreen: false
+        UIAppFonts:
+          - "AtkinsonHyperlegible-Regular.ttf"
+          - "AtkinsonHyperlegible-Italic.ttf"
+          - "AtkinsonHyperlegible-Bold.ttf"
+          - "AtkinsonHyperlegible-BoldItalic.ttf"
+          - "Lexend-Regular.ttf"
+          - "Lexend-Medium.ttf"
+          - "Lexend-SemiBold.ttf"
+          - "Lexend-Bold.ttf"
+          - "Roboto-Regular.ttf"
+          - "Roboto-Medium.ttf"
+          - "Roboto-SemiBold.ttf"
+          - "Roboto-Italic.ttf"
+          - "Roboto-Bold.ttf"
+          - "Roboto-BoldItalic.ttf"
+          - "Fredoka-Regular.ttf"
+          - "Fredoka-Medium.ttf"
+          - "Fredoka-SemiBold.ttf"
+          - "Fredoka-Bold.ttf"
+          - "OpenDyslexic-Regular.otf"
+          - "OpenDyslexic-Italic.otf"
+          - "OpenDyslexic-Bold.otf"
+          - "OpenDyslexic-BoldItalic.otf"
         NSLocalNetworkUsageDescription: "Plozz uses your local network to discover media servers and network shares."
         NSBonjourServices:
           - _jellyfin._tcp

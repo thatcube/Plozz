@@ -516,58 +516,25 @@ private struct PlozziOSSubtitleOptionsSheet: View {
         }
     }
 
+    @ViewBuilder
     private var appearance: some View {
         Section("Appearance") {
-            Picker(
-                "Font",
-                selection: styleBinding(\.fontFamily)
-            ) {
-                ForEach(SubtitleFontFamily.allCases, id: \.self) {
-                    Text($0.displayName).tag($0)
+            if let format =
+                viewModel.controls.secondarySubtitleImagePrimaryFormat {
+                Label(
+                    "\(format) subtitles are rendered as images and can’t be restyled.",
+                    systemImage: "photo"
+                )
+                .foregroundStyle(.secondary)
+            } else {
+                NavigationLink {
+                    PlozziOSSubtitleAppearanceView(viewModel: viewModel)
+                } label: {
+                    LabeledContent(
+                        "Style",
+                        value: viewModel.controls.subtitleStyle.fontFamily.displayName
+                    )
                 }
-            }
-            Picker(
-                "Weight",
-                selection: styleBinding(\.fontWeight)
-            ) {
-                ForEach(
-                    viewModel.controls.subtitleStyle.fontFamily.availableWeights,
-                    id: \.self
-                ) {
-                    Text($0.displayName).tag($0)
-                }
-            }
-            LabeledContent("Size") {
-                Slider(
-                    value: styleBinding(\.fontScale),
-                    in: 0.6...2
-                )
-                .frame(maxWidth: 320)
-            }
-            LabeledContent("Position") {
-                Slider(
-                    value: styleBinding(\.verticalPosition),
-                    in: 0...1
-                )
-                .frame(maxWidth: 320)
-            }
-            LabeledContent("Opacity") {
-                Slider(
-                    value: styleBinding(\.opacity),
-                    in: 0.2...1
-                )
-                .frame(maxWidth: 320)
-            }
-            Toggle(
-                "Background",
-                isOn: styleBinding(\.background.isEnabled)
-            )
-            Toggle(
-                "Outline",
-                isOn: styleBinding(\.border.isEnabled)
-            )
-            Button("Reset Appearance", role: .destructive) {
-                viewModel.applySubtitleStyle(.default)
             }
         }
     }
@@ -639,19 +606,6 @@ private struct PlozziOSSubtitleOptionsSheet: View {
         }
     }
 
-    private func styleBinding<Value>(
-        _ keyPath: WritableKeyPath<SubtitleStyle, Value>
-    ) -> Binding<Value> {
-        Binding(
-            get: { viewModel.controls.subtitleStyle[keyPath: keyPath] },
-            set: { value in
-                var style = viewModel.controls.subtitleStyle
-                style[keyPath: keyPath] = value
-                viewModel.applySubtitleStyle(style)
-            }
-        )
-    }
-
     private func remoteSubtitleDetails(_ subtitle: RemoteSubtitle) -> String {
         [
             subtitle.language?.uppercased(),
@@ -662,6 +616,549 @@ private struct PlozziOSSubtitleOptionsSheet: View {
         ]
         .compactMap { $0 }
         .joined(separator: " • ")
+    }
+}
+
+private struct PlozziOSSubtitleAppearanceView: View {
+    let viewModel: PlayerViewModel
+
+    var body: some View {
+        Form {
+            Section("Text") {
+                NavigationLink {
+                    PlozziOSSubtitleFontView(viewModel: viewModel)
+                } label: {
+                    LabeledContent(
+                        "Font",
+                        value: viewModel.controls.subtitleStyle.fontFamily.displayName
+                    )
+                }
+
+                Picker(
+                    "Weight",
+                    selection: subtitleStyleBinding(viewModel, \.fontWeight)
+                ) {
+                    ForEach(
+                        viewModel.controls.subtitleStyle.fontFamily.availableWeights,
+                        id: \.self
+                    ) {
+                        Text($0.displayName).tag($0)
+                    }
+                }
+
+                PlozziOSSubtitleSliderRow(
+                    title: "Text Size",
+                    value: subtitleStyleBinding(viewModel, \.fontScale),
+                    range: 0.6...2.5,
+                    step: 0.05,
+                    formattedValue: {
+                        "\((100 * $0).rounded().formatted())%"
+                    }
+                )
+                PlozziOSSubtitleSliderRow(
+                    title: "Position",
+                    value: subtitleStyleBinding(viewModel, \.verticalPosition),
+                    range: 0...0.9,
+                    step: 0.01,
+                    formattedValue: subtitlePositionLabel
+                )
+                PlozziOSSubtitleSliderRow(
+                    title: "Horizontal Offset",
+                    value: subtitleStyleBinding(viewModel, \.horizontalOffset),
+                    range: -1...1,
+                    step: 0.05,
+                    formattedValue: {
+                        let percent = Int(($0 * 100).rounded())
+                        return percent == 0
+                            ? "Center"
+                            : "\(percent > 0 ? "+" : "")\(percent)%"
+                    }
+                )
+                subtitleColorPicker(
+                    "Text Color",
+                    viewModel: viewModel,
+                    keyPath: \.textColor,
+                    options: SubtitleColor.presets
+                )
+                PlozziOSSubtitleSliderRow(
+                    title: "Opacity",
+                    value: subtitleStyleBinding(viewModel, \.opacity),
+                    range: 0.2...1,
+                    step: 0.05,
+                    formattedValue: {
+                        "\((100 * $0).rounded().formatted())%"
+                    }
+                )
+                if viewModel.controls.subtitlesRenderHDR {
+                    PlozziOSSubtitleSliderRow(
+                        title: "HDR Brightness",
+                        value: subtitleStyleBinding(
+                            viewModel,
+                            \.hdrLuminanceScale
+                        ),
+                        range: 0.2...1,
+                        step: 0.05,
+                        formattedValue: {
+                            "\((100 * $0).rounded().formatted())%"
+                        }
+                    )
+                }
+            }
+
+            Section("Details") {
+                NavigationLink("Shadow & Outline") {
+                    PlozziOSSubtitleShadowOutlineView(viewModel: viewModel)
+                }
+                NavigationLink {
+                    PlozziOSSubtitleBackgroundView(viewModel: viewModel)
+                } label: {
+                    LabeledContent(
+                        "Background",
+                        value: viewModel.controls.subtitleStyle.background.isEnabled
+                            ? "On"
+                            : "Off"
+                    )
+                }
+                NavigationLink {
+                    PlozziOSSubtitleDualView(viewModel: viewModel)
+                } label: {
+                    LabeledContent(
+                        "Dual Subtitles",
+                        value: selectedSecondaryTrack(in: viewModel) == nil
+                            ? "Off"
+                            : "On"
+                    )
+                }
+            }
+
+            Section {
+                Button("Reset to Default", role: .destructive) {
+                    viewModel.applySubtitleStyle(.default)
+                }
+            }
+        }
+        .navigationTitle("Appearance")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+private struct PlozziOSSubtitleFontView: View {
+    let viewModel: PlayerViewModel
+
+    var body: some View {
+        List {
+            ForEach(SubtitleFontFamily.allCases, id: \.self) { family in
+                Button {
+                    var style = viewModel.controls.subtitleStyle
+                    style.fontFamily = family
+                    style.fontWeight = style.fontWeight.snapped(
+                        to: family.availableWeights
+                    )
+                    viewModel.applySubtitleStyle(style)
+                } label: {
+                    HStack {
+                        Text(family.displayName)
+                            .font(subtitlePreviewFont(for: family))
+                        Spacer()
+                        if family ==
+                            viewModel.controls.subtitleStyle.fontFamily {
+                            Image(systemName: "checkmark")
+                        }
+                    }
+                }
+            }
+        }
+        .navigationTitle("Font")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+private struct PlozziOSSubtitleShadowOutlineView: View {
+    let viewModel: PlayerViewModel
+    private let shadowStyles: [SubtitleEdgeStyle] = [
+        .none, .dropShadow, .raised, .depressed
+    ]
+
+    var body: some View {
+        Form {
+            Section("Shadow") {
+                Picker(
+                    "Style",
+                    selection: subtitleStyleBinding(viewModel, \.edge.style)
+                ) {
+                    ForEach(shadowStyles, id: \.self) {
+                        Text($0.displayName).tag($0)
+                    }
+                }
+                if viewModel.controls.subtitleStyle.edge.style != .none {
+                    subtitleColorPicker(
+                        "Color",
+                        viewModel: viewModel,
+                        keyPath: \.edge.color,
+                        options: SubtitleColor.presets
+                    )
+                    PlozziOSSubtitleSliderRow(
+                        title: "Thickness",
+                        value: subtitleStyleBinding(
+                            viewModel,
+                            \.edge.thickness
+                        ),
+                        range: 0...10,
+                        step: 1,
+                        formattedValue: { $0.rounded().formatted() }
+                    )
+                }
+            }
+
+            Section("Outline") {
+                Toggle(
+                    "Show Outline",
+                    isOn: subtitleStyleBinding(
+                        viewModel,
+                        \.border.isEnabled
+                    )
+                )
+                if viewModel.controls.subtitleStyle.border.isEnabled {
+                    subtitleColorPicker(
+                        "Color",
+                        viewModel: viewModel,
+                        keyPath: \.border.color,
+                        options: SubtitleColor.presets
+                    )
+                    PlozziOSSubtitleSliderRow(
+                        title: "Width",
+                        value: subtitleStyleBinding(
+                            viewModel,
+                            \.border.width
+                        ),
+                        range: 0...10,
+                        step: 0.5,
+                        formattedValue: {
+                            $0.formatted(
+                                .number.precision(.fractionLength(0...1))
+                            )
+                        }
+                    )
+                }
+            }
+        }
+        .navigationTitle("Shadow & Outline")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+private struct PlozziOSSubtitleBackgroundView: View {
+    let viewModel: PlayerViewModel
+    private let backgroundColors: [(name: String, color: SubtitleColor)] = [
+        ("Black", .black),
+        (
+            "Dark Gray",
+            SubtitleColor(red: 0.15, green: 0.15, blue: 0.15)
+        ),
+        ("White", .white)
+    ]
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle(
+                    "Show Box",
+                    isOn: subtitleStyleBinding(
+                        viewModel,
+                        \.background.isEnabled
+                    )
+                )
+            }
+
+            if viewModel.controls.subtitleStyle.background.isEnabled {
+                Section("Box") {
+                    subtitleColorPicker(
+                        "Color",
+                        viewModel: viewModel,
+                        keyPath: \.background.color,
+                        options: backgroundColors
+                    )
+                    PlozziOSSubtitleSliderRow(
+                        title: "Opacity",
+                        value: subtitleColorAlphaBinding(
+                            viewModel,
+                            \.background.color
+                        ),
+                        range: 0.05...1,
+                        step: 0.05,
+                        formattedValue: {
+                            "\((100 * $0).rounded().formatted())%"
+                        }
+                    )
+                    PlozziOSSubtitleSliderRow(
+                        title: "Corner Radius",
+                        value: subtitleStyleBinding(
+                            viewModel,
+                            \.background.cornerRadius
+                        ),
+                        range: 0...50,
+                        step: 2,
+                        formattedValue: {
+                            "\($0.rounded().formatted()) pt"
+                        }
+                    )
+                    PlozziOSSubtitleSliderRow(
+                        title: "Horizontal Padding",
+                        value: subtitleStyleBinding(
+                            viewModel,
+                            \.background.horizontalPadding
+                        ),
+                        range: 0...40,
+                        step: 2,
+                        formattedValue: {
+                            "\($0.rounded().formatted()) pt"
+                        }
+                    )
+                    PlozziOSSubtitleSliderRow(
+                        title: "Vertical Padding",
+                        value: subtitleStyleBinding(
+                            viewModel,
+                            \.background.verticalPadding
+                        ),
+                        range: 0...40,
+                        step: 2,
+                        formattedValue: {
+                            "\($0.rounded().formatted()) pt"
+                        }
+                    )
+                }
+            }
+        }
+        .navigationTitle("Background")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+private struct PlozziOSSubtitleDualView: View {
+    let viewModel: PlayerViewModel
+
+    var body: some View {
+        Form {
+            Section("Second Track") {
+                if let format =
+                    viewModel.controls.secondarySubtitleImagePrimaryFormat {
+                    Text("Unavailable with \(format) image subtitles.")
+                        .foregroundStyle(.secondary)
+                } else if viewModel.controls.secondarySubtitleOptions.isEmpty {
+                    Text("No additional text tracks are available.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(
+                        viewModel.controls.secondarySubtitleOptions
+                    ) { option in
+                        Button {
+                            viewModel.selectSecondarySubtitleOption(id: option.id)
+                        } label: {
+                            HStack {
+                                Text(option.title)
+                                Spacer()
+                                if option.isSelected {
+                                    Image(systemName: "checkmark")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if selectedSecondaryTrack(in: viewModel) != nil,
+               viewModel.controls.subtitleStyle.secondary != nil {
+                Section("Layout") {
+                    Picker(
+                        "Placement",
+                        selection: subtitleStyleBinding(
+                            viewModel,
+                            \.secondary!.placement
+                        )
+                    ) {
+                        Text("Above").tag(
+                            SubtitleStyle.Secondary.Placement.above
+                        )
+                        Text("Below").tag(
+                            SubtitleStyle.Secondary.Placement.below
+                        )
+                    }
+                    Toggle(
+                        "Distinct Style",
+                        isOn: subtitleStyleBinding(
+                            viewModel,
+                            \.secondary!.differentiate
+                        )
+                    )
+                    if viewModel.controls.subtitleStyle.secondary?
+                        .differentiate == true {
+                        PlozziOSSubtitleSliderRow(
+                            title: "Size",
+                            value: subtitleStyleBinding(
+                                viewModel,
+                                \.secondary!.relativeScale
+                            ),
+                            range: 0.5...1,
+                            step: 0.05,
+                            formattedValue: {
+                                "\((100 * $0).rounded().formatted())%"
+                            }
+                        )
+                        subtitleColorPicker(
+                            "Color",
+                            viewModel: viewModel,
+                            keyPath: \.secondary!.textColor,
+                            options: SubtitleColor.presets
+                        )
+                    }
+                    PlozziOSSubtitleSliderRow(
+                        title: "Gap",
+                        value: subtitleStyleBinding(
+                            viewModel,
+                            \.secondary!.gap
+                        ),
+                        range: 0...24,
+                        step: 2,
+                        formattedValue: {
+                            "\($0.rounded().formatted()) pt"
+                        }
+                    )
+                }
+            }
+        }
+        .navigationTitle("Dual Subtitles")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+private struct PlozziOSSubtitleSliderRow: View {
+    let title: LocalizedStringKey
+    @Binding var value: Double
+    let range: ClosedRange<Double>
+    let step: Double
+    let formattedValue: (Double) -> String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(title)
+                Spacer()
+                Text(formattedValue(value))
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+            Slider(value: $value, in: range, step: step)
+        }
+    }
+}
+
+@MainActor
+private func subtitleStyleBinding<Value>(
+    _ viewModel: PlayerViewModel,
+    _ keyPath: WritableKeyPath<SubtitleStyle, Value>
+) -> Binding<Value> {
+    Binding(
+        get: {
+            viewModel.controls.subtitleStyle[keyPath: keyPath]
+        },
+        set: { value in
+            var style = viewModel.controls.subtitleStyle
+            style[keyPath: keyPath] = value
+            viewModel.applySubtitleStyle(style)
+        }
+    )
+}
+
+@MainActor
+private func subtitleColorAlphaBinding(
+    _ viewModel: PlayerViewModel,
+    _ keyPath: WritableKeyPath<SubtitleStyle, SubtitleColor>
+) -> Binding<Double> {
+    Binding(
+        get: {
+            viewModel.controls.subtitleStyle[keyPath: keyPath].alpha
+        },
+        set: { alpha in
+            var style = viewModel.controls.subtitleStyle
+            style[keyPath: keyPath].alpha = alpha
+            viewModel.applySubtitleStyle(style)
+        }
+    )
+}
+
+@MainActor
+private func subtitleColorPicker(
+    _ title: LocalizedStringKey,
+    viewModel: PlayerViewModel,
+    keyPath: WritableKeyPath<SubtitleStyle, SubtitleColor>,
+    options: [(name: String, color: SubtitleColor)]
+) -> some View {
+    Picker(
+        title,
+        selection: Binding(
+            get: {
+                let current =
+                    viewModel.controls.subtitleStyle[keyPath: keyPath]
+                return options.first {
+                    $0.color.red == current.red
+                        && $0.color.green == current.green
+                        && $0.color.blue == current.blue
+                }?.color ?? current
+            },
+            set: { selected in
+                var style = viewModel.controls.subtitleStyle
+                let alpha = style[keyPath: keyPath].alpha
+                var color = selected
+                color.alpha = alpha
+                style[keyPath: keyPath] = color
+                viewModel.applySubtitleStyle(style)
+            }
+        )
+    ) {
+        ForEach(options, id: \.name) { option in
+            Label {
+                Text(option.name)
+            } icon: {
+                Circle()
+                    .fill(
+                        Color(
+                            red: option.color.red,
+                            green: option.color.green,
+                            blue: option.color.blue
+                        )
+                    )
+            }
+            .tag(option.color)
+        }
+    }
+}
+
+private func subtitlePreviewFont(
+    for family: SubtitleFontFamily
+) -> Font {
+    if family.usesRoundedDesign {
+        return .system(size: 22, design: .rounded)
+    }
+    if let stem = family.postScriptStem {
+        return .custom("\(stem)-Regular", size: 22)
+    }
+    return .system(size: 22)
+}
+
+private func subtitlePositionLabel(_ value: Double) -> String {
+    switch value {
+    case ..<0.2: "Bottom"
+    case 0.2..<0.65: "\((value * 100).rounded().formatted())%"
+    default: "Top"
+    }
+}
+
+@MainActor
+private func selectedSecondaryTrack(
+    in viewModel: PlayerViewModel
+) -> PlayerTrackOption? {
+    viewModel.controls.secondarySubtitleOptions.first {
+        $0.isSelected && $0.id != PlayerTrackOption.offID
     }
 }
 

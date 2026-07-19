@@ -47,6 +47,11 @@ public struct MetadataCapability: RawRepresentable, Codable, Hashable, Sendable 
     /// by the Step 8 "Airing Soon" / missing-episode features — not a per-item field
     /// written back onto a ``MediaItem``.
     public static let nextAiringEpisode = Self(rawValue: "nextAiringEpisode")
+    /// The work's original/production audio language (ISO-639-1). Supplied by the
+    /// providers that expose it (TMDb `original_language`, TheTVDB `originalLanguage`,
+    /// TVmaze `language`); projected onto ``MediaItem/originalLanguage`` to drive the
+    /// prefer-original-language audio policy.
+    public static let originalLanguage = Self(rawValue: "originalLanguage")
 }
 
 public extension MetadataCapability {
@@ -92,5 +97,6 @@ public extension MetadataCapability {
         .episodeThumbnail: .episodeStill,
         .ratings: .ratings,
         .nextAiringEpisode: .nextAiringEpisode,
+        .originalLanguage: .originalLanguage,
     ]
 }

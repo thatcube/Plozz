@@ -57,6 +57,12 @@ public struct MetadataField: RawRepresentable, Codable, Hashable, Sendable {
     // local sidecar parser can attribute the extra descriptive facts an NFO
     // carries (Kodi/Jellyfin `movie`/`tvshow`/`episodedetails` documents).
     public static let originalTitle = Self(rawValue: "originalTitle")
+    /// The work's original/production audio language as an ISO-639-1 code
+    /// (lowercased). Supplied by external providers (TMDb `original_language`,
+    /// TheTVDB `originalLanguage`, TVmaze `language`) and projected onto
+    /// ``MediaItem/originalLanguage`` to drive the prefer-original-language audio
+    /// policy. Additive; older builds ignore the unknown field.
+    public static let originalLanguage = Self(rawValue: "originalLanguage")
     /// The catalog's SORT projection only (never `assets.sort_title`, which stays
     /// scan-owned) — see `ShareCatalogStore`'s grid ORDER BY.
     public static let sortTitle = Self(rawValue: "sortTitle")

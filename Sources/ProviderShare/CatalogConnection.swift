@@ -13,6 +13,12 @@ final class CatalogConnection {
     private let url: URL
     private(set) var db: OpaquePointer?
     private var didOpen = false
+    /// Memoized `hasColumn(table:column:)` results, keyed by `"table.column"`. The
+    /// catalog schema only ever grows within a process (additive migrations), so a
+    /// present column stays present; caching keeps repeated read-path checks (e.g.
+    /// the `enrichment.original_language` guard on every grid page) off a per-read
+    /// `PRAGMA table_info`.
+    private var columnPresenceCache: [String: Bool] = [:]
 
     /// SQLite wants a destructor sentinel for transient (copied) bound text; not
     /// exported into Swift, so reconstruct it.
@@ -118,6 +124,12 @@ final class CatalogConnection {
         // assets mutation.
         if !hasColumn(table: "enrichment", column: "title") {
             apply("ALTER TABLE enrichment ADD COLUMN title TEXT;")
+        }
+        // Migration: the work's original/production audio language (ISO-639-1),
+        // resolved by the external pipeline and projected onto MediaItem to drive the
+        // prefer-original-language audio policy. Additive — an older build ignores it.
+        if !hasColumn(table: "enrichment", column: "original_language") {
+            apply("ALTER TABLE enrichment ADD COLUMN original_language TEXT;")
         }
         // Source-addressable metadata lives beside the unchanged flat winning
         // projection. The old table stays readable through this schema transition.
@@ -318,10 +330,16 @@ final class CatalogConnection {
     /// `table`/`column` are compile-time literals at every call site, so the
     /// interpolation into the PRAGMA carries no injection risk.
     func hasColumn(table: String, column: String) -> Bool {
+        let key = "\(table).\(column)"
+        if let cached = columnPresenceCache[key] { return cached }
         var found = false
         query("PRAGMA table_info(\(table));") { stmt in
             if CatalogConnection.columnText(stmt, 1) == column { found = true }
         }
+        // Only memoize a positive result: a column that exists never disappears, but a
+        // not-yet-present column may be added by a migration later this session, so a
+        // negative must be re-checked.
+        if found { columnPresenceCache[key] = true }
         return found
     }
 

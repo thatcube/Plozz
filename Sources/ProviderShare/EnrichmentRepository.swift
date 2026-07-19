@@ -76,6 +76,7 @@ struct EnrichmentRepository {
         append(record.backdropURL, field: .backdropURL)
         append(record.logoURL, field: .logoURL)
         if record.title?.isEmpty == false { append(record.title, field: .title) }
+        if record.originalLanguage?.isEmpty == false { append(record.originalLanguage, field: .originalLanguage) }
         return values
     }
 
@@ -215,6 +216,10 @@ struct EnrichmentRepository {
         if let t = new.title, !t.isEmpty {
             out.title = t
             out.provenance[.title] = new.provenance[.title]
+        }
+        if let lang = new.originalLanguage, !lang.isEmpty {
+            out.originalLanguage = lang
+            out.provenance[.originalLanguage] = new.provenance[.originalLanguage]
         }
         return out
     }
@@ -518,7 +523,7 @@ struct EnrichmentRepository {
         guard sqlite3_prepare_v2(db, """
         SELECT item_id, provider_ids_json, overview, genres_json, runtime,
                poster_url, backdrop_url, logo_url, enriched_at,
-               enrich_version, attempts, title
+               enrich_version, attempts, title, original_language
         FROM enrichment;
         """, -1, &stmt, nil) == SQLITE_OK else { return false }
 
@@ -537,6 +542,7 @@ struct EnrichmentRepository {
                 record.backdropURL = columnText(stmt, 6).flatMap(URL.init(string:))
                 record.logoURL = columnText(stmt, 7).flatMap(URL.init(string:))
                 record.title = columnText(stmt, 11)
+                record.originalLanguage = columnText(stmt, 12)
                 record.inferLegacyProvenanceForMissingFields()
                 rows.append((
                     itemID,

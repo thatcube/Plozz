@@ -41,6 +41,8 @@ enum ShareCatalogReadProjection {
             return CatalogJSON.decode(URL.self, valueJSON) == record.backdropURL
         case .logoURL:
             return CatalogJSON.decode(URL.self, valueJSON) == record.logoURL
+        case .originalLanguage:
+            return CatalogJSON.decode(String.self, valueJSON) == record.originalLanguage
         default:
             let prefix = "providerID."
             guard field.rawValue.hasPrefix(prefix) else { return false }
@@ -53,13 +55,14 @@ enum ShareCatalogReadProjection {
     }
 
     /// Decode the enrichment columns (provider_ids_json, overview, genres_json,
-    /// runtime, poster_url, backdrop_url, logo_url, title) starting at `startingAt`
-    /// into a record. Shared by the standalone `enrichmentRow` lookup and the JOINed
-    /// grid queries (movies/series), so a page fetch reads enrichment in ONE query
-    /// instead of N+1 per-row lookups. Returns nil when the core columns are all NULL
-    /// (no enrichment row matched the LEFT JOIN); `title` is a supplementary 8th
-    /// column not counted in that emptiness check.
-    static func enrichmentRecord(fromColumns stmt: OpaquePointer?, startingAt base: Int32) -> EnrichmentRecord? {
+    /// runtime, poster_url, backdrop_url, logo_url, title, original_language)
+    /// starting at `startingAt` into a record. Shared by the standalone `enrichmentRow`
+    /// lookup and the JOINed grid queries (movies/series), so a page fetch reads
+    /// enrichment in ONE query instead of N+1 per-row lookups. Returns nil when the
+    /// core columns are all NULL (no enrichment row matched the LEFT JOIN); `title`
+    /// (8th) and `original_language` (9th) are supplementary columns not counted in
+    /// that emptiness check.
+    static func enrichmentRecord(fromColumns stmt: OpaquePointer?, startingAt base: Int32, includeOriginalLanguage: Bool = true) -> EnrichmentRecord? {
         let allNull = (0..<7).allSatisfy { sqlite3_column_type(stmt, base + $0) == SQLITE_NULL }
         if allNull { return nil }
         var rec = EnrichmentRecord()
@@ -71,6 +74,12 @@ enum ShareCatalogReadProjection {
         rec.backdropURL = CatalogConnection.columnText(stmt, base + 5).flatMap(URL.init(string:))
         rec.logoURL = CatalogConnection.columnText(stmt, base + 6).flatMap(URL.init(string:))
         rec.title = CatalogConnection.columnText(stmt, base + 7)
+        // `original_language` is an additive column; a legacy catalog (or one whose
+        // schema migration was rolled back) omits it from the SELECT, so read it only
+        // when the caller included it.
+        if includeOriginalLanguage {
+            rec.originalLanguage = CatalogConnection.columnText(stmt, base + 8)
+        }
         return rec
     }
 
@@ -245,6 +254,13 @@ enum ShareCatalogReadProjection {
         if copy.logoURL == nil, let logo = rec.logoURL {
             copy.logoURL = logo
             adopt(.logoURL)
+        }
+        // Original language: the pipeline resolves the work's true original audio
+        // language (ISO-639-1). Never blank an existing value; adopt when the item
+        // has none so the prefer-original-language audio policy can use it.
+        if (copy.originalLanguage?.isEmpty ?? true), let lang = rec.originalLanguage, !lang.isEmpty {
+            copy.originalLanguage = lang
+            adopt(.originalLanguage)
         }
         // Display-title upgrade (series/movies only, never episodes): overlay the
         // resolved canonical name when it's IDENTICAL, MORE SPECIFIC (current is a

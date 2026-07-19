@@ -45,6 +45,21 @@ struct CatalogReadQueries {
     /// forwarders guarantee before delegating here.
     private var db: OpaquePointer? { connection.db }
 
+    /// Whether the `enrichment` table carries the additive `original_language`
+    /// column. A legacy catalog — or one whose schema-upgrade transaction was rolled
+    /// back after a failed normalized migration — omits it, so the flat read must not
+    /// SELECT a column that may not exist. Cheap `PRAGMA table_info` per read; the
+    /// grid reads run it once per page.
+    private var enrichmentHasOriginalLanguage: Bool {
+        connection.hasColumn(table: "enrichment", column: "original_language")
+    }
+
+    /// The `original_language` SELECT fragment (with the given table alias, if any)
+    /// or an empty string when the column is absent.
+    private func originalLanguageColumn(alias: String) -> String {
+        enrichmentHasOriginalLanguage ? ", \(alias)original_language" : ""
+    }
+
     /// Leaf enrichment persistence over the same actor-confined connection — used only
     /// for the `hasUsableEnrichment` fast-path check inside `pendingEnrichment`.
     private var enrichmentRepo: EnrichmentRepository { EnrichmentRepository(connection: connection) }
@@ -161,10 +176,11 @@ struct CatalogReadQueries {
     func movies(offset: Int, limit: Int) -> [MediaItem] {
         guard db != nil else { return [] }
         var rows: [(item: MediaItem, enrichmentID: String, record: EnrichmentRecord?)] = []
+        let hasOL = enrichmentHasOriginalLanguage
         query("""
         SELECT g.logical_id, g.title, g.year, g.rep_id,
                e.provider_ids_json, e.overview, e.genres_json, e.runtime,
-               e.poster_url, e.backdrop_url, e.logo_url, e.title
+               e.poster_url, e.backdrop_url, e.logo_url, e.title\(originalLanguageColumn(alias: "e."))
         FROM (
           SELECT
             CASE WHEN MIN(COALESCE(movie_group_key, movie_key)) IS NOT NULL
@@ -195,7 +211,7 @@ struct CatalogReadQueries {
             rows.append((
                 item,
                 self.columnText(stmt, 3) ?? item.id,
-                ShareCatalogReadProjection.enrichmentRecord(fromColumns: stmt, startingAt: 4)
+                ShareCatalogReadProjection.enrichmentRecord(fromColumns: stmt, startingAt: 4, includeOriginalLanguage: hasOL)
             ))
         }
         let records = Dictionary(uniqueKeysWithValues: rows.compactMap { row in
@@ -211,13 +227,14 @@ struct CatalogReadQueries {
     func series(in library: CatalogLibrary, offset: Int, limit: Int) -> [MediaItem] {
         guard db != nil, library != .movies else { return [] }
         var rows: [(item: MediaItem, enrichmentID: String, record: EnrichmentRecord?)] = []
+        let hasOL = enrichmentHasOriginalLanguage
         // LEFT JOIN enrichment (keyed "series:<series_key>") into the grouped query so
         // a page is one query, not 1 + N per-row enrichment lookups. The GROUP BY is
         // over series_key, which the JOIN is 1:1 with.
         query("""
         SELECT a.series_key, MIN(a.series_title), MAX(a.year), MIN(a.sort_title) AS s,
                e.provider_ids_json, e.overview, e.genres_json, e.runtime,
-               e.poster_url, e.backdrop_url, e.logo_url, e.title
+               e.poster_url, e.backdrop_url, e.logo_url, e.title\(originalLanguageColumn(alias: "e."))
         FROM assets a
         LEFT JOIN enrichment e ON e.item_id = 'series:' || a.series_key
         LEFT JOIN metadata_values sv
@@ -235,7 +252,7 @@ struct CatalogReadQueries {
             rows.append((
                 item,
                 ShareCatalogID.series(key),
-                ShareCatalogReadProjection.enrichmentRecord(fromColumns: stmt, startingAt: 4)
+                ShareCatalogReadProjection.enrichmentRecord(fromColumns: stmt, startingAt: 4, includeOriginalLanguage: hasOL)
             ))
         }
         let records = Dictionary(uniqueKeysWithValues: rows.compactMap { row in
@@ -807,15 +824,16 @@ struct CatalogReadQueries {
     /// Persisted enrichment for a catalog id (movie file id or `series:<key>`).
     func enrichmentRow(itemID: String) -> EnrichmentRecord? {
         guard db != nil else { return nil }
+        let hasOL = enrichmentHasOriginalLanguage
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, """
-        SELECT provider_ids_json, overview, genres_json, runtime, poster_url, backdrop_url, logo_url, title
+        SELECT provider_ids_json, overview, genres_json, runtime, poster_url, backdrop_url, logo_url, title\(originalLanguageColumn(alias: ""))
         FROM enrichment WHERE item_id=?;
         """, -1, &stmt, nil) == SQLITE_OK else { return nil }
         defer { sqlite3_finalize(stmt) }
         bindText(stmt, 1, itemID)
         guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
-        guard let record = ShareCatalogReadProjection.enrichmentRecord(fromColumns: stmt, startingAt: 0) else { return nil }
+        guard let record = ShareCatalogReadProjection.enrichmentRecord(fromColumns: stmt, startingAt: 0, includeOriginalLanguage: hasOL) else { return nil }
         return hydratedEnrichmentRecords([itemID: record])[itemID]
     }
 
@@ -847,11 +865,12 @@ struct CatalogReadQueries {
         let keyed = items.map { item in (item, enrichmentKey(for: item)) }
         let itemIDs = Array(Set(keyed.compactMap { $0.1 })).sorted()
         guard !itemIDs.isEmpty else { return withLocalOverlay(items) }
+        let hasOL = enrichmentHasOriginalLanguage
         let placeholders = Array(repeating: "?", count: itemIDs.count).joined(separator: ",")
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, """
         SELECT item_id, provider_ids_json, overview, genres_json, runtime,
-               poster_url, backdrop_url, logo_url, title
+               poster_url, backdrop_url, logo_url, title\(originalLanguageColumn(alias: ""))
         FROM enrichment WHERE item_id IN (\(placeholders));
         """, -1, &stmt, nil) == SQLITE_OK else { return withLocalOverlay(items) }
         for (offset, itemID) in itemIDs.enumerated() {
@@ -860,7 +879,7 @@ struct CatalogReadQueries {
         var records: [String: EnrichmentRecord] = [:]
         while sqlite3_step(stmt) == SQLITE_ROW {
             guard let itemID = columnText(stmt, 0),
-                  let record = ShareCatalogReadProjection.enrichmentRecord(fromColumns: stmt, startingAt: 1) else {
+                  let record = ShareCatalogReadProjection.enrichmentRecord(fromColumns: stmt, startingAt: 1, includeOriginalLanguage: hasOL) else {
                 continue
             }
             records[itemID] = record

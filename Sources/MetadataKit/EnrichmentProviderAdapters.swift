@@ -77,7 +77,7 @@ extension TVDBClient: TVDBEnriching {}
 /// a title search, so no duplicate work is done.
 public struct TVDBEnrichmentProvider: MetadataEnrichmentProvider {
     public let id: MetadataSource = .tvdb
-    public let capabilities: Set<MetadataCapability> = [.externalIDs, .canonicalText, .poster, .backdrop, .nextAiringEpisode]
+    public let capabilities: Set<MetadataCapability> = [.externalIDs, .canonicalText, .poster, .backdrop, .nextAiringEpisode, .originalLanguage]
     public let policy: ProviderPolicy
     private let client: any TVDBEnriching
 
@@ -95,6 +95,7 @@ public struct TVDBEnrichmentProvider: MetadataEnrichmentProvider {
         // TheTVDB schedule needs a concrete id, so skip the show resolve entirely.
         let wantsResolveFields = missing.contains(.title) || missing.contains(.overview)
             || missing.contains(.genres) || missing.contains(.posterURL) || requestsBackdrop(missing)
+            || missing.contains(.originalLanguage)
             || missing.contains { $0.rawValue.hasPrefix("providerID.") }
 
         var out = MetadataEnrichment()
@@ -137,6 +138,10 @@ public struct TVDBEnrichmentProvider: MetadataEnrichmentProvider {
                ) {
                 out.backdropCandidates = [SourcedValue(value: backdrop, source: .tvdb, sourceURL: sourceURL)]
             }
+            if missing.contains(.originalLanguage),
+               let code = OriginalLanguageNormalizer.normalized(meta.originalLanguage) {
+                out.originalLanguage = SourcedValue(value: code, source: .tvdb, sourceURL: sourceURL)
+            }
         }
 
         if missing.contains(.nextAiringEpisode), query.isTV,
@@ -164,6 +169,8 @@ public protocol TMDbEnriching: Sendable {
     var isEnabled: Bool { get }
     func backdropURLs(for query: MetadataQuery, limit: Int) async -> [URL]
     func artworkURL(_ kind: ArtworkKind, for query: MetadataQuery) async -> URL?
+    /// The work's original language (ISO-639-1) from TMDb's `original_language`.
+    func originalLanguage(for query: MetadataQuery) async -> String?
 }
 
 extension TMDbMetadataProvider: TMDbEnriching {}
@@ -173,7 +180,7 @@ extension TMDbMetadataProvider: TMDbEnriching {}
 /// poster, clear logo, and per-episode stills. Inert when TMDb isn't configured.
 public struct TMDbEnrichmentProvider: MetadataEnrichmentProvider {
     public let id: MetadataSource = .tmdb
-    public let capabilities: Set<MetadataCapability> = [.poster, .backdrop, .logo, .episodeStill]
+    public let capabilities: Set<MetadataCapability> = [.poster, .backdrop, .logo, .episodeStill, .originalLanguage]
     public let policy: ProviderPolicy
     private let provider: any TMDbEnriching
     private let backdropLimit: Int
@@ -199,6 +206,10 @@ public struct TMDbEnrichmentProvider: MetadataEnrichmentProvider {
         }
         if missing.contains(.episodeThumbnail), let url = await provider.artworkURL(.thumbnail, for: query) {
             out.episodeStillURL = SourcedValue(value: url, source: .tmdb)
+        }
+        if missing.contains(.originalLanguage),
+           let code = OriginalLanguageNormalizer.normalized(await provider.originalLanguage(for: query)) {
+            out.originalLanguage = SourcedValue(value: code, source: .tmdb)
         }
         return out
     }

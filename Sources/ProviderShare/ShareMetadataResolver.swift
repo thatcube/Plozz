@@ -289,7 +289,8 @@ struct PipelineShareResolver: ShareMetadataResolving {
             // the top (home-hero) candidate as its single backdrop today.
             backdropURL: enrichment.homeHero,
             logoURL: enrichment.logoURL,
-            title: enrichment.title
+            title: enrichment.title,
+            originalLanguage: enrichment.originalLanguage
         )
     }
 
@@ -307,6 +308,7 @@ struct PipelineShareResolver: ShareMetadataResolving {
         var fields: Set<MetadataField> = [
             .title, .overview, .genres,
             .posterURL, .backdropURL, .homeHero, .detailBackdrop, .logoURL,
+            .originalLanguage,
             .providerID("Imdb"), .providerID("Tvdb"), .providerID("Tmdb"),
         ]
         if isAnime {

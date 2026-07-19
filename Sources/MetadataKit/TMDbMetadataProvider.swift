@@ -50,6 +50,15 @@ public struct TMDbMetadataProvider: ArtworkProvider {
             .compactMap { URL(string: "\(imageBase)/original\($0)") }
     }
 
+    /// The work's original language as ISO-639-1 (`en`, `ja`), from the top TMDb
+    /// search match's `original_language`. `nil` when TMDb is disabled, the item is
+    /// music, or no match is found. One search call (the same one poster resolution
+    /// uses), so it adds no extra round-trip on the enrichment path.
+    public func originalLanguage(for query: MetadataQuery) async -> String? {
+        guard access.isEnabled, query.contentType != .music else { return nil }
+        return await search(query)?.original_language
+    }
+
     public func artworkURL(_ kind: ArtworkKind, for query: MetadataQuery) async -> URL? {
         guard access.isEnabled, query.contentType != .music else { return nil }
         switch kind {
@@ -194,6 +203,7 @@ public struct TMDbMetadataProvider: ArtworkProvider {
     struct SearchResult: Decodable {
         let id: Int?
         let poster_path: String?
+        let original_language: String?
     }
     struct ImagesResponse: Decodable {
         let backdrops: [Image]?

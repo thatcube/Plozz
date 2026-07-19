@@ -93,6 +93,16 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
     /// English title here. Used as an extra cross-server discovery query so a
     /// title named differently on each server is still found and matched by id.
     public var originalTitle: String?
+    /// The work's original/production audio language as an ISO-639-1 code,
+    /// lowercased (`en`, `ja`, `ko`, `zh`). Populated from real metadata
+    /// (TMDb `original_language`, TheTVDB `originalLanguage`, TVmaze `language`)
+    /// when known, else `nil`. Drives the "prefer original language" audio policy
+    /// so a file whose container default track is tagged for a foreign audience
+    /// (e.g. a Turkish default on an English movie) still requests the true
+    /// original-language track. Never trust the container `isDefault` flag as a
+    /// proxy for original language — it reflects the distributor's target
+    /// audience, not the work's original language.
+    public var originalLanguage: String?
     public var kind: MediaItemKind
     public var overview: String?
 
@@ -310,6 +320,7 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         id: String,
         title: String,
         originalTitle: String? = nil,
+        originalLanguage: String? = nil,
         kind: MediaItemKind,
         overview: String? = nil,
         parentTitle: String? = nil,
@@ -356,6 +367,7 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         self.id = id
         self.title = title
         self.originalTitle = originalTitle
+        self.originalLanguage = originalLanguage
         self.kind = kind
         self.overview = overview
         self.parentTitle = parentTitle
@@ -407,6 +419,7 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case id, title, kind, overview, parentTitle, seasonNumber, episodeNumber
         case originalTitle
+        case originalLanguage
         case productionYear, officialRating, genres, people, studios, tags, taglines
         case seriesID, seasonID, runtime, resumePosition, playedPercentage, isPlayed, hasBeenPlayed
         case posterURL, seriesPosterURL, backdropURL, heroBackdropURL
@@ -426,6 +439,7 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         id = try container.decode(String.self, forKey: .id)
         title = try container.decode(String.self, forKey: .title)
         originalTitle = try container.decodeIfPresent(String.self, forKey: .originalTitle)
+        originalLanguage = try container.decodeIfPresent(String.self, forKey: .originalLanguage)
         kind = try container.decode(MediaItemKind.self, forKey: .kind)
         overview = try container.decodeIfPresent(String.self, forKey: .overview)
         parentTitle = try container.decodeIfPresent(String.self, forKey: .parentTitle)

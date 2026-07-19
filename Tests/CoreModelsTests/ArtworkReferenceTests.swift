@@ -84,6 +84,23 @@ final class ArtworkReferenceTests: XCTestCase {
         XCTAssertTrue(decoded.artworkSelections.isEmpty)
     }
 
+    func testOriginalLanguageCodableRoundTripAndLegacyDecode() throws {
+        var item = MediaItem(id: "m", title: "Spider-Man", kind: .movie)
+        item.originalLanguage = "en"
+        let decoded = try JSONDecoder().decode(MediaItem.self, from: JSONEncoder().encode(item))
+        XCTAssertEqual(decoded.originalLanguage, "en")
+
+        // A payload from an older build (no originalLanguage key) decodes to nil.
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(item)) as? [String: Any]
+        )
+        object.removeValue(forKey: "originalLanguage")
+        let legacy = try JSONDecoder().decode(
+            MediaItem.self, from: JSONSerialization.data(withJSONObject: object)
+        )
+        XCTAssertNil(legacy.originalLanguage)
+    }
+
     func testEpisodeThumbnailLegacyReferencesStayEpisodeScoped() throws {
         let poster = try XCTUnwrap(URL(string: "https://example.com/episode.jpg"))
         let backdrop = try XCTUnwrap(URL(string: "https://example.com/episode-backdrop.jpg"))

@@ -5,7 +5,7 @@ import CoreModels
 /// Step 2 deliberately models this as data without changing any preference. Later
 /// work can replace the policy while the router and persisted provenance stay stable.
 enum CurrentMetadataPriority {
-    static let policy = MetadataPriorityPolicy(rules: artworkRules + overviewRules + scheduleRules)
+    static let policy = MetadataPriorityPolicy(rules: artworkRules + overviewRules + scheduleRules + originalLanguageRules)
 
     static func artworkSources(
         for type: ContentType,
@@ -60,6 +60,19 @@ enum CurrentMetadataPriority {
         schedule(.movie, []),
     ]
 
+    /// Which source owns a work's original-language lookup, by content type. TMDb's
+    /// `original_language` is the authoritative field, so it leads; TheTVDB
+    /// (`originalLanguage`) and TVmaze (`language`) fill in when TMDb is unconfigured
+    /// or misses. Anime keeps the same chain — a real provider value (e.g. `zh` for a
+    /// Chinese donghua) must be able to supersede the ContentClassifier anime→`ja`
+    /// last-resort fallback.
+    private static let originalLanguageRules: [MetadataPriorityRule] = [
+        originalLanguage(.anime, [.tmdb, .tvdb, .tvmaze]),
+        originalLanguage(.movie, [.tmdb, .tvdb]),
+        originalLanguage(.tvShow, [.tmdb, .tvdb, .tvmaze]),
+        originalLanguage(.unknown, [.tmdb, .tvdb, .tvmaze]),
+    ]
+
     private static func artwork(
         _ type: ContentType,
         _ kind: ArtworkKind,
@@ -90,6 +103,18 @@ enum CurrentMetadataPriority {
         MetadataPriorityRule(
             context: MetadataPriorityContext(rawValue: "nextAiringEpisode.\(type.rawValue)"),
             field: .nextAiringEpisode,
+            sources: sources
+        )
+    }
+
+    private static func originalLanguage(
+        _ type: ContentType,
+        _ sources: [MetadataSource]
+    ) -> MetadataPriorityRule {
+        // Matches `MetadataEnrichmentConfig.contextRawValue` fallback (`<field>.<type>`).
+        MetadataPriorityRule(
+            context: MetadataPriorityContext(rawValue: "originalLanguage.\(type.rawValue)"),
+            field: .originalLanguage,
             sources: sources
         )
     }

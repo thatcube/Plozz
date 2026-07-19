@@ -28,6 +28,11 @@ struct EnrichmentRecord: Sendable, Equatable {
     /// Airbender"), overlaid over a generic folder-derived display title at read
     /// time. Persisted in the `title` enrichment column so it survives re-scans.
     var title: String?
+    /// The work's original/production audio language (ISO-639-1, lowercased),
+    /// resolved by the external pipeline. Projected onto ``MediaItem/originalLanguage``
+    /// so the prefer-original-language audio policy can request the true original
+    /// track instead of the container's (possibly foreign) default.
+    var originalLanguage: String?
     var provenance = MetadataProvenance()
 
     static func sourced(
@@ -38,7 +43,8 @@ struct EnrichmentRecord: Sendable, Equatable {
         posterURL: SourcedValue<URL>? = nil,
         backdropURL: SourcedValue<URL>? = nil,
         logoURL: SourcedValue<URL>? = nil,
-        title: SourcedValue<String>? = nil
+        title: SourcedValue<String>? = nil,
+        originalLanguage: SourcedValue<String>? = nil
     ) -> EnrichmentRecord {
         var provenance = MetadataProvenance()
         for (namespace, value) in providerIDs {
@@ -51,6 +57,7 @@ struct EnrichmentRecord: Sendable, Equatable {
         provenance.set(backdropURL, for: .backdropURL)
         provenance.set(logoURL, for: .logoURL)
         provenance.set(title, for: .title)
+        provenance.set(originalLanguage, for: .originalLanguage)
         return EnrichmentRecord(
             providerIDs: providerIDs.mapValues(\.value),
             overview: overview?.value,
@@ -60,6 +67,7 @@ struct EnrichmentRecord: Sendable, Equatable {
             backdropURL: backdropURL?.value,
             logoURL: logoURL?.value,
             title: title?.value,
+            originalLanguage: originalLanguage?.value,
             provenance: provenance
         )
     }
@@ -87,5 +95,6 @@ struct EnrichmentRecord: Sendable, Equatable {
         if backdropURL != nil { provenance.fillMissing(legacy, for: [.backdropURL]) }
         if logoURL != nil { provenance.fillMissing(legacy, for: [.logoURL]) }
         if title?.isEmpty == false { provenance.fillMissing(legacy, for: [.title]) }
+        if originalLanguage?.isEmpty == false { provenance.fillMissing(legacy, for: [.originalLanguage]) }
     }
 }

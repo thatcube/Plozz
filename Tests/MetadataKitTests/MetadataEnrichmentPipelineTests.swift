@@ -38,6 +38,7 @@ final class FakeEnrichmentProvider: MetadataEnrichmentProvider, @unchecked Senda
         if missing.contains(.posterURL) { filtered.posterURL = output.posterURL }
         if missing.contains(.logoURL) { filtered.logoURL = output.logoURL }
         if missing.contains(.episodeThumbnail) { filtered.episodeStillURL = output.episodeStillURL }
+        if missing.contains(.originalLanguage) { filtered.originalLanguage = output.originalLanguage }
         if requestsBackdrop(missing) { filtered.backdropCandidates = output.backdropCandidates }
         return filtered
     }
@@ -117,6 +118,37 @@ final class MetadataEnrichmentPipelineTests: XCTestCase {
     }
 
     // MARK: Provenance / priority merge
+
+    func testOriginalLanguageRespectsFrontierAndProvenance() async {
+        // The higher-priority source (tmdb) owns originalLanguage; the lower one
+        // (tvmaze) is never asked once it is filled, and the winner's provenance
+        // is retained.
+        let tmdb = FakeEnrichmentProvider(
+            id: .tmdb,
+            capabilities: [.originalLanguage],
+            output: MetadataEnrichment(originalLanguage: sourced("en", .tmdb))
+        )
+        let tvmaze = FakeEnrichmentProvider(
+            id: .tvmaze,
+            capabilities: [.originalLanguage],
+            output: MetadataEnrichment(originalLanguage: sourced("tr", .tvmaze))
+        )
+        let pipeline = MetadataEnrichmentPipeline(
+            providers: [tmdb, tvmaze],
+            config: makeConfig(order: [.tmdb, .tvmaze])
+        )
+
+        let result = await pipeline.enrich(
+            makeQuery(),
+            requesting: [.originalLanguage],
+            tier: .foregroundFill
+        )
+
+        XCTAssertEqual(result.originalLanguage?.value, "en")
+        XCTAssertEqual(result.originalLanguage?.source, .tmdb)
+        XCTAssertEqual(tmdb.callCount, 1)
+        XCTAssertEqual(tvmaze.callCount, 0, "Lower-priority source must not run once filled")
+    }
 
     func testHigherPriorityProviderWins() async {
         let a = FakeEnrichmentProvider(

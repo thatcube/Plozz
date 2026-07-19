@@ -2081,15 +2081,15 @@ actor ShareCatalogStore {
         var stmt: OpaquePointer?
         let sql = """
         INSERT INTO enrichment
-          (item_id, provider_ids_json, overview, genres_json, runtime, poster_url, backdrop_url, logo_url, enriched_at, enrich_version, attempts, title)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+          (item_id, provider_ids_json, overview, genres_json, runtime, poster_url, backdrop_url, logo_url, enriched_at, enrich_version, attempts, title, original_language)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(item_id) DO UPDATE SET
           provider_ids_json=excluded.provider_ids_json, overview=excluded.overview,
           genres_json=excluded.genres_json, runtime=excluded.runtime,
           poster_url=excluded.poster_url, backdrop_url=excluded.backdrop_url,
           logo_url=excluded.logo_url, enriched_at=excluded.enriched_at,
           enrich_version=excluded.enrich_version, attempts=excluded.attempts,
-          title=excluded.title;
+          title=excluded.title, original_language=excluded.original_language;
         """
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
             _ = exec("ROLLBACK;")
@@ -2107,6 +2107,7 @@ actor ShareCatalogStore {
         sqlite3_bind_int64(stmt, 10, Int64(version))
         sqlite3_bind_int64(stmt, 11, Int64(attempts))
         bindOptText(stmt, 12, merged.title)
+        bindOptText(stmt, 13, merged.originalLanguage)
         let projectionWritten = sqlite3_step(stmt) == SQLITE_DONE
         sqlite3_finalize(stmt)
         let normalizedWritten = projectionWritten && enrichmentRepo.writeMetadataValues(

@@ -80,6 +80,23 @@ final class ShareCatalogDecompositionTests: XCTestCase {
         XCTAssertEqual(out.posterURL, URL(string: "https://img/p.jpg"))
     }
 
+    func testApplyEnrichmentProjectsOriginalLanguageWithoutClobbering() {
+        // The pipeline resolved the true original language; projection fills it onto
+        // a movie that has none, and never overwrites a value already present.
+        var item = MediaItem(id: "f:spiderman.mkv", title: "Spider-Man", kind: .movie)
+        var rec = EnrichmentRecord()
+        rec.originalLanguage = "en"
+        rec.provenance[.originalLanguage] = MetadataAttribution(source: .tmdb)
+
+        let out = ShareCatalogReadProjection.applyEnrichment(item, rec)
+        XCTAssertEqual(out.originalLanguage, "en")
+        XCTAssertEqual(out.metadataProvenance[.originalLanguage]?.source, .tmdb)
+
+        item.originalLanguage = "ja"
+        let kept = ShareCatalogReadProjection.applyEnrichment(item, rec)
+        XCTAssertEqual(kept.originalLanguage, "ja", "An existing original language is never clobbered")
+    }
+
     func testApplyEnrichmentUpgradesNearIdenticalSeriesTitleButNotDown() {
         var typo = MediaItem(id: "series:pb", title: "Peaky Blinder", kind: .series)
         typo.seriesID = "series:pb"

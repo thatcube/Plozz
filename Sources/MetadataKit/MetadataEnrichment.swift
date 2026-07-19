@@ -23,6 +23,10 @@ public struct MetadataEnrichment: Sendable, Equatable, Codable {
     public var episodeStillURL: SourcedValue<URL>?
     public var bannerURL: SourcedValue<URL>?
     public var score: SourcedValue<Double>?
+    /// The work's original/production audio language (ISO-639-1, lowercased) as
+    /// reported by a provider (`en`, `ja`, …). Projected onto
+    /// ``MediaItem/originalLanguage`` for the prefer-original-language audio policy.
+    public var originalLanguage: SourcedValue<String>?
     /// Ordered wide-backdrop candidates, best first. Retained as a set (not one URL)
     /// so both ``homeHero`` and ``detailBackdrop`` can be served from one response.
     public var backdropCandidates: [SourcedValue<URL>]
@@ -42,6 +46,7 @@ public struct MetadataEnrichment: Sendable, Equatable, Codable {
         episodeStillURL: SourcedValue<URL>? = nil,
         bannerURL: SourcedValue<URL>? = nil,
         score: SourcedValue<Double>? = nil,
+        originalLanguage: SourcedValue<String>? = nil,
         backdropCandidates: [SourcedValue<URL>] = [],
         upcomingEpisode: UpcomingEpisode? = nil
     ) {
@@ -55,6 +60,7 @@ public struct MetadataEnrichment: Sendable, Equatable, Codable {
         self.episodeStillURL = episodeStillURL
         self.bannerURL = bannerURL
         self.score = score
+        self.originalLanguage = originalLanguage
         self.backdropCandidates = backdropCandidates
         self.upcomingEpisode = upcomingEpisode
     }
@@ -63,6 +69,7 @@ public struct MetadataEnrichment: Sendable, Equatable, Codable {
         externalIDs.isEmpty && title == nil && overview == nil && genres == nil
             && tagline == nil && posterURL == nil && logoURL == nil
             && episodeStillURL == nil && bannerURL == nil && score == nil
+            && originalLanguage == nil
             && backdropCandidates.isEmpty && upcomingEpisode == nil
     }
 
@@ -88,6 +95,7 @@ public struct MetadataEnrichment: Sendable, Equatable, Codable {
         if posterURL != nil { fields.insert(.posterURL) }
         if logoURL != nil { fields.insert(.logoURL) }
         if episodeStillURL != nil { fields.insert(.episodeThumbnail) }
+        if originalLanguage != nil { fields.insert(.originalLanguage) }
         if !backdropCandidates.isEmpty {
             fields.formUnion([.backdropURL, .homeHero, .detailBackdrop])
         }
@@ -117,6 +125,7 @@ public struct MetadataEnrichment: Sendable, Equatable, Codable {
         fill(&posterURL, from: other.posterURL, field: .posterURL, present: present)
         fill(&logoURL, from: other.logoURL, field: .logoURL, present: present)
         fill(&episodeStillURL, from: other.episodeStillURL, field: .episodeThumbnail, present: present)
+        fill(&originalLanguage, from: other.originalLanguage, field: .originalLanguage, present: present)
         // Banner and score have no dedicated MetadataField (bonus art/metadata);
         // still first-writer-wins, and never blocked by `present`.
         if bannerURL == nil { bannerURL = other.bannerURL }

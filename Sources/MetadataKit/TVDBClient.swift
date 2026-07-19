@@ -13,10 +13,14 @@ public struct TVDBMetadata: Sendable, Equatable {
     /// The show's canonical name as TheTVDB records it ("Avatar: The Last
     /// Airbender"), used to upgrade a generic folder-derived title ("Avatar").
     public var title: String?
+    /// The work's original language as TheTVDB records it (`originalLanguage` on the
+    /// extended record, `primary_language` on a search hit) — an ISO-639-2/1 code
+    /// like `eng`/`jpn`. Normalized to ISO-639-1 by the enrichment adapter.
+    public var originalLanguage: String?
 
     public init(tvdbID: String? = nil, imdbID: String? = nil, tmdbID: String? = nil,
                 overview: String? = nil, posterURL: URL? = nil, genres: [String] = [], year: Int? = nil,
-                title: String? = nil) {
+                title: String? = nil, originalLanguage: String? = nil) {
         self.tvdbID = tvdbID
         self.imdbID = imdbID
         self.tmdbID = tmdbID
@@ -25,6 +29,7 @@ public struct TVDBMetadata: Sendable, Equatable {
         self.genres = genres
         self.year = year
         self.title = title
+        self.originalLanguage = originalLanguage
     }
 }
 
@@ -140,7 +145,8 @@ public actor TVDBClient {
             posterURL: data.image.flatMap(Self.imageURL),
             genres: (data.genres ?? []).compactMap { $0.name?.nonEmpty },
             year: data.year.flatMap { Int($0) },
-            title: name
+            title: name,
+            originalLanguage: data.originalLanguage?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty
         )
     }
 
@@ -531,6 +537,8 @@ public actor TVDBClient {
         let remoteIds: [RemoteID]?
         /// A bare `yyyy-MM-dd` calendar day for the next scheduled episode (no time).
         let nextAired: String?
+        /// The work's original language (`eng`, `jpn`, …).
+        let originalLanguage: String?
         struct Genre: Decodable { let name: String? }
         struct RemoteID: Decodable { let id: String?; let sourceName: String? }
     }
@@ -578,6 +586,8 @@ public actor TVDBClient {
         let year: String?
         let genres: [String]?
         let remote_ids: [RemoteID]?
+        /// TheTVDB search hit's original language code (`eng`, `jpn`, …).
+        let primary_language: String?
 
         struct RemoteID: Decodable {
             let id: String?
@@ -600,7 +610,8 @@ public actor TVDBClient {
                 posterURL: image_url.flatMap { URL(string: $0) },
                 genres: genres ?? [],
                 year: year.flatMap { Int($0) },
-                title: name?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty
+                title: name?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty,
+                originalLanguage: primary_language?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty
             )
         }
     }

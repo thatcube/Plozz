@@ -34,6 +34,7 @@ private struct FakeTMDb: TMDbEnriching {
     var poster: URL?
     var logo: URL?
     var still: URL?
+    var original: String?
     var isEnabled: Bool { enabled }
     func backdropURLs(for query: MetadataQuery, limit: Int) async -> [URL] { Array(backdrops.prefix(limit)) }
     func artworkURL(_ kind: ArtworkKind, for query: MetadataQuery) async -> URL? {
@@ -44,6 +45,7 @@ private struct FakeTMDb: TMDbEnriching {
         case .hero: return backdrops.first
         }
     }
+    func originalLanguage(for query: MetadataQuery) async -> String? { original }
 }
 
 private struct FakeAniList: AniListEnriching {
@@ -120,6 +122,18 @@ final class EnrichmentProviderAdapterTests: XCTestCase {
         XCTAssertEqual(fake.log.all.first, "byTitle:Show")
     }
 
+    func testTVDBEmitsNormalizedOriginalLanguage() async {
+        // TheTVDB reports an ISO-639-2 code (`jpn`); the adapter folds it to `ja`.
+        let fake = FakeTVDB(
+            byID: TVDBMetadata(tvdbID: "1", title: "Anime", originalLanguage: "jpn"),
+            byTitle: nil, backdrop: nil
+        )
+        let provider = TVDBEnrichmentProvider(client: fake)
+        let out = await provider.enrich(query(.tvShow, kind: .series, ids: ["Tvdb": "1"]), missing: [.originalLanguage])
+        XCTAssertEqual(out.originalLanguage?.value, "ja")
+        XCTAssertEqual(out.originalLanguage?.source, .tvdb)
+    }
+
     // MARK: TMDb candidate set
 
     func testTMDbReturnsOrderedBackdropCandidateSet() async {
@@ -136,6 +150,30 @@ final class EnrichmentProviderAdapterTests: XCTestCase {
         let provider = TMDbEnrichmentProvider(provider: FakeTMDb(enabled: false, backdrops: [URL(string: "https://b/1.jpg")!]))
         let out = await provider.enrich(query(.movie), missing: [.backdropURL])
         XCTAssertTrue(out.isEmpty)
+    }
+
+    func testTMDbEmitsOriginalLanguage() async {
+        // TMDb's `original_language` is already ISO-639-1; the adapter passes it
+        // through (normalized). This is the Spider-Man case: English original.
+        let provider = TMDbEnrichmentProvider(provider: FakeTMDb(original: "en"))
+        let out = await provider.enrich(query(.movie), missing: [.originalLanguage])
+        XCTAssertEqual(out.originalLanguage?.value, "en")
+        XCTAssertEqual(out.originalLanguage?.source, .tmdb)
+    }
+
+    func testTMDbSkipsOriginalLanguageWhenNotRequested() async {
+        let provider = TMDbEnrichmentProvider(provider: FakeTMDb(original: "en"))
+        let out = await provider.enrich(query(.movie), missing: [.posterURL])
+        XCTAssertNil(out.originalLanguage)
+    }
+
+    func testTVmazeEmitsOriginalLanguageFromDisplayName() async {
+        // TVmaze reports a display name ("Japanese"); the adapter maps it to `ja`.
+        let fake = FakeTVmaze(resolved: TVmazeResolved(showID: 9, language: "Japanese"))
+        let provider = TVmazeEnrichmentProvider(client: fake)
+        let out = await provider.enrich(query(.tvShow, kind: .series), missing: [.originalLanguage])
+        XCTAssertEqual(out.originalLanguage?.value, "ja")
+        XCTAssertEqual(out.originalLanguage?.source, .tvmaze)
     }
 
     // MARK: AniList

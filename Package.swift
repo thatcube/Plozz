@@ -39,6 +39,7 @@ let package = Package(
         .library(name: "FeatureAuth", targets: ["FeatureAuth"]),
         .library(name: "FeatureHomeCore", targets: ["FeatureHomeCore"]),
         .library(name: "FeatureHome", targets: ["FeatureHome"]),
+        .library(name: "FeatureSearchCore", targets: ["FeatureSearchCore"]),
         .library(name: "FeaturePlayback", targets: ["FeaturePlayback"]),
         .library(name: "FeatureSearch", targets: ["FeatureSearch"]),
         .library(name: "FeatureSettings", targets: ["FeatureSettings"]),
@@ -282,8 +283,12 @@ let package = Package(
             ]
         ),
         .target(
+            name: "FeatureSearchCore",
+            dependencies: ["CoreModels"]
+        ),
+        .target(
             name: "FeatureSearch",
-            dependencies: ["CoreModels", "CoreUI"]
+            dependencies: ["CoreModels", "CoreUI", "FeatureSearchCore"]
         ),
         .target(
             name: "FeatureSettings",
@@ -552,6 +557,7 @@ let package = Package(
                 "CoreNetworking",
                 "FeatureAuthCore",
                 "FeatureHomeCore",
+                "FeatureSearchCore",
                 "ProviderPlex",
             ]
         ),
@@ -622,8 +628,8 @@ let package = Package(
             dependencies: ["FeatureHomeCore", "CoreModels", "MetadataKit"]
         ),
         .testTarget(
-            name: "FeatureSearchTests",
-            dependencies: ["FeatureSearch", "CoreModels"]
+            name: "FeatureSearchCoreTests",
+            dependencies: ["FeatureSearchCore", "CoreModels"]
         ),
         .testTarget(
             name: "FeatureProfilesTests",

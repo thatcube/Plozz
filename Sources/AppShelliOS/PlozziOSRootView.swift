@@ -131,12 +131,8 @@ private struct PlozziOSDestinationView: View {
                 onAddServer: onAddServer
             )
         case .search:
-            ContentUnavailableView(
-                "Search",
-                systemImage: "magnifyingglass",
-                description: Text("Search becomes available after Home loads your libraries.")
-            )
-            .navigationTitle("Search")
+            PlozziOSSearchView(appModel: appModel)
+                .id(appModel.accounts.map(\.credentialRevision))
         case .settings:
             PlozziOSSettingsView(
                 appModel: appModel,

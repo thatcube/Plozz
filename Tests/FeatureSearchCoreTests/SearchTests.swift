@@ -1,6 +1,6 @@
 import XCTest
 import CoreModels
-@testable import FeatureSearch
+@testable import FeatureSearchCore
 
 final class SearchPolicyTests: XCTestCase {
     func testNormalizedTrimsWhitespace() {

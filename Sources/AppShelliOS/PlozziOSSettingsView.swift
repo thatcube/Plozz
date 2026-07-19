@@ -23,7 +23,7 @@ struct PlozziOSSettingsView: View {
                     onAddServer: onAddServer
                 )
             }
-            .toolbarBackground(.hidden, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done", action: onClose)
@@ -177,7 +177,7 @@ private struct PlozziOSSettingsSplitView: View {
             .id(selection)
         }
         .navigationSplitViewStyle(.balanced)
-        .toolbarBackground(.hidden, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
                 Button("Done", action: onClose)

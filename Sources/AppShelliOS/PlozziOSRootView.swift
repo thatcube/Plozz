@@ -250,6 +250,7 @@ private struct PlozziOSTabShell: View {
                 onAddServer: showAddServerFromSettings,
                 onClose: { showingSettings = false }
             )
+            .preferredColorScheme(palette.isLight ? .light : .dark)
         }
     }
 

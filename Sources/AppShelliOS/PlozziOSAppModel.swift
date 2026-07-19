@@ -24,6 +24,14 @@ final class PlozziOSAppModel {
         let accountIDs: [String]
     }
 
+    enum FirstRunStep: String, Identifiable {
+        case profiles
+        case confirmProfile
+        case theme
+
+        var id: Self { self }
+    }
+
     let accountsProviders: AccountsProvidersModel
     let profiles: ProfilesModel
     let authenticatedHTTPResolver: ManagedAuthenticatedHTTPResolver
@@ -43,6 +51,7 @@ final class PlozziOSAppModel {
     private(set) var versionPreferences: VersionPreferenceStore
     private(set) var downloads: PlozziOSDownloadsModel
     private(set) var pendingLibrarySelection: PendingLibrarySelection?
+    private(set) var pendingFirstRunStep: FirstRunStep?
     @ObservationIgnored
     private(set) var plexHomeUsers: PlexHomeUsersModel!
     @ObservationIgnored
@@ -75,10 +84,12 @@ final class PlozziOSAppModel {
     @ObservationIgnored private var trackerProfileGeneration: UInt64 = 0
     @ObservationIgnored private var plexUserSelectionGeneration: UInt64 = 0
     @ObservationIgnored private var appliesPlexIdentityAfterLibrarySelection = false
+    @ObservationIgnored private var beginsFirstRunAfterLibrarySelection = false
     @ObservationIgnored private var isManagedServerPresentationActive = false
     @ObservationIgnored
     private var queuedPlexUserSelection: PlexHomeUsersModel.PendingPlexUserSelection?
     @ObservationIgnored private var queuedLibraryAccountIDs: [String]?
+    @ObservationIgnored private var queuedLibrarySelectionBeginsFirstRun = false
     @ObservationIgnored private var postAddPresentationGeneration: UInt64 = 0
     @ObservationIgnored private var watchReconcilers: [String: WatchStateReconciler] = [:]
     @ObservationIgnored
@@ -201,6 +212,11 @@ final class PlozziOSAppModel {
             authenticatedHTTPResolver: authenticatedHTTPResolver
         )
         self.pendingLibrarySelection = nil
+        self.pendingFirstRunStep =
+            !accountsProviders.accounts.isEmpty
+                && !profiles.firstRunProfileSetupComplete
+            ? .profiles
+            : nil
         self.mediaShareAccountService = MediaShareAccountService(runtime: mediaShareRuntime)
         self.mediaShareConfigurationService = MediaShareAccountConfigurationService(
             accountStore: accountStore
@@ -636,11 +652,28 @@ final class PlozziOSAppModel {
     func addProfile(name: String, emoji: String?) {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        _ = profiles.add(
+        let profile = profiles.add(
             name: trimmed,
             activeAccountIDs: accounts.map(\.id),
             avatarEmoji: emoji?.isEmpty == false ? emoji : nil
         )
+        selectProfile(profile.id)
+        scheduleFirstRunStep(.theme)
+    }
+
+    func updateProfile(_ profileID: String, name: String, emoji: String?) {
+        guard var profile = profiles.profiles.first(where: { $0.id == profileID }) else {
+            return
+        }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        let trimmedEmoji = emoji?.trimmingCharacters(in: .whitespacesAndNewlines)
+        profile.name = trimmed
+        profile.avatarEmoji = trimmedEmoji?.isEmpty == false ? trimmedEmoji : nil
+        if profile.avatarEmoji != nil {
+            profile.avatarImageURL = nil
+        }
+        profiles.update(profile)
     }
 
     func removeProfile(_ id: String) {
@@ -729,6 +762,8 @@ final class PlozziOSAppModel {
     func persist(_ sessions: [UserSession]) {
         do {
             let existingIDs = Set(accountsProviders.accounts.map(\.id))
+            let isFirstRun = existingIDs.isEmpty
+                && !profiles.firstRunProfileSetupComplete
             var addedAccounts: [Account] = []
             for session in sessions {
                 let account = Account(from: session)
@@ -740,7 +775,20 @@ final class PlozziOSAppModel {
             accountError = nil
             reloadAccountsAndCrashContext()
             identityIndex.warmIdentityIndex()
-            preparePostSignInOnboarding(for: addedAccounts)
+            if isFirstRun,
+               let session = sessions.first(where: {
+                   let account = Account(from: $0)
+                   return addedAccounts.contains(where: { $0.id == account.id })
+               }) {
+                profiles.seedDefaultProfileIdentity(
+                    name: session.userName,
+                    avatarImageURL: session.avatarURL?.absoluteString
+                )
+            }
+            preparePostSignInOnboarding(
+                for: addedAccounts,
+                beginsFirstRun: isFirstRun && !addedAccounts.isEmpty
+            )
         } catch {
             accountError = error.localizedDescription
         }
@@ -761,10 +809,29 @@ final class PlozziOSAppModel {
                 forPlexAccount: accountID
             )
         }
+
         profiles.update(profile)
+        if pending.isFirstRun {
+            profiles.seedDefaultProfileIdentity(
+                name: user.name,
+                avatarImageURL: user.avatarURL?.absoluteString
+            )
+        }
         appliesPlexIdentityAfterLibrarySelection = true
         plexHomeUsers.clearUserSelection()
-        scheduleLibrarySelection(accountIDs: pending.applyToAccountIDs)
+        scheduleLibrarySelection(
+            accountIDs: pending.applyToAccountIDs,
+            beginsFirstRun: pending.isFirstRun
+        )
+    }
+
+    func cancelPlexUserSelectionDuringOnboarding() {
+        guard let pending = plexHomeUsers.pendingPlexUserSelection else { return }
+        plexHomeUsers.clearUserSelection()
+        scheduleLibrarySelection(
+            accountIDs: pending.applyToAccountIDs,
+            beginsFirstRun: pending.isFirstRun
+        )
     }
 
     func beginManagedServerPresentation() {
@@ -772,6 +839,7 @@ final class PlozziOSAppModel {
         plexUserSelectionGeneration &+= 1
         queuedPlexUserSelection = nil
         queuedLibraryAccountIDs = nil
+        queuedLibrarySelectionBeginsFirstRun = false
         isManagedServerPresentationActive = true
     }
 
@@ -781,19 +849,54 @@ final class PlozziOSAppModel {
             queuedPlexUserSelection = nil
             plexHomeUsers.presentUserSelection(selection)
         } else if let accountIDs = queuedLibraryAccountIDs {
+            let beginsFirstRun = queuedLibrarySelectionBeginsFirstRun
             queuedLibraryAccountIDs = nil
-            scheduleLibrarySelection(accountIDs: accountIDs)
+            queuedLibrarySelectionBeginsFirstRun = false
+            scheduleLibrarySelection(
+                accountIDs: accountIDs,
+                beginsFirstRun: beginsFirstRun
+            )
         }
     }
 
     func completeLibrarySelection() {
         pendingLibrarySelection = nil
-        guard appliesPlexIdentityAfterLibrarySelection else { return }
-        appliesPlexIdentityAfterLibrarySelection = false
-        plexHomeUsers.ensurePlexIdentityForActiveProfile()
+        if beginsFirstRunAfterLibrarySelection {
+            beginsFirstRunAfterLibrarySelection = false
+            scheduleFirstRunStep(.profiles)
+        } else if appliesPlexIdentityAfterLibrarySelection {
+            appliesPlexIdentityAfterLibrarySelection = false
+            plexHomeUsers.ensurePlexIdentityForActiveProfile()
+        }
     }
 
-    private func preparePostSignInOnboarding(for accounts: [Account]) {
+    func enableProfilesForFirstRun() {
+        profiles.enableProfiles()
+        pendingFirstRunStep = .confirmProfile
+    }
+
+    func declineProfilesForFirstRun() {
+        profiles.disableProfiles()
+        pendingFirstRunStep = .theme
+    }
+
+    func confirmFirstRunProfile() {
+        pendingFirstRunStep = .theme
+    }
+
+    func finishFirstRunThemeSelection() {
+        profiles.markFirstRunProfileSetupComplete()
+        pendingFirstRunStep = nil
+        if appliesPlexIdentityAfterLibrarySelection {
+            appliesPlexIdentityAfterLibrarySelection = false
+            plexHomeUsers.ensurePlexIdentityForActiveProfile()
+        }
+    }
+
+    private func preparePostSignInOnboarding(
+        for accounts: [Account],
+        beginsFirstRun: Bool
+    ) {
         plexUserSelectionGeneration &+= 1
         let generation = plexUserSelectionGeneration
         guard let account = accounts.first(where: {
@@ -802,7 +905,10 @@ final class PlozziOSAppModel {
                     forPlexAccount: $0.id
                 ) == nil
         }) else {
-            scheduleLibrarySelection(accountIDs: accounts.map(\.id))
+            scheduleLibrarySelection(
+                accountIDs: accounts.map(\.id),
+                beginsFirstRun: beginsFirstRun
+            )
             return
         }
         Task {
@@ -814,7 +920,10 @@ final class PlozziOSAppModel {
                   accountsProviders.accounts.contains(where: {
                       $0.id == account.id
                   }) else {
-                scheduleLibrarySelection(accountIDs: accounts.map(\.id))
+                scheduleLibrarySelection(
+                    accountIDs: accounts.map(\.id),
+                    beginsFirstRun: beginsFirstRun
+                )
                 return
             }
             schedulePlexUserSelection(
@@ -822,7 +931,7 @@ final class PlozziOSAppModel {
                     accountID: account.id,
                     serverName: account.server.name,
                     users: users,
-                    isFirstRun: false,
+                    isFirstRun: beginsFirstRun,
                     applyToAccountIDs: accounts.map(\.id)
                 )
             )
@@ -871,9 +980,7 @@ final class PlozziOSAppModel {
             )
             reloadAccountsAndCrashContext()
             identityIndex.warmIdentityIndex()
-            if prepared.previousAccount == nil {
-                scheduleLibrarySelection(accountIDs: [prepared.account.id])
-            }
+            preparePostShareOnboarding(prepared)
             accountError = nil
             return true
         } catch {
@@ -902,9 +1009,7 @@ final class PlozziOSAppModel {
             )
             reloadAccountsAndCrashContext()
             identityIndex.warmIdentityIndex()
-            if prepared.previousAccount == nil {
-                scheduleLibrarySelection(accountIDs: [prepared.account.id])
-            }
+            preparePostShareOnboarding(prepared)
             accountError = nil
             return true
         } catch {
@@ -929,9 +1034,7 @@ final class PlozziOSAppModel {
             )
             reloadAccountsAndCrashContext()
             identityIndex.warmIdentityIndex()
-            if prepared.previousAccount == nil {
-                scheduleLibrarySelection(accountIDs: [prepared.account.id])
-            }
+            preparePostShareOnboarding(prepared)
             accountError = nil
             return true
         } catch {
@@ -962,9 +1065,7 @@ final class PlozziOSAppModel {
             )
             reloadAccountsAndCrashContext()
             identityIndex.warmIdentityIndex()
-            if prepared.previousAccount == nil {
-                scheduleLibrarySelection(accountIDs: [prepared.account.id])
-            }
+            preparePostShareOnboarding(prepared)
             accountError = nil
             return true
         } catch {
@@ -987,9 +1088,7 @@ final class PlozziOSAppModel {
             )
             reloadAccountsAndCrashContext()
             identityIndex.warmIdentityIndex()
-            if prepared.previousAccount == nil {
-                scheduleLibrarySelection(accountIDs: [prepared.account.id])
-            }
+            preparePostShareOnboarding(prepared)
             accountError = nil
             return true
         } catch {
@@ -1002,10 +1101,37 @@ final class PlozziOSAppModel {
         let activeIDs = Set(accountsProviders.accounts.map(\.id))
         let available = accountIDs.filter(activeIDs.contains)
         guard !available.isEmpty else {
+            beginsFirstRunAfterLibrarySelection = false
             appliesPlexIdentityAfterLibrarySelection = false
             return
         }
         pendingLibrarySelection = PendingLibrarySelection(accountIDs: available)
+    }
+
+    private func preparePostShareOnboarding(
+        _ prepared: PreparedMediaShareAccount
+    ) {
+        guard prepared.previousAccount == nil else { return }
+        let beginsFirstRun = accountsProviders.accounts.count == 1
+            && !profiles.firstRunProfileSetupComplete
+        if beginsFirstRun {
+            profiles.seedDefaultProfileIdentity(
+                name: prepared.session.userName,
+                avatarImageURL: prepared.session.avatarURL?.absoluteString
+            )
+        }
+
+        scheduleLibrarySelection(
+            accountIDs: [prepared.account.id],
+            beginsFirstRun: beginsFirstRun
+        )
+    }
+
+    private func scheduleFirstRunStep(_ step: FirstRunStep) {
+        Task {
+            await Task.yield()
+            pendingFirstRunStep = step
+        }
     }
 
     private func schedulePlexUserSelection(
@@ -1018,12 +1144,17 @@ final class PlozziOSAppModel {
         }
     }
 
-    private func scheduleLibrarySelection(accountIDs: [String]) {
+    private func scheduleLibrarySelection(
+        accountIDs: [String],
+        beginsFirstRun: Bool = false
+    ) {
         guard !accountIDs.isEmpty else { return }
+        beginsFirstRunAfterLibrarySelection = beginsFirstRun
         postAddPresentationGeneration &+= 1
         let generation = postAddPresentationGeneration
         if isManagedServerPresentationActive {
             queuedLibraryAccountIDs = accountIDs
+            queuedLibrarySelectionBeginsFirstRun = beginsFirstRun
             return
         }
         Task {

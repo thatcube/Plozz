@@ -1,4 +1,5 @@
 #if os(iOS)
+import AppRuntime
 import CoreModels
 import CoreUI
 import SwiftUI
@@ -13,10 +14,6 @@ public struct PlozziOSRootView: View {
     public init() {}
 
     public var body: some View {
-        let pinRequest = appModel.plexHomeUsers.pendingPlexPINRequest
-        let plexUserSelection = appModel.plexHomeUsers.pendingPlexUserSelection
-        let librarySelection = appModel.pendingLibrarySelection
-
         Group {
             if appModel.requiresLaunchProfileSelection
                 && !completedLaunchProfileSelection {
@@ -50,14 +47,7 @@ public struct PlozziOSRootView: View {
             AddServerView(appModel: appModel)
         }
         .sheet(
-            item: Binding(
-                get: { plexUserSelection },
-                set: { selection in
-                    if selection == nil {
-                        appModel.plexHomeUsers.clearUserSelection()
-                    }
-                }
-            )
+            item: plexUserSelectionBinding
         ) { selection in
             PlozziOSPlexUserSelectionView(
                 selection: selection,
@@ -65,14 +55,7 @@ public struct PlozziOSRootView: View {
             )
         }
         .sheet(
-            item: Binding(
-                get: { pinRequest },
-                set: { request in
-                    if request == nil {
-                        appModel.plexHomeUsers.dismissPlexPINIfPresented()
-                    }
-                }
-            )
+            item: plexPINBinding
         ) { request in
             PlozziOSPlexPINView(
                 model: appModel.plexHomeUsers,
@@ -80,14 +63,7 @@ public struct PlozziOSRootView: View {
             )
         }
         .sheet(
-            item: Binding(
-                get: { librarySelection },
-                set: { selection in
-                    if selection == nil {
-                        appModel.completeLibrarySelection()
-                    }
-                }
-            )
+            item: librarySelectionBinding
         ) { selection in
             PlozziOSLibrarySelectionView(
                 accounts: appModel.accountsProviders.resolvedAccounts(
@@ -96,6 +72,11 @@ public struct PlozziOSRootView: View {
                 visibility: appModel.settings.homeVisibility,
                 onContinue: appModel.completeLibrarySelection
             )
+        }
+        .fullScreenCover(
+            item: firstRunStepBinding
+        ) { step in
+            PlozziOSFirstRunView(step: step, appModel: appModel)
         }
         .preferredColorScheme(appModel.settings.theme.theme.preferredColorScheme)
         .installNightShiftOverlay(appModel.settings.nightShift)
@@ -108,6 +89,54 @@ public struct PlozziOSRootView: View {
         }
         return "\(appModel.profiles.activeProfileID)#"
             + "\(appModel.plexHomeUsers.plexIdentityGeneration)"
+    }
+
+    private var plexUserSelectionBinding:
+        Binding<PlexHomeUsersModel.PendingPlexUserSelection?>
+    {
+        Binding(
+            get: { appModel.plexHomeUsers.pendingPlexUserSelection },
+            set: { selection in
+                if selection == nil {
+                    appModel.cancelPlexUserSelectionDuringOnboarding()
+                }
+            }
+        )
+    }
+
+    private var plexPINBinding:
+        Binding<PlexHomeUsersModel.PlexPINRequest?>
+    {
+        Binding(
+            get: { appModel.plexHomeUsers.pendingPlexPINRequest },
+            set: { request in
+                if request == nil {
+                    appModel.plexHomeUsers.dismissPlexPINIfPresented()
+                }
+            }
+        )
+    }
+
+    private var librarySelectionBinding:
+        Binding<PlozziOSAppModel.PendingLibrarySelection?>
+    {
+        Binding(
+            get: { appModel.pendingLibrarySelection },
+            set: { selection in
+                if selection == nil {
+                    appModel.completeLibrarySelection()
+                }
+            }
+        )
+    }
+
+    private var firstRunStepBinding:
+        Binding<PlozziOSAppModel.FirstRunStep?>
+    {
+        Binding(
+            get: { appModel.pendingFirstRunStep },
+            set: { _ in }
+        )
     }
 
     private func showAddServer() {

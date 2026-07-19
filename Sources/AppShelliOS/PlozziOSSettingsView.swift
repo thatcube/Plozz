@@ -179,8 +179,23 @@ private struct PlozziOSProfilesView: View {
 
     var body: some View {
         List {
-            if appModel.profiles.profiles.count > 1 {
-                Section {
+            Section {
+                Toggle(
+                    "Enable Profiles",
+                    isOn: Binding(
+                        get: { appModel.profiles.profilesEnabled },
+                        set: { enabled in
+                            if enabled {
+                                appModel.profiles.enableProfiles()
+                            } else {
+                                appModel.profiles.disableProfiles()
+                            }
+                        }
+                    )
+                )
+                .disabled(appModel.profiles.profiles.count > 1)
+
+                if appModel.profiles.profilesEnabled {
                     Toggle(
                         "Ask Who’s Watching on Startup",
                         isOn: Binding(
@@ -192,8 +207,12 @@ private struct PlozziOSProfilesView: View {
                             }
                         )
                     )
-                } footer: {
-                    Text("Choose a household profile whenever Plozz opens.")
+                }
+            } footer: {
+                if appModel.profiles.profiles.count > 1 {
+                    Text("Profiles stay enabled while more than one household profile exists.")
+                } else {
+                    Text("Profiles keep Home, settings, watch history, and downloads personal.")
                 }
             }
 
@@ -206,7 +225,7 @@ private struct PlozziOSProfilesView: View {
                         )
                     } label: {
                         HStack {
-                            Text(profile.avatarEmoji ?? "👤")
+                            PlozziOSProfileAvatar(profile: profile, size: 34)
                             Text(profile.name)
                             Spacer()
                             if profile.id == appModel.profiles.activeProfileID {
@@ -240,18 +259,27 @@ private struct PlozziOSProfilesView: View {
 private struct PlozziOSProfileDetailView: View {
     let appModel: PlozziOSAppModel
     let profile: Profile
+    @State private var editing = false
+
+    private var currentProfile: Profile {
+        appModel.profiles.profiles.first(where: { $0.id == profile.id }) ?? profile
+    }
 
     var body: some View {
         Form {
             Section {
                 Button(
-                    profile.id == appModel.profiles.activeProfileID
+                    currentProfile.id == appModel.profiles.activeProfileID
                         ? "Current Profile"
-                        : "Switch to \(profile.name)"
+                        : "Switch to \(currentProfile.name)"
                 ) {
-                    appModel.selectProfile(profile.id)
+                    appModel.selectProfile(currentProfile.id)
                 }
-                .disabled(profile.id == appModel.profiles.activeProfileID)
+                .disabled(currentProfile.id == appModel.profiles.activeProfileID)
+
+                Button("Edit Profile", systemImage: "pencil") {
+                    editing = true
+                }
             }
 
             Section("Media sources") {
@@ -260,14 +288,14 @@ private struct PlozziOSProfileDetailView: View {
                         account.server.name,
                         isOn: Binding(
                             get: {
-                                appModel.activeAccountIDs(for: profile.id)
+                                appModel.activeAccountIDs(for: currentProfile.id)
                                     .contains(account.id)
                             },
                             set: {
                                 appModel.setAccount(
                                     account.id,
                                     enabled: $0,
-                                    for: profile.id
+                                    for: currentProfile.id
                                 )
                             }
                         )
@@ -275,7 +303,23 @@ private struct PlozziOSProfileDetailView: View {
                 }
             }
         }
-        .navigationTitle(profile.name)
+        .navigationTitle(currentProfile.name)
+        .sheet(isPresented: $editing) {
+            NavigationStack {
+                PlozziOSProfileEditorView(
+                    profile: currentProfile,
+                    onSave: { name, emoji in
+                        appModel.updateProfile(
+                            currentProfile.id,
+                            name: name,
+                            emoji: emoji
+                        )
+                        editing = false
+                    },
+                    onCancel: { editing = false }
+                )
+            }
+        }
     }
 }
 

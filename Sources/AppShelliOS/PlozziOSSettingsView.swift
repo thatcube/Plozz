@@ -158,9 +158,9 @@ struct PlozziOSSettingsView: View {
                 }
             }
         }
-        .plozziOSSettingsSurface()
         .frame(maxWidth: 760)
         .frame(maxWidth: .infinity)
+        .plozziOSSettingsSurface()
         .navigationTitle("Settings")
         .alert("Sign out of all accounts?", isPresented: $confirmSignOutAll) {
             Button("Cancel", role: .cancel) {}
@@ -597,9 +597,9 @@ private struct PlozziOSAppearanceSettingsView: View {
                 }
             }
         }
-        .plozziOSSettingsSurface()
         .frame(maxWidth: 760)
         .frame(maxWidth: .infinity)
+        .plozziOSSettingsSurface()
         .navigationTitle("Appearance")
     }
 }

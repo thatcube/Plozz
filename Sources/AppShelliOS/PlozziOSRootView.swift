@@ -186,6 +186,7 @@ private enum PlozziOSDestination: String, CaseIterable, Identifiable {
 }
 
 private struct PlozziOSSplitShell: View {
+    @Environment(\.themePalette) private var palette
     @Binding var selection: PlozziOSDestination?
     @State private var homePath = NavigationPath()
     @State private var searchPath = NavigationPath()
@@ -212,6 +213,7 @@ private struct PlozziOSSplitShell: View {
                 )
             }
             .id(destination)
+            .background { AppBackground(palette: palette) }
         }
     }
 

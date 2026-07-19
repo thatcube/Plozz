@@ -251,6 +251,7 @@ private struct PlozziOSTabShell: View {
                 onClose: { showingSettings = false }
             )
             .preferredColorScheme(palette.isLight ? .light : .dark)
+            .presentationSizing(.page)
         }
     }
 

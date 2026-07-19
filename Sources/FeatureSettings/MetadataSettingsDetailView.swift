@@ -284,10 +284,10 @@ struct MetadataSettingsDetailView: View {
         )
     }
 
-    private var preferOnlineArtworkBinding: Binding<Bool> {
+    private var preferLocalArtworkBinding: Binding<Bool> {
         Binding(
-            get: { providers.settings.preferOnlineArtwork },
-            set: { providers.settings.preferOnlineArtwork = $0 }
+            get: { !providers.settings.preferOnlineArtwork },
+            set: { providers.settings.preferOnlineArtwork = !$0 }
         )
     }
 
@@ -321,7 +321,7 @@ struct MetadataSettingsDetailView: View {
                     title: orderModeTitle
                 )
 
-                Toggle("Prefer online artwork", isOn: preferOnlineArtworkBinding)
+                Toggle("Prefer local artwork", isOn: preferLocalArtworkBinding)
                     .toggleStyle(SettingsSwitchToggleStyle())
 
                 if providers.settings.orderMode == .custom {
@@ -454,7 +454,7 @@ struct MetadataSettingsDetailView: View {
                     title: orderModeTitle
                 )
 
-                Toggle("Prefer online artwork", isOn: preferOnlineArtworkBinding)
+                Toggle("Prefer local artwork", isOn: preferLocalArtworkBinding)
                     .toggleStyle(SettingsSwitchToggleStyle())
 
                 if providers.settings.orderMode == .custom {

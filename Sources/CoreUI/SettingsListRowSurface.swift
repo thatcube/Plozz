@@ -7,7 +7,9 @@ public struct SettingsListRowSurface: ViewModifier {
     public init() {}
 
     public func body(content: Content) -> some View {
-        content.listRowBackground(palette.cardOpaqueSurface)
+        content
+            .listRowBackground(palette.cardOpaqueSurface)
+            .background(palette.cardOpaqueSurface)
     }
 }
 

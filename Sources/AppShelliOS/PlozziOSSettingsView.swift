@@ -37,6 +37,7 @@ struct PlozziOSSettingsView: View {
         .background { AppBackground(palette: palette) }
         .environment(\.themePalette, palette)
         .environment(\.colorScheme, palette.isLight ? .light : .dark)
+        .tint(palette.primaryText)
         .preferredColorScheme(palette.isLight ? .light : .dark)
         .modifier(
             PlozziOSSettingsListAppearance(

@@ -96,7 +96,7 @@ struct FakeDownloadEngine: MediaDownloadEngine {
     func download(
         record: DownloadedMediaRecord,
         to destination: URL,
-        onProgress: @Sendable (Int64, Int64) async -> Void
+        onProgress: @escaping @Sendable (Int64, Int64) async -> Void
     ) async throws -> Int64 {
         try await behavior(record, onProgress)
     }

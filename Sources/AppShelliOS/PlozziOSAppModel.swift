@@ -14,7 +14,7 @@ import ProviderShare
 final class PlozziOSAppModel {
     let accountsProviders: AccountsProvidersModel
     let profiles: ProfilesModel
-    let authenticatedHTTPResolver = ManagedAuthenticatedHTTPResolver()
+    let authenticatedHTTPResolver: ManagedAuthenticatedHTTPResolver
     let mediaShareRuntime: DefaultMediaShareRuntime
     private(set) var settings: PlozziOSSettingsModel
     private(set) var downloads: PlozziOSDownloadsModel
@@ -27,6 +27,7 @@ final class PlozziOSAppModel {
     var accountError: String?
 
     init() {
+        let authenticatedHTTPResolver = ManagedAuthenticatedHTTPResolver()
         let accountStore: AccountStore
         var launchErrors: [String] = []
         do {
@@ -74,6 +75,7 @@ final class PlozziOSAppModel {
         self.accountStore = accountStore
         self.profiles = profiles
         self.accountsProviders = accountsProviders
+        self.authenticatedHTTPResolver = authenticatedHTTPResolver
         self.mediaShareRuntime = mediaShareRuntime
         self.durableLocalStateStore = durableLocalStateStore
         self.settings = PlozziOSSettingsModel(
@@ -82,7 +84,9 @@ final class PlozziOSAppModel {
         self.downloads = Self.makeDownloadsModel(
             namespace: profiles.activeProfileID,
             durableStore: durableLocalStateStore,
-            mediaShareRuntime: mediaShareRuntime
+            mediaShareRuntime: mediaShareRuntime,
+            accountsProviders: accountsProviders,
+            authenticatedHTTPResolver: authenticatedHTTPResolver
         )
         self.mediaShareAccountService = MediaShareAccountService(runtime: mediaShareRuntime)
         self.mediaShareConfigurationService = MediaShareAccountConfigurationService(
@@ -144,7 +148,9 @@ final class PlozziOSAppModel {
         downloads = Self.makeDownloadsModel(
             namespace: profiles.activeProfileID,
             durableStore: durableLocalStateStore,
-            mediaShareRuntime: mediaShareRuntime
+            mediaShareRuntime: mediaShareRuntime,
+            accountsProviders: accountsProviders,
+            authenticatedHTTPResolver: authenticatedHTTPResolver
         )
         accountsProviders.reloadAccounts()
     }
@@ -152,7 +158,9 @@ final class PlozziOSAppModel {
     private static func makeDownloadsModel(
         namespace: String,
         durableStore: DurableLocalStateStore?,
-        mediaShareRuntime: DefaultMediaShareRuntime
+        mediaShareRuntime: DefaultMediaShareRuntime,
+        accountsProviders: AccountsProvidersModel,
+        authenticatedHTTPResolver: ManagedAuthenticatedHTTPResolver
     ) -> PlozziOSDownloadsModel {
         guard let durableStore else {
             return PlozziOSDownloadsModel(
@@ -163,7 +171,41 @@ final class PlozziOSAppModel {
             return try PlozziOSDownloadsModel(
                 profileID: namespace,
                 durableStore: durableStore,
-                networkFileResolver: mediaShareRuntime.networkFileResolver
+                networkFileResolver: mediaShareRuntime.networkFileResolver,
+                providerKind: { accountID in
+                    accountsProviders.accounts.first {
+                        $0.id == accountID
+                    }?.server.provider
+                },
+                managedURLResolver: { source in
+                    let provider: (any MediaProvider)? = await MainActor.run {
+                        guard accountsProviders.accounts.first(where: {
+                            $0.id == source.accountID
+                        })?.server.provider == source.provider else {
+                            return nil
+                        }
+                        return accountsProviders.provider(
+                            forAccountID: source.accountID
+                        )
+                    }
+                    guard let provider else {
+                        throw MediaTransportError.authentication(
+                            reason: "inactive managed download account"
+                        )
+                    }
+                    let playback = try await provider.playbackInfo(
+                        for: source.itemID,
+                        mediaSourceID: source.mediaSourceID,
+                        forceTranscode: false
+                    )
+                    guard case .authenticatedHTTP(let locator) = playback.playbackSource,
+                          locator.deliveryMode == .directFile else {
+                        throw MediaTransportError.unsupportedCapability(
+                            "managed background download requires a direct file"
+                        )
+                    }
+                    return try await authenticatedHTTPResolver.resolve(locator)
+                }
             )
         } catch {
             return PlozziOSDownloadsModel(

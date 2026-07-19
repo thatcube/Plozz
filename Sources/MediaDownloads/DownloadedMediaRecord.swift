@@ -21,6 +21,8 @@ public struct DownloadedMediaRecord: Codable, Sendable, Hashable, Identifiable {
 
     /// Direct-share reopen info (present when `sourceKind == .directShare`).
     public var directShareSource: DirectShareDownloadSource?
+    /// Managed-provider reopen info (present when `sourceKind == .managedHTTP`).
+    public var managedHTTPSource: ManagedHTTPDownloadSource?
 
     /// Leaf filename of the pinned media file inside the download's folder
     /// (e.g. `media.mkv`).
@@ -46,6 +48,7 @@ public struct DownloadedMediaRecord: Codable, Sendable, Hashable, Identifiable {
         quality: DownloadQuality = .original,
         status: DownloadStatus = .queued,
         directShareSource: DirectShareDownloadSource? = nil,
+        managedHTTPSource: ManagedHTTPDownloadSource? = nil,
         localFileName: String,
         bytesDownloaded: Int64 = 0,
         totalBytes: Int64? = nil,
@@ -62,6 +65,7 @@ public struct DownloadedMediaRecord: Codable, Sendable, Hashable, Identifiable {
         self.quality = quality
         self.status = status
         self.directShareSource = directShareSource
+        self.managedHTTPSource = managedHTTPSource
         self.localFileName = localFileName
         self.bytesDownloaded = bytesDownloaded
         self.totalBytes = totalBytes

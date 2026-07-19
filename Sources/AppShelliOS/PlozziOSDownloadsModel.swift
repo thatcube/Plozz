@@ -23,13 +23,17 @@ final class PlozziOSDownloadsModel {
     private let queue: DownloadQueue?
     private let defaults: UserDefaults?
     private let policyKey: String
+    private let providerKind: @MainActor (String) -> ProviderKind?
     @ObservationIgnored
     nonisolated(unsafe) private var eventsTask: Task<Void, Never>?
 
     init(
         profileID: String,
         durableStore: DurableLocalStateStore,
-        networkFileResolver: any MediaTransportNetworkFileResolving
+        networkFileResolver: any MediaTransportNetworkFileResolving,
+        providerKind: @escaping @MainActor (String) -> ProviderKind?,
+        managedURLResolver:
+            @escaping PlozziOSBackgroundHTTPDownloadEngine.URLResolver
     ) throws {
         let store = try DurableDownloadedMediaStore(
             store: durableStore,
@@ -41,10 +45,19 @@ final class PlozziOSDownloadsModel {
         )
         let policyKey = "downloads.policy.\(profileID)"
         let policy = Self.loadPolicy(key: policyKey)
+        let engine = RoutingMediaDownloadEngine(
+            directShare: TransportCursorDownloadEngine(
+                resolver: networkFileResolver
+            ),
+            managedHTTP: PlozziOSBackgroundHTTPDownloadEngine(
+                profileID: profileID,
+                resolveURL: managedURLResolver
+            )
+        )
         let queue = DownloadQueue(
             registry: registry,
             storage: storage,
-            engine: TransportCursorDownloadEngine(resolver: networkFileResolver),
+            engine: engine,
             observer: NWPathDownloadNetworkObserver(),
             policy: policy
         )
@@ -57,6 +70,7 @@ final class PlozziOSDownloadsModel {
         )
         self.defaults = .standard
         self.policyKey = policyKey
+        self.providerKind = providerKind
         self.allowsCellular = policy.allowsExpensiveNetwork
         self.pausesOnLowDataMode = policy.pausesOnConstrainedNetwork
 
@@ -78,6 +92,7 @@ final class PlozziOSDownloadsModel {
         self.offlineResolver = nil
         self.defaults = nil
         self.policyKey = ""
+        self.providerKind = { _ in nil }
         self.allowsCellular = false
         self.pausesOnLowDataMode = true
     }
@@ -110,16 +125,43 @@ final class PlozziOSDownloadsModel {
             mediaSourceID: item.selectedVersionID,
             forceTranscode: false
         )
-        guard case .networkFile(let locator) = playback.playbackSource else {
+        let request: DownloadRequest
+        switch playback.playbackSource {
+        case .networkFile(let locator):
+            request = DownloadRequest.directShare(
+                identity: identity,
+                locator: locator,
+                snapshot: PinnedMediaSnapshot(item: item)
+            )
+        case .authenticatedHTTP(let locator):
+            guard locator.deliveryMode == .directFile,
+                  let accountID = item.sourceAccountID,
+                  let kind = providerKind(accountID),
+                  kind != .mediaShare else {
+                throw PlozziOSDownloadError.unavailable(
+                    "This server did not provide a downloadable original file."
+                )
+            }
+            let source = ManagedHTTPDownloadSource(
+                provider: kind,
+                accountID: accountID,
+                itemID: item.id,
+                mediaSourceID: item.selectedVersionID
+            )
+            let fileExtension = playback.sourceFileName.map {
+                ($0 as NSString).pathExtension
+            }
+            request = DownloadRequest.managedHTTP(
+                identity: identity,
+                source: source,
+                snapshot: PinnedMediaSnapshot(item: item),
+                fileExtension: fileExtension
+            )
+        case .publicURL, .dlnaResource, nil:
             throw PlozziOSDownloadError.unavailable(
-                "Managed-server background downloads are not available in this build yet."
+                "This playback source cannot be downloaded for offline use."
             )
         }
-        let request = DownloadRequest.directShare(
-            identity: identity,
-            locator: locator,
-            snapshot: PinnedMediaSnapshot(item: item)
-        )
         let record = try await queue.enqueue(request)
         await reload()
         return record

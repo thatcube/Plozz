@@ -44,6 +44,41 @@ struct PlozziOSDownloadsView: View {
     }
 }
 
+struct PlozziOSDownloadSettingsView: View {
+    @Bindable var model: PlozziOSDownloadsModel
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle("Allow Cellular Downloads", isOn: $model.allowsCellular)
+                Toggle(
+                    "Pause in Low Data Mode",
+                    isOn: $model.pausesOnLowDataMode
+                )
+            } footer: {
+                Text(
+                    "Downloads use original quality. Network-share downloads continue while Plozz is open; Jellyfin, Emby, and Plex downloads can continue in the background."
+                )
+            }
+
+            Section("Storage") {
+                LabeledContent("Downloaded titles") {
+                    Text(model.records.filter { $0.status == .completed }.count.formatted())
+                }
+                LabeledContent("Stored media") {
+                    Text(
+                        model.records
+                            .filter { $0.status == .completed }
+                            .reduce(Int64(0)) { $0 + $1.bytesDownloaded },
+                        format: .byteCount(style: .file)
+                    )
+                }
+            }
+        }
+        .navigationTitle("Downloads")
+    }
+}
+
 private struct DownloadRow: View {
     let record: DownloadedMediaRecord
     let model: PlozziOSDownloadsModel

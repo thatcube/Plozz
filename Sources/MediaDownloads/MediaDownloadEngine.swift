@@ -34,8 +34,54 @@ public protocol MediaDownloadEngine: Sendable {
     func download(
         record: DownloadedMediaRecord,
         to destination: URL,
-        onProgress: @Sendable (Int64, Int64) async -> Void
+        onProgress: @escaping @Sendable (Int64, Int64) async -> Void
     ) async throws -> Int64
+}
+
+/// Optional capability for engines that must push policy into the underlying
+/// transfer system (for example URLSession's cellular/Low Data request flags).
+public protocol DownloadPolicyApplying: Sendable {
+    func applyDownloadPolicy(_ policy: DownloadNetworkPolicy)
+}
+
+/// Routes durable records to the transport-specific byte mover.
+public struct RoutingMediaDownloadEngine: MediaDownloadEngine, DownloadPolicyApplying {
+    private let directShare: any MediaDownloadEngine
+    private let managedHTTP: any MediaDownloadEngine
+
+    public init(
+        directShare: any MediaDownloadEngine,
+        managedHTTP: any MediaDownloadEngine
+    ) {
+        self.directShare = directShare
+        self.managedHTTP = managedHTTP
+    }
+
+    public func download(
+        record: DownloadedMediaRecord,
+        to destination: URL,
+        onProgress: @escaping @Sendable (Int64, Int64) async -> Void
+    ) async throws -> Int64 {
+        switch record.sourceKind {
+        case .directShare:
+            try await directShare.download(
+                record: record,
+                to: destination,
+                onProgress: onProgress
+            )
+        case .managedHTTP:
+            try await managedHTTP.download(
+                record: record,
+                to: destination,
+                onProgress: onProgress
+            )
+        }
+    }
+
+    public func applyDownloadPolicy(_ policy: DownloadNetworkPolicy) {
+        (directShare as? any DownloadPolicyApplying)?.applyDownloadPolicy(policy)
+        (managedHTTP as? any DownloadPolicyApplying)?.applyDownloadPolicy(policy)
+    }
 }
 
 /// Production opener: resolves a direct-share locator through the shared transport
@@ -87,7 +133,10 @@ final class TransportCursorByteReader: DownloadByteReader, @unchecked Sendable {
 /// byte API — the uniform `read(at:length:)` path that works identically across
 /// every share transport. Resumes by byte offset; foreground/while-running only
 /// (the OS can't continue a stateful-socket transfer while suspended).
-public struct TransportCursorDownloadEngine: MediaDownloadEngine {
+public struct TransportCursorDownloadEngine:
+    MediaDownloadEngine,
+    @unchecked Sendable
+{
     private let opener: any DownloadByteSourceOpening
     private let chunkSize: Int
     private let fileManager: FileManager
@@ -118,7 +167,7 @@ public struct TransportCursorDownloadEngine: MediaDownloadEngine {
     public func download(
         record: DownloadedMediaRecord,
         to destination: URL,
-        onProgress: @Sendable (Int64, Int64) async -> Void
+        onProgress: @escaping @Sendable (Int64, Int64) async -> Void
     ) async throws -> Int64 {
         guard let source = record.directShareSource else {
             throw MediaDownloadError.unsupportedSource

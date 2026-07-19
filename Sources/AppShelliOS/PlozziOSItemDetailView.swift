@@ -83,6 +83,7 @@ struct PlozziOSItemDetailView: View {
                                 PlozziOSSeasonEpisodesView(
                                     viewModel: viewModel,
                                     season: season,
+                                    provider: provider,
                                     onPlay: play
                                 )
                             } label: {
@@ -346,6 +347,7 @@ private struct PlozziOSSeasonRow: View {
 private struct PlozziOSSeasonEpisodesView: View {
     let viewModel: ItemDetailViewModel
     let season: MediaItem
+    let provider: any MediaProvider
     let onPlay: (MediaItem, Bool) -> Void
 
     var body: some View {
@@ -358,12 +360,19 @@ private struct PlozziOSSeasonEpisodesView: View {
                     )
                 } else {
                     List(episodes) { episode in
-                        Button {
-                            onPlay(episode, false)
-                        } label: {
-                            PlozziOSEpisodeRow(episode: episode)
+                        HStack {
+                            Button {
+                                onPlay(episode, false)
+                            } label: {
+                                PlozziOSEpisodeRow(episode: episode)
+                            }
+                            .buttonStyle(.plain)
+
+                            PlozziOSEpisodeDownloadButton(
+                                episode: episode,
+                                provider: provider
+                            )
                         }
-                        .buttonStyle(.plain)
                     }
                     .listStyle(.plain)
                 }
@@ -374,6 +383,101 @@ private struct PlozziOSSeasonEpisodesView: View {
         .navigationTitle(season.title)
         .navigationBarTitleDisplayMode(.inline)
         .task { await viewModel.loadEpisodes(for: season.id) }
+    }
+}
+
+private struct PlozziOSEpisodeDownloadButton: View {
+    @Environment(PlozziOSAppModel.self) private var appModel
+    @State private var record: DownloadedMediaRecord?
+    @State private var errorMessage: String?
+
+    let episode: MediaItem
+    let provider: any MediaProvider
+
+    var body: some View {
+        Button(action: toggleDownload) {
+            Group {
+                switch currentRecord?.status {
+                case .downloading, .queued:
+                    ProgressView()
+                case .paused, .failed:
+                    Image(systemName: "arrow.clockwise.circle")
+                case .completed:
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                case nil:
+                    Image(systemName: "arrow.down.circle")
+                }
+            }
+            .frame(width: 44, height: 44)
+        }
+        .buttonStyle(.borderless)
+        .disabled(currentRecord?.status == .completed)
+        .contextMenu {
+            if let currentRecord {
+                Button("Remove Download", systemImage: "trash", role: .destructive) {
+                    Task {
+                        await appModel.downloads.remove(currentRecord)
+                        record = nil
+                    }
+                }
+            }
+        }
+        .task(id: episode.id) {
+            record = await appModel.downloads.record(for: episode)
+        }
+        .alert(
+            "Download Failed",
+            isPresented: Binding(
+                get: { errorMessage != nil },
+                set: { if !$0 { errorMessage = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(errorMessage ?? "")
+        }
+        .accessibilityLabel(accessibilityLabel)
+    }
+
+    private var currentRecord: DownloadedMediaRecord? {
+        guard let record else { return nil }
+        return appModel.downloads.records.first {
+            $0.identityKey == record.identityKey
+        } ?? record
+    }
+
+    private var accessibilityLabel: String {
+        switch currentRecord?.status {
+        case .downloading, .queued: "Pause download"
+        case .paused, .failed: "Resume download"
+        case .completed: "Downloaded"
+        case nil: "Download episode"
+        }
+    }
+
+    private func toggleDownload() {
+        Task {
+            do {
+                if let currentRecord {
+                    switch currentRecord.status {
+                    case .downloading, .queued:
+                        await appModel.downloads.pause(currentRecord)
+                    case .paused, .failed:
+                        await appModel.downloads.resume(currentRecord)
+                    case .completed:
+                        break
+                    }
+                } else {
+                    record = try await appModel.downloads.enqueue(
+                        item: episode,
+                        provider: provider
+                    )
+                }
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
     }
 }
 

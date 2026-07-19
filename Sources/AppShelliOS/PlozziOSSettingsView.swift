@@ -78,6 +78,11 @@ struct PlozziOSSettingsView: View {
                     Label("Playback", systemImage: "play.rectangle")
                 }
                 NavigationLink {
+                    PlozziOSDownloadSettingsView(model: appModel.downloads)
+                } label: {
+                    Label("Downloads", systemImage: "arrow.down.circle")
+                }
+                NavigationLink {
                     PlozziOSSubtitleSettingsView(
                         behavior: appModel.settings.subtitleBehavior,
                         style: appModel.settings.subtitleStyle

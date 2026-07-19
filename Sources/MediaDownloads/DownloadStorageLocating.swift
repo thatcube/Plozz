@@ -51,7 +51,10 @@ public enum DownloadStoragePlatform: Sendable {
 
 /// Concrete locator that selects the base directory per ``DownloadStoragePlatform``
 /// and applies the backup-exclusion resource value where required.
-public struct PlatformDownloadStorageLocator: DownloadStorageLocating {
+public struct PlatformDownloadStorageLocator:
+    DownloadStorageLocating,
+    @unchecked Sendable
+{
     private let platform: DownloadStoragePlatform
     private let subdirectory: String
     private let fileManager: FileManager

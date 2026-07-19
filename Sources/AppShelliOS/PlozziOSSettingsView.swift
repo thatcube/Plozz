@@ -155,14 +155,20 @@ private struct PlozziOSSettingsSplitView: View {
                 }
             }
             .navigationTitle("Settings")
+            .scrollContentBackground(.hidden)
+            .background { AppBackground(palette: palette) }
         } detail: {
             NavigationStack {
-                Group {
-                    settingsDetail
+                ZStack {
+                    AppBackground(palette: palette)
+                    Group {
+                        settingsDetail
+                    }
+                    .frame(maxWidth: 760)
+                    .frame(maxWidth: .infinity)
+                    .plozziOSSettingsSurface()
                 }
-                .frame(maxWidth: 760)
-                .frame(maxWidth: .infinity)
-                .plozziOSSettingsSurface()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             .id(selection)
         }

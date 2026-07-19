@@ -171,7 +171,7 @@ final class MetadataFoundationCharacterizationTests: XCTestCase {
         XCTAssertEqual(movie.posterURL, URL(string: "https://example.com/poster.jpg"))
     }
 
-    func testDefaultExternalResolverSelectionPreservesConfiguredFallbackOrder() {
+    func testDefaultExternalResolverIsThePipelineResolver() {
         let clients = ShareExternalMetadataClients(
             ids: FakeShareExternalIDs(),
             artwork: FakeShareArtwork(),
@@ -180,7 +180,7 @@ final class MetadataFoundationCharacterizationTests: XCTestCase {
             makeTVDBClient: { _ in FakeTVDBMetadata() }
         )
         let keylessFactory = DefaultShareMetadataPipelineFactory(clients: clients)
-        XCTAssertTrue(keylessFactory.makeExternalResolver() is KeylessShareResolver)
+        XCTAssertTrue(keylessFactory.makeExternalResolver() is PipelineShareResolver)
 
         let configuredClients = ShareExternalMetadataClients(
             ids: FakeShareExternalIDs(),
@@ -190,7 +190,9 @@ final class MetadataFoundationCharacterizationTests: XCTestCase {
             makeTVDBClient: { _ in FakeTVDBMetadata() }
         )
         let configuredFactory = DefaultShareMetadataPipelineFactory(clients: configuredClients)
-        XCTAssertTrue(configuredFactory.makeExternalResolver() is TVDBShareResolver)
+        // A single resolver covers both configs; TheTVDB participation is data
+        // (inert when unconfigured), not a separate resolver class.
+        XCTAssertTrue(configuredFactory.makeExternalResolver() is PipelineShareResolver)
     }
 
     func testCoordinatorUsesOnePipelinePerAccountGeneration() async {

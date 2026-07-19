@@ -55,6 +55,28 @@ struct ShareExternalMetadataClients: Sendable {
     /// Builds a TVDB metadata client for a configuration (injected so tests never
     /// perform network I/O).
     let makeTVDBClient: @Sendable (TVDBConfig) -> any ShareTVDBMetadataResolving
+    /// Builds the Step 5 capability pipeline the ``PipelineShareResolver`` drives.
+    /// Injected so tests substitute a pipeline of fake providers; defaults to the
+    /// production provider set (each result-cached + circuit-broken).
+    let makePipeline: @Sendable () -> MetadataEnrichmentPipeline
+
+    init(
+        ids: any ShareExternalIDResolving,
+        artwork: any ShareSourcedArtworkResolving,
+        overview: any ShareSourcedOverviewResolving,
+        tvdbConfig: @escaping @Sendable () -> TVDBConfig,
+        makeTVDBClient: @escaping @Sendable (TVDBConfig) -> any ShareTVDBMetadataResolving,
+        makePipeline: @escaping @Sendable () -> MetadataEnrichmentPipeline = {
+            ProductionMetadataProviders.makePipeline()
+        }
+    ) {
+        self.ids = ids
+        self.artwork = artwork
+        self.overview = overview
+        self.tvdbConfig = tvdbConfig
+        self.makeTVDBClient = makeTVDBClient
+        self.makePipeline = makePipeline
+    }
 }
 
 // MARK: - Production adapters (composition boundary)

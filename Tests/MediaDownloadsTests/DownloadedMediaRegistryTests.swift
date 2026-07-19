@@ -71,6 +71,40 @@ final class DownloadedMediaRegistryTests: XCTestCase {
         XCTAssertEqual(found?.identity, identity)
     }
 
+    func testRecordForItemMatchesUniqueAccountScopedFallbackByItemID() async throws {
+        let registry = DownloadedMediaRegistry(store: InMemoryDownloadedMediaStore())
+        let identity = MediaIdentity.external(
+            source: "plozz-account:share-account",
+            value: "episode-7"
+        )
+        _ = try await registry.beginDownload(
+            try DownloadTestFactory.record(identity: identity, status: .completed)
+        )
+        let item = MediaItem(id: "episode-7", title: "Episode 7", kind: .episode)
+
+        let found = await registry.record(for: item)
+
+        XCTAssertEqual(found?.identity, identity)
+    }
+
+    func testRecordForItemRejectsAmbiguousAccountScopedFallback() async throws {
+        let registry = DownloadedMediaRegistry(store: InMemoryDownloadedMediaStore())
+        for account in ["one", "two"] {
+            let identity = MediaIdentity.external(
+                source: "plozz-account:\(account)",
+                value: "episode-7"
+            )
+            _ = try await registry.beginDownload(
+                try DownloadTestFactory.record(identity: identity, status: .completed)
+            )
+        }
+        let item = MediaItem(id: "episode-7", title: "Episode 7", kind: .episode)
+
+        let found = await registry.record(for: item)
+
+        XCTAssertNil(found)
+    }
+
     func testStatusTransitionsAndRemoval() async throws {
         let registry = DownloadedMediaRegistry(store: InMemoryDownloadedMediaStore())
         let identity = DownloadTestFactory.imdbIdentity()

@@ -36,6 +36,7 @@ public struct PlozziOSRootView: View {
 private enum PlozziOSDestination: String, CaseIterable, Identifiable {
     case home
     case search
+    case downloads
     case settings
 
     var id: Self { self }
@@ -44,6 +45,7 @@ private enum PlozziOSDestination: String, CaseIterable, Identifiable {
         switch self {
         case .home: "Home"
         case .search: "Search"
+        case .downloads: "Downloads"
         case .settings: "Settings"
         }
     }
@@ -52,6 +54,7 @@ private enum PlozziOSDestination: String, CaseIterable, Identifiable {
         switch self {
         case .home: "house"
         case .search: "magnifyingglass"
+        case .downloads: "arrow.down.circle"
         case .settings: "gear"
         }
     }
@@ -106,6 +109,16 @@ private struct PlozziOSTabShell: View {
                 }
             }
 
+            Tab("Downloads", systemImage: "arrow.down.circle") {
+                NavigationStack {
+                    PlozziOSDestinationView(
+                        destination: .downloads,
+                        appModel: appModel,
+                        onAddServer: onAddServer
+                    )
+                }
+            }
+
             Tab("Settings", systemImage: "gear") {
                 NavigationStack {
                     PlozziOSDestinationView(
@@ -134,6 +147,9 @@ private struct PlozziOSDestinationView: View {
         case .search:
             PlozziOSSearchView(appModel: appModel)
                 .id(appModel.accounts.map(\.credentialRevision))
+        case .downloads:
+            PlozziOSDownloadsView(model: appModel.downloads)
+                .id(appModel.profiles.activeProfileID)
         case .settings:
             PlozziOSSettingsView(
                 appModel: appModel,

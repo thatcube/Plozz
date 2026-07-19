@@ -4,6 +4,7 @@ import CoreModels
 import CoreUI
 import FeatureAuthCore
 import Foundation
+import MediaDownloads
 import MediaTransportCore
 import Observation
 import ProviderShare
@@ -16,8 +17,10 @@ final class PlozziOSAppModel {
     let authenticatedHTTPResolver = ManagedAuthenticatedHTTPResolver()
     let mediaShareRuntime: DefaultMediaShareRuntime
     private(set) var settings: PlozziOSSettingsModel
+    private(set) var downloads: PlozziOSDownloadsModel
 
     private let accountStore: AccountPersisting
+    private let durableLocalStateStore: DurableLocalStateStore?
     private let mediaShareAccountService: MediaShareAccountService
     private let mediaShareConfigurationService: MediaShareAccountConfigurationService
 
@@ -72,8 +75,14 @@ final class PlozziOSAppModel {
         self.profiles = profiles
         self.accountsProviders = accountsProviders
         self.mediaShareRuntime = mediaShareRuntime
+        self.durableLocalStateStore = durableLocalStateStore
         self.settings = PlozziOSSettingsModel(
             namespace: profiles.activeNamespace
+        )
+        self.downloads = Self.makeDownloadsModel(
+            namespace: profiles.activeProfileID,
+            durableStore: durableLocalStateStore,
+            mediaShareRuntime: mediaShareRuntime
         )
         self.mediaShareAccountService = MediaShareAccountService(runtime: mediaShareRuntime)
         self.mediaShareConfigurationService = MediaShareAccountConfigurationService(
@@ -132,7 +141,35 @@ final class PlozziOSAppModel {
     func selectProfile(_ id: String) {
         profiles.select(id)
         settings = PlozziOSSettingsModel(namespace: profiles.activeNamespace)
+        downloads = Self.makeDownloadsModel(
+            namespace: profiles.activeProfileID,
+            durableStore: durableLocalStateStore,
+            mediaShareRuntime: mediaShareRuntime
+        )
         accountsProviders.reloadAccounts()
+    }
+
+    private static func makeDownloadsModel(
+        namespace: String,
+        durableStore: DurableLocalStateStore?,
+        mediaShareRuntime: DefaultMediaShareRuntime
+    ) -> PlozziOSDownloadsModel {
+        guard let durableStore else {
+            return PlozziOSDownloadsModel(
+                initializationError: "Durable download storage is unavailable."
+            )
+        }
+        do {
+            return try PlozziOSDownloadsModel(
+                profileID: namespace,
+                durableStore: durableStore,
+                networkFileResolver: mediaShareRuntime.networkFileResolver
+            )
+        } catch {
+            return PlozziOSDownloadsModel(
+                initializationError: error.localizedDescription
+            )
+        }
     }
 
     func addProfile(name: String, emoji: String?) {

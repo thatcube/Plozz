@@ -1,11 +1,15 @@
 #if os(iOS)
 import CoreModels
 import FeatureHomeCore
+import MediaDownloads
 import SwiftUI
 
 struct PlozziOSItemDetailView: View {
+    @Environment(PlozziOSAppModel.self) private var appModel
     @State private var viewModel: ItemDetailViewModel
     @State private var playbackRequest: PlozziOSPlaybackRequest?
+    @State private var downloadRecord: DownloadedMediaRecord?
+    @State private var downloadError: String?
     private let provider: any MediaProvider
 
     init(provider: any MediaProvider, item: MediaItem) {
@@ -58,6 +62,15 @@ struct PlozziOSItemDetailView: View {
 
                 if detail.item.kind == .movie || detail.item.kind == .episode {
                     PlozziOSPlaybackActions(item: detail.item, onPlay: play)
+                    PlozziOSDownloadAction(
+                        item: detail.item,
+                        record: currentDownloadRecord,
+                        errorMessage: downloadError,
+                        onDownload: { Task { await download(detail.item) } },
+                        onPause: { Task { await pauseDownload() } },
+                        onResume: { Task { await resumeDownload() } },
+                        onRemove: { Task { await removeDownload(detail.item) } }
+                    )
                 }
 
                 if detail.item.kind == .series, !detail.children.isEmpty {
@@ -88,6 +101,9 @@ struct PlozziOSItemDetailView: View {
             .padding(.bottom, 32)
         }
         .navigationTitle(detail.item.title)
+        .task(id: detail.item.id) {
+            downloadRecord = await appModel.downloads.record(for: detail.item)
+        }
     }
 
     private func play(_ item: MediaItem, fromBeginning: Bool = false) {
@@ -95,6 +111,100 @@ struct PlozziOSItemDetailView: View {
             item: item,
             startPosition: fromBeginning ? 0 : (item.resumePosition ?? 0)
         )
+    }
+
+    private var currentDownloadRecord: DownloadedMediaRecord? {
+        guard let downloadRecord else { return nil }
+        return appModel.downloads.records.first {
+            $0.identityKey == downloadRecord.identityKey
+        } ?? downloadRecord
+    }
+
+    private func download(_ item: MediaItem) async {
+        do {
+            downloadRecord = try await appModel.downloads.enqueue(
+                item: item,
+                provider: provider
+            )
+            downloadError = nil
+        } catch {
+            downloadError = error.localizedDescription
+        }
+    }
+
+    private func pauseDownload() async {
+        guard let downloadRecord else { return }
+        await appModel.downloads.pause(downloadRecord)
+        self.downloadRecord = appModel.downloads.records.first {
+            $0.identityKey == downloadRecord.identityKey
+        }
+    }
+
+    private func resumeDownload() async {
+        guard let downloadRecord else { return }
+        await appModel.downloads.resume(downloadRecord)
+        self.downloadRecord = appModel.downloads.records.first {
+            $0.identityKey == downloadRecord.identityKey
+        }
+    }
+
+    private func removeDownload(_ item: MediaItem) async {
+        guard let downloadRecord else { return }
+        await appModel.downloads.remove(downloadRecord)
+        self.downloadRecord = await appModel.downloads.record(for: item)
+    }
+}
+
+private struct PlozziOSDownloadAction: View {
+    let item: MediaItem
+    let record: DownloadedMediaRecord?
+    let errorMessage: String?
+    let onDownload: () -> Void
+    let onPause: () -> Void
+    let onResume: () -> Void
+    let onRemove: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                if let record {
+                    statusControl(record)
+                } else {
+                    Button(action: onDownload) {
+                        Label("Download", systemImage: "arrow.down.circle")
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+            if let errorMessage {
+                Text(errorMessage)
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func statusControl(_ record: DownloadedMediaRecord) -> some View {
+        switch record.status {
+        case .queued:
+            Label("Queued", systemImage: "clock")
+            Button("Cancel", role: .destructive, action: onRemove)
+        case .downloading:
+            ProgressView(value: record.fractionCompleted ?? 0)
+                .frame(maxWidth: 240)
+            Button("Pause", action: onPause)
+        case .paused:
+            Button("Resume Download", action: onResume)
+            Button("Remove", role: .destructive, action: onRemove)
+        case .failed:
+            Button("Try Download Again", action: onResume)
+            Button("Remove", role: .destructive, action: onRemove)
+        case .completed:
+            Label("Available Offline", systemImage: "checkmark.circle.fill")
+                .foregroundStyle(.green)
+            Button("Remove Download", role: .destructive, action: onRemove)
+        }
     }
 }
 

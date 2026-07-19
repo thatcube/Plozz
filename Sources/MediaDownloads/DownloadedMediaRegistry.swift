@@ -60,7 +60,19 @@ public actor DownloadedMediaRegistry {
                 return record
             }
         }
-        return nil
+        if let identity = DownloadMediaIdentity.primary(for: item) {
+            if let record = state.records[MediaIdentityKey.string(for: identity)] {
+                return record
+            }
+        }
+        let sourceScopedMatches = state.records.values.filter {
+            guard case .external(let source, let value) = $0.identity else {
+                return false
+            }
+            return source.hasPrefix(DownloadMediaIdentity.accountSourcePrefix)
+                && value == item.id
+        }
+        return sourceScopedMatches.count == 1 ? sourceScopedMatches[0] : nil
     }
 
     /// The records belonging to a download group (e.g. a season).

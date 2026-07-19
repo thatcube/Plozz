@@ -62,6 +62,7 @@ struct PlozziOSPlayerView: View {
             provider: provider,
             itemID: item.id,
             mediaSourceID: item.selectedVersionID,
+            offlinePlaybackResolver: appModel.downloads.offlineResolver,
             behavior: appModel.settings.subtitleBehavior.settings,
             style: appModel.settings.subtitleStyle.style,
             subtitlePolicy: .inheriting(

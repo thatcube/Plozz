@@ -1,5 +1,6 @@
 #if os(iOS)
 import CoreModels
+import CoreUI
 import SwiftUI
 
 struct PlozziOSSettingsView: View {
@@ -157,6 +158,7 @@ struct PlozziOSSettingsView: View {
                 }
             }
         }
+        .plozziOSSettingsSurface()
         .frame(maxWidth: 760)
         .frame(maxWidth: .infinity)
         .navigationTitle("Settings")
@@ -247,6 +249,7 @@ private struct PlozziOSProfilesView: View {
                 }
             }
         }
+        .plozziOSSettingsSurface()
         .navigationTitle("Profiles")
         .sheet(isPresented: $showingAddProfile) {
             NavigationStack {
@@ -594,9 +597,26 @@ private struct PlozziOSAppearanceSettingsView: View {
                 }
             }
         }
+        .plozziOSSettingsSurface()
         .frame(maxWidth: 760)
         .frame(maxWidth: .infinity)
         .navigationTitle("Appearance")
+    }
+}
+
+private struct PlozziOSSettingsSurface: ViewModifier {
+    @Environment(\.themePalette) private var palette
+
+    func body(content: Content) -> some View {
+        content
+            .scrollContentBackground(.hidden)
+            .background { AppBackground(palette: palette) }
+    }
+}
+
+private extension View {
+    func plozziOSSettingsSurface() -> some View {
+        modifier(PlozziOSSettingsSurface())
     }
 }
 

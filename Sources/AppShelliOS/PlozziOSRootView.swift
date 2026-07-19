@@ -6,6 +6,7 @@ import SwiftUI
 
 public struct PlozziOSRootView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.colorScheme) private var systemColorScheme
     @State private var appModel = PlozziOSAppModel()
     @State private var selection: PlozziOSDestination? = .home
     @State private var showingAddServer = false
@@ -38,6 +39,12 @@ public struct PlozziOSRootView: View {
                 )
             }
         }
+        .background { AppBackground(palette: resolvedPalette) }
+        .environment(\.themePalette, resolvedPalette)
+        .environment(
+            \.colorScheme,
+            resolvedPalette.isLight ? .light : .dark
+        )
         .environment(appModel)
         .id(shellIdentity)
         .sheet(
@@ -78,8 +85,14 @@ public struct PlozziOSRootView: View {
         ) { step in
             PlozziOSFirstRunView(step: step, appModel: appModel)
         }
-        .preferredColorScheme(appModel.settings.theme.theme.preferredColorScheme)
         .installNightShiftOverlay(appModel.settings.nightShift)
+    }
+
+    private var resolvedPalette: ThemePalette {
+        ThemePalette.palette(
+            for: appModel.settings.theme.theme,
+            systemColorScheme: systemColorScheme
+        )
     }
 
     private var shellIdentity: String {
@@ -322,13 +335,4 @@ private struct PlozziOSHomeLandingView: View {
     }
 }
 
-private extension AppTheme {
-    var preferredColorScheme: ColorScheme? {
-        switch self {
-        case .system: nil
-        case .light: .light
-        case .dark, .pureBlack: .dark
-        }
-    }
-}
 #endif

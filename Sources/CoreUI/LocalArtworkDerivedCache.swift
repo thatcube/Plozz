@@ -13,7 +13,10 @@ public actor LocalArtworkDerivedCache {
 
     private let directory: URL
     private let databaseURL: URL
-    private let byteCap: Int
+    /// User-adjustable byte budget (Step 6). A `var` so `setByteCap(_:)` can change
+    /// it at runtime and trim immediately; `store` continues to trim to it after
+    /// each write.
+    private var byteCap: Int
     private let warningByteCap: Int
     private let maximumEntryAge: TimeInterval
     private let now: @Sendable () -> Date
@@ -144,6 +147,26 @@ public actor LocalArtworkDerivedCache {
     public func usageBytes() -> Int {
         guard open() else { return 0 }
         return Int(queryInt64("SELECT COALESCE(SUM(byte_count), 0) FROM entries;"))
+    }
+
+    /// Current cache size in bytes (Step 6 diagnostics). Alias of ``usageBytes()``
+    /// under the naming the diagnostics aggregator uses across both caches.
+    public func currentByteSize() -> Int { usageBytes() }
+
+    /// Applies a new user-chosen byte budget and immediately trims down to it
+    /// (oldest / inactive-account entries first — idempotent). Subsequent `store`
+    /// calls also trim to this value.
+    public func setByteCap(_ bytes: Int) {
+        byteCap = max(0, bytes)
+        guard open() else { return }
+        trim(to: byteCap)
+    }
+
+    /// Removes every cached derivative and its file (Step 6 "Clear cache now").
+    /// Distinct from a budget change: it drops all data regardless of size.
+    public func clear() {
+        guard open() else { return }
+        for entry in entries(ordering: "last_use ASC") { delete(key: entry.key) }
     }
 
     public func trim(to byteCap: Int) {

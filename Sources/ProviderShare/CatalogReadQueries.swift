@@ -1008,6 +1008,22 @@ struct CatalogReadQueries {
 
     // MARK: - Assets-count query intents
 
+    /// Per-source count of persisted provenance rows in `metadata_values`, keyed by
+    /// ``MetadataSource`` (Step 6 diagnostics). One grouped scan — cheap relative to
+    /// a full read — but callers should still invoke it **lazily / on demand** (and
+    /// debounce) since `metadata_values` grows with the library. Empty on a fresh
+    /// catalog. Internal (server/local) and external sources are both included; the
+    /// caller decides what to surface.
+    func metadataCountPerSource() -> [MetadataSource: Int] {
+        guard db != nil else { return [:] }
+        var result: [MetadataSource: Int] = [:]
+        query("SELECT source, COUNT(*) FROM metadata_values GROUP BY source;") { stmt in
+            guard let raw = self.columnText(stmt, 0) else { return }
+            result[MetadataSource(rawValue: raw)] = Int(sqlite3_column_int64(stmt, 1))
+        }
+        return result
+    }
+
     private func count(where clause: String?) -> Int {
         guard db != nil else { return 0 }
         let sql = "SELECT COUNT(*) FROM assets" + (clause.map { " WHERE \($0)" } ?? "") + ";"

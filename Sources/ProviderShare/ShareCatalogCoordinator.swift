@@ -443,6 +443,38 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
         await metadataScheduler.enqueueItem(accountKey: accountKey, itemID: itemID)
     }
 
+    /// Manual item-level re-enrichment (Step 6 "Refresh"): enqueues the item ahead of
+    /// the backlog, exactly like ``enrichItem(accountKey:itemID:)``. Named for the
+    /// user-facing intent so Settings/detail refresh controls read clearly; whole-share
+    /// refresh uses `rescan(accountKey:)` (surfaced via the runtime facet's `rescanShare`).
+    public func requestRefresh(accountKey: String, itemID: String) async {
+        await enrichItem(accountKey: accountKey, itemID: itemID)
+    }
+
+    /// Aggregate per-source provenance-row counts across **every** registered share
+    /// (Step 6 diagnostics). Lazy/on-demand — the caller decides when to sample and
+    /// should debounce, since each share's scan grows `metadata_values`.
+    public func metadataCountPerSource() async -> [MetadataSource: Int] {
+        var totals: [MetadataSource: Int] = [:]
+        for runtime in runtimes.values {
+            for (source, count) in await runtime.store.metadataCountPerSource() {
+                totals[source, default: 0] += count
+            }
+        }
+        return totals
+    }
+
+    /// Background metadata work status projected into the module-neutral
+    /// diagnostics shape (Step 6). Point-in-time.
+    public func metadataWorkStatus() async -> MetadataEnrichmentDiagnosticsSnapshot.WorkStatus {
+        let snapshot = await metadataScheduler.snapshot()
+        return MetadataEnrichmentDiagnosticsSnapshot.WorkStatus(
+            queuedBacklogs: snapshot.queuedBacklogs,
+            queuedItems: snapshot.queuedItems,
+            isRunning: snapshot.runningAccountKey != nil
+        )
+    }
+
     public func noteInteractiveActivity(accountKey: String) async {
         // Note interactive activity on the account's pacer when it is registered.
         // An unregistered account has no scanner/pacer to pace, so there is nothing

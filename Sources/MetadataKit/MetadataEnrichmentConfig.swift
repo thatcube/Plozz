@@ -112,6 +112,51 @@ public struct MetadataEnrichmentConfig: Sendable {
         }
     }
 
+    // MARK: - User overrides
+
+    /// Returns a copy of this (Info.plist / code-default) baseline with a user's
+    /// persisted ``MetadataProviderSettings`` layered on top — the Step 6 override
+    /// layer. `AppShell` applies this at composition time; Step 5's own read-only,
+    /// Info.plist-sourced semantics are unchanged (this never mutates the baseline
+    /// and is a no-op unless the user actually overrode something).
+    ///
+    /// Layering rules, chosen so the baseline is preserved wherever the user hasn't
+    /// spoken:
+    ///   * **Roles:** each user role override replaces the baseline role for exactly
+    ///     that source; every other source keeps its baseline role. (`MetadataProviderState`
+    ///     shares raw values with ``ProviderRole``, so the mapping is exact.)
+    ///   * **Order:** when the user supplied an explicit order, it leads — in the
+    ///     user's sequence — and any baseline source the user omitted is appended in
+    ///     its original baseline order, so a provider a newer build adds is never
+    ///     dropped by an older saved order. An empty user order keeps the baseline order.
+    ///
+    /// An **empty** override returns `self` unchanged, so a user who has customized
+    /// nothing runs a config identical to the pure Step 5 baseline.
+    public func merged(withUserOverrides overrides: MetadataProviderSettings) -> MetadataEnrichmentConfig {
+        guard !overrides.isEmpty else { return self }
+
+        var mergedRoles = roles
+        for (raw, state) in overrides.roleOverrides {
+            mergedRoles[MetadataSource(rawValue: raw)] = ProviderRole(rawValue: state.rawValue) ?? .primary
+        }
+
+        var mergedOrder = baseOrder
+        if !overrides.order.isEmpty {
+            var seen: Set<MetadataSource> = []
+            var ordered: [MetadataSource] = []
+            for source in overrides.order.map({ MetadataSource(rawValue: $0) })
+            where seen.insert(source).inserted {
+                ordered.append(source)
+            }
+            for source in baseOrder where seen.insert(source).inserted {
+                ordered.append(source)
+            }
+            mergedOrder = ordered
+        }
+
+        return MetadataEnrichmentConfig(roles: mergedRoles, baseOrder: mergedOrder, priority: priority)
+    }
+
     // MARK: - Bundle resolution
 
     /// Reads role overrides from the app bundle so a build can promote/demote/disable

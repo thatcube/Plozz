@@ -127,6 +127,17 @@ final class MetadataCacheFileIO: @unchecked Sendable {
         }
     }
 
+    /// Serialized byte size of `snapshot`, measured on the serial queue with the
+    /// same coder the write path uses. Returns 0 when encoding fails. Diagnostics
+    /// only — keeps the (blocking) encode off the cache actor's executor.
+    func byteSize(of snapshot: [String: MetadataDiskCache.Entry]) async -> Int {
+        await withCheckedContinuation { continuation in
+            queue.async {
+                continuation.resume(returning: self.coding.encode(snapshot)?.count ?? 0)
+            }
+        }
+    }
+
     // MARK: - Budget pruning (queue-confined)
 
     /// Serializes `entries`, pruning oldest-expiring entries when over budget.

@@ -75,7 +75,10 @@ public actor MetadataDiskCache {
     private let fileURL: URL?
     private let positiveTTL: TimeInterval
     private let negativeTTL: TimeInterval
-    private let maxBytes: Int
+    /// User-adjustable byte budget (Step 6). A `var` so `setMaxBytes(_:)` can lower
+    /// or raise it at runtime and trigger an immediate eviction pass; the write path
+    /// prunes the serialized map to this value atomically on the IO queue.
+    private var maxBytes: Int
     private let io: MetadataCacheFileIO
     private var loaded = false
     /// The single in-flight initial load. Concurrent `cached`/`store` callers all
@@ -147,6 +150,36 @@ public actor MetadataDiskCache {
         await loadIfNeeded()
         let ttl = url == nil ? negativeTTL : positiveTTL
         entries[key] = Entry(url: url?.absoluteString, expires: Date().addingTimeInterval(ttl))
+        revision += 1
+        await persist()
+    }
+
+    /// The current serialized size of the cache in bytes (Step 6 diagnostics). It
+    /// encodes the live snapshot on the IO queue — the same encoder the write path
+    /// uses — so the number matches what the on-disk file would occupy right now.
+    public func currentByteSize() async -> Int {
+        await loadIfNeeded()
+        return await io.byteSize(of: entries)
+    }
+
+    /// Applies a new user-chosen byte budget and immediately evicts down to it.
+    ///
+    /// The eviction happens atomically on the serial IO queue via the normal write
+    /// path (oldest-expiring first — idempotent), and any evicted keys are
+    /// reconciled back into the in-memory map, so a lowered budget takes effect at
+    /// once rather than waiting for the next `store`.
+    public func setMaxBytes(_ bytes: Int) async {
+        await loadIfNeeded()
+        maxBytes = max(0, bytes)
+        revision += 1
+        await persist()
+    }
+
+    /// Drops every cached entry and persists the empty map (Step 6 "Clear cache
+    /// now"). Distinct from a budget change: it removes all data regardless of size.
+    public func clear() async {
+        await loadIfNeeded()
+        entries = [:]
         revision += 1
         await persist()
     }

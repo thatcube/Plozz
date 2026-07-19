@@ -2195,6 +2195,11 @@ actor ShareCatalogStore {
         ensureOpen(); return readQueries.libraryCounts()
     }
 
+    /// Per-source provenance-row counts (Step 6 diagnostics). Lazy/on-demand.
+    func metadataCountPerSource() -> [MetadataSource: Int] {
+        ensureOpen(); return readQueries.metadataCountPerSource()
+    }
+
     /// Recently added: movies + one entry per series, newest first (Home hot path).
     func latest(limit: Int) -> [MediaItem] { ensureOpen(); return readQueries.latest(limit: limit) }
 

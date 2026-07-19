@@ -59,6 +59,8 @@ public final class HeroTrailerController {
     /// Whether a trailer item is actively playing (has begun, not ended/stopped).
     public private(set) var isPlaying = false
     public private(set) var isReady = false
+    public private(set) var isPaused = false
+    public private(set) var pauseStartedAt: Date?
     /// The resolved trailer duration in seconds once known (`0` until ready).
     /// Drives the hero's dwell length so the progress bar spans the full trailer.
     public private(set) var duration: TimeInterval = 0
@@ -165,7 +167,7 @@ public final class HeroTrailerController {
         player.isMuted = muted
         hasStartedPlayback = false
         autoplayWhenReady = false
-        requestedPaused = false
+        requestedPaused = isPaused
         isReady = false
         duration = 0
         observeEnd(of: item)
@@ -235,6 +237,13 @@ public final class HeroTrailerController {
     /// drift apart during remote interaction or recede.
     public func setPaused(_ paused: Bool) {
         requestedPaused = paused
+        if paused {
+            if !isPaused { pauseStartedAt = .now }
+            isPaused = true
+        } else {
+            isPaused = false
+            pauseStartedAt = nil
+        }
         guard currentItemID != nil else { return }
         if paused {
             player.pause()
@@ -273,6 +282,8 @@ public final class HeroTrailerController {
             handoffImage = nil
             isPlaying = false
             isReady = false
+            isPaused = false
+            pauseStartedAt = nil
             currentItemID = nil
             duration = 0
         }

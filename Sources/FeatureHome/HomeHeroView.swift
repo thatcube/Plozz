@@ -193,6 +193,9 @@ struct HomeHeroView: View {
     /// The video and gauge are allowed to finish; paging occurs once interaction
     /// protection is released.
     @State private var pendingTrailerAdvance = false
+    /// Separate from interaction `pausedAt`: only transport-level pauses (recede
+    /// or full-screen playback) freeze trailer/static progress.
+    @State private var trailerPausedAt: Date?
     /// Per-carousel memo so wrapping back to a slide never re-runs provider
     /// trailer/playback resolution. Bounded by the curated item set (max 20).
     @State private var trailerSourceCache: [String: HeroTrailerSource] = [:]
@@ -641,6 +644,20 @@ struct HomeHeroView: View {
         .onChange(of: backgroundSettings.trailerMuted) { _, muted in
             trailerController.setMuted(muted)
         }
+        .onChange(of: trailerController.isPaused) { _, paused in
+            if paused {
+                trailerPausedAt = trailerController.pauseStartedAt ?? .now
+                runEpoch &+= 1
+            } else if let trailerPausedAt {
+                // Shift the one wall-clock timeline by the real transport pause
+                // so both the gauge and auto-fire resume from the same point.
+                dwellStart = dwellStart.addingTimeInterval(
+                    Date().timeIntervalSince(trailerPausedAt)
+                )
+                self.trailerPausedAt = nil
+                runEpoch &+= 1
+            }
+        }
         // Auto-advance: the fire is rescheduled whenever `autoAdvanceKey` changes
         // (slide change, manual page, pause/resume, or the item count settling).
         // It runs REGARDLESS of focus — focus lands on the hero action row by
@@ -651,7 +668,7 @@ struct HomeHeroView: View {
             guard settings.autoAdvance, items.count > 1 else { return }
             // Paused (user is interacting): schedule no fire at all. The gauge is
             // frozen at `pausedAt`; resuming bumps `runEpoch` to reschedule here.
-            guard pausedAt == nil else { return }
+            guard pausedAt == nil, !trailerController.isPaused else { return }
             // Fire after the *remaining* dwell so that resuming after a pause
             // finishes the countdown from where it froze instead of restarting it.
             let duration = currentDwellDuration
@@ -995,7 +1012,9 @@ struct HomeHeroView: View {
             dotsDwellDuration: currentDwellDuration,
             // Interaction blocks paging but never freezes a playing trailer or
             // its progress. Static-image slides retain today's frozen gauge.
-            dotsPausedAt: activeTrailerDuration > 0 ? nil : pausedAt
+            dotsPausedAt: activeTrailerDuration > 0
+                ? trailerPausedAt
+                : (pausedAt ?? trailerPausedAt)
         )
     }
 
@@ -1785,6 +1804,7 @@ struct HomeHeroView: View {
     private func restartDwell() {
         dwellStart = .now
         pausedAt = nil
+        trailerPausedAt = nil
         pendingTrailerAdvance = false
         resumeWork?.cancel()
         resumeWork = nil
@@ -1795,6 +1815,7 @@ struct HomeHeroView: View {
         activeTrailerDuration = 0
         activeTrailerSource = nil
         pendingTrailerAdvance = false
+        trailerPausedAt = nil
         trailerController.clearEndHandler(ownerID: "home-hero")
         if stopPlayer {
             trailerController.stop()
@@ -1829,6 +1850,7 @@ struct HomeHeroView: View {
             pausedAt = Date()
             runEpoch &+= 1
         }
+        trailerController.setPaused(true)
     }
 
     /// Resumes the auto-advance when the hero un-recedes (focus returns to the hero
@@ -1845,8 +1867,10 @@ struct HomeHeroView: View {
         }
         if activeTrailerDuration > 0 {
             pausedAt = nil
+            trailerController.setPaused(false)
         } else {
             restartDwell()
+            trailerController.setPaused(false)
         }
         runEpoch &+= 1
     }

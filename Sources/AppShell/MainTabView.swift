@@ -444,8 +444,10 @@ struct MainTabView: View {
         .onChange(of: playRequest != nil) { _, videoStarting in
             if videoStarting {
                 themeMusicController.stop()
-                heroTrailerController.stop()
             }
+            // Full-screen playback suspends the ambient hero in place; dismissing
+            // the player resumes the same trailer/timeline instead of restarting.
+            heroTrailerController.setPaused(videoStarting)
         }
         .onChange(of: heroBackgroundModel.settings, initial: true) { _, settings in
             // Keep the legacy theme-music settings/controller in sync with the

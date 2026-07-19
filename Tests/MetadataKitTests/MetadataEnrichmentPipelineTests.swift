@@ -28,7 +28,18 @@ final class FakeEnrichmentProvider: MetadataEnrichmentProvider, @unchecked Senda
         lock.lock()
         _calls.append((query, missing))
         lock.unlock()
-        return output
+        // Mirror real adapters: scalar/art fields are only returned when requested,
+        // while external ids are volunteered wholesale (a lookup yields all it finds).
+        var filtered = MetadataEnrichment(externalIDs: output.externalIDs, bannerURL: output.bannerURL, score: output.score)
+        if missing.contains(.title) { filtered.title = output.title }
+        if missing.contains(.overview) { filtered.overview = output.overview }
+        if missing.contains(.genres) { filtered.genres = output.genres }
+        if missing.contains(.taglines) { filtered.tagline = output.tagline }
+        if missing.contains(.posterURL) { filtered.posterURL = output.posterURL }
+        if missing.contains(.logoURL) { filtered.logoURL = output.logoURL }
+        if missing.contains(.episodeThumbnail) { filtered.episodeStillURL = output.episodeStillURL }
+        if requestsBackdrop(missing) { filtered.backdropCandidates = output.backdropCandidates }
+        return filtered
     }
 
     var calls: [(query: MetadataQuery, missing: Set<MetadataField>)] {
@@ -311,7 +322,78 @@ final class MetadataEnrichmentPipelineTests: XCTestCase {
         )
     }
 
-    // MARK: tier eligibility
+    // MARK: Per-field priority with disagreeing chains (regression)
+
+    func testPerFieldPriorityHonoredWhenChainsDisagree() async {
+        // overview is configured to prefer tvmaze; the wide backdrop prefers tvdb.
+        // tvdb is capable of BOTH canonicalText and backdrop, so a naive "ask each
+        // visited provider for every serviceable field" would let tvdb steal overview.
+        let policy = MetadataPriorityPolicy(rules: [
+            MetadataPriorityRule(
+                context: MetadataPriorityContext(rawValue: "overview.movie"),
+                field: .overview, sources: [.tvmaze]
+            ),
+            MetadataPriorityRule(
+                context: MetadataPriorityContext(rawValue: "artwork.movie.hero"),
+                field: .backdropURL, sources: [.tvdb]
+            ),
+        ])
+        let config = MetadataEnrichmentConfig(roles: [:], baseOrder: [.tvdb, .tvmaze], priority: policy)
+
+        let tvdb = FakeEnrichmentProvider(
+            id: .tvdb,
+            capabilities: [.canonicalText, .backdrop],
+            output: MetadataEnrichment(
+                overview: sourced("tvdb overview", .tvdb),
+                backdropCandidates: [SourcedValue(value: URL(string: "https://b/tvdb.jpg")!, source: .tvdb)]
+            )
+        )
+        let tvmaze = FakeEnrichmentProvider(
+            id: .tvmaze,
+            capabilities: [.canonicalText],
+            output: MetadataEnrichment(overview: sourced("tvmaze overview", .tvmaze))
+        )
+        let pipeline = MetadataEnrichmentPipeline(providers: [tvdb, tvmaze], config: config)
+
+        let result = await pipeline.enrich(
+            makeQuery(),
+            requesting: [.overview, .backdropURL],
+            tier: .foregroundFill
+        )
+
+        XCTAssertEqual(result.overview?.value, "tvmaze overview", "overview must follow its own priority chain")
+        XCTAssertEqual(result.overview?.source, .tvmaze)
+        XCTAssertEqual(result.backdropCandidates.first?.source, .tvdb)
+        // tvdb was asked, but never for overview (it isn't overview's frontmost source).
+        let tvdbMissingSets = tvdb.calls.map(\.missing)
+        XCTAssertFalse(
+            tvdbMissingSets.contains { $0.contains(.overview) },
+            "tvdb must never be asked for overview"
+        )
+    }
+
+    func testFallsThroughChainWhenTopSourceMisses() async {
+        // overview chain [tvmaze, tvdb]; tvmaze returns nothing → tvdb fills it.
+        let policy = MetadataPriorityPolicy(rules: [
+            MetadataPriorityRule(
+                context: MetadataPriorityContext(rawValue: "overview.movie"),
+                field: .overview, sources: [.tvmaze, .tvdb]
+            ),
+        ])
+        let config = MetadataEnrichmentConfig(roles: [:], baseOrder: [.tvmaze, .tvdb], priority: policy)
+        let tvmaze = FakeEnrichmentProvider(id: .tvmaze, capabilities: [.canonicalText], output: MetadataEnrichment())
+        let tvdb = FakeEnrichmentProvider(
+            id: .tvdb, capabilities: [.canonicalText],
+            output: MetadataEnrichment(overview: sourced("tvdb fallback", .tvdb))
+        )
+        let pipeline = MetadataEnrichmentPipeline(providers: [tvmaze, tvdb], config: config)
+
+        let result = await pipeline.enrich(makeQuery(), requesting: [.overview], tier: .foregroundFill)
+
+        XCTAssertEqual(result.overview?.value, "tvdb fallback")
+        XCTAssertEqual(tvmaze.callCount, 1, "The top source is tried first")
+        XCTAssertEqual(tvdb.callCount, 1, "Then the field falls through to the next source")
+    }
 
     func testProviderSkippedWhenNotEligibleForTier() async {
         let backlogOnly = FakeEnrichmentProvider(

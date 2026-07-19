@@ -79,6 +79,15 @@ public actor MetadataEnrichmentPipeline {
 
     /// Resolve `requesting` for `query`, skipping fields already in `present`.
     ///
+    /// The pipeline honors each field's configured priority chain independently: a
+    /// field is only ever offered to the **highest-priority source that has not yet
+    /// been tried for it**. A provider is asked (in one call) for exactly the batch of
+    /// still-missing fields for which it is currently that frontmost source — never for
+    /// a field a higher-priority source should own — so a multi-capability source
+    /// (e.g. TheTVDB) can't grab a field (e.g. TV `overview`) that the policy assigns
+    /// to another source (TVmaze). If a source fails to fill a field it was asked for,
+    /// that field falls through to the next source in its chain on a later round.
+    ///
     /// - Parameters:
     ///   - query: The normalized item to enrich.
     ///   - present: Fields a higher-priority source already filled; never requested
@@ -96,46 +105,62 @@ public actor MetadataEnrichmentPipeline {
         var remaining = requested.subtracting(present)
         guard !remaining.isEmpty else { return result }
 
-        for source in orderedSourceSweep(for: remaining, query: query) {
-            if remaining.isEmpty { break }
-            guard let provider = providers[source],
-                  provider.policy.eligibleTiers.contains(tier)
-            else { continue }
-            let want = provider.serviceableFields(from: remaining)
-            guard !want.isEmpty else { continue }
+        // Per-field record of which sources have already had their chance at it, so a
+        // field falls through its chain on successive rounds and no source is asked
+        // twice for the same field.
+        var triedForField: [MetadataField: Set<MetadataSource>] = [:]
 
+        while !remaining.isEmpty {
+            guard let round = nextRound(remaining: remaining, query: query, tier: tier, tried: triedForField) else {
+                break
+            }
+            for field in round.fields { triedForField[field, default: []].insert(round.source) }
+            guard let provider = providers[round.source] else { break }
+
+            // Thread already-resolved ids downstream so an exact-id lookup replaces a
+            // fuzzy title search (no duplicate work).
             let threaded = query.mergingProviderIDs(result.externalIDs.mapValues(\.value))
-            let enrichment = await provider.enrich(threaded, missing: want)
+            let enrichment = await provider.enrich(threaded, missing: round.fields)
             result.fillMissing(from: enrichment, skipping: present)
             remaining = requested.subtracting(present).subtracting(result.filledFields)
         }
         return result
     }
 
-    /// A de-duplicated, priority-ordered sweep of every source relevant to any of the
-    /// still-missing `fields`. Each field contributes its own configured chain; the
-    /// chains are interleaved by rank (all top choices first, then all seconds, …) so
-    /// a source that is the best choice for one field is visited before another
-    /// field's fallbacks, and each source is visited at most once.
-    private func orderedSourceSweep(
-        for fields: Set<MetadataField>,
-        query: MetadataQuery
-    ) -> [MetadataSource] {
-        let sortedFields = fields.sorted { $0.rawValue < $1.rawValue }
-        let chains = sortedFields.map { config.orderedSources(for: $0, query: query) }
-        var order: [MetadataSource] = []
-        var seen: Set<MetadataSource> = []
-        var rank = 0
-        var addedAny = true
-        while addedAny {
-            addedAny = false
-            for chain in chains where rank < chain.count {
-                addedAny = true
-                let source = chain[rank]
-                if seen.insert(source).inserted { order.append(source) }
+    /// The next provider to call and the batch of fields it currently owns.
+    ///
+    /// For each still-missing field it finds the frontmost source that is registered,
+    /// eligible for `tier`, and not yet tried for that field, tagged with the field's
+    /// rank (position in its priority chain). It then picks the source owning the
+    /// globally-lowest-rank field (ties broken deterministically) and batches every
+    /// remaining field for which that same source is currently frontmost — so a source
+    /// that is the top choice for several fields is asked for all of them at once.
+    private func nextRound(
+        remaining: Set<MetadataField>,
+        query: MetadataQuery,
+        tier: MetadataWorkTier,
+        tried: [MetadataField: Set<MetadataSource>]
+    ) -> (source: MetadataSource, fields: Set<MetadataField>)? {
+        struct Front { let source: MetadataSource; let rank: Int; let field: MetadataField }
+        var fronts: [Front] = []
+        for field in remaining {
+            let chain = config.orderedSources(for: field, query: query)
+            for (rank, source) in chain.enumerated() {
+                guard let provider = providers[source],
+                      provider.policy.eligibleTiers.contains(tier),
+                      !(tried[field]?.contains(source) ?? false)
+                else { continue }
+                fronts.append(Front(source: source, rank: rank, field: field))
+                break
             }
-            rank += 1
         }
-        return order
+        guard let chosen = fronts.min(by: { lhs, rhs in
+            if lhs.rank != rhs.rank { return lhs.rank < rhs.rank }
+            if lhs.field.rawValue != rhs.field.rawValue { return lhs.field.rawValue < rhs.field.rawValue }
+            return lhs.source.rawValue < rhs.source.rawValue
+        }) else { return nil }
+
+        let fields = Set(fronts.filter { $0.source == chosen.source }.map(\.field))
+        return (chosen.source, fields)
     }
 }

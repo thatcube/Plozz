@@ -134,6 +134,7 @@ final class EnrichmentProviderAdapterTests: XCTestCase {
     func testAniListMapsIdentityScoreAndArt() async {
         let media = AniListArtworkProvider.Media(
             id: 21,
+            idMal: 1735,
             averageScore: 88,
             bannerImage: "https://a/banner.jpg",
             coverImage: AniListArtworkProvider.Media.CoverImage(extraLarge: "https://a/cover.jpg", large: nil)
@@ -141,6 +142,7 @@ final class EnrichmentProviderAdapterTests: XCTestCase {
         let provider = AniListEnrichmentProvider(client: FakeAniList(media: media))
         let out = await provider.enrich(query(.anime, kind: .series), missing: [.posterURL, .backdropURL])
         XCTAssertEqual(out.externalIDs["AniList"]?.value, "21")
+        XCTAssertEqual(out.externalIDs["Mal"]?.value, "1735")
         XCTAssertEqual(out.score?.value ?? 0, 8.8, accuracy: 0.001)
         XCTAssertEqual(out.posterURL?.value, URL(string: "https://a/cover.jpg"))
         XCTAssertEqual(out.bannerURL?.value, URL(string: "https://a/banner.jpg"))
@@ -148,7 +150,7 @@ final class EnrichmentProviderAdapterTests: XCTestCase {
     }
 
     func testAniListInertForNonAnime() async {
-        let media = AniListArtworkProvider.Media(id: 1, averageScore: nil, bannerImage: nil, coverImage: nil)
+        let media = AniListArtworkProvider.Media(id: 1, idMal: nil, averageScore: nil, bannerImage: nil, coverImage: nil)
         let provider = AniListEnrichmentProvider(client: FakeAniList(media: media))
         let out = await provider.enrich(query(.movie), missing: [.posterURL])
         XCTAssertTrue(out.isEmpty)
@@ -249,7 +251,7 @@ final class EnrichmentProviderAdapterTests: XCTestCase {
             backdrop: nil
         ))
         let anilist = AniListEnrichmentProvider(client: FakeAniList(media: AniListArtworkProvider.Media(
-            id: 21, averageScore: 90, bannerImage: "https://a/banner.jpg",
+            id: 21, idMal: 1735, averageScore: 90, bannerImage: "https://a/banner.jpg",
             coverImage: AniListArtworkProvider.Media.CoverImage(extraLarge: "https://a/cover.jpg", large: nil)
         )))
         let pipeline = MetadataEnrichmentPipeline(providers: [tvdb, anilist])

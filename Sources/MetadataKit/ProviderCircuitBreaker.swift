@@ -43,17 +43,26 @@ public actor ProviderCircuitBreaker {
     private var openUntil: Date?
     private var openReason: ProviderFailureKind?
     private var consecutiveTransient = 0
+    /// Set once a half-open probe has been admitted, so only ONE caller probes a
+    /// just-recovering source; cleared by the next ``record(_:)`` (success or failure).
+    private var probeInFlight = false
 
     public init(policy: Policy = Policy(), now: @escaping @Sendable () -> Date = { Date() }) {
         self.policy = policy
         self.now = now
     }
 
-    /// Whether a call may proceed now. `false` while tripped and the cooldown has not
-    /// elapsed; `true` when closed or half-open (cooldown elapsed → admit one probe).
+    /// Whether a call may proceed now, **consuming** a half-open probe slot when the
+    /// breaker is tripped-but-cooled-down. Returns `true` when closed, or exactly once
+    /// per cooldown when half-open (admitting a single probe); returns `false` while
+    /// cooling down, and for every other caller until the probe's ``record(_:)``
+    /// resolves it — preventing a thundering herd against a recovering source.
     public func allow() -> Bool {
-        guard let until = openUntil else { return true }
-        return now() >= until
+        guard let until = openUntil else { return true } // closed
+        if now() < until { return false }                // still cooling down
+        if probeInFlight { return false }                // a probe is already out
+        probeInFlight = true                             // admit exactly one probe
+        return true
     }
 
     /// Whether the breaker is currently tripped (open and still cooling down).
@@ -71,6 +80,7 @@ public actor ProviderCircuitBreaker {
     ///   refill that provider's previously-cached gaps.
     @discardableResult
     public func record(_ health: ProviderHealth) -> Bool {
+        probeInFlight = false
         switch health {
         case .ok, .empty:
             let wasOpen = openUntil != nil
@@ -100,6 +110,7 @@ public actor ProviderCircuitBreaker {
         openUntil = nil
         openReason = nil
         consecutiveTransient = 0
+        probeInFlight = false
     }
 
     private func trip(_ reason: ProviderFailureKind, cooldown: TimeInterval) {

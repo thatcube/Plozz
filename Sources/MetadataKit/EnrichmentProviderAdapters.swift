@@ -215,6 +215,9 @@ public struct AniListEnrichmentProvider: MetadataEnrichmentProvider {
         if let anilist = media.id {
             out.externalIDs["AniList"] = SourcedValue(value: String(anilist), source: .anilist, sourceURL: sourceURL)
         }
+        if let mal = media.idMal {
+            out.externalIDs["Mal"] = SourcedValue(value: String(mal), source: .anilist, sourceURL: sourceURL)
+        }
         if let score = media.averageScore {
             out.score = SourcedValue(value: Double(score) / 10.0, source: .anilist, sourceURL: sourceURL)
         }

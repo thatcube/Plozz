@@ -47,6 +47,7 @@ public struct AniListArtworkProvider: ArtworkProvider {
         query ($id: Int, $idMal: Int, $search: String) {
           Media(id: $id, idMal: $idMal, search: $search, type: ANIME) {
             id
+            idMal
             averageScore
             bannerImage
             coverImage { extraLarge large }
@@ -77,6 +78,7 @@ public struct AniListArtworkProvider: ArtworkProvider {
 
     public struct Media: Decodable, Sendable {
         public let id: Int?
+        public let idMal: Int?
         public let averageScore: Int?
         public let bannerImage: String?
         public let coverImage: CoverImage?

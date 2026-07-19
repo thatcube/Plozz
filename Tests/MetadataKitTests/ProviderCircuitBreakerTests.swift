@@ -78,6 +78,20 @@ final class ProviderCircuitBreakerTests: XCTestCase {
         XCTAssertFalse(authAllowed, "The 300s auth cooldown has not — cooldowns are independent")
     }
 
+    func testHalfOpenAdmitsOnlyOneProbe() async {
+        let clock = OutageTestClock()
+        let breaker = ProviderCircuitBreaker(policy: .init(failureThreshold: 1, transientCooldown: 60), now: clock.nowClosure)
+        _ = await breaker.record(.failure(.transient)) // trip
+        clock.advance(61)
+        let first = await breaker.allow()
+        let second = await breaker.allow()
+        XCTAssertTrue(first, "The cooled-down breaker admits one probe")
+        XCTAssertFalse(second, "A second concurrent caller is blocked until the probe resolves")
+        _ = await breaker.record(.ok) // probe succeeds → closed
+        let afterRecovery = await breaker.allow()
+        XCTAssertTrue(afterRecovery, "Once closed, calls flow freely again")
+    }
+
     // MARK: Resilient decorator
 
     func testWarmCacheServedDuringOutage() async {

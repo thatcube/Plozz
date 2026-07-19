@@ -513,11 +513,6 @@ let package = Package(
                 "ProviderJellyfin",
                 "ProviderPlex",
                 "ProviderShare",
-                "SeerService",
-                "TraktService",
-                "SimklService",
-                "AniListService",
-                "MALService",
             ]
         ),
 
@@ -582,6 +577,11 @@ let package = Package(
                 "MediaTransportWebDAV",
                 "ProviderPlex",
                 "ProviderShare",
+                "SeerService",
+                "TraktService",
+                "SimklService",
+                "AniListService",
+                "MALService",
             ]
         ),
 

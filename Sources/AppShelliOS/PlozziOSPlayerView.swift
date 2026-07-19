@@ -128,6 +128,7 @@ struct PlozziOSPlayerView: View {
             audioPolicy: .inheriting(from: playbackSettings),
             playbackSettings: playbackSettings,
             spoilerSettings: appModel.settings.spoilers.settings,
+            seriesTrackStore: appModel.seriesTrackStore,
             seriesAccountFallbackID: item.sourceAccountID,
             startPosition: startPosition,
             scrobbler: appModel.trackerScrobbler,

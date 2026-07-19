@@ -5,10 +5,10 @@ import CoreModels
 /// coordinator (mark watched/unwatched) and the player (resume / finish fan-out)
 /// produce identical, cross-server-correct intents. Centralised so the target
 /// derivation and Trakt-mirror policy live in exactly one place.
-enum WatchMutationFactory {
+public enum WatchMutationFactory {
     /// Considered "finished" at or above this watched percentage — finishing marks
     /// the title played everywhere, clears resume, and mirrors to Trakt.
-    static let finishedThreshold: Double = 90
+    public static let finishedThreshold: Double = 90
 
     /// Every server target this title should converge on, addressed by *that
     /// server's* own item id. The **origin** (where the user actually watched it)
@@ -26,7 +26,7 @@ enum WatchMutationFactory {
     /// than the one played, and dropping the origin there would skip the resume /
     /// played write on the very server the user watched on. Dedup keeps it to one
     /// entry when the origin is already among the sources.
-    static func targets(
+    public static func targets(
         for item: MediaItem,
         primaryAccountID: String?,
         additionalSources: [MediaSourceRef] = [],
@@ -144,7 +144,7 @@ enum WatchMutationFactory {
     /// A mark-watched / mark-unwatched mutation. Marking watched clears resume
     /// everywhere and mirrors to Trakt (write-if-missing); unwatch never touches
     /// Trakt (no deletes) and leaves resume alone.
-    static func playedToggle(item: MediaItem, played: Bool, primaryAccountID: String?, additionalSources: [MediaSourceRef] = [], crossServerSync: Bool = true, capturedAt: Date = Date()) -> WatchMutation? {
+    public static func playedToggle(item: MediaItem, played: Bool, primaryAccountID: String?, additionalSources: [MediaSourceRef] = [], crossServerSync: Bool = true, capturedAt: Date = Date()) -> WatchMutation? {
         let targets = targets(for: item, primaryAccountID: primaryAccountID, additionalSources: additionalSources, crossServerSync: crossServerSync)
         guard !targets.isEmpty else { return nil }
         // OFF: suppress ALL cross-server expansion seeds too — not just the extra
@@ -177,7 +177,7 @@ enum WatchMutationFactory {
     /// best-source switch resumes where you left off, on whichever server backs it.
     /// Returns `nil` when there is nothing worth converging (no targets, or an
     /// unfinished item barely started).
-    static func playbackStop(item: MediaItem, position: TimeInterval, watchedPercent: Double, primaryAccountID: String?, additionalSources: [MediaSourceRef] = [], crossServerSync: Bool = true, capturedAt: Date = Date()) -> WatchMutation? {
+    public static func playbackStop(item: MediaItem, position: TimeInterval, watchedPercent: Double, primaryAccountID: String?, additionalSources: [MediaSourceRef] = [], crossServerSync: Bool = true, capturedAt: Date = Date()) -> WatchMutation? {
         let targets = targets(for: item, primaryAccountID: primaryAccountID, additionalSources: additionalSources, crossServerSync: crossServerSync)
         guard !targets.isEmpty else { return nil }
         // OFF: origin-only convergence with no expansion seeds (see `playedToggle`).

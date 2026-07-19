@@ -116,17 +116,23 @@ struct PlozziOSItemDetailView: View {
                         actingName: appModel.activeSeerrUserName,
                         onRequest: beginRequest
                     )
-                } else if detail.item.kind == .movie || detail.item.kind == .episode {
-                    PlozziOSPlaybackActions(item: detail.item, onPlay: play)
-                    PlozziOSDownloadAction(
+                } else {
+                    PlozziOSDetailManagementActions(
                         item: detail.item,
-                        record: currentDownloadRecord,
-                        errorMessage: downloadError,
-                        onDownload: { Task { await download(detail.item) } },
-                        onPause: { Task { await pauseDownload() } },
-                        onResume: { Task { await resumeDownload() } },
-                        onRemove: { Task { await removeDownload(detail.item) } }
+                        handler: appModel.mediaItemActionHandler
                     )
+                    if detail.item.kind == .movie || detail.item.kind == .episode {
+                        PlozziOSPlaybackActions(item: detail.item, onPlay: play)
+                        PlozziOSDownloadAction(
+                            item: detail.item,
+                            record: currentDownloadRecord,
+                            errorMessage: downloadError,
+                            onDownload: { Task { await download(detail.item) } },
+                            onPause: { Task { await pauseDownload() } },
+                            onResume: { Task { await resumeDownload() } },
+                            onRemove: { Task { await removeDownload(detail.item) } }
+                        )
+                    }
                 }
 
                 if detail.item.kind == .series, !detail.children.isEmpty {
@@ -160,6 +166,35 @@ struct PlozziOSItemDetailView: View {
         .navigationTitle(detail.item.title)
         .task(id: detail.item.id) {
             downloadRecord = await appModel.downloads.record(for: detail.item)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .mediaItemDidMutate)) { note in
+            guard let mutation = MediaItemMutation.from(note) else { return }
+            viewModel.applyWatchedState(mutation)
+        }
+    }
+
+    private struct PlozziOSDetailManagementActions: View {
+        let item: MediaItem
+        let handler: any MediaItemActionHandling
+
+        private var actions: [MediaItemAction] {
+            handler.actions(for: item, context: .none)
+                .filter { !$0.isNavigation }
+        }
+
+        var body: some View {
+            if !actions.isEmpty {
+                Menu {
+                    ForEach(actions) { action in
+                        Button(action.title, systemImage: action.systemImage) {
+                            handler.perform(action, on: item, context: .none)
+                        }
+                    }
+                } label: {
+                    Label("More Actions", systemImage: "ellipsis.circle")
+                }
+                .buttonStyle(.bordered)
+            }
         }
     }
 
@@ -524,6 +559,19 @@ private struct PlozziOSSeasonEpisodesView: View {
                                 PlozziOSEpisodeRow(episode: episode)
                             }
                             .buttonStyle(.plain)
+                            .contextMenu {
+                                ForEach(actions(for: episode, episodes: episodes)) { action in
+                                    Button(action.title, systemImage: action.systemImage) {
+                                        appModel.mediaItemActionHandler.perform(
+                                            action,
+                                            on: episode,
+                                            context: MediaItemActionContext(
+                                                orderedSiblings: episodes
+                                            )
+                                        )
+                                    }
+                                }
+                            }
 
                             PlozziOSEpisodeDownloadButton(
                                 episode: episode,
@@ -540,6 +588,23 @@ private struct PlozziOSSeasonEpisodesView: View {
         .navigationTitle(season.title)
         .navigationBarTitleDisplayMode(.inline)
         .task { await viewModel.loadEpisodes(for: season.id) }
+        .onReceive(NotificationCenter.default.publisher(for: .mediaItemDidMutate)) { note in
+            guard let mutation = MediaItemMutation.from(note) else { return }
+            viewModel.applyWatchedState(mutation)
+        }
+    }
+
+    @Environment(PlozziOSAppModel.self) private var appModel
+
+    private func actions(
+        for episode: MediaItem,
+        episodes: [MediaItem]
+    ) -> [MediaItemAction] {
+        appModel.mediaItemActionHandler.actions(
+            for: episode,
+            context: MediaItemActionContext(orderedSiblings: episodes)
+        )
+        .filter { !$0.isNavigation }
     }
 }
 

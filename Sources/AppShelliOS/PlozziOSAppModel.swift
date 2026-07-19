@@ -2,6 +2,7 @@
 import AniListService
 import AppRuntime
 import CoreModels
+import CoreNetworking
 import CoreUI
 import FeatureAuthCore
 import Foundation
@@ -28,15 +29,45 @@ final class PlozziOSAppModel {
     let malService: MALService
     let trackerScrobbler: PlozziOSTrackerScrobbler
     private(set) var settings: PlozziOSSettingsModel
+    private(set) var seriesTrackStore: SeriesTrackPreferenceStore
     private(set) var downloads: PlozziOSDownloadsModel
     @ObservationIgnored
     private(set) var plexHomeUsers: PlexHomeUsersModel!
+    @ObservationIgnored
+    private(set) lazy var mediaItemActionHandler: any MediaItemActionHandling =
+        MediaItemActionCoordinator(
+            providerResolver: { [unowned self] accountID in
+                accountID.flatMap {
+                    self.accountsProviders.provider(forAccountID: $0)
+                } ?? self.accountsProviders.primaryProvider
+            },
+            primaryAccountID: { [unowned self] in
+                self.accountsProviders.primaryActiveAccount?.id
+            },
+            crossServerWatchSyncEnabled: { [unowned self] in
+                self.settings.playback.settings.syncWatchAcrossServers
+            },
+            enqueueWatchMutation: { [unowned self] mutation in
+                self.applyWatchMutation(mutation)
+            }
+        )
 
     private let accountStore: AccountPersisting
     private let durableLocalStateStore: DurableLocalStateStore?
     private let mediaShareAccountService: MediaShareAccountService
     private let mediaShareConfigurationService: MediaShareAccountConfigurationService
     @ObservationIgnored private var trackerProfileGeneration: UInt64 = 0
+    @ObservationIgnored private var watchReconcilers: [String: WatchStateReconciler] = [:]
+
+    private var watchReconciler: WatchStateReconciler {
+        let profileID = profiles.activeProfileID
+        if let existing = watchReconcilers[profileID] {
+            return existing
+        }
+        let reconciler = makeWatchReconciler(profileID: profileID)
+        watchReconcilers[profileID] = reconciler
+        return reconciler
+    }
 
     var accountError: String?
 
@@ -114,6 +145,9 @@ final class PlozziOSAppModel {
         self.settings = PlozziOSSettingsModel(
             namespace: profiles.activeNamespace
         )
+        self.seriesTrackStore = SeriesTrackPreferenceStore(
+            namespace: profiles.activeNamespace
+        )
         self.downloads = Self.makeDownloadsModel(
             namespace: profiles.activeProfileID,
             durableStore: durableLocalStateStore,
@@ -182,6 +216,7 @@ final class PlozziOSAppModel {
         accountsProviders.reloadAccounts()
         plexHomeUsers.ensurePlexIdentityForActiveProfile()
         updateTrackersForActiveProfile()
+        drainWatchOutbox()
         Task {
             let namespaces = [nil] + profiles.profiles.map { Optional($0.id) }
             await seerService.migrateLegacyConnectionIfNeeded(namespaces: namespaces)
@@ -200,6 +235,9 @@ final class PlozziOSAppModel {
     func selectProfile(_ id: String) {
         profiles.select(id)
         settings = PlozziOSSettingsModel(namespace: profiles.activeNamespace)
+        seriesTrackStore = SeriesTrackPreferenceStore(
+            namespace: profiles.activeNamespace
+        )
         downloads = Self.makeDownloadsModel(
             namespace: profiles.activeProfileID,
             durableStore: durableLocalStateStore,
@@ -210,6 +248,7 @@ final class PlozziOSAppModel {
         plexHomeUsers.ensurePlexIdentityForActiveProfile()
         accountsProviders.reloadAccounts()
         updateTrackersForActiveProfile()
+        drainWatchOutbox()
         Task { await seerService.setActiveProfile(namespace: profiles.activeNamespace) }
     }
 
@@ -227,6 +266,103 @@ final class PlozziOSAppModel {
             guard generation == trackerProfileGeneration else { return }
             await malService.setActiveProfile(namespace: namespace)
         }
+    }
+
+    private func applyWatchMutation(_ mutation: WatchMutation) {
+        let reconciler = watchReconciler
+        Task {
+            await reconciler.enqueue(mutation)
+            await reconciler.drain()
+        }
+    }
+
+    private func drainWatchOutbox() {
+        let reconciler = watchReconciler
+        Task { await reconciler.drain() }
+    }
+
+    private func makeWatchReconciler(profileID: String) -> WatchStateReconciler {
+        let profile = profiles.profiles.first { $0.id == profileID } ?? profiles.activeProfile
+        let namespace = profile.settingsNamespace(isDefault: profiles.isDefault(profile))
+        let trakt = TraktServiceFactory.make(namespace: namespace).scrobbler
+        let simkl = SimklServiceFactory.make(namespace: namespace).scrobbler
+        let anilist = AniListServiceFactory.make(namespace: namespace).scrobbler
+        let mal = MALServiceFactory.make(namespace: namespace).scrobbler
+        let indexedAccountIDs = Set(
+            profiles.activeAccountIDs(
+                for: profileID,
+                fallback: accountStore.activeAccountIDs()
+            )
+        )
+        let store: any WatchMutationStoring
+        if let durableLocalStateStore {
+            do {
+                store = try DurableWatchMutationStore(
+                    store: durableLocalStateStore,
+                    profileID: profileID,
+                    onLoadFailure: {
+                        PlozzLog.app.error(
+                            "iOS durable watch outbox unavailable; preserving corrupt state"
+                        )
+                    }
+                )
+            } catch {
+                PlozzLog.app.error(
+                    "iOS durable watch outbox address invalid; using memory only"
+                )
+                store = InMemoryWatchMutationStore()
+            }
+        } else {
+            store = InMemoryWatchMutationStore()
+        }
+        let applier = AppShellWatchMutationApplier(
+            isActive: { [weak self] in
+                await MainActor.run { self?.profiles.activeProfileID == profileID }
+            },
+            resolveProvider: { [weak self] accountID in
+                await MainActor.run {
+                    guard self?.profiles.activeProfileID == profileID else { return nil }
+                    return self?.accountsProviders.provider(forAccountID: accountID)
+                }
+            },
+            applyTrakt: { intent in
+                try await trakt.scrobbleResult(
+                    item: intent.makeScrobbleItem(),
+                    progress: intent.progress,
+                    event: .stop
+                )
+            },
+            applySimkl: { intent in
+                try await simkl.scrobbleResult(
+                    item: intent.makeScrobbleItem(),
+                    progress: intent.progress,
+                    event: .stop
+                )
+            },
+            applyAniList: { intent in
+                try await anilist.scrobbleResult(
+                    item: intent.makeScrobbleItem(),
+                    progress: intent.progress,
+                    event: .stop
+                )
+            },
+            applyMAL: { intent in
+                try await mal.scrobbleResult(
+                    item: intent.makeScrobbleItem(),
+                    progress: intent.progress,
+                    event: .stop
+                )
+            },
+            allAccountIDs: { Array(indexedAccountIDs) },
+            indexedAccountIDs: { indexedAccountIDs }
+        )
+        return WatchStateReconciler(
+            store: store,
+            applier: applier,
+            onPersistenceFailure: {
+                PlozzLog.app.error("iOS durable watch outbox write failed")
+            }
+        )
     }
 
     private static func makeDownloadsModel(
@@ -299,9 +435,26 @@ final class PlozziOSAppModel {
     }
 
     func removeProfile(_ id: String) {
+        let previousActiveProfileID = profiles.activeProfileID
         profiles.remove(id)
+        watchReconcilers[id] = nil
+        if profiles.activeProfileID != previousActiveProfileID {
+            settings = PlozziOSSettingsModel(namespace: profiles.activeNamespace)
+            seriesTrackStore = SeriesTrackPreferenceStore(
+                namespace: profiles.activeNamespace
+            )
+            downloads = Self.makeDownloadsModel(
+                namespace: profiles.activeProfileID,
+                durableStore: durableLocalStateStore,
+                mediaShareRuntime: mediaShareRuntime,
+                accountsProviders: accountsProviders,
+                authenticatedHTTPResolver: authenticatedHTTPResolver
+            )
+            plexHomeUsers.ensurePlexIdentityForActiveProfile()
+        }
         accountsProviders.reloadAccounts()
         updateTrackersForActiveProfile()
+        drainWatchOutbox()
         Task { await seerService.setActiveProfile(namespace: profiles.activeNamespace) }
     }
 
@@ -350,8 +503,10 @@ final class PlozziOSAppModel {
             ids.remove(accountID)
         }
         profiles.setActiveAccountIDs(Array(ids), for: profileID)
+        watchReconcilers[profileID] = nil
         if profiles.activeProfileID == profileID {
             accountsProviders.reloadAccounts()
+            drainWatchOutbox()
         }
     }
 

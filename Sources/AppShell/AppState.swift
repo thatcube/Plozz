@@ -129,7 +129,24 @@ public final class AppState {
     /// and performs watched-state (and future) actions against the server.
     @ObservationIgnored
     public private(set) lazy var mediaItemActionHandler: any MediaItemActionHandling =
-        MediaItemActionCoordinator(appState: self)
+        MediaItemActionCoordinator(
+            providerResolver: { [unowned self] accountID in
+                accountID.flatMap { self.accountsProviders.provider(forAccountID: $0) }
+                    ?? self.accountsProviders.primaryProvider
+            },
+            additionalSources: { [unowned self] item in
+                self.identityIndex.identitySnapshot.sourceRefs(for: item)
+            },
+            primaryAccountID: { [unowned self] in
+                self.accountsProviders.primaryActiveAccount?.id
+            },
+            crossServerWatchSyncEnabled: { [unowned self] in
+                self.profileSettings.playbackModel.settings.syncWatchAcrossServers
+            },
+            enqueueWatchMutation: { [unowned self] mutation in
+                self.enqueueWatchMutation(mutation)
+            }
+        )
 
     /// Durable cross-server watch-state outbox + reconciler. Persists each watch
     /// mutation's intent to disk before the network call and drains it on launch /
@@ -249,17 +266,33 @@ public final class AppState {
                     return self?.accountsProviders.provider(forAccountID: accountID)
                 }
             },
-            traktScrobbler: {
-                boundTraktScrobbler
+            applyTrakt: { intent in
+                try await boundTraktScrobbler.scrobbleResult(
+                    item: intent.makeScrobbleItem(),
+                    progress: intent.progress,
+                    event: .stop
+                )
             },
-            simklScrobbler: {
-                boundSimklScrobbler
+            applySimkl: { intent in
+                try await boundSimklScrobbler.scrobbleResult(
+                    item: intent.makeScrobbleItem(),
+                    progress: intent.progress,
+                    event: .stop
+                )
             },
-            anilistScrobbler: {
-                boundAniListScrobbler
+            applyAniList: { intent in
+                try await boundAniListScrobbler.scrobbleResult(
+                    item: intent.makeScrobbleItem(),
+                    progress: intent.progress,
+                    event: .stop
+                )
             },
-            malScrobbler: {
-                boundMALScrobbler
+            applyMAL: { intent in
+                try await boundMALScrobbler.scrobbleResult(
+                    item: intent.makeScrobbleItem(),
+                    progress: intent.progress,
+                    event: .stop
+                )
             },
             allAccountIDs: { [weak self] in
                 // The set the identity index actually warms and that Home/Search

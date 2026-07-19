@@ -10,17 +10,31 @@ import CoreNetworking
 /// it through the SwiftUI environment (`\.mediaItemActionHandler`) so no closure
 /// has to be threaded through every row and grid.
 ///
-/// Resolution is always live (it asks `AppState` on demand) so account / profile
-/// changes are picked up without rebuilding the handler.
+/// Resolution is always live through injected app-runtime seams so account and
+/// profile changes are picked up without rebuilding the handler.
 @MainActor
-final class MediaItemActionCoordinator: MediaItemActionHandling {
-    private unowned let appState: AppState
+public final class MediaItemActionCoordinator: MediaItemActionHandling {
+    private let providerResolver: (String?) -> (any MediaProvider)?
+    private let additionalSources: (MediaItem) -> [MediaSourceRef]
+    private let primaryAccountID: () -> String?
+    private let crossServerWatchSyncEnabled: () -> Bool
+    private let enqueueWatchMutation: (WatchMutation) -> Void
 
-    init(appState: AppState) {
-        self.appState = appState
+    public init(
+        providerResolver: @escaping (String?) -> (any MediaProvider)?,
+        additionalSources: @escaping (MediaItem) -> [MediaSourceRef] = { _ in [] },
+        primaryAccountID: @escaping () -> String?,
+        crossServerWatchSyncEnabled: @escaping () -> Bool,
+        enqueueWatchMutation: @escaping (WatchMutation) -> Void
+    ) {
+        self.providerResolver = providerResolver
+        self.additionalSources = additionalSources
+        self.primaryAccountID = primaryAccountID
+        self.crossServerWatchSyncEnabled = crossServerWatchSyncEnabled
+        self.enqueueWatchMutation = enqueueWatchMutation
     }
 
-    func actions(for item: MediaItem, context: MediaItemActionContext) -> [MediaItemAction] {
+    public func actions(for item: MediaItem, context: MediaItemActionContext) -> [MediaItemAction] {
         // A not-in-library discovery (Seerr) title has a synthetic `seer:<tmdbId>`
         // id that isn't addressable on any provider, so watch-state / watchlist /
         // refresh actions would silently fail — offer none (the discovery detail
@@ -38,7 +52,7 @@ final class MediaItemActionCoordinator: MediaItemActionHandling {
         )
     }
 
-    func perform(_ action: MediaItemAction, on item: MediaItem, context: MediaItemActionContext) {
+    public func perform(_ action: MediaItemAction, on item: MediaItem, context: MediaItemActionContext) {
         switch action {
         case .markWatched, .markUnwatched, .markWatchedUpToHere:
             performWatchState(action, on: item, context: context)
@@ -76,9 +90,9 @@ final class MediaItemActionCoordinator: MediaItemActionHandling {
         guard let mutation = WatchMutationFactory.playedToggle(
             item: item,
             played: played,
-            primaryAccountID: appState.accountsProviders.primaryActiveAccount?.id,
-            additionalSources: appState.identityIndex.identitySnapshot.sourceRefs(for: item),
-            crossServerSync: appState.profileSettings.playbackModel.settings.syncWatchAcrossServers
+            primaryAccountID: primaryAccountID(),
+            additionalSources: additionalSources(item),
+            crossServerSync: crossServerWatchSyncEnabled()
         ) else { return }
 
         var ids = Set(mutation.targets.map(\.itemID))
@@ -97,7 +111,7 @@ final class MediaItemActionCoordinator: MediaItemActionHandling {
             playedPercentage: played ? 1 : nil
         ).post()
 
-        appState.enqueueWatchMutation(mutation)
+        enqueueWatchMutation(mutation)
     }
 
     /// "Mark watched up to here" stays scoped to the primary server: the preceding
@@ -185,12 +199,11 @@ final class MediaItemActionCoordinator: MediaItemActionHandling {
         let refs = unionedSourceRefs(for: item)
         guard !refs.isEmpty else {
             // Untagged single-account item: write to the primary as-is.
-            let provider = (item.sourceAccountID.flatMap { appState.accountsProviders.provider(forAccountID: $0) }
-                ?? appState.accountsProviders.primaryProvider) as? WatchlistProviding
+            let provider = providerResolver(item.sourceAccountID) as? WatchlistProviding
             return provider.map { [(provider: $0, item: item)] } ?? []
         }
         return refs.compactMap { ref in
-            guard let provider = appState.accountsProviders.provider(forAccountID: ref.accountID) as? WatchlistProviding else { return nil }
+            guard let provider = providerResolver(ref.accountID) as? WatchlistProviding else { return nil }
             // The primary's own ref already points at `item.id`, so `selectingSource`
             // is a no-op there and repoints only the alternate copies.
             return (provider: provider, item: item.selectingSource(ref))
@@ -210,7 +223,7 @@ final class MediaItemActionCoordinator: MediaItemActionHandling {
     private func unionedSourceRefs(for item: MediaItem) -> [MediaSourceRef] {
         var refs = item.sources
         var seen = Set(refs.map(\.id))
-        for ref in appState.identityIndex.identitySnapshot.sourceRefs(for: item)
+        for ref in additionalSources(item)
         where seen.insert(ref.id).inserted {
             refs.append(ref)
         }
@@ -239,10 +252,6 @@ final class MediaItemActionCoordinator: MediaItemActionHandling {
     /// The provider that owns `item`, by its tagged account; falls back to the
     /// primary provider for untagged (single-account) items.
     private func provider(for item: MediaItem) -> (any MediaProvider)? {
-        if let accountID = item.sourceAccountID,
-           let provider = appState.accountsProviders.provider(forAccountID: accountID) {
-            return provider
-        }
-        return appState.accountsProviders.primaryProvider
+        providerResolver(item.sourceAccountID)
     }
 }

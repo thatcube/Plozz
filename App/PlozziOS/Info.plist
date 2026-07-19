@@ -53,6 +53,8 @@
 	</array>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Plozz uses your local network to discover media servers and network shares.</string>
+	<key>PlozzSentryDSN</key>
+	<string>$(PLOZZ_SENTRY_DSN)</string>
 	<key>SimklClientID</key>
 	<string>$(SIMKL_CLIENT_ID)</string>
 	<key>SimklClientSecret</key>

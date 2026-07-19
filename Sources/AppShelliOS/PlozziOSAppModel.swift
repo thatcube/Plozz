@@ -4,6 +4,7 @@ import AppRuntime
 import CoreModels
 import CoreNetworking
 import CoreUI
+import CrashReporting
 import FeatureAuthCore
 import Foundation
 import MALService
@@ -29,6 +30,8 @@ final class PlozziOSAppModel {
     let anilistService: AniListService
     let malService: MALService
     let trackerScrobbler: PlozziOSTrackerScrobbler
+    let crashReporting: CrashReportingSettingsModel
+    let crashReportingController: CrashReportingController
     private(set) var settings: PlozziOSSettingsModel
     private(set) var seriesTrackStore: SeriesTrackPreferenceStore
     private(set) var versionPreferences: VersionPreferenceStore
@@ -162,6 +165,8 @@ final class PlozziOSAppModel {
             anilist: anilistService.scrobbler,
             mal: malService.scrobbler
         )
+        self.crashReporting = CrashReportingSettingsModel()
+        self.crashReportingController = CrashReportingController()
         self.settings = PlozziOSSettingsModel(
             namespace: profiles.activeNamespace
         )
@@ -246,6 +251,7 @@ final class PlozziOSAppModel {
         plexHomeUsers.ensurePlexIdentityForActiveProfile()
         updateTrackersForActiveProfile()
         drainWatchOutbox()
+        applyCrashReportingPreference()
         Task {
             let namespaces = [nil] + profiles.profiles.map { Optional($0.id) }
             await seerService.migrateLegacyConnectionIfNeeded(namespaces: namespaces)
@@ -255,6 +261,31 @@ final class PlozziOSAppModel {
 
     var accounts: [Account] {
         accountsProviders.accounts
+    }
+
+    var crashReportContext: CrashReportContext {
+        let info = Bundle.main.infoDictionary
+        let version = info?["CFBundleShortVersionString"] as? String ?? "Unknown"
+        let build = info?["CFBundleVersion"] as? String ?? "Unknown"
+        let providers = Set(accounts.map(\.server.provider.displayName)).sorted()
+        return CrashReportContext.make(
+            bundleIdentifier: Bundle.main.bundleIdentifier ?? "com.thatcube.Plozz",
+            version: version,
+            build: build,
+            providers: providers
+        )
+    }
+
+    func applyCrashReportingPreference() {
+        crashReportingController.apply(
+            enabled: crashReporting.settings.isEnabled,
+            context: crashReportContext
+        )
+    }
+
+    private func reloadAccountsAndCrashContext() {
+        accountsProviders.reloadAccounts()
+        applyCrashReportingPreference()
     }
 
     func provider(for item: MediaItem) -> (any MediaProvider)? {
@@ -289,7 +320,7 @@ final class PlozziOSAppModel {
             authenticatedHTTPResolver: authenticatedHTTPResolver
         )
         plexHomeUsers.ensurePlexIdentityForActiveProfile()
-        accountsProviders.reloadAccounts()
+        reloadAccountsAndCrashContext()
         identityIndex.reset()
         identityIndex.warmIdentityIndex()
         updateTrackersForActiveProfile()
@@ -613,7 +644,7 @@ final class PlozziOSAppModel {
             )
             plexHomeUsers.ensurePlexIdentityForActiveProfile()
         }
-        accountsProviders.reloadAccounts()
+        reloadAccountsAndCrashContext()
         identityIndex.reset()
         identityIndex.warmIdentityIndex()
         updateTrackersForActiveProfile()
@@ -668,7 +699,7 @@ final class PlozziOSAppModel {
         profiles.setActiveAccountIDs(Array(ids), for: profileID)
         watchReconcilers[profileID] = nil
         if profiles.activeProfileID == profileID {
-            accountsProviders.reloadAccounts()
+            reloadAccountsAndCrashContext()
             identityIndex.reset()
             identityIndex.warmIdentityIndex()
             drainWatchOutbox()
@@ -681,7 +712,7 @@ final class PlozziOSAppModel {
                 try accountStore.add(Account(from: session), token: session.accessToken)
             }
             accountError = nil
-            accountsProviders.reloadAccounts()
+            reloadAccountsAndCrashContext()
             identityIndex.warmIdentityIndex()
         } catch {
             accountError = error.localizedDescription
@@ -696,7 +727,7 @@ final class PlozziOSAppModel {
         do {
             try accountStore.remove(id: id)
             plexHomeUsers.forgetAccount(id)
-            accountsProviders.reloadAccounts()
+            reloadAccountsAndCrashContext()
             identityIndex.reset()
             identityIndex.warmIdentityIndex()
             guard !accountsProviders.accounts.contains(where: { $0.id == id }) else {
@@ -728,7 +759,7 @@ final class PlozziOSAppModel {
                 exportPath: exportPath,
                 displayName: displayName
             )
-            accountsProviders.reloadAccounts()
+            reloadAccountsAndCrashContext()
             identityIndex.warmIdentityIndex()
             accountError = nil
             return true
@@ -756,7 +787,7 @@ final class PlozziOSAppModel {
                 password: password,
                 displayName: displayName
             )
-            accountsProviders.reloadAccounts()
+            reloadAccountsAndCrashContext()
             identityIndex.warmIdentityIndex()
             accountError = nil
             return true
@@ -780,7 +811,7 @@ final class PlozziOSAppModel {
                 trustPin: trustPin,
                 displayName: displayName
             )
-            accountsProviders.reloadAccounts()
+            reloadAccountsAndCrashContext()
             identityIndex.warmIdentityIndex()
             accountError = nil
             return true
@@ -810,7 +841,7 @@ final class PlozziOSAppModel {
                 hostKeyPin: hostKeyPin,
                 displayName: displayName
             )
-            accountsProviders.reloadAccounts()
+            reloadAccountsAndCrashContext()
             identityIndex.warmIdentityIndex()
             accountError = nil
             return true
@@ -832,7 +863,7 @@ final class PlozziOSAppModel {
                 auth: auth,
                 displayName: displayName
             )
-            accountsProviders.reloadAccounts()
+            reloadAccountsAndCrashContext()
             identityIndex.warmIdentityIndex()
             accountError = nil
             return true

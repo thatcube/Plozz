@@ -13,7 +13,7 @@ public struct CrashReportContext: Sendable {
     public var build: String
     /// `debug` | `testflight` | `production`.
     public var environment: String
-    /// e.g. `tvOS 18.5`.
+    /// e.g. `tvOS 18.5` or `iOS 18.5`.
     public var systemVersion: String
     /// Hardware identifier, e.g. `AppleTV14,1`.
     public var deviceModel: String
@@ -72,7 +72,14 @@ public struct CrashReportContext: Sendable {
 
     static func currentSystemVersion() -> String {
         let v = ProcessInfo.processInfo.operatingSystemVersion
-        return "tvOS \(v.majorVersion).\(v.minorVersion).\(v.patchVersion)"
+        #if os(tvOS)
+        let platform = "tvOS"
+        #elseif os(iOS)
+        let platform = "iOS"
+        #else
+        let platform = "Apple OS"
+        #endif
+        return "\(platform) \(v.majorVersion).\(v.minorVersion).\(v.patchVersion)"
     }
 
     static func deviceModelIdentifier() -> String {
@@ -93,6 +100,7 @@ public struct CrashReportContext: Sendable {
 public protocol CrashReporter: AnyObject {
     var isActive: Bool { get }
     func start(context: CrashReportContext)
+    func update(context: CrashReportContext)
     func stop()
 }
 
@@ -103,6 +111,7 @@ public final class NoopCrashReporter: CrashReporter {
     public init() {}
     public private(set) var isActive = false
     public func start(context: CrashReportContext) {}
+    public func update(context: CrashReportContext) {}
     public func stop() {}
 }
 
@@ -119,8 +128,10 @@ public final class CrashReportingController {
 
     public init(dsn: String = CrashReportingController.bundleDSN()) {
         let trimmed = dsn.trimmingCharacters(in: .whitespacesAndNewlines)
+        let isUnresolvedBuildSetting =
+            trimmed.hasPrefix("$(") && trimmed.hasSuffix(")")
         #if canImport(Sentry)
-        if trimmed.isEmpty {
+        if trimmed.isEmpty || isUnresolvedBuildSetting {
             self.reporter = NoopCrashReporter()
             self.isConfigured = false
         } else {
@@ -139,7 +150,11 @@ public final class CrashReportingController {
     public func apply(enabled: Bool, context: CrashReportContext) {
         guard isConfigured else { return }
         if enabled {
-            if !reporter.isActive { reporter.start(context: context) }
+            if reporter.isActive {
+                reporter.update(context: context)
+            } else {
+                reporter.start(context: context)
+            }
         } else if reporter.isActive {
             reporter.stop()
         }

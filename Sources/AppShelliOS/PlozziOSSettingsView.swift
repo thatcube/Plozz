@@ -123,7 +123,11 @@ struct PlozziOSSettingsView: View {
 
             Section("Support") {
                 NavigationLink {
-                    PlozziOSDiagnosticsSettingsView(model: appModel.settings.diagnostics)
+                    PlozziOSDiagnosticsSettingsView(
+                        appModel: appModel,
+                        model: appModel.settings.diagnostics,
+                        crashReporting: appModel.crashReporting
+                    )
                 } label: {
                     Label("Diagnostics", systemImage: "waveform.path.ecg")
                 }
@@ -1016,25 +1020,6 @@ private struct PlozziOSNightShiftSettingsView: View {
             }
         }
         .navigationTitle("Night Shift")
-    }
-}
-
-private struct PlozziOSDiagnosticsSettingsView: View {
-    @Bindable var model: DiagnosticsSettingsModel
-
-    var body: some View {
-        Form {
-            Section {
-                Toggle("Playback diagnostics", isOn: $model.settings.isEnabled)
-                Toggle(
-                    "Home performance overlay",
-                    isOn: $model.settings.homePerformanceOverlayEnabled
-                )
-            } footer: {
-                Text("Diagnostics are off by default and intended for troubleshooting.")
-            }
-        }
-        .navigationTitle("Diagnostics")
     }
 }
 

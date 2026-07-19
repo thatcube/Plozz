@@ -257,6 +257,7 @@ targets:
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         ITSAppUsesNonExemptEncryption: false
+        PlozzSentryDSN: "$(PLOZZ_SENTRY_DSN)"
         UILaunchScreen: {}
         UIRequiresFullScreen: false
         NSLocalNetworkUsageDescription: "Plozz uses your local network to discover media servers and network shares."

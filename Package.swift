@@ -564,6 +564,7 @@ let package = Package(
                 "CoreModels",
                 "CoreNetworking",
                 "CoreUI",
+                "CrashReporting",
                 "FeatureAuthCore",
                 "FeatureHomeCore",
                 "FeaturePlayback",

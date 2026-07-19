@@ -8,7 +8,7 @@ import Sentry
 ///
 /// What is sent (only when the user has opted in AND a DSN is baked in):
 ///   • Crash stack traces (the whole point) and watchdog/hang signals.
-///   • Coarse tags: app version/build, tvOS version, device model, provider kinds.
+///   • Coarse tags: app version/build, OS version, device model, provider kinds.
 /// What is NOT sent: user identity, IP, server URLs/hostnames, media titles,
 /// profile names, network/UI breadcrumbs, or performance traces.
 @MainActor
@@ -57,23 +57,33 @@ public final class SentryCrashReporter: CrashReporter {
             options.beforeBreadcrumb = { crumb in CrashRedaction.scrub(crumb) }
         }
 
-        SentrySDK.configureScope { scope in
-            scope.setTag(value: context.version, key: "app.version")
-            scope.setTag(value: context.build, key: "app.build")
-            scope.setTag(value: context.systemVersion, key: "os.version")
-            scope.setTag(value: context.deviceModel, key: "device.model")
-            if !context.providers.isEmpty {
-                scope.setTag(value: context.providers.joined(separator: "+"), key: "providers")
-            }
-        }
+        applyScope(context)
 
         isActive = true
+    }
+
+    public func update(context: CrashReportContext) {
+        guard isActive else { return }
+        applyScope(context)
     }
 
     public func stop() {
         guard isActive else { return }
         SentrySDK.close()
         isActive = false
+    }
+
+    private func applyScope(_ context: CrashReportContext) {
+        SentrySDK.configureScope { scope in
+            scope.setTag(value: context.version, key: "app.version")
+            scope.setTag(value: context.build, key: "app.build")
+            scope.setTag(value: context.systemVersion, key: "os.version")
+            scope.setTag(value: context.deviceModel, key: "device.model")
+            let providers = context.providers.isEmpty
+                ? "none"
+                : context.providers.joined(separator: "+")
+            scope.setTag(value: providers, key: "providers")
+        }
     }
 }
 #endif

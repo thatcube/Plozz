@@ -365,6 +365,13 @@ public final class HomeViewModel {
         let isLibraryVisible: (String) -> Bool = { visibility.isVisible($0) }
         let continueWatching = content.continueWatching.filter { $0.isVisibleOnHome(isLibraryVisible: isLibraryVisible) }
         let latest = content.latest.filter { $0.isVisibleOnHome(isLibraryVisible: isLibraryVisible) }
+        // Supersede any in-flight publish: the async per-item poster compositing
+        // makes a publish take seconds, so two overlapping `load()`s would run two
+        // detached publishes whose `pruneArtwork(keeping:)` calls could each delete
+        // the other's freshly-written poster, leaving a snapshot pointing at a
+        // now-missing file (a blank card until the next publish). Cancelling the
+        // prior task first guarantees the newest publish wins.
+        topShelfPublishTask?.cancel()
         topShelfPublishTask = Task.detached(priority: .utility) {
             await TopShelfPublisher.publish(continueWatching: continueWatching, latest: latest)
         }

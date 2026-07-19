@@ -29,7 +29,11 @@ public enum TopShelfPublisher {
             sections.append(.init(id: "latest", title: "Recently Added", items: recent))
         }
 
-        // Drop any composited poster no longer referenced by this snapshot.
+        // Drop any composited poster no longer referenced by this snapshot. Guard
+        // on cancellation first: a superseded publish (a newer one started while
+        // this one was awaiting image fetches) must not prune the directory the
+        // winning publish is writing, nor overwrite its snapshot.
+        guard !Task.isCancelled else { return }
         let keptArtwork = Set(
             sections
                 .flatMap(\.items)

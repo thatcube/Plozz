@@ -1,4 +1,3 @@
-#if canImport(SwiftUI)
 import CoreModels
 import Foundation
 import MediaTransportCore
@@ -11,16 +10,21 @@ import CryptoKit
 #endif
 
 /// A folder discovered while browsing a WebDAV server during onboarding.
-struct WebDAVOnboardingFolder: Equatable, Sendable, Identifiable {
+public struct WebDAVOnboardingFolder: Equatable, Sendable, Identifiable {
     /// Absolute, server-rooted path (percent-decoded, normalized). Also the id.
-    let path: String
+    public let path: String
     /// Display name (the last path segment).
-    let name: String
-    var id: String { path }
+    public let name: String
+    public var id: String { path }
+
+    public init(path: String, name: String) {
+        self.path = path
+        self.name = name
+    }
 }
 
 /// Typed onboarding failures, mapped to friendly copy by the view model.
-enum WebDAVOnboardingError: Error, Equatable, Sendable {
+public enum WebDAVOnboardingError: Error, Equatable, Sendable {
     case invalidURL
     case notSecure           // a reusable credential over plain http
     case unreachable         // couldn't connect at all
@@ -33,7 +37,7 @@ enum WebDAVOnboardingError: Error, Equatable, Sendable {
 }
 
 /// The outcome of a TLS preflight against an `https` origin.
-enum WebDAVTrustPreflight: Equatable, Sendable {
+public enum WebDAVTrustPreflight: Equatable, Sendable {
     /// The system already trusts this server's certificate chain — no pin needed.
     case systemTrusted
     /// The certificate isn't system-trusted (e.g. self-signed). The captured
@@ -44,7 +48,7 @@ enum WebDAVTrustPreflight: Equatable, Sendable {
 }
 
 /// The trust decision to use for a WebDAV request during onboarding.
-enum WebDAVOnboardingTrust: Equatable, Sendable {
+public enum WebDAVOnboardingTrust: Equatable, Sendable {
     case system
     case pinnedLeaf(sha256: Data)
 
@@ -59,7 +63,7 @@ enum WebDAVOnboardingTrust: Equatable, Sendable {
 /// Network operations the WebDAV onboarding flow needs, behind a protocol so the
 /// view model is unit-testable with a stub (the real implementation is validated
 /// end-to-end on a physical device against a real server).
-protocol WebDAVOnboardingProbing: Sendable {
+public protocol WebDAVOnboardingProbing: Sendable {
     /// Preflight TLS for an `https` URL, capturing an untrusted leaf's SHA-256
     /// for approval. Never transfers data over an unverified channel.
     func preflightTrust(url: URL) async -> WebDAVTrustPreflight
@@ -81,7 +85,8 @@ protocol WebDAVOnboardingProbing: Sendable {
 /// Real probe backed by the `MediaTransportHTTP` primitives. Uses a fresh
 /// ephemeral registry per call (onboarding has no account/vault yet), and a
 /// dedicated capturing delegate for the trust-on-first-use preflight.
-struct WebDAVOnboardingProbe: WebDAVOnboardingProbing {
+public struct WebDAVOnboardingProbe: WebDAVOnboardingProbing {
+    public init() {}
     // A fixed, arbitrary trust revision for onboarding sessions: onboarding
     // builds a throwaway registry per call, so the revision only needs to be
     // internally consistent between the key and the pinned policy.
@@ -89,7 +94,7 @@ struct WebDAVOnboardingProbe: WebDAVOnboardingProbing {
         uuid: (1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1)
     )
 
-    func preflightTrust(url: URL) async -> WebDAVTrustPreflight {
+    public func preflightTrust(url: URL) async -> WebDAVTrustPreflight {
         #if canImport(Security)
         guard let origin = TransportOrigin(url: url), origin.isSecure else {
             return .unreachable
@@ -111,7 +116,7 @@ struct WebDAVOnboardingProbe: WebDAVOnboardingProbing {
         #endif
     }
 
-    func validate(
+    public func validate(
         url: URL,
         credential: WebDAVCredential,
         trust: WebDAVOnboardingTrust
@@ -133,7 +138,7 @@ struct WebDAVOnboardingProbe: WebDAVOnboardingProbing {
         }
     }
 
-    func listFolders(
+    public func listFolders(
         url: URL,
         path: String,
         credential: WebDAVCredential,
@@ -193,7 +198,7 @@ struct WebDAVOnboardingProbe: WebDAVOnboardingProbing {
     /// Re-encodes a percent-DECODED, normalized path (segments contain no `/`)
     /// into a percent-ENCODED path safe to assign to `URLComponents
     /// .percentEncodedPath` and to feed `WebDAVRoot(rawPath:)`.
-    static func percentEncodedPath(fromDecoded decoded: String) -> String {
+    public static func percentEncodedPath(fromDecoded decoded: String) -> String {
         let segments = decoded.split(separator: "/", omittingEmptySubsequences: true)
         guard !segments.isEmpty else { return "/" }
         let encoded = segments.map { segment -> String in
@@ -287,5 +292,4 @@ private final class LeafCapturingDelegate: NSObject, URLSessionDataDelegate, @un
         session.invalidateAndCancel()
     }
 }
-#endif
 #endif

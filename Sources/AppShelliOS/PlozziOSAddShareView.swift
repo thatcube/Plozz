@@ -17,6 +17,11 @@ struct PlozziOSAddShareView: View {
                 } label: {
                     Label("NFS", systemImage: "externaldrive")
                 }
+                NavigationLink {
+                    PlozziOSAddWebDAVShareView(appModel: appModel)
+                } label: {
+                    Label("WebDAV", systemImage: "network")
+                }
             }
         }
         .navigationTitle("Add Network Share")

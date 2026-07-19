@@ -1237,32 +1237,7 @@ public final class AppState {
     /// The credential a WebDAV share is being added with. Mirrors the vault's
     /// `MediaShareAuthentication` cases WebDAV permits, kept as a small onboarding
     /// input type so the UI (Phase 3) doesn't depend on FeatureAuth internals.
-    public enum WebDAVShareAuth: Equatable, Sendable {
-        case anonymous
-        case password(username: String, password: String)
-        case bearer(token: String)
-
-        /// Stable principal component of the account identity. Different users on
-        /// one URL get separate accounts; anonymous and bearer each fold to a
-        /// single principal (re-adding replaces in place — the "my token/password
-        /// changed" flow), which is the common one-principal-per-server case.
-        fileprivate var principal: String {
-            switch self {
-            case .anonymous: return "anon"
-            case .password(let username, _):
-                let trimmed = username.trimmingCharacters(in: .whitespaces)
-                return trimmed.isEmpty ? "anon" : trimmed
-            case .bearer: return "bearer"
-            }
-        }
-
-        fileprivate var accountUserName: String {
-            switch self {
-            case .anonymous, .bearer: return ""
-            case .password(let username, _): return username.trimmingCharacters(in: .whitespaces)
-            }
-        }
-    }
+    public typealias WebDAVShareAuth = MediaShareWebDAVAuth
 
     /// Stable identity for a WebDAV share. Unlike SMB, WebDAV paths are
     /// case-sensitive and http vs https are genuinely different origins, so both
@@ -1276,19 +1251,13 @@ public final class AppState {
         path: String,
         principal: String
     ) -> String {
-        let normalizedScheme = scheme.lowercased()
-        // Canonicalize the port: an explicit default port (443/https, 80/http)
-        // is the same origin as an implicit one, so drop it to dedup
-        // `https://h/dav` and `https://h:443/dav` to one account.
-        let defaultPort = normalizedScheme == "https" ? 443 : 80
-        let portKey = (port == nil || port == defaultPort) ? "" : ":\(port!)"
-        // Canonicalize a trailing slash (`/dav` == `/dav/`) so the same
-        // collection isn't added twice; the transport endpoint drops it too.
-        var normalizedPath = path.isEmpty ? "/" : path
-        if normalizedPath.count > 1, normalizedPath.hasSuffix("/") {
-            normalizedPath.removeLast()
-        }
-        return "share:\(normalizedScheme)://\(host.lowercased())\(portKey)\(normalizedPath)#\(principal)"
+        MediaShareAccountConfigurationService.webDAVID(
+            scheme: scheme,
+            host: host,
+            port: port,
+            path: path,
+            principal: principal
+        )
     }
 
     /// Secret-safe persistence failure identity for device diagnostics. Never
@@ -1343,93 +1312,41 @@ public final class AppState {
         trustPin: SHA256Fingerprint? = nil,
         displayName: String
     ) {
-        guard let components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false),
-              let scheme = components.scheme?.lowercased(),
-              scheme == "http" || scheme == "https",
-              let host = components.host, !host.isEmpty,
-              // A base URL must never carry credentials-in-URL, a query, or a
-              // fragment — those aren't part of a share root and are a smuggling
-              // vector. Reject rather than silently strip.
-              components.user == nil, components.password == nil,
-              components.query == nil, components.fragment == nil else {
-            apply(.authenticationFailed(.unknown("Invalid WebDAV address")))
-            return
-        }
-        // A TLS leaf pin is only meaningful over HTTPS; refuse it on plaintext.
-        if trustPin != nil, scheme != "https" {
+        if trustPin != nil, baseURL.scheme?.lowercased() != "https" {
             apply(.authenticationFailed(.unknown("A certificate pin requires HTTPS")))
             return
         }
-        // Credentials over plain http are permitted for a LAN media share (the
-        // onboarding UI warns); only a TLS pin requires https. No cleartext
-        // rejection here.
-
-        let path = components.percentEncodedPath
-        let normalizedPath = path.isEmpty ? "/" : path
-        let envelope: MediaShareCredentialEnvelope
+        let service = MediaShareAccountConfigurationService(
+            accountStore: accountsProviders.accountStore
+        )
+        let prepared: PreparedMediaShareAccount
         do {
-            let authentication: MediaShareAuthentication
-            switch auth {
-            case .anonymous:
-                authentication = .anonymous
-            case let .password(username, password):
-                authentication = .password(
-                    username: username.trimmingCharacters(in: .whitespaces),
-                    password: password
-                )
-            case let .bearer(token):
-                authentication = .bearer(token: token)
-            }
-            let trust = MediaShareTrustMaterial(tlsLeafCertificateSHA256: trustPin)
-            envelope = try MediaShareCredentialEnvelope(
-                transport: .webDAV,
-                authentication: authentication,
-                trust: trust
+            prepared = try service.prepareWebDAV(
+                baseURL: baseURL,
+                auth: auth,
+                trustPin: trustPin,
+                displayName: displayName
             )
+        } catch is MediaShareAccountConfigurationError {
+            apply(.authenticationFailed(.unknown("Invalid WebDAV address")))
+            return
         } catch {
             apply(.authenticationFailed(.unknown("Invalid WebDAV credentials")))
             return
         }
-
-        let serverID = Self.webDAVShareID(
-            scheme: scheme,
-            host: host,
-            port: components.port,
-            path: normalizedPath,
-            principal: auth.principal
-        )
-        let trimmedName = displayName.trimmingCharacters(in: .whitespaces)
-        let name = trimmedName.isEmpty ? Self.defaultShareName(path: normalizedPath, host: host, transport: .webDAV) : trimmedName
-        let server = MediaServer(
-            id: serverID,
-            name: name,
-            baseURL: baseURL,
-            provider: .mediaShare
-        )
         let isFirstRun = accountsProviders.accounts.isEmpty && !profilesModel.firstRunProfileSetupComplete
-        let userName = auth.accountUserName
-        let session = UserSession(
-            server: server,
-            userID: auth.principal,
-            userName: userName,
-            deviceID: accountsProviders.accountStore.deviceID(),
-            // Credential bytes live in the vault envelope, not the token slot.
-            accessToken: ""
-        )
-        let account = Account(id: server.id, from: session)
-        let previousAccount = accountsProviders.accounts.first { $0.id == account.id }
-        apply(.serverSelected(server))
+        apply(.serverSelected(prepared.session.server))
         do {
-            try accountsProviders.accountStore.addMediaShare(account, credential: envelope, generatedPrivateKey: nil)
+            try service.persist(prepared)
         } catch {
             Self.reportMediaSharePersistenceFailure(error, operation: "webdav-save")
             apply(.authenticationFailed(.unknown("Couldn’t save this WebDAV share")))
             return
         }
         finalizeAddedAccount(
-            session: session,
-            account: account,
-            previousAccount: previousAccount,
+            session: prepared.session,
+            account: prepared.account,
+            previousAccount: prepared.previousAccount,
             isFirstRun: isFirstRun
         )
     }

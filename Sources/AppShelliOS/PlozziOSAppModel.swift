@@ -205,6 +205,29 @@ final class PlozziOSAppModel {
             return false
         }
     }
+
+    @discardableResult
+    func addWebDAVShare(
+        baseURL: URL,
+        auth: MediaShareWebDAVAuth,
+        trustPin: SHA256Fingerprint?,
+        displayName: String
+    ) -> Bool {
+        do {
+            _ = try mediaShareConfigurationService.saveWebDAV(
+                baseURL: baseURL,
+                auth: auth,
+                trustPin: trustPin,
+                displayName: displayName
+            )
+            accountsProviders.reloadAccounts()
+            accountError = nil
+            return true
+        } catch {
+            accountError = error.localizedDescription
+            return false
+        }
+    }
 }
 
 private struct PlozziOSMediaShareArtworkCacheLifecycle:

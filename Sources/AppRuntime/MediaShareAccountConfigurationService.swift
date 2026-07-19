@@ -17,6 +17,31 @@ public enum MediaShareAccountConfigurationError: LocalizedError, Equatable {
     }
 }
 
+public enum MediaShareWebDAVAuth: Equatable, Sendable {
+    case anonymous
+    case password(username: String, password: String)
+    case bearer(token: String)
+
+    var principal: String {
+        switch self {
+        case .anonymous: "anon"
+        case let .password(username, _):
+            username.trimmingCharacters(in: .whitespaces).isEmpty
+                ? "anon"
+                : username.trimmingCharacters(in: .whitespaces)
+        case .bearer: "bearer"
+        }
+    }
+
+    var accountUserName: String {
+        switch self {
+        case .anonymous, .bearer: ""
+        case let .password(username, _):
+            username.trimmingCharacters(in: .whitespaces)
+        }
+    }
+}
+
 public struct PreparedMediaShareAccount: Sendable {
     public let session: UserSession
     public let account: Account
@@ -124,6 +149,96 @@ public struct MediaShareAccountConfigurationService: Sendable {
             share: share,
             username: username,
             password: password,
+            displayName: displayName
+        )
+        try persist(prepared)
+        return prepared
+    }
+
+    public func prepareWebDAV(
+        baseURL: URL,
+        auth: MediaShareWebDAVAuth,
+        trustPin: SHA256Fingerprint?,
+        displayName: String
+    ) throws -> PreparedMediaShareAccount {
+        guard let components = URLComponents(
+            url: baseURL,
+            resolvingAgainstBaseURL: false
+        ),
+        let scheme = components.scheme?.lowercased(),
+        scheme == "http" || scheme == "https",
+        let host = components.host,
+        !host.isEmpty,
+        components.user == nil,
+        components.password == nil,
+        components.query == nil,
+        components.fragment == nil,
+        trustPin == nil || scheme == "https" else {
+            throw MediaShareAccountConfigurationError.invalidAddress
+        }
+
+        let authentication: MediaShareAuthentication
+        switch auth {
+        case .anonymous:
+            authentication = .anonymous
+        case let .password(username, password):
+            authentication = .password(
+                username: username.trimmingCharacters(in: .whitespaces),
+                password: password
+            )
+        case let .bearer(token):
+            authentication = .bearer(token: token)
+        }
+        let credential = try MediaShareCredentialEnvelope(
+            transport: .webDAV,
+            authentication: authentication,
+            trust: MediaShareTrustMaterial(tlsLeafCertificateSHA256: trustPin)
+        )
+        let path = components.percentEncodedPath.isEmpty
+            ? "/"
+            : components.percentEncodedPath
+        let serverID = Self.webDAVID(
+            scheme: scheme,
+            host: host,
+            port: components.port,
+            path: path,
+            principal: auth.principal
+        )
+        let trimmedName = displayName.trimmingCharacters(in: .whitespaces)
+        let server = MediaServer(
+            id: serverID,
+            name: trimmedName.isEmpty
+                ? Self.defaultShareName(path: path, host: host, transport: .webDAV)
+                : trimmedName,
+            baseURL: baseURL,
+            provider: .mediaShare
+        )
+        let session = UserSession(
+            server: server,
+            userID: auth.principal,
+            userName: auth.accountUserName,
+            deviceID: accountStore.deviceID(),
+            accessToken: ""
+        )
+        let account = Account(id: server.id, from: session)
+        return PreparedMediaShareAccount(
+            session: session,
+            account: account,
+            previousAccount: accountStore.loadAccounts().first { $0.id == account.id },
+            credential: credential
+        )
+    }
+
+    public func saveWebDAV(
+        baseURL: URL,
+        auth: MediaShareWebDAVAuth,
+        trustPin: SHA256Fingerprint?,
+        displayName: String
+    ) throws -> PreparedMediaShareAccount {
+        let prepared = try prepareWebDAV(
+            baseURL: baseURL,
+            auth: auth,
+            trustPin: trustPin,
             displayName: displayName
         )
         try persist(prepared)
@@ -248,6 +363,23 @@ public struct MediaShareAccountConfigurationService: Sendable {
         let normalizedUser = username.trimmingCharacters(in: .whitespaces).lowercased()
         let user = normalizedUser.isEmpty ? "guest" : normalizedUser
         return "share:\(host.lowercased())\(portKey)/\(share.lowercased())#\(user)"
+    }
+
+    public static func webDAVID(
+        scheme: String,
+        host: String,
+        port: Int?,
+        path: String,
+        principal: String
+    ) -> String {
+        let normalizedScheme = scheme.lowercased()
+        let defaultPort = normalizedScheme == "https" ? 443 : 80
+        let portKey = (port == nil || port == defaultPort) ? "" : ":\(port!)"
+        var normalizedPath = path.isEmpty ? "/" : path
+        if normalizedPath.count > 1, normalizedPath.hasSuffix("/") {
+            normalizedPath.removeLast()
+        }
+        return "share:\(normalizedScheme)://\(host.lowercased())\(portKey)\(normalizedPath)#\(principal)"
     }
 
     public static func defaultShareName(

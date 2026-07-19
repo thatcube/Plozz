@@ -4,6 +4,31 @@ import FeatureAuthCore
 import XCTest
 
 final class MediaShareAccountConfigurationServiceTests: XCTestCase {
+    func testSaveWebDAVPersistsBearerAndPinnedTrust() throws {
+        let store = try makeStore()
+        let service = MediaShareAccountConfigurationService(accountStore: store)
+        let pin = try SHA256Fingerprint(bytes: Data(repeating: 7, count: 32))
+
+        let prepared = try service.saveWebDAV(
+            baseURL: try XCTUnwrap(URL(string: "https://DAV.Example:443/media/")),
+            auth: .bearer(token: "token"),
+            trustPin: pin,
+            displayName: ""
+        )
+
+        XCTAssertEqual(
+            prepared.account.id,
+            "share:https://dav.example/media#bearer"
+        )
+        XCTAssertEqual(prepared.account.server.name, "media (WebDAV)")
+        let credential = try store.mediaShareCredential(
+            for: prepared.account.id,
+            revision: prepared.account.credentialRevision
+        )
+        XCTAssertEqual(credential.authentication, .bearer(token: "token"))
+        XCTAssertEqual(credential.trust.tlsLeafCertificateSHA256, pin)
+    }
+
     func testSaveSMBPersistsPasswordCredentialAndStableIdentity() throws {
         let store = try makeStore()
         let service = MediaShareAccountConfigurationService(accountStore: store)

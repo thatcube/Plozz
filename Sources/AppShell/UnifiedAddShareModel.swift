@@ -5,6 +5,7 @@ import CoreModels
 import FeatureAuth
 import ProviderShare
 import MediaTransportHTTP
+import MediaTransportWebDAV
 import MediaTransportSFTP
 import MediaTransportFTP
 import MediaTransportNFS

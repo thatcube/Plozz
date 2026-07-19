@@ -569,7 +569,9 @@ let package = Package(
                 "FeaturePlayback",
                 "FeatureSearchCore",
                 "MediaTransportCore",
+                "MediaTransportHTTP",
                 "MediaTransportNFS",
+                "MediaTransportWebDAV",
                 "ProviderPlex",
                 "ProviderShare",
             ]
@@ -590,7 +592,7 @@ let package = Package(
         ),
         .testTarget(
             name: "AppShellTests",
-            dependencies: ["AppShell", "CoreModels", "MediaTransportSFTP", "MediaTransportFTP", "MediaTransportNFS"]
+            dependencies: ["AppShell", "CoreModels", "MediaTransportSFTP", "MediaTransportFTP", "MediaTransportNFS", "MediaTransportWebDAV"]
         ),
         .testTarget(
             name: "CoreUITests",

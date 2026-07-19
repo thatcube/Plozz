@@ -7,9 +7,14 @@ struct PlozziOSSearchView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var viewModel: SearchViewModel
     private let appModel: PlozziOSAppModel
+    private let onShowSettings: () -> Void
 
-    init(appModel: PlozziOSAppModel) {
+    init(
+        appModel: PlozziOSAppModel,
+        onShowSettings: @escaping () -> Void
+    ) {
         self.appModel = appModel
+        self.onShowSettings = onShowSettings
         _viewModel = State(
             initialValue: SearchViewModel(
                 accounts: appModel.accountsProviders.homeAccounts,
@@ -27,6 +32,15 @@ struct PlozziOSSearchView: View {
     var body: some View {
         content
             .navigationTitle("Search")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(
+                        "Settings",
+                        systemImage: "gear",
+                        action: onShowSettings
+                    )
+                }
+            }
             .searchable(
                 text: $viewModel.query,
                 prompt: "Movies, shows, and episodes"

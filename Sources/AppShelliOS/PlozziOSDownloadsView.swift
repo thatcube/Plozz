@@ -5,6 +5,7 @@ import SwiftUI
 struct PlozziOSDownloadsView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Bindable var model: PlozziOSDownloadsModel
+    let onShowSettings: () -> Void
 
     var body: some View {
         Group {
@@ -32,6 +33,13 @@ struct PlozziOSDownloadsView: View {
         }
         .navigationTitle("Downloads")
         .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button(
+                    "Settings",
+                    systemImage: "gear",
+                    action: onShowSettings
+                )
+            }
             if horizontalSizeClass != .regular {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {

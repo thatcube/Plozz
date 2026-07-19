@@ -9,10 +9,16 @@ struct PlozziOSHomeView: View {
     @State private var heroItems: [MediaItem] = []
     private let appModel: PlozziOSAppModel
     private let onAddServer: () -> Void
+    private let onShowSettings: () -> Void
 
-    init(appModel: PlozziOSAppModel, onAddServer: @escaping () -> Void) {
+    init(
+        appModel: PlozziOSAppModel,
+        onAddServer: @escaping () -> Void,
+        onShowSettings: @escaping () -> Void
+    ) {
         self.appModel = appModel
         self.onAddServer = onAddServer
+        self.onShowSettings = onShowSettings
         _viewModel = State(
             initialValue: HomeViewModel(
                 accounts: appModel.accountsProviders.homeAccounts,
@@ -62,17 +68,12 @@ struct PlozziOSHomeView: View {
         }
         .navigationTitle("Home")
         .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Menu {
-                    Button("Add Server", systemImage: "server.rack", action: onAddServer)
-                    NavigationLink {
-                        PlozziOSAddShareView(appModel: appModel)
-                    } label: {
-                        Label("Add Network Share", systemImage: "externaldrive")
-                    }
-                } label: {
-                    Label("Add Source", systemImage: "plus")
-                }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button(
+                    "Settings",
+                    systemImage: "gear",
+                    action: onShowSettings
+                )
             }
         }
         .task(id: appModel.settings.homeVisibility.visibility) {

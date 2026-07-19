@@ -208,13 +208,11 @@ private struct PlozziOSTabShell: View {
                     PlozziOSDestinationView(
                         destination: .home,
                         appModel: appModel,
-                        onAddServer: onAddServer
+                        onAddServer: onAddServer,
+                        onShowSettings: { showingSettings = true }
                     )
                 }
                 .toolbarBackground(.hidden, for: .navigationBar)
-                .plozziOSSettingsToolbar {
-                    showingSettings = true
-                }
                 .background { AppBackground(palette: palette) }
             }
 
@@ -223,13 +221,11 @@ private struct PlozziOSTabShell: View {
                     PlozziOSDestinationView(
                         destination: .search,
                         appModel: appModel,
-                        onAddServer: onAddServer
+                        onAddServer: onAddServer,
+                        onShowSettings: { showingSettings = true }
                     )
                 }
                 .toolbarBackground(.hidden, for: .navigationBar)
-                .plozziOSSettingsToolbar {
-                    showingSettings = true
-                }
                 .background { AppBackground(palette: palette) }
             }
 
@@ -238,13 +234,11 @@ private struct PlozziOSTabShell: View {
                     PlozziOSDestinationView(
                         destination: .downloads,
                         appModel: appModel,
-                        onAddServer: onAddServer
+                        onAddServer: onAddServer,
+                        onShowSettings: { showingSettings = true }
                     )
                 }
                 .toolbarBackground(.hidden, for: .navigationBar)
-                .plozziOSSettingsToolbar {
-                    showingSettings = true
-                }
                 .background { AppBackground(palette: palette) }
             }
         }
@@ -274,6 +268,7 @@ private struct PlozziOSDestinationView: View {
     let destination: PlozziOSDestination
     let appModel: PlozziOSAppModel
     let onAddServer: () -> Void
+    let onShowSettings: () -> Void
 
     var body: some View {
         ZStack {
@@ -289,41 +284,29 @@ private struct PlozziOSDestinationView: View {
         case .home:
             PlozziOSHomeLandingView(
                 appModel: appModel,
-                onAddServer: onAddServer
+                onAddServer: onAddServer,
+                onShowSettings: onShowSettings
             )
         case .search:
-            PlozziOSSearchView(appModel: appModel)
+            PlozziOSSearchView(
+                appModel: appModel,
+                onShowSettings: onShowSettings
+            )
                 .id(appModel.accounts.map(\.credentialRevision))
         case .downloads:
-            PlozziOSDownloadsView(model: appModel.downloads)
+            PlozziOSDownloadsView(
+                model: appModel.downloads,
+                onShowSettings: onShowSettings
+            )
                 .id(appModel.profiles.activeProfileID)
         }
-    }
-}
-
-private struct PlozziOSSettingsToolbarModifier: ViewModifier {
-    let action: () -> Void
-
-    func body(content: Content) -> some View {
-        content.toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button("Settings", systemImage: "gear", action: action)
-            }
-        }
-    }
-}
-
-private extension View {
-    func plozziOSSettingsToolbar(
-        action: @escaping () -> Void
-    ) -> some View {
-        modifier(PlozziOSSettingsToolbarModifier(action: action))
     }
 }
 
 private struct PlozziOSHomeLandingView: View {
     let appModel: PlozziOSAppModel
     let onAddServer: () -> Void
+    let onShowSettings: () -> Void
 
     var body: some View {
         if appModel.accounts.isEmpty {
@@ -339,10 +322,20 @@ private struct PlozziOSHomeLandingView: View {
                 }
             }
             .navigationTitle("Home")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(
+                        "Settings",
+                        systemImage: "gear",
+                        action: onShowSettings
+                    )
+                }
+            }
         } else {
             PlozziOSHomeView(
                 appModel: appModel,
-                onAddServer: onAddServer
+                onAddServer: onAddServer,
+                onShowSettings: onShowSettings
             )
             .id(appModel.accounts.map(\.credentialRevision))
         }

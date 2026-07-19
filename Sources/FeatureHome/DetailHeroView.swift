@@ -1310,8 +1310,16 @@ private struct SeriesDetailHeroBackdrop: View {
             stillImageOpacity: showsTrailer ? 0 : 1
         ) {
             if showsTrailer {
-                HeroTrailerVideoLayer(controller: trailerController)
-                    .transition(.opacity)
+                ZStack {
+                    if let handoffImage = trailerController.handoffImage {
+                        Image(uiImage: handoffImage)
+                            .resizable()
+                            .scaledToFill()
+                    }
+                    HeroTrailerVideoLayer(controller: trailerController)
+                }
+                .clipped()
+                .transition(.opacity)
             }
         }
         .animation(reduceMotion ? nil : .smooth(duration: 0.9), value: receded)

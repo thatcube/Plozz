@@ -1,5 +1,6 @@
 #if canImport(AVFoundation)
 import AVFoundation
+import CoreImage
 import CoreModels
 import CoreNetworking
 import Foundation
@@ -56,6 +57,10 @@ public final class HeroTrailerController {
     /// The resolved trailer duration in seconds once known (`0` until ready).
     /// Drives the hero's dwell length so the progress bar spans the full trailer.
     public private(set) var duration: TimeInterval = 0
+    /// One frozen frame captured immediately before Home pushes detail. It masks
+    /// the few-frame gap while the shared player moves between AVPlayerLayers.
+    /// Bounded to exactly one image and replaced on every handoff.
+    public private(set) var handoffImage: UIImage?
 
     /// The underlying player, exposed only so a ``HeroTrailerVideoLayer`` can
     /// attach an `AVPlayerLayer`. Engine-agnostic callers must not depend on it.
@@ -71,6 +76,8 @@ public final class HeroTrailerController {
     private var hasStartedPlayback = false
     private var autoplayWhenReady = false
     private var requestedPaused = false
+    @ObservationIgnored private var videoOutput: AVPlayerItemVideoOutput?
+    @ObservationIgnored private let imageContext = CIContext(options: nil)
 
     public init() {
         // Never let the trailer claim the Now-Playing transport or interrupt
@@ -132,6 +139,14 @@ public final class HeroTrailerController {
         activateSession()
 
         let item = AVPlayerItem(url: resolvedURL)
+        let output = AVPlayerItemVideoOutput(
+            pixelBufferAttributes: [
+                kCVPixelBufferPixelFormatTypeKey as String:
+                    Int(kCVPixelFormatType_32BGRA)
+            ]
+        )
+        item.add(output)
+        videoOutput = output
         player.isMuted = muted
         hasStartedPlayback = false
         autoplayWhenReady = false
@@ -156,6 +171,25 @@ public final class HeroTrailerController {
     /// reloading.
     public func setMuted(_ muted: Bool) {
         player.isMuted = muted
+    }
+
+    /// Captures the currently displayed video frame for a seamless layer handoff.
+    /// Failure is harmless (the detail layer falls back to its normal background).
+    public func captureHandoffFrame() {
+        guard let videoOutput,
+              let pixelBuffer = videoOutput.copyPixelBuffer(
+                  forItemTime: player.currentTime(),
+                  itemTimeForDisplay: nil
+              ) else {
+            handoffImage = nil
+            return
+        }
+        let image = CIImage(cvPixelBuffer: pixelBuffer)
+        guard let cgImage = imageContext.createCGImage(image, from: image.extent) else {
+            handoffImage = nil
+            return
+        }
+        handoffImage = UIImage(cgImage: cgImage)
     }
 
     /// Freezes/resumes the ambient trailer in lockstep with the hero's
@@ -197,6 +231,8 @@ public final class HeroTrailerController {
         statusObservation = nil
         if resetItem {
             player.replaceCurrentItem(with: nil)
+            videoOutput = nil
+            handoffImage = nil
             isPlaying = false
             isReady = false
             currentItemID = nil

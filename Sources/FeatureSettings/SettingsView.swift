@@ -495,12 +495,7 @@ public struct SettingsView: View {
                 if metadataSettings != nil {
                     navRow("Metadata", icon: "sparkles.rectangle.stack",
                            value: nil,
-                           route: .metadata) {
-                        Text("Providers, attribution, diagnostics, and cache")
-                            .font(.footnote)
-                            .settingsRowSecondary()
-                            .lineLimit(2)
-                    }
+                           route: .metadata)
                 }
             }
             .padding(.horizontal, 28)

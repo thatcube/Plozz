@@ -5,6 +5,7 @@ import SwiftUI
 
 private enum PlozziOSPlayerSheet: String, Identifiable {
     case info
+    case speed
     case sync
 
     var id: Self { self }
@@ -75,6 +76,10 @@ struct PlozziOSPlayerControlsOverlay: View {
                         presentedSheet = .info
                         cancelAutoHide()
                     },
+                    onShowSpeed: {
+                        presentedSheet = .speed
+                        cancelAutoHide()
+                    },
                     onShowSync: {
                         presentedSheet = .sync
                         cancelAutoHide()
@@ -128,6 +133,8 @@ struct PlozziOSPlayerControlsOverlay: View {
             switch sheet {
             case .info:
                 PlozziOSPlaybackInfoSheet(viewModel: viewModel)
+            case .speed:
+                PlozziOSPlaybackSpeedSheet(viewModel: viewModel)
             case .sync:
                 PlozziOSPlaybackSyncSheet(viewModel: viewModel)
             }
@@ -224,6 +231,7 @@ private struct PlozziOSPlayerTransport: View {
     let onPlayPause: () -> Void
     let onSkipForward: () -> Void
     let onShowInfo: () -> Void
+    let onShowSpeed: () -> Void
     let onShowSync: () -> Void
     let onInteraction: () -> Void
 
@@ -295,7 +303,7 @@ private struct PlozziOSPlayerTransport: View {
 
     private var playbackOptions: some View {
         Menu {
-            if !viewModel.controls.audioOptions.isEmpty {
+            if !viewModel.controls.audioOptions.isEmpty || supportsDialogEnhance {
                 Menu("Audio") {
                     ForEach(viewModel.controls.audioOptions) { option in
                         Button {
@@ -308,6 +316,24 @@ private struct PlozziOSPlayerTransport: View {
                                 Text(option.title)
                             }
                         }
+                    }
+                    if !viewModel.controls.audioOptions.isEmpty,
+                       supportsDialogEnhance {
+                        Divider()
+                    }
+                    if supportsDialogEnhance {
+                        Toggle(
+                            "Dialog Enhance",
+                            isOn: Binding(
+                                get: {
+                                    viewModel.controls.dialogEnhanceEnabled
+                                },
+                                set: {
+                                    viewModel.setDialogEnhanceEnabled($0)
+                                    onInteraction()
+                                }
+                            )
+                        )
                     }
                 }
             }
@@ -329,18 +355,9 @@ private struct PlozziOSPlayerTransport: View {
                 }
             }
 
-            Menu("Playback Speed") {
-                ForEach([0.5, 0.75, 1, 1.25, 1.5, 2], id: \.self) { rate in
-                    Button {
-                        viewModel.setPlaybackSpeed(rate)
-                        onInteraction()
-                    } label: {
-                        if abs(viewModel.controls.playbackSpeed - rate) < 0.01 {
-                            Label("\(rate, format: .number)×", systemImage: "checkmark")
-                        } else {
-                            Text("\(rate, format: .number)×")
-                        }
-                    }
+            if viewModel.controls.engineCapabilities.contains(.playbackSpeed) {
+                Button("Playback Speed", systemImage: "speedometer") {
+                    onShowSpeed()
                 }
             }
 
@@ -361,6 +378,10 @@ private struct PlozziOSPlayerTransport: View {
             || viewModel.controls.subtitleDelayAdjustable
     }
 
+    private var supportsDialogEnhance: Bool {
+        viewModel.controls.engineCapabilities.contains(.dialogEnhance)
+    }
+
     private func playbackTime(_ seconds: TimeInterval) -> String {
         let total = max(Int(seconds.rounded()), 0)
         let hours = total / 3_600
@@ -370,6 +391,60 @@ private struct PlozziOSPlayerTransport: View {
             return String(format: "%d:%02d:%02d", hours, minutes, remainder)
         }
         return String(format: "%d:%02d", minutes, remainder)
+    }
+}
+
+private struct PlozziOSPlaybackSpeedSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let viewModel: PlayerViewModel
+
+    private let presets: [Double] = [0.5, 0.75, 1, 1.25, 1.5, 2]
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Fine Control") {
+                    Slider(
+                        value: Binding(
+                            get: { viewModel.controls.playbackSpeed },
+                            set: { viewModel.setPlaybackSpeed($0) }
+                        ),
+                        in: 0.25...2,
+                        step: 0.05
+                    )
+                    Text(
+                        viewModel.controls.playbackSpeed,
+                        format: .number.precision(.fractionLength(2))
+                    )
+                    .monospacedDigit()
+                    .frame(maxWidth: .infinity)
+                }
+
+                Section("Presets") {
+                    ForEach(presets, id: \.self) { rate in
+                        Button {
+                            viewModel.setPlaybackSpeed(rate)
+                        } label: {
+                            HStack {
+                                Text("\(rate, format: .number)×")
+                                Spacer()
+                                if abs(viewModel.controls.playbackSpeed - rate) < 0.01 {
+                                    Image(systemName: "checkmark")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Playback Speed")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+        .presentationDetents([.medium])
     }
 }
 

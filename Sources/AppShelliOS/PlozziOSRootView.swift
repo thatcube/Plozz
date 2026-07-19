@@ -29,7 +29,8 @@ public struct PlozziOSRootView: View {
             } else {
                 PlozziOSTabShell(
                     appModel: appModel,
-                    onAddServer: showAddServer
+                    onAddServer: showAddServer,
+                    systemColorScheme: systemColorScheme
                 )
             }
         }
@@ -96,7 +97,11 @@ public struct PlozziOSRootView: View {
         .fullScreenCover(
             item: firstRunStepBinding
         ) { step in
-            PlozziOSFirstRunView(step: step, appModel: appModel)
+            PlozziOSFirstRunView(
+                step: step,
+                appModel: appModel,
+                systemColorScheme: systemColorScheme
+            )
         }
         .installNightShiftOverlay(appModel.settings.nightShift)
     }
@@ -200,6 +205,7 @@ private struct PlozziOSTabShell: View {
     @State private var showingSettings = false
     let appModel: PlozziOSAppModel
     let onAddServer: () -> Void
+    let systemColorScheme: ColorScheme
 
     var body: some View {
         TabView {
@@ -248,11 +254,21 @@ private struct PlozziOSTabShell: View {
             PlozziOSSettingsView(
                 appModel: appModel,
                 onAddServer: showAddServerFromSettings,
-                onClose: { showingSettings = false }
+                onClose: { showingSettings = false },
+                systemColorScheme: systemColorScheme
             )
-            .preferredColorScheme(palette.isLight ? .light : .dark)
+            .preferredColorScheme(
+                settingsPalette.isLight ? .light : .dark
+            )
             .presentationSizing(.page)
         }
+    }
+
+    private var settingsPalette: ThemePalette {
+        ThemePalette.palette(
+            for: appModel.settings.theme.theme,
+            systemColorScheme: systemColorScheme
+        )
     }
 
     private func showAddServerFromSettings() {

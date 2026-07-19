@@ -8,28 +8,43 @@ struct PlozziOSSettingsView: View {
     let appModel: PlozziOSAppModel
     let onAddServer: () -> Void
     let onClose: () -> Void
+    let systemColorScheme: ColorScheme
 
     var body: some View {
-        if horizontalSizeClass == .regular {
-            PlozziOSSettingsSplitView(
-                appModel: appModel,
-                onAddServer: onAddServer,
-                onClose: onClose
-            )
-        } else {
-            NavigationStack {
-                PlozziOSSettingsCompactMenu(
+        Group {
+            if horizontalSizeClass == .regular {
+                PlozziOSSettingsSplitView(
                     appModel: appModel,
-                    onAddServer: onAddServer
+                    onAddServer: onAddServer,
+                    onClose: onClose
                 )
-            }
-            .toolbarBackground(.visible, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done", action: onClose)
+            } else {
+                NavigationStack {
+                    PlozziOSSettingsCompactMenu(
+                        appModel: appModel,
+                        onAddServer: onAddServer
+                    )
+                }
+                .toolbarBackground(.hidden, for: .navigationBar)
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done", action: onClose)
+                    }
                 }
             }
         }
+        .scrollContentBackground(.hidden)
+        .background { AppBackground(palette: palette) }
+        .environment(\.themePalette, palette)
+        .environment(\.colorScheme, palette.isLight ? .light : .dark)
+        .preferredColorScheme(palette.isLight ? .light : .dark)
+    }
+
+    private var palette: ThemePalette {
+        ThemePalette.palette(
+            for: appModel.settings.theme.theme,
+            systemColorScheme: systemColorScheme
+        )
     }
 }
 
@@ -164,7 +179,7 @@ private struct PlozziOSSettingsSplitView: View {
                 }
             }
             .navigationTitle("Settings")
-            .scrollContentBackground(.visible)
+            .scrollContentBackground(.hidden)
         } detail: {
             NavigationStack {
                 Group {
@@ -177,7 +192,7 @@ private struct PlozziOSSettingsSplitView: View {
             .id(selection)
         }
         .navigationSplitViewStyle(.balanced)
-        .toolbarBackground(.visible, for: .navigationBar)
+        .toolbarBackground(.hidden, for: .navigationBar)
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
                 Button("Done", action: onClose)
@@ -943,7 +958,7 @@ private struct PlozziOSAppearanceSettingsView: View {
 private struct PlozziOSSettingsSurface: ViewModifier {
     func body(content: Content) -> some View {
         content
-            .scrollContentBackground(.visible)
+            .scrollContentBackground(.hidden)
     }
 }
 

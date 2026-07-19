@@ -1,11 +1,13 @@
 #if os(iOS)
 import CoreModels
+import CoreUI
 import Foundation
 import SwiftUI
 
 struct PlozziOSFirstRunView: View {
     let step: PlozziOSAppModel.FirstRunStep
     let appModel: PlozziOSAppModel
+    let systemColorScheme: ColorScheme
 
     var body: some View {
         NavigationStack {
@@ -18,7 +20,20 @@ struct PlozziOSFirstRunView: View {
                 PlozziOSThemeWelcomeView(appModel: appModel)
             }
         }
+        .scrollContentBackground(.hidden)
+        .background { AppBackground(palette: palette) }
+        .environment(\.themePalette, palette)
+        .environment(\.colorScheme, palette.isLight ? .light : .dark)
+        .preferredColorScheme(palette.isLight ? .light : .dark)
+        .toolbarBackground(.hidden, for: .navigationBar)
         .interactiveDismissDisabled()
+    }
+
+    private var palette: ThemePalette {
+        ThemePalette.palette(
+            for: appModel.settings.theme.theme,
+            systemColorScheme: systemColorScheme
+        )
     }
 }
 

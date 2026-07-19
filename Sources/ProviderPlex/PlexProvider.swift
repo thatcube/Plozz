@@ -1337,10 +1337,63 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
     }
 
     /// Maps Plex's native rating fields onto provider-agnostic ratings. Plex
-    /// normalises every source to a 0–10 scale and names the source via the
-    /// rating image (`rottentomatoes://…`, `imdb://…`). Rotten Tomatoes scores
-    /// are rendered as the familiar percentage; user/critic scores stay 0–10.
+    /// normalises every source to a 0–10 scale and names the source via a rating
+    /// image (`rottentomatoes://…`, `imdb://…`, `themoviedb://…`).
+    ///
+    /// Prefers the full `Rating` **array** (the Plex Movie agent records IMDb,
+    /// Rotten Tomatoes critic + audience, and The Movie Database there), falling
+    /// back to the two `rating`/`audienceRating` scalars for items scanned with
+    /// older agents that only populate the primary pair. Rotten Tomatoes and
+    /// TMDB scores render as the familiar percentage; IMDb stays 0–10.
     static func ratings(from dto: PlexMetadata) -> [ExternalRating] {
+        if let entries = dto.Rating, !entries.isEmpty {
+            let parsed = entries.compactMap(rating(fromArrayEntry:))
+            if !parsed.isEmpty {
+                // One entry per source (first wins), ordered for stable layout.
+                var bySource: [RatingSource: ExternalRating] = [:]
+                for rating in parsed where bySource[rating.source] == nil {
+                    bySource[rating.source] = rating
+                }
+                return bySource.values.sorted { $0.source.sortRank < $1.source.sortRank }
+            }
+        }
+        return scalarRatings(from: dto)
+    }
+
+    /// Maps one `Rating`-array entry onto an `ExternalRating`, reading the source
+    /// from its `image` URN and (for Rotten Tomatoes) critic vs audience from the
+    /// `type` attribute or the fresh/rotten image variant.
+    private static func rating(fromArrayEntry entry: PlexRating) -> ExternalRating? {
+        guard let value = entry.value else { return nil }
+        let image = (entry.image ?? "").lowercased()
+        let type = (entry.type ?? "").lowercased()
+
+        if image.contains("rottentomatoes") {
+            // Critic images end `.ripe`/`.rotten`; audience `.upright`/`.spilled`.
+            let isAudience = type == "audience"
+                || image.contains("upright") || image.contains("spilled")
+            let source: RatingSource = isAudience ? .rottenTomatoesAudience : .rottenTomatoes
+            return ExternalRating(source: source, value: value * 10, scale: .percent)
+        }
+        if image.contains("imdb") {
+            return ExternalRating(source: .imdb, value: value, scale: .outOfTen)
+        }
+        if image.contains("themoviedb") || image.contains("tmdb") {
+            // TMDB shown as a percentage for visual consistency with the RT
+            // scores it sits beside (Plex reports it on its 0–10 scale).
+            return ExternalRating(source: .tmdb, value: value * 10, scale: .percent)
+        }
+        // Unknown source: keep a generic critic/audience score by `type`.
+        switch type {
+        case "audience": return ExternalRating(source: .community, value: value, scale: .outOfTen)
+        case "critic": return ExternalRating(source: .critic, value: value, scale: .outOfTen)
+        default: return nil
+        }
+    }
+
+    /// The legacy scalar mapping (`rating`/`audienceRating` + their `*Image`),
+    /// used when an item exposes no `Rating` array.
+    static func scalarRatings(from dto: PlexMetadata) -> [ExternalRating] {
         var ratings: [ExternalRating] = []
         if let critic = dto.rating {
             let image = (dto.ratingImage ?? "").lowercased()

@@ -83,7 +83,10 @@ public enum RatingSource: String, Codable, Sendable, Hashable, CaseIterable {
         // A backend "community" score is TMDB-sourced in practice, so it shares
         // TMDB's branding rather than a generic star.
         case .tmdb, .community: return .tmdb
-        case .imdb, .letterboxd, .anilist: return .star
+        // IMDb gets its own branded yellow pill; the remaining star sources
+        // (Letterboxd, AniList) keep the generic filled star.
+        case .imdb: return .imdb
+        case .letterboxd, .anilist: return .star
         case .metacritic: return .metacritic
         }
     }
@@ -110,8 +113,10 @@ public enum RatingFreshness: String, Sendable, Hashable {
 /// concrete symbol/emoji/chip; keeping it as an enum lets the choice be unit
 /// tested without importing SwiftUI.
 public enum RatingIcon: String, Sendable, Hashable {
-    /// A filled star — user/community/aggregate scores (IMDb, community, …).
+    /// A filled star — user/community/aggregate scores (Letterboxd, AniList, …).
     case star
+    /// IMDb's branded yellow "IMDb" pill.
+    case imdb
     /// TMDB's branded logo + source chip.
     case tmdb
     /// Rotten Tomatoes critic "Tomatometer".

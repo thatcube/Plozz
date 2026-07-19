@@ -69,6 +69,8 @@ public struct RatingBadge: View {
             Image(systemName: "star.fill")
                 .font(.system(size: Self.iconSize * 0.8, weight: .semibold))
                 .foregroundStyle(starColor)
+        case .imdb:
+            imdbBadge
         case .tmdb:
             tmdbBadge
         case .tomato:
@@ -109,6 +111,15 @@ public struct RatingBadge: View {
             .resizable()
             .scaledToFit()
             .frame(width: 42, height: 18)
+    }
+
+    /// IMDb's signature yellow "IMDb" pill (a self-contained logo, so it's not
+    /// tinted). Sized to the ~2:1 logo aspect ratio at the shared cap height.
+    private var imdbBadge: some View {
+        Image("IMDbLogo")
+            .resizable()
+            .scaledToFit()
+            .frame(width: 44, height: 22)
     }
 
     /// Tint for the score text — fresh/rotten for Rotten Tomatoes-style sources,

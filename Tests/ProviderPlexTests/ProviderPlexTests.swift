@@ -695,6 +695,40 @@ final class PlexProviderMappingTests: XCTestCase {
         XCTAssertEqual(item.ratings.first(where: { $0.source == .imdb })?.displayValue, "9")
     }
 
+    func testItemMapsFullRatingArrayImdbRottenTomatoesAndTMDB() async throws {
+        let stub = StubHTTPClient()
+        // Mirrors the Plex Movie agent's `Rating` array for "The Accountant":
+        // IMDb 7.3, RT critic 5.3, RT audience 7.7, TMDB 7.1. The scalar
+        // `rating`/`audienceRating` fields carry only the primary RT pair and
+        // must be superseded by the richer array.
+        stub.stub(pathSuffix: "/library/metadata/88", json: """
+        {"MediaContainer":{"Metadata":[
+          {"ratingKey":"88","type":"movie","title":"The Accountant","year":2016,
+           "rating":5.3,"ratingImage":"rottentomatoes://image.rating.rotten",
+           "audienceRating":7.7,"audienceRatingImage":"rottentomatoes://image.rating.upright",
+           "Rating":[
+             {"image":"imdb://image.rating","value":7.3,"type":"audience"},
+             {"image":"rottentomatoes://image.rating.rotten","value":5.3,"type":"critic"},
+             {"image":"rottentomatoes://image.rating.upright","value":7.7,"type":"audience"},
+             {"image":"themoviedb://image.rating","value":7.1,"type":"audience"}
+           ],
+           "Media":[{"id":1,"container":"mkv","videoCodec":"hevc","audioCodec":"eac3",
+             "Part":[{"id":2,"key":"/p","container":"mkv"}]}]}
+        ]}}
+        """)
+        let provider = PlexProvider(session: makeSession(), http: stub)
+
+        let item = try await provider.item(id: "88")
+        // All four sources surface, ordered by sortRank (IMDb, RT critic, RT
+        // audience, TMDB), each with no duplicate entries.
+        XCTAssertEqual(item.ratings.map(\.source), [.imdb, .rottenTomatoes, .rottenTomatoesAudience, .tmdb])
+        XCTAssertEqual(item.ratings.first(where: { $0.source == .imdb })?.displayValue, "7.3")
+        XCTAssertEqual(item.ratings.first(where: { $0.source == .rottenTomatoes })?.displayValue, "53%")
+        XCTAssertEqual(item.ratings.first(where: { $0.source == .rottenTomatoesAudience })?.displayValue, "77%")
+        // TMDB rendered as a percentage (0–10 → %) for consistency.
+        XCTAssertEqual(item.ratings.first(where: { $0.source == .tmdb })?.displayValue, "71%")
+    }
+
     func testItemMapsDolbyVisionFromStreamDisplayTitleWhenFlagsMissing() async throws {
         let stub = StubHTTPClient()
         stub.stub(pathSuffix: "/library/metadata/78", json: """

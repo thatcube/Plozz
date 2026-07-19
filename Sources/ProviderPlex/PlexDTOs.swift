@@ -178,6 +178,16 @@ struct PlexMetadata: Decodable {
     /// Audience score (0–10); `audienceRatingImage` names the source.
     let audienceRating: Double?
     let audienceRatingImage: String?
+    /// The **full** set of critic/audience scores the new Plex Movie agent
+    /// records — IMDb, Rotten Tomatoes (critic + audience) and The Movie
+    /// Database — as opposed to the two `rating`/`audienceRating` scalars above,
+    /// which only carry the single "primary" pair Plex picks. Each entry names
+    /// its source + variant in `image` (`imdb://image.rating`,
+    /// `rottentomatoes://image.rating.ripe`, `themoviedb://image.rating`) and
+    /// its `type` (`critic`/`audience`); values are on Plex's normalised 0–10
+    /// scale. Present on the item-detail metadata for library items scanned with
+    /// the Plex Movie agent.
+    let Rating: [PlexRating]?
     /// External ids (`imdb://...`, `tmdb://...`, `tvdb://...`, `anidb://...`)
     /// exported by Plex agents/scanners. Ingested into `MediaItem.providerIDs`
     /// so the metadata router can match items by a stable external id (which
@@ -229,6 +239,27 @@ struct PlexImage: Decodable {
 /// One Plex external-id GUID, e.g. `{ "id": "imdb://tt0111161" }`.
 struct PlexGuid: Decodable {
     let id: String?
+}
+
+/// One entry from a Plex item's `Rating` array (the full multi-source score set;
+/// see ``PlexMetadata/Rating``). `image` names the source and, for Rotten
+/// Tomatoes, its fresh/rotten variant (`…ripe`/`…rotten` for critic,
+/// `…upright`/`…spilled` for audience); `type` is `critic` or `audience`;
+/// `value` is on Plex's normalised 0–10 scale. Decoded leniently because Plex
+/// serialises `value` as a number or string depending on server version.
+struct PlexRating: Decodable {
+    let image: String?
+    let value: Double?
+    let type: String?
+
+    private enum CodingKeys: String, CodingKey { case image, value, type }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        image = c.flexibleString(.image)
+        value = c.flexibleDouble(.value)
+        type = c.flexibleString(.type)
+    }
 }
 
 /// A simple Plex tag element (genres, directors, …): only the display `tag` is

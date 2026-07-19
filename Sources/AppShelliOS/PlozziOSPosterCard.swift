@@ -3,11 +3,35 @@ import CoreModels
 import SwiftUI
 
 struct PlozziOSPosterCard: View {
+    @Environment(PlozziOSAppModel.self) private var appModel
+
     let item: MediaItem?
     let cardStyle: CardStyle
     let watchIndicator: WatchStatusIndicator
 
     var body: some View {
+        if let item, !actions(for: item).isEmpty {
+            content.contextMenu {
+                ForEach(actions(for: item)) { action in
+                    Button(
+                        action.title,
+                        systemImage: action.systemImage,
+                        role: action.isDestructive ? .destructive : nil
+                    ) {
+                        appModel.mediaItemActionHandler.perform(
+                            action,
+                            on: item,
+                            context: .none
+                        )
+                    }
+                }
+            }
+        } else {
+            content
+        }
+    }
+
+    private var content: some View {
         VStack(alignment: .leading, spacing: 7) {
             poster
 
@@ -23,6 +47,11 @@ struct PlozziOSPosterCard: View {
                     .fill(.thinMaterial)
             }
         }
+    }
+
+    private func actions(for item: MediaItem) -> [MediaItemAction] {
+        appModel.mediaItemActionHandler.actions(for: item, context: .none)
+            .filter { !$0.isNavigation }
     }
 
     private var poster: some View {

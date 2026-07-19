@@ -42,7 +42,7 @@ public struct AniListArtworkProvider: ArtworkProvider {
     }
 
     /// Fetches the best-matching AniList media for a query (id → idMal → search).
-    func fetchMedia(for query: MetadataQuery) async -> Media? {
+    public func fetchMedia(for query: MetadataQuery) async -> Media? {
         let document = """
         query ($id: Int, $idMal: Int, $search: String) {
           Media(id: $id, idMal: $idMal, search: $search, type: ANIME) {

@@ -67,7 +67,8 @@ struct PlozziOSSettingsView: View {
                 NavigationLink {
                     PlozziOSHomeSettingsView(
                         hero: appModel.settings.hero,
-                        visibility: appModel.settings.homeVisibility
+                        visibility: appModel.settings.homeVisibility,
+                        accounts: appModel.accountsProviders.resolvedActiveAccounts
                     )
                 } label: {
                     Label("Home", systemImage: "house")
@@ -346,6 +347,9 @@ private struct PlozziOSAppearanceSettingsView: View {
 private struct PlozziOSHomeSettingsView: View {
     @Bindable var hero: HeroSettingsModel
     let visibility: HomeLibraryVisibilityModel
+    let accounts: [ResolvedAccount]
+    @State private var libraries: [HomeLibraryChoice] = []
+    @State private var isLoadingLibraries = false
 
     var body: some View {
         Form {
@@ -363,9 +367,52 @@ private struct PlozziOSHomeSettingsView: View {
                     "Merge libraries",
                     isOn: Binding(
                         get: { visibility.visibility.mergeLibrariesOnHome },
-                        set: { visibility.setMergeLibrariesOnHome($0) }
+                        set: { merge in
+                            visibility.setMergeLibrariesOnHome(merge)
+                            if !merge {
+                                visibility.seedLibraryRowsIfNeeded(
+                                    libraries.flatMap { library in
+                                        LibraryHomeRowKind.allCases.map {
+                                            (library.key, $0)
+                                        }
+                                    }
+                                )
+                            }
+                        }
                     )
                 )
+            }
+
+            Section {
+                if isLoadingLibraries, libraries.isEmpty {
+                    HStack {
+                        ProgressView()
+                        Text("Loading libraries…")
+                    }
+                } else if libraries.isEmpty {
+                    Text("No video libraries are available.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(libraries) { library in
+                        NavigationLink {
+                            PlozziOSLibraryHomeSettingsView(
+                                library: library,
+                                visibility: visibility
+                            )
+                        } label: {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(library.title)
+                                Text(library.serverName)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+            } header: {
+                Text("Libraries")
+            } footer: {
+                Text("Choose which libraries and library-specific rows appear on Home.")
             }
 
             Section("Hero carousel") {
@@ -391,6 +438,97 @@ private struct PlozziOSHomeSettingsView: View {
             }
         }
         .navigationTitle("Home")
+        .task(id: accounts.map(\.account.id)) {
+            await loadLibraries()
+        }
+    }
+
+    private func loadLibraries() async {
+        isLoadingLibraries = true
+        defer { isLoadingLibraries = false }
+        var loaded: [HomeLibraryChoice] = []
+        for resolved in accounts {
+            guard let libraries = try? await resolved.provider.libraries() else {
+                continue
+            }
+            loaded.append(
+                contentsOf: libraries
+                    .filter { !$0.isMusic }
+                    .map {
+                        HomeLibraryChoice(
+                            accountID: resolved.account.id,
+                            serverName: resolved.account.server.name,
+                            library: $0
+                        )
+                    }
+            )
+        }
+        libraries = loaded.sorted {
+            if $0.serverName != $1.serverName {
+                return $0.serverName.localizedStandardCompare($1.serverName)
+                    == .orderedAscending
+            }
+            return $0.title.localizedStandardCompare($1.title) == .orderedAscending
+        }
+    }
+}
+
+private struct HomeLibraryChoice: Identifiable {
+    let accountID: String
+    let serverName: String
+    let library: MediaLibrary
+
+    var id: String { key }
+    var key: String { "\(accountID):\(library.id)" }
+    var title: String { library.title }
+}
+
+private struct PlozziOSLibraryHomeSettingsView: View {
+    let library: HomeLibraryChoice
+    let visibility: HomeLibraryVisibilityModel
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle(
+                    "Enabled",
+                    isOn: Binding(
+                        get: { visibility.isEnabled(library.key) },
+                        set: { visibility.setEnabled($0, for: library.key) }
+                    )
+                )
+            } footer: {
+                Text("Disabled libraries are hidden from Home and library browsing.")
+            }
+
+            if !visibility.mergeLibrariesOnHome {
+                Section("Home rows") {
+                    ForEach(LibraryHomeRowKind.allCases, id: \.rawValue) { kind in
+                        Toggle(
+                            kind.displayName,
+                            isOn: Binding(
+                                get: {
+                                    visibility.isLibraryRowEnabled(
+                                        library.key,
+                                        kind: kind
+                                    )
+                                },
+                                set: {
+                                    visibility.setLibraryRowEnabled(
+                                        $0,
+                                        libraryKey: library.key,
+                                        kind: kind
+                                    )
+                                }
+                            )
+                        )
+                        .disabled(!visibility.isEnabled(library.key))
+                    }
+                }
+            }
+        }
+        .navigationTitle(library.title)
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 

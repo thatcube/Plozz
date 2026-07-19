@@ -158,10 +158,11 @@ private struct PlozziOSHomeLandingView: View {
             }
             .navigationTitle("Home")
         } else {
-            PlozziOSLibrariesView(
+            PlozziOSHomeView(
                 appModel: appModel,
                 onAddServer: onAddServer
             )
+            .id(appModel.accounts.map(\.credentialRevision))
         }
     }
 }

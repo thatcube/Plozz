@@ -13,6 +13,7 @@ final class PlozziOSSettingsModel {
     let spoilers = SpoilerSettingsModel()
     let nightShift = NightShiftSettingsModel()
     let hero = HeroSettingsModel()
+    let homeVisibility = HomeLibraryVisibilityModel()
     let diagnostics = DiagnosticsSettingsModel()
 }
 #endif

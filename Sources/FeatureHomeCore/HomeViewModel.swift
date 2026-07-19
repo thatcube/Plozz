@@ -2,7 +2,9 @@ import Foundation
 import Observation
 import CoreModels
 import CoreNetworking
-import TopShelfKit
+
+public typealias HomeContentPublishing =
+    @Sendable (_ continueWatching: [MediaItem], _ latest: [MediaItem]) async -> Void
 
 /// Loads and holds the unified Home screen's content rows, merged across every
 /// active account/provider. Home-visibility filtering of the Libraries row is
@@ -135,6 +137,7 @@ public final class HomeViewModel {
     /// short-lived, so this never overrides a genuine later play (e.g. on another
     /// client). Defaults to none so existing callers/tests are unaffected. (h2-cw-clamp)
     private let recentlyAppliedRecency: @Sendable () async -> [String: AppliedResumeRecord]
+    private let contentPublisher: HomeContentPublishing
 
     /// In-flight content aggregation (run off the main actor) and the fire-and-
     /// forget Top Shelf publish. Tracked so ``deinit`` can cancel them — otherwise
@@ -183,7 +186,8 @@ public final class HomeViewModel {
         identitySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef] = { _ in [] },
         currentVisibility: @escaping () -> HomeLibraryVisibility = { .default },
         pendingWatchMutations: @escaping @Sendable () async -> [WatchMutation] = { [] },
-        recentlyAppliedRecency: @escaping @Sendable () async -> [String: AppliedResumeRecord] = { [:] }
+        recentlyAppliedRecency: @escaping @Sendable () async -> [String: AppliedResumeRecord] = { [:] },
+        contentPublisher: @escaping HomeContentPublishing = { _, _ in }
     ) {
         self.accounts = accounts
         self.aggregator = aggregator
@@ -193,6 +197,7 @@ public final class HomeViewModel {
         self.currentVisibility = currentVisibility
         self.pendingWatchMutations = pendingWatchMutations
         self.recentlyAppliedRecency = recentlyAppliedRecency
+        self.contentPublisher = contentPublisher
         let persisted = layoutStore.load()
         self.skeletonLayout = persisted.isEmpty ? HomeRowKind.defaultSkeletonLayout : persisted
         // Hydrate the last-known Home from disk so the hero + Continue Watching (and
@@ -372,8 +377,9 @@ public final class HomeViewModel {
         // now-missing file (a blank card until the next publish). Cancelling the
         // prior task first guarantees the newest publish wins.
         topShelfPublishTask?.cancel()
+        let contentPublisher = contentPublisher
         topShelfPublishTask = Task.detached(priority: .utility) {
-            await TopShelfPublisher.publish(continueWatching: continueWatching, latest: latest)
+            await contentPublisher(continueWatching, latest)
         }
     }
 
@@ -520,7 +526,7 @@ public final class HomeViewModel {
     /// is fresh, so it can never override a genuine later play (e.g. on another
     /// client). Clamp-only-downward: worst case a card sits slightly lower, never
     /// wrongly at the top. (h2-cw-clamp)
-    nonisolated static func reconcileContinueWatching(
+    public nonisolated static func reconcileContinueWatching(
         _ items: [MediaItem],
         pending: [WatchMutation],
         appliedRecency: [String: AppliedResumeRecord] = [:],

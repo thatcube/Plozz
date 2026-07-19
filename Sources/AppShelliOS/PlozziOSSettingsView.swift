@@ -46,7 +46,10 @@ struct PlozziOSSettingsView: View {
                     Label("Appearance", systemImage: "paintpalette")
                 }
                 NavigationLink {
-                    PlozziOSHomeSettingsView(model: appModel.settings.hero)
+                    PlozziOSHomeSettingsView(
+                        hero: appModel.settings.hero,
+                        visibility: appModel.settings.homeVisibility
+                    )
                 } label: {
                     Label("Home", systemImage: "house")
                 }
@@ -168,27 +171,47 @@ private struct PlozziOSAppearanceSettingsView: View {
 }
 
 private struct PlozziOSHomeSettingsView: View {
-    @Bindable var model: HeroSettingsModel
+    @Bindable var hero: HeroSettingsModel
+    let visibility: HomeLibraryVisibilityModel
 
     var body: some View {
         Form {
+            Section("Rows") {
+                ForEach(HomeGlobalRow.allCases, id: \.rawValue) { row in
+                    Toggle(
+                        row.title,
+                        isOn: Binding(
+                            get: { visibility.isGlobalRowEnabled(row) },
+                            set: { visibility.setGlobalRowEnabled($0, for: row) }
+                        )
+                    )
+                }
+                Toggle(
+                    "Merge libraries",
+                    isOn: Binding(
+                        get: { visibility.visibility.mergeLibrariesOnHome },
+                        set: { visibility.setMergeLibrariesOnHome($0) }
+                    )
+                )
+            }
+
             Section("Hero carousel") {
-                Toggle("Show hero", isOn: $model.settings.isEnabled)
-                Toggle("Hide watched titles", isOn: $model.settings.hideWatched)
-                Toggle("Auto-advance", isOn: $model.settings.autoAdvance)
-                Toggle("Background trailers", isOn: $model.settings.trailersEnabled)
+                Toggle("Show hero", isOn: $hero.settings.isEnabled)
+                Toggle("Hide watched titles", isOn: $hero.settings.hideWatched)
+                Toggle("Auto-advance", isOn: $hero.settings.autoAdvance)
+                Toggle("Background trailers", isOn: $hero.settings.trailersEnabled)
             }
 
             Section("Rotation") {
                 Stepper(
-                    "Items: \(model.settings.maxItems)",
-                    value: $model.settings.maxItems,
+                    "Items: \(hero.settings.maxItems)",
+                    value: $hero.settings.maxItems,
                     in: HeroSettings.maxItemsRange
                 )
-                if model.settings.autoAdvance {
+                if hero.settings.autoAdvance {
                     Stepper(
-                        "Every \(model.settings.autoAdvanceSeconds) seconds",
-                        value: $model.settings.autoAdvanceSeconds,
+                        "Every \(hero.settings.autoAdvanceSeconds) seconds",
+                        value: $hero.settings.autoAdvanceSeconds,
                         in: HeroSettings.autoAdvanceRange
                     )
                 }

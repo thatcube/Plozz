@@ -18,6 +18,7 @@ import SimklService
 import AniListService
 import MALService
 import LastFmService
+import TopShelfKit
 
 /// Home tab with its own navigation stack: Home → Library (paged) → Detail and
 /// full-screen player presentation. Every destination resolves its provider from
@@ -138,7 +139,13 @@ struct HomeTab: View {
                     identitySources: identitySources,
                     currentVisibility: { homeVisibility.visibility },
                     pendingWatchMutations: pendingWatchMutations,
-                    recentlyAppliedRecency: appliedWatchRecency
+                    recentlyAppliedRecency: appliedWatchRecency,
+                    contentPublisher: { continueWatching, latest in
+                        await TopShelfPublisher.publish(
+                            continueWatching: continueWatching,
+                            latest: latest
+                        )
+                    }
                 ),
                 visibility: homeVisibility,
                 activeShareIDs: Set(

@@ -717,13 +717,13 @@ struct HomeHeroView: View {
                 metadataLine(for: item)
                     .modifier(HeroTextLegibilityShadow(colorScheme: colorScheme))
 
-                if !hideText, let overview = item.overview {
-                    Text(overview)
+                if !hideText, let heroText = item.tagline ?? item.overview {
+                    Text(heroText)
                         .font(.system(size: 22))
                         .foregroundStyle(.primary)
                         .lineSpacing(2)
                         .lineLimit(3, reservesSpace: true)
-                        // Cap the description to the action-button row width (measured
+                        // Cap the tagline to the action-button row width (measured
                         // below) so it never runs wider than the buttons beneath it.
                         // Falls back to the previous fixed cap until first measured.
                         .frame(maxWidth: actionButtonsWidth > 0 ? actionButtonsWidth : 960, alignment: .topLeading)

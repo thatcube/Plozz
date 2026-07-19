@@ -256,7 +256,16 @@ extension HomeHeroView {
         case .folder, .collection, .unknown: return nil
         default: break
         }
-        return { await ArtworkRouter.shared.artworkURL(.hero, for: item) }
+        // art → TMDb hero → the item's own poster. Some titles (e.g. a Plex movie
+        // with a poster but no fanart/`art`) have no landscape backdrop anywhere;
+        // rather than leave the hero blank, fall back to the poster so the user
+        // still sees the artwork the server does have. Only reached when the
+        // primary backdrop URLs fail, so a title with real backdrop art is
+        // unaffected.
+        return {
+            if let hero = await ArtworkRouter.shared.artworkURL(.hero, for: item) { return hero }
+            return item.posterURL
+        }
     }
 
     func logoFallback(for item: MediaItem) -> (@Sendable () async -> URL?)? {

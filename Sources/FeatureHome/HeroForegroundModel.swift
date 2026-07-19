@@ -33,8 +33,9 @@ struct HeroForegroundModel: Equatable {
     let metadataText: String?
     /// Content-rating badge text (e.g. `TV-14`), or `nil`.
     let ratingBadgeText: String?
-    /// Long-form overview/description (already spoiler-gated by the caller), or
-    /// `nil` when hidden.
+    /// The hero's description line (already spoiler-gated by the caller): the
+    /// item's short marketing tagline when it has one, otherwise its long
+    /// overview as a fallback. `nil` only when neither exists / text is hidden.
     let overview: String?
     /// The visible action pills, left-to-right, exactly matching the SwiftUI
     /// hero's `buttons(for:)` order. Non-interactive here — the SwiftUI overlay
@@ -250,7 +251,7 @@ enum HeroForegroundModelBuilder {
             logoURL: item.logoURL,
             metadataText: metadataText(for: item),
             ratingBadgeText: ratingBadgeText(for: item),
-            overview: overviewVisible ? item.overview : nil,
+            overview: overviewVisible ? (item.tagline ?? item.overview) : nil,
             pills: pills,
             selectedIndex: clamped,
             heroFocused: heroFocused,

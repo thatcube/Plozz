@@ -3,6 +3,7 @@ options:
   bundleIdPrefix: com.thatcube
   deploymentTarget:
     tvOS: "18.0"
+    iOS: "18.0"
   createIntermediateGroups: true
 
 settings:
@@ -243,6 +244,96 @@ targets:
         # instantiates ContentProvider.
         LD_ENTRY_POINT: _NSExtensionMain
 
+  # iOS FOUNDATION SPIKE (Part A) — a THIN iOS/iPadOS app that links ONLY the
+  # platform-neutral shared modules (models, networking, providers, transports,
+  # services, crash-reporting). Its sole job is to compile + launch a blank
+  # placeholder screen, proving the shared core is portable to iOS. It links NONE
+  # of the tvOS UI/playback modules (CoreUI, AppShell, TopShelfKit, Feature*,
+  # EnginePlozzigen). Throwaway bundle id so it never collides with the tvOS app
+  # or a future canonical iOS app.
+  PlozziOS:
+    type: application
+    platform: iOS
+    deploymentTarget: "18.0"
+    sources:
+      - path: App/PlozziOS
+    info:
+      path: App/PlozziOS/Info.plist
+      properties:
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        ITSAppUsesNonExemptEncryption: false
+        UILaunchScreen: {}
+        # Networking parity so the linked provider/transport core can actually
+        # reach user servers when iOS UI is built later (Part B). Harmless for the
+        # blank placeholder.
+        NSLocalNetworkUsageDescription: "Plozz uses your local network to discover Jellyfin and Emby servers and media shares automatically."
+        NSBonjourServices:
+          - _jellyfin._tcp
+          - _smb._tcp
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+          NSAllowsLocalNetworking: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.thatcube.Plozz.iosspike
+        PRODUCT_NAME: PlozziOS
+        # Universal iPhone (1) + iPad (2) so one iOS slice proves iOS AND iPadOS.
+        TARGETED_DEVICE_FAMILY: "1,2"
+        GENERATE_INFOPLIST_FILE: NO
+        CODE_SIGN_STYLE: Automatic
+    dependencies:
+      # Audited platform-neutral shared modules ONLY (zero UIKit/AVKit, zero
+      # tvOS-only symbols). NOT: CoreUI, AppShell, TopShelfKit, EnginePlozzigen,
+      # FeatureDiscovery, FeatureAuth, FeatureHome, FeaturePlayback, FeatureSearch,
+      # FeatureSettings, FeatureProfiles, FeatureMusic.
+      - package: Plozz
+        product: CoreModels
+      - package: Plozz
+        product: CoreNetworking
+      - package: Plozz
+        product: MetadataKit
+      - package: Plozz
+        product: ProviderJellyfin
+      - package: Plozz
+        product: ProviderPlex
+      - package: Plozz
+        product: ProviderShare
+      - package: Plozz
+        product: ProviderTrailers
+      - package: Plozz
+        product: RatingsService
+      - package: Plozz
+        product: TraktService
+      - package: Plozz
+        product: SeerService
+      - package: Plozz
+        product: SimklService
+      - package: Plozz
+        product: AniListService
+      - package: Plozz
+        product: MALService
+      - package: Plozz
+        product: LastFmService
+      - package: Plozz
+        product: MediaTransportCore
+      - package: Plozz
+        product: MediaTransportHTTP
+      - package: Plozz
+        product: MediaTransportSMB
+      - package: Plozz
+        product: MediaTransportWebDAV
+      - package: Plozz
+        product: MediaTransportSFTP
+      - package: Plozz
+        product: TransportNFS
+      - package: Plozz
+        product: MediaTransportNFS
+      - package: Plozz
+        product: MediaTransportFTP
+      - package: Plozz
+        product: CrashReporting
+
 schemes:
   Plozz:
     build:
@@ -268,3 +359,13 @@ schemes:
       # wraps `xcodebuild test ... -destination 'platform=tvOS Simulator,...'`
       # for the full set. `swift test` is unusable on macOS because
       # AetherEngine's FFmpeg xcframeworks are tvOS-only.
+
+  # Thin iOS/iPadOS spike app scheme (see the PlozziOS target above).
+  PlozziOS:
+    build:
+      targets:
+        PlozziOS: all
+    run:
+      config: Debug
+    test:
+      config: Debug

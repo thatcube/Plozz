@@ -16,7 +16,15 @@ import Foundation
 let package = Package(
     name: "Plozz",
     platforms: [
-        .tvOS(.v18)
+        .tvOS(.v18),
+        // iOS/iPadOS added for the "iOS foundation spike" — proving the shared,
+        // platform-neutral core (models, networking, providers, transports,
+        // services) links and runs on iOS. iOS 18 matches tvOS 18 to minimize
+        // `#available` divergence; iPadOS rides `.iOS` (there is no separate SPM
+        // iPadOS platform) via the iOS app target's TARGETED_DEVICE_FAMILY "1,2".
+        // The tvOS UI/playback modules (CoreUI, AppShell, Feature*, EnginePlozzigen,
+        // TopShelfKit) are NOT linked by any iOS target yet.
+        .iOS(.v18)
     ],
     products: [
         .library(name: "CoreModels", targets: ["CoreModels"]),
@@ -50,6 +58,7 @@ let package = Package(
         .library(name: "MediaTransportSFTP", targets: ["MediaTransportSFTP"]),
         .library(name: "TransportNFS", targets: ["TransportNFS"]),
         .library(name: "MediaTransportNFS", targets: ["MediaTransportNFS"]),
+        .library(name: "MediaTransportFTP", targets: ["MediaTransportFTP"]),
         .library(name: "AppShell", targets: ["AppShell"])
     ],
     dependencies: [

@@ -34,6 +34,11 @@ public struct HeroTrailerSource: Sendable, Equatable {
 
 public typealias HeroTrailerResolving = @Sendable (MediaItem) async -> HeroTrailerSource?
 
+public enum HeroTrailerSurfaceRole: Sendable {
+    case home
+    case detail
+}
+
 /// Shared, app-level owner of the **hero trailer** — one muted (by default)
 /// `AVPlayer` whose video layer is rendered by both the Home hero carousel and
 /// the detail-page hero. Hoisting it above both surfaces (like
@@ -65,6 +70,12 @@ public final class HeroTrailerController {
     /// The underlying player, exposed only so a ``HeroTrailerVideoLayer`` can
     /// attach an `AVPlayerLayer`. Engine-agnostic callers must not depend on it.
     public let player = AVPlayer()
+    #if canImport(UIKit)
+    /// Two persistent display layers fed by the same AVPlayer. Detail's layer is
+    /// pre-rendered invisibly on Home; Home's remains warm under the pop.
+    @ObservationIgnored fileprivate let homeSurfaceView = HeroTrailerPlayerSurfaceView()
+    @ObservationIgnored fileprivate let detailSurfaceView = HeroTrailerPlayerSurfaceView()
+    #endif
 
     /// Fired on the main actor when the current trailer plays through to its end,
     /// so the hero can advance to the next item. Reset per load.
@@ -83,6 +94,10 @@ public final class HeroTrailerController {
         // Never let the trailer claim the Now-Playing transport or interrupt
         // music; it's ambient. Muting is applied per play() call.
         player.actionAtItemEnd = .pause
+        #if canImport(UIKit)
+        homeSurfaceView.playerLayer.player = player
+        detailSurfaceView.playerLayer.player = player
+        #endif
     }
 
     /// Reads the source's actual AVFoundation duration before the hero timeline
@@ -326,35 +341,64 @@ public final class HeroTrailerController {
 }
 
 #if canImport(UIKit)
-/// A thin `AVPlayerLayer`-backed surface fed by a ``HeroTrailerController``'s
-/// player, so both the Home hero and the detail hero can render the *same* live
-/// trailer. Purely a video sink — no controls, no transport UI.
+fileprivate final class HeroTrailerPlayerSurfaceView: UIView {
+    override static var layerClass: AnyClass { AVPlayerLayer.self }
+    var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        playerLayer.videoGravity = .resizeAspectFill
+        isUserInteractionEnabled = false
+    }
+
+    required init?(coder: NSCoder) { nil }
+}
+
+/// Reparents one of the controller's two persistent AVPlayerLayer surfaces into
+/// this SwiftUI host. The layer itself survives navigation hierarchy changes.
 public struct HeroTrailerVideoLayer: UIViewRepresentable {
-    private let player: AVPlayer
+    private let controller: HeroTrailerController
+    private let role: HeroTrailerSurfaceRole
 
-    public init(controller: HeroTrailerController) {
-        self.player = controller.player
+    public init(
+        controller: HeroTrailerController,
+        role: HeroTrailerSurfaceRole
+    ) {
+        self.controller = controller
+        self.role = role
     }
 
-    public func makeUIView(context: Context) -> PlayerSurfaceView {
-        let view = PlayerSurfaceView()
-        view.playerLayer.player = player
-        view.playerLayer.videoGravity = .resizeAspectFill
-        view.isUserInteractionEnabled = false
-        return view
+    public func makeUIView(context: Context) -> HostView {
+        let host = HostView()
+        attach(to: host)
+        return host
     }
 
-    public func updateUIView(_ uiView: PlayerSurfaceView, context: Context) {
-        if uiView.playerLayer.player !== player {
-            uiView.playerLayer.player = player
+    public func updateUIView(_ uiView: HostView, context: Context) {
+        attach(to: uiView)
+    }
+
+    private var surface: HeroTrailerPlayerSurfaceView {
+        switch role {
+        case .home: controller.homeSurfaceView
+        case .detail: controller.detailSurfaceView
         }
     }
 
-    /// A `UIView` whose backing layer is an `AVPlayerLayer`, so the video always
-    /// fills the view without a manual frame-sync.
-    public final class PlayerSurfaceView: UIView {
-        public override static var layerClass: AnyClass { AVPlayerLayer.self }
-        public var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
+    private func attach(to host: HostView) {
+        let surface = surface
+        guard surface.superview !== host else { return }
+        surface.removeFromSuperview()
+        host.addSubview(surface)
+        surface.frame = host.bounds
+        surface.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+    }
+
+    public final class HostView: UIView {
+        public override func layoutSubviews() {
+            super.layoutSubviews()
+            subviews.forEach { $0.frame = bounds }
+        }
     }
 }
 #endif

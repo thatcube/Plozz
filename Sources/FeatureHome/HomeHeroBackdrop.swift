@@ -145,8 +145,22 @@ struct HomeHeroBackdrop: View {
             .clipped()
             .overlay {
                 if showsTrailer, let trailerController {
-                    HeroTrailerVideoLayer(controller: trailerController)
-                        .transition(.opacity)
+                    ZStack {
+                        HeroTrailerVideoLayer(
+                            controller: trailerController,
+                            role: .home
+                        )
+                        // Keep detail's separate layer decoding/current before the
+                        // push. Nearly transparent rather than hidden so AVPlayerLayer
+                        // stays in the render tree and has a frame ready.
+                        HeroTrailerVideoLayer(
+                            controller: trailerController,
+                            role: .detail
+                        )
+                        .opacity(0.001)
+                        .allowsHitTesting(false)
+                    }
+                    .transition(.opacity)
                 }
             }
             .animation(.easeInOut(duration: 0.45), value: showsTrailer)

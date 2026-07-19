@@ -1325,7 +1325,10 @@ private struct SeriesDetailHeroBackdrop: View {
                             .resizable()
                             .scaledToFill()
                     }
-                    HeroTrailerVideoLayer(controller: trailerController)
+                    HeroTrailerVideoLayer(
+                        controller: trailerController,
+                        role: .detail
+                    )
                 }
                 .clipped()
                 .transition(.opacity)

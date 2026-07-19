@@ -438,6 +438,18 @@ public final class ItemDetailViewModel {
         await YouTubeTrailerProvider.firstEmbeddableVideoID(in: candidates)
     }
 
+    /// Env-gated (`SCRUB_DIAG=1`) stdout tracer for trailer-source resolution,
+    /// mirroring the `PLZSEEK` capture pattern so a network-paired Apple TV can be
+    /// watched via `devicectl --console`. Zero-cost when unset.
+    private static let trailerDiagEnabled: Bool = {
+        let env = ProcessInfo.processInfo.environment
+        return env["SCRUB_DIAG"] == "1" || env["SEEK_DIAG"] == "1"
+    }()
+    private static func trailerDiag(_ message: String) {
+        guard trailerDiagEnabled else { return }
+        FileHandle.standardOutput.write(Data(("PLZTRAIL " + message + "\n").utf8))
+    }
+
     /// Cancels every piece of owned background work so no detached/async task can
     /// outlive the view model. The view's `onDisappear` already calls
     /// ``suspendEnrichment()``, but a view model torn down without that hook
@@ -819,10 +831,30 @@ public final class ItemDetailViewModel {
         let provided = (try? await provider.trailers(for: item.id)) ?? []
         guard !Task.isCancelled, self.sourceGeneration == sourceGeneration else { return }
 
+        let localCount = provided.filter { !$0.isYouTubeTrailer }.count
+        let ytCount = provided.count - localCount
+        Self.trailerDiag("loadTrailers item=\(item.id) provider=\(provider.kind.rawValue) provided=\(provided.count) local=\(localCount) yt=\(ytCount)")
+
         // 1) A real local trailer file wins outright — no network verification.
         if let local = provided.first(where: { !$0.isYouTubeTrailer }) {
             guard isStillLoaded(item, sourceGeneration: sourceGeneration) else { return }
+            Self.trailerDiag("loadTrailers item=\(item.id) -> LOCAL trailer id=\(local.id)")
             trailers = [tagged(local)]
+            return
+        }
+
+        // 1b) The active server has no local trailer, but this may be a
+        //     cross-server merged title whose OTHER copy (e.g. a Plex twin) does
+        //     have a local trailer file. Prefer any server's real local trailer
+        //     over the online (YouTube) fallback. The surfaced item is tagged with
+        //     the owning server's account so playback routes back to it.
+        if let (crossLocal, ownerAccountID) = await firstCrossServerLocalTrailer(
+            excluding: activeSourceAccountID,
+            sourceGeneration: sourceGeneration
+        ) {
+            guard isStillLoaded(item, sourceGeneration: sourceGeneration) else { return }
+            Self.trailerDiag("loadTrailers item=\(item.id) -> CROSS-SERVER LOCAL trailer id=\(crossLocal.id) account=\(ownerAccountID)")
+            trailers = [crossLocal.taggingSource(ownerAccountID)]
             return
         }
 
@@ -896,6 +928,39 @@ public final class ItemDetailViewModel {
             return true
         }
         return false
+    }
+
+    /// Searches this title's OTHER cross-server copies for a real local trailer
+    /// file, returning the first one found with the account id that owns it (so
+    /// the caller can tag it for correct playback routing). `nil` when no alternate
+    /// source has a local trailer.
+    ///
+    /// This is what lets a title whose active server (e.g. a Jellyfin twin) only
+    /// exposes an online YouTube trailer still play the real local trailer sitting
+    /// on another server (e.g. its Plex twin) instead of the online fallback.
+    /// Alternate sources come from the merged card (`initialSources`) and any
+    /// cross-server discovery already completed (`sources`), deduped by account and
+    /// skipping the active source (already checked by the caller).
+    private func firstCrossServerLocalTrailer(
+        excluding activeAccountID: String?,
+        sourceGeneration: UInt64
+    ) async -> (MediaItem, String)? {
+        var seenAccounts = Set<String>()
+        if let activeAccountID { seenAccounts.insert(activeAccountID) }
+
+        let candidates = initialSources + sources
+        Self.trailerDiag("firstCrossServerLocalTrailer candidates=\(candidates.count) initial=\(initialSources.count) enriched=\(sources.count) activeAccount=\(activeAccountID ?? "nil")")
+        for source in candidates {
+            guard self.sourceGeneration == sourceGeneration, !Task.isCancelled else { return nil }
+            guard !seenAccounts.contains(source.accountID) else { continue }
+            seenAccounts.insert(source.accountID)
+            guard let altProvider = alternateProviderResolver(source.accountID) else { continue }
+            let altTrailers = (try? await altProvider.trailers(for: source.itemID)) ?? []
+            if let local = altTrailers.first(where: { !$0.isYouTubeTrailer }) {
+                return (local, source.accountID)
+            }
+        }
+        return nil
     }
 
     /// Builds and shows the online (YouTube) Trailer button for `videoID`, stamped

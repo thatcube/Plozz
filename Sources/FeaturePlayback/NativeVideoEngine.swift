@@ -108,10 +108,6 @@ public final class NativeVideoEngine: VideoEngine {
     /// Retains the resource-loader delegate that serves injected subtitle
     /// playlists; `AVAssetResourceLoader` holds it only weakly.
     @ObservationIgnored private var subtitleLoader: SubtitleInjectingResourceLoader?
-    /// Retains the resource-loader delegate that serves the synthesized HLS master
-    /// pairing a video-only + audio-only trailer stream (adaptive YouTube
-    /// trailers); `AVAssetResourceLoader` holds it only weakly.
-    @ObservationIgnored private var trailerMuxLoader: TrailerAudioMuxResourceLoader?
     /// Off-critical-path default-subtitle pick. Runs concurrently with playback
     /// startup so resolving the asset's `AVMediaSelectionGroup` never extends the
     /// time-to-first-frame; cancelled on teardown so a stale selection never
@@ -197,16 +193,25 @@ public final class NativeVideoEngine: VideoEngine {
 
         let injectableSubtitles = await resolveInjectableSubtitles(for: request)
         let asset: AVURLAsset
+        var item: AVPlayerItem
         if let audioURL = request.externalAudioURL {
             PlaybackTrace.note("trailer mux: extAudio present video=\(Self.itagOf(streamURL)) audio=\(Self.itagOf(audioURL))")
             // Adaptive trailer: a video-only stream paired with a separate
-            // audio-only stream. AVPlayer can't take two bare URLs, so wrap them
-            // in a synthesized HLS master and let it mux + sync them itself. Falls
-            // back to the plain video URL only if the duration probe fails (rare);
-            // that path is silent, so a failed decode there re-resolves through the
-            // engine's transcode fallback to the progressive muxed (audible) stream.
-            asset = await makeTrailerMuxAsset(videoURL: streamURL, audioURL: audioURL)
-                ?? makeAsset(for: request, streamURL: streamURL, injectableSubtitles: injectableSubtitles)
+            // audio-only stream (the only way YouTube serves 1080p). AVPlayer can't
+            // take two bare URLs, and googlevideo's adaptive tracks are fragmented
+            // MP4 that AVPlayer won't play wrapped in a plain HLS segment — so mux
+            // them with an AVMutableComposition (a video track + an audio track),
+            // which AVFoundation reads natively and keeps in sync. If that fails,
+            // fall back to the plain video URL, whose failed (silent) decode
+            // re-resolves through the engine's transcode fallback to the
+            // progressive muxed (audible ~360p) stream.
+            if let muxItem = await makeTrailerMuxItem(videoURL: streamURL, audioURL: audioURL) {
+                item = muxItem
+                asset = AVURLAsset(url: streamURL)
+            } else {
+                asset = makeAsset(for: request, streamURL: streamURL, injectableSubtitles: injectableSubtitles)
+                item = AVPlayerItem(asset: asset)
+            }
         } else {
             PlaybackTrace.note("trailer/native load: no extAudio (progressive) url=\(Self.itagOf(streamURL))")
             asset = makeAsset(
@@ -214,8 +219,8 @@ public final class NativeVideoEngine: VideoEngine {
                 streamURL: streamURL,
                 injectableSubtitles: injectableSubtitles
             )
+            item = AVPlayerItem(asset: asset)
         }
-        let item = AVPlayerItem(asset: asset)
         // Apply in-app subtitle styling overrides if the user set any.
         item.textStyleRules = style.textStyleRules()
         // Drive the tvOS display into the right dynamic range (true Dolby
@@ -349,7 +354,6 @@ public final class NativeVideoEngine: VideoEngine {
         injectableSubtitles: [InjectableSubtitle]
     ) -> AVURLAsset {
         subtitleLoader = nil
-        trailerMuxLoader = nil
         guard !request.isManifestStream else {
             return AVURLAsset(url: streamURL)
         }
@@ -379,31 +383,91 @@ public final class NativeVideoEngine: VideoEngine {
     /// small metadata fetch: googlevideo fMP4 is faststart, so only the moov is
     /// touched). Returns `nil` if the duration can't be read, so the caller falls
     /// back to a plain asset rather than authoring a broken playlist.
-    private func makeTrailerMuxAsset(videoURL: URL, audioURL: URL) async -> AVURLAsset? {
+    /// Builds an `AVPlayerItem` that muxes a **video-only** trailer stream with a
+    /// **separate audio-only** stream using an `AVMutableComposition` (one video
+    /// track + one audio track), so AVPlayer plays higher-quality (e.g. 1080p
+    /// H.264) YouTube trailers — which are only offered as adaptive video+audio
+    /// tracks — natively and in sync.
+    ///
+    /// Why a composition and not an HLS wrap: googlevideo's adaptive tracks are
+    /// *fragmented* MP4; wrapping the whole file as one plain HLS segment (no
+    /// `EXT-X-MAP` init segment) makes AVPlayer stall and fail to decode. As bare
+    /// `AVURLAsset`s the same fMP4 reads natively, and a composition is the
+    /// standard way to pair a picture track with a separate sound track.
+    ///
+    /// Returns `nil` if either track can't be loaded/composed, so the caller falls
+    /// back to the progressive (audible) stream rather than a broken item.
+    private func makeTrailerMuxItem(videoURL: URL, audioURL: URL) async -> AVPlayerItem? {
         subtitleLoader = nil
-        trailerMuxLoader = nil
 
-        let probeStart = Date()
-        let seconds: Double
+        let start = Date()
+        let videoAsset = AVURLAsset(url: videoURL)
+        let audioAsset = AVURLAsset(url: audioURL)
         do {
-            let duration = try await AVURLAsset(url: videoURL).load(.duration)
-            seconds = duration.seconds
+            // Load both assets' tracks concurrently — the unavoidable metadata
+            // (moov) fetch. Durations come from the track ranges / URL below, not
+            // the (doubled) asset duration, so we don't load `.duration` here.
+            async let videoTracksLoad = videoAsset.loadTracks(withMediaType: .video)
+            async let audioTracksLoad = audioAsset.loadTracks(withMediaType: .audio)
+            let (videoTracks, audioTracks) = try await (videoTracksLoad, audioTracksLoad)
+
+            guard let videoTrack = videoTracks.first else {
+                PlaybackTrace.note("trailer mux: no video track after \(Self.ms(since: start))ms")
+                return nil
+            }
+
+            // Use each track's authoritative media `timeRange` (its real sample
+            // range) rather than the asset's container `duration`.
+            let vTrackRange = try await videoTrack.load(.timeRange)
+            let aTrackRange = try await audioTracks.first?.load(.timeRange)
+
+            // YouTube DASH fMP4 consistently reports ~2x the real duration in its
+            // moov (both the asset duration AND the track sample range are doubled
+            // — phantom time padded onto the end). That leaves the scrubber reading
+            // double-length and delays the natural-end auto-dismiss. The googlevideo
+            // URL carries the true length in its `dur=` query param, independent of
+            // the fMP4 metadata, so clamp every inserted range to it when present.
+            let trueDuration = Self.googleVideoDurationSeconds(videoURL)
+            let cap: CMTime = trueDuration.map { CMTime(seconds: $0, preferredTimescale: 600) }
+                ?? .positiveInfinity
+            let videoSpan = CMTimeMinimum(vTrackRange.duration, cap)
+            PlaybackTrace.note("trailer mux durations: vTrack=\(String(format: "%.1f", vTrackRange.duration.seconds)) aTrack=\(String(format: "%.1f", (aTrackRange?.duration.seconds ?? -1))) urlDur=\(trueDuration.map { String(format: "%.1f", $0) } ?? "?") -> span=\(String(format: "%.1f", videoSpan.seconds))")
+
+            let composition = AVMutableComposition()
+            let compVideo = composition.addMutableTrack(
+                withMediaType: .video,
+                preferredTrackID: kCMPersistentTrackID_Invalid
+            )
+            try compVideo?.insertTimeRange(
+                CMTimeRange(start: .zero, duration: videoSpan),
+                of: videoTrack,
+                at: .zero
+            )
+
+            if let audioTrack = audioTracks.first, let aTrackRange {
+                let compAudio = composition.addMutableTrack(
+                    withMediaType: .audio,
+                    preferredTrackID: kCMPersistentTrackID_Invalid
+                )
+                // Clamp the audio to the shorter of the real ranges so a small
+                // track-length mismatch can't extend the item past the picture.
+                let audioSpan = CMTimeMinimum(CMTimeMinimum(aTrackRange.duration, cap), videoSpan)
+                try compAudio?.insertTimeRange(
+                    CMTimeRange(start: .zero, duration: audioSpan),
+                    of: audioTrack,
+                    at: .zero
+                )
+            } else {
+                PlaybackTrace.note("trailer mux: no audio track (silent) after \(Self.ms(since: start))ms")
+            }
+
+            PlaybackTrace.note("trailer mux: composed in \(Self.ms(since: start))ms dur=\(String(format: "%.1f", composition.duration.seconds))s")
+            return AVPlayerItem(asset: composition)
         } catch {
-            PlaybackTrace.note("trailer mux: duration probe FAILED after \(Self.ms(since: probeStart))ms err=\(error)")
-            PlozzLog.playback.debug("Trailer mux: duration probe failed; falling back to plain asset")
+            PlaybackTrace.note("trailer mux: compose FAILED after \(Self.ms(since: start))ms err=\(error)")
+            PlozzLog.playback.debug("Trailer mux composition failed; falling back to plain asset")
             return nil
         }
-        PlaybackTrace.note("trailer mux: duration probe ok \(String(format: "%.1f", seconds))s in \(Self.ms(since: probeStart))ms")
-        guard seconds.isFinite, seconds > 0 else { return nil }
-
-        let composer = TrailerAudioMuxComposer(
-            videoURL: videoURL,
-            audioURL: audioURL,
-            durationSeconds: seconds
-        )
-        let loader = TrailerAudioMuxResourceLoader(composer: composer)
-        trailerMuxLoader = loader
-        return loader.makeAsset()
     }
 
     /// Milliseconds elapsed since `start`, for diagnostic timing.
@@ -416,6 +480,20 @@ public final class NativeVideoEngine: VideoEngine {
     private static func itagOf(_ url: URL) -> String {
         URLComponents(url: url, resolvingAgainstBaseURL: false)?
             .queryItems?.first(where: { $0.name == "itag" })?.value ?? "?"
+    }
+
+    /// The true media length (seconds) from a googlevideo URL's `dur=` query
+    /// param, or `nil` when absent/unparseable. This is the authoritative video
+    /// duration YouTube stamps on the stream URL, independent of the fMP4 moov
+    /// (which YouTube DASH consistently reports at ~2x), so it's the reliable cap
+    /// for the muxed composition's length.
+    private static func googleVideoDurationSeconds(_ url: URL) -> Double? {
+        guard let value = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+            .queryItems?.first(where: { $0.name == "dur" })?.value,
+              let seconds = Double(value), seconds > 0 else {
+            return nil
+        }
+        return seconds
     }
 
     private func resolveInjectableSubtitles(
@@ -733,6 +811,7 @@ public final class NativeVideoEngine: VideoEngine {
             queue: .main
         ) { [weak self] _ in
             MainActor.assumeIsolated {
+                PlaybackTrace.note("didPlayToEnd fired curr=\(String(format: "%.1f", item.currentTime().seconds)) dur=\(String(format: "%.1f", item.duration.seconds))")
                 self?.onEnded?()
             }
         }
@@ -750,7 +829,6 @@ public final class NativeVideoEngine: VideoEngine {
         preferredAudioSelectionTask?.cancel()
         preferredAudioSelectionTask = nil
         subtitleLoader = nil
-        trailerMuxLoader = nil
         if let endOfPlaybackObserver {
             NotificationCenter.default.removeObserver(endOfPlaybackObserver)
         }

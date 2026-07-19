@@ -5,9 +5,21 @@ import SwiftUI
 struct PlozziOSSettingsView: View {
     let appModel: PlozziOSAppModel
     let onAddServer: () -> Void
+    @State private var confirmSignOutAll = false
 
     var body: some View {
         List {
+            Section("Profiles") {
+                NavigationLink {
+                    PlozziOSProfilesView(appModel: appModel)
+                } label: {
+                    Label(
+                        appModel.profiles.activeProfile.name,
+                        systemImage: "person.2"
+                    )
+                }
+            }
+
             Section("Media sources") {
                 ForEach(appModel.accounts) { account in
                     NavigationLink {
@@ -21,9 +33,11 @@ struct PlozziOSSettingsView: View {
                         Label {
                             VStack(alignment: .leading) {
                                 Text(account.server.name)
-                                Text(account.userName)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                                if !account.userName.isEmpty {
+                                    Text(account.userName)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
                             }
                         } icon: {
                             Image(systemName: "server.rack")
@@ -89,11 +103,21 @@ struct PlozziOSSettingsView: View {
                 } label: {
                     Label("Diagnostics", systemImage: "waveform.path.ecg")
                 }
+                NavigationLink {
+                    PlozziOSAttributionsView()
+                } label: {
+                    Label("Attributions & Licensing", systemImage: "doc.text.magnifyingglass")
+                }
                 LabeledContent("Version") {
                     Text(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—")
                 }
                 LabeledContent("Build") {
                     Text(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "—")
+                }
+                if !appModel.accounts.isEmpty {
+                    Button("Sign Out of All Accounts", role: .destructive) {
+                        confirmSignOutAll = true
+                    }
                 }
             }
 
@@ -105,6 +129,134 @@ struct PlozziOSSettingsView: View {
             }
         }
         .navigationTitle("Settings")
+        .alert("Sign out of all accounts?", isPresented: $confirmSignOutAll) {
+            Button("Cancel", role: .cancel) {}
+            Button("Sign Out", role: .destructive) {
+                for account in appModel.accounts {
+                    appModel.removeAccount(id: account.id)
+                }
+            }
+        } message: {
+            Text("This removes every server and network share from this device.")
+        }
+    }
+}
+
+private struct PlozziOSProfilesView: View {
+    let appModel: PlozziOSAppModel
+    @State private var showingAddProfile = false
+
+    var body: some View {
+        List {
+            Section("Who’s watching?") {
+                ForEach(appModel.profiles.profiles) { profile in
+                    NavigationLink {
+                        PlozziOSProfileDetailView(
+                            appModel: appModel,
+                            profile: profile
+                        )
+                    } label: {
+                        HStack {
+                            Text(profile.avatarEmoji ?? "👤")
+                            Text(profile.name)
+                            Spacer()
+                            if profile.id == appModel.profiles.activeProfileID {
+                                Image(systemName: "checkmark")
+                                    .foregroundStyle(.tint)
+                            }
+                        }
+                    }
+                    .swipeActions {
+                        if !appModel.profiles.isDefault(profile) {
+                            Button("Delete", role: .destructive) {
+                                appModel.removeProfile(profile.id)
+                            }
+                        }
+                    }
+                }
+                Button("Add Profile", systemImage: "person.badge.plus") {
+                    showingAddProfile = true
+                }
+            }
+        }
+        .navigationTitle("Profiles")
+        .sheet(isPresented: $showingAddProfile) {
+            NavigationStack {
+                PlozziOSAddProfileView(appModel: appModel)
+            }
+        }
+    }
+}
+
+private struct PlozziOSProfileDetailView: View {
+    let appModel: PlozziOSAppModel
+    let profile: Profile
+
+    var body: some View {
+        Form {
+            Section {
+                Button(
+                    profile.id == appModel.profiles.activeProfileID
+                        ? "Current Profile"
+                        : "Switch to \(profile.name)"
+                ) {
+                    appModel.selectProfile(profile.id)
+                }
+                .disabled(profile.id == appModel.profiles.activeProfileID)
+            }
+
+            Section("Media sources") {
+                ForEach(appModel.accounts) { account in
+                    Toggle(
+                        account.server.name,
+                        isOn: Binding(
+                            get: {
+                                appModel.activeAccountIDs(for: profile.id)
+                                    .contains(account.id)
+                            },
+                            set: {
+                                appModel.setAccount(
+                                    account.id,
+                                    enabled: $0,
+                                    for: profile.id
+                                )
+                            }
+                        )
+                    )
+                }
+            }
+        }
+        .navigationTitle(profile.name)
+    }
+}
+
+private struct PlozziOSAddProfileView: View {
+    @Environment(\.dismiss) private var dismiss
+    let appModel: PlozziOSAppModel
+    @State private var name = ""
+    @State private var emoji = "👤"
+
+    var body: some View {
+        Form {
+            Section("Profile") {
+                TextField("Name", text: $name)
+                TextField("Emoji", text: $emoji)
+            }
+        }
+        .navigationTitle("New Profile")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Cancel") { dismiss() }
+            }
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Add") {
+                    appModel.addProfile(name: name, emoji: emoji)
+                    dismiss()
+                }
+                .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
     }
 }
 
@@ -113,25 +265,36 @@ private struct PlozziOSAccountDetailView: View {
 
     let account: Account
     let onRemove: () -> Void
+    @State private var confirmRemoval = false
 
     var body: some View {
         Form {
             Section("Account") {
                 LabeledContent("Provider", value: account.server.provider.displayName)
-                LabeledContent("User", value: account.userName)
+                if !account.userName.isEmpty {
+                    LabeledContent("User", value: account.userName)
+                }
                 LabeledContent("Server", value: account.server.name)
                 LabeledContent("Address", value: account.server.baseURL.absoluteString)
             }
 
             Section {
                 Button("Remove Account", role: .destructive) {
-                    onRemove()
-                    dismiss()
+                    confirmRemoval = true
                 }
             }
         }
         .navigationTitle(account.server.name)
         .navigationBarTitleDisplayMode(.inline)
+        .alert("Remove \(account.server.name)?", isPresented: $confirmRemoval) {
+            Button("Cancel", role: .cancel) {}
+            Button("Remove", role: .destructive) {
+                onRemove()
+                dismiss()
+            }
+        } message: {
+            Text("Credentials and locally cached data for this source will be removed.")
+        }
     }
 }
 
@@ -319,6 +482,11 @@ private struct PlozziOSSubtitleSettingsView: View {
             }
 
             Section("Behavior") {
+                Picker("Automatic subtitles", selection: $behavior.settings.subtitleMode) {
+                    ForEach(SubtitleMode.allCases, id: \.self) {
+                        Text($0.displayName).tag($0)
+                    }
+                }
                 Toggle(
                     "Download subtitles automatically",
                     isOn: $behavior.settings.autoDownloadSubtitles
@@ -337,6 +505,25 @@ private struct PlozziOSSubtitleSettingsView: View {
                 )
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
+            }
+
+            Section("Subtitle search") {
+                Picker(
+                    "Hearing impaired",
+                    selection: $behavior.settings.hearingImpairedPreference
+                ) {
+                    ForEach(HearingImpairedPreference.allCases, id: \.self) {
+                        Text($0.displayName).tag($0)
+                    }
+                }
+                Picker(
+                    "Forced subtitles",
+                    selection: $behavior.settings.forcedSearchPreference
+                ) {
+                    ForEach(ForcedSubtitlePreference.allCases, id: \.self) {
+                        Text($0.displayName).tag($0)
+                    }
+                }
             }
         }
         .navigationTitle("Subtitles")
@@ -421,6 +608,40 @@ private struct PlozziOSDiagnosticsSettingsView: View {
             }
         }
         .navigationTitle("Diagnostics")
+    }
+}
+
+private struct PlozziOSAttributionsView: View {
+    var body: some View {
+        List {
+            Section {
+                Text("Plozz is free and open source under GPL-3.0 with an App Store exception.")
+                Text("Plozz is an unofficial client and is not affiliated with Jellyfin or Plex.")
+            }
+            attribution(
+                "AetherEngine & FFmpeg",
+                "Playback is powered by AetherEngine. Media processing uses FFmpeg under LGPL licenses."
+            )
+            attribution(
+                "Networking",
+                "Network shares use AMSMB2, SwiftNIO SSH, Network.framework, and protocol-specific open-source components."
+            )
+            attribution(
+                "Media metadata",
+                "This product may use TMDB metadata but is not endorsed or certified by TMDB."
+            )
+            attribution(
+                "Open-source licenses",
+                "Third-party components retain their respective MIT, BSD, Apache, ISC, LGPL, and other licenses."
+            )
+        }
+        .navigationTitle("Attributions")
+    }
+
+    private func attribution(_ title: String, _ detail: String) -> some View {
+        Section(title) {
+            Text(detail)
+        }
     }
 }
 #endif

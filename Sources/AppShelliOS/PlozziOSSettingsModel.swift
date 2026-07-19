@@ -3,17 +3,56 @@ import CoreModels
 
 @MainActor
 final class PlozziOSSettingsModel {
-    let theme = ThemeSettingsModel()
-    let cardStyle = CardStyleSettingsModel()
-    let density = UIDensitySettingsModel()
-    let watchIndicator = WatchStatusIndicatorSettingsModel()
-    let playback = PlaybackSettingsModel()
-    let subtitleBehavior = SubtitleBehaviorModel()
-    let subtitleStyle = SubtitleStyleModel()
-    let spoilers = SpoilerSettingsModel()
-    let nightShift = NightShiftSettingsModel()
-    let hero = HeroSettingsModel()
-    let homeVisibility = HomeLibraryVisibilityModel()
-    let diagnostics = DiagnosticsSettingsModel()
+    let theme: ThemeSettingsModel
+    let cardStyle: CardStyleSettingsModel
+    let density: UIDensitySettingsModel
+    let watchIndicator: WatchStatusIndicatorSettingsModel
+    let playback: PlaybackSettingsModel
+    let subtitleBehavior: SubtitleBehaviorModel
+    let subtitleStyle: SubtitleStyleModel
+    let spoilers: SpoilerSettingsModel
+    let nightShift: NightShiftSettingsModel
+    let hero: HeroSettingsModel
+    let homeVisibility: HomeLibraryVisibilityModel
+    let diagnostics: DiagnosticsSettingsModel
+
+    init(namespace: String? = nil) {
+        theme = ThemeSettingsModel(
+            store: ThemeSettingsStore(namespace: namespace)
+        )
+        cardStyle = CardStyleSettingsModel(
+            store: CardStyleSettingsStore(namespace: namespace)
+        )
+        density = UIDensitySettingsModel(
+            store: UIDensitySettingsStore(namespace: namespace)
+        )
+        watchIndicator = WatchStatusIndicatorSettingsModel(
+            store: WatchStatusIndicatorSettingsStore(namespace: namespace)
+        )
+        playback = PlaybackSettingsModel(
+            store: PlaybackSettingsStore(namespace: namespace)
+        )
+        subtitleBehavior = SubtitleBehaviorModel(
+            store: SubtitleBehaviorStore(namespace: namespace)
+        )
+        subtitleStyle = SubtitleStyleModel(
+            store: SubtitleStyleStore(namespace: namespace)
+        )
+        spoilers = SpoilerSettingsModel(
+            store: SpoilerSettingsStore(namespace: namespace)
+        )
+        nightShift = NightShiftSettingsModel(
+            store: NightShiftSettingsStore(namespace: namespace)
+        )
+        hero = HeroSettingsModel(
+            store: HeroSettingsStore(namespace: namespace)
+        )
+        homeVisibility = HomeLibraryVisibilityModel(
+            store: HomeLibraryVisibilityStore(namespace: namespace)
+        )
+        diagnostics = DiagnosticsSettingsModel(
+            store: DiagnosticsSettingsStore(namespace: namespace)
+        )
+    }
 }
 #endif

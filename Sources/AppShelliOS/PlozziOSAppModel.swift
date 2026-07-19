@@ -12,9 +12,10 @@ import ProviderShare
 @Observable
 final class PlozziOSAppModel {
     let accountsProviders: AccountsProvidersModel
+    let profiles: ProfilesModel
     let authenticatedHTTPResolver = ManagedAuthenticatedHTTPResolver()
     let mediaShareRuntime: DefaultMediaShareRuntime
-    let settings = PlozziOSSettingsModel()
+    private(set) var settings: PlozziOSSettingsModel
 
     private let accountStore: AccountPersisting
     private let mediaShareAccountService: MediaShareAccountService
@@ -55,6 +56,9 @@ final class PlozziOSAppModel {
             durableLocalStateStore: durableLocalStateStore
         )
         let profiles = ProfilesModel(
+            store: ProfileStore(
+                secureStore: KeychainStore(service: "com.plozz.app.household")
+            ),
             defaultActiveAccountIDs: accountStore.activeAccountIDs()
         )
         let accountsProviders = AccountsProvidersModel(
@@ -65,8 +69,12 @@ final class PlozziOSAppModel {
         accountsProviders.tokenResolver = { accountStore.token(for: $0) }
 
         self.accountStore = accountStore
+        self.profiles = profiles
         self.accountsProviders = accountsProviders
         self.mediaShareRuntime = mediaShareRuntime
+        self.settings = PlozziOSSettingsModel(
+            namespace: profiles.activeNamespace
+        )
         self.mediaShareAccountService = MediaShareAccountService(runtime: mediaShareRuntime)
         self.mediaShareConfigurationService = MediaShareAccountConfigurationService(
             accountStore: accountStore
@@ -119,6 +127,49 @@ final class PlozziOSAppModel {
 
     var deviceID: String {
         accountStore.deviceID()
+    }
+
+    func selectProfile(_ id: String) {
+        profiles.select(id)
+        settings = PlozziOSSettingsModel(namespace: profiles.activeNamespace)
+        accountsProviders.reloadAccounts()
+    }
+
+    func addProfile(name: String, emoji: String?) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        _ = profiles.add(
+            name: trimmed,
+            activeAccountIDs: accounts.map(\.id),
+            avatarEmoji: emoji?.isEmpty == false ? emoji : nil
+        )
+    }
+
+    func removeProfile(_ id: String) {
+        profiles.remove(id)
+        accountsProviders.reloadAccounts()
+    }
+
+    func activeAccountIDs(for profileID: String) -> Set<String> {
+        Set(
+            profiles.activeAccountIDs(
+                for: profileID,
+                fallback: accountStore.activeAccountIDs()
+            )
+        )
+    }
+
+    func setAccount(_ accountID: String, enabled: Bool, for profileID: String) {
+        var ids = activeAccountIDs(for: profileID)
+        if enabled {
+            ids.insert(accountID)
+        } else {
+            ids.remove(accountID)
+        }
+        profiles.setActiveAccountIDs(Array(ids), for: profileID)
+        if profiles.activeProfileID == profileID {
+            accountsProviders.reloadAccounts()
+        }
     }
 
     func persist(_ sessions: [UserSession]) {

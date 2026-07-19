@@ -433,15 +433,23 @@ struct DetailHeroView: View {
                         .contentTransition(.opacity)
                 }
             }
-            let metadata = item.metadataComponents()
+            let comps = item.metadataComponents()
+            let genreSet = Set(item.genres)
+            // Split the facts line: genres ride the certificate line up top; the
+            // year/runtime facts drop to the bottom row beside the ratings.
+            let genreParts = comps.filter { genreSet.contains($0) }
+            let factParts = comps.filter { !genreSet.contains($0) }
+            let showRatings = !heroRatings.isEmpty && !spoilerSettings.shouldHideRatings(for: item)
+
+            // Line 1: content-rating certificate + genres.
             ZStack(alignment: .leading) {
-                if heroRatingBadge != nil || !metadata.isEmpty {
+                if heroRatingBadge != nil || !genreParts.isEmpty {
                     HStack(alignment: .center, spacing: 16) {
                         if let badge = heroRatingBadge {
                             MediaBadgeChip(badge: badge)
                         }
-                        if !metadata.isEmpty {
-                            Text(metadata.joined(separator: "  ·  "))
+                        if !genreParts.isEmpty {
+                            Text(genreParts.joined(separator: "  ·  "))
                                 .font(.system(size: 23, weight: .medium))
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
@@ -450,16 +458,7 @@ struct DetailHeroView: View {
                     }
                 }
             }
-            ZStack(alignment: .leading) {
-                if !featureBadges.isEmpty {
-                    MediaBadgeRow(badges: featureBadges)
-                }
-            }
-            ZStack(alignment: .leading) {
-                if !heroRatings.isEmpty && !spoilerSettings.shouldHideRatings(for: item) {
-                    RatingsBadgeRow(ratings: heroRatings)
-                }
-            }
+            // Description directly beneath the genres line.
             SpoilerSafeOverviewText(
                 overview: item.overview,
                 hidesSpoilers: hideText,
@@ -467,6 +466,28 @@ struct DetailHeroView: View {
                 lineCount: 3,
                 maxWidth: 960
             )
+            // Bottom facts line just above the action buttons: year · runtime,
+            // then the ratings, then the capability badges (4K / Atmos / HDR …),
+            // all inline on one row.
+            ZStack(alignment: .leading) {
+                if !factParts.isEmpty || showRatings || !featureBadges.isEmpty {
+                    HStack(alignment: .center, spacing: 16) {
+                        if !factParts.isEmpty {
+                            Text(factParts.joined(separator: "  ·  "))
+                                .font(.system(size: 23, weight: .medium))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .contentTransition(.opacity)
+                        }
+                        if showRatings {
+                            RatingsBadgeRow(ratings: heroRatings)
+                        }
+                        if !featureBadges.isEmpty {
+                            MediaBadgeRow(badges: featureBadges)
+                        }
+                    }
+                }
+            }
             if isDiscoveryItem ? showsRequestPill : ((playTitle != nil && onPlay != nil) || onPlayTrailer != nil || showsMoreMenu || hasHeroActionButtons) {
                 HStack(spacing: 24) {
                     if isDiscoveryItem {

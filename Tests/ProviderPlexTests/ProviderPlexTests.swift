@@ -725,8 +725,8 @@ final class PlexProviderMappingTests: XCTestCase {
         XCTAssertEqual(item.ratings.first(where: { $0.source == .imdb })?.displayValue, "7.3")
         XCTAssertEqual(item.ratings.first(where: { $0.source == .rottenTomatoes })?.displayValue, "53%")
         XCTAssertEqual(item.ratings.first(where: { $0.source == .rottenTomatoesAudience })?.displayValue, "77%")
-        // TMDB rendered as a percentage (0–10 → %) for consistency.
-        XCTAssertEqual(item.ratings.first(where: { $0.source == .tmdb })?.displayValue, "71%")
+        // TMDB kept in its native 0–10 decimal.
+        XCTAssertEqual(item.ratings.first(where: { $0.source == .tmdb })?.displayValue, "7.1")
     }
 
     func testItemMapsDolbyVisionFromStreamDisplayTitleWhenFlagsMissing() async throws {

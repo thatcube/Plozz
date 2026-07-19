@@ -1379,9 +1379,8 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
             return ExternalRating(source: .imdb, value: value, scale: .outOfTen)
         }
         if image.contains("themoviedb") || image.contains("tmdb") {
-            // TMDB shown as a percentage for visual consistency with the RT
-            // scores it sits beside (Plex reports it on its 0–10 scale).
-            return ExternalRating(source: .tmdb, value: value * 10, scale: .percent)
+            // TMDB is a 0–10 user score; keep it in its native decimal.
+            return ExternalRating(source: .tmdb, value: value, scale: .outOfTen)
         }
         // Unknown source: keep a generic critic/audience score by `type`.
         switch type {

@@ -3,7 +3,8 @@ import SwiftUI
 import CoreModels
 
 /// A horizontal row of external rating badges (IMDb, Rotten Tomatoes, …) for
-/// the item detail screen. Renders nothing when there are no ratings.
+/// the item detail screen, sized to sit inline beside the year/runtime facts.
+/// Renders nothing when there are no ratings.
 public struct RatingsBadgeRow: View {
     private let ratings: [ExternalRating]
 
@@ -13,7 +14,7 @@ public struct RatingsBadgeRow: View {
 
     public var body: some View {
         if !ratings.isEmpty {
-            HStack(alignment: .firstTextBaseline, spacing: 22) {
+            HStack(alignment: .center, spacing: 18) {
                 ForEach(ratings) { rating in
                     RatingBadge(rating: rating)
                 }
@@ -23,16 +24,16 @@ public struct RatingsBadgeRow: View {
 }
 
 /// A single source's rating: a compact branded icon (a filled star for
-/// user/community scores, a TMDB logo chip for TMDB, a tomato/popcorn for
+/// user/community scores, the IMDb / TMDB logo chips, a tomato/popcorn for
 /// Rotten Tomatoes, or a coloured Metacritic chip) beside the formatted score.
-/// Rotten Tomatoes scores tint red when fresh and green when rotten, mirroring
-/// the real badges.
+/// The score itself is rendered in one neutral, uniform-weight style so the row
+/// reads as a single line of facts; only the icons carry brand colour.
 public struct RatingBadge: View {
     private let rating: ExternalRating
 
-    /// Shared type scale so the icon and score line up to a compact cap height.
-    private static let valueFont = Font.system(size: 22, weight: .semibold)
-    private static let emphasizedValueFont = Font.system(size: 22, weight: .bold)
+    /// One shared type scale + weight for every score, matching the adjacent
+    /// year/runtime metadata line so the whole bottom row reads consistently.
+    private static let valueFont = Font.system(size: 23, weight: .medium)
     private static let iconSize: CGFloat = 24
 
     public init(rating: ExternalRating) {
@@ -40,18 +41,11 @@ public struct RatingBadge: View {
     }
 
     public var body: some View {
-        VStack(spacing: 5) {
-            HStack(spacing: 7) {
-                icon
-                Text(rating.displayValue)
-                    .font(valueFont)
-                    .monospacedDigit()
-                    .foregroundStyle(valueColor)
-            }
-            Text(rating.source.shortLabel)
-                .font(.system(size: 14, weight: .semibold))
-                .textCase(.uppercase)
-                .tracking(0.6)
+        HStack(spacing: 7) {
+            icon
+            Text(rating.displayValue)
+                .font(Self.valueFont)
+                .monospacedDigit()
                 .foregroundStyle(.secondary)
         }
         // Preserve each icon + score as one indivisible badge. Without this,
@@ -122,27 +116,8 @@ public struct RatingBadge: View {
             .frame(width: 44, height: 22)
     }
 
-    /// Tint for the score text — fresh/rotten for Rotten Tomatoes-style sources,
-    /// primary otherwise.
-    private var valueFont: Font {
-        switch rating.source {
-        case .tmdb, .rottenTomatoes, .critic:
-            return Self.emphasizedValueFont
-        default:
-            return Self.valueFont
-        }
-    }
-
-    /// Tint for the score text — fresh/rotten for Rotten Tomatoes-style sources,
-    /// primary otherwise.
-    private var valueColor: Color {
-        switch rating.freshness {
-        case .fresh: return Self.freshRed
-        case .rotten: return Self.rottenGreen
-        case .none: return .primary
-        }
-    }
-
+    /// Metacritic's coloured square tint: green for favourable scores, yellow
+    /// for mixed, red for unfavourable.
     private var metacriticColor: Color {
         let score = rating.value
         if score >= 61 { return Self.metacriticGreen }
@@ -153,8 +128,6 @@ public struct RatingBadge: View {
     // Brand-ish colours.
     private static let starGold = Color(red: 0.96, green: 0.77, blue: 0.13)
     private static let anilistBlue = Color(red: 0.13, green: 0.62, blue: 1.0)
-    private static let freshRed = Color(red: 0.98, green: 0.27, blue: 0.20)
-    private static let rottenGreen = Color(red: 0.18, green: 0.70, blue: 0.40)
     private static let metacriticGreen = Color(red: 0.40, green: 0.73, blue: 0.27)
     private static let metacriticYellow = Color(red: 1.0, green: 0.80, blue: 0.0)
     private static let metacriticRed = Color(red: 0.98, green: 0.27, blue: 0.20)

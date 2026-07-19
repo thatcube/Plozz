@@ -44,8 +44,14 @@ public struct MediaBadgeChip: View {
 
     /// Shared type scale so every treatment lines up to the same cap height.
     private static let textFont = Font.system(size: 21, weight: .semibold)
-    private static let dolbyWordFont = Font.system(size: 16, weight: .semibold)
-    private static let dolbyFormatFont = Font.system(size: 13, weight: .medium)
+    /// Smaller scale for the resolution `.spec` pills (`4K`, `1080P`), which read
+    /// as chunky at the shared size — deliberately more compact than the
+    /// HDR/SDR/DTS marks, which keep their size.
+    private static let specFont = Font.system(size: 16, weight: .semibold)
+    private static let specPillHeight: CGFloat = 27
+    private static let specHPadding: CGFloat = 8
+    private static let dolbyWordFont = Font.system(size: 13, weight: .semibold)
+    private static let dolbyFormatFont = Font.system(size: 11, weight: .medium)
     /// Heavy weights for the HDR wordmark so it reads as a bold logo: the format
     /// name (`HDR`/`HLG`) and its numeric variant (`10`, `10+`).
     private static let hdrHeadFont = Font.system(size: 21, weight: .black)
@@ -63,8 +69,9 @@ public struct MediaBadgeChip: View {
     private static let dtsDashRaise: CGFloat = 6
     private static let dtsDashLeading: CGFloat = 2
     private static let dtsDashOverlap: CGFloat = 2
-    /// Plain trailing channel-layout number appended to a format logo.
-    private static let channelFont = Font.system(size: 18, weight: .semibold)
+    /// Plain trailing channel-layout number appended to a format logo (the `5.1`
+    /// beside a Dolby mark). Sized to the smaller Dolby wordmark.
+    private static let channelFont = Font.system(size: 15, weight: .semibold)
     /// A bolder channel number for the dts-HD mark specifically.
     private static let dtsChannelFont = Font.system(size: 18, weight: .heavy)
     /// The oversized `X` of the dts:X mark, larger than the `dts` head and
@@ -106,7 +113,13 @@ public struct MediaBadgeChip: View {
                     )
                     .accessibilityLabel(badge.label)
             case .spec:
-                label(badge.label, textColor: palette.primaryText)
+                label(
+                    badge.label,
+                    textColor: palette.primaryText,
+                    font: Self.specFont,
+                    height: Self.specPillHeight,
+                    hPadding: Self.specHPadding
+                )
                     .background(
                         RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
                             .fill(palette.primaryText.opacity(0.16))
@@ -131,12 +144,12 @@ public struct MediaBadgeChip: View {
                 }
                 .accessibilityLabel(badge.accessibilityText)
             case .dolby:
-                HStack(alignment: .center, spacing: 7) {
+                HStack(alignment: .center, spacing: 6) {
                     VStack(alignment: .center, spacing: -1) {
-                        HStack(alignment: .center, spacing: 5) {
+                        HStack(alignment: .center, spacing: 4) {
                             DolbyDoubleD()
                                 .fill(palette.primaryText)
-                                .frame(width: 21, height: 14)
+                                .frame(width: 17, height: 11)
                             Text("Dolby")
                                 .font(Self.dolbyWordFont)
                                 .foregroundStyle(palette.primaryText)
@@ -171,7 +184,13 @@ public struct MediaBadgeChip: View {
             .minimumScaleFactor(0.75)
     }
 
-    private func label(_ text: String, textColor: Color, font: Font? = nil) -> some View {
+    private func label(
+        _ text: String,
+        textColor: Color,
+        font: Font? = nil,
+        height: CGFloat = MediaBadgeChip.pillHeight,
+        hPadding: CGFloat = MediaBadgeChip.hPadding
+    ) -> some View {
         Text(text)
             .font(font ?? Self.textFont)
             .foregroundStyle(textColor)
@@ -179,8 +198,8 @@ public struct MediaBadgeChip: View {
             .tracking(0.5)
             .lineLimit(1)
             .minimumScaleFactor(0.75)
-            .padding(.horizontal, Self.hPadding)
-            .frame(height: Self.pillHeight)
+            .padding(.horizontal, hPadding)
+            .frame(height: height)
     }
 
     /// A two-weight HDR wordmark filled with the HDR gradient (no pill behind

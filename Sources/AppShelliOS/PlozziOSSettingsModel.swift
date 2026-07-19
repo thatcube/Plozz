@@ -5,6 +5,7 @@ import Foundation
 @MainActor
 final class PlozziOSSettingsModel {
     let theme: ThemeSettingsModel
+    let transparency: TransparencyPreferenceModel
     let cardStyle: CardStyleSettingsModel
     let density: UIDensitySettingsModel
     let watchIndicator: WatchStatusIndicatorSettingsModel
@@ -16,12 +17,17 @@ final class PlozziOSSettingsModel {
     let spoilers: SpoilerSettingsModel
     let nightShift: NightShiftSettingsModel
     let hero: HeroSettingsModel
+    let heroBackground: HeroBackgroundSettingsModel
+    let themeMusic: ThemeMusicSettingsModel
     let homeVisibility: HomeLibraryVisibilityModel
     let diagnostics: DiagnosticsSettingsModel
 
     init(namespace: String? = nil) {
         theme = ThemeSettingsModel(
             store: ThemeSettingsStore(namespace: namespace)
+        )
+        transparency = TransparencyPreferenceModel(
+            store: TransparencyPreferenceStore(namespace: namespace)
         )
         cardStyle = CardStyleSettingsModel(
             store: CardStyleSettingsStore(namespace: namespace)
@@ -61,6 +67,12 @@ final class PlozziOSSettingsModel {
         )
         hero = HeroSettingsModel(
             store: HeroSettingsStore(namespace: namespace)
+        )
+        heroBackground = HeroBackgroundSettingsModel(
+            store: HeroBackgroundSettingsStore(namespace: namespace)
+        )
+        themeMusic = ThemeMusicSettingsModel(
+            store: ThemeMusicSettingsStore(namespace: namespace)
         )
         homeVisibility = HomeLibraryVisibilityModel(
             store: HomeLibraryVisibilityStore(namespace: namespace)

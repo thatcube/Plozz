@@ -4,6 +4,307 @@ import CoreUI
 import SwiftUI
 
 struct PlozziOSSettingsView: View {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    let appModel: PlozziOSAppModel
+    let onAddServer: () -> Void
+
+    var body: some View {
+        if horizontalSizeClass == .regular {
+            PlozziOSSettingsSplitView(
+                appModel: appModel,
+                onAddServer: onAddServer
+            )
+        } else {
+            NavigationStack {
+                PlozziOSSettingsCompactMenu(
+                    appModel: appModel,
+                    onAddServer: onAddServer
+                )
+            }
+        }
+    }
+}
+
+private enum PlozziOSSettingsDestination: Hashable {
+    case profiles
+    case requests
+    case account(String)
+    case addNetworkShare
+    case trackers
+    case appearance
+    case home
+    case playback
+    case downloads
+    case subtitles
+    case spoilers
+    case nightShift
+    case diagnostics
+    case attributions
+    case about
+}
+
+private struct PlozziOSSettingsSplitView: View {
+    @Environment(\.themePalette) private var palette
+    let appModel: PlozziOSAppModel
+    let onAddServer: () -> Void
+    @State private var selection: PlozziOSSettingsDestination? = .profiles
+    @State private var confirmSignOutAll = false
+
+    var body: some View {
+        NavigationSplitView {
+            List(selection: $selection) {
+                Section("Profiles") {
+                    Label(
+                        appModel.profiles.activeProfile.name,
+                        systemImage: "person.2"
+                    )
+                    .tag(PlozziOSSettingsDestination.profiles)
+                }
+
+                Section("Services") {
+                    settingsRow(
+                        .requests,
+                        title: "Requests",
+                        systemImage: "plus.rectangle.on.folder"
+                    )
+                }
+
+                Section("Media sources") {
+                    ForEach(appModel.accounts) { account in
+                        Label {
+                            VStack(alignment: .leading) {
+                                Text(account.server.name)
+                                if !account.userName.isEmpty {
+                                    Text(account.userName)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        } icon: {
+                            Image(systemName: "server.rack")
+                        }
+                        .tag(PlozziOSSettingsDestination.account(account.id))
+                    }
+
+                    Button("Add Server", systemImage: "plus", action: onAddServer)
+                    settingsRow(
+                        .addNetworkShare,
+                        title: "Add Network Share",
+                        systemImage: "externaldrive.connected.to.line.below"
+                    )
+                }
+
+                Section("Preferences") {
+                    settingsRow(
+                        .trackers,
+                        title: "Trackers",
+                        systemImage: "arrow.triangle.2.circlepath"
+                    )
+                    settingsRow(
+                        .appearance,
+                        title: "Appearance",
+                        systemImage: "paintpalette"
+                    )
+                    settingsRow(.home, title: "Home", systemImage: "house")
+                    settingsRow(
+                        .playback,
+                        title: "Playback",
+                        systemImage: "play.rectangle"
+                    )
+                    settingsRow(
+                        .downloads,
+                        title: "Downloads",
+                        systemImage: "arrow.down.circle"
+                    )
+                    settingsRow(
+                        .subtitles,
+                        title: "Subtitles",
+                        systemImage: "captions.bubble"
+                    )
+                    settingsRow(
+                        .spoilers,
+                        title: "Spoilers",
+                        systemImage: "eye.slash"
+                    )
+                    settingsRow(
+                        .nightShift,
+                        title: "Night Shift",
+                        systemImage: "moon.stars"
+                    )
+                }
+
+                Section("Support") {
+                    settingsRow(
+                        .diagnostics,
+                        title: "Diagnostics",
+                        systemImage: "waveform.path.ecg"
+                    )
+                    settingsRow(
+                        .attributions,
+                        title: "Attributions & Licensing",
+                        systemImage: "doc.text.magnifyingglass"
+                    )
+                    settingsRow(
+                        .about,
+                        title: "About",
+                        systemImage: "info.circle"
+                    )
+                }
+            }
+            .navigationTitle("Settings")
+        } detail: {
+            NavigationStack {
+                Group {
+                    settingsDetail
+                }
+                .frame(maxWidth: 760)
+                .frame(maxWidth: .infinity)
+                .plozziOSSettingsSurface()
+            }
+            .id(selection)
+            .background { AppBackground(palette: palette) }
+        }
+        .navigationSplitViewStyle(.balanced)
+        .alert("Sign out of all accounts?", isPresented: $confirmSignOutAll) {
+            Button("Cancel", role: .cancel) {}
+            Button("Sign Out", role: .destructive) {
+                for account in appModel.accounts {
+                    appModel.removeAccount(id: account.id)
+                }
+            }
+        } message: {
+            Text("This removes every server and network share from this device.")
+        }
+    }
+
+    private func settingsRow(
+        _ destination: PlozziOSSettingsDestination,
+        title: LocalizedStringResource,
+        systemImage: String
+    ) -> some View {
+        Label(title, systemImage: systemImage)
+            .tag(destination)
+    }
+
+    @ViewBuilder
+    private var settingsDetail: some View {
+        switch selection ?? .profiles {
+        case .profiles:
+            PlozziOSProfilesView(appModel: appModel)
+        case .requests:
+            PlozziOSSeerrSettingsView(appModel: appModel)
+        case .account(let accountID):
+            if let account = appModel.accounts.first(where: {
+                $0.id == accountID
+            }) {
+                PlozziOSAccountDetailView(
+                    appModel: appModel,
+                    account: account,
+                    onRemove: {
+                        appModel.removeAccount(id: account.id)
+                        selection = .profiles
+                    }
+                )
+            } else {
+                ContentUnavailableView(
+                    "Source unavailable",
+                    systemImage: "server.rack",
+                    description: Text("Select another media source.")
+                )
+            }
+        case .addNetworkShare:
+            PlozziOSAddShareView(appModel: appModel)
+        case .trackers:
+            PlozziOSTrackerSettingsView(appModel: appModel)
+        case .appearance:
+            PlozziOSAppearanceSettingsView(
+                theme: appModel.settings.theme,
+                transparency: appModel.settings.transparency,
+                cardStyle: appModel.settings.cardStyle,
+                density: appModel.settings.density,
+                watchIndicator: appModel.settings.watchIndicator
+            )
+        case .home:
+            PlozziOSHomeSettingsView(
+                hero: appModel.settings.hero,
+                visibility: appModel.settings.homeVisibility,
+                accounts: appModel.accountsProviders.resolvedActiveAccounts,
+                seerConfigured: appModel.seerService.isConfigured
+            )
+        case .playback:
+            PlozziOSPlaybackSettingsView(
+                model: appModel.settings.playback,
+                audioPolicy: appModel.settings.audioPolicy,
+                heroBackground: appModel.settings.heroBackground,
+                themeMusic: appModel.settings.themeMusic
+            )
+        case .downloads:
+            PlozziOSDownloadSettingsView(model: appModel.downloads)
+        case .subtitles:
+            PlozziOSSubtitleSettingsView(
+                behavior: appModel.settings.subtitleBehavior,
+                policy: appModel.settings.subtitlePolicy,
+                style: appModel.settings.subtitleStyle
+            )
+        case .spoilers:
+            PlozziOSSpoilerSettingsView(model: appModel.settings.spoilers)
+        case .nightShift:
+            PlozziOSNightShiftSettingsView(model: appModel.settings.nightShift)
+        case .diagnostics:
+            PlozziOSDiagnosticsSettingsView(
+                appModel: appModel,
+                model: appModel.settings.diagnostics,
+                crashReporting: appModel.crashReporting
+            )
+        case .attributions:
+            PlozziOSAttributionsView()
+        case .about:
+            PlozziOSAboutSettingsView(
+                hasAccounts: !appModel.accounts.isEmpty,
+                onSignOutAll: { confirmSignOutAll = true }
+            )
+        }
+    }
+}
+
+private struct PlozziOSAboutSettingsView: View {
+    let hasAccounts: Bool
+    let onSignOutAll: () -> Void
+
+    var body: some View {
+        Form {
+            Section("Plozz") {
+                LabeledContent("Version") {
+                    Text(
+                        Bundle.main.infoDictionary?[
+                            "CFBundleShortVersionString"
+                        ] as? String ?? "—"
+                    )
+                }
+                LabeledContent("Build") {
+                    Text(
+                        Bundle.main.infoDictionary?[
+                            "CFBundleVersion"
+                        ] as? String ?? "—"
+                    )
+                }
+            }
+
+            if hasAccounts {
+                Section {
+                    Button(
+                        "Sign Out of All Accounts",
+                        role: .destructive,
+                        action: onSignOutAll
+                    )
+                }
+            }
+        }
+        .navigationTitle("About")
+    }
+}
+
+private struct PlozziOSSettingsCompactMenu: View {
     let appModel: PlozziOSAppModel
     let onAddServer: () -> Void
     @State private var confirmSignOutAll = false
@@ -72,6 +373,7 @@ struct PlozziOSSettingsView: View {
                 NavigationLink {
                     PlozziOSAppearanceSettingsView(
                         theme: appModel.settings.theme,
+                        transparency: appModel.settings.transparency,
                         cardStyle: appModel.settings.cardStyle,
                         density: appModel.settings.density,
                         watchIndicator: appModel.settings.watchIndicator
@@ -92,7 +394,9 @@ struct PlozziOSSettingsView: View {
                 NavigationLink {
                     PlozziOSPlaybackSettingsView(
                         model: appModel.settings.playback,
-                        audioPolicy: appModel.settings.audioPolicy
+                        audioPolicy: appModel.settings.audioPolicy,
+                        heroBackground: appModel.settings.heroBackground,
+                        themeMusic: appModel.settings.themeMusic
                     )
                 } label: {
                     Label("Playback", systemImage: "play.rectangle")
@@ -386,17 +690,17 @@ private struct PlozziOSAccountDetailView: View {
                         Label("Plex User", systemImage: "person.crop.circle")
                     }
                 }
+            }
 
-                if account.server.provider == .mediaShare {
-                    PlozziOSShareScanSection(
-                        state: appModel.shareScanStatus.state(
-                            forShareID: account.id
-                        ),
-                        onScan: {
-                            appModel.rescanShare(accountID: account.id)
-                        }
-                    )
-                }
+            if account.server.provider == .mediaShare {
+                PlozziOSShareScanSection(
+                    state: appModel.shareScanStatus.state(
+                        forShareID: account.id
+                    ),
+                    onScan: {
+                        appModel.rescanShare(accountID: account.id)
+                    }
+                )
             }
 
             Section {
@@ -563,6 +867,7 @@ private struct PlozziOSPlexHomeUserSettingsView: View {
 
 private struct PlozziOSAppearanceSettingsView: View {
     @Bindable var theme: ThemeSettingsModel
+    @Bindable var transparency: TransparencyPreferenceModel
     @Bindable var cardStyle: CardStyleSettingsModel
     @Bindable var density: UIDensitySettingsModel
     @Bindable var watchIndicator: WatchStatusIndicatorSettingsModel
@@ -574,6 +879,19 @@ private struct PlozziOSAppearanceSettingsView: View {
                     ForEach(AppTheme.allCases) { theme in
                         Label(theme.displayName, systemImage: theme.symbolName)
                             .tag(theme)
+                    }
+                    Picker(
+                        "Liquid Glass",
+                        selection: $transparency.preference
+                    ) {
+                        ForEach(TransparencyPreference.allCases) { preference in
+                            Text(
+                                preference == .system
+                                    ? "System"
+                                    : preference.displayName
+                            )
+                            .tag(preference)
+                        }
                     }
                 }
             }
@@ -697,7 +1015,6 @@ private struct PlozziOSHomeSettingsView: View {
                 if hero.settings.isEnabled {
                     Toggle("Hide watched titles", isOn: $hero.settings.hideWatched)
                     Toggle("Auto-advance", isOn: $hero.settings.autoAdvance)
-                    Toggle("Background trailers", isOn: $hero.settings.trailersEnabled)
                 }
             }
 
@@ -905,6 +1222,8 @@ private struct PlozziOSLibraryHomeSettingsView: View {
 private struct PlozziOSPlaybackSettingsView: View {
     @Bindable var model: PlaybackSettingsModel
     @Bindable var audioPolicy: AudioPolicyModel
+    @Bindable var heroBackground: HeroBackgroundSettingsModel
+    @Bindable var themeMusic: ThemeMusicSettingsModel
 
     private static let policyCategories: [ContentCategory] = [.movie, .tvShow, .anime]
     private static let audioOptions: [AudioLanguagePreference] =
@@ -944,6 +1263,33 @@ private struct PlozziOSPlaybackSettingsView: View {
                     Picker("Up Next lead time", selection: $model.settings.upNextLeadSeconds) {
                         ForEach(PlaybackSettings.upNextLeadSecondsOptions, id: \.self) {
                             Text("\($0) sec").tag($0)
+                        }
+
+                        Section("Hero Background") {
+                            Picker(
+                                "Background",
+                                selection: $heroBackground.settings.mode
+                            ) {
+                                ForEach(HeroBackgroundMode.allCases, id: \.self) {
+                                    Text($0.displayName).tag($0)
+                                }
+                            }
+                            if heroBackground.settings.mode == .trailer {
+                                Toggle(
+                                    "Mute trailer audio",
+                                    isOn: $heroBackground.settings.trailerMuted
+                                )
+                            }
+                            if heroBackground.settings.mode == .themeMusic {
+                                Picker(
+                                    "Theme music volume",
+                                    selection: $themeMusic.settings.volume
+                                ) {
+                                    ForEach(ThemeMusicVolume.allCases, id: \.self) {
+                                        Text($0.displayName).tag($0)
+                                    }
+                                }
+                            }
                         }
                     }
                 }

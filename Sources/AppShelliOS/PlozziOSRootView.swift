@@ -5,10 +5,10 @@ import CoreUI
 import SwiftUI
 
 public struct PlozziOSRootView: View {
-    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.colorScheme) private var systemColorScheme
+    @Environment(\.accessibilityReduceTransparency)
+    private var systemReduceTransparency
     @State private var appModel = PlozziOSAppModel()
-    @State private var selection: PlozziOSDestination? = .home
     @State private var showingAddServer = false
     @State private var completedLaunchProfileSelection = false
 
@@ -26,12 +26,6 @@ public struct PlozziOSRootView: View {
                         completedLaunchProfileSelection = true
                     }
                 )
-            } else if horizontalSizeClass == .regular {
-                PlozziOSSplitShell(
-                    selection: $selection,
-                    appModel: appModel,
-                    onAddServer: showAddServer
-                )
             } else {
                 PlozziOSTabShell(
                     appModel: appModel,
@@ -41,6 +35,24 @@ public struct PlozziOSRootView: View {
         }
         .background { AppBackground(palette: resolvedPalette) }
         .environment(\.themePalette, resolvedPalette)
+        .environment(
+            \.plozzMetrics,
+            PlozzMetrics(density: appModel.settings.density.density)
+        )
+        .environment(
+            \.plozzCardStyle,
+            appModel.settings.cardStyle.style
+        )
+        .environment(
+            \.plozzWatchStatusIndicator,
+            appModel.settings.watchIndicator.indicator
+        )
+        .environment(
+            \.plozzReduceTransparency,
+            appModel.settings.transparency.preference.reducesTransparency(
+                systemReduceTransparency: systemReduceTransparency
+            )
+        )
         .environment(
             \.colorScheme,
             resolvedPalette.isLight ? .light : .dark
@@ -185,54 +197,6 @@ private enum PlozziOSDestination: String, CaseIterable, Identifiable {
     }
 }
 
-private struct PlozziOSSplitShell: View {
-    @Environment(\.themePalette) private var palette
-    @Binding var selection: PlozziOSDestination?
-    @State private var homePath = NavigationPath()
-    @State private var searchPath = NavigationPath()
-    @State private var downloadsPath = NavigationPath()
-    @State private var settingsPath = NavigationPath()
-
-    let appModel: PlozziOSAppModel
-    let onAddServer: () -> Void
-
-    var body: some View {
-        let destination = selection ?? .home
-
-        NavigationSplitView {
-            List(PlozziOSDestination.allCases, selection: $selection) { destination in
-                Label(destination.title, systemImage: destination.systemImage)
-            }
-            .navigationTitle("Plozz")
-        } detail: {
-            NavigationStack(path: path(for: destination)) {
-                PlozziOSDestinationView(
-                    destination: destination,
-                    appModel: appModel,
-                    onAddServer: onAddServer
-                )
-            }
-            .id(destination)
-            .background { AppBackground(palette: palette) }
-        }
-    }
-
-    private func path(
-        for destination: PlozziOSDestination
-    ) -> Binding<NavigationPath> {
-        switch destination {
-        case .home:
-            $homePath
-        case .search:
-            $searchPath
-        case .downloads:
-            $downloadsPath
-        case .settings:
-            $settingsPath
-        }
-    }
-}
-
 private struct PlozziOSTabShell: View {
     let appModel: PlozziOSAppModel
     let onAddServer: () -> Void
@@ -270,15 +234,14 @@ private struct PlozziOSTabShell: View {
             }
 
             Tab("Settings", systemImage: "gear") {
-                NavigationStack {
-                    PlozziOSDestinationView(
-                        destination: .settings,
-                        appModel: appModel,
-                        onAddServer: onAddServer
-                    )
-                }
+                PlozziOSDestinationView(
+                    destination: .settings,
+                    appModel: appModel,
+                    onAddServer: onAddServer
+                )
             }
         }
+        .tabViewStyle(.sidebarAdaptable)
     }
 }
 

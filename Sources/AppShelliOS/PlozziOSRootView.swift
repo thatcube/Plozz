@@ -7,6 +7,7 @@ public struct PlozziOSRootView: View {
     @State private var appModel = PlozziOSAppModel()
     @State private var selection: PlozziOSDestination? = .home
     @State private var showingAddServer = false
+    @State private var completedLaunchProfileSelection = false
 
     public init() {}
 
@@ -14,7 +15,17 @@ public struct PlozziOSRootView: View {
         let pinRequest = appModel.plexHomeUsers.pendingPlexPINRequest
 
         Group {
-            if horizontalSizeClass == .regular {
+            if appModel.requiresLaunchProfileSelection
+                && !completedLaunchProfileSelection {
+                PlozziOSProfilePickerView(
+                    profiles: appModel.profiles.profiles,
+                    activeProfileID: appModel.profiles.activeProfileID,
+                    onSelect: { profile in
+                        appModel.selectProfile(profile.id)
+                        completedLaunchProfileSelection = true
+                    }
+                )
+            } else if horizontalSizeClass == .regular {
                 PlozziOSSplitShell(
                     selection: $selection,
                     appModel: appModel,
@@ -28,10 +39,7 @@ public struct PlozziOSRootView: View {
             }
         }
         .environment(appModel)
-        .id(
-            "\(appModel.profiles.activeProfileID)#"
-                + "\(appModel.plexHomeUsers.plexIdentityGeneration)"
-        )
+        .id(shellIdentity)
         .sheet(isPresented: $showingAddServer) {
             AddServerView(appModel: appModel)
         }
@@ -51,6 +59,15 @@ public struct PlozziOSRootView: View {
             )
         }
         .preferredColorScheme(appModel.settings.theme.theme.preferredColorScheme)
+    }
+
+    private var shellIdentity: String {
+        if appModel.requiresLaunchProfileSelection
+            && !completedLaunchProfileSelection {
+            return "profile-picker"
+        }
+        return "\(appModel.profiles.activeProfileID)#"
+            + "\(appModel.plexHomeUsers.plexIdentityGeneration)"
     }
 }
 

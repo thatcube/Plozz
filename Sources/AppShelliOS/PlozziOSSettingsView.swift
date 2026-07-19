@@ -176,6 +176,24 @@ private struct PlozziOSProfilesView: View {
 
     var body: some View {
         List {
+            if appModel.profiles.profiles.count > 1 {
+                Section {
+                    Toggle(
+                        "Ask Who’s Watching on Startup",
+                        isOn: Binding(
+                            get: {
+                                appModel.profiles.askProfileOnStartup
+                            },
+                            set: {
+                                appModel.profiles.setAskProfileOnStartup($0)
+                            }
+                        )
+                    )
+                } footer: {
+                    Text("Choose a household profile whenever Plozz opens.")
+                }
+            }
+
             Section("Who’s watching?") {
                 ForEach(appModel.profiles.profiles) { profile in
                     NavigationLink {

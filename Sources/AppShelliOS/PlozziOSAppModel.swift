@@ -32,6 +32,7 @@ final class PlozziOSAppModel {
     let trackerScrobbler: PlozziOSTrackerScrobbler
     let crashReporting: CrashReportingSettingsModel
     let crashReportingController: CrashReportingController
+    let requiresLaunchProfileSelection: Bool
     private(set) var settings: PlozziOSSettingsModel
     private(set) var seriesTrackStore: SeriesTrackPreferenceStore
     private(set) var versionPreferences: VersionPreferenceStore
@@ -131,6 +132,8 @@ final class PlozziOSAppModel {
             ),
             defaultActiveAccountIDs: accountStore.activeAccountIDs()
         )
+        let requiresLaunchProfileSelection =
+            profiles.askProfileOnStartup && profiles.profiles.count > 1
         let accountsProviders = AccountsProvidersModel(
             accountStore: accountStore,
             registry: registry,
@@ -167,6 +170,7 @@ final class PlozziOSAppModel {
         )
         self.crashReporting = CrashReportingSettingsModel()
         self.crashReportingController = CrashReportingController()
+        self.requiresLaunchProfileSelection = requiresLaunchProfileSelection
         self.settings = PlozziOSSettingsModel(
             namespace: profiles.activeNamespace
         )
@@ -248,7 +252,9 @@ final class PlozziOSAppModel {
         identityIndex.warmIdentityIndex()
         let scanReporter = shareScanStatus.reporter()
         Task { await mediaShareRuntime.configure(reporter: scanReporter) }
-        plexHomeUsers.ensurePlexIdentityForActiveProfile()
+        if !requiresLaunchProfileSelection {
+            plexHomeUsers.ensurePlexIdentityForActiveProfile()
+        }
         updateTrackersForActiveProfile()
         drainWatchOutbox()
         applyCrashReportingPreference()

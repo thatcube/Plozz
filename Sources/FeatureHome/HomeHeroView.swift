@@ -642,6 +642,16 @@ struct HomeHeroView: View {
         .onChange(of: backgroundSettings.trailerMuted) { _, muted in
             trailerController.setMuted(muted)
         }
+        .onChange(of: isFrontmost) { _, frontmost in
+            // Reclaim the one physical surface synchronously at the beginning of
+            // a detail→Home pop. Waiting for the async trailer task leaves the
+            // returning Home host empty for a few frames (the black fade).
+            if frontmost, let item = current,
+               trailerController.isShowing(item.id) {
+                trailerController.claimSurface(ownerID: "home-hero")
+                trailerVisible = trailerController.isPlaying
+            }
+        }
         // Auto-advance: the fire is rescheduled whenever `autoAdvanceKey` changes
         // (slide change, manual page, pause/resume, or the item count settling).
         // It runs REGARDLESS of focus — focus lands on the hero action row by

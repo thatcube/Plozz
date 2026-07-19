@@ -238,7 +238,11 @@ public struct ItemDetailView: View {
             let itemID = viewModel.state.value?.item.id
             if let itemID {
                 heroTrailerController.clearEndHandler(ownerID: "detail-\(itemID)")
-                if !preservesHeroTrailerOnDisappear {
+                if preservesHeroTrailerOnDisappear {
+                    // Hand the persistent layer back before the pop transition
+                    // presents Home, rather than waiting for Home's async task.
+                    heroTrailerController.claimSurface(ownerID: "home-hero")
+                } else {
                     heroTrailerController.stop(ifShowing: itemID)
                 }
             }

@@ -44,7 +44,6 @@ private enum PlozziOSSettingsDestination: Hashable {
 }
 
 private struct PlozziOSSettingsSplitView: View {
-    @Environment(\.themePalette) private var palette
     let appModel: PlozziOSAppModel
     let onAddServer: () -> Void
     @State private var selection: PlozziOSSettingsDestination? = .profiles
@@ -162,7 +161,6 @@ private struct PlozziOSSettingsSplitView: View {
                 .plozziOSSettingsSurface()
             }
             .id(selection)
-            .background { AppBackground(palette: palette) }
         }
         .navigationSplitViewStyle(.balanced)
         .alert("Sign out of all accounts?", isPresented: $confirmSignOutAll) {
@@ -923,12 +921,9 @@ private struct PlozziOSAppearanceSettingsView: View {
 }
 
 private struct PlozziOSSettingsSurface: ViewModifier {
-    @Environment(\.themePalette) private var palette
-
     func body(content: Content) -> some View {
         content
             .scrollContentBackground(.hidden)
-            .background { AppBackground(palette: palette) }
     }
 }
 

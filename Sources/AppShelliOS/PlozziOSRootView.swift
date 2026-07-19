@@ -33,6 +33,7 @@ public struct PlozziOSRootView: View {
                 )
             }
         }
+        .scrollContentBackground(.hidden)
         .background { AppBackground(palette: resolvedPalette) }
         .environment(\.themePalette, resolvedPalette)
         .environment(

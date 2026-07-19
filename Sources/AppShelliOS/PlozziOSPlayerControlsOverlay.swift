@@ -6,6 +6,7 @@ import SwiftUI
 private enum PlozziOSPlayerSheet: String, Identifiable {
     case info
     case speed
+    case subtitles
     case sync
 
     var id: Self { self }
@@ -80,6 +81,10 @@ struct PlozziOSPlayerControlsOverlay: View {
                         presentedSheet = .speed
                         cancelAutoHide()
                     },
+                    onShowSubtitles: {
+                        presentedSheet = .subtitles
+                        cancelAutoHide()
+                    },
                     onShowSync: {
                         presentedSheet = .sync
                         cancelAutoHide()
@@ -135,6 +140,8 @@ struct PlozziOSPlayerControlsOverlay: View {
                 PlozziOSPlaybackInfoSheet(viewModel: viewModel)
             case .speed:
                 PlozziOSPlaybackSpeedSheet(viewModel: viewModel)
+            case .subtitles:
+                PlozziOSSubtitleOptionsSheet(viewModel: viewModel)
             case .sync:
                 PlozziOSPlaybackSyncSheet(viewModel: viewModel)
             }
@@ -232,6 +239,7 @@ private struct PlozziOSPlayerTransport: View {
     let onSkipForward: () -> Void
     let onShowInfo: () -> Void
     let onShowSpeed: () -> Void
+    let onShowSubtitles: () -> Void
     let onShowSync: () -> Void
     let onInteraction: () -> Void
 
@@ -338,20 +346,10 @@ private struct PlozziOSPlayerTransport: View {
                 }
             }
 
-            if !viewModel.controls.subtitleOptions.isEmpty {
-                Menu("Subtitles") {
-                    ForEach(viewModel.controls.subtitleOptions) { option in
-                        Button {
-                            viewModel.selectSubtitleOption(id: option.id)
-                            onInteraction()
-                        } label: {
-                            if option.isSelected {
-                                Label(option.title, systemImage: "checkmark")
-                            } else {
-                                Text(option.title)
-                            }
-                        }
-                    }
+            if !viewModel.controls.subtitleOptions.isEmpty
+                || viewModel.controls.canSearchRemoteSubtitles {
+                Button("Subtitles", systemImage: "captions.bubble") {
+                    onShowSubtitles()
                 }
             }
 
@@ -391,6 +389,231 @@ private struct PlozziOSPlayerTransport: View {
             return String(format: "%d:%02d:%02d", hours, minutes, remainder)
         }
         return String(format: "%d:%02d", minutes, remainder)
+    }
+}
+
+private struct PlozziOSSubtitleOptionsSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let viewModel: PlayerViewModel
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                primaryTracks
+                secondaryTracks
+                appearance
+                remoteSearch
+            }
+            .navigationTitle("Subtitles")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+        .presentationDetents([.large])
+    }
+
+    @ViewBuilder
+    private var primaryTracks: some View {
+        if !viewModel.controls.subtitleOptions.isEmpty {
+            Section("Primary Track") {
+                ForEach(viewModel.controls.subtitleOptions) { option in
+                    Button {
+                        viewModel.selectSubtitleOption(id: option.id)
+                    } label: {
+                        HStack {
+                            Text(option.title)
+                            Spacer()
+                            if option.isSelected {
+                                Image(systemName: "checkmark")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var secondaryTracks: some View {
+        if let format = viewModel.controls.secondarySubtitleImagePrimaryFormat {
+            Section("Second Track") {
+                Text("Unavailable with \(format) image subtitles.")
+                    .foregroundStyle(.secondary)
+            }
+        } else if !viewModel.controls.secondarySubtitleOptions.isEmpty {
+            Section("Second Track") {
+                ForEach(viewModel.controls.secondarySubtitleOptions) { option in
+                    Button {
+                        viewModel.selectSecondarySubtitleOption(id: option.id)
+                    } label: {
+                        HStack {
+                            Text(option.title)
+                            Spacer()
+                            if option.isSelected {
+                                Image(systemName: "checkmark")
+                            }
+                        }
+                    }
+                }
+
+                if let statusText = secondaryStatusText {
+                    Text(statusText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    private var appearance: some View {
+        Section("Appearance") {
+            Picker(
+                "Font",
+                selection: styleBinding(\.fontFamily)
+            ) {
+                ForEach(SubtitleFontFamily.allCases, id: \.self) {
+                    Text($0.displayName).tag($0)
+                }
+            }
+            Picker(
+                "Weight",
+                selection: styleBinding(\.fontWeight)
+            ) {
+                ForEach(
+                    viewModel.controls.subtitleStyle.fontFamily.availableWeights,
+                    id: \.self
+                ) {
+                    Text($0.displayName).tag($0)
+                }
+            }
+            LabeledContent("Size") {
+                Slider(
+                    value: styleBinding(\.fontScale),
+                    in: 0.6...2
+                )
+                .frame(maxWidth: 320)
+            }
+            LabeledContent("Position") {
+                Slider(
+                    value: styleBinding(\.verticalPosition),
+                    in: 0...1
+                )
+                .frame(maxWidth: 320)
+            }
+            LabeledContent("Opacity") {
+                Slider(
+                    value: styleBinding(\.opacity),
+                    in: 0.2...1
+                )
+                .frame(maxWidth: 320)
+            }
+            Toggle(
+                "Background",
+                isOn: styleBinding(\.background.isEnabled)
+            )
+            Toggle(
+                "Outline",
+                isOn: styleBinding(\.border.isEnabled)
+            )
+            Button("Reset Appearance", role: .destructive) {
+                viewModel.applySubtitleStyle(.default)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var remoteSearch: some View {
+        if viewModel.controls.canSearchRemoteSubtitles {
+            Section("Find More") {
+                switch viewModel.controls.subtitleDownloadState {
+                case .idle:
+                    searchButton
+                case .searching:
+                    HStack {
+                        ProgressView()
+                        Text("Searching…")
+                    }
+                case let .results(results):
+                    ForEach(results) { subtitle in
+                        Button {
+                            viewModel.downloadAndLoadRemoteSubtitle(subtitle)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(subtitle.name)
+                                Text(remoteSubtitleDetails(subtitle))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    searchButton
+                case .empty:
+                    Text("No matching subtitles were found.")
+                        .foregroundStyle(.secondary)
+                    searchButton
+                case .downloading:
+                    HStack {
+                        ProgressView()
+                        Text("Adding subtitle…")
+                    }
+                case .added:
+                    Label("Subtitle added", systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                    searchButton
+                case .failed:
+                    Text("Subtitle search failed.")
+                        .foregroundStyle(.red)
+                    searchButton
+                }
+            }
+        }
+    }
+
+    private var searchButton: some View {
+        Button("Search for Subtitles", systemImage: "magnifyingglass") {
+            viewModel.searchRemoteSubtitles()
+        }
+    }
+
+    private var secondaryStatusText: String? {
+        switch viewModel.controls.secondarySubtitleStatus {
+        case .idle:
+            nil
+        case .loading:
+            "Loading second subtitle…"
+        case let .loaded(cueCount):
+            cueCount == 0 ? "The selected track contains no cues." : nil
+        case .unavailable:
+            "The selected second subtitle could not be loaded."
+        }
+    }
+
+    private func styleBinding<Value>(
+        _ keyPath: WritableKeyPath<SubtitleStyle, Value>
+    ) -> Binding<Value> {
+        Binding(
+            get: { viewModel.controls.subtitleStyle[keyPath: keyPath] },
+            set: { value in
+                var style = viewModel.controls.subtitleStyle
+                style[keyPath: keyPath] = value
+                viewModel.applySubtitleStyle(style)
+            }
+        )
+    }
+
+    private func remoteSubtitleDetails(_ subtitle: RemoteSubtitle) -> String {
+        [
+            subtitle.language?.uppercased(),
+            subtitle.format?.uppercased(),
+            subtitle.providerName,
+            subtitle.isForced ? "Forced" : nil,
+            subtitle.isHearingImpaired ? "SDH" : nil
+        ]
+        .compactMap { $0 }
+        .joined(separator: " • ")
     }
 }
 

@@ -6,6 +6,7 @@ import SwiftUI
 struct PlozziOSHomeView: View {
     @State private var viewModel: HomeViewModel
     @State private var featuredItems: [MediaItem] = []
+    @State private var heroItems: [MediaItem] = []
     private let appModel: PlozziOSAppModel
     private let onAddServer: () -> Void
 
@@ -106,11 +107,12 @@ struct PlozziOSHomeView: View {
         )
         return ScrollView {
             LazyVStack(alignment: .leading, spacing: 30) {
-                if appModel.settings.hero.settings.isEnabled,
-                   let heroItem = selectedHeroItem(from: content) {
-                    PlozziOSHomeHero(
-                        item: heroItem,
-                        provider: provider(for: heroItem)
+                if !heroItems.isEmpty {
+                    PlozziOSHomeHeroCarousel(
+                        items: heroItems,
+                        autoAdvance: appModel.settings.hero.settings.autoAdvance,
+                        autoAdvanceSeconds:
+                            appModel.settings.hero.settings.autoAdvanceSeconds
                     )
                 }
 
@@ -134,22 +136,16 @@ struct PlozziOSHomeView: View {
             await viewModel.load()
             await loadFeatured()
         }
-    }
-
-    private func selectedHeroItem(from content: HomeViewModel.Content) -> MediaItem? {
-        for source in appModel.settings.hero.settings.sources {
-            switch source {
-            case .featured:
-                if let item = featuredItems.first { return item }
-            case .continueWatching:
-                if let item = content.continueWatching.first { return item }
-            case .randomFromLibrary:
-                if let item = content.latest.first { return item }
-            case .watchlist:
-                if let item = content.watchlist.first { return item }
-            }
+        .task(
+            id: PlozziOSHeroLoadID(
+                content: content,
+                settings: appModel.settings.hero.settings,
+                featuredItems: featuredItems,
+                visibility: appModel.settings.homeVisibility.visibility
+            )
+        ) {
+            await loadHero(from: content)
         }
-        return nil
     }
 
     private func loadFeatured() async {
@@ -161,8 +157,135 @@ struct PlozziOSHomeView: View {
             return
         }
         let trending = (try? await appModel.seerService.trending(limit: hero.maxItems)) ?? []
+        guard !Task.isCancelled else { return }
         featuredItems = trending.filter(\.isNotInLibraryDiscovery)
     }
+
+    private func loadHero(from content: HomeViewModel.Content) async {
+        let settings = appModel.settings.hero.settings
+        guard settings.isActive else {
+            heroItems = []
+            return
+        }
+
+        let randomLibraries = HeroRandomLibrarySelection.resolve(
+            content.libraries,
+            settings: settings,
+            isVisible: appModel.settings.homeVisibility.isVisibleOnHome
+        )
+        let providers = Dictionary(
+            uniqueKeysWithValues: appModel.accountsProviders.resolvedActiveAccounts.map {
+                ($0.account.id, $0.provider)
+            }
+        )
+        let randomProvider: RandomLibraryContentProviding = { libraries, limit in
+            await HeroRandomLibraryLoader.load(
+                libraries: libraries,
+                limit: limit
+            ) { library, requestLimit in
+                guard let provider = providers[library.accountID],
+                      let page = try? await provider.items(
+                          in: library.libraryID,
+                          kind: library.kind,
+                          page: PageRequest(
+                              startIndex: 0,
+                              limit: requestLimit,
+                              sort: CoreModels.SortDescriptor(
+                                  field: .random,
+                                  direction: .descending
+                              )
+                          )
+                      ) else {
+                    return []
+                }
+                return page.items.map {
+                    $0.taggingSource(library.accountID)
+                        .taggingLibrary(library.libraryID)
+                }
+            }
+        }
+        let featured = featuredItems
+        let pendingMutations = await viewModel.pendingHeroWatchMutations()
+        let curated = await HeroCurator().curate(
+            settings: settings,
+            continueWatching: content.continueWatching,
+            watchlist: content.watchlist,
+            randomLibraries: randomLibraries,
+            watchMutations: pendingMutations,
+            featuredProvider: { limit in
+                Array(featured.prefix(limit))
+            },
+            randomProvider: randomProvider
+        )
+        guard !Task.isCancelled else { return }
+        heroItems = curated
+    }
+}
+
+private struct FeaturedLoadID: Equatable {
+    let isConfigured: Bool
+    let settings: HeroSettings
+}
+
+private struct PlozziOSHeroLoadID: Equatable {
+    let content: HomeViewModel.Content
+    let settings: HeroSettings
+    let featuredItems: [MediaItem]
+    let visibility: HomeLibraryVisibility
+}
+
+private struct PlozziOSHomeHeroCarousel: View {
+    @State private var selectedItemID: String?
+
+    let items: [MediaItem]
+    let autoAdvance: Bool
+    let autoAdvanceSeconds: Int
+
+    var body: some View {
+        TabView(selection: $selectedItemID) {
+            ForEach(items) { item in
+                PlozziOSHomeHero(
+                    item: item,
+                    provider: provider(for: item)
+                )
+                .tag(Optional(item.id))
+            }
+        }
+        .tabViewStyle(
+            .page(indexDisplayMode: items.count > 1 ? .automatic : .never)
+        )
+        .aspectRatio(16 / 8.5, contentMode: .fit)
+        .padding(.horizontal)
+        .onChange(of: items.map(\.id), initial: true) { _, itemIDs in
+            if selectedItemID == nil || !itemIDs.contains(selectedItemID ?? "") {
+                selectedItemID = itemIDs.first
+            }
+        }
+        .task(
+            id: PlozziOSHeroTimerID(
+                itemIDs: items.map(\.id),
+                autoAdvance: autoAdvance,
+                seconds: autoAdvanceSeconds
+            )
+        ) {
+            guard autoAdvance, items.count > 1 else { return }
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(for: .seconds(autoAdvanceSeconds))
+                } catch {
+                    return
+                }
+                withAnimation(.easeInOut(duration: 0.35)) {
+                    let currentIndex = items.firstIndex {
+                        $0.id == selectedItemID
+                    } ?? -1
+                    selectedItemID = items[(currentIndex + 1) % items.count].id
+                }
+            }
+        }
+    }
+
+    @Environment(PlozziOSAppModel.self) private var appModel
 
     private func provider(for item: MediaItem) -> (any MediaProvider)? {
         if let accountID = item.sourceAccountID {
@@ -172,9 +295,10 @@ struct PlozziOSHomeView: View {
     }
 }
 
-private struct FeaturedLoadID: Equatable {
-    let isConfigured: Bool
-    let settings: HeroSettings
+private struct PlozziOSHeroTimerID: Equatable {
+    let itemIDs: [String]
+    let autoAdvance: Bool
+    let seconds: Int
 }
 
 private struct PlozziOSHomeHero: View {
@@ -201,7 +325,6 @@ private struct PlozziOSHomeHero: View {
                 hero
             }
         }
-        .padding(.horizontal)
     }
 
     private var hero: some View {

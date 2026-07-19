@@ -58,6 +58,41 @@ final class MetadataProviderListLogicTests: XCTestCase {
         XCTAssertFalse(s.enabled.contains(MetadataSource(rawValue: "ghostsource")))
     }
 
+    func testRecommendedCustomRoundTripSeedsOnceAndPreservesCustomOrder() {
+        let seeded = MetadataProviderListLogic.settings(
+            .default,
+            selecting: .custom,
+            baselineOrder: baseline,
+            baselineDisabled: [.tvmaze]
+        )
+        XCTAssertEqual(seeded.orderMode, .custom)
+        XCTAssertEqual(seeded.enabledOrder, baseline.dropLast().map(\.rawValue))
+        XCTAssertEqual(seeded.disabledOrder, [MetadataSource.tvmaze.rawValue])
+
+        var reordered = seeded
+        reordered.setLists(
+            enabled: [.anilist, .tvdb, .tmdb],
+            disabled: [.tvmaze]
+        )
+        let recommended = MetadataProviderListLogic.settings(
+            reordered,
+            selecting: .recommended,
+            baselineOrder: baseline,
+            baselineDisabled: [.tvmaze]
+        )
+        let restored = MetadataProviderListLogic.settings(
+            recommended,
+            selecting: .custom,
+            baselineOrder: baseline,
+            baselineDisabled: [.tvmaze]
+        )
+
+        XCTAssertEqual(recommended.orderMode, .recommended)
+        XCTAssertEqual(restored.orderMode, .custom)
+        XCTAssertEqual(restored.enabledOrder, reordered.enabledOrder)
+        XCTAssertEqual(restored.disabledOrder, reordered.disabledOrder)
+    }
+
     // MARK: Reordering + cross-divider
 
     func testMovedSwapsWithinBounds() {

@@ -19,8 +19,8 @@ import CoreModels
 /// ``orderedSources(for:query:)`` combines them into the concrete fallback order the
 /// pipeline walks. Its key safety property: **an un-reordered config is byte-identical
 /// to the pre-reorder per-field behavior** — the per-field policy chains drive ordering
-/// until the user actually reorders, at which point the single global ``order`` takes
-/// over for every field (``usesGlobalOrder``). Disabled sources are always excluded.
+/// in Recommended mode. Custom mode activates the single global ``order`` for every
+/// field (``usesGlobalOrder``). Disabled sources are always excluded.
 public struct MetadataEnrichmentConfig: Sendable {
     /// Sources removed from enrichment entirely (below the divider, or build-disabled).
     public var disabledSources: Set<MetadataSource>
@@ -29,10 +29,9 @@ public struct MetadataEnrichmentConfig: Sendable {
     /// but kept for a stable, complete order). Seeded from the Step-3-policy-derived
     /// ``defaultBaseOrder``; user reordering permutes it.
     public var order: [MetadataSource]
-    /// Whether the user has supplied an explicit reorder. When `false` (default or
-    /// disable-only), ``orderedSources(for:query:)`` follows the per-field priority
-    /// policy (byte-identical to the pre-reorder behavior). When `true`, the single
-    /// global ``order`` drives every field's candidate order.
+    /// Whether Custom mode is active. When `false`, ``orderedSources(for:query:)``
+    /// follows the per-field recommended policy (byte-identical to the pre-reorder
+    /// behavior). When `true`, the single global ``order`` drives every field.
     public var usesGlobalOrder: Bool
     /// The per-field / per-content-type source-priority tables (the Step 3 policy).
     public var priority: MetadataPriorityPolicy
@@ -67,10 +66,10 @@ public struct MetadataEnrichmentConfig: Sendable {
 
     /// The ordered, enabled sources to try for `field` given `query`'s content type.
     ///
-    /// * **Default / disable-only** (``usesGlobalOrder`` == false): starts from the
+    /// * **Recommended** (``usesGlobalOrder`` == false): starts from the
     ///   per-field priority rule, appends any global-order sources the rule omitted,
     ///   and drops disabled sources — byte-identical to the pre-reorder behavior.
-    /// * **Reordered** (``usesGlobalOrder`` == true): the single global ``order`` (minus
+    /// * **Custom** (``usesGlobalOrder`` == true): the single global ``order`` (minus
     ///   disabled) governs every field. Capability is still enforced downstream by the
     ///   pipeline frontier — an incapable frontmost source is asked, returns nothing,
     ///   and the field falls through — so a provider can never win a field it can't
@@ -151,14 +150,14 @@ public struct MetadataEnrichmentConfig: Sendable {
     ///     baseline source the user didn't place keeps its baseline position, appended
     ///     after; disabled sources trail. So a provider a newer build adds is never
     ///     dropped by an older saved order.
-    ///   * **``usesGlobalOrder``:** set only when the user's effective *enabled* order
-    ///     actually differs from the baseline enabled order — a real reorder. Merely
-    ///     disabling a source keeps the per-field policy chains (nothing was reordered),
-    ///     preserving byte-identical ordering for the sources that remain.
+    ///   * **Mode:** Recommended returns the baseline untouched (byte-identical to
+    ///     today's per-field behavior). Custom activates the saved global order and
+    ///     disabled set. The saved custom lists remain persisted while Recommended is
+    ///     selected, so switching back restores them.
     ///
-    /// An **empty** override returns `self` unchanged.
+    /// A Recommended override returns `self` unchanged.
     public func merged(withUserOverrides overrides: MetadataProviderSettings) -> MetadataEnrichmentConfig {
-        guard !overrides.isEmpty else { return self }
+        guard overrides.orderMode == .custom else { return self }
 
         let known = Set(order)
         let userEnabled = overrides.enabledOrder.map { MetadataSource(rawValue: $0) }.filter { known.contains($0) }
@@ -189,16 +188,10 @@ public struct MetadataEnrichmentConfig: Sendable {
         }
         let effectiveOrder = enabledEffective + disabledTrail
 
-        // A real reorder (vs a disable-only change) is detected by comparing the
-        // effective enabled order to the baseline enabled order (same set, disabled
-        // removed). Only a real reorder switches enrichment onto the single global order.
-        let baselineEnabled = order.filter { !effectiveDisabled.contains($0) }
-        let reordered = enabledEffective != baselineEnabled
-
         return MetadataEnrichmentConfig(
             disabledSources: effectiveDisabled,
             order: effectiveOrder,
-            usesGlobalOrder: reordered,
+            usesGlobalOrder: true,
             priority: priority
         )
     }

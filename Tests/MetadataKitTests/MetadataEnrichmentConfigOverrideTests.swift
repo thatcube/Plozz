@@ -3,8 +3,8 @@ import CoreModels
 @testable import MetadataKit
 
 /// Locks the user-override merge (enabled + order) on top of the Info.plist baseline:
-/// empty overrides are a no-op, disabling excludes a source, reordering the enabled
-/// list switches enrichment onto the single global order, and stale/foreign tokens are
+/// Recommended is a no-op, Custom uses its single global order and disabled set,
+/// and stale/foreign tokens are
 /// filtered without re-enabling a disabled provider.
 final class MetadataEnrichmentConfigOverrideTests: XCTestCase {
     private func makeQuery(_ type: ContentType = .movie) -> MetadataQuery {
@@ -32,17 +32,29 @@ final class MetadataEnrichmentConfigOverrideTests: XCTestCase {
         XCTAssertFalse(merged.usesGlobalOrder)
     }
 
-    func testDisablingExcludesOnlyThatSourceAndKeepsPerFieldOrder() {
+    func testRecommendedIgnoresSavedCustomLists() {
         let baseline = MetadataEnrichmentConfig(order: [.tvdb, .tmdb, .anilist])
-        var overrides = MetadataProviderSettings()
+        let overrides = MetadataProviderSettings(
+            orderMode: .recommended,
+            enabledOrder: ["anilist", "tvdb"],
+            disabledOrder: ["tmdb"]
+        )
+        let merged = baseline.merged(withUserOverrides: overrides)
+        XCTAssertEqual(merged.disabledSources, baseline.disabledSources)
+        XCTAssertEqual(merged.order, baseline.order)
+        XCTAssertFalse(merged.usesGlobalOrder)
+    }
+
+    func testCustomDisablingExcludesSourceAndUsesGlobalOrder() {
+        let baseline = MetadataEnrichmentConfig(order: [.tvdb, .tmdb, .anilist])
+        var overrides = MetadataProviderSettings(orderMode: .custom)
         overrides.setDisabledOrder([.tmdb])
         let merged = baseline.merged(withUserOverrides: overrides)
 
         XCTAssertTrue(merged.disabledSources.contains(.tmdb))       // disabled
         XCTAssertFalse(merged.isEnabled(.tmdb))
         XCTAssertTrue(merged.isEnabled(.anilist))                   // untouched
-        // A disable-only change is NOT a reorder: per-field policy still governs.
-        XCTAssertFalse(merged.usesGlobalOrder)
+        XCTAssertTrue(merged.usesGlobalOrder)
         let sources = merged.orderedSources(for: .title, query: makeQuery())
         XCTAssertFalse(sources.contains(.tmdb), "disabled source dropped from every chain")
         XCTAssertEqual(sources, [.tvdb, .anilist])
@@ -50,7 +62,7 @@ final class MetadataEnrichmentConfigOverrideTests: XCTestCase {
 
     func testReorderingEnabledSwitchesToGlobalOrder() {
         let baseline = MetadataEnrichmentConfig(order: [.tvdb, .tmdb, .anilist, .tvmaze])
-        var overrides = MetadataProviderSettings()
+        var overrides = MetadataProviderSettings(orderMode: .custom)
         overrides.setEnabledOrder([.anilist, .tvdb]) // user promotes two sources
         let merged = baseline.merged(withUserOverrides: overrides)
 
@@ -63,7 +75,7 @@ final class MetadataEnrichmentConfigOverrideTests: XCTestCase {
 
     func testReenablingBuildDisabledSourceViaEnabledList() {
         let baseline = MetadataEnrichmentConfig(disabledSources: [.omdb], order: [.tvdb, .tmdb, .omdb])
-        var overrides = MetadataProviderSettings()
+        var overrides = MetadataProviderSettings(orderMode: .custom)
         overrides.setEnabledOrder([.tvdb, .tmdb, .omdb]) // user places omdb above the divider
         let merged = baseline.merged(withUserOverrides: overrides)
         XCTAssertTrue(merged.isEnabled(.omdb), "user can re-enable a build-disabled source")
@@ -80,7 +92,10 @@ final class MetadataEnrichmentConfigOverrideTests: XCTestCase {
     func testOrderOverrideIgnoresUnknownTokens() {
         let baseline = MetadataEnrichmentConfig(order: [.tvdb, .tmdb, .anilist])
         // A persisted order carrying a stale/foreign token must not add a phantom source.
-        let overrides = MetadataProviderSettings(enabledOrder: ["anilist", "ghostsource", "tvdb"])
+        let overrides = MetadataProviderSettings(
+            orderMode: .custom,
+            enabledOrder: ["anilist", "ghostsource", "tvdb"]
+        )
         let merged = baseline.merged(withUserOverrides: overrides)
         XCTAssertEqual(merged.order, [.anilist, .tvdb, .tmdb])
         XCTAssertFalse(merged.order.contains(MetadataSource(rawValue: "ghostsource")))
@@ -90,7 +105,10 @@ final class MetadataEnrichmentConfigOverrideTests: XCTestCase {
         let baseline = MetadataEnrichmentConfig(order: [.tvdb, .tmdb])
         // A foreign disabled token is simply dropped (no such source to disable) and
         // never flips any real source on.
-        let overrides = MetadataProviderSettings(disabledOrder: ["ghostsource"])
+        let overrides = MetadataProviderSettings(
+            orderMode: .custom,
+            disabledOrder: ["ghostsource"]
+        )
         let merged = baseline.merged(withUserOverrides: overrides)
         XCTAssertTrue(merged.disabledSources.isEmpty)
         XCTAssertEqual(merged.order, [.tvdb, .tmdb])
@@ -98,7 +116,7 @@ final class MetadataEnrichmentConfigOverrideTests: XCTestCase {
 
     func testOverrideAffectsOrderedSourcesOutput() {
         let baseline = MetadataEnrichmentConfig(order: [.tvdb, .tmdb])
-        var overrides = MetadataProviderSettings()
+        var overrides = MetadataProviderSettings(orderMode: .custom)
         overrides.setDisabledOrder([.tvdb])
         let merged = baseline.merged(withUserOverrides: overrides)
         let sources = merged.orderedSources(for: .title, query: makeQuery())

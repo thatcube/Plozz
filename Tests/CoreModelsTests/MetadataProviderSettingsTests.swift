@@ -7,6 +7,7 @@ import XCTest
 final class MetadataProviderSettingsTests: XCTestCase {
     func testDefaultIsEmpty() {
         XCTAssertTrue(MetadataProviderSettings.default.isEmpty)
+        XCTAssertEqual(MetadataProviderSettings.default.orderMode, .recommended)
         XCTAssertTrue(MetadataProviderSettings().enabledOrder.isEmpty)
         XCTAssertTrue(MetadataProviderSettings().disabledOrder.isEmpty)
     }
@@ -22,7 +23,7 @@ final class MetadataProviderSettingsTests: XCTestCase {
     }
 
     func testRoundTrips() throws {
-        var original = MetadataProviderSettings()
+        var original = MetadataProviderSettings(orderMode: .custom)
         original.setLists(enabled: [.anilist, .tvdb, .tmdb], disabled: [.omdb, .wikipedia])
         let data = try JSONEncoder().encode(original)
         let decoded = try JSONDecoder().decode(MetadataProviderSettings.self, from: data)
@@ -33,6 +34,7 @@ final class MetadataProviderSettingsTests: XCTestCase {
         var settings = MetadataProviderSettings()
         settings.setLists(enabled: [.tvdb], disabled: [.omdb])
         let json = String(data: try JSONEncoder().encode(settings), encoding: .utf8)!
+        XCTAssertTrue(json.contains(#""orderMode":"recommended""#))
         XCTAssertTrue(json.contains("enabledOrder"))
         XCTAssertTrue(json.contains("disabledOrder"))
         XCTAssertFalse(json.contains("roleOverrides"), "legacy schema must not be re-emitted")
@@ -46,6 +48,7 @@ final class MetadataProviderSettingsTests: XCTestCase {
         // tmdb (disabled) drops below the divider; the rest stay enabled in order.
         XCTAssertEqual(decoded.enabledOrder, ["tvdb", "anilist"])
         XCTAssertEqual(decoded.disabledOrder, ["tmdb"])
+        XCTAssertEqual(decoded.orderMode, .custom)
     }
 
     func testMigratesPrimaryAndSecondaryToEnabledPreservingOrder() throws {
@@ -55,6 +58,7 @@ final class MetadataProviderSettingsTests: XCTestCase {
         let decoded = try JSONDecoder().decode(MetadataProviderSettings.self, from: legacy)
         XCTAssertEqual(decoded.enabledOrder, ["tvdb", "tmdb", "anilist"])
         XCTAssertTrue(decoded.disabledOrder.isEmpty)
+        XCTAssertEqual(decoded.orderMode, .custom)
     }
 
     func testMigrationTreatsUnknownRoleAsDisabled() throws {
@@ -64,6 +68,7 @@ final class MetadataProviderSettingsTests: XCTestCase {
         let decoded = try JSONDecoder().decode(MetadataProviderSettings.self, from: legacy)
         XCTAssertEqual(decoded.disabledOrder, ["tmdb"])
         XCTAssertEqual(decoded.enabledOrder, ["tvdb"])
+        XCTAssertEqual(decoded.orderMode, .custom)
     }
 
     func testMigratesDisabledRoleWithoutOrderEntry() throws {
@@ -71,6 +76,7 @@ final class MetadataProviderSettingsTests: XCTestCase {
         let decoded = try JSONDecoder().decode(MetadataProviderSettings.self, from: legacy)
         XCTAssertEqual(decoded.disabledOrder, ["omdb"])
         XCTAssertTrue(decoded.enabledOrder.isEmpty)
+        XCTAssertEqual(decoded.orderMode, .custom)
     }
 
     func testCurrentSchemaWinsOverLegacyKeys() throws {
@@ -79,6 +85,30 @@ final class MetadataProviderSettingsTests: XCTestCase {
         let decoded = try JSONDecoder().decode(MetadataProviderSettings.self, from: mixed)
         XCTAssertEqual(decoded.enabledOrder, ["tvdb"])
         XCTAssertTrue(decoded.disabledOrder.isEmpty)
+        XCTAssertEqual(decoded.orderMode, .custom)
+    }
+
+    func testRecommendedPreservesSavedCustomLists() throws {
+        let original = MetadataProviderSettings(
+            orderMode: .recommended,
+            enabledOrder: ["anilist", "tvdb"],
+            disabledOrder: ["omdb"]
+        )
+        let decoded = try JSONDecoder().decode(
+            MetadataProviderSettings.self,
+            from: JSONEncoder().encode(original)
+        )
+        XCTAssertEqual(decoded.orderMode, .recommended)
+        XCTAssertEqual(decoded.enabledOrder, original.enabledOrder)
+        XCTAssertEqual(decoded.disabledOrder, original.disabledOrder)
+        XCTAssertFalse(decoded.isEmpty, "saved custom state remains resettable while Recommended is active")
+    }
+
+    func testUnknownModePreservesDisabledProvidersAsCustom() throws {
+        let data = Data(#"{"orderMode":"future","enabledOrder":[],"disabledOrder":["tmdb"]}"#.utf8)
+        let decoded = try JSONDecoder().decode(MetadataProviderSettings.self, from: data)
+        XCTAssertEqual(decoded.orderMode, .custom)
+        XCTAssertEqual(decoded.disabledOrder, ["tmdb"])
     }
 
     func testStoreRoundTripAndScoping() {

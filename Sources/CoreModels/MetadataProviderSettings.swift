@@ -1,6 +1,13 @@
 import Foundation
 import Observation
 
+/// Whether metadata providers follow Plozz's per-field recommended policy or the
+/// household's saved single global order.
+public enum MetadataProviderOrderMode: String, Codable, Sendable, CaseIterable {
+    case recommended
+    case custom
+}
+
 /// A persisted **user override** for metadata-source ordering + enablement, layered
 /// on top of the build's Info.plist provider baseline (the Step 5
 /// `MetadataEnrichmentConfig`).
@@ -21,12 +28,14 @@ import Observation
 /// un-namespaced) — see `AppState.metadataProviderSettingsModel` — because a share and
 /// its scan are household-global, so provider ordering/enablement is too.
 ///
-/// It is intentionally *sparse*: an empty value means "use the build defaults
-/// unchanged", and any source named in neither list inherits its baseline position and
-/// enabled state. This is what lets the merge preserve the Info.plist baseline where the
-/// user hasn't spoken, and lets "reset to build defaults" be a single assignment back to
-/// ``default``.
+/// The saved lists remain sparse: any source named in neither list inherits its baseline
+/// position and enabled state. Recommended ignores both lists without deleting them;
+/// Custom applies them. This lets mode toggling restore the household's last custom order.
 public struct MetadataProviderSettings: Codable, Equatable, Sendable {
+    /// Recommended is the default and leaves the Step-3 per-field policy untouched.
+    /// Custom activates the saved single global order.
+    public var orderMode: MetadataProviderOrderMode
+
     /// Enabled sources, highest-priority first (above the divider), as
     /// `MetadataSource.rawValue`s. A source absent from both lists inherits the
     /// baseline's position + enabled state.
@@ -36,16 +45,19 @@ public struct MetadataProviderSettings: Codable, Equatable, Sendable {
     public var disabledOrder: [String]
 
     public init(
+        orderMode: MetadataProviderOrderMode = .recommended,
         enabledOrder: [String] = [],
         disabledOrder: [String] = []
     ) {
+        self.orderMode = orderMode
         self.enabledOrder = enabledOrder
         self.disabledOrder = disabledOrder
     }
 
-    /// Whether this override is empty — i.e. the merge is a no-op and the running
-    /// config equals the pure Info.plist baseline.
-    public var isEmpty: Bool { enabledOrder.isEmpty && disabledOrder.isEmpty }
+    /// Whether there is neither an active mode override nor a saved custom list.
+    public var isEmpty: Bool {
+        orderMode == .recommended && enabledOrder.isEmpty && disabledOrder.isEmpty
+    }
 
     /// Whether the user has explicitly disabled `source`.
     public func isDisabled(_ source: MetadataSource) -> Bool {
@@ -74,18 +86,19 @@ public struct MetadataProviderSettings: Codable, Equatable, Sendable {
         disabledOrder = disabled.map(\.rawValue)
     }
 
-    /// The build-default (empty) override — the "reset to build defaults" value.
+    /// The build-default (empty) override — Recommended with no saved custom list.
     public static let `default` = MetadataProviderSettings()
 
     private enum CodingKeys: String, CodingKey {
         // Current schema.
-        case enabledOrder, disabledOrder
+        case orderMode, enabledOrder, disabledOrder
         // Legacy Step-6 schema (role model) — decoded for one-way migration only.
         case roleOverrides, order
     }
 
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(orderMode, forKey: .orderMode)
         try container.encode(enabledOrder, forKey: .enabledOrder)
         try container.encode(disabledOrder, forKey: .disabledOrder)
     }
@@ -96,6 +109,8 @@ public struct MetadataProviderSettings: Codable, Equatable, Sendable {
         // decodes to its default instead of failing the whole decode.
         enabledOrder = try container.decodeIfPresent([String].self, forKey: .enabledOrder) ?? []
         disabledOrder = try container.decodeIfPresent([String].self, forKey: .disabledOrder) ?? []
+        let persistedMode = try container.decodeIfPresent(String.self, forKey: .orderMode)
+            .flatMap(MetadataProviderOrderMode.init(rawValue:))
 
         // One-way migration of the legacy Step-6 role blob ({roleOverrides, order}) —
         // only when this build finds no current-schema data (so a re-encode never keeps
@@ -109,6 +124,12 @@ public struct MetadataProviderSettings: Codable, Equatable, Sendable {
                 (enabledOrder, disabledOrder) = Self.migrate(roleOverrides: legacyRoles, order: legacyOrder)
             }
         }
+
+        // New/default records are Recommended. A pre-mode record carrying any explicit
+        // provider customization migrates to Custom so an existing user's ordering or
+        // disabled sources do not silently stop applying after upgrade.
+        orderMode = persistedMode
+            ?? (enabledOrder.isEmpty && disabledOrder.isEmpty ? .recommended : .custom)
     }
 
     /// Deterministically maps a legacy role override map + explicit order onto the

@@ -137,6 +137,23 @@ enum MetadataProviderListLogic {
         return Sections(enabled: enabled, disabled: disabled)
     }
 
+    static func settings(
+        _ settings: MetadataProviderSettings,
+        selecting mode: MetadataProviderOrderMode,
+        baselineOrder: [MetadataSource],
+        baselineDisabled: Set<MetadataSource>
+    ) -> MetadataProviderSettings {
+        var updated = settings
+        if mode == .custom, updated.enabledOrder.isEmpty, updated.disabledOrder.isEmpty {
+            updated.setLists(
+                enabled: baselineOrder.filter { !baselineDisabled.contains($0) },
+                disabled: baselineOrder.filter(baselineDisabled.contains)
+            )
+        }
+        updated.orderMode = mode
+        return updated
+    }
+
     /// `order` with `source` moved by `delta` (clamped: out-of-range is a no-op).
     static func moved(_ source: MetadataSource, by delta: Int, in order: [MetadataSource]) -> [MetadataSource] {
         var order = order
@@ -260,6 +277,29 @@ struct MetadataSettingsDetailView: View {
         )
     }
 
+    private var orderModeBinding: Binding<MetadataProviderOrderMode> {
+        Binding(
+            get: { providers.settings.orderMode },
+            set: { setOrderMode($0) }
+        )
+    }
+
+    private func setOrderMode(_ mode: MetadataProviderOrderMode) {
+        providers.settings = MetadataProviderListLogic.settings(
+            providers.settings,
+            selecting: mode,
+            baselineOrder: deps.baselineOrder,
+            baselineDisabled: deps.baselineDisabled
+        )
+    }
+
+    private func orderModeTitle(_ mode: MetadataProviderOrderMode) -> String {
+        switch mode {
+        case .recommended: "Recommended"
+        case .custom: "Custom"
+        }
+    }
+
     #if os(tvOS)
     private var providersSection: some View {
         let split = sections
@@ -267,45 +307,50 @@ struct MetadataSettingsDetailView: View {
             title: "Metadata Providers",
             contentPadding: .settingsPanelRowContent
         ) {
-            VStack(spacing: 6) {
-                ForEach(Array(split.enabled.enumerated()), id: \.element) { index, source in
-                    row(source, isEnabled: true, rank: index + 1)
-                }
+            VStack(alignment: .leading, spacing: 16) {
+                SettingsSegmentedPicker(
+                    options: MetadataProviderOrderMode.allCases,
+                    selection: orderModeBinding,
+                    title: orderModeTitle
+                )
 
-                MetadataDisabledDivider(isDropTarget: liftedSource != nil)
-
-                if split.disabled.isEmpty {
-                    MetadataDisabledPlaceholder(isReordering: liftedSource != nil)
-                        .focused($isDisabledPlaceholderFocused)
-                        .onChange(of: isDisabledPlaceholderFocused) { _, isFocused in
-                            handleEmptyDisabledDropTargetFocus(isFocused)
+                if providers.settings.orderMode == .custom {
+                    VStack(spacing: 6) {
+                        ForEach(Array(split.enabled.enumerated()), id: \.element) { index, source in
+                            row(source, isEnabled: true, rank: index + 1)
                         }
-                } else {
-                    ForEach(split.disabled, id: \.self) { source in
-                        row(source, isEnabled: false, rank: nil)
-                    }
-                }
 
-                if !providers.settings.isEmpty {
-                    Button(role: .destructive) {
-                        liftedSource = nil
-                        providers.resetToBuildDefaults()
-                    } label: {
-                        Label("Reset to Built-in Defaults", systemImage: "arrow.uturn.backward")
-                            .frame(maxWidth: .infinity)
+                        MetadataDisabledDivider(isDropTarget: liftedSource != nil)
+
+                        if split.disabled.isEmpty {
+                            MetadataDisabledPlaceholder(isReordering: liftedSource != nil)
+                                .focused($isDisabledPlaceholderFocused)
+                                .onChange(of: isDisabledPlaceholderFocused) { _, isFocused in
+                                    handleEmptyDisabledDropTargetFocus(isFocused)
+                                }
+                        } else {
+                            ForEach(split.disabled, id: \.self) { source in
+                                row(source, isEnabled: false, rank: nil)
+                            }
+                        }
+
+                        Button(role: .destructive) {
+                            liftedSource = nil
+                            providers.resetToBuildDefaults()
+                        } label: {
+                            Label("Reset to Recommended", systemImage: "arrow.uturn.backward")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(SettingsFocusButtonStyle())
+                        .disabled(liftedSource != nil)
+                        .padding(.top, 6)
                     }
-                    .buttonStyle(SettingsFocusButtonStyle())
-                    .disabled(liftedSource != nil)
-                    .padding(.top, 6)
+                    // Reorder rides the native focus move: while a row is lifted,
+                    // moving focus to a neighbor becomes a one-step move.
+                    .onChange(of: focusedSource) { _, newValue in
+                        handleFocusMoveWhileLifted(to: newValue)
+                    }
                 }
-            }
-            // Reorder rides the NATIVE focus move (instant, no gesture-recognizer
-            // latency): while a row is lifted, moving focus to a neighbor is translated
-            // into a one-step reorder of the lifted row toward that neighbor, then focus
-            // is snapped back onto the lifted row at its new slot. Result: d-pad Up/Down
-            // moves the lifted row immediately, with focus following it.
-            .onChange(of: focusedSource) { _, newValue in
-                handleFocusMoveWhileLifted(to: newValue)
             }
         }
     }
@@ -392,25 +437,35 @@ struct MetadataSettingsDetailView: View {
             title: "Metadata Providers",
             contentPadding: .settingsPanelRowContent
         ) {
-            List {
-                ForEach(items, id: \.self) { item in
-                    iosProviderListRow(item, split: split)
-                        .moveDisabled(item == .divider)
-                }
-                .onMove { offsets, destination in
-                    persist(
-                        MetadataProviderListLogic.moving(
-                            fromOffsets: offsets,
-                            toOffset: destination,
-                            in: sections
-                        )
-                    )
+            VStack(alignment: .leading, spacing: 16) {
+                SettingsSegmentedPicker(
+                    options: MetadataProviderOrderMode.allCases,
+                    selection: orderModeBinding,
+                    title: orderModeTitle
+                )
+
+                if providers.settings.orderMode == .custom {
+                    List {
+                        ForEach(items, id: \.self) { item in
+                            iosProviderListRow(item, split: split)
+                                .moveDisabled(item == .divider)
+                        }
+                        .onMove { offsets, destination in
+                            persist(
+                                MetadataProviderListLogic.moving(
+                                    fromOffsets: offsets,
+                                    toOffset: destination,
+                                    in: sections
+                                )
+                            )
+                        }
+                    }
+                    .listStyle(.plain)
+                    .scrollDisabled(true)
+                    .environment(\.editMode, .constant(.active))
+                    .frame(height: CGFloat(items.count) * 54)
                 }
             }
-            .listStyle(.plain)
-            .scrollDisabled(true)
-            .environment(\.editMode, .constant(.active))
-            .frame(height: CGFloat(items.count) * 54)
         }
     }
 

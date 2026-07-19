@@ -450,15 +450,6 @@ struct DetailHeroView: View {
                     }
                 }
             }
-            if !hideText, let tagline = item.tagline {
-                Text(tagline)
-                    .font(.system(size: 24, weight: .medium))
-                    .italic()
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-                    .frame(maxWidth: 960, alignment: .topLeading)
-                    .contentTransition(.opacity)
-            }
             ZStack(alignment: .leading) {
                 if !featureBadges.isEmpty {
                     MediaBadgeRow(badges: featureBadges)
@@ -1079,8 +1070,15 @@ struct DetailHeroView: View {
         default:
             break
         }
+        // art → TMDb hero → the item's own poster. Some titles (e.g. a Plex movie
+        // with a poster but no fanart/`art`) carry no landscape backdrop anywhere,
+        // so fall back to the poster rather than leaving the hero blank — matching
+        // the resolution order documented on `heroBackgroundSample`. Only reached
+        // when the server backdrop URLs fail, so titles with real backdrop art are
+        // unaffected.
         return {
-            await ArtworkRouter.shared.artworkURL(.hero, for: source)
+            if let hero = await ArtworkRouter.shared.artworkURL(.hero, for: source) { return hero }
+            return source.posterURL
         }
     }
 
@@ -1256,7 +1254,7 @@ private struct SeriesHeroContentRecedeModifier: ViewModifier {
             .offset(y: reduceMotion ? 0 : (receded ? -120 : 0))
             .accessibilityHidden(receded)
             .animation(
-                reduceMotion ? nil : .smooth(duration: 0.45),
+                reduceMotion ? nil : .smooth(duration: 0.3),
                 value: receded
             )
     }

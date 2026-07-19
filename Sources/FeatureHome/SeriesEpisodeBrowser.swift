@@ -29,7 +29,10 @@ enum SeriesHeroRevealTransition {
 enum SeriesEpisodeBrowserLayout {
     /// Pulls enough episode artwork above the fold to make the horizontal browser
     /// unmistakable while the full-screen backdrop still owns the resting page.
-    static let heroOverlap: CGFloat = 420
+    /// Lowered from 420 to open ~40pt more breathing room between the hero action
+    /// row and the episodes/Seasons below (the hero content is positioned
+    /// independently, so it doesn't move).
+    static let heroOverlap: CGFloat = 380
     /// The matching series-only lift for the bottom-anchored hero content. Keeping
     /// this static preserves immutable focus geometry and leaves a clean gap between
     /// the hero action row and Seasons despite the deeper browser overlap.

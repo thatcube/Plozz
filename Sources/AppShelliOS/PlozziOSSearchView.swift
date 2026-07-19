@@ -10,7 +10,15 @@ struct PlozziOSSearchView: View {
     init(appModel: PlozziOSAppModel) {
         self.appModel = appModel
         _viewModel = State(
-            initialValue: SearchViewModel(accounts: appModel.accountsProviders.homeAccounts)
+            initialValue: SearchViewModel(
+                accounts: appModel.accountsProviders.homeAccounts,
+                seerSearch: { [seer = appModel.seerService] query in
+                    (try? await seer.search(query)) ?? []
+                },
+                seerRequestAvailability: { [seer = appModel.seerService] item in
+                    await seer.requestAvailability(for: item)
+                }
+            )
         )
     }
 
@@ -106,6 +114,7 @@ struct PlozziOSSearchView: View {
 }
 
 private struct PlozziOSSearchResultCard: View {
+    @Environment(PlozziOSAppModel.self) private var appModel
     let item: MediaItem
     let provider: (any MediaProvider)?
     let cardStyle: CardStyle
@@ -115,7 +124,11 @@ private struct PlozziOSSearchResultCard: View {
         Group {
             if let provider {
                 NavigationLink {
-                    PlozziOSItemDetailView(provider: provider, item: item)
+                    PlozziOSItemDetailView(
+                        provider: provider,
+                        item: item,
+                        seerService: appModel.seerService
+                    )
                 } label: {
                     card
                 }

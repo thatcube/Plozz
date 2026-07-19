@@ -20,6 +20,14 @@ struct PlozziOSSettingsView: View {
                 }
             }
 
+            Section("Services") {
+                NavigationLink {
+                    PlozziOSSeerrSettingsView(appModel: appModel)
+                } label: {
+                    Label("Requests", systemImage: "plus.rectangle.on.folder")
+                }
+            }
+
             Section("Media sources") {
                 ForEach(appModel.accounts) { account in
                     NavigationLink {

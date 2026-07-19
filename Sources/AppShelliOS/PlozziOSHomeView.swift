@@ -5,6 +5,7 @@ import SwiftUI
 
 struct PlozziOSHomeView: View {
     @State private var viewModel: HomeViewModel
+    @State private var featuredItems: [MediaItem] = []
     private let appModel: PlozziOSAppModel
     private let onAddServer: () -> Void
 
@@ -69,6 +70,14 @@ struct PlozziOSHomeView: View {
                 for: appModel.settings.homeVisibility.visibility
             )
         }
+        .task(
+            id: FeaturedLoadID(
+                isConfigured: appModel.seerService.isConfigured,
+                settings: appModel.settings.hero.settings
+            )
+        ) {
+            await loadFeatured()
+        }
         .onReceive(NotificationCenter.default.publisher(for: .mediaItemDidMutate)) { note in
             if let mutation = MediaItemMutation.from(note) {
                 viewModel.applyWatchedState(mutation)
@@ -86,10 +95,17 @@ struct PlozziOSHomeView: View {
         return ScrollView {
             LazyVStack(alignment: .leading, spacing: 30) {
                 if appModel.settings.hero.settings.isEnabled,
-                   let heroItem = content.continueWatching.first ?? content.latest.first {
+                   let heroItem = selectedHeroItem(from: content) {
                     PlozziOSHomeHero(
                         item: heroItem,
                         provider: provider(for: heroItem)
+                    )
+                }
+
+                if !featuredItems.isEmpty {
+                    PlozziOSFeaturedRow(
+                        items: featuredItems,
+                        appModel: appModel
                     )
                 }
 
@@ -104,7 +120,36 @@ struct PlozziOSHomeView: View {
         }
         .refreshable {
             await viewModel.load()
+            await loadFeatured()
         }
+    }
+
+    private func selectedHeroItem(from content: HomeViewModel.Content) -> MediaItem? {
+        for source in appModel.settings.hero.settings.sources {
+            switch source {
+            case .featured:
+                if let item = featuredItems.first { return item }
+            case .continueWatching:
+                if let item = content.continueWatching.first { return item }
+            case .randomFromLibrary:
+                if let item = content.latest.first { return item }
+            case .watchlist:
+                if let item = content.watchlist.first { return item }
+            }
+        }
+        return nil
+    }
+
+    private func loadFeatured() async {
+        let hero = appModel.settings.hero.settings
+        guard hero.isEnabled,
+              appModel.seerService.isConfigured,
+              hero.sources.contains(.featured) else {
+            featuredItems = []
+            return
+        }
+        let trending = (try? await appModel.seerService.trending(limit: hero.maxItems)) ?? []
+        featuredItems = trending.filter(\.isNotInLibraryDiscovery)
     }
 
     private func provider(for item: MediaItem) -> (any MediaProvider)? {
@@ -115,7 +160,13 @@ struct PlozziOSHomeView: View {
     }
 }
 
+private struct FeaturedLoadID: Equatable {
+    let isConfigured: Bool
+    let settings: HeroSettings
+}
+
 private struct PlozziOSHomeHero: View {
+    @Environment(PlozziOSAppModel.self) private var appModel
     let item: MediaItem
     let provider: (any MediaProvider)?
 
@@ -123,10 +174,15 @@ private struct PlozziOSHomeHero: View {
         Group {
             if let provider {
                 NavigationLink {
-                    PlozziOSItemDetailView(provider: provider, item: item)
+                    PlozziOSItemDetailView(
+                        provider: provider,
+                        item: item,
+                        seerService: appModel.seerService
+                    )
                 } label: {
                     hero
                 }
+
                 .buttonStyle(.plain)
             } else {
                 hero
@@ -169,6 +225,35 @@ private struct PlozziOSHomeHero: View {
             .padding()
         }
         .clipShape(RoundedRectangle(cornerRadius: 22))
+    }
+}
+
+private struct PlozziOSFeaturedRow: View {
+    let items: [MediaItem]
+    let appModel: PlozziOSAppModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Trending")
+                .font(.title2.bold())
+                .padding(.horizontal)
+
+            ScrollView(.horizontal) {
+                LazyHStack(alignment: .top, spacing: 14) {
+                    ForEach(items) { item in
+                        PlozziOSHomeMediaCard(
+                            item: item,
+                            isLandscape: false,
+                            provider: appModel.accountsProviders.primaryProvider,
+                            settings: appModel.settings
+                        )
+                        .frame(width: 140)
+                    }
+                }
+                .padding(.horizontal)
+            }
+            .scrollIndicators(.hidden)
+        }
     }
 }
 
@@ -248,6 +333,7 @@ private struct PlozziOSHomeRowView: View {
 }
 
 private struct PlozziOSHomeMediaCard: View {
+    @Environment(PlozziOSAppModel.self) private var appModel
     let item: MediaItem
     let isLandscape: Bool
     let provider: (any MediaProvider)?
@@ -257,7 +343,11 @@ private struct PlozziOSHomeMediaCard: View {
         Group {
             if let provider {
                 NavigationLink {
-                    PlozziOSItemDetailView(provider: provider, item: item)
+                    PlozziOSItemDetailView(
+                        provider: provider,
+                        item: item,
+                        seerService: appModel.seerService
+                    )
                 } label: {
                     card
                 }

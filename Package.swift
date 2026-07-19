@@ -513,6 +513,7 @@ let package = Package(
                 "ProviderJellyfin",
                 "ProviderPlex",
                 "ProviderShare",
+                "SeerService",
                 "TraktService",
                 "SimklService",
                 "AniListService",

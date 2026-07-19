@@ -10,6 +10,7 @@ import MediaDownloads
 import MediaTransportCore
 import Observation
 import ProviderShare
+import SeerService
 import SimklService
 import TraktService
 
@@ -20,6 +21,7 @@ final class PlozziOSAppModel {
     let profiles: ProfilesModel
     let authenticatedHTTPResolver: ManagedAuthenticatedHTTPResolver
     let mediaShareRuntime: DefaultMediaShareRuntime
+    let seerService: SeerService
     let traktService: TraktService
     let simklService: SimklService
     let anilistService: AniListService
@@ -82,6 +84,11 @@ final class PlozziOSAppModel {
             registry: registry,
             profilesModel: profiles
         )
+        let seerService = SeerServiceFactory.make(
+            connectionStore: HouseholdSeerConnectionStore(
+                secureStore: KeychainStore(service: "com.plozz.app.household")
+            )
+        )
         let trackerNamespace = profiles.activeNamespace
         let traktService = TraktServiceFactory.make(namespace: trackerNamespace)
         let simklService = SimklServiceFactory.make(namespace: trackerNamespace)
@@ -93,6 +100,7 @@ final class PlozziOSAppModel {
         self.authenticatedHTTPResolver = authenticatedHTTPResolver
         self.mediaShareRuntime = mediaShareRuntime
         self.durableLocalStateStore = durableLocalStateStore
+        self.seerService = seerService
         self.traktService = traktService
         self.simklService = simklService
         self.anilistService = anilistService
@@ -174,6 +182,11 @@ final class PlozziOSAppModel {
         accountsProviders.reloadAccounts()
         plexHomeUsers.ensurePlexIdentityForActiveProfile()
         updateTrackersForActiveProfile()
+        Task {
+            let namespaces = [nil] + profiles.profiles.map { Optional($0.id) }
+            await seerService.migrateLegacyConnectionIfNeeded(namespaces: namespaces)
+            await seerService.refreshStatus()
+        }
     }
 
     var accounts: [Account] {
@@ -197,6 +210,7 @@ final class PlozziOSAppModel {
         plexHomeUsers.ensurePlexIdentityForActiveProfile()
         accountsProviders.reloadAccounts()
         updateTrackersForActiveProfile()
+        Task { await seerService.setActiveProfile(namespace: profiles.activeNamespace) }
     }
 
     private func updateTrackersForActiveProfile() {
@@ -288,6 +302,35 @@ final class PlozziOSAppModel {
         profiles.remove(id)
         accountsProviders.reloadAccounts()
         updateTrackersForActiveProfile()
+        Task { await seerService.setActiveProfile(namespace: profiles.activeNamespace) }
+    }
+
+    var activeSeerrUserID: Int? {
+        profiles.activeProfile.seerrUserID
+    }
+
+    var activeSeerrUserName: String? {
+        profiles.activeProfile.seerrUserName
+    }
+
+    func setSeerrUser(_ user: SeerUser?, for profileID: String) {
+        guard var profile = profiles.profiles.first(where: { $0.id == profileID }) else {
+            return
+        }
+        profile.seerrUserID = user?.id
+        profile.seerrUserName = user?.name
+        profile.seerrUserAvatarURL = user?.avatarURL?.absoluteString
+        profiles.update(profile)
+    }
+
+    func disconnectSeerr() {
+        seerService.disconnect()
+        for var profile in profiles.profiles where profile.seerrUserID != nil {
+            profile.seerrUserID = nil
+            profile.seerrUserName = nil
+            profile.seerrUserAvatarURL = nil
+            profiles.update(profile)
+        }
     }
 
     func activeAccountIDs(for profileID: String) -> Set<String> {

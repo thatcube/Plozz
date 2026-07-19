@@ -2,6 +2,7 @@
 import CoreModels
 import FeatureHomeCore
 import MediaDownloads
+import SeerService
 import SwiftUI
 
 struct PlozziOSItemDetailView: View {
@@ -10,15 +11,39 @@ struct PlozziOSItemDetailView: View {
     @State private var playbackRequest: PlozziOSPlaybackRequest?
     @State private var downloadRecord: DownloadedMediaRecord?
     @State private var downloadError: String?
+    @State private var requestError: String?
+    @State private var isRequesting = false
+    @State private var requestConfirmationItem: MediaItem?
+    @State private var requestStatusOverride: MediaAvailabilityStatus?
     private let provider: any MediaProvider
+    private let seerService: SeerService?
+    private let isDiscoveryItem: Bool
 
-    init(provider: any MediaProvider, item: MediaItem) {
+    init(
+        provider: any MediaProvider,
+        item: MediaItem,
+        seerService: SeerService? = nil
+    ) {
         self.provider = provider
+        self.seerService = seerService
+        let isDiscoveryItem = item.isNotInLibraryDiscovery
+        self.isDiscoveryItem = isDiscoveryItem
+        let discoveryStatusRefresh:
+            (@Sendable (MediaItem) async -> (MediaAvailabilityStatus, Double?)?)?
+        if isDiscoveryItem {
+            discoveryStatusRefresh = { [seerService] item in
+                await seerService?.availability(for: item)
+            }
+        } else {
+            discoveryStatusRefresh = nil
+        }
         _viewModel = State(
             initialValue: ItemDetailViewModel(
                 provider: provider,
                 itemID: item.id,
                 initialItem: item,
+                isDiscoveryItem: isDiscoveryItem,
+                discoveryStatusRefresh: discoveryStatusRefresh,
                 sourceAccountID: item.sourceAccountID
             )
         )
@@ -53,6 +78,28 @@ struct PlozziOSItemDetailView: View {
         .fullScreenCover(item: $playbackRequest) {
             PlozziOSPlayerView(request: $0, provider: provider)
         }
+        .confirmationDialog(
+            "Request as Administrator?",
+            isPresented: Binding(
+                get: { requestConfirmationItem != nil },
+                set: { if !$0 { requestConfirmationItem = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Request as Administrator") {
+                guard let item = requestConfirmationItem else { return }
+                requestConfirmationItem = nil
+                Task { await request(item) }
+            }
+            Button("Cancel", role: .cancel) {
+                requestConfirmationItem = nil
+            }
+        } message: {
+            Text(
+                "This profile isn’t linked to a Seerr user. "
+                    + "The request will use the unrestricted administrator account."
+            )
+        }
     }
 
     private func detailContent(_ detail: ItemDetailViewModel.Detail) -> some View {
@@ -60,7 +107,16 @@ struct PlozziOSItemDetailView: View {
             VStack(alignment: .leading, spacing: 24) {
                 PlozziOSDetailHero(item: detail.item)
 
-                if detail.item.kind == .movie || detail.item.kind == .episode {
+                if isDiscoveryItem {
+                    PlozziOSRequestAction(
+                        item: detail.item,
+                        availability: requestStatusOverride ?? detail.item.availability ?? .unknown,
+                        isRequesting: isRequesting,
+                        errorMessage: requestError,
+                        actingName: appModel.activeSeerrUserName,
+                        onRequest: beginRequest
+                    )
+                } else if detail.item.kind == .movie || detail.item.kind == .episode {
                     PlozziOSPlaybackActions(item: detail.item, onPlay: play)
                     PlozziOSDownloadAction(
                         item: detail.item,
@@ -114,6 +170,54 @@ struct PlozziOSItemDetailView: View {
         )
     }
 
+    private func beginRequest(_ item: MediaItem) {
+        if appModel.activeSeerrUserID == nil, appModel.profiles.profiles.count > 1 {
+            requestConfirmationItem = item
+        } else {
+            Task { await request(item) }
+        }
+    }
+
+    private func request(_ item: MediaItem) async {
+        guard let seerService else {
+            requestError = "Connect Overseerr or Jellyseerr in Settings first."
+            return
+        }
+        isRequesting = true
+        requestError = nil
+        defer { isRequesting = false }
+        let outcome = await seerService.request(
+            item,
+            actingUserID: appModel.activeSeerrUserID
+        )
+        switch outcome {
+        case let .success(status):
+            requestStatusOverride = status
+            await viewModel.load()
+        case let .failure(reason):
+            requestError = requestFailureMessage(reason)
+        }
+    }
+
+    private func requestFailureMessage(_ reason: SeerRequestFailure) -> String {
+        switch reason {
+        case .noDefaults:
+            return "No default server or quality profile is configured for this user."
+        case .noPermission:
+            return "This user doesn’t have permission to make that request."
+        case .quotaExceeded:
+            return "This user has reached their request limit."
+        case .alreadyRequested:
+            return "This title has already been requested."
+        case .invalidActingUser:
+            return "The linked Seerr user no longer exists. Update the profile mapping in Settings."
+        case .unreachable:
+            return "Couldn’t reach the Seerr server."
+        case let .unknown(message):
+            return message ?? "The request failed."
+        }
+    }
+
     private var currentDownloadRecord: DownloadedMediaRecord? {
         guard let downloadRecord else { return nil }
         return appModel.downloads.records.first {
@@ -153,6 +257,59 @@ struct PlozziOSItemDetailView: View {
         guard let downloadRecord else { return }
         await appModel.downloads.remove(downloadRecord)
         self.downloadRecord = await appModel.downloads.record(for: item)
+    }
+}
+
+private struct PlozziOSRequestAction: View {
+    let item: MediaItem
+    let availability: MediaAvailabilityStatus
+    let isRequesting: Bool
+    let errorMessage: String?
+    let actingName: String?
+    let onRequest: (MediaItem) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            switch availability {
+            case .unknown, .deleted:
+                Button {
+                    onRequest(item)
+                } label: {
+                    if isRequesting {
+                        ProgressView()
+                    } else {
+                        Label(
+                            item.kind == .series ? "Request Series" : "Request Movie",
+                            systemImage: "plus.rectangle.on.folder"
+                        )
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(isRequesting)
+                if let actingName {
+                    Text("Request as \(actingName)")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            case .pending:
+                Label("Requested — awaiting approval", systemImage: "clock")
+                    .foregroundStyle(.orange)
+            case .processing:
+                Label("Downloading", systemImage: "arrow.down.circle")
+                    .foregroundStyle(.blue)
+            case .partiallyAvailable:
+                Label("Partially available", systemImage: "circle.lefthalf.filled")
+                    .foregroundStyle(.green)
+            case .available:
+                Label("Available in your library", systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+            }
+            if let errorMessage {
+                Text(errorMessage)
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+            }
+        }
     }
 }
 

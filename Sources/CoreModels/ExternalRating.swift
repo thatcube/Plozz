@@ -91,6 +91,17 @@ public enum RatingSource: String, Codable, Sendable, Hashable, CaseIterable {
         }
     }
 
+    /// Whether this source only makes sense for anime. AniList's community score
+    /// is meaningless for a live-action film, so it must never be shown on a
+    /// non-anime item — a safety net against stale caches or bad ID matches
+    /// attaching an anime score to the wrong title.
+    public var isAnimeOnly: Bool {
+        switch self {
+        case .anilist: return true
+        default: return false
+        }
+    }
+
     /// Whether this source carries Rotten Tomatoes-style fresh/rotten state, so
     /// the UI can tint the score red (fresh) or green (rotten).
     public var hasFreshness: Bool {

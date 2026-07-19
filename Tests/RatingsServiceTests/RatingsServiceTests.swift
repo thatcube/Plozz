@@ -147,6 +147,38 @@ final class RatingsCacheTests: XCTestCase {
 
         XCTAssertEqual(base.callCount, 2, "Empty (failed) results should not be cached")
     }
+
+    func testDropsStaleAniListRatingForNonAnimeItem() async {
+        // Reproduces the poisoned on-device entry: an AniList score pinned under
+        // a live-action movie's IMDb id from an earlier misclassification.
+        let cache = RatingsCache(ttl: 1000)
+        await cache.store([ExternalRating(source: .anilist, value: 75, scale: .percent)],
+                          forKey: "tt2140479")
+        let base = CountingProvider(result: [])
+        let provider = CachingRatingsProvider(base: base, cache: cache)
+
+        let ratings = await provider.ratings(for: movie(imdbID: "tt2140479"))
+
+        XCTAssertTrue(ratings.isEmpty, "AniList must never surface on a non-anime item")
+        XCTAssertEqual(base.callCount, 0, "Served (and filtered) from cache, not refetched")
+    }
+
+    func testKeepsAniListRatingForAnimeItem() async {
+        let cache = RatingsCache(ttl: 1000)
+        await cache.store([ExternalRating(source: .anilist, value: 75, scale: .percent)],
+                          forKey: "tt9999999")
+        let base = CountingProvider(result: [])
+        let provider = CachingRatingsProvider(base: base, cache: cache)
+
+        // An item flagged anime (carries an AniList provider id) keeps its score.
+        let animeItem = MediaItem(
+            id: "a1", title: "Anime", kind: .movie,
+            providerIDs: ["Imdb": "tt9999999", "AniList": "12345"]
+        )
+        let ratings = await provider.ratings(for: animeItem)
+
+        XCTAssertEqual(ratings.map(\.source), [.anilist])
+    }
 }
 
 /// A thread-safe mutable clock for TTL tests.

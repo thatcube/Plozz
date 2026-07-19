@@ -111,14 +111,24 @@ public struct CachingRatingsProvider: ExternalRatingsProviding {
 
     public func ratings(for item: MediaItem) async -> [ExternalRating] {
         let key = OMDbRatingsProvider.imdbID(from: item) ?? item.id
+        let resolved: [ExternalRating]
         if let cached = await cache.ratings(forKey: key) {
-            return cached
+            resolved = cached
+        } else {
+            let fetched = await base.ratings(for: item)
+            // Only cache non-empty results so a transient failure isn't pinned.
+            if !fetched.isEmpty {
+                await cache.store(fetched, forKey: key)
+            }
+            resolved = fetched
         }
-        let fetched = await base.ratings(for: item)
-        // Only cache non-empty results so a transient failure isn't pinned.
-        if !fetched.isEmpty {
-            await cache.store(fetched, forKey: key)
-        }
-        return fetched
+        // Self-heal: never surface an anime-only score (AniList) on a non-anime
+        // item, even if a stale/poisoned cache entry — keyed only by IMDb id —
+        // carries one from an earlier misclassification. AniList is keyless and
+        // the cache persists for days, so a bad entry would otherwise stick.
+        guard resolved.contains(where: { $0.source.isAnimeOnly }),
+              !AniListRatingsProvider.isAnime(item)
+        else { return resolved }
+        return resolved.filter { !$0.source.isAnimeOnly }
     }
 }

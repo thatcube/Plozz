@@ -54,7 +54,7 @@ final class HeroForegroundModelTests: XCTestCase {
         XCTAssertEqual(Builder.metadataText(for: item), "A  ·  B  ·  C")
     }
 
-    // MARK: - seasonEpisodeText
+    // MARK: - seasonEpisodeButtonText
 
     private func episode(
         id: String = "e1",
@@ -73,31 +73,34 @@ final class HeroForegroundModelTests: XCTestCase {
         )
     }
 
-    func testSeasonEpisodeTextFormatsEpisode() {
-        XCTAssertEqual(Builder.seasonEpisodeText(for: episode(season: 12, number: 2)), "S12 · E2")
+    func testSeasonEpisodeButtonTextFormatsEpisode() {
+        XCTAssertEqual(Builder.seasonEpisodeButtonText(for: episode(season: 12, number: 2)), "S12, E2")
     }
 
-    func testSeasonEpisodeTextNilForMovie() {
-        XCTAssertNil(Builder.seasonEpisodeText(for: movie()))
+    func testSeasonEpisodeButtonTextNilForMovie() {
+        XCTAssertNil(Builder.seasonEpisodeButtonText(for: movie()))
     }
 
-    func testSeasonEpisodeTextNilWhenNumbersMissing() {
-        XCTAssertNil(Builder.seasonEpisodeText(for: episode(season: nil, number: 2)))
-        XCTAssertNil(Builder.seasonEpisodeText(for: episode(season: 1, number: nil)))
+    func testSeasonEpisodeButtonTextNilWhenNumbersMissing() {
+        XCTAssertNil(Builder.seasonEpisodeButtonText(for: episode(season: nil, number: 2)))
+        XCTAssertNil(Builder.seasonEpisodeButtonText(for: episode(season: 1, number: nil)))
     }
 
-    func testBuiltEpisodeModelCarriesSeasonEpisodeText() {
+    func testBuiltEpisodePlayPillCarriesSeasonEpisode() {
+        let item = episode(season: 3, number: 7)
         let model = Builder.model(
-            item: episode(season: 3, number: 7),
+            item: item,
             overviewVisible: true,
             maskedTitle: nil,
-            pillInputs: [],
+            pillInputs: [
+                .init(kind: .play, seasonEpisodeText: Builder.seasonEpisodeButtonText(for: item))
+            ],
             selectedIndex: 0,
             heroFocused: false,
             slideCount: 1,
             slideIndex: 0
         )
-        XCTAssertEqual(model.seasonEpisodeText, "S3 · E7")
+        XCTAssertEqual(model.pills.first?.text, "Play S3, E7")
     }
 
     func testEpisodeTextFallbackUsesSeriesTitle() {

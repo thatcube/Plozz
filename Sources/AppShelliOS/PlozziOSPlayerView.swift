@@ -13,47 +13,104 @@ struct PlozziOSPlayerView: View {
     @Environment(PlozziOSAppModel.self) private var appModel
     @Environment(\.dismiss) private var dismiss
     @State private var viewModel: PlayerViewModel?
+    @State private var playerIdentity = UUID()
+    @State private var handoffTask: Task<Void, Never>?
+    @State private var isPresented = false
 
     let request: PlozziOSPlaybackRequest
     let provider: any MediaProvider
 
     var body: some View {
-        ZStack(alignment: .topTrailing) {
+        ZStack {
             Color.black.ignoresSafeArea()
 
             if let viewModel {
                 PlayerView(
                     viewModel: viewModel,
-                    showDiagnostics: appModel.settings.diagnostics.settings.isEnabled
+                    showDiagnostics: appModel.settings.diagnostics.settings.isEnabled,
+                    showsSharedControls: false
                 )
-                .id(request.id)
+                .id(playerIdentity)
+                if viewModel.phase == .ready {
+                    PlozziOSPlayerControlsOverlay(
+                        viewModel: viewModel,
+                        onClose: { dismiss() }
+                    )
+                } else {
+                    closeButton
+                }
             } else {
                 ProgressView()
                     .tint(.white)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                closeButton
             }
-
-            Button {
-                dismiss()
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.headline)
-                    .frame(width: 44, height: 44)
-                    .background(.ultraThinMaterial, in: Circle())
-            }
-            .foregroundStyle(.white)
-            .padding()
-            .accessibilityLabel("Close player")
         }
         .statusBarHidden()
+        .onAppear { isPresented = true }
+        .onDisappear {
+            isPresented = false
+            handoffTask?.cancel()
+            handoffTask = nil
+        }
         .task {
             guard viewModel == nil else { return }
-            viewModel = makeViewModel()
+            viewModel = makeViewModel(
+                item: request.item,
+                startPosition: request.startPosition
+            )
+        }
+        .onChange(of: viewModel?.pendingNextEpisode?.id) { _, nextID in
+            guard nextID != nil,
+                  let outgoing = viewModel,
+                  let next = outgoing.pendingNextEpisode,
+                  handoffTask == nil else {
+                return
+            }
+            let prefetched = outgoing.consumePrefetchedNext(matching: next.id)
+            handoffTask = Task { @MainActor in
+                await outgoing.stop()
+                let incoming = makeViewModel(
+                    item: next,
+                    startPosition: 0,
+                    adoptedResolved: prefetched
+                )
+                guard !Task.isCancelled, isPresented else {
+                    await incoming.stop()
+                    return
+                }
+                viewModel = incoming
+                playerIdentity = UUID()
+                handoffTask = nil
+            }
         }
     }
 
-    private func makeViewModel() -> PlayerViewModel {
-        let item = request.item
+    private var closeButton: some View {
+        VStack {
+            HStack {
+                Spacer()
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.headline)
+                        .frame(width: 44, height: 44)
+                        .background(.ultraThinMaterial, in: Circle())
+                }
+                .accessibilityLabel("Close player")
+            }
+            Spacer()
+        }
+        .foregroundStyle(.white)
+        .padding()
+    }
+
+    private func makeViewModel(
+        item: MediaItem,
+        startPosition: TimeInterval,
+        adoptedResolved: PlayerViewModel.PrefetchedPlayback? = nil
+    ) -> PlayerViewModel {
         let resolver = appModel.authenticatedHTTPResolver
         let playbackSettings = appModel.settings.playback.settings
         let neighborResolver = makeNeighborResolver(for: item)
@@ -72,7 +129,7 @@ struct PlozziOSPlayerView: View {
             playbackSettings: playbackSettings,
             spoilerSettings: appModel.settings.spoilers.settings,
             seriesAccountFallbackID: item.sourceAccountID,
-            startPosition: request.startPosition,
+            startPosition: startPosition,
             engineFactory: EngineFactory(
                 makeNative: {
                     NativeVideoEngine(
@@ -83,7 +140,8 @@ struct PlozziOSPlayerView: View {
             ),
             authenticatedHTTPResolver: resolver,
             neighborResolver: neighborResolver,
-            seriesIDResolver: seriesIDResolver
+            seriesIDResolver: seriesIDResolver,
+            adoptedResolved: adoptedResolved
         )
         viewModel.onSubtitleStyleChanged = {
             appModel.settings.subtitleStyle.style = $0

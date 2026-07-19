@@ -66,7 +66,28 @@ struct CustomPlayerContainer: UIViewControllerRepresentable {
     let scrubPreview: ScrubPreviewSource?
     let authenticatedHTTPResolver:
         (any AuthenticatedHTTPResourceResolving)?
+    let showsSharedControls: Bool
     let themePalette: ThemePaletteBox
+
+    init(
+        engine: any VideoEngine,
+        model: PlayerControlsModel,
+        subtitleModel: LiveSubtitleModel,
+        actions: PlayerActions,
+        scrubPreview: ScrubPreviewSource?,
+        authenticatedHTTPResolver: (any AuthenticatedHTTPResourceResolving)?,
+        showsSharedControls: Bool = true,
+        themePalette: ThemePaletteBox
+    ) {
+        self.engine = engine
+        self.model = model
+        self.subtitleModel = subtitleModel
+        self.actions = actions
+        self.scrubPreview = scrubPreview
+        self.authenticatedHTTPResolver = authenticatedHTTPResolver
+        self.showsSharedControls = showsSharedControls
+        self.themePalette = themePalette
+    }
 
     func makeUIViewController(context: Context) -> PlayerInputViewController {
         let controller = PlayerInputViewController(engine: engine, model: model, actions: actions)
@@ -76,7 +97,9 @@ struct CustomPlayerContainer: UIViewControllerRepresentable {
         )
         controller.attachVideoSurface()
         controller.attachSubtitleOverlay(subtitleModel)
-        controller.attachControls(themePalette: themePalette)
+        if showsSharedControls {
+            controller.attachControls(themePalette: themePalette)
+        }
         return controller
     }
 

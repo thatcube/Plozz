@@ -29,11 +29,18 @@ public struct PlayerView: View {
     @Environment(DisplayVeilModel.self) private var displayVeil: DisplayVeilModel?
     private let showDiagnostics: Bool
     private let themePalette: ThemePalette
+    private let showsSharedControls: Bool
 
-    public init(viewModel: PlayerViewModel, showDiagnostics: Bool = false, themePalette: ThemePalette = .dark) {
+    public init(
+        viewModel: PlayerViewModel,
+        showDiagnostics: Bool = false,
+        themePalette: ThemePalette = .dark,
+        showsSharedControls: Bool = true
+    ) {
         _viewModel = State(initialValue: viewModel)
         self.showDiagnostics = showDiagnostics
         self.themePalette = themePalette
+        self.showsSharedControls = showsSharedControls
     }
 
 
@@ -238,6 +245,7 @@ public struct PlayerView: View {
             scrubPreview: viewModel.scrubPreview,
             authenticatedHTTPResolver:
                 viewModel.authenticatedHTTPResolver,
+            showsSharedControls: showsSharedControls,
             themePalette: ThemePaletteBox(
                 makeControls: { model, actions, onExitToSurface in
                     AnyView(PlayerControls(

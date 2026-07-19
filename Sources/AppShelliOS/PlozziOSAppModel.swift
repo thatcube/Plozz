@@ -257,6 +257,27 @@ final class PlozziOSAppModel {
             return false
         }
     }
+
+    @discardableResult
+    func addFTPShare(
+        baseURL: URL,
+        auth: MediaShareFTPAuth,
+        displayName: String
+    ) -> Bool {
+        do {
+            _ = try mediaShareConfigurationService.saveFTP(
+                baseURL: baseURL,
+                auth: auth,
+                displayName: displayName
+            )
+            accountsProviders.reloadAccounts()
+            accountError = nil
+            return true
+        } catch {
+            accountError = error.localizedDescription
+            return false
+        }
+    }
 }
 
 private struct PlozziOSMediaShareArtworkCacheLifecycle:

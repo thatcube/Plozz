@@ -27,6 +27,11 @@ struct PlozziOSAddShareView: View {
                 } label: {
                     Label("SFTP", systemImage: "lock.shield")
                 }
+                NavigationLink {
+                    PlozziOSAddFTPShareView(appModel: appModel)
+                } label: {
+                    Label("FTP / FTPS", systemImage: "server.rack")
+                }
             }
         }
         .navigationTitle("Add Network Share")

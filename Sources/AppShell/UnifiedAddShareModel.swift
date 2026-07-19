@@ -38,7 +38,7 @@ struct SFTPShareConfiguration: Equatable {
 /// `ftps`).
 struct FTPShareConfiguration: Equatable {
     let baseURL: URL
-    let auth: AppState.FTPShareAuth
+    let auth: MediaShareFTPAuth
     let trustPin: SHA256Fingerprint?
     let displayName: String
 }
@@ -768,7 +768,7 @@ final class UnifiedAddShareModel {
                 return
             }
             let user = username.trimmingCharacters(in: .whitespaces)
-            let auth: AppState.FTPShareAuth = (user.isEmpty && password.isEmpty)
+            let auth: MediaShareFTPAuth = (user.isEmpty && password.isEmpty)
                 ? .anonymous
                 : .password(username: user, password: password)
             onMediaShareConfigured(.ftp(FTPShareConfiguration(

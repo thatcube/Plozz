@@ -4,6 +4,38 @@ import FeatureAuthCore
 import XCTest
 
 final class MediaShareAccountConfigurationServiceTests: XCTestCase {
+    func testSaveFTPAndImplicitFTPSPersistExpectedSecurityMaterial() throws {
+        let store = try makeStore()
+        let service = MediaShareAccountConfigurationService(accountStore: store)
+
+        let plain = try service.saveFTP(
+            baseURL: try XCTUnwrap(URL(string: "ftp://files.example/Movies/")),
+            auth: .anonymous,
+            displayName: ""
+        )
+        XCTAssertEqual(plain.account.id, "share:ftp://files.example/Movies#anon")
+        XCTAssertEqual(plain.account.server.name, "Movies (FTP)")
+
+        let secure = try service.saveFTP(
+            baseURL: try XCTUnwrap(URL(string: "ftps://files.example:990/TV")),
+            auth: .password(username: "Brandon", password: "secret"),
+            displayName: "Secure TV"
+        )
+        XCTAssertEqual(
+            secure.account.id,
+            "share:ftps://files.example:990/TV#Brandon"
+        )
+        let credential = try store.mediaShareCredential(
+            for: secure.account.id,
+            revision: secure.account.credentialRevision
+        )
+        XCTAssertEqual(credential.transport, .ftp)
+        XCTAssertEqual(
+            credential.authentication,
+            .password(username: "Brandon", password: "secret")
+        )
+    }
+
     func testSaveSFTPPersistsPasswordAndMandatoryHostKeyPin() throws {
         let store = try makeStore()
         let service = MediaShareAccountConfigurationService(accountStore: store)

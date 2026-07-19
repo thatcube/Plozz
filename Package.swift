@@ -569,6 +569,7 @@ let package = Package(
                 "FeaturePlayback",
                 "FeatureSearchCore",
                 "MediaTransportCore",
+                "MediaTransportFTP",
                 "MediaTransportHTTP",
                 "MediaTransportNFS",
                 "MediaTransportSFTP",

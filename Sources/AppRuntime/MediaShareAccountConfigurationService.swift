@@ -31,11 +31,36 @@ public enum MediaShareWebDAVAuth: Equatable, Sendable {
                 : username.trimmingCharacters(in: .whitespaces)
         case .bearer: "bearer"
         }
+
     }
 
     var accountUserName: String {
         switch self {
         case .anonymous, .bearer: ""
+        case let .password(username, _):
+            username.trimmingCharacters(in: .whitespaces)
+        }
+    }
+}
+
+public enum MediaShareFTPAuth: Equatable, Sendable {
+    case anonymous
+    case password(username: String, password: String)
+
+    var principal: String {
+        switch self {
+        case .anonymous:
+            return "anon"
+        case let .password(username, _):
+            let trimmed = username.trimmingCharacters(in: .whitespaces)
+            return trimmed.isEmpty ? "anon" : trimmed
+        }
+    }
+
+    var accountUserName: String {
+        switch self {
+        case .anonymous:
+            ""
         case let .password(username, _):
             username.trimmingCharacters(in: .whitespaces)
         }
@@ -338,6 +363,108 @@ public struct MediaShareAccountConfigurationService: Sendable {
             username: username,
             password: password,
             hostKeyPin: hostKeyPin,
+            displayName: displayName
+        )
+        try persist(prepared)
+        return prepared
+    }
+
+    public func prepareFTP(
+        baseURL: URL,
+        auth: MediaShareFTPAuth,
+        trustPin: SHA256Fingerprint? = nil,
+        displayName: String
+    ) throws -> PreparedMediaShareAccount {
+        guard var components = URLComponents(
+            url: baseURL,
+            resolvingAgainstBaseURL: false
+        ),
+        let scheme = components.scheme?.lowercased(),
+        scheme == "ftp" || scheme == "ftps",
+        let host = components.host,
+        !host.isEmpty,
+        components.user == nil,
+        components.password == nil,
+        components.query == nil,
+        components.fragment == nil,
+        trustPin == nil || scheme == "ftps" else {
+            throw MediaShareAccountConfigurationError.invalidAddress
+        }
+
+        let authentication: MediaShareAuthentication
+        switch auth {
+        case .anonymous:
+            authentication = .anonymous
+        case let .password(username, password):
+            authentication = .password(
+                username: username.trimmingCharacters(in: .whitespaces),
+                password: password
+            )
+        }
+        let credential: MediaShareCredentialEnvelope
+        do {
+            credential = try MediaShareCredentialEnvelope(
+                transport: .ftp,
+                authentication: authentication,
+                trust: MediaShareTrustMaterial(
+                    tlsLeafCertificateSHA256: trustPin
+                )
+            )
+        } catch {
+            throw MediaShareAccountConfigurationError.invalidShare
+        }
+
+        let normalizedPath = Self.normalizedFilesystemPath(components.path)
+        components.path = normalizedPath == "/" ? "" : normalizedPath
+        guard let normalizedURL = components.url else {
+            throw MediaShareAccountConfigurationError.invalidAddress
+        }
+        let serverID = Self.filesystemID(
+            scheme: scheme,
+            host: host,
+            port: components.port,
+            path: normalizedPath,
+            principal: auth.principal
+        )
+        let trimmedName = displayName.trimmingCharacters(in: .whitespaces)
+        let server = MediaServer(
+            id: serverID,
+            name: trimmedName.isEmpty
+                ? Self.defaultShareName(
+                    path: normalizedPath,
+                    host: host,
+                    transport: .ftp
+                )
+                : trimmedName,
+            baseURL: normalizedURL,
+            provider: .mediaShare
+        )
+        let session = UserSession(
+            server: server,
+            userID: auth.accountUserName.isEmpty ? "anon" : auth.accountUserName,
+            userName: auth.accountUserName,
+            deviceID: accountStore.deviceID(),
+            accessToken: ""
+        )
+        let account = Account(id: server.id, from: session)
+        return PreparedMediaShareAccount(
+            session: session,
+            account: account,
+            previousAccount: accountStore.loadAccounts().first { $0.id == account.id },
+            credential: credential
+        )
+    }
+
+    public func saveFTP(
+        baseURL: URL,
+        auth: MediaShareFTPAuth,
+        trustPin: SHA256Fingerprint? = nil,
+        displayName: String
+    ) throws -> PreparedMediaShareAccount {
+        let prepared = try prepareFTP(
+            baseURL: baseURL,
+            auth: auth,
+            trustPin: trustPin,
             displayName: displayName
         )
         try persist(prepared)

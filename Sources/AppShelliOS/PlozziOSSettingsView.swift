@@ -82,7 +82,8 @@ struct PlozziOSSettingsView: View {
                     PlozziOSHomeSettingsView(
                         hero: appModel.settings.hero,
                         visibility: appModel.settings.homeVisibility,
-                        accounts: appModel.accountsProviders.resolvedActiveAccounts
+                        accounts: appModel.accountsProviders.resolvedActiveAccounts,
+                        seerConfigured: appModel.seerService.isConfigured
                     )
                 } label: {
                     Label("Home", systemImage: "house")
@@ -559,6 +560,7 @@ private struct PlozziOSHomeSettingsView: View {
     @Bindable var hero: HeroSettingsModel
     let visibility: HomeLibraryVisibilityModel
     let accounts: [ResolvedAccount]
+    let seerConfigured: Bool
     @State private var libraries: [HomeLibraryChoice] = []
     @State private var isLoadingLibraries = false
 
@@ -628,30 +630,123 @@ private struct PlozziOSHomeSettingsView: View {
 
             Section("Hero carousel") {
                 Toggle("Show hero", isOn: $hero.settings.isEnabled)
-                Toggle("Hide watched titles", isOn: $hero.settings.hideWatched)
-                Toggle("Auto-advance", isOn: $hero.settings.autoAdvance)
-                Toggle("Background trailers", isOn: $hero.settings.trailersEnabled)
+                if hero.settings.isEnabled {
+                    Toggle("Hide watched titles", isOn: $hero.settings.hideWatched)
+                    Toggle("Auto-advance", isOn: $hero.settings.autoAdvance)
+                    Toggle("Background trailers", isOn: $hero.settings.trailersEnabled)
+                }
             }
 
-            Section("Rotation") {
-                Stepper(
-                    "Items: \(hero.settings.maxItems)",
-                    value: $hero.settings.maxItems,
-                    in: HeroSettings.maxItemsRange
-                )
-                if hero.settings.autoAdvance {
+            if hero.settings.isEnabled {
+                Section("Hero sources") {
+                    ForEach(orderedHeroSources, id: \.self) { source in
+                        Toggle(
+                            source.displayName,
+                            isOn: Binding(
+                                get: {
+                                    source == .featured && !seerConfigured
+                                        ? false
+                                        : hero.settings.sources.contains(source)
+                                },
+                                set: { _ in toggleSource(source) }
+                            )
+                        )
+                        .disabled(source == .featured && !seerConfigured)
+                    }
+                }
+
+                if hero.settings.isEnabled(.randomFromLibrary) {
+                    Section {
+                        if randomEligibleLibraries.isEmpty {
+                            Text("No movie or TV libraries are enabled on Home.")
+                                .foregroundStyle(.secondary)
+                        } else {
+                            ForEach(randomEligibleLibraries) { library in
+                                Toggle(
+                                    library.title,
+                                    isOn: Binding(
+                                        get: {
+                                            isRandomLibraryEnabled(library.key)
+                                        },
+                                        set: { _ in
+                                            toggleRandomLibrary(library.key)
+                                        }
+                                    )
+                                )
+                            }
+                        }
+                    } header: {
+                        Text("Random libraries")
+                    } footer: {
+                        Text("Leave every library selected to include all enabled libraries.")
+                    }
+                }
+            }
+
+            if hero.settings.isEnabled {
+                Section("Rotation") {
                     Stepper(
-                        "Every \(hero.settings.autoAdvanceSeconds) seconds",
-                        value: $hero.settings.autoAdvanceSeconds,
-                        in: HeroSettings.autoAdvanceRange
+                        "Items: \(hero.settings.maxItems)",
+                        value: $hero.settings.maxItems,
+                        in: HeroSettings.maxItemsRange
                     )
+                    if hero.settings.autoAdvance {
+                        Stepper(
+                            "Every \(hero.settings.autoAdvanceSeconds) seconds",
+                            value: $hero.settings.autoAdvanceSeconds,
+                            in: HeroSettings.autoAdvanceRange
+                        )
+                    }
                 }
             }
         }
+        .frame(maxWidth: 760)
+        .frame(maxWidth: .infinity)
         .navigationTitle("Home")
         .task(id: accounts.map(\.account.id)) {
             await loadLibraries()
         }
+    }
+
+    private var orderedHeroSources: [HeroSourceKind] {
+        HeroSourceKind.allCases.filter { $0 != .featured } + [.featured]
+    }
+
+    private var randomEligibleLibraries: [HomeLibraryChoice] {
+        libraries.filter {
+            ($0.library.kind == .movie || $0.library.kind == .series)
+                && visibility.isVisibleOnHome($0.key)
+        }
+    }
+
+    private func toggleSource(_ source: HeroSourceKind) {
+        guard source != .featured || seerConfigured else { return }
+        var enabled = Set(hero.settings.sources)
+        if enabled.contains(source) {
+            enabled.remove(source)
+        } else {
+            enabled.insert(source)
+        }
+        hero.settings.sources = HeroSourceKind.allCases.filter(enabled.contains)
+    }
+
+    private func isRandomLibraryEnabled(_ key: String) -> Bool {
+        let selected = hero.settings.randomLibraryKeys
+        return selected.isEmpty || selected.contains(key)
+    }
+
+    private func toggleRandomLibrary(_ key: String) {
+        let allKeys = Set(randomEligibleLibraries.map(\.key))
+        var selected = hero.settings.randomLibraryKeys.isEmpty
+            ? allKeys
+            : hero.settings.randomLibraryKeys
+        if selected.contains(key) {
+            selected.remove(key)
+        } else {
+            selected.insert(key)
+        }
+        selected.formIntersection(allKeys)
+        hero.settings.randomLibraryKeys = selected == allKeys ? [] : selected
     }
 
     private func loadLibraries() async {

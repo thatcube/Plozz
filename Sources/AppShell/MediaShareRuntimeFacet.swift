@@ -54,6 +54,8 @@ public final class MediaShareRuntimeFacet {
     /// registry, provider-resolution context, and the effective token seam).
     @ObservationIgnored
     private let accountsProviders: AccountsProvidersModel
+    @ObservationIgnored
+    private let rescanService: MediaShareRescanService
 
     /// Monotonic revision for preferred-account-key updates so a stale, out-of-
     /// order propagation can't overwrite a newer active set on the runtime.
@@ -73,6 +75,9 @@ public final class MediaShareRuntimeFacet {
     ) {
         self.runtime = runtime
         self.accountsProviders = accountsProviders
+        self.rescanService = MediaShareRescanService(
+            accountsProviders: accountsProviders
+        )
         let resolvedScanStatus = scanStatus ?? ShareScanStatusModel()
         self.scanStatus = resolvedScanStatus
         self.accountService = MediaShareAccountService(runtime: runtime)
@@ -118,28 +123,6 @@ public final class MediaShareRuntimeFacet {
     /// asks it to rescan — registering its catalog/scanner if needed, so this works
     /// even when Home never queried the share, and it drives the scan indicator.
     public func rescanShare(accountID: String) {
-        guard let account = accountsProviders.accounts.first(where: { $0.id == accountID }),
-              account.server.provider == .mediaShare else { return }
-        let token = accountsProviders.tokenResolver(account.id) ?? ""
-        let shareProvider: ShareProvider
-        do {
-            // Log a resolution failure instead of silently swallowing it: without
-            // this, Settings "Scan now" no-ops with no diagnostic when the share's
-            // provider can't be built (unregistered factory, stale credential
-            // revision, local-media context mismatch) or resolves to the wrong type.
-            // The early-return-on-failure behavior is unchanged — this only ADDS a
-            // log line, so a real "Scan now" no-op is no longer invisible.
-            guard let resolved = try accountsProviders.registry.provider(
-                for: accountsProviders.providerResolutionContext(for: account, token: token)
-            ) as? ShareProvider else {
-                PlozzLog.app.error("Scan now: resolved provider for share \(accountID) is not a ShareProvider")
-                return
-            }
-            shareProvider = resolved
-        } catch {
-            PlozzLog.app.error("Scan now: provider resolution failed for share \(accountID): \(error)")
-            return
-        }
-        Task { await shareProvider.rescan() }
+        rescanService.rescan(accountID: accountID)
     }
 }

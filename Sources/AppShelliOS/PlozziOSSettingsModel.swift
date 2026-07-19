@@ -9,6 +9,8 @@ final class PlozziOSSettingsModel {
     let watchIndicator: WatchStatusIndicatorSettingsModel
     let playback: PlaybackSettingsModel
     let subtitleBehavior: SubtitleBehaviorModel
+    let subtitlePolicy: SubtitlePolicyModel
+    let audioPolicy: AudioPolicyModel
     let subtitleStyle: SubtitleStyleModel
     let spoilers: SpoilerSettingsModel
     let nightShift: NightShiftSettingsModel
@@ -34,6 +36,12 @@ final class PlozziOSSettingsModel {
         )
         subtitleBehavior = SubtitleBehaviorModel(
             store: SubtitleBehaviorStore(namespace: namespace)
+        )
+        subtitlePolicy = SubtitlePolicyModel(
+            store: SubtitlePolicyStore(namespace: namespace)
+        )
+        audioPolicy = AudioPolicyModel(
+            store: AudioPolicyStore(namespace: namespace)
         )
         subtitleStyle = SubtitleStyleModel(
             store: SubtitleStyleStore(namespace: namespace)

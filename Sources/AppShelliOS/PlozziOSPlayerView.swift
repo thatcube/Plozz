@@ -122,10 +122,12 @@ struct PlozziOSPlayerView: View {
             offlinePlaybackResolver: appModel.downloads.offlineResolver,
             behavior: appModel.settings.subtitleBehavior.settings,
             style: appModel.settings.subtitleStyle.style,
-            subtitlePolicy: .inheriting(
-                from: appModel.settings.subtitleBehavior.settings
+            subtitlePolicy: appModel.settings.subtitlePolicy.resolvedPolicy(
+                behavior: appModel.settings.subtitleBehavior.settings
             ),
-            audioPolicy: .inheriting(from: playbackSettings),
+            audioPolicy: appModel.settings.audioPolicy.resolvedPolicy(
+                settings: playbackSettings
+            ),
             playbackSettings: playbackSettings,
             spoilerSettings: appModel.settings.spoilers.settings,
             seriesTrackStore: appModel.seriesTrackStore,

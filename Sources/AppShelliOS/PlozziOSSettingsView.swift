@@ -88,7 +88,10 @@ struct PlozziOSSettingsView: View {
                     Label("Home", systemImage: "house")
                 }
                 NavigationLink {
-                    PlozziOSPlaybackSettingsView(model: appModel.settings.playback)
+                    PlozziOSPlaybackSettingsView(
+                        model: appModel.settings.playback,
+                        audioPolicy: appModel.settings.audioPolicy
+                    )
                 } label: {
                     Label("Playback", systemImage: "play.rectangle")
                 }
@@ -100,6 +103,7 @@ struct PlozziOSSettingsView: View {
                 NavigationLink {
                     PlozziOSSubtitleSettingsView(
                         behavior: appModel.settings.subtitleBehavior,
+                        policy: appModel.settings.subtitlePolicy,
                         style: appModel.settings.subtitleStyle
                     )
                 } label: {
@@ -310,6 +314,17 @@ private struct PlozziOSAccountDetailView: View {
                         Label("Plex User", systemImage: "person.crop.circle")
                     }
                 }
+
+                if account.server.provider == .mediaShare {
+                    PlozziOSShareScanSection(
+                        state: appModel.shareScanStatus.state(
+                            forShareID: account.id
+                        ),
+                        onScan: {
+                            appModel.rescanShare(accountID: account.id)
+                        }
+                    )
+                }
             }
 
             Section {
@@ -328,6 +343,42 @@ private struct PlozziOSAccountDetailView: View {
             }
         } message: {
             Text("Credentials and locally cached data for this source will be removed.")
+        }
+    }
+}
+
+private struct PlozziOSShareScanSection: View {
+    let state: ShareScanState?
+    let onScan: () -> Void
+
+    var body: some View {
+        Section("Library") {
+            if let state, state.isBusy {
+                LabeledContent(state.phase) {
+                    if let detail = state.progressDetail {
+                        Text(detail)
+                            .monospacedDigit()
+                    } else {
+                        ProgressView()
+                    }
+                }
+                if let fraction = state.enrichFraction {
+                    ProgressView(value: fraction)
+                } else {
+                    ProgressView()
+                }
+            } else {
+                LabeledContent("Last scanned") {
+                    if let date = state?.lastScanAt {
+                        Text(date, format: .relative(presentation: .named))
+                    } else {
+                        Text("Never")
+                    }
+                }
+            }
+
+            Button("Scan Now", systemImage: "arrow.clockwise", action: onScan)
+                .disabled(state?.isBusy == true)
         }
     }
 }
@@ -668,6 +719,13 @@ private struct PlozziOSLibraryHomeSettingsView: View {
 
 private struct PlozziOSPlaybackSettingsView: View {
     @Bindable var model: PlaybackSettingsModel
+    @Bindable var audioPolicy: AudioPolicyModel
+
+    private static let policyCategories: [ContentCategory] = [.movie, .tvShow, .anime]
+    private static let audioOptions: [AudioLanguagePreference] =
+        [.original, .device] + SubtitleLanguageCatalog.languages.map {
+            .language($0.code)
+        }
 
     var body: some View {
         Form {
@@ -712,8 +770,22 @@ private struct PlozziOSPlaybackSettingsView: View {
 
             Section("Tracks") {
                 Picker("Preferred audio", selection: $model.settings.audioLanguagePreference) {
-                    Text("Original language").tag(AudioLanguagePreference.original)
-                    Text("Device language").tag(AudioLanguagePreference.device)
+                    ForEach(Self.audioOptions, id: \.self) { preference in
+                        Text(audioName(preference)).tag(preference)
+                    }
+                }
+                Toggle("Different default per type", isOn: audioOverridesEnabled)
+                if !audioPolicy.overrides.isEmpty {
+                    ForEach(Self.policyCategories, id: \.self) { category in
+                        Picker(
+                            category.displayName,
+                            selection: audioBinding(for: category)
+                        ) {
+                            ForEach(Self.audioOptions, id: \.self) { preference in
+                                Text(audioName(preference)).tag(preference)
+                            }
+                        }
+                    }
                 }
                 Toggle(
                     "Remember audio per series",
@@ -727,11 +799,51 @@ private struct PlozziOSPlaybackSettingsView: View {
         }
         .navigationTitle("Playback")
     }
+
+    private var audioOverridesEnabled: Binding<Bool> {
+        Binding(
+            get: { !audioPolicy.overrides.isEmpty },
+            set: {
+                audioPolicy.overrides = $0
+                    ? AudioPolicy.smartDefaultOverrides()
+                    : [:]
+            }
+        )
+    }
+
+    private func audioBinding(
+        for category: ContentCategory
+    ) -> Binding<AudioLanguagePreference> {
+        Binding(
+            get: {
+                audioPolicy.overrides[category]
+                    ?? model.settings.audioLanguagePreference
+            },
+            set: { audioPolicy.overrides[category] = $0 }
+        )
+    }
+
+    private func audioName(_ preference: AudioLanguagePreference) -> String {
+        switch preference {
+        case .original:
+            return "Original language"
+        case .device:
+            return "Device language"
+        case .language(let code):
+            return SubtitleLanguageCatalog.languages.first {
+                $0.code == code
+            }?.name ?? code
+        }
+    }
 }
 
 private struct PlozziOSSubtitleSettingsView: View {
     @Bindable var behavior: SubtitleBehaviorModel
+    @Bindable var policy: SubtitlePolicyModel
     @Bindable var style: SubtitleStyleModel
+
+    private static let policyCategories: [SubtitleContentCategory] =
+        [.movie, .tvShow, .anime]
 
     var body: some View {
         Form {
@@ -762,6 +874,16 @@ private struct PlozziOSSubtitleSettingsView: View {
                 Picker("Automatic subtitles", selection: $behavior.settings.subtitleMode) {
                     ForEach(SubtitleMode.allCases, id: \.self) {
                         Text($0.displayName).tag($0)
+                    }
+                    Toggle("Different default per type", isOn: subtitleOverridesEnabled)
+                    if !policy.overrides.isEmpty {
+                        ForEach(Self.policyCategories, id: \.self) { category in
+                            Picker(category.displayName, selection: modeBinding(for: category)) {
+                                ForEach(SubtitleMode.allCases, id: \.self) {
+                                    Text($0.displayName).tag($0)
+                                }
+                            }
+                        }
                     }
                 }
                 Toggle(
@@ -804,6 +926,34 @@ private struct PlozziOSSubtitleSettingsView: View {
             }
         }
         .navigationTitle("Subtitles")
+    }
+
+    private var baseRule: SubtitlePolicy.Rule {
+        SubtitlePolicy.inheriting(from: behavior.settings).basePolicy
+    }
+
+    private var subtitleOverridesEnabled: Binding<Bool> {
+        Binding(
+            get: { !policy.overrides.isEmpty },
+            set: {
+                policy.overrides = $0
+                    ? SubtitlePolicy.smartDefaultOverrides(base: baseRule)
+                    : [:]
+            }
+        )
+    }
+
+    private func modeBinding(
+        for category: SubtitleContentCategory
+    ) -> Binding<SubtitleMode> {
+        Binding(
+            get: { policy.overrides[category]?.mode ?? baseRule.mode },
+            set: {
+                var rule = policy.overrides[category] ?? baseRule
+                rule.mode = $0
+                policy.overrides[category] = rule
+            }
+        )
     }
 }
 

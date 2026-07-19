@@ -22,6 +22,7 @@ final class PlozziOSAppModel {
     let profiles: ProfilesModel
     let authenticatedHTTPResolver: ManagedAuthenticatedHTTPResolver
     let mediaShareRuntime: DefaultMediaShareRuntime
+    let shareScanStatus: ShareScanStatusModel
     let seerService: SeerService
     let traktService: TraktService
     let simklService: SimklService
@@ -56,6 +57,7 @@ final class PlozziOSAppModel {
     private let durableLocalStateStore: DurableLocalStateStore?
     private let mediaShareAccountService: MediaShareAccountService
     private let mediaShareConfigurationService: MediaShareAccountConfigurationService
+    private let mediaShareRescanService: MediaShareRescanService
     @ObservationIgnored private var trackerProfileGeneration: UInt64 = 0
     @ObservationIgnored private var watchReconcilers: [String: WatchStateReconciler] = [:]
 
@@ -115,6 +117,7 @@ final class PlozziOSAppModel {
             registry: registry,
             profilesModel: profiles
         )
+        let shareScanStatus = ShareScanStatusModel()
         let seerService = SeerServiceFactory.make(
             connectionStore: HouseholdSeerConnectionStore(
                 secureStore: KeychainStore(service: "com.plozz.app.household")
@@ -130,6 +133,7 @@ final class PlozziOSAppModel {
         self.accountsProviders = accountsProviders
         self.authenticatedHTTPResolver = authenticatedHTTPResolver
         self.mediaShareRuntime = mediaShareRuntime
+        self.shareScanStatus = shareScanStatus
         self.durableLocalStateStore = durableLocalStateStore
         self.seerService = seerService
         self.traktService = traktService
@@ -158,6 +162,9 @@ final class PlozziOSAppModel {
         self.mediaShareAccountService = MediaShareAccountService(runtime: mediaShareRuntime)
         self.mediaShareConfigurationService = MediaShareAccountConfigurationService(
             accountStore: accountStore
+        )
+        self.mediaShareRescanService = MediaShareRescanService(
+            accountsProviders: accountsProviders
         )
         self.plexHomeUsers = PlexHomeUsersModel(
             accountsProviders: accountsProviders,
@@ -214,6 +221,8 @@ final class PlozziOSAppModel {
             )
         }
         accountsProviders.reloadAccounts()
+        let scanReporter = shareScanStatus.reporter()
+        Task { await mediaShareRuntime.configure(reporter: scanReporter) }
         plexHomeUsers.ensurePlexIdentityForActiveProfile()
         updateTrackersForActiveProfile()
         drainWatchOutbox()
@@ -226,6 +235,10 @@ final class PlozziOSAppModel {
 
     var accounts: [Account] {
         accountsProviders.accounts
+    }
+
+    func rescanShare(accountID: String) {
+        mediaShareRescanService.rescan(accountID: accountID)
     }
 
     var deviceID: String {

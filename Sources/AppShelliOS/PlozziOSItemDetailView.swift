@@ -353,7 +353,7 @@ struct PlozziOSItemDetailView: View {
             preferences: appModel.versionPreferences,
             capabilities: capabilities
         )
-        return DetailPlaybackSelection.playItem(
+        let selected = DetailPlaybackSelection.playItem(
             for: item,
             sources: sources,
             activeAccountID: source?.accountID,
@@ -361,6 +361,11 @@ struct PlozziOSItemDetailView: View {
             explicit: viewModel.isLibraryOriginPinned
                 || sourceOverride != nil
                 || versionOverride != nil
+        )
+        return PlaybackSourceSelection.bestPlayItem(
+            selected,
+            accounts: appModel.accountsProviders.resolvedActiveAccounts,
+            identitySources: appModel.identityIndex.identitySourcesProvider
         )
     }
 

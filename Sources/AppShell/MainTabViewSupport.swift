@@ -1,5 +1,6 @@
 #if canImport(SwiftUI)
 import SwiftUI
+import AppRuntime
 import CoreModels
 import CoreUI
 import FeatureHome
@@ -414,114 +415,10 @@ func bestSourcePlayItem(
     accounts: [ResolvedAccount],
     identitySources: (MediaItem) -> [MediaSourceRef]
 ) -> MediaItem {
-    let activeAccountIDs = Set(accounts.map(\.account.id))
-    let liveLocality: [String: SourceLocality] = Dictionary(
-        accounts.map { ($0.account.id, $0.provider.connectionLocality) },
-        uniquingKeysWith: { first, _ in first }
-    )
-    func withLiveLocality(_ source: MediaSourceRef) -> MediaSourceRef {
-        guard let locality = liveLocality[source.accountID] else { return source }
-        var copy = source
-        copy.locality = locality
-        return copy
-    }
-
-    // Union the card's own sources with any twin the live index knows. The card's
-    // refs come first and win on id collision (live versions/watch-state). The
-    // card's own sources are already cross-kind sanitized by `MediaItemMerger`
-    // (and stale caches are schema-bumped), so no further filtering is needed here.
-    var unioned = item.sources
-    var seen = Set(unioned.map(\.id))
-    for ref in identitySources(item) where seen.insert(ref.id).inserted {
-        unioned.append(ref)
-    }
-
-    // Drop any un-playable Plex **Discover** source: a watchlist/Discover stub is
-    // addressed by the GLOBAL catalog guid (its itemID == the `plex://…/<id>`
-    // tail), which no Plex Media Server can play. Such refs can linger on an item
-    // rebuilt before the merger fix, or hydrated from an older on-disk Home cache;
-    // if one wins best-source selection, playback dead-ends on "Can't play this"
-    // even though a real library copy exists. Filtering here is cache-proof — but
-    // only when a real, playable twin remains (never strip the last source, so a
-    // genuinely Discover-only title still resolves to its stub rather than nothing).
-    if let guidTail = item.providerIDs["PlexGuid"]?.split(separator: "/").last.map(String.init) {
-        let playable = unioned.filter { $0.itemID != guidTail }
-        if !playable.isEmpty { unioned = playable }
-    }
-
-    let liveSources = (activeAccountIDs.isEmpty
-        ? unioned
-        : unioned.filter { activeAccountIDs.contains($0.accountID) })
-        .map(withLiveLocality)
-
-    // Honor an already-applied EXPLICIT source pick. The detail page's play path
-    // retargets through `MediaItem.retargetedForPlayback` first, stamping
-    // `selectedSourceAccountID` from the server picker (or its origin-aware smart
-    // default) and repointing the item — but it preserves the full `sources`
-    // array for further switching. Re-running best-source selection here would
-    // then clobber that pick back to the locality-best copy, making the picker
-    // cosmetic (a user who deliberately chose the remote/Tailscale copy would
-    // still be sent to the LAN one). Only honor picks the user actually made
-    // (`explicitSourceSelection`): an AUTO default (origin-following detail
-    // default, or a Home/Search item that carries no explicit choice) is instead
-    // re-selected below against *live* locality, so a title opened from a
-    // remote/Tailscale library still plays from a same-LAN copy when one exists.
-    if item.explicitSourceSelection,
-       let picked = item.selectedSourceAccountID,
-       liveSources.contains(where: { $0.accountID == picked }) {
-        return item
-    }
-
-    // If the item's OWN (account, id) isn't itself a playable source — the
-    // Discover-stub case, where its id is the global guid we filtered out above —
-    // force a retarget onto the best remaining source, so we never launch the
-    // un-playable id even when the real copy sits on the same account as the stub
-    // (which the single-source heuristic below wouldn't otherwise catch). No-op
-    // for ordinary items, whose primary (account, id) is always among liveSources.
-    let primaryIsPlayable = liveSources.contains {
-        $0.accountID == item.sourceAccountID && $0.itemID == item.id
-    }
-    if !primaryIsPlayable, !liveSources.isEmpty {
-        let selection = CrossSourceSelector.bestSelection(
-            from: liveSources,
-            capabilities: .detected(),
-            preferring: item.sourceAccountID
-        )
-        let target = selection?.source ?? liveSources[0]
-        return MediaItem.retargetedForPlayback(
-            item: item,
-            sources: liveSources,
-            activeAccountID: target.accountID,
-            versionID: selection?.version?.id
-        )
-    }
-
-    guard liveSources.count > 1,
-          let selection = CrossSourceSelector.bestSelection(
-              from: liveSources,
-              capabilities: .detected(),
-              preferring: item.selectedSourceAccountID ?? item.sourceAccountID
-          )
-    else {
-        // One (or zero) live source. If pruning dropped servers, or the primary
-        // pointed at a now-removed account, retarget onto the surviving copy so we
-        // don't mis-resolve; otherwise the single-source item passes through.
-        if let only = liveSources.first,
-           liveSources.count < unioned.count || only.accountID != item.sourceAccountID {
-            return MediaItem.retargetedForPlayback(
-                item: item,
-                sources: liveSources,
-                activeAccountID: only.accountID,
-                versionID: nil
-            )
-        }
-        return item
-    }
-    return MediaItem.retargetedForPlayback(
-        item: item,
-        sources: liveSources,
-        activeAccountID: selection.source.accountID,
-        versionID: selection.version?.id
+    PlaybackSourceSelection.bestPlayItem(
+        item,
+        accounts: accounts,
+        identitySources: identitySources
     )
 }
 

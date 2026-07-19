@@ -9,6 +9,10 @@ struct PlozziOSSeerrSettingsView: View {
     @State private var users: [SeerUser] = []
     @State private var isLoadingUsers = false
     @State private var usersError: String?
+    @State private var discoveredServers: [DiscoveredSeerServer] = []
+    @State private var isScanning = false
+    @State private var scanRequestID = 0
+    private let discovery = SeerDiscovery()
 
     init(appModel: PlozziOSAppModel) {
         self.appModel = appModel
@@ -48,7 +52,13 @@ struct PlozziOSSeerrSettingsView: View {
             await appModel.seerService.refreshStatus()
             if appModel.seerService.isConfigured {
                 await loadUsers()
+            } else {
+                await scanForServers(reset: true)
             }
+        }
+        .task(id: scanRequestID) {
+            guard scanRequestID > 0 else { return }
+            await scanForServers(reset: true)
         }
     }
 
@@ -97,6 +107,38 @@ struct PlozziOSSeerrSettingsView: View {
 
     @ViewBuilder
     private var connectionFields: some View {
+        if isScanning || !discoveredServers.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    Text("On your network")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    if isScanning {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+                }
+
+                ForEach(discoveredServers) { server in
+                    Button {
+                        urlText = server.baseURL.absoluteString
+                    } label: {
+                        HStack {
+                            Label(
+                                server.baseURL.host ?? server.baseURL.absoluteString,
+                                systemImage: "server.rack"
+                            )
+                            Spacer()
+                            if let version = server.version {
+                                Text("v\(version)")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+            }
+        }
         TextField("Server address", text: $urlText, prompt: Text("192.168.1.20:5055"))
             .textInputAutocapitalization(.never)
             .autocorrectionDisabled()
@@ -108,6 +150,10 @@ struct PlozziOSSeerrSettingsView: View {
             connect()
         }
         .disabled(!canConnect)
+        Button(isScanning ? "Scanning…" : "Scan Local Network", systemImage: "wifi") {
+            scanRequestID &+= 1
+        }
+        .disabled(isScanning)
     }
 
     @ViewBuilder
@@ -178,6 +224,33 @@ struct PlozziOSSeerrSettingsView: View {
             users = try await appModel.seerService.users()
         } catch {
             usersError = "Couldn’t load Seerr users."
+        }
+    }
+
+    private var knownServerHosts: [String] {
+        var seen = Set<String>()
+        return appModel.accountsProviders.resolvedActiveAccounts.compactMap { resolved in
+            guard let host = resolved.account.server.baseURL.host,
+                  seen.insert(host).inserted else {
+                return nil
+            }
+            return host
+        }
+    }
+
+    private func scanForServers(reset: Bool = false) async {
+        guard !appModel.seerService.isConfigured, !isScanning else { return }
+        isScanning = true
+        if reset {
+            discoveredServers = []
+        }
+        defer { isScanning = false }
+
+        for await server in discovery.discover(hostHints: knownServerHosts) {
+            guard !Task.isCancelled else { return }
+            if !discoveredServers.contains(where: { $0.id == server.id }) {
+                discoveredServers.append(server)
+            }
         }
     }
 }

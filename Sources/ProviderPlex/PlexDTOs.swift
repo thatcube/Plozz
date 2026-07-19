@@ -134,6 +134,10 @@ struct PlexMetadata: Decodable {
     let parentRatingKey: String?
     let grandparentRatingKey: String?
     let summary: String?
+    /// Short marketing tagline (Plex records a single `tagline` attribute on
+    /// movies/shows). Mapped into `MediaItem.taglines` for parity with Jellyfin,
+    /// and used as the hero's punchy one-liner.
+    let tagline: String?
     let index: Int?            // episode number (or season index)
     let parentIndex: Int?      // season number for an episode
     let year: Int?
@@ -192,9 +196,34 @@ struct PlexMetadata: Decodable {
     /// Production company (Plex records a single `studio` attribute, not a list).
     let studio: String?
     let Media: [PlexMedia]?
+    /// Image variants Plex records for the item (`type` one of `coverPoster`,
+    /// `background`, `clearLogo`, `snapshot`, …). The full metadata fetch returns
+    /// this array; we read the `clearLogo` entry for the hero/detail title logo,
+    /// which Plex does NOT expose via the top-level `thumb`/`art` attributes.
+    let Image: [PlexImage]?
     /// Plex Pass intro/credits markers, present only when the metadata request
     /// passes `includeMarkers=1`. Offsets are in milliseconds.
     let Marker: [PlexMarker]?
+}
+
+/// One entry from a Plex item's `Image` array. `type` names the variant
+/// (`coverPoster`, `background`, `clearLogo`, `snapshot`, …) and `url` is either
+/// a server-relative path (`/library/metadata/…/clearLogo/…`) or an absolute
+/// `metadata-static.plex.tv` URL. Decoded leniently since Plex omits fields it
+/// has no value for.
+struct PlexImage: Decodable {
+    let alt: String?
+    let type: String?
+    let url: String?
+
+    private enum CodingKeys: String, CodingKey { case alt, type, url }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        alt = c.flexibleString(.alt)
+        type = c.flexibleString(.type)
+        url = c.flexibleString(.url)
+    }
 }
 
 /// One Plex external-id GUID, e.g. `{ "id": "imdb://tt0111161" }`.

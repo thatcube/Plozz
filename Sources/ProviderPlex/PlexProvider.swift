@@ -1005,6 +1005,7 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
             people: people(from: dto),
             studios: dto.studio.flatMap { $0.isEmpty ? nil : [$0] } ?? [],
             tags: dto.Tag?.compactMap(\.tag).filter { !$0.isEmpty } ?? [],
+            taglines: dto.tagline.flatMap { $0.isEmpty ? nil : [$0] } ?? [],
             seriesID: isEpisode ? dto.grandparentRatingKey : (kind == .season ? dto.parentRatingKey : nil),
             seasonID: isEpisode ? dto.parentRatingKey : nil,
             runtime: runtime,
@@ -1016,6 +1017,7 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
             seriesPosterURL: isEpisode ? client.imageURL(path: dto.grandparentThumb, maxWidth: 500) : nil,
             backdropURL: client.imageURL(path: dto.art, maxWidth: 1280),
             heroBackdropURL: client.imageURL(path: dto.art, maxWidth: 3840),
+            logoURL: logoURL(from: dto),
             ratings: Self.ratings(from: dto),
             providerIDs: Self.providerIDs(from: dto),
             mediaInfo: Self.sourceMetadata(from: dto),
@@ -1024,6 +1026,23 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
             isFavorite: false,
             lastPlayedAt: dto.lastViewedAt.map { Date(timeIntervalSince1970: TimeInterval($0)) }
         )
+    }
+
+    /// The item's title logo (Plex "clearLogo") from its `Image` array, or `nil`
+    /// when the item advertises none. Plex exposes the logo ONLY here — never via
+    /// the top-level `thumb`/`art` attributes — so without reading this array the
+    /// hero/detail title logo is always missing for Plex titles. The clearLogo is
+    /// a transparent PNG, so it's loaded raw (no `/photo/:/transcode`, which would
+    /// flatten transparency) via the same http-vs-server-path handling as person
+    /// headshots; the hero logo pipeline downsamples it on device.
+    private func logoURL(from dto: PlexMetadata) -> URL? {
+        guard let entry = dto.Image?.first(where: {
+            $0.type?.lowercased() == "clearlogo"
+        }), let path = entry.url, !path.isEmpty else { return nil }
+        if path.hasPrefix("http://") || path.hasPrefix("https://") {
+            return URL(string: path)
+        }
+        return client.imageURL(path: path, maxWidth: nil)
     }
 
     /// Maps Plex's `<Role>` (cast) plus `<Director>`/`<Writer>` (crew) elements

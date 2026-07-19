@@ -5,16 +5,24 @@
 # are tvOS-only. Instead we drive xcodebuild on a tvOS Simulator destination.
 #
 # ── Strategy (the speed win) ─────────────────────────────────────────────────
-# The old runner looped `xcodebuild test` once PER test target (23 separate
-# build + simulator-install + launch cycles ≈ 10–13 min, almost all of it compile
-# + simulator orchestration — the tests themselves execute in <1s). This runner
-# does ONE build that runs many suites:
-#   * Full sweep (no args, or all targets): `xcodebuild test -scheme Plozz-Package`
-#     with no `-only-testing` — one compile, one orchestration, every suite.
-#   * Subset (≥2 suites, or a single suite whose native scheme isn't materialised):
-#     `xcodebuild test -scheme Plozz-Package -only-testing:<S> …` — one build.
-#   * Single suite whose native `<Suite>` scheme IS materialised: use it directly
-#     (no "move Plozz.xcodeproj aside" dance needed) — the fast inner-loop path.
+# The tests themselves execute in <1s; essentially all wall-clock is compile +
+# simulator orchestration. Two things dominate a subset run's cost, and this
+# runner cuts both:
+#   1. Build scope. `xcodebuild -only-testing:<S>` filters which tests EXECUTE
+#      but still BUILDS the whole `Plozz-Package` scheme (~30 modules + ~29 test
+#      bundles + every heavy external dep). So a 2-suite run used to compile the
+#      entire graph — ~90% of it wasted.
+#   2. Redundant per-worktree work (dSYMs, index store, inactive archs).
+# Strategy:
+#   * Full sweep (no args, or every target): `xcodebuild test -scheme
+#     Plozz-Package` — one compile, one orchestration, every suite (CI gate).
+#   * Subset (any 1..N suites): synthesise an ephemeral SCOPED scheme whose
+#     build+test actions list exactly the requested test targets, then
+#     `xcodebuild test -scheme <scoped>`. Only those suites' dependency subtrees
+#     compile — e.g. `CoreModelsTests ProviderPlexTests` builds ~7 targets, not
+#     ~96. The scheme lives in the gitignored `.swiftpm/` and is removed on exit.
+#   * All builds also pass lean settings (no dSYM / no index store / active arch
+#     only); set PLOZZ_LEAN=0 to opt out.
 # The list of test targets is discovered from `swift package dump-package`, so it
 # is DATA-DRIVEN and stays correct as targets are added (e.g. the WebDAV work's
 # MediaTransportWebDAVTests) — nothing here is hardcoded.
@@ -45,6 +53,22 @@ cd "$(dirname "$0")/.."
 export GIT_CONFIG_PARAMETERS="${GIT_CONFIG_PARAMETERS-'safe.bareRepository=all'}"
 
 PARALLEL="${PLOZZ_PARALLEL:-NO}"
+
+# --- Lean build settings for the test build (P3) ------------------------------
+# These trim work that a simulator test build never needs: the index-while-
+# building store (COMPILER_INDEX_STORE_ENABLE=NO), dSYM generation
+# (DEBUG_INFORMATION_FORMAT=dwarf, not dwarf-with-dsym), and building for
+# inactive architectures (ONLY_ACTIVE_ARCH=YES). They shave cold-build time and
+# reduce CPU/IO footprint (which matters most when several worktrees build in
+# parallel). Set PLOZZ_LEAN=0 to opt out (e.g. to profile with a dSYM).
+LEAN_SETTINGS=()
+if [[ "${PLOZZ_LEAN:-1}" != "0" ]]; then
+  LEAN_SETTINGS=(
+    COMPILER_INDEX_STORE_ENABLE=NO
+    DEBUG_INFORMATION_FORMAT=dwarf
+    ONLY_ACTIVE_ARCH=YES
+  )
+fi
 
 # --- Architecture layering guard (fast, data-driven) -------------------------
 # Enforce the module-layering invariants before any (slow) compile/simulator
@@ -126,8 +150,72 @@ restore_project() {
   fi
 }
 
+# --- Scoped-scheme support (the subset speed win) ----------------------------
+# `xcodebuild ... -only-testing:<S>` filters which tests EXECUTE but still BUILDS
+# the entire `Plozz-Package` scheme (all ~30 library modules + all ~29 test
+# bundles + every heavy external dep: swift-nio, swift-crypto/BoringSSL,
+# AetherEngine, SMBClient, …). For a subset run that is ~90% wasted compile.
+# SwiftPM only auto-exposes per-PRODUCT schemes (no per-test-target scheme), so
+# to build ONLY the requested suites' dependency subtrees we synthesise an
+# ephemeral shared scheme whose Build + Test actions list exactly those test
+# targets; their subtrees resolve automatically. `.swiftpm/` is gitignored and
+# each scheme is removed on exit, so nothing is left behind or committed.
+SCOPED_SCHEME_DIR=".swiftpm/xcode/xcshareddata/xcschemes"
+CREATED_SCHEMES=()
+cleanup_scoped_schemes() {
+  local s
+  for s in "${CREATED_SCHEMES[@]:-}"; do
+    [[ -n "$s" ]] && rm -f "$SCOPED_SCHEME_DIR/$s.xcscheme"
+  done
+  return 0   # never let the loop's last (possibly-false) test set the EXIT status
+}
+
+# make_scoped_scheme <scheme-name> <test-target>...
+# Writes an ephemeral shared scheme that builds+tests only the given test
+# targets (and, transitively, only the modules they depend on).
+make_scoped_scheme() {
+  local name="$1"; shift
+  mkdir -p "$SCOPED_SCHEME_DIR"
+  local build_entries="" testables="" s
+  for s in "$@"; do
+    build_entries+="         <BuildActionEntry buildForTesting = \"YES\" buildForRunning = \"NO\" buildForProfiling = \"NO\" buildForArchiving = \"NO\" buildForAnalyzing = \"NO\">
+            <BuildableReference BuildableIdentifier = \"primary\" BlueprintIdentifier = \"${s}\" BuildableName = \"${s}\" BlueprintName = \"${s}\" ReferencedContainer = \"container:\"></BuildableReference>
+         </BuildActionEntry>
+"
+    testables+="         <TestableReference skipped = \"NO\">
+            <BuildableReference BuildableIdentifier = \"primary\" BlueprintIdentifier = \"${s}\" BuildableName = \"${s}\" BlueprintName = \"${s}\" ReferencedContainer = \"container:\"></BuildableReference>
+         </TestableReference>
+"
+  done
+  cat > "$SCOPED_SCHEME_DIR/$name.xcscheme" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<Scheme LastUpgradeVersion = "1600" version = "1.7">
+   <BuildAction parallelizeBuildables = "YES" buildImplicitDependencies = "YES">
+      <BuildActionEntries>
+${build_entries}      </BuildActionEntries>
+   </BuildAction>
+   <TestAction buildConfiguration = "Debug" selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB" selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB" shouldUseLaunchSchemeArgsEnv = "YES">
+      <Testables>
+${testables}      </Testables>
+   </TestAction>
+</Scheme>
+EOF
+  CREATED_SCHEMES+=("$name")
+}
+
+# True if every argument is a known test target (safe to build a scoped scheme).
+all_are_test_targets() {
+  local want found t
+  for want in "$@"; do
+    found=0
+    for t in "${ALL_TESTS[@]}"; do [[ "$t" == "$want" ]] && { found=1; break; }; done
+    [[ $found -eq 1 ]] || return 1
+  done
+  return 0
+}
+
 LOG_DIR="$(mktemp -d)"
-trap 'restore_project; rm -rf "$LOG_DIR"' EXIT
+trap 'restore_project; cleanup_scoped_schemes; rm -rf "$LOG_DIR"' EXIT
 
 AVAILABLE_SCHEMES="$(list_schemes)"
 scheme_exists() { grep -qxF -- "$1" <<<"$AVAILABLE_SCHEMES"; }
@@ -163,6 +251,7 @@ xcodebuild_test() {
     "$@" \
     -destination "platform=tvOS Simulator,id=$PLOZZ_SIM_ID" \
     -parallel-testing-enabled "$PARALLEL" \
+    "${LEAN_SETTINGS[@]}" \
     CODE_SIGNING_ALLOWED=NO 2>&1 \
     | tee "$log" \
     | grep --line-buffered -E "$SUMMARY_RE" | tail -60
@@ -184,24 +273,39 @@ is_full_set() {
 MAIN_LOG="$LOG_DIR/main.log"
 STATUS=0
 
-if [[ ${#SCHEMES[@]} -eq 1 ]] && scheme_exists "${SCHEMES[0]}"; then
-  # Fast inner-loop path: a single suite whose native scheme Xcode materialised —
-  # build just that target, no shadow-dance.
-  echo "=== ${SCHEMES[0]} (native scheme) ==="
-  xcodebuild_test "$MAIN_LOG" -scheme "${SCHEMES[0]}" || STATUS=$?
+if is_full_set; then
+  # Full matrix (CI / pre-merge gate): build the whole package once — one
+  # compile, one orchestration, every suite.
+  if ! ensure_package_scheme; then
+    echo "run-tests.sh: FAILED — 'Plozz-Package' scheme is unavailable and could not be resolved (needed for a build-once run)."
+    exit 1
+  fi
+  echo "=== FULL matrix via Plozz-Package (build once, ${#ALL_TESTS[@]} suites) ==="
+  xcodebuild_test "$MAIN_LOG" -scheme "Plozz-Package" || STATUS=$?
+elif all_are_test_targets "${SCHEMES[@]}"; then
+  # Subset: build ONLY the requested suites' dependency subtrees via an
+  # ephemeral scoped scheme. Skips the ~90% of the module graph (and all the
+  # heavy external deps) that the requested suites don't touch. The scoped
+  # scheme lives in the package's .swiftpm dir, so the package must be the
+  # resolved container — move a shadowing generated Plozz.xcodeproj aside first.
+  if ! ensure_package_scheme; then
+    echo "run-tests.sh: FAILED — could not resolve the Swift package (needed to build a scoped subset)."
+    exit 1
+  fi
+  SCOPED_SCHEME="_PlozzScoped_$$"
+  make_scoped_scheme "$SCOPED_SCHEME" "${SCHEMES[@]}"
+  echo "=== ${#SCHEMES[@]} suite(s) via scoped scheme (build only their subtrees): ${SCHEMES[*]} ==="
+  xcodebuild_test "$MAIN_LOG" -scheme "$SCOPED_SCHEME" || STATUS=$?
 else
-  # Build-once via the package scheme (one compile, one orchestration).
+  # At least one requested name isn't a known test target — fall back to the
+  # safe build-once path (which tolerates/filters via -only-testing).
   if ! ensure_package_scheme; then
     echo "run-tests.sh: FAILED — 'Plozz-Package' scheme is unavailable and could not be resolved (needed for a build-once run)."
     exit 1
   fi
   XCB=(-scheme "Plozz-Package")
-  if is_full_set; then
-    echo "=== FULL matrix via Plozz-Package (build once, ${#ALL_TESTS[@]} suites) ==="
-  else
-    echo "=== ${#SCHEMES[@]} suite(s) via Plozz-Package (build once): ${SCHEMES[*]} ==="
-    for S in "${SCHEMES[@]}"; do XCB+=(-only-testing:"$S"); done
-  fi
+  echo "=== ${#SCHEMES[@]} suite(s) via Plozz-Package (build once): ${SCHEMES[*]} ==="
+  for S in "${SCHEMES[@]}"; do XCB+=(-only-testing:"$S"); done
   xcodebuild_test "$MAIN_LOG" "${XCB[@]}" || STATUS=$?
 fi
 
@@ -225,7 +329,17 @@ if [[ $STATUS -ne 0 ]]; then
   for S in "${FAILED[@]}"; do
     echo "=== retry: $S ==="
     RETRY_LOG="$LOG_DIR/retry-$S.log"
-    if xcodebuild_test "$RETRY_LOG" -scheme "Plozz-Package" -only-testing:"$S"; then
+    # Retry the single failing suite in isolation. Prefer a scoped scheme (build
+    # only that suite's subtree); fall back to Plozz-Package if it isn't a known
+    # test target (e.g. an unexpected bundle name in the log).
+    if all_are_test_targets "$S"; then
+      RETRY_SCHEME="_PlozzRetry_${$}_${S}"
+      make_scoped_scheme "$RETRY_SCHEME" "$S"
+      RETRY_ARGS=(-scheme "$RETRY_SCHEME")
+    else
+      RETRY_ARGS=(-scheme "Plozz-Package" -only-testing:"$S")
+    fi
+    if xcodebuild_test "$RETRY_LOG" "${RETRY_ARGS[@]}"; then
       echo "  -> $S PASSED on retry (flake)."
     else
       echo "  -> $S FAILED again."

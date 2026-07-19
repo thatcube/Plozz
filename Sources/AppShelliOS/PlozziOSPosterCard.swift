@@ -75,5 +75,25 @@ extension UIDensity {
     var iOSPosterMinimumWidth: CGFloat {
         max(86, CGFloat(116 * scale))
     }
+
+    func iOSPosterGridColumns(
+        horizontalSizeClass: UserInterfaceSizeClass?
+    ) -> [GridItem] {
+        let minimumWidth = if horizontalSizeClass == .regular {
+            max(150, CGFloat(144 * scale))
+        } else {
+            iOSPosterMinimumWidth
+        }
+        let spacing: CGFloat = horizontalSizeClass == .regular ? 16 : 12
+        return [
+            GridItem(
+                .adaptive(
+                    minimum: minimumWidth,
+                    maximum: minimumWidth * 1.55
+                ),
+                spacing: spacing
+            )
+        ]
+    }
 }
 #endif

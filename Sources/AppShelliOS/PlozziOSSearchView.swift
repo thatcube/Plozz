@@ -4,6 +4,7 @@ import FeatureSearchCore
 import SwiftUI
 
 struct PlozziOSSearchView: View {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var viewModel: SearchViewModel
     private let appModel: PlozziOSAppModel
 
@@ -85,15 +86,9 @@ struct PlozziOSSearchView: View {
                             .font(.title2.bold())
 
                         LazyVGrid(
-                            columns: [
-                                GridItem(
-                                    .adaptive(
-                                        minimum: appModel.settings.density.density.iOSPosterMinimumWidth,
-                                        maximum: appModel.settings.density.density.iOSPosterMinimumWidth * 1.55
-                                    ),
-                                    spacing: 12
-                                )
-                            ],
+                            columns: appModel.settings.density.density.iOSPosterGridColumns(
+                                horizontalSizeClass: horizontalSizeClass
+                            ),
                             spacing: 18
                         ) {
                             ForEach(section.items) { item in

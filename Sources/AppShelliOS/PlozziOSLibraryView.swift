@@ -150,6 +150,7 @@ private struct PlozziOSLibraryCard: View {
 }
 
 struct PlozziOSLibraryGridView: View {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var viewModel: LibraryBrowseViewModel
     private let title: String
     private let provider: any MediaProvider
@@ -186,15 +187,9 @@ struct PlozziOSLibraryGridView: View {
                 } else {
                     ScrollView {
                         LazyVGrid(
-                            columns: [
-                                GridItem(
-                                    .adaptive(
-                                        minimum: settings.density.density.iOSPosterMinimumWidth,
-                                        maximum: settings.density.density.iOSPosterMinimumWidth * 1.55
-                                    ),
-                                    spacing: 12
-                                )
-                            ],
+                            columns: settings.density.density.iOSPosterGridColumns(
+                                horizontalSizeClass: horizontalSizeClass
+                            ),
                             spacing: 18
                         ) {
                             ForEach(0..<total, id: \.self) { index in

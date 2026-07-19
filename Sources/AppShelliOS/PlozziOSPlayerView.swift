@@ -120,6 +120,7 @@ struct PlozziOSPlayerView: View {
             provider: provider,
             itemID: item.id,
             mediaSourceID: item.selectedVersionID,
+            offlineItem: item,
             offlinePlaybackResolver: appModel.downloads.offlineResolver,
             behavior: appModel.settings.subtitleBehavior.settings,
             style: appModel.settings.subtitleStyle.style,
@@ -135,13 +136,9 @@ struct PlozziOSPlayerView: View {
             seriesAccountFallbackID: item.sourceAccountID,
             startPosition: startPosition,
             scrobbler: appModel.trackerScrobbler,
-            engineFactory: EngineFactory(
-                makeNative: {
-                    NativeVideoEngine(
-                        style: $0,
-                        authenticatedHTTPResolver: resolver
-                    )
-                }
+            engineFactory: PlozziOSPlaybackEngineComposition.engineFactory(
+                networkFileResolver: appModel.mediaShareRuntime.networkFileResolver,
+                authenticatedHTTPResolver: resolver
             ),
             authenticatedHTTPResolver: resolver,
             neighborResolver: neighborResolver,

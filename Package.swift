@@ -572,6 +572,7 @@ let package = Package(
                 "CoreNetworking",
                 "CoreUI",
                 "CrashReporting",
+                "EnginePlozzigen",
                 "FeatureAuthCore",
                 "FeatureDiscoveryCore",
                 "FeatureHomeCore",

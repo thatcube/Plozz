@@ -22,6 +22,9 @@ enum EngineSelection {
         capabilities: MediaCapabilities,
         subtitleRule: SubtitlePolicy.Rule
     ) -> PlaybackEngineKind {
+        if request.streamURL?.isFileURL == true, plozzigenAvailable {
+            return .plozzigen
+        }
         if case .some(.networkFile) = request.playbackSource {
             return .plozzigen
         }
@@ -71,4 +74,3 @@ enum EngineSelection {
         return kind
     }
 }
-

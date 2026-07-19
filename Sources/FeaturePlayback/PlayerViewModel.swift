@@ -173,6 +173,9 @@ public final class PlayerViewModel {
     /// asset. `nil` (the default) makes offline resolution a strict no-op.
     private let offlinePlaybackResolver: (any OfflinePlaybackResolving)?
     private let itemID: String
+    /// The item already selected by the UI. When it has a completed local copy,
+    /// playback can start without first contacting the provider.
+    private let offlineItem: MediaItem?
     /// The chosen `MediaVersion.id` (Jellyfin `MediaSourceId` / Plex `Media` id)
     /// to play when the title has multiple versions; `nil` plays the default.
     private let mediaSourceID: String?
@@ -394,6 +397,7 @@ public final class PlayerViewModel {
         provider: any MediaProvider,
         itemID: String,
         mediaSourceID: String? = nil,
+        offlineItem: MediaItem? = nil,
         offlinePlaybackResolver: (any OfflinePlaybackResolving)? = nil,
         behavior: SubtitleBehavior = .default,
         style: SubtitleStyle = .default,
@@ -422,6 +426,7 @@ public final class PlayerViewModel {
         self.provider = provider
         self.offlinePlaybackResolver = offlinePlaybackResolver
         self.itemID = itemID
+        self.offlineItem = offlineItem
         self.mediaSourceID = mediaSourceID
         self.behavior = behavior
         self.style = style
@@ -842,6 +847,26 @@ public final class PlayerViewModel {
         mediaSourceID: String?,
         forceTranscode: Bool
     ) async throws -> PrefetchedPlayback {
+        if !forceTranscode,
+           let offlineItem,
+           let localURL = await offlinePlaybackResolver?
+               .localPlaybackURL(for: offlineItem) {
+            var request = PlaybackRequest(
+                item: offlineItem,
+                streamURL: localURL,
+                startPosition: offlineItem.resumePosition ?? 0,
+                sourceProvider: provider.kind,
+                sourceFileName: localURL.lastPathComponent
+            )
+            request.preferredAudioLanguages =
+                preferredAudioLanguages(for: offlineItem)
+            let kind = routeEngine(for: request, forceTranscode: false)
+            return PrefetchedPlayback(
+                itemID: itemID,
+                request: request,
+                engineKind: kind
+            )
+        }
         var request = try await provider.playbackInfo(
             for: itemID, mediaSourceID: mediaSourceID, forceTranscode: forceTranscode)
         // Offline choke point: if a completed download exists for this item,

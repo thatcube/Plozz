@@ -73,6 +73,11 @@ public final class AppState {
     /// created once.
     public let cacheBudgetSettingsModel = CacheBudgetSettingsModel()
 
+    /// Household-wide (Step 9) optional user-supplied TMDB API key (bring-your-own-key).
+    /// Created once and stored in the household Keychain; drives the Settings opt-in,
+    /// verify, and remove flow. App-wide like the provider settings it rides on.
+    public let tmdbUserKeyModel: TMDBUserKeyModel
+
     /// The household's profiles + active selection. Owned at the app level and
     /// layered on top of the multi-account core.
     public let profilesModel: ProfilesModel
@@ -659,6 +664,16 @@ public final class AppState {
         self.mediaShare = MediaShareRuntimeFacet(
             runtime: resolvedRuntime,
             accountsProviders: self.accountsProviders
+        )
+        // Step 9: the household TMDB BYOK key model. Reads/writes the same
+        // household-global Keychain item the media-share pipeline reads for its
+        // provider config, and drives verification + credential-change invalidation
+        // through the media-share facet.
+        let tmdbKeyMediaShare = self.mediaShare
+        self.tmdbUserKeyModel = TMDBUserKeyModel(
+            store: TMDBUserKeyStore(secureStore: KeychainStore(service: "com.plozz.app.household")),
+            validator: { token in await tmdbKeyMediaShare.validateTMDBUserKey(token) },
+            onCredentialSuperseded: { token in await tmdbKeyMediaShare.invalidateTMDBCredential(forToken: token) }
         )
         self.systemBridge = systemBridge ?? Self.makeDefaultSystemBridge()
         self.ratingsProvider = ratingsProvider ?? RatingsServiceFactory.make()

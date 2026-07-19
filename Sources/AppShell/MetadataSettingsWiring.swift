@@ -17,6 +17,7 @@ extension AppState {
         return MetadataSettingsDependencies(
             providers: metadataProviderSettingsModel,
             cacheBudget: cacheBudgetSettingsModel,
+            tmdbKey: tmdbUserKeyModel,
             baselineOrder: baseline.baseOrder,
             baselineRoles: baselineRoles,
             diagnosticsSnapshot: { [mediaShare] in await mediaShare.metadataDiagnosticsSnapshot() },

@@ -13,6 +13,8 @@ import CoreUI
 public struct MetadataSettingsDependencies {
     public var providers: MetadataProviderSettingsModel
     public var cacheBudget: CacheBudgetSettingsModel
+    /// Step 9: the household TMDB bring-your-own-key model (opt-in, verify, remove).
+    public var tmdbKey: TMDBUserKeyModel
     /// The build's baseline source order (Info.plist / code defaults).
     public var baselineOrder: [MetadataSource]
     /// The build's baseline role per source (used to show baseline-vs-override).
@@ -24,6 +26,7 @@ public struct MetadataSettingsDependencies {
     public init(
         providers: MetadataProviderSettingsModel,
         cacheBudget: CacheBudgetSettingsModel,
+        tmdbKey: TMDBUserKeyModel,
         baselineOrder: [MetadataSource],
         baselineRoles: [MetadataSource: MetadataProviderState],
         diagnosticsSnapshot: @escaping @MainActor () async -> MetadataEnrichmentDiagnosticsSnapshot,
@@ -32,6 +35,7 @@ public struct MetadataSettingsDependencies {
     ) {
         self.providers = providers
         self.cacheBudget = cacheBudget
+        self.tmdbKey = tmdbKey
         self.baselineOrder = baselineOrder
         self.baselineRoles = baselineRoles
         self.diagnosticsSnapshot = diagnosticsSnapshot
@@ -93,6 +97,7 @@ struct MetadataSettingsDetailView: View {
                     subtitle: "Artwork and details for your libraries — shared across every profile on this Apple TV."
                 )
                 providersSection
+                tmdbKeySection
                 attributionSection
                 diagnosticsSection
                 cacheSection
@@ -173,6 +178,103 @@ struct MetadataSettingsDetailView: View {
             MetadataProviderListLogic.moved(source, by: delta, in: displayOrder)
         )
     }
+
+    // MARK: - TMDB bring-your-own-key (Step 9)
+
+    private var tmdbKey: TMDBUserKeyModel { deps.tmdbKey }
+
+    /// A binding onto the model's obscured draft field.
+    private var draftKeyBinding: Binding<String> {
+        Binding(get: { tmdbKey.draftKey }, set: { tmdbKey.draftKey = $0 })
+    }
+
+    @ViewBuilder
+    private var tmdbKeySection: some View {
+        SettingsPanel(
+            title: "Your Own TMDB Key",
+            subtitle: "Optional. Add a TMDB API Read Access Token (v4) to fetch TMDB artwork and details under your own TMDB account.",
+            footer: nil,
+            contentPadding: .settingsPanelRowContent
+        ) {
+            VStack(alignment: .leading, spacing: 14) {
+                if tmdbKey.isConfigured {
+                    Label("A TMDB key is saved on this Apple TV.", systemImage: "checkmark.seal")
+                        .font(.callout.weight(.medium))
+                        .foregroundStyle(.secondary)
+                }
+
+                SecureField("TMDB v4 API Read Access Token", text: draftKeyBinding)
+                    .textContentType(.password)
+                    .disableAutocorrection(true)
+
+                verifyStatusView
+
+                HStack(spacing: 12) {
+                    Button {
+                        Task { await tmdbKey.saveDraft() }
+                    } label: {
+                        Label(tmdbKey.isConfigured ? "Replace Key" : "Save Key", systemImage: "square.and.arrow.down")
+                    }
+                    .buttonStyle(SettingsFocusButtonStyle())
+                    .disabled(!tmdbKey.canSaveDraft)
+
+                    Button {
+                        Task { await tmdbKey.verify() }
+                    } label: {
+                        Label("Verify Key", systemImage: "checkmark.shield")
+                    }
+                    .buttonStyle(SettingsFocusButtonStyle())
+                    .disabled((!tmdbKey.canSaveDraft && !tmdbKey.isConfigured) || tmdbKey.verifyState == .verifying)
+
+                    if tmdbKey.isConfigured {
+                        Button(role: .destructive) {
+                            Task { await tmdbKey.remove() }
+                        } label: {
+                            Label("Remove Key", systemImage: "trash")
+                        }
+                        .buttonStyle(SettingsFocusButtonStyle())
+                    }
+                }
+
+                Text(Self.tmdbKeyDisclosure)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var verifyStatusView: some View {
+        switch tmdbKey.verifyState {
+        case .idle:
+            EmptyView()
+        case .verifying:
+            Label("Checking…", systemImage: "hourglass")
+                .font(.callout).foregroundStyle(.secondary)
+        case .valid:
+            Label("Key verified — TMDB authenticated successfully.", systemImage: "checkmark.circle.fill")
+                .font(.callout.weight(.medium)).foregroundStyle(.green)
+        case .invalid:
+            Label("TMDB rejected this key. Check the token and try again.", systemImage: "xmark.octagon.fill")
+                .font(.callout.weight(.medium)).foregroundStyle(.red)
+        case .unreachable:
+            Label("Couldn't reach TMDB to check the key. Try again in a moment.", systemImage: "wifi.exclamationmark")
+                .font(.callout.weight(.medium)).foregroundStyle(.orange)
+        }
+    }
+
+    /// Required disclosure: BYOK changes credential / attribution / rate-limit
+    /// ownership only — never TMDB's licensing terms — and keeps the "not endorsed"
+    /// notice with a link to TMDB's terms.
+    private static let tmdbKeyDisclosure = """
+    Using your own key changes only whose TMDB credentials, rate limit, and attribution \
+    are used — it does not change TMDB's licensing terms or how you may use the artwork. \
+    Your key is stored securely on this Apple TV and never leaves it. Plozz uses the TMDB \
+    API but is not endorsed or certified by TMDB. See TMDB's Terms of Use at \
+    themoviedb.org/terms-of-use and get a token at themoviedb.org/settings/api.
+    """
+
 
     // MARK: - Attribution
 

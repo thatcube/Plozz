@@ -162,4 +162,16 @@ public final class MediaShareRuntimeFacet {
     public func clearMetadataCaches() async {
         await runtime.clearMetadataCaches()
     }
+
+    /// Verifies a user's TMDB BYOK token against TMDb (Step 9), reporting valid /
+    /// invalid / unreachable and recording the result into that key's breaker.
+    public func validateTMDBUserKey(_ token: String) async -> TMDBKeyValidationResult {
+        await runtime.validateTMDBUserKey(token)
+    }
+
+    /// Clears the shared cache + breaker state for a superseded TMDB key (Step 9),
+    /// called when the user replaces or removes their key.
+    public func invalidateTMDBCredential(forToken token: String) async {
+        await runtime.invalidateTMDBCredential(forToken: token)
+    }
 }

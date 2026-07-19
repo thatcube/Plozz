@@ -59,6 +59,15 @@ public protocol MediaShareRuntime: Sendable {
     /// Clears the resolved-URL metadata cache and the derived-artwork cache
     /// (Step 6 "Clear cache now"). Default: no-op.
     func clearMetadataCaches() async
+
+    /// Verifies a user's TMDB BYOK token against TMDb over the resilient HTTP path
+    /// (Step 9), recording the outcome into that key's circuit breaker. Default:
+    /// `.unreachable` (test fakes need not implement).
+    func validateTMDBUserKey(_ token: String) async -> TMDBKeyValidationResult
+
+    /// Clears the shared cache + breaker state for a superseded TMDB key (Step 9),
+    /// invoked when a user replaces or removes their key. Default: no-op.
+    func invalidateTMDBCredential(forToken token: String) async
 }
 
 public extension MediaShareRuntime {
@@ -67,6 +76,8 @@ public extension MediaShareRuntime {
     }
     func applyCacheBudgets(_ settings: CacheBudgetSettings) async {}
     func clearMetadataCaches() async {}
+    func validateTMDBUserKey(_ token: String) async -> TMDBKeyValidationResult { .unreachable }
+    func invalidateTMDBCredential(forToken token: String) async {}
 }
 
 /// The single production `MediaShareRuntime`. Construct it only through
@@ -262,6 +273,16 @@ final class DefaultMediaShareRuntime: MediaShareRuntime {
     func clearMetadataCaches() async {
         await MetadataDiskCache.shared.clear()
         await ArtworkImageCache.shared.clearDerivedArtworkCache()
+    }
+
+    func validateTMDBUserKey(_ token: String) async -> TMDBKeyValidationResult {
+        await TMDBKeyValidator(runtime: providerRuntime).validate(token)
+    }
+
+    func invalidateTMDBCredential(forToken token: String) async {
+        let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let credentialID = TMDbAccess.userToken(trimmed).credentialID else { return }
+        await providerRuntime.invalidateCredential(credentialID)
     }
 }
 

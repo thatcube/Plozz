@@ -72,7 +72,10 @@ struct PlozziOSSearchView: View {
                         LazyVGrid(
                             columns: [
                                 GridItem(
-                                    .adaptive(minimum: 116, maximum: 190),
+                                    .adaptive(
+                                        minimum: appModel.settings.density.density.iOSPosterMinimumWidth,
+                                        maximum: appModel.settings.density.density.iOSPosterMinimumWidth * 1.55
+                                    ),
                                     spacing: 12
                                 )
                             ],
@@ -81,7 +84,9 @@ struct PlozziOSSearchView: View {
                             ForEach(section.items) { item in
                                 PlozziOSSearchResultCard(
                                     item: item,
-                                    provider: provider(for: item)
+                                    provider: provider(for: item),
+                                    cardStyle: appModel.settings.cardStyle.style,
+                                    watchIndicator: appModel.settings.watchIndicator.indicator
                                 )
                             }
                         }
@@ -103,6 +108,8 @@ struct PlozziOSSearchView: View {
 private struct PlozziOSSearchResultCard: View {
     let item: MediaItem
     let provider: (any MediaProvider)?
+    let cardStyle: CardStyle
+    let watchIndicator: WatchStatusIndicator
 
     var body: some View {
         Group {
@@ -120,28 +127,14 @@ private struct PlozziOSSearchResultCard: View {
     }
 
     private var card: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            AsyncImage(url: item.posterURL) { image in
-                image
-                    .resizable()
-                    .scaledToFill()
-            } placeholder: {
-                Rectangle()
-                    .fill(.secondary.opacity(0.14))
-                    .overlay {
-                        Image(systemName: item.kind == .series ? "tv" : "film")
-                            .foregroundStyle(.secondary)
-                    }
-            }
-            .aspectRatio(2 / 3, contentMode: .fit)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-
-            Text(item.title)
-                .font(.subheadline.weight(.medium))
-                .lineLimit(2)
-
+        VStack(alignment: .leading, spacing: 6) {
+            PlozziOSPosterCard(
+                item: item,
+                cardStyle: cardStyle,
+                watchIndicator: watchIndicator
+            )
             if let cue = SearchSection.availabilityCue(for: item) {
-                Text(cue)
+                Label(cue, systemImage: "rectangle.stack.badge.plus")
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(.tint)
             }

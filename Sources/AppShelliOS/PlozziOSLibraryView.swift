@@ -49,7 +49,8 @@ struct PlozziOSLibrariesView: View {
             case let .loaded(libraries):
                 PlozziOSLibraryList(
                     libraries: libraries,
-                    provider: appModel.accountsProviders.primaryProvider
+                    provider: appModel.accountsProviders.primaryProvider,
+                    settings: appModel.settings
                 )
             case let .failed(error):
                 ContentUnavailableView {
@@ -82,6 +83,7 @@ struct PlozziOSLibrariesView: View {
 private struct PlozziOSLibraryList: View {
     let libraries: [MediaLibrary]
     let provider: (any MediaProvider)?
+    let settings: PlozziOSSettingsModel
 
     var body: some View {
         ScrollView {
@@ -102,7 +104,8 @@ private struct PlozziOSLibraryList: View {
                                     sourceAccountID: library.sourceAccountID
                                 ),
                                 title: library.title,
-                                provider: provider
+                                provider: provider,
+                                settings: settings
                             )
                         } label: {
                             PlozziOSLibraryCard(library: library)
@@ -150,15 +153,18 @@ struct PlozziOSLibraryGridView: View {
     @State private var viewModel: LibraryBrowseViewModel
     private let title: String
     private let provider: any MediaProvider
+    private let settings: PlozziOSSettingsModel
 
     init(
         viewModel: LibraryBrowseViewModel,
         title: String,
-        provider: any MediaProvider
+        provider: any MediaProvider,
+        settings: PlozziOSSettingsModel
     ) {
         _viewModel = State(initialValue: viewModel)
         self.title = title
         self.provider = provider
+        self.settings = settings
     }
 
     var body: some View {
@@ -181,7 +187,13 @@ struct PlozziOSLibraryGridView: View {
                     ScrollView {
                         LazyVGrid(
                             columns: [
-                                GridItem(.adaptive(minimum: 116, maximum: 190), spacing: 12)
+                                GridItem(
+                                    .adaptive(
+                                        minimum: settings.density.density.iOSPosterMinimumWidth,
+                                        maximum: settings.density.density.iOSPosterMinimumWidth * 1.55
+                                    ),
+                                    spacing: 12
+                                )
                             ],
                             spacing: 18
                         ) {
@@ -190,6 +202,8 @@ struct PlozziOSLibraryGridView: View {
                                     slot: viewModel.slot(at: index),
                                     index: index,
                                     provider: provider,
+                                    cardStyle: settings.cardStyle.style,
+                                    watchIndicator: settings.watchIndicator.indicator,
                                     onAppear: { await viewModel.itemAppeared(at: index) },
                                     onDisappear: { viewModel.itemDisappeared(at: index) }
                                 )
@@ -220,6 +234,8 @@ private struct PlozziOSLibraryItemCell: View {
     let slot: LibrarySlot?
     let index: Int
     let provider: any MediaProvider
+    let cardStyle: CardStyle
+    let watchIndicator: WatchStatusIndicator
     let onAppear: () async -> Void
     let onDisappear: () -> Void
 
@@ -241,31 +257,11 @@ private struct PlozziOSLibraryItemCell: View {
     }
 
     private var card: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            AsyncImage(url: slot?.item?.posterURL) { image in
-                image
-                    .resizable()
-                    .scaledToFill()
-            } placeholder: {
-                Rectangle()
-                    .fill(.secondary.opacity(0.14))
-                    .overlay {
-                        if slot?.item == nil {
-                            ProgressView()
-                        } else {
-                            Image(systemName: "film")
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-            }
-            .aspectRatio(2 / 3, contentMode: .fit)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-
-            Text(slot?.item?.title ?? "Loading…")
-                .font(.subheadline.weight(.medium))
-                .lineLimit(2)
-                .redacted(reason: slot?.item == nil ? .placeholder : [])
-        }
+        PlozziOSPosterCard(
+            item: slot?.item,
+            cardStyle: cardStyle,
+            watchIndicator: watchIndicator
+        )
     }
 }
 #endif

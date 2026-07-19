@@ -144,22 +144,27 @@ public enum MediaItemIdentity {
         return .title(normalizedTitle: normalized, year: year, kind: item.kind)
     }
 
+    /// The strong SHOW-level external id namespaces an episode can carry, paired
+    /// with the canonical token. Shared by ``seriesEpisodeIdentities(for:)`` (which
+    /// forms the episode's merge keys) and ``seriesExternalIDs(for:)`` (which the
+    /// episode split-guard compares), so the two stay in lock-step.
+    private static let seriesExternalNamespaces: [(namespace: ProviderIDNamespace, canonical: String)] = [
+        (.seriesImdb, "imdb"),
+        (.seriesTmdb, "tmdb"),
+        (.seriesTvdb, "tvdb"),
+        (.seriesTvmaze, "tvmaze"),
+        (.seriesAniList, "anilist"),
+        (.seriesMal, "myanimelist"),
+        (.seriesAniDB, "anidb")
+    ]
+
     private static func seriesEpisodeIdentities(
         for item: MediaItem
     ) -> [MediaIdentity] {
         guard item.kind == .episode,
               let season = item.seasonNumber,
               let episode = item.episodeNumber else { return [] }
-        let namespaces: [(ProviderIDNamespace, String)] = [
-            (.seriesImdb, "imdb"),
-            (.seriesTmdb, "tmdb"),
-            (.seriesTvdb, "tvdb"),
-            (.seriesTvmaze, "tvmaze"),
-            (.seriesAniList, "anilist"),
-            (.seriesMal, "myanimelist"),
-            (.seriesAniDB, "anidb")
-        ]
-        return namespaces.compactMap { namespace, canonical in
+        return seriesExternalNamespaces.compactMap { namespace, canonical in
             guard let value = item.providerIDs.providerID(namespace) else {
                 return nil
             }
@@ -168,6 +173,53 @@ public enum MediaItemIdentity {
                 value: value.lowercased()
             )
         }
+    }
+
+    /// An episode's SHOW-level external ids as `canonical namespace → lowercased
+    /// value` (e.g. `["tvdb": "81797"]`). This is the show identity the episode
+    /// split-guard compares — a conflicting value in a shared namespace proves two
+    /// episodes belong to *different shows* even when a bad shared id merged them.
+    public static func seriesExternalIDs(for item: MediaItem) -> [String: String] {
+        var result: [String: String] = [:]
+        for entry in seriesExternalNamespaces {
+            if let value = item.providerIDs.providerID(entry.namespace) {
+                result[entry.canonical] = value.lowercased()
+            }
+        }
+        return result
+    }
+
+    /// Whether two **episodes** almost certainly belong to *different works* despite
+    /// sharing a merge key — the episode arm of the split-guard. One server
+    /// mis-tagging show Y's SxEy with show X's series id (a documented Plex/NFO
+    /// failure mode — see ``externalSource(_:for:)``) makes both share the same
+    /// `series-<ns>:sXeY` key and false-merge into one card, cross-linking their
+    /// sources so best-source playback / the version picker / the watch fan-out can
+    /// target the *wrong show's* episode.
+    ///
+    /// The signal is deliberately keyed on **show identity + season/episode
+    /// numbering**, never the per-episode title: a legitimate cross-server twin can
+    /// carry a localized or differently-scraped episode title, so a title compare
+    /// would false-split real duplicates. Two episodes positively contradict when:
+    /// - both season numbers are present and differ, or both episode numbers are
+    ///   present and differ (a different slot in the run), or
+    /// - a **series** external id shared by namespace disagrees in value (proof they
+    ///   are different shows riding one bad id).
+    ///
+    /// Absent signal never contradicts (no S/E, or no overlapping series id), so a
+    /// sparse twin — or two copies that merged on an episode-level id and expose no
+    /// series ids — always stays merged, matching the movie/series guards' "a false
+    /// merge is worse than a missed split" stance.
+    public static func episodesPlausiblyContradict(
+        seasonA: Int?, episodeA: Int?, seriesIDsA: [String: String],
+        seasonB: Int?, episodeB: Int?, seriesIDsB: [String: String]
+    ) -> Bool {
+        if let sa = seasonA, let sb = seasonB, sa != sb { return true }
+        if let ea = episodeA, let eb = episodeB, ea != eb { return true }
+        for (namespace, valueA) in seriesIDsA {
+            if let valueB = seriesIDsB[namespace], valueA != valueB { return true }
+        }
+        return false
     }
 
     /// Whether two items almost certainly refer to **different works** despite

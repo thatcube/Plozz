@@ -254,11 +254,29 @@ public enum MediaItemMerger {
 
     /// Whether two items are almost certainly *different* works despite sharing a
     /// merge key — the positive-contradiction signal the split-guard ejects on.
-    /// Delegates to the shared, index-reusable primitive so a bad shared external
-    /// id is split identically here (full-item merges) and inside the identity
-    /// index's membership walk (which stores only title/year per source).
+    /// Movie/series pairs delegate to the shared, index-reusable title/year
+    /// primitive (so a bad shared external id is split identically here and inside
+    /// the identity index's membership walk); **episode** pairs use the show-identity
+    /// + season/episode primitive (``MediaItemIdentity/episodesPlausiblyContradict``),
+    /// because a per-episode title can legitimately differ across servers while a
+    /// conflicting series id / differing S/E proves two mis-tagged episodes belong to
+    /// different shows.
     static func plausiblyContradicts(_ a: MediaItem, _ b: MediaItem) -> Bool {
-        MediaItemIdentity.titlesPlausiblyContradict(
+        // Episodes take the show-identity + S/E arm (their title carries no reliable
+        // signal and can legitimately differ across servers); movies/series use the
+        // title/year primitive. A cross-kind pair can't share a kind-scoped merge key
+        // in the first place, so it never reaches here as a contradiction candidate.
+        if a.kind == .episode, b.kind == .episode {
+            return MediaItemIdentity.episodesPlausiblyContradict(
+                seasonA: a.seasonNumber,
+                episodeA: a.episodeNumber,
+                seriesIDsA: MediaItemIdentity.seriesExternalIDs(for: a),
+                seasonB: b.seasonNumber,
+                episodeB: b.episodeNumber,
+                seriesIDsB: MediaItemIdentity.seriesExternalIDs(for: b)
+            )
+        }
+        return MediaItemIdentity.titlesPlausiblyContradict(
             titleA: a.title,
             yearA: a.productionYear,
             kindA: a.kind,

@@ -215,13 +215,39 @@ private struct LoadedLogo<TextFallback: View>: View {
     /// keeps vibrant wordmarks (e.g. a saturated red logo on near-black) clean,
     /// even though their luminance sits close to the dark backdrop's.
     private func finalize(_ prepared: PreparedLogo) async -> ProcessedLogo {
+        HeroLogoAnalysis.analyze(prepared, backgroundSample: await backgroundSample?())
+    }
+}
+
+/// Shared logo legibility analysis, so the SwiftUI ``HeroLogoArtwork`` and the
+/// imperative UIKit hero foreground (`HeroForegroundUIView`) treat logos
+/// identically: the same single-tone-wordmark detection (recoloured to the
+/// scheme foreground) and the same adaptive contrast-halo decision. Before this
+/// was shared, the UIKit hero drew the *raw* cached logo — so a monochrome
+/// wordmark never flipped colour in light mode and low-contrast logos got no
+/// halo, unlike the detail hero.
+enum HeroLogoAnalysis {
+    /// Logo/background luminance gap (0…1) below which the logo no longer
+    /// separates by brightness alone. Tuned for a "clean" lean.
+    static let haloLuminanceThreshold = 0.26
+
+    /// Perceptual logo/background colour distance (0…~3, see `perceptualDistance`)
+    /// below which the logo no longer separates by colour either. Above it a
+    /// vibrant logo reads clearly against the backdrop and needs no halo.
+    static let haloColorThreshold = 0.40
+
+    /// Combines the prepared logo with an optional colour sample of the background
+    /// to decide the monochrome recolour + halo. With no sample we keep the halo
+    /// on, since we can't prove the logo is safe without it.
+    ///
+    /// A logo is legible when it separates from the artwork behind it by *either*
+    /// brightness or colour, so the halo is reserved for the cases where it does
+    /// neither. A logo is "monochrome" when its visible pixels are a single
+    /// near-grayscale tone at one luminance extreme — an all-black or all-white
+    /// wordmark that can be safely recoloured to the scheme foreground via its
+    /// alpha mask (the coverage guard excludes never-stripped solid rectangles).
+    static func analyze(_ prepared: PreparedLogo, backgroundSample: HeroBackgroundSample?) -> ProcessedLogo {
         let isDark = prepared.luminance < 0.5
-        // A logo is "monochrome" when its visible pixels are a single near-grayscale
-        // tone at one luminance extreme — an all-black or all-white wordmark. Such a
-        // logo can be safely recoloured to the current scheme's foreground tone via
-        // its alpha mask. The coverage guard excludes images that never had their
-        // background removed (a near-solid rectangle), whose alpha mask would tint
-        // the whole box rather than just letter shapes.
         let chroma = max(prepared.red, prepared.green, prepared.blue)
             - min(prepared.red, prepared.green, prepared.blue)
         let isMonochrome = prepared.coverage < 0.85
@@ -229,14 +255,13 @@ private struct LoadedLogo<TextFallback: View>: View {
             && (prepared.luminance < 0.22 || prepared.luminance > 0.85)
 
         var needsHalo = true
-        if let bg = await backgroundSample?() {
+        if let bg = backgroundSample {
             let lumaGap = abs(prepared.luminance - bg.luminance)
-            let colorGap = Self.perceptualDistance(
+            let colorGap = perceptualDistance(
                 r1: prepared.red, g1: prepared.green, b1: prepared.blue,
                 r2: bg.red, g2: bg.green, b2: bg.blue
             )
-            needsHalo = lumaGap < Self.haloLuminanceThreshold
-                && colorGap < Self.haloColorThreshold
+            needsHalo = lumaGap < haloLuminanceThreshold && colorGap < haloColorThreshold
         }
         return ProcessedLogo(
             image: prepared.image,
@@ -246,20 +271,11 @@ private struct LoadedLogo<TextFallback: View>: View {
         )
     }
 
-    /// Logo/background luminance gap (0…1) below which the logo no longer
-    /// separates by brightness alone. Tuned for a "clean" lean.
-    private static var haloLuminanceThreshold: Double { 0.26 }
-
-    /// Perceptual logo/background colour distance (0…~3, see `perceptualDistance`)
-    /// below which the logo no longer separates by colour either. Above it a
-    /// vibrant logo reads clearly against the backdrop and needs no halo.
-    private static var haloColorThreshold: Double { 0.40 }
-
     /// Weighted ("redmean") RGB distance — a cheap approximation of perceived
     /// colour difference that tracks the eye far better than raw Euclidean RGB.
     /// Inputs are 0…1 per channel; the result ranges 0 (identical) to ~3
     /// (black↔white).
-    private static func perceptualDistance(
+    static func perceptualDistance(
         r1: Double, g1: Double, b1: Double,
         r2: Double, g2: Double, b2: Double
     ) -> Double {
@@ -270,6 +286,56 @@ private struct LoadedLogo<TextFallback: View>: View {
         return ((2 + rMean) * dr * dr + 4 * dg * dg + (3 - rMean) * db * db).squareRoot()
     }
 }
+
+#if canImport(UIKit)
+/// A hero logo rendered for the imperative UIKit foreground (`HeroForegroundUIView`):
+/// the prepared (background-stripped, trimmed) image plus the same legibility
+/// decisions the SwiftUI hero makes. The caller applies them with UIKit
+/// primitives — a monochrome logo as a `.alwaysTemplate` image tinted to the
+/// scheme foreground, and a layer-shadow halo when `needsHalo` — so both hero
+/// surfaces render logos identically.
+///
+/// `@unchecked Sendable`: an immutable value whose only reference type is a
+/// `UIImage` created once and thereafter read-only.
+public struct HeroUIKitLogo: @unchecked Sendable {
+    public let image: UIImage
+    /// Single-tone wordmark: draw as a template image tinted to the scheme
+    /// foreground (white in dark mode, black in light mode).
+    public let isMonochrome: Bool
+    /// Whether a legibility halo is needed (ignored for monochrome logos, which
+    /// contrast against the scheme-tone scrim by construction).
+    public let needsHalo: Bool
+    /// Whether the logo reads dark (picks the halo colour: light glow for a dark
+    /// logo, dark glow for a light one).
+    public let isDark: Bool
+}
+
+/// Loads and analyses a hero logo through the exact same shared pipeline the
+/// SwiftUI ``HeroLogoArtwork`` uses (`HeroLogoPipeline` prepare + cache, then
+/// ``HeroLogoAnalysis``), so the imperative UIKit hero can recolour/halo logos
+/// identically instead of drawing the raw cached image.
+public enum HeroUIKitLogoRenderer {
+    public static func render(
+        primaryURL: URL?,
+        asyncFallbackURL: (@Sendable () async -> URL?)? = nil,
+        backgroundSample: (@Sendable () async -> HeroBackgroundSample?)? = nil,
+        priority: TaskPriority = .userInitiated
+    ) async -> HeroUIKitLogo? {
+        guard let prepared = await loadPreparedHeroLogo(
+            primaryURL: primaryURL,
+            asyncFallbackURL: asyncFallbackURL,
+            priority: priority
+        ) else { return nil }
+        let processed = HeroLogoAnalysis.analyze(prepared, backgroundSample: await backgroundSample?())
+        return HeroUIKitLogo(
+            image: processed.image,
+            isMonochrome: processed.isMonochrome,
+            needsHalo: processed.needsHalo,
+            isDark: processed.isDark
+        )
+    }
+}
+#endif
 
 /// Opportunistically prepares logo artwork before a hero slide becomes visible.
 /// The shared pipeline de-duplicates this work with any foreground request.
@@ -444,6 +510,8 @@ private struct LogoLegibilityHalo: ViewModifier {
     let isDark: Bool
     let active: Bool
 
+    @Environment(\.colorScheme) private var colorScheme
+
     func body(content: Content) -> some View {
         if !active {
             content
@@ -451,6 +519,13 @@ private struct LogoLegibilityHalo: ViewModifier {
             content
                 .shadow(color: .white.opacity(0.6), radius: 5)
                 .shadow(color: .white.opacity(0.35), radius: 14)
+        } else if colorScheme == .light {
+            // Softer, lighter dark glow in light mode: the light-mode hero is
+            // already bright, so a heavy black halo reads as a hard smudge. Lower
+            // opacity + a wider radius keeps the logo legible with a gentle lift.
+            content
+                .shadow(color: .black.opacity(0.30), radius: 7)
+                .shadow(color: .black.opacity(0.22), radius: 18)
         } else {
             content
                 .shadow(color: .black.opacity(0.55), radius: 5)

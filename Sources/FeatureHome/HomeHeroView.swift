@@ -822,6 +822,7 @@ struct HomeHeroView: View {
                 model: foregroundModel(for: item),
                 neighbours: foregroundNeighbours(for: item),
                 logoFallbacks: foregroundLogoFallbacks(for: item),
+                backgroundSamplers: foregroundBackgroundSamplers(for: item),
                 metadataVisible: metadataVisible,
                 width: HomeHeroLayout.screenWidth,
                 height: HomeHeroLayout.screenHeight - Self.contentBottomInset
@@ -948,6 +949,29 @@ struct HomeHeroView: View {
         for target in targets where result[target.id] == nil {
             let source = target
             result[source.id] = { await ArtworkRouter.shared.artworkURL(.logo, for: source) }
+        }
+        return result
+    }
+
+    /// Backdrop colour samplers for the current slide plus its prepared neighbours,
+    /// keyed by itemID. Mirrors the SwiftUI hero's `backgroundSample(for:)` so the
+    /// imperative UIKit hero decides a logo's legibility halo from the same backdrop
+    /// sample. Bounded to the same window the coordinator prepares.
+    private func foregroundBackgroundSamplers(
+        for item: MediaItem
+    ) -> [String: @Sendable () async -> HeroBackgroundSample?] {
+        var targets: [MediaItem] = [item]
+        if items.count > 1 {
+            let current = items.firstIndex(where: { $0.id == item.id }) ?? index
+            let previous = (current - 1 + items.count) % items.count
+            let next = (current + 1) % items.count
+            for i in [previous, next] where items.indices.contains(i) { targets.append(items[i]) }
+        }
+        var result: [String: @Sendable () async -> HeroBackgroundSample?] = [:]
+        for target in targets where result[target.id] == nil {
+            if let sampler = backgroundSample(for: target) {
+                result[target.id] = sampler
+            }
         }
         return result
     }

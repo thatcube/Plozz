@@ -69,6 +69,10 @@ final class HeroForegroundUIView: UIView {
     /// coordinator's generation guard).
     private var currentItemID: String?
     private var model: HeroForegroundModel?
+    /// The current slide's fully-processed logo (image + monochrome/halo flags), so
+    /// a light/dark trait change can re-tint a monochrome wordmark and reapply the
+    /// halo without reloading it. `nil` when the slide shows its text title.
+    private var currentLogo: HeroUIKitLogo?
 
     /// The last rendered paging index, so a genuine page change can animate the
     /// active-dot morph (dot→pill / pill→dot sliding left→right, matching the SwiftUI
@@ -109,8 +113,9 @@ final class HeroForegroundUIView: UIView {
     private let dotSpacing: CGFloat = 12
     /// Narrower cinematic text column (was 576; trimmed 80pt for a tighter column).
     private let contentMaxWidth: CGFloat = 496
-    /// Keep logos proportionally aligned with the narrower column (60% of 620pt).
-    private let logoMaxWidth: CGFloat = 372
+    /// Cap the logo to the same width as the description text column, so a wide
+    /// wordmark spans the full text width rather than a narrower box.
+    private let logoMaxWidth: CGFloat = 496
     private let dotsGlassHPad: CGFloat = 14
     private let dotsGlassVPad: CGFloat = 9
     private let bottomMargin: CGFloat = 24
@@ -126,6 +131,9 @@ final class HeroForegroundUIView: UIView {
 
         logoImageView.contentMode = .scaleAspectFit
         logoImageView.isHidden = true
+        // The legibility halo (for low-contrast logos) is a layer shadow derived
+        // from the image's alpha, so it must not be clipped.
+        logoImageView.layer.masksToBounds = false
 
         titleLabel.font = .systemFont(ofSize: 64, weight: .bold)
         titleLabel.numberOfLines = 2
@@ -199,23 +207,28 @@ final class HeroForegroundUIView: UIView {
         for label in [titleLabel, ratingLabel, metadataLabel, overviewLabel] {
             label.layer.shadowColor = shadow.cgColor
         }
+        // A monochrome wordmark is recoloured to the scheme foreground, so a
+        // light/dark switch must re-tint it (and re-evaluate the halo colour).
+        applyLogoTintAndHalo()
     }
 
     // MARK: - Imperative apply
 
     /// Applies a slide's model in place. `slideChanged` drives the metadata
     /// snap-hide / fade-in exactly like the SwiftUI hero's `metadataVisible`.
-    func apply(_ model: HeroForegroundModel, logo: UIImage?, metadataVisible: Bool, slideChanged: Bool) {
+    func apply(_ model: HeroForegroundModel, logo: HeroUIKitLogo?, metadataVisible: Bool, slideChanged: Bool) {
         self.model = model
         currentItemID = model.itemID
 
         // Logo vs text-title.
         if let logo {
-            logoImageView.image = logo
+            configureLogoImage(logo)
             logoImageView.isHidden = false
             titleLabel.isHidden = true
         } else {
+            currentLogo = nil
             logoImageView.image = nil
+            logoImageView.layer.shadowOpacity = 0
             logoImageView.isHidden = true
             titleLabel.isHidden = false
             titleLabel.text = model.title
@@ -246,19 +259,19 @@ final class HeroForegroundUIView: UIView {
     /// fade has settled), mirroring the SwiftUI hero's `HeroLogoArtwork` arrival
     /// transition, instead of a hard snap. When the block is currently hidden (mid
     /// page snap-hide) it just sets the image so the group fade-in brings it up.
-    func setLogo(_ image: UIImage, for itemID: String) {
+    func setLogo(_ logo: HeroUIKitLogo, for itemID: String) {
         guard itemID == currentItemID else { return }
-        crossfadeToLogo(image)
+        crossfadeToLogo(logo)
         setNeedsLayout()
     }
 
-    /// Swaps the text title out for `image`, dissolving when on screen. Sets the image
+    /// Swaps the text title out for `logo`, dissolving when on screen. Sets the image
     /// and lays out at final geometry first (layout only positions the logo once its
     /// image is non-nil), then cross-dissolves via alpha so the logo fades up as the
     /// outgoing title fades out — no frame jump, no backdrop sampling.
-    private func crossfadeToLogo(_ image: UIImage) {
+    private func crossfadeToLogo(_ logo: HeroUIKitLogo) {
         let onScreen = !isHidden && logoImageView.alpha > 0.01
-        logoImageView.image = image
+        configureLogoImage(logo)
         logoImageView.isHidden = false
         guard onScreen else {
             titleLabel.isHidden = true
@@ -277,6 +290,59 @@ final class HeroForegroundUIView: UIView {
             self.titleLabel.isHidden = true
             self.titleLabel.alpha = 1
         }
+    }
+
+    /// Installs a resolved logo into `logoImageView` with the same treatment as the
+    /// SwiftUI ``HeroLogoArtwork``: a monochrome wordmark is drawn as a template
+    /// image (tinted to the scheme foreground in ``applyLogoTintAndHalo``), while
+    /// multi-colour brand art draws as-is. Tint/halo are applied separately so a
+    /// trait change can recolour without reloading.
+    private func configureLogoImage(_ logo: HeroUIKitLogo) {
+        currentLogo = logo
+        logoImageView.image = logo.image.withRenderingMode(
+            logo.isMonochrome ? .alwaysTemplate : .alwaysOriginal
+        )
+        applyLogoTintAndHalo()
+    }
+
+    /// Applies the current logo's scheme-adaptive tint and legibility halo. A
+    /// monochrome wordmark is tinted to the scheme foreground (white in dark mode,
+    /// black in light) and needs no halo (it contrasts the scheme-tone scrim by
+    /// construction). A low-contrast multi-colour logo gets a soft alpha-derived
+    /// glow — light for a dark logo, dark for a light one — mirroring
+    /// `LogoLegibilityHalo`.
+    private func applyLogoTintAndHalo() {
+        guard let logo = currentLogo else {
+            logoImageView.layer.shadowOpacity = 0
+            return
+        }
+        if logo.isMonochrome {
+            logoImageView.tintColor = traitCollection.userInterfaceStyle == .light ? .black : .white
+            logoImageView.layer.shadowOpacity = 0
+            return
+        }
+        guard logo.needsHalo else {
+            logoImageView.layer.shadowOpacity = 0
+            return
+        }
+        if logo.isDark {
+            // Light glow for a dark logo — unchanged across appearances.
+            logoImageView.layer.shadowColor = UIColor.white.cgColor
+            logoImageView.layer.shadowOpacity = 0.6
+            logoImageView.layer.shadowRadius = 9
+        } else if traitCollection.userInterfaceStyle == .light {
+            // Softer, lighter dark glow in light mode (matches LogoLegibilityHalo):
+            // the bright hero doesn't need a heavy black halo, so drop the opacity
+            // and widen the radius for a gentle lift instead of a hard smudge.
+            logoImageView.layer.shadowColor = UIColor.black.cgColor
+            logoImageView.layer.shadowOpacity = 0.28
+            logoImageView.layer.shadowRadius = 13
+        } else {
+            logoImageView.layer.shadowColor = UIColor.black.cgColor
+            logoImageView.layer.shadowOpacity = 0.55
+            logoImageView.layer.shadowRadius = 9
+        }
+        logoImageView.layer.shadowOffset = .zero
     }
 
     // MARK: Pills

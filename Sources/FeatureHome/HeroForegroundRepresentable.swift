@@ -24,6 +24,10 @@ struct HeroForegroundRepresentable: UIViewRepresentable {
     /// series logo for an episode) is resolved on demand via `ArtworkRouter`. Keyed to
     /// the current slide + its prepared neighbours so it stays bounded.
     let logoFallbacks: [String: @Sendable () async -> URL?]
+    /// Async backdrop colour samplers by itemID, mirroring the SwiftUI hero's
+    /// `backgroundSample`. Feeds the shared logo legibility analysis so the UIKit
+    /// hero decides the contrast halo exactly like ``HeroLogoArtwork``.
+    let backgroundSamplers: [String: @Sendable () async -> HeroBackgroundSample?]
     /// Whether the show description (logo/metadata/overview/pills) is currently
     /// shown; the SwiftUI hero snaps this to `false` on a page and back to `true`
     /// ~280ms later. The renderer mirrors it as an imperative alpha animation.
@@ -37,6 +41,7 @@ struct HeroForegroundRepresentable: UIViewRepresentable {
         let view = HeroForegroundUIView()
         context.coordinator.view = view
         context.coordinator.logoFallbacks = logoFallbacks
+        context.coordinator.backgroundSamplers = backgroundSamplers
         context.coordinator.configure(width: width, height: height)
         context.coordinator.prepare(neighbours)
         context.coordinator.apply(model, metadataVisible: metadataVisible)
@@ -46,6 +51,7 @@ struct HeroForegroundRepresentable: UIViewRepresentable {
     func updateUIView(_ uiView: HeroForegroundUIView, context: Context) {
         context.coordinator.view = uiView
         context.coordinator.logoFallbacks = logoFallbacks
+        context.coordinator.backgroundSamplers = backgroundSamplers
         context.coordinator.configure(width: width, height: height)
         context.coordinator.prepare(neighbours)
         context.coordinator.apply(model, metadataVisible: metadataVisible)
@@ -80,16 +86,21 @@ final class HeroForegroundCoordinator {
     /// Bounded prepared window: itemID → prepared model (+ warmed logo). Trimmed to
     /// the current slide plus its handed-in neighbours so it never grows unbounded.
     private var prepared: [String: HeroForegroundModel] = [:]
-    /// Warmed logo images by itemID (raw cache decode), so a page can assign
-    /// instantly instead of waiting on a fetch — the "prepare next/previous off
-    /// transition" optimisation.
-    private var warmedLogos: [String: UIImage] = [:]
+    /// Warmed, fully-processed logos by itemID (shared `HeroLogoPipeline` prepare
+    /// + legibility analysis — background-stripped, trimmed, monochrome/halo
+    /// flags), so a page can assign instantly instead of waiting on a fetch, and
+    /// the UIKit hero recolours/haloes logos identically to ``HeroLogoArtwork``.
+    private var warmedLogos: [String: HeroUIKitLogo] = [:]
     private var loadTasks: [String: Task<Void, Never>] = [:]
 
     /// Async `.logo` URL resolvers by itemID (mirrors the SwiftUI hero's
     /// `asyncFallbackURL`). Used when a slide has no baked `logoURL` — the common
     /// case — to resolve the real (series, for an episode) logo on demand.
     var logoFallbacks: [String: @Sendable () async -> URL?] = [:]
+
+    /// Async backdrop colour samplers by itemID (mirrors the SwiftUI hero's
+    /// `backgroundSample`), feeding the shared logo legibility halo decision.
+    var backgroundSamplers: [String: @Sendable () async -> HeroBackgroundSample?] = [:]
 
     func configure(width: CGFloat, height: CGFloat) {
         guard width != configuredWidth || height != configuredHeight else { return }
@@ -152,33 +163,36 @@ final class HeroForegroundCoordinator {
         }
     }
 
-    /// Loads a slide's raw logo image off the shared artwork cache, generation- and
-    /// identity-guarded so a slow load can never paint the wrong slide's logo. When
-    /// the slide has no baked `logoURL` it first resolves one via the async `.logo`
-    /// fallback (the router), exactly like the SwiftUI hero's `asyncFallbackURL`.
+    /// Loads a slide's logo through the shared ``HeroUIKitLogoRenderer`` (same
+    /// `HeroLogoPipeline` prepare + legibility analysis the SwiftUI hero uses),
+    /// generation- and identity-guarded so a slow load can never paint the wrong
+    /// slide's logo. When the slide has no baked `logoURL` the renderer first
+    /// resolves one via the async `.logo` fallback (the router), exactly like the
+    /// SwiftUI hero's `asyncFallbackURL`, and folds in the backdrop sample so the
+    /// contrast halo matches.
     private func warmLogo(for model: HeroForegroundModel, generation gen: Int, assignIfCurrent: Bool = false) {
         guard warmedLogos[model.itemID] == nil, loadTasks[model.itemID] == nil else { return }
         let id = model.itemID
         let primary = model.logoURL
         let fallback = logoFallbacks[id]
         guard primary != nil || fallback != nil else { return }
+        let sampler = backgroundSamplers[id]
         loadTasks[id] = Task { [weak self] in
-            var url = primary
-            if url == nil, let fallback { url = await fallback() }
-            guard let url else {
-                await MainActor.run { self?.loadTasks[id] = nil }
-                return
-            }
-            let image = await ArtworkImageCache.shared.image(for: url, variant: .original, background: true)
+            let logo = await HeroUIKitLogoRenderer.render(
+                primaryURL: primary,
+                asyncFallbackURL: fallback,
+                backgroundSample: sampler,
+                priority: .userInitiated
+            )
             await MainActor.run {
                 guard let self else { return }
                 self.loadTasks[id] = nil
-                guard let image else { return }
-                self.warmedLogos[id] = image
+                guard let logo else { return }
+                self.warmedLogos[id] = logo
                 // Only paint if this is still the fronted slide and no newer apply
                 // has superseded us.
                 if assignIfCurrent, self.appliedModel?.itemID == id, gen <= self.generation {
-                    self.view?.setLogo(image, for: id)
+                    self.view?.setLogo(logo, for: id)
                 }
             }
         }

@@ -777,6 +777,9 @@ private struct PlozziOSSeasonRow: View {
 }
 
 private struct PlozziOSSeasonEpisodesView: View {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(PlozziOSAppModel.self) private var appModel
+
     let viewModel: ItemDetailViewModel
     let season: MediaItem
     let onPlay: (MediaItem, Bool) -> Void
@@ -789,33 +792,20 @@ private struct PlozziOSSeasonEpisodesView: View {
                         "No episodes",
                         systemImage: "play.rectangle"
                     )
+                } else if horizontalSizeClass == .regular {
+                    ScrollView {
+                        LazyVStack(spacing: 12) {
+                            ForEach(episodes) { episode in
+                                episodeEntry(episode, episodes: episodes, isWide: true)
+                            }
+                        }
+                        .padding()
+                        .frame(maxWidth: 920)
+                        .frame(maxWidth: .infinity)
+                    }
                 } else {
                     List(episodes) { episode in
-                        HStack {
-                            Button {
-                                onPlay(episode, false)
-                            } label: {
-                                PlozziOSEpisodeRow(episode: episode)
-                            }
-                            .buttonStyle(.plain)
-                            .contextMenu {
-                                ForEach(actions(for: episode, episodes: episodes)) { action in
-                                    Button(action.title, systemImage: action.systemImage) {
-                                        appModel.mediaItemActionHandler.perform(
-                                            action,
-                                            on: episode,
-                                            context: MediaItemActionContext(
-                                                orderedSiblings: episodes
-                                            )
-                                        )
-                                    }
-                                }
-                            }
-
-                            PlozziOSEpisodeDownloadButton(
-                                episode: episode
-                            )
-                        }
+                        episodeEntry(episode, episodes: episodes, isWide: false)
                     }
                     .listStyle(.plain)
                 }
@@ -832,7 +822,42 @@ private struct PlozziOSSeasonEpisodesView: View {
         }
     }
 
-    @Environment(PlozziOSAppModel.self) private var appModel
+    private func episodeEntry(
+        _ episode: MediaItem,
+        episodes: [MediaItem],
+        isWide: Bool
+    ) -> some View {
+        HStack {
+            Button {
+                onPlay(episode, false)
+            } label: {
+                PlozziOSEpisodeRow(episode: episode, isWide: isWide)
+            }
+            .buttonStyle(.plain)
+            .contextMenu {
+                ForEach(actions(for: episode, episodes: episodes)) { action in
+                    Button(action.title, systemImage: action.systemImage) {
+                        appModel.mediaItemActionHandler.perform(
+                            action,
+                            on: episode,
+                            context: MediaItemActionContext(
+                                orderedSiblings: episodes
+                            )
+                        )
+                    }
+                }
+            }
+
+            PlozziOSEpisodeDownloadButton(episode: episode)
+        }
+        .padding(isWide ? 14 : 0)
+        .background {
+            if isWide {
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(.thinMaterial)
+            }
+        }
+    }
 
     private func actions(
         for episode: MediaItem,
@@ -946,6 +971,7 @@ private struct PlozziOSEpisodeDownloadButton: View {
 
 private struct PlozziOSEpisodeRow: View {
     let episode: MediaItem
+    let isWide: Bool
 
     var body: some View {
         HStack(alignment: .top, spacing: 14) {
@@ -957,7 +983,10 @@ private struct PlozziOSEpisodeRow: View {
                 Rectangle()
                     .fill(.secondary.opacity(0.14))
             }
-            .frame(width: 120, height: 68)
+            .frame(
+                width: isWide ? 180 : 120,
+                height: isWide ? 101 : 68
+            )
             .clipShape(RoundedRectangle(cornerRadius: 8))
 
             VStack(alignment: .leading, spacing: 5) {
@@ -965,11 +994,12 @@ private struct PlozziOSEpisodeRow: View {
                     .font(.headline)
                 if let overview = episode.overview, !overview.isEmpty {
                     Text(overview)
-                        .font(.caption)
+                        .font(isWide ? .subheadline : .caption)
                         .foregroundStyle(.secondary)
-                        .lineLimit(3)
+                        .lineLimit(isWide ? 4 : 3)
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.vertical, 4)
     }

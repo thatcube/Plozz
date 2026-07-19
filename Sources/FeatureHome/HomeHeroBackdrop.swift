@@ -145,7 +145,10 @@ struct HomeHeroBackdrop: View {
             .clipped()
             .overlay {
                 if showsTrailer, let trailerController {
-                    HeroTrailerVideoLayer(controller: trailerController)
+                    HeroTrailerVideoLayer(
+                        controller: trailerController,
+                        ownerID: "home-hero"
+                    )
                         .transition(.opacity)
                 }
             }

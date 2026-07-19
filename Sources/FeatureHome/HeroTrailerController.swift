@@ -1,6 +1,5 @@
 #if canImport(AVFoundation)
 import AVFoundation
-import CoreImage
 import CoreModels
 import CoreNetworking
 import Foundation
@@ -57,11 +56,6 @@ public final class HeroTrailerController {
     /// The resolved trailer duration in seconds once known (`0` until ready).
     /// Drives the hero's dwell length so the progress bar spans the full trailer.
     public private(set) var duration: TimeInterval = 0
-    /// One frozen frame captured immediately before Home pushes detail. It masks
-    /// the few-frame gap while the shared player moves between AVPlayerLayers.
-    /// Bounded to exactly one image and replaced on every handoff.
-    public private(set) var handoffImage: UIImage?
-
     /// The underlying player, exposed only so a ``HeroTrailerVideoLayer`` can
     /// attach an `AVPlayerLayer`. Engine-agnostic callers must not depend on it.
     public let player = AVPlayer()
@@ -76,13 +70,20 @@ public final class HeroTrailerController {
     private var hasStartedPlayback = false
     private var autoplayWhenReady = false
     private var requestedPaused = false
-    @ObservationIgnored private var videoOutput: AVPlayerItemVideoOutput?
-    @ObservationIgnored private let imageContext = CIContext(options: nil)
+    #if canImport(UIKit)
+    @ObservationIgnored fileprivate let surfaceView = HeroTrailerPlayerSurfaceView()
+    /// Only this logical surface may attach the physical player view. Explicit
+    /// ownership prevents a stale disappearing hierarchy from stealing it back.
+    public private(set) var surfaceOwnerID: String?
+    #endif
 
     public init() {
         // Never let the trailer claim the Now-Playing transport or interrupt
         // music; it's ambient. Muting is applied per play() call.
         player.actionAtItemEnd = .pause
+        #if canImport(UIKit)
+        surfaceView.playerLayer.player = player
+        #endif
     }
 
     /// Reads the source's actual AVFoundation duration before the hero timeline
@@ -99,6 +100,12 @@ public final class HeroTrailerController {
     /// hand-off for the same title can keep playing rather than reload).
     public func isShowing(_ itemID: String) -> Bool {
         currentItemID == itemID && currentItemID != nil
+    }
+
+    public func claimSurface(ownerID: String) {
+        #if canImport(UIKit)
+        surfaceOwnerID = ownerID
+        #endif
     }
 
     /// Installs the current frontmost surface's end handler. Ownership prevents
@@ -139,14 +146,6 @@ public final class HeroTrailerController {
         activateSession()
 
         let item = AVPlayerItem(url: resolvedURL)
-        let output = AVPlayerItemVideoOutput(
-            pixelBufferAttributes: [
-                kCVPixelBufferPixelFormatTypeKey as String:
-                    Int(kCVPixelFormatType_32BGRA)
-            ]
-        )
-        item.add(output)
-        videoOutput = output
         player.isMuted = muted
         hasStartedPlayback = false
         autoplayWhenReady = false
@@ -171,48 +170,6 @@ public final class HeroTrailerController {
     /// reloading.
     public func setMuted(_ muted: Bool) {
         player.isMuted = muted
-    }
-
-    /// Captures the currently displayed video frame for a seamless layer handoff.
-    /// Failure is harmless (the detail layer falls back to its normal background).
-    public func captureHandoffFrame() async {
-        let itemTime = player.currentTime()
-        // Fast path: use the live decoded pixel buffer when available.
-        if let videoOutput,
-           let pixelBuffer = videoOutput.copyPixelBuffer(
-               forItemTime: itemTime,
-               itemTimeForDisplay: nil
-           ) {
-            let image = CIImage(cvPixelBuffer: pixelBuffer)
-            if let cgImage = imageContext.createCGImage(image, from: image.extent) {
-                handoffImage = UIImage(cgImage: cgImage)
-                return
-            }
-        }
-
-        // Reliable fallback: generate the exact current frame from the already
-        // loaded asset before pushing detail. Navigation waits for this one frame,
-        // eliminating the race where a missing live-output snapshot exposed art.
-        guard let asset = player.currentItem?.asset else {
-            handoffImage = nil
-            return
-        }
-        let generator = AVAssetImageGenerator(asset: asset)
-        generator.appliesPreferredTrackTransform = true
-        generator.requestedTimeToleranceBefore = CMTime(
-            seconds: 0.05,
-            preferredTimescale: 600
-        )
-        generator.requestedTimeToleranceAfter = CMTime(
-            seconds: 0.05,
-            preferredTimescale: 600
-        )
-        do {
-            let generated = try await generator.image(at: itemTime)
-            handoffImage = UIImage(cgImage: generated.image)
-        } catch {
-            handoffImage = nil
-        }
     }
 
     /// Freezes/resumes the ambient trailer in lockstep with the hero's
@@ -254,8 +211,6 @@ public final class HeroTrailerController {
         statusObservation = nil
         if resetItem {
             player.replaceCurrentItem(with: nil)
-            videoOutput = nil
-            handoffImage = nil
             isPlaying = false
             isReady = false
             currentItemID = nil
@@ -326,35 +281,55 @@ public final class HeroTrailerController {
 }
 
 #if canImport(UIKit)
-/// A thin `AVPlayerLayer`-backed surface fed by a ``HeroTrailerController``'s
-/// player, so both the Home hero and the detail hero can render the *same* live
-/// trailer. Purely a video sink — no controls, no transport UI.
+fileprivate final class HeroTrailerPlayerSurfaceView: UIView {
+    override static var layerClass: AnyClass { AVPlayerLayer.self }
+    var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        playerLayer.videoGravity = .resizeAspectFill
+        isUserInteractionEnabled = false
+    }
+
+    required init?(coder: NSCoder) { nil }
+}
+
+/// Hosts the controller's one physical AVPlayerLayer surface. Owner tokens make
+/// reparenting deterministic across overlapping navigation hierarchies.
 public struct HeroTrailerVideoLayer: UIViewRepresentable {
-    private let player: AVPlayer
+    private let controller: HeroTrailerController
+    private let ownerID: String
 
-    public init(controller: HeroTrailerController) {
-        self.player = controller.player
+    public init(controller: HeroTrailerController, ownerID: String) {
+        self.controller = controller
+        self.ownerID = ownerID
     }
 
-    public func makeUIView(context: Context) -> PlayerSurfaceView {
-        let view = PlayerSurfaceView()
-        view.playerLayer.player = player
-        view.playerLayer.videoGravity = .resizeAspectFill
-        view.isUserInteractionEnabled = false
-        return view
+    public func makeUIView(context: Context) -> HostView {
+        let host = HostView()
+        attach(to: host)
+        return host
     }
 
-    public func updateUIView(_ uiView: PlayerSurfaceView, context: Context) {
-        if uiView.playerLayer.player !== player {
-            uiView.playerLayer.player = player
+    public func updateUIView(_ uiView: HostView, context: Context) {
+        attach(to: uiView)
+    }
+
+    private func attach(to host: HostView) {
+        guard controller.surfaceOwnerID == ownerID else { return }
+        let surface = controller.surfaceView
+        guard surface.superview !== host else { return }
+        surface.removeFromSuperview()
+        host.addSubview(surface)
+        surface.frame = host.bounds
+        surface.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+    }
+
+    public final class HostView: UIView {
+        public override func layoutSubviews() {
+            super.layoutSubviews()
+            subviews.forEach { $0.frame = bounds }
         }
-    }
-
-    /// A `UIView` whose backing layer is an `AVPlayerLayer`, so the video always
-    /// fills the view without a manual frame-sync.
-    public final class PlayerSurfaceView: UIView {
-        public override static var layerClass: AnyClass { AVPlayerLayer.self }
-        public var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
     }
 }
 #endif

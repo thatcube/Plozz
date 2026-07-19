@@ -257,6 +257,7 @@ public struct ItemDetailView: View {
         .task(id: heroTrailerTaskID) {
             guard heroBackground.settings.mode == .trailer,
                   let item = viewModel.state.value?.item else { return }
+            heroTrailerController.claimSurface(ownerID: "detail-\(item.id)")
             if let currentID = heroTrailerController.currentItemID,
                currentID != item.id {
                 heroTrailerController.stop()

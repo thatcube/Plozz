@@ -195,10 +195,9 @@ struct HomeTab: View {
                     // server picker), so best-source selection still happens there and
                     // at play time (requestPlay).
                     let item = $0
-                    Task { @MainActor in
-                        await heroTrailerController.captureHandoffFrame()
-                        if heroTrailerController.isShowing(item.id),
-                           heroTrailerController.isPlaying {
+                    if heroTrailerController.isShowing(item.id),
+                       heroTrailerController.isPlaying {
+                        heroTrailerController.claimSurface(ownerID: "detail-\(item.id)")
                             // A system NavigationStack push snapshots/composites
                             // the newly-created detail hierarchy before its video
                             // layer is live, which exposes a backdrop for a few
@@ -210,9 +209,8 @@ struct HomeTab: View {
                             withTransaction(transaction) {
                                 navigate(item)
                             }
-                        } else {
-                            navigate(item)
-                        }
+                    } else {
+                        navigate(item)
                     }
                 },
                 onPlayItem: { requestPlay($0) },

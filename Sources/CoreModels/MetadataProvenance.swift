@@ -25,6 +25,9 @@ public struct MetadataSource: RawRepresentable, Codable, Hashable, Sendable {
     public static let wikipedia = Self(rawValue: "wikipedia")
     public static let kitsu = Self(rawValue: "kitsu")
     public static let mal = Self(rawValue: "mal")
+    public static let omdb = Self(rawValue: "omdb")
+    public static let deezer = Self(rawValue: "deezer")
+    public static let musicbrainz = Self(rawValue: "musicbrainz")
     public static let legacyUnknown = Self(rawValue: "legacyUnknown")
 }
 

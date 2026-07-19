@@ -161,28 +161,10 @@ private struct PlozziOSHomeLandingView: View {
             }
             .navigationTitle("Home")
         } else {
-            List {
-                Section("Connected servers") {
-                    ForEach(appModel.accounts) { account in
-                        Label {
-                            VStack(alignment: .leading) {
-                                Text(account.server.name)
-                                Text(account.userName)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        } icon: {
-                            Image(systemName: "server.rack")
-                        }
-                    }
-                }
-            }
-            .navigationTitle("Home")
-            .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    Button("Add Server", systemImage: "plus", action: onAddServer)
-                }
-            }
+            PlozziOSLibrariesView(
+                appModel: appModel,
+                onAddServer: onAddServer
+            )
         }
     }
 }

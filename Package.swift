@@ -37,6 +37,7 @@ let package = Package(
         .library(name: "LastFmService", targets: ["LastFmService"]),
         .library(name: "FeatureAuthCore", targets: ["FeatureAuthCore"]),
         .library(name: "FeatureAuth", targets: ["FeatureAuth"]),
+        .library(name: "FeatureHomeCore", targets: ["FeatureHomeCore"]),
         .library(name: "FeatureHome", targets: ["FeatureHome"]),
         .library(name: "FeaturePlayback", targets: ["FeaturePlayback"]),
         .library(name: "FeatureSearch", targets: ["FeatureSearch"]),
@@ -254,8 +255,12 @@ let package = Package(
             dependencies: ["CoreModels", "CoreUI", "FeatureAuthCore", "ProviderPlex"]
         ),
         .target(
+            name: "FeatureHomeCore",
+            dependencies: ["CoreModels", "CoreNetworking"]
+        ),
+        .target(
             name: "FeatureHome",
-            dependencies: ["CoreModels", "CoreNetworking", "CoreUI", "MetadataKit", "TopShelfKit", "RatingsService", "ProviderTrailers"]
+            dependencies: ["CoreModels", "CoreNetworking", "CoreUI", "FeatureHomeCore", "MetadataKit", "TopShelfKit", "RatingsService", "ProviderTrailers"]
         ),
         .target(
             name: "FeaturePlayback",
@@ -540,6 +545,7 @@ let package = Package(
                 "CoreModels",
                 "CoreNetworking",
                 "FeatureAuthCore",
+                "FeatureHomeCore",
                 "ProviderPlex",
             ]
         ),

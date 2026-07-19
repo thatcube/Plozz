@@ -1306,7 +1306,8 @@ private struct SeriesDetailHeroBackdrop: View {
             asyncFallbackURL: asyncFallbackURL,
             height: height,
             scrimTone: scrimTone,
-            verticalOffset: reduceMotion ? 0 : (receded ? -260 : 0)
+            verticalOffset: reduceMotion ? 0 : (receded ? -260 : 0),
+            stillImageOpacity: showsTrailer ? 0 : 1
         ) {
             if showsTrailer {
                 HeroTrailerVideoLayer(controller: trailerController)

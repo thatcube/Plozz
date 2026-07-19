@@ -47,6 +47,11 @@ public struct HeroBackdropLayer<Video: View>: View {
     /// so the strip tiles correctly, and the *container* applies the overscan
     /// breakout once for the whole strip.
     private let ignoresOverscan: Bool
+    /// Opacity of the still image beneath the video slot. Detail handoff sets
+    /// this to zero while the shared trailer is already playing, letting the
+    /// existing Home video remain visible through the navigation transition
+    /// until the newly-mounted AVPlayerLayer presents its first frame.
+    private let stillImageOpacity: Double
     /// Overlaid on the still image; empty today, hosts a faded-in trailer later.
     private let backgroundVideo: () -> Video
 
@@ -58,6 +63,7 @@ public struct HeroBackdropLayer<Video: View>: View {
         verticalOffset: CGFloat = 0,
         dissolveStart: CGFloat = 0.33,
         ignoresOverscan: Bool = true,
+        stillImageOpacity: Double = 1,
         @ViewBuilder backgroundVideo: @escaping () -> Video
     ) {
         self.references = urls.map(ArtworkReference.remote)
@@ -67,6 +73,7 @@ public struct HeroBackdropLayer<Video: View>: View {
         self.verticalOffset = verticalOffset
         self.dissolveStart = dissolveStart
         self.ignoresOverscan = ignoresOverscan
+        self.stillImageOpacity = stillImageOpacity
         self.backgroundVideo = backgroundVideo
     }
 
@@ -78,6 +85,7 @@ public struct HeroBackdropLayer<Video: View>: View {
         verticalOffset: CGFloat = 0,
         dissolveStart: CGFloat = 0.33,
         ignoresOverscan: Bool = true,
+        stillImageOpacity: Double = 1,
         @ViewBuilder backgroundVideo: @escaping () -> Video
     ) {
         self.references = references
@@ -87,6 +95,7 @@ public struct HeroBackdropLayer<Video: View>: View {
         self.verticalOffset = verticalOffset
         self.dissolveStart = dissolveStart
         self.ignoresOverscan = ignoresOverscan
+        self.stillImageOpacity = stillImageOpacity
         self.backgroundVideo = backgroundVideo
     }
 
@@ -99,6 +108,7 @@ public struct HeroBackdropLayer<Video: View>: View {
         ) {
             placeholder
         }
+        .opacity(stillImageOpacity)
         .frame(height: height)
         .frame(maxWidth: .infinity)
         .clipped()
@@ -180,7 +190,8 @@ public extension HeroBackdropLayer where Video == EmptyView {
         scrimTone: Color,
         verticalOffset: CGFloat = 0,
         dissolveStart: CGFloat = 0.33,
-        ignoresOverscan: Bool = true
+        ignoresOverscan: Bool = true,
+        stillImageOpacity: Double = 1
     ) {
         self.init(
             urls: urls,
@@ -190,6 +201,7 @@ public extension HeroBackdropLayer where Video == EmptyView {
             verticalOffset: verticalOffset,
             dissolveStart: dissolveStart,
             ignoresOverscan: ignoresOverscan,
+            stillImageOpacity: stillImageOpacity,
             backgroundVideo: { EmptyView() }
         )
     }
@@ -201,7 +213,8 @@ public extension HeroBackdropLayer where Video == EmptyView {
         scrimTone: Color,
         verticalOffset: CGFloat = 0,
         dissolveStart: CGFloat = 0.33,
-        ignoresOverscan: Bool = true
+        ignoresOverscan: Bool = true,
+        stillImageOpacity: Double = 1
     ) {
         self.init(
             references: references,
@@ -211,6 +224,7 @@ public extension HeroBackdropLayer where Video == EmptyView {
             verticalOffset: verticalOffset,
             dissolveStart: dissolveStart,
             ignoresOverscan: ignoresOverscan,
+            stillImageOpacity: stillImageOpacity,
             backgroundVideo: { EmptyView() }
         )
     }

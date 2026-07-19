@@ -15,7 +15,16 @@ struct PlozziOSHomeView: View {
         _viewModel = State(
             initialValue: HomeViewModel(
                 accounts: appModel.accountsProviders.homeAccounts,
-                contentStore: HomeContentStore()
+                contentStore: HomeContentStore(
+                    namespace: appModel.profiles.activeNamespace
+                ),
+                identitySources: appModel.identityIndex.identitySourcesProvider,
+                pendingWatchMutations: { [weak appModel] in
+                    await appModel?.pendingWatchMutations() ?? []
+                },
+                recentlyAppliedRecency: { [weak appModel] in
+                    await appModel?.appliedWatchRecency() ?? [:]
+                }
             )
         )
     }
@@ -82,6 +91,9 @@ struct PlozziOSHomeView: View {
             if let mutation = MediaItemMutation.from(note) {
                 viewModel.applyWatchedState(mutation)
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .identityIndexDidUpdate)) { _ in
+            viewModel.scheduleReenrich()
         }
     }
 

@@ -42,6 +42,9 @@ final class PlozziOSAppModel {
                     self.accountsProviders.provider(forAccountID: $0)
                 } ?? self.accountsProviders.primaryProvider
             },
+            additionalSources: { [weak self] item in
+                self?.identityIndex.identitySnapshot.sourceRefs(for: item) ?? []
+            },
             primaryAccountID: { [unowned self] in
                 self.accountsProviders.primaryActiveAccount?.id
             },
@@ -60,6 +63,18 @@ final class PlozziOSAppModel {
     private let mediaShareRescanService: MediaShareRescanService
     @ObservationIgnored private var trackerProfileGeneration: UInt64 = 0
     @ObservationIgnored private var watchReconcilers: [String: WatchStateReconciler] = [:]
+    @ObservationIgnored
+    private(set) lazy var identityIndex = IdentityIndexModel(
+        activeAccounts: { [weak self] in
+            self?.accountsProviders.homeAccounts ?? []
+        },
+        namespace: { [weak self] in
+            self?.profiles.activeNamespace
+        },
+        onPublish: { [weak self] in
+            self?.drainWatchOutbox()
+        }
+    )
 
     private var watchReconciler: WatchStateReconciler {
         let profileID = profiles.activeProfileID
@@ -221,6 +236,7 @@ final class PlozziOSAppModel {
             )
         }
         accountsProviders.reloadAccounts()
+        identityIndex.warmIdentityIndex()
         let scanReporter = shareScanStatus.reporter()
         Task { await mediaShareRuntime.configure(reporter: scanReporter) }
         plexHomeUsers.ensurePlexIdentityForActiveProfile()
@@ -260,6 +276,8 @@ final class PlozziOSAppModel {
         )
         plexHomeUsers.ensurePlexIdentityForActiveProfile()
         accountsProviders.reloadAccounts()
+        identityIndex.reset()
+        identityIndex.warmIdentityIndex()
         updateTrackersForActiveProfile()
         drainWatchOutbox()
         Task { await seerService.setActiveProfile(namespace: profiles.activeNamespace) }
@@ -382,6 +400,14 @@ final class PlozziOSAppModel {
         Task { await reconciler.drain() }
     }
 
+    func pendingWatchMutations() async -> [WatchMutation] {
+        await watchReconciler.snapshot().pending
+    }
+
+    func appliedWatchRecency() async -> [String: AppliedResumeRecord] {
+        await watchReconciler.snapshot().appliedRecency
+    }
+
     private func makeWatchReconciler(profileID: String) -> WatchStateReconciler {
         let profile = profiles.profiles.first { $0.id == profileID } ?? profiles.activeProfile
         let namespace = profile.settingsNamespace(isDefault: profiles.isDefault(profile))
@@ -389,12 +415,6 @@ final class PlozziOSAppModel {
         let simkl = SimklServiceFactory.make(namespace: namespace).scrobbler
         let anilist = AniListServiceFactory.make(namespace: namespace).scrobbler
         let mal = MALServiceFactory.make(namespace: namespace).scrobbler
-        let indexedAccountIDs = Set(
-            profiles.activeAccountIDs(
-                for: profileID,
-                fallback: accountStore.activeAccountIDs()
-            )
-        )
         let store: any WatchMutationStoring
         if let durableLocalStateStore {
             do {
@@ -454,8 +474,31 @@ final class PlozziOSAppModel {
                     event: .stop
                 )
             },
-            allAccountIDs: { Array(indexedAccountIDs) },
-            indexedAccountIDs: { indexedAccountIDs }
+            allAccountIDs: { [weak self] in
+                await MainActor.run {
+                    self?.accountsProviders.homeAccounts.map(\.account.id) ?? []
+                }
+            },
+            indexedSeriesSources: {
+                [identitySnapshotStore = identityIndex.identitySnapshotStore]
+                originSeries in
+                identitySnapshotStore.current.sources(for: originSeries)
+                    .filter { $0.kind == .series }
+            },
+            indexedSources: {
+                [identitySnapshotStore = identityIndex.identitySnapshotStore]
+                identities, kind, anchorTitle, anchorYear in
+                identitySnapshotStore.current.sources(
+                    forIdentities: identities,
+                    kind: kind,
+                    anchorTitle: anchorTitle,
+                    anchorYear: anchorYear
+                )
+            },
+            indexedAccountIDs: {
+                [identitySnapshotStore = identityIndex.identitySnapshotStore] in
+                identitySnapshotStore.current.indexedAccountIDs
+            }
         )
         return WatchStateReconciler(
             store: store,
@@ -554,6 +597,8 @@ final class PlozziOSAppModel {
             plexHomeUsers.ensurePlexIdentityForActiveProfile()
         }
         accountsProviders.reloadAccounts()
+        identityIndex.reset()
+        identityIndex.warmIdentityIndex()
         updateTrackersForActiveProfile()
         drainWatchOutbox()
         Task { await seerService.setActiveProfile(namespace: profiles.activeNamespace) }
@@ -607,6 +652,8 @@ final class PlozziOSAppModel {
         watchReconcilers[profileID] = nil
         if profiles.activeProfileID == profileID {
             accountsProviders.reloadAccounts()
+            identityIndex.reset()
+            identityIndex.warmIdentityIndex()
             drainWatchOutbox()
         }
     }
@@ -618,6 +665,7 @@ final class PlozziOSAppModel {
             }
             accountError = nil
             accountsProviders.reloadAccounts()
+            identityIndex.warmIdentityIndex()
         } catch {
             accountError = error.localizedDescription
         }
@@ -632,6 +680,8 @@ final class PlozziOSAppModel {
             try accountStore.remove(id: id)
             plexHomeUsers.forgetAccount(id)
             accountsProviders.reloadAccounts()
+            identityIndex.reset()
+            identityIndex.warmIdentityIndex()
             guard !accountsProviders.accounts.contains(where: { $0.id == id }) else {
                 return
             }
@@ -662,6 +712,7 @@ final class PlozziOSAppModel {
                 displayName: displayName
             )
             accountsProviders.reloadAccounts()
+            identityIndex.warmIdentityIndex()
             accountError = nil
             return true
         } catch {
@@ -689,6 +740,7 @@ final class PlozziOSAppModel {
                 displayName: displayName
             )
             accountsProviders.reloadAccounts()
+            identityIndex.warmIdentityIndex()
             accountError = nil
             return true
         } catch {
@@ -712,6 +764,7 @@ final class PlozziOSAppModel {
                 displayName: displayName
             )
             accountsProviders.reloadAccounts()
+            identityIndex.warmIdentityIndex()
             accountError = nil
             return true
         } catch {
@@ -741,6 +794,7 @@ final class PlozziOSAppModel {
                 displayName: displayName
             )
             accountsProviders.reloadAccounts()
+            identityIndex.warmIdentityIndex()
             accountError = nil
             return true
         } catch {
@@ -762,6 +816,7 @@ final class PlozziOSAppModel {
                 displayName: displayName
             )
             accountsProviders.reloadAccounts()
+            identityIndex.warmIdentityIndex()
             accountError = nil
             return true
         } catch {

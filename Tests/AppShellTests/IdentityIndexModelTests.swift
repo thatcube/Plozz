@@ -1,4 +1,5 @@
 import XCTest
+import AppRuntime
 import CoreModels
 @testable import AppShell
 

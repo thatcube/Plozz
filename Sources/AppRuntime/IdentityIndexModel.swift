@@ -2,7 +2,7 @@ import Foundation
 import Observation
 import CoreModels
 
-/// The eager cross-server **identity index** facet, extracted from `AppState`.
+/// The eager cross-server identity index shared by both app composition roots.
 ///
 /// Owns the `identity → sources` index built at sign-in / sync — the single
 /// shared source of truth every surface reads (Home/Browse/Search merge, the

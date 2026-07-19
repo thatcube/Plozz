@@ -194,6 +194,7 @@ struct HomeTab: View {
                     // own multi-server source resolution (crossServerSourceResolver +
                     // server picker), so best-source selection still happens there and
                     // at play time (requestPlay).
+                    heroTrailerController.captureHandoffFrame()
                     navigate($0)
                 },
                 onPlayItem: { requestPlay($0) },

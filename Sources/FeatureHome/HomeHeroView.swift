@@ -695,9 +695,7 @@ struct HomeHeroView: View {
                 // whole backdrop blends together while browsing the rows below.
                 receded: receded,
                 trailerController: trailerController,
-                // Once detail is pushed, Home must stop hosting the single
-                // physical player surface so the detail host owns it exclusively.
-                showsTrailer: trailerVisible && isFrontmost,
+                showsTrailer: trailerVisible,
                 scrimOpacity: isFrontmost ? 1 : 0
             )
         } else {

@@ -231,6 +231,7 @@ struct PlozziOSLibraryGridView: View {
 }
 
 private struct PlozziOSLibraryItemCell: View {
+    @Environment(PlozziOSAppModel.self) private var appModel
     let slot: LibrarySlot?
     let index: Int
     let provider: any MediaProvider
@@ -243,7 +244,12 @@ private struct PlozziOSLibraryItemCell: View {
         Group {
             if let item = slot?.item {
                 NavigationLink {
-                    PlozziOSItemDetailView(provider: provider, item: item)
+                    PlozziOSItemDetailView(
+                        appModel: appModel,
+                        provider: provider,
+                        item: item,
+                        originSourceAccountID: item.sourceAccountID
+                    )
                 } label: {
                     card
                 }

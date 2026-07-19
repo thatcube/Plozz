@@ -12,6 +12,7 @@ struct PlozziOSSearchView: View {
         _viewModel = State(
             initialValue: SearchViewModel(
                 accounts: appModel.accountsProviders.homeAccounts,
+                identitySources: appModel.identityIndex.identitySourcesProvider,
                 seerSearch: { [seer = appModel.seerService] query in
                     (try? await seer.search(query)) ?? []
                 },
@@ -38,6 +39,12 @@ struct PlozziOSSearchView: View {
                 } else {
                     Task { await viewModel.search() }
                 }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .identityIndexDidUpdate)) { _ in
+                guard !viewModel.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                    return
+                }
+                Task { await viewModel.search() }
             }
     }
 
@@ -125,6 +132,7 @@ private struct PlozziOSSearchResultCard: View {
             if let provider {
                 NavigationLink {
                     PlozziOSItemDetailView(
+                        appModel: appModel,
                         provider: provider,
                         item: item,
                         seerService: appModel.seerService

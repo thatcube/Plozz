@@ -1,4 +1,5 @@
 #if os(iOS)
+import AppRuntime
 import CoreModels
 import FeatureHomeCore
 import MediaDownloads
@@ -15,16 +16,20 @@ struct PlozziOSItemDetailView: View {
     @State private var isRequesting = false
     @State private var requestConfirmationItem: MediaItem?
     @State private var requestStatusOverride: MediaAvailabilityStatus?
-    private let provider: any MediaProvider
+    @State private var sourceOverride: String?
+    @State private var versionOverride: String?
     private let seerService: SeerService?
     private let isDiscoveryItem: Bool
+    private let initialSources: [MediaSourceRef]
+    private let capabilities = MediaCapabilities.detected()
 
     init(
+        appModel: PlozziOSAppModel,
         provider: any MediaProvider,
         item: MediaItem,
-        seerService: SeerService? = nil
+        seerService: SeerService? = nil,
+        originSourceAccountID: String? = nil
     ) {
-        self.provider = provider
         self.seerService = seerService
         let isDiscoveryItem = item.isNotInLibraryDiscovery
         self.isDiscoveryItem = isDiscoveryItem
@@ -37,6 +42,16 @@ struct PlozziOSItemDetailView: View {
         } else {
             discoveryStatusRefresh = nil
         }
+        let indexedSources = isDiscoveryItem
+            ? []
+            : appModel.identityIndex.identitySourcesProvider(item)
+        var seenSources = Set<String>()
+        let initialSources = (item.sources + indexedSources).filter {
+            seenSources.insert($0.id).inserted
+        }
+        self.initialSources = initialSources
+        let accounts = appModel.accountsProviders.homeAccounts
+        let identitySources = appModel.identityIndex.identitySourcesProvider
         _viewModel = State(
             initialValue: ItemDetailViewModel(
                 provider: provider,
@@ -44,7 +59,18 @@ struct PlozziOSItemDetailView: View {
                 initialItem: item,
                 isDiscoveryItem: isDiscoveryItem,
                 discoveryStatusRefresh: discoveryStatusRefresh,
-                sourceAccountID: item.sourceAccountID
+                sourceAccountID: item.sourceAccountID,
+                originSourceAccountID: originSourceAccountID,
+                initialSources: initialSources,
+                alternateProviderResolver: { accountID in
+                    appModel.accountsProviders.provider(forAccountID: accountID)
+                },
+                crossServerSourceResolver: isDiscoveryItem
+                    ? nil
+                    : crossServerSourceResolver(
+                        in: accounts,
+                        identitySources: identitySources
+                    )
             )
         )
     }
@@ -76,7 +102,15 @@ struct PlozziOSItemDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task { await viewModel.load() }
         .fullScreenCover(item: $playbackRequest) {
-            PlozziOSPlayerView(request: $0, provider: provider)
+            if let playbackProvider = appModel.provider(for: $0.item) {
+                PlozziOSPlayerView(request: $0, provider: playbackProvider)
+            } else {
+                ContentUnavailableView(
+                    "Server unavailable",
+                    systemImage: "server.rack",
+                    description: Text("Reconnect the selected server and try again.")
+                )
+            }
         }
         .confirmationDialog(
             "Request as Administrator?",
@@ -106,6 +140,7 @@ struct PlozziOSItemDetailView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 PlozziOSDetailHero(item: detail.item)
+                sourceAndVersionControls(for: detail.item)
 
                 if isDiscoveryItem {
                     PlozziOSRequestAction(
@@ -122,15 +157,16 @@ struct PlozziOSItemDetailView: View {
                         handler: appModel.mediaItemActionHandler
                     )
                     if detail.item.kind == .movie || detail.item.kind == .episode {
-                        PlozziOSPlaybackActions(item: detail.item, onPlay: play)
+                        let playableItem = playbackItem(for: detail.item)
+                        PlozziOSPlaybackActions(item: playableItem, onPlay: play)
                         PlozziOSDownloadAction(
-                            item: detail.item,
+                            item: playableItem,
                             record: currentDownloadRecord,
                             errorMessage: downloadError,
-                            onDownload: { Task { await download(detail.item) } },
+                            onDownload: { Task { await download(playableItem) } },
                             onPause: { Task { await pauseDownload() } },
                             onResume: { Task { await resumeDownload() } },
-                            onRemove: { Task { await removeDownload(detail.item) } }
+                            onRemove: { Task { await removeDownload(playableItem) } }
                         )
                     }
                 }
@@ -145,7 +181,6 @@ struct PlozziOSItemDetailView: View {
                                 PlozziOSSeasonEpisodesView(
                                     viewModel: viewModel,
                                     season: season,
-                                    provider: provider,
                                     onPlay: play
                                 )
                             } label: {
@@ -164,12 +199,49 @@ struct PlozziOSItemDetailView: View {
             .padding(.bottom, 32)
         }
         .navigationTitle(detail.item.title)
-        .task(id: detail.item.id) {
-            downloadRecord = await appModel.downloads.record(for: detail.item)
+        .task(id: downloadLookupID(for: detail.item)) {
+            downloadRecord = await appModel.downloads.record(
+                for: playbackItem(for: detail.item)
+            )
         }
         .onReceive(NotificationCenter.default.publisher(for: .mediaItemDidMutate)) { note in
             guard let mutation = MediaItemMutation.from(note) else { return }
             viewModel.applyWatchedState(mutation)
+        }
+    }
+
+    @ViewBuilder
+    private func sourceAndVersionControls(for item: MediaItem) -> some View {
+        let sources = availableSources
+        let source = DetailPlaybackSelection.preferredSource(
+            sourceOverride: sourceOverride,
+            libraryOrigin: viewModel.originSourceAccountID,
+            itemSourceAccountID: item.sourceAccountID,
+            sources: sources,
+            capabilities: capabilities
+        )
+        let choices = DetailPlaybackSelection.serverChoices(from: sources)
+        let versions = DetailPlaybackSelection.versions(
+            for: item,
+            sources: sources,
+            activeAccountID: source?.accountID
+        )
+        let versionID = DetailPlaybackSelection.preferredVersionID(
+            for: item,
+            versions: versions,
+            versionOverride: versionOverride,
+            preferences: appModel.versionPreferences,
+            capabilities: capabilities
+        )
+        if choices.count > 1 || versions.count > 1 {
+            PlozziOSSourceVersionControls(
+                sources: choices,
+                selectedSourceID: source?.accountID ?? item.sourceAccountID,
+                versions: versions,
+                selectedVersionID: versionID,
+                onSelectSource: selectSource,
+                onSelectVersion: { selectVersion($0, for: item) }
+            )
         }
     }
 
@@ -202,6 +274,65 @@ struct PlozziOSItemDetailView: View {
         playbackRequest = PlozziOSPlaybackRequest(
             item: item,
             startPosition: fromBeginning ? 0 : (item.resumePosition ?? 0)
+        )
+    }
+
+    private var availableSources: [MediaSourceRef] {
+        viewModel.sources.isEmpty ? initialSources : viewModel.sources
+    }
+
+    private func playbackItem(for item: MediaItem) -> MediaItem {
+        let sources = availableSources
+        let source = DetailPlaybackSelection.preferredSource(
+            sourceOverride: sourceOverride,
+            libraryOrigin: viewModel.originSourceAccountID,
+            itemSourceAccountID: item.sourceAccountID,
+            sources: sources,
+            capabilities: capabilities
+        )
+        let versions = DetailPlaybackSelection.versions(
+            for: item,
+            sources: sources,
+            activeAccountID: source?.accountID
+        )
+        let versionID = DetailPlaybackSelection.preferredVersionID(
+            for: item,
+            versions: versions,
+            versionOverride: versionOverride,
+            preferences: appModel.versionPreferences,
+            capabilities: capabilities
+        )
+        return DetailPlaybackSelection.playItem(
+            for: item,
+            sources: sources,
+            activeAccountID: source?.accountID,
+            versionID: versionID,
+            explicit: viewModel.isLibraryOriginPinned
+                || sourceOverride != nil
+                || versionOverride != nil
+        )
+    }
+
+    private func downloadLookupID(for item: MediaItem) -> String {
+        let playable = playbackItem(for: item)
+        return [
+            playable.sourceAccountID ?? "_",
+            playable.id,
+            playable.selectedVersionID ?? "_"
+        ].joined(separator: "|")
+    }
+
+    private func selectSource(_ accountID: String) {
+        sourceOverride = accountID
+        versionOverride = nil
+        Task { await viewModel.switchToSource(accountID: accountID) }
+    }
+
+    private func selectVersion(_ id: String, for item: MediaItem) {
+        versionOverride = id
+        appModel.versionPreferences.setPreferredVersionID(
+            id,
+            forTitle: DetailPlaybackSelection.versionPreferenceKey(for: item)
         )
     }
 
@@ -262,9 +393,13 @@ struct PlozziOSItemDetailView: View {
 
     private func download(_ item: MediaItem) async {
         do {
+            guard let downloadProvider = appModel.provider(for: item) else {
+                downloadError = "The selected server is no longer available."
+                return
+            }
             downloadRecord = try await appModel.downloads.enqueue(
                 item: item,
-                provider: provider
+                provider: downloadProvider
             )
             downloadError = nil
         } catch {
@@ -292,6 +427,78 @@ struct PlozziOSItemDetailView: View {
         guard let downloadRecord else { return }
         await appModel.downloads.remove(downloadRecord)
         self.downloadRecord = await appModel.downloads.record(for: item)
+    }
+}
+
+private struct PlozziOSSourceVersionControls: View {
+    let sources: [MediaSourceRef]
+    let selectedSourceID: String?
+    let versions: [MediaVersion]
+    let selectedVersionID: String?
+    let onSelectSource: (String) -> Void
+    let onSelectVersion: (String) -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            if sources.count > 1 {
+                Menu {
+                    ForEach(sources) { source in
+                        Button {
+                            onSelectSource(source.accountID)
+                        } label: {
+                            selectionLabel(
+                                source.displayName,
+                                selected: source.accountID == selectedSourceID
+                            )
+                        }
+                    }
+                } label: {
+                    Label(
+                        selectedSource?.displayName ?? "Server",
+                        systemImage: "server.rack"
+                    )
+                }
+                .buttonStyle(.bordered)
+            }
+
+            if versions.count > 1 {
+                Menu {
+                    ForEach(versions) { version in
+                        Button {
+                            onSelectVersion(version.id)
+                        } label: {
+                            selectionLabel(
+                                version.displayLabel,
+                                selected: version.id == selectedVersionID
+                            )
+                        }
+                    }
+                } label: {
+                    Label(
+                        selectedVersion?.displayLabel ?? "Version",
+                        systemImage: "film.stack"
+                    )
+                }
+                .buttonStyle(.bordered)
+            }
+        }
+    }
+
+    private var selectedSource: MediaSourceRef? {
+        sources.first { $0.accountID == selectedSourceID }
+    }
+
+    private var selectedVersion: MediaVersion? {
+        versions.first { $0.id == selectedVersionID }
+    }
+
+    @ViewBuilder
+    private func selectionLabel(_ title: String, selected: Bool) -> some View {
+        if selected {
+            Label(title, systemImage: "checkmark")
+        } else {
+            Text(title)
+        }
     }
 }
 
@@ -539,7 +746,6 @@ private struct PlozziOSSeasonRow: View {
 private struct PlozziOSSeasonEpisodesView: View {
     let viewModel: ItemDetailViewModel
     let season: MediaItem
-    let provider: any MediaProvider
     let onPlay: (MediaItem, Bool) -> Void
 
     var body: some View {
@@ -574,8 +780,7 @@ private struct PlozziOSSeasonEpisodesView: View {
                             }
 
                             PlozziOSEpisodeDownloadButton(
-                                episode: episode,
-                                provider: provider
+                                episode: episode
                             )
                         }
                     }
@@ -614,7 +819,6 @@ private struct PlozziOSEpisodeDownloadButton: View {
     @State private var errorMessage: String?
 
     let episode: MediaItem
-    let provider: any MediaProvider
 
     var body: some View {
         Button(action: toggleDownload) {
@@ -691,6 +895,10 @@ private struct PlozziOSEpisodeDownloadButton: View {
                         break
                     }
                 } else {
+                    guard let provider = appModel.provider(for: episode) else {
+                        errorMessage = "The selected server is no longer available."
+                        return
+                    }
                     record = try await appModel.downloads.enqueue(
                         item: episode,
                         provider: provider

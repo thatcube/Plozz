@@ -31,6 +31,7 @@ final class PlozziOSAppModel {
     let trackerScrobbler: PlozziOSTrackerScrobbler
     private(set) var settings: PlozziOSSettingsModel
     private(set) var seriesTrackStore: SeriesTrackPreferenceStore
+    private(set) var versionPreferences: VersionPreferenceStore
     private(set) var downloads: PlozziOSDownloadsModel
     @ObservationIgnored
     private(set) var plexHomeUsers: PlexHomeUsersModel!
@@ -167,6 +168,9 @@ final class PlozziOSAppModel {
         self.seriesTrackStore = SeriesTrackPreferenceStore(
             namespace: profiles.activeNamespace
         )
+        self.versionPreferences = VersionPreferenceStore(
+            namespace: profiles.activeNamespace
+        )
         self.downloads = Self.makeDownloadsModel(
             namespace: profiles.activeProfileID,
             durableStore: durableLocalStateStore,
@@ -253,6 +257,13 @@ final class PlozziOSAppModel {
         accountsProviders.accounts
     }
 
+    func provider(for item: MediaItem) -> (any MediaProvider)? {
+        if let accountID = item.sourceAccountID {
+            return accountsProviders.provider(forAccountID: accountID)
+        }
+        return accountsProviders.primaryProvider
+    }
+
     func rescanShare(accountID: String) {
         mediaShareRescanService.rescan(accountID: accountID)
     }
@@ -265,6 +276,9 @@ final class PlozziOSAppModel {
         profiles.select(id)
         settings = PlozziOSSettingsModel(namespace: profiles.activeNamespace)
         seriesTrackStore = SeriesTrackPreferenceStore(
+            namespace: profiles.activeNamespace
+        )
+        versionPreferences = VersionPreferenceStore(
             namespace: profiles.activeNamespace
         )
         downloads = Self.makeDownloadsModel(
@@ -585,6 +599,9 @@ final class PlozziOSAppModel {
         if profiles.activeProfileID != previousActiveProfileID {
             settings = PlozziOSSettingsModel(namespace: profiles.activeNamespace)
             seriesTrackStore = SeriesTrackPreferenceStore(
+                namespace: profiles.activeNamespace
+            )
+            versionPreferences = VersionPreferenceStore(
                 namespace: profiles.activeNamespace
             )
             downloads = Self.makeDownloadsModel(

@@ -187,6 +187,7 @@ private struct PlozziOSHomeHero: View {
             if let provider {
                 NavigationLink {
                     PlozziOSItemDetailView(
+                        appModel: appModel,
                         provider: provider,
                         item: item,
                         seerService: appModel.seerService
@@ -356,6 +357,7 @@ private struct PlozziOSHomeMediaCard: View {
             if let provider {
                 NavigationLink {
                     PlozziOSItemDetailView(
+                        appModel: appModel,
                         provider: provider,
                         item: item,
                         seerService: appModel.seerService

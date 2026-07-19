@@ -8,6 +8,7 @@ import Observation
 @Observable
 final class PlozziOSAppModel {
     let accountsProviders: AccountsProvidersModel
+    let settings = PlozziOSSettingsModel()
 
     private let accountStore: AccountPersisting
 

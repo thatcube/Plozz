@@ -1,4 +1,5 @@
 #if os(iOS)
+import CoreModels
 import SwiftUI
 
 public struct PlozziOSRootView: View {
@@ -27,6 +28,7 @@ public struct PlozziOSRootView: View {
         .sheet(isPresented: $showingAddServer) {
             AddServerView(appModel: appModel)
         }
+        .preferredColorScheme(appModel.settings.theme.theme.preferredColorScheme)
     }
 }
 
@@ -136,11 +138,10 @@ private struct PlozziOSDestinationView: View {
             )
             .navigationTitle("Search")
         case .settings:
-            PlozziOSAccountSettingsView(
+            PlozziOSSettingsView(
                 appModel: appModel,
                 onAddServer: onAddServer
             )
-            .navigationTitle("Settings")
         }
     }
 }
@@ -169,36 +170,12 @@ private struct PlozziOSHomeLandingView: View {
     }
 }
 
-private struct PlozziOSAccountSettingsView: View {
-    let appModel: PlozziOSAppModel
-    let onAddServer: () -> Void
-
-    var body: some View {
-        List {
-            Section("Servers") {
-                ForEach(appModel.accounts) { account in
-                    VStack(alignment: .leading) {
-                        Text(account.server.name)
-                        Text(account.userName)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    .swipeActions {
-                        Button("Remove", role: .destructive) {
-                            appModel.removeAccount(id: account.id)
-                        }
-                    }
-                }
-
-                Button("Add Server", systemImage: "plus", action: onAddServer)
-            }
-
-            if let accountError = appModel.accountError {
-                Section {
-                    Label(accountError, systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.red)
-                }
-            }
+private extension AppTheme {
+    var preferredColorScheme: ColorScheme? {
+        switch self {
+        case .system: nil
+        case .light: .light
+        case .dark, .pureBlack: .dark
         }
     }
 }

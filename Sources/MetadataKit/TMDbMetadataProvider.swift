@@ -72,6 +72,60 @@ public struct TMDbMetadataProvider: ArtworkProvider {
         return await search(query)?.original_language
     }
 
+    /// The work's original language (ISO-639-1) resolved from an **exact external
+    /// id only** — never a fuzzy title search. Reads `original_language` from the
+    /// TMDb movie/tv *details* endpoint for a stamped TMDb id (the show's
+    /// `SeriesTmdb` for episodes/seasons, else the item's own `Tmdb` for
+    /// movies/series); when only an IMDB id is known it resolves through `/find`,
+    /// which returns the language directly. `nil` when TMDb is disabled, the item
+    /// is music, or it carries no usable external id — so the caller defers to the
+    /// container default rather than guessing from a title match. Used by the
+    /// "prefer original language" audio policy for server-backed items, where a
+    /// wrong fuzzy match would pick the wrong spoken language.
+    public func originalLanguage(forExactMatchOf query: MetadataQuery) async -> String? {
+        guard access.isEnabled, query.contentType != .music else { return nil }
+        let isTV = query.isTV
+        if let id = Self.exactStampedTMDbID(for: query, isTV: isTV) {
+            return await details(id: id, isTV: isTV)?.original_language
+        }
+        if let imdb = query.providerIDs.providerID(.imdb), !imdb.isEmpty {
+            return await findOriginalLanguage(imdbID: imdb, isTV: isTV)
+        }
+        return nil
+    }
+
+    /// The stamped TMDb id usable for an EXACT details lookup: the show id for
+    /// episodes/seasons (`SeriesTmdb`), else the item's own `Tmdb` for a
+    /// movie/series. An episode's own `Tmdb` is the *episode*, not the show, so it
+    /// is deliberately ignored here — audio original language is a show-level fact.
+    static func exactStampedTMDbID(for query: MetadataQuery, isTV: Bool) -> String? {
+        if isTV {
+            if let series = query.providerIDs.providerID(.seriesTmdb), !series.isEmpty {
+                return series
+            }
+            // A whole-series item (not an episode/season) carries its show id in `Tmdb`.
+            if query.kind == .series, let own = query.providerIDs.providerID(.tmdb), !own.isEmpty {
+                return own
+            }
+            return nil
+        }
+        if let own = query.providerIDs.providerID(.tmdb), !own.isEmpty { return own }
+        return nil
+    }
+
+    private func details(id: String, isTV: Bool) async -> DetailsResponse? {
+        guard let url = url("/3/\(isTV ? "tv" : "movie")/\(id)") else { return nil }
+        return await MetadataHTTP.get(DetailsResponse.self, url: url, headers: authHeaders)
+    }
+
+    private func findOriginalLanguage(imdbID: String, isTV: Bool) async -> String? {
+        guard let escaped = metadataEscaped(imdbID),
+              let url = url("/3/find/\(escaped)?external_source=imdb_id") else { return nil }
+        let found = await MetadataHTTP.get(FindResponse.self, url: url, headers: authHeaders)
+        let results = isTV ? found?.tv_results : found?.movie_results
+        return results?.first?.original_language
+    }
+
     /// Poster URL + original language from a **single** search call, so the
     /// enrichment adapter can resolve both without issuing two identical searches
     /// (`artworkURL(.poster)` and `originalLanguage(for:)` each search on their own).
@@ -228,6 +282,13 @@ public struct TMDbMetadataProvider: ArtworkProvider {
         let id: Int?
         let poster_path: String?
         let original_language: String?
+    }
+    struct DetailsResponse: Decodable {
+        let original_language: String?
+    }
+    struct FindResponse: Decodable {
+        let movie_results: [SearchResult]?
+        let tv_results: [SearchResult]?
     }
     struct ImagesResponse: Decodable {
         let backdrops: [Image]?

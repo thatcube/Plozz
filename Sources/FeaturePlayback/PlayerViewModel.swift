@@ -857,6 +857,7 @@ public final class PlayerViewModel {
         // fallback, which reuse self.request) inherits it. Subtitle language
         // steering is intentionally left empty — Plozz owns subtitle selection
         // via the SDR overlay, so the engine must not activate its own track.
+        await fillOriginalLanguageIfNeeded(for: &request)
         request.preferredAudioLanguages = preferredAudioLanguages(for: request.item)
         let kind = routeEngine(for: request, forceTranscode: forceTranscode)
         return PrefetchedPlayback(itemID: itemID, request: request, engineKind: kind)
@@ -900,6 +901,26 @@ public final class PlayerViewModel {
             capabilities: capabilities,
             subtitleRule: effectiveSubtitleRule(for: request.item)
         )
+    }
+
+    /// Fills `request.item.originalLanguage` for a SERVER-backed item that lacks it
+    /// (Plex/Jellyfin/Emby never provide `original_language`) so the "prefer
+    /// original language" audio policy can steer to the real spoken language
+    /// instead of the server/container default. Resolved once (cached in the shared
+    /// ``ArtworkRouter``) from an exact-ID TMDB lookup keyed on the item's external
+    /// ids — the same provider-id-keyed seam artwork already uses for server items.
+    ///
+    /// Deliberately gated so it's a no-op (and issues NO network call) unless the
+    /// effective preference is `.original` with no remembered per-series language
+    /// and the value is still unknown: `.device`/`.language(code)` are unchanged,
+    /// and direct-share items (which arrive already enriched) never re-resolve.
+    private func fillOriginalLanguageIfNeeded(for request: inout PlaybackRequest) async {
+        guard request.item.originalLanguage == nil,
+              rememberedAudioLanguage(for: request.item) == nil,
+              case .original = effectiveAudioPreference(for: request.item),
+              let resolved = await ArtworkRouter.shared.originalLanguage(for: request.item)
+        else { return }
+        request.item.originalLanguage = resolved
     }
 
     /// Resolves the ordered audio-language preference for a load from per-series

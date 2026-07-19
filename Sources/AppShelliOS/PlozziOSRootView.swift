@@ -256,11 +256,21 @@ private struct PlozziOSTabShell: View {
 }
 
 private struct PlozziOSDestinationView: View {
+    @Environment(\.themePalette) private var palette
     let destination: PlozziOSDestination
     let appModel: PlozziOSAppModel
     let onAddServer: () -> Void
 
     var body: some View {
+        ZStack {
+            AppBackground(palette: palette)
+            destinationContent
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    @ViewBuilder
+    private var destinationContent: some View {
         switch destination {
         case .home:
             PlozziOSHomeLandingView(

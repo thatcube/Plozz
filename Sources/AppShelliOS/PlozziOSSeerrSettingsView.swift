@@ -1,4 +1,5 @@
 #if os(iOS)
+import CoreUI
 import SeerService
 import SwiftUI
 
@@ -29,10 +30,12 @@ struct PlozziOSSeerrSettingsView: View {
                 .font(.footnote)
                 .foregroundStyle(.secondary)
             }
+            .settingsListRowSurface()
 
             Section("Connection") {
                 connectionContent
             }
+            .settingsListRowSurface()
 
             if appModel.seerService.isConfigured {
                 Section {
@@ -45,6 +48,7 @@ struct PlozziOSSeerrSettingsView: View {
                             + "Linked profiles use that user’s permissions, quotas, and defaults."
                     )
                 }
+                .settingsListRowSurface()
             }
         }
         .navigationTitle("Seerr")

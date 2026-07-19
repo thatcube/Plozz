@@ -1,4 +1,5 @@
 #if os(iOS)
+import CoreUI
 import MediaDownloads
 import SwiftUI
 
@@ -107,6 +108,7 @@ struct PlozziOSDownloadSettingsView: View {
                     "Downloads use original quality. Network-share downloads continue while Plozz is open; Jellyfin, Emby, and Plex downloads can continue in the background."
                 )
             }
+            .settingsListRowSurface()
 
             Section("Storage") {
                 LabeledContent("Downloaded titles") {
@@ -121,6 +123,7 @@ struct PlozziOSDownloadSettingsView: View {
                     )
                 }
             }
+            .settingsListRowSurface()
         }
         .frame(maxWidth: 760)
         .frame(maxWidth: .infinity)

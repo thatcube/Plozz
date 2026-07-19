@@ -1,6 +1,7 @@
 #if os(iOS)
 import CoreModels
 import CoreNetworking
+import CoreUI
 import CrashReporting
 import Foundation
 import SwiftUI
@@ -47,6 +48,7 @@ struct PlozziOSDiagnosticsSettingsView: View {
                     Label("Recent Activity", systemImage: "clock.arrow.circlepath")
                 }
             }
+            .settingsListRowSurface()
 
             Section {
                 Toggle(
@@ -63,6 +65,7 @@ struct PlozziOSDiagnosticsSettingsView: View {
                     Text("Crash reporting is unavailable in this build.")
                 }
             }
+            .settingsListRowSurface()
 
             Section("Send Diagnostics") {
                 TextField("Optional note", text: $diagnosticNote, axis: .vertical)
@@ -89,6 +92,7 @@ struct PlozziOSDiagnosticsSettingsView: View {
                         .foregroundStyle(.secondary)
                 }
             }
+            .settingsListRowSurface()
 
             Section {
                 Toggle("Playback diagnostics", isOn: $model.settings.isEnabled)
@@ -99,6 +103,7 @@ struct PlozziOSDiagnosticsSettingsView: View {
             } footer: {
                 Text("Troubleshooting overlays stay on this device and are off by default.")
             }
+            .settingsListRowSurface()
         }
         .navigationTitle("Help & Diagnostics")
         .onChange(of: crashReporting.settings.isEnabled) {

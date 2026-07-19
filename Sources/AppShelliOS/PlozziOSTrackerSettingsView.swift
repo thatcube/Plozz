@@ -1,5 +1,6 @@
 #if os(iOS)
 import AniListService
+import CoreUI
 import MALService
 import SimklService
 import SwiftUI
@@ -18,22 +19,27 @@ struct PlozziOSTrackerSettingsView: View {
                 .font(.footnote)
                 .foregroundStyle(.secondary)
             }
+            .settingsListRowSurface()
 
             Section("Trakt") {
                 TraktSettingsContent(service: appModel.traktService)
             }
+            .settingsListRowSurface()
 
             Section("Simkl") {
                 SimklSettingsContent(service: appModel.simklService)
             }
+            .settingsListRowSurface()
 
             Section("AniList") {
                 AniListSettingsContent(service: appModel.anilistService)
             }
+            .settingsListRowSurface()
 
             Section("MyAnimeList") {
                 MALSettingsContent(service: appModel.malService)
             }
+            .settingsListRowSurface()
         }
         .navigationTitle("Trackers")
         .task {

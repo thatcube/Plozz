@@ -242,6 +242,7 @@ private struct PlozziOSHomeHero: View {
 }
 
 private struct PlozziOSFeaturedRow: View {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     let items: [MediaItem]
     let appModel: PlozziOSAppModel
 
@@ -260,7 +261,12 @@ private struct PlozziOSFeaturedRow: View {
                             provider: appModel.accountsProviders.primaryProvider,
                             settings: appModel.settings
                         )
-                        .frame(width: 140)
+                        .frame(
+                            width: appModel.settings.density.density
+                                .iOSHomePosterWidth(
+                                    horizontalSizeClass: horizontalSizeClass
+                                )
+                        )
                     }
                 }
                 .padding(.horizontal)
@@ -271,6 +277,7 @@ private struct PlozziOSFeaturedRow: View {
 }
 
 private struct PlozziOSHomeRowView: View {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     let row: HomeRow
     let appModel: PlozziOSAppModel
 
@@ -298,7 +305,7 @@ private struct PlozziOSHomeRowView: View {
                         provider: provider(for: item),
                         settings: appModel.settings
                     )
-                    .frame(width: row.style == .landscape ? 250 : 140)
+                    .frame(width: mediaCardWidth)
                 }
             }
             .padding(.horizontal)
@@ -326,7 +333,13 @@ private struct PlozziOSHomeRowView: View {
                                 settings: appModel.settings
                             )
                         } label: {
-                            PlozziOSHomeLibraryCard(library: library)
+                            PlozziOSHomeLibraryCard(
+                                library: library,
+                                width: appModel.settings.density.density
+                                    .iOSHomeLibraryWidth(
+                                        horizontalSizeClass: horizontalSizeClass
+                                    )
+                            )
                         }
                         .buttonStyle(.plain)
                     }
@@ -342,6 +355,18 @@ private struct PlozziOSHomeRowView: View {
             return appModel.accountsProviders.provider(forAccountID: accountID)
         }
         return appModel.accountsProviders.primaryProvider
+    }
+
+    private var mediaCardWidth: CGFloat {
+        let density = appModel.settings.density.density
+        if row.style == .landscape {
+            return density.iOSHomeLandscapeWidth(
+                horizontalSizeClass: horizontalSizeClass
+            )
+        }
+        return density.iOSHomePosterWidth(
+            horizontalSizeClass: horizontalSizeClass
+        )
     }
 }
 
@@ -403,6 +428,7 @@ private struct PlozziOSHomeMediaCard: View {
 
 private struct PlozziOSHomeLibraryCard: View {
     let library: AggregatedLibrary
+    let width: CGFloat
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -419,7 +445,7 @@ private struct PlozziOSHomeLibraryCard: View {
                             .foregroundStyle(.secondary)
                     }
             }
-            .frame(width: 220, height: 132)
+            .frame(width: width, height: width * 0.6)
             .clipShape(RoundedRectangle(cornerRadius: 14))
 
             Text(library.library.title)
@@ -430,7 +456,7 @@ private struct PlozziOSHomeLibraryCard: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
         }
-        .frame(width: 220, alignment: .leading)
+        .frame(width: width, alignment: .leading)
     }
 }
 #endif

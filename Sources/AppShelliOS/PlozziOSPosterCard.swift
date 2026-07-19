@@ -80,7 +80,7 @@ extension UIDensity {
         horizontalSizeClass: UserInterfaceSizeClass?
     ) -> [GridItem] {
         let minimumWidth = if horizontalSizeClass == .regular {
-            max(150, CGFloat(144 * scale))
+            max(108, CGFloat(144 * scale))
         } else {
             iOSPosterMinimumWidth
         }
@@ -94,6 +94,24 @@ extension UIDensity {
                 spacing: spacing
             )
         ]
+    }
+
+    func iOSHomePosterWidth(
+        horizontalSizeClass: UserInterfaceSizeClass?
+    ) -> CGFloat {
+        max(96, CGFloat((horizontalSizeClass == .regular ? 170 : 140) * scale))
+    }
+
+    func iOSHomeLandscapeWidth(
+        horizontalSizeClass: UserInterfaceSizeClass?
+    ) -> CGFloat {
+        max(180, CGFloat((horizontalSizeClass == .regular ? 300 : 250) * scale))
+    }
+
+    func iOSHomeLibraryWidth(
+        horizontalSizeClass: UserInterfaceSizeClass?
+    ) -> CGFloat {
+        max(164, CGFloat((horizontalSizeClass == .regular ? 260 : 220) * scale))
     }
 }
 #endif

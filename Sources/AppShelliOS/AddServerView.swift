@@ -63,7 +63,7 @@ struct AddServerView: View {
                 }
             }
             .navigationDestination(item: $server) { server in
-                PasswordServerSignInView(
+                ManagedServerSignInView(
                     server: server,
                     appModel: appModel,
                     onComplete: { dismiss() }
@@ -97,11 +97,11 @@ struct AddServerView: View {
     }
 }
 
-private struct PasswordServerSignInView: View {
-    @State private var viewModel: PasswordSignInViewModel
-
-    private let server: MediaServer
-    private let onComplete: () -> Void
+private struct ManagedServerSignInView: View {
+    @State private var usesPassword: Bool
+    let server: MediaServer
+    let appModel: PlozziOSAppModel
+    let onComplete: () -> Void
 
     init(
         server: MediaServer,
@@ -109,7 +109,177 @@ private struct PasswordServerSignInView: View {
         onComplete: @escaping () -> Void
     ) {
         self.server = server
+        self.appModel = appModel
         self.onComplete = onComplete
+        _usesPassword = State(initialValue: server.provider == .emby)
+    }
+
+    var body: some View {
+        if usesPassword {
+            PasswordServerSignInView(
+                server: server,
+                appModel: appModel,
+                onComplete: onComplete,
+                onUseQuickConnect: server.provider == .jellyfin
+                    ? { usesPassword = false }
+                    : nil
+            )
+        } else {
+            QuickConnectServerSignInView(
+                server: server,
+                appModel: appModel,
+                onComplete: onComplete,
+                onUsePassword: { usesPassword = true }
+            )
+        }
+    }
+}
+
+private struct QuickConnectServerSignInView: View {
+    @State private var viewModel: QuickConnectViewModel
+    private let server: MediaServer
+    private let onUsePassword: () -> Void
+
+    init(
+        server: MediaServer,
+        appModel: PlozziOSAppModel,
+        onComplete: @escaping () -> Void,
+        onUsePassword: @escaping () -> Void
+    ) {
+        self.server = server
+        self.onUsePassword = onUsePassword
+        _viewModel = State(
+            initialValue: QuickConnectViewModel(
+                service: QuickConnectService(
+                    server: server,
+                    deviceID: appModel.deviceID
+                ),
+                onAuthenticated: {
+                    appModel.persist([$0])
+                    onComplete()
+                }
+            )
+        )
+    }
+
+    var body: some View {
+        Form {
+            Section {
+                Text(
+                    "Open Jellyfin on another device, choose Quick Connect, "
+                        + "and enter this code."
+                )
+                .foregroundStyle(.secondary)
+                Text(server.baseURL.absoluteString)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
+                phaseContent
+                    .frame(maxWidth: .infinity)
+            }
+
+            Section("Other options") {
+                Button("Sign in with username and password", systemImage: "person.fill") {
+                    onUsePassword()
+                }
+            }
+        }
+        .navigationTitle(server.name)
+        .navigationBarTitleDisplayMode(.inline)
+        .task { viewModel.start() }
+        .onDisappear { viewModel.cancel() }
+    }
+
+    @ViewBuilder
+    private var phaseContent: some View {
+        switch viewModel.phase {
+        case .idle, .requesting:
+            ProgressView("Requesting a code…")
+        case let .awaitingApproval(code, expiresAt):
+            VStack(spacing: 20) {
+                Text(code)
+                    .font(.system(size: 52, weight: .bold, design: .rounded))
+                    .tracking(8)
+                    .monospaced()
+                    .textSelection(.enabled)
+                    .accessibilityLabel("Quick Connect code \(code)")
+                PlozziOSQuickConnectCountdown(
+                    expiresAt: expiresAt,
+                    lifetime: viewModel.codeLifetime
+                )
+                Text("Waiting for approval…")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.vertical, 12)
+        case .success:
+            Label("Signed in", systemImage: "checkmark.circle.fill")
+                .font(.title2)
+                .foregroundStyle(.green)
+        case let .error(message):
+            ContentUnavailableView {
+                Label("Quick Connect unavailable", systemImage: "exclamationmark.triangle")
+            } description: {
+                Text(message)
+            } actions: {
+                Button("Try Again") { viewModel.retry() }
+                Button("Use Password") { onUsePassword() }
+            }
+        }
+    }
+}
+
+private struct PlozziOSQuickConnectCountdown: View {
+    let expiresAt: Date
+    let lifetime: TimeInterval
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            let remaining = max(0, expiresAt.timeIntervalSince(context.date))
+            let fraction = lifetime > 0 ? remaining / lifetime : 0
+            let tint: Color = remaining <= 15 ? .orange : .accentColor
+
+            ZStack {
+                Circle()
+                    .stroke(tint.opacity(0.16), lineWidth: 6)
+                Circle()
+                    .trim(from: 0, to: fraction)
+                    .stroke(
+                        tint,
+                        style: StrokeStyle(lineWidth: 6, lineCap: .round)
+                    )
+                    .rotationEffect(.degrees(-90))
+                Text("\(Int(remaining.rounded(.up)))")
+                    .font(.title3.monospacedDigit().bold())
+                    .foregroundStyle(tint)
+                    .contentTransition(.numericText())
+            }
+            .frame(width: 76, height: 76)
+            .accessibilityLabel(
+                "Code expires in \(Int(remaining.rounded(.up))) seconds"
+            )
+        }
+    }
+}
+
+private struct PasswordServerSignInView: View {
+    @State private var viewModel: PasswordSignInViewModel
+
+    private let server: MediaServer
+    private let onComplete: () -> Void
+    private let onUseQuickConnect: (() -> Void)?
+
+    init(
+        server: MediaServer,
+        appModel: PlozziOSAppModel,
+        onComplete: @escaping () -> Void,
+        onUseQuickConnect: (() -> Void)? = nil
+    ) {
+        self.server = server
+        self.onComplete = onComplete
+        self.onUseQuickConnect = onUseQuickConnect
         _viewModel = State(
             initialValue: PasswordSignInViewModel(
                 service: PasswordSignInService(
@@ -161,6 +331,14 @@ private struct PasswordServerSignInView: View {
                     }
                 }
                 .disabled(!viewModel.canSubmit)
+            }
+
+            if let onUseQuickConnect {
+                Section("Other options") {
+                    Button("Use Quick Connect", systemImage: "qrcode") {
+                        onUseQuickConnect()
+                    }
+                }
             }
         }
         .navigationTitle("Sign In")

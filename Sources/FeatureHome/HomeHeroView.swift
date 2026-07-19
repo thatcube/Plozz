@@ -822,6 +822,7 @@ struct HomeHeroView: View {
                 model: foregroundModel(for: item),
                 neighbours: foregroundNeighbours(for: item),
                 logoFallbacks: foregroundLogoFallbacks(for: item),
+                logoReferences: foregroundLogoReferences(for: item),
                 backgroundSamplers: foregroundBackgroundSamplers(for: item),
                 metadataVisible: metadataVisible,
                 width: HomeHeroLayout.screenWidth,
@@ -949,6 +950,21 @@ struct HomeHeroView: View {
         for target in targets where result[target.id] == nil {
             let source = target
             result[source.id] = { await ArtworkRouter.shared.artworkURL(.logo, for: source) }
+        }
+        return result
+    }
+
+    private func foregroundLogoReferences(for item: MediaItem) -> [String: [ArtworkReference]] {
+        var targets: [MediaItem] = [item]
+        if items.count > 1 {
+            let current = items.firstIndex(where: { $0.id == item.id }) ?? index
+            let previous = (current - 1 + items.count) % items.count
+            let next = (current + 1) % items.count
+            for i in [previous, next] where items.indices.contains(i) { targets.append(items[i]) }
+        }
+        var result: [String: [ArtworkReference]] = [:]
+        for target in targets where result[target.id] == nil {
+            result[target.id] = target.artworkReferences(for: .logo)
         }
         return result
     }

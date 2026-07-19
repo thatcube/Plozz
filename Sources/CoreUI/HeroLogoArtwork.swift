@@ -341,13 +341,13 @@ public struct HeroUIKitLogo: @unchecked Sendable {
 /// identically instead of drawing the raw cached image.
 public enum HeroUIKitLogoRenderer {
     public static func render(
-        primaryURL: URL?,
+        references: [ArtworkReference],
         asyncFallbackURL: (@Sendable () async -> URL?)? = nil,
         backgroundSample: (@Sendable () async -> HeroBackgroundSample?)? = nil,
         priority: TaskPriority = .userInitiated
     ) async -> HeroUIKitLogo? {
         guard let prepared = await loadPreparedHeroLogo(
-            primaryURL: primaryURL,
+            references: references,
             asyncFallbackURL: asyncFallbackURL,
             priority: priority
         ) else { return nil }
@@ -357,6 +357,20 @@ public enum HeroUIKitLogoRenderer {
             isMonochrome: processed.isMonochrome,
             needsHalo: processed.needsHalo,
             isDark: processed.isDark
+        )
+    }
+
+    public static func render(
+        primaryURL: URL?,
+        asyncFallbackURL: (@Sendable () async -> URL?)? = nil,
+        backgroundSample: (@Sendable () async -> HeroBackgroundSample?)? = nil,
+        priority: TaskPriority = .userInitiated
+    ) async -> HeroUIKitLogo? {
+        await render(
+            references: primaryURL.map { [.remote($0)] } ?? [],
+            asyncFallbackURL: asyncFallbackURL,
+            backgroundSample: backgroundSample,
+            priority: priority
         )
     }
 }

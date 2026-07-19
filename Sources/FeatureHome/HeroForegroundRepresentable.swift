@@ -24,6 +24,8 @@ struct HeroForegroundRepresentable: UIViewRepresentable {
     /// series logo for an episode) is resolved on demand via `ArtworkRouter`. Keyed to
     /// the current slide + its prepared neighbours so it stays bounded.
     let logoFallbacks: [String: @Sendable () async -> URL?]
+    /// Persisted local-first logo candidates for the same bounded slide window.
+    let logoReferences: [String: [ArtworkReference]]
     /// Async backdrop colour samplers by itemID, mirroring the SwiftUI hero's
     /// `backgroundSample`. Feeds the shared logo legibility analysis so the UIKit
     /// hero decides the contrast halo exactly like ``HeroLogoArtwork``.
@@ -41,6 +43,7 @@ struct HeroForegroundRepresentable: UIViewRepresentable {
         let view = HeroForegroundUIView()
         context.coordinator.view = view
         context.coordinator.logoFallbacks = logoFallbacks
+        context.coordinator.logoReferences = logoReferences
         context.coordinator.backgroundSamplers = backgroundSamplers
         context.coordinator.configure(width: width, height: height)
         context.coordinator.prepare(neighbours)
@@ -51,6 +54,7 @@ struct HeroForegroundRepresentable: UIViewRepresentable {
     func updateUIView(_ uiView: HeroForegroundUIView, context: Context) {
         context.coordinator.view = uiView
         context.coordinator.logoFallbacks = logoFallbacks
+        context.coordinator.logoReferences = logoReferences
         context.coordinator.backgroundSamplers = backgroundSamplers
         context.coordinator.configure(width: width, height: height)
         context.coordinator.prepare(neighbours)
@@ -97,6 +101,7 @@ final class HeroForegroundCoordinator {
     /// `asyncFallbackURL`). Used when a slide has no baked `logoURL` — the common
     /// case — to resolve the real (series, for an episode) logo on demand.
     var logoFallbacks: [String: @Sendable () async -> URL?] = [:]
+    var logoReferences: [String: [ArtworkReference]] = [:]
 
     /// Async backdrop colour samplers by itemID (mirrors the SwiftUI hero's
     /// `backgroundSample`), feeding the shared logo legibility halo decision.
@@ -174,12 +179,15 @@ final class HeroForegroundCoordinator {
         guard warmedLogos[model.itemID] == nil, loadTasks[model.itemID] == nil else { return }
         let id = model.itemID
         let primary = model.logoURL
+        let references = logoReferences[id]
+            ?? primary.map { [.remote($0)] }
+            ?? []
         let fallback = logoFallbacks[id]
-        guard primary != nil || fallback != nil else { return }
+        guard !references.isEmpty || fallback != nil else { return }
         let sampler = backgroundSamplers[id]
         loadTasks[id] = Task { [weak self] in
             let logo = await HeroUIKitLogoRenderer.render(
-                primaryURL: primary,
+                references: references,
                 asyncFallbackURL: fallback,
                 backgroundSample: sampler,
                 priority: .userInitiated

@@ -271,6 +271,7 @@ public struct ItemDetailView: View {
             // item, do nothing — the picture keeps rolling while metadata swaps.
             guard !heroTrailerController.isShowing(item.id) else {
                 heroTrailerController.setMuted(heroBackground.settings.trailerMuted)
+                heroTrailerController.setPaused(false)
                 return
             }
             try? await Task.sleep(for: .seconds(3))

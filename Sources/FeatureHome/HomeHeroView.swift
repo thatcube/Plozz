@@ -189,6 +189,10 @@ struct HomeHeroView: View {
     @State private var activeTrailerSource: HeroTrailerSource?
     @State private var activeTrailerDuration: TimeInterval = 0
     @State private var trailerVisible = false
+    /// Trailer reached its end while interaction/recede blocked automatic paging.
+    /// The video and gauge are allowed to finish; paging occurs once interaction
+    /// protection is released.
+    @State private var pendingTrailerAdvance = false
     /// Per-carousel memo so wrapping back to a slide never re-runs provider
     /// trailer/playback resolution. Bounded by the curated item set (max 20).
     @State private var trailerSourceCache: [String: HeroTrailerSource] = [:]
@@ -613,14 +617,17 @@ struct HomeHeroView: View {
             guard !Task.isCancelled, current?.id == item.id else { return }
             trailerController.setEndHandler(ownerID: "home-hero") { [itemID = item.id] in
                 guard current?.id == itemID, items.count > 1 else { return }
-                page(
-                    to: (index + 1) % items.count,
-                    keepButton: selectedButton,
-                    forward: true
-                )
+                if pausedAt != nil {
+                    pendingTrailerAdvance = true
+                } else {
+                    page(
+                        to: (index + 1) % items.count,
+                        keepButton: selectedButton,
+                        forward: true
+                    )
+                }
             }
             trailerController.startPrepared()
-            trailerController.setPaused(pausedAt != nil)
             trailerVisible = trailerController.isPlaying
         }
         .onChange(of: trailerController.isPlaying) { _, playing in
@@ -630,9 +637,6 @@ struct HomeHeroView: View {
             } else {
                 trailerVisible = false
             }
-        }
-        .onChange(of: pausedAt) { _, paused in
-            trailerController.setPaused(paused != nil)
         }
         .onChange(of: backgroundSettings.trailerMuted) { _, muted in
             trailerController.setMuted(muted)
@@ -988,7 +992,9 @@ struct HomeHeroView: View {
             dotsAutoAdvance: settings.autoAdvance && items.count > 1,
             dotsDwellStart: dwellStart,
             dotsDwellDuration: currentDwellDuration,
-            dotsPausedAt: pausedAt
+            // Interaction blocks paging but never freezes a playing trailer or
+            // its progress. Static-image slides retain today's frozen gauge.
+            dotsPausedAt: activeTrailerDuration > 0 ? nil : pausedAt
         )
     }
 
@@ -1752,6 +1758,7 @@ struct HomeHeroView: View {
         beginTransition()
 
         resetTrailer(stopPlayer: true)
+        pendingTrailerAdvance = false
         index = toItem
         advanceToken &+= 1
         // A page is a fresh dwell: reset the progress gauge (so the newly-active
@@ -1777,6 +1784,7 @@ struct HomeHeroView: View {
     private func restartDwell() {
         dwellStart = .now
         pausedAt = nil
+        pendingTrailerAdvance = false
         resumeWork?.cancel()
         resumeWork = nil
     }
@@ -1785,6 +1793,7 @@ struct HomeHeroView: View {
         trailerVisible = false
         activeTrailerDuration = 0
         activeTrailerSource = nil
+        pendingTrailerAdvance = false
         trailerController.clearEndHandler(ownerID: "home-hero")
         if stopPlayer {
             trailerController.stop()
@@ -1827,7 +1836,17 @@ struct HomeHeroView: View {
     /// No-op if the carousel wasn't paused.
     private func resumeFromRecede() {
         guard settings.autoAdvance, items.count > 1, pausedAt != nil else { return }
-        restartDwell()
+        if pendingTrailerAdvance {
+            pendingTrailerAdvance = false
+            pausedAt = nil
+            advanceForward()
+            return
+        }
+        if activeTrailerDuration > 0 {
+            pausedAt = nil
+        } else {
+            restartDwell()
+        }
         runEpoch &+= 1
     }
 
@@ -1850,7 +1869,16 @@ struct HomeHeroView: View {
         // must not have the carousel page behind it. The `receded` onChange resumes
         // once focus returns to the hero.
         guard !receded else { return }
-        dwellStart = dwellStart.addingTimeInterval(Date().timeIntervalSince(pausedAt))
+        if pendingTrailerAdvance {
+            pendingTrailerAdvance = false
+            self.pausedAt = nil
+            resumeWork = nil
+            advanceForward()
+            return
+        }
+        if activeTrailerDuration <= 0 {
+            dwellStart = dwellStart.addingTimeInterval(Date().timeIntervalSince(pausedAt))
+        }
         self.pausedAt = nil
         resumeWork = nil
         runEpoch &+= 1

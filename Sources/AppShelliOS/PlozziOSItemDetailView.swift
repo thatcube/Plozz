@@ -16,6 +16,8 @@ struct PlozziOSItemDetailView: View {
     @State private var requestError: String?
     @State private var isRequesting = false
     @State private var requestConfirmationItem: MediaItem?
+    @State private var requestConfirmationSeasons: [Int]?
+    @State private var seasonRequestAvailability: MediaRequestAvailability?
     @State private var requestStatusOverride: MediaAvailabilityStatus?
     @State private var sourceOverride: String?
     @State private var versionOverride: String?
@@ -98,6 +100,7 @@ struct PlozziOSItemDetailView: View {
                         Task { await viewModel.reload() }
                     }
                 }
+
             }
         }
         .navigationBarTitleDisplayMode(.inline)
@@ -117,17 +120,25 @@ struct PlozziOSItemDetailView: View {
             "Request as Administrator?",
             isPresented: Binding(
                 get: { requestConfirmationItem != nil },
-                set: { if !$0 { requestConfirmationItem = nil } }
+                set: {
+                    if !$0 {
+                        requestConfirmationItem = nil
+                        requestConfirmationSeasons = nil
+                    }
+                }
             ),
             titleVisibility: .visible
         ) {
             Button("Request as Administrator") {
                 guard let item = requestConfirmationItem else { return }
+                let seasons = requestConfirmationSeasons
                 requestConfirmationItem = nil
-                Task { await request(item) }
+                requestConfirmationSeasons = nil
+                Task { await request(item, seasons: seasons) }
             }
             Button("Cancel", role: .cancel) {
                 requestConfirmationItem = nil
+                requestConfirmationSeasons = nil
             }
         } message: {
             Text(
@@ -150,13 +161,25 @@ struct PlozziOSItemDetailView: View {
                         isRequesting: isRequesting,
                         errorMessage: requestError,
                         actingName: appModel.activeSeerrUserName,
-                        onRequest: beginRequest
+                        onRequest: { beginRequest($0) }
                     )
                 } else {
                     PlozziOSDetailManagementActions(
                         item: detail.item,
                         handler: appModel.mediaItemActionHandler
                     )
+                    if detail.item.kind == .series,
+                       let seasonRequestAvailability,
+                       seasonRequestAvailability.hasSeasonRequestContent {
+                        PlozziOSSeasonRequestMenu(
+                            availability: seasonRequestAvailability,
+                            isRequesting: isRequesting,
+                            errorMessage: requestError,
+                            onRequest: {
+                                beginRequest(detail.item, seasons: $0)
+                            }
+                        )
+                    }
                     if detail.item.kind == .movie || detail.item.kind == .episode {
                         let playableItem = playbackItem(for: detail.item)
                         PlozziOSPlaybackActions(item: playableItem, onPlay: play)
@@ -211,6 +234,9 @@ struct PlozziOSItemDetailView: View {
             downloadRecord = await appModel.downloads.record(
                 for: playbackItem(for: detail.item)
             )
+        }
+        .task(id: seasonRequestLookupID(for: detail)) {
+            await loadSeasonRequestAvailability(for: detail)
         }
         .onReceive(NotificationCenter.default.publisher(for: .mediaItemDidMutate)) { note in
             guard let mutation = MediaItemMutation.from(note) else { return }
@@ -361,15 +387,16 @@ struct PlozziOSItemDetailView: View {
         )
     }
 
-    private func beginRequest(_ item: MediaItem) {
+    private func beginRequest(_ item: MediaItem, seasons: [Int]? = nil) {
         if appModel.activeSeerrUserID == nil, appModel.profiles.profiles.count > 1 {
             requestConfirmationItem = item
+            requestConfirmationSeasons = seasons
         } else {
-            Task { await request(item) }
+            Task { await request(item, seasons: seasons) }
         }
     }
 
-    private func request(_ item: MediaItem) async {
+    private func request(_ item: MediaItem, seasons: [Int]? = nil) async {
         guard let seerService else {
             requestError = "Connect Overseerr or Jellyseerr in Settings first."
             return
@@ -379,15 +406,50 @@ struct PlozziOSItemDetailView: View {
         defer { isRequesting = false }
         let outcome = await seerService.request(
             item,
+            seasons: seasons,
             actingUserID: appModel.activeSeerrUserID
         )
         switch outcome {
         case let .success(status):
-            requestStatusOverride = status
+            if let seasons {
+                seasonRequestAvailability = seasonRequestAvailability?
+                    .markingRequested(seasons)
+            } else {
+                requestStatusOverride = status
+            }
             await viewModel.load()
         case let .failure(reason):
             requestError = requestFailureMessage(reason)
         }
+    }
+
+    private func loadSeasonRequestAvailability(
+        for detail: ItemDetailViewModel.Detail
+    ) async {
+        guard detail.item.kind == .series,
+              let seerService,
+              seerService.isConfigured else {
+            seasonRequestAvailability = nil
+            return
+        }
+        seasonRequestAvailability = await seerService
+            .requestAvailability(for: detail.item)?
+            .markingAvailable(
+                detail.children.compactMap {
+                    $0.kind == .season || $0.kind == .episode
+                        ? $0.seasonNumber
+                        : nil
+                }
+            )
+    }
+
+    private func seasonRequestLookupID(
+        for detail: ItemDetailViewModel.Detail
+    ) -> String {
+        let seasons = detail.children.compactMap(\.seasonNumber)
+            .map(String.init)
+            .joined(separator: ",")
+        return "\(detail.item.id):\(seasons):\(seerService?.isConfigured == true)"
     }
 
     private func requestFailureMessage(_ reason: SeerRequestFailure) -> String {
@@ -576,6 +638,81 @@ private struct PlozziOSRequestAction: View {
                     .font(.footnote)
                     .foregroundStyle(.red)
             }
+        }
+    }
+}
+
+private struct PlozziOSSeasonRequestMenu: View {
+    let availability: MediaRequestAvailability
+    let isRequesting: Bool
+    let errorMessage: String?
+    let onRequest: ([Int]) -> Void
+
+    private var seasons: [MediaSeasonRequestState] {
+        availability.requestPickerSeasons
+    }
+
+    private var requestableSeasons: [MediaSeasonRequestState] {
+        seasons.filter(\.isRequestable)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Menu {
+                if requestableSeasons.count > 1 {
+                    Button("Request All Missing Seasons") {
+                        onRequest(requestableSeasons.map(\.number))
+                    }
+                    Divider()
+                }
+
+                ForEach(seasons) { season in
+                    if season.requestFailed {
+                        Label(
+                            "\(season.title) — Failed",
+                            systemImage: "exclamationmark.circle"
+                        )
+                    } else if season.isRequestable {
+                        Button("Request \(season.title)") {
+                            onRequest([season.number])
+                        }
+                    } else {
+                        Label(
+                            "\(season.title) — \(statusText(for: season))",
+                            systemImage: season.status == .processing
+                                ? "arrow.down.circle"
+                                : "clock"
+                        )
+                    }
+                }
+            } label: {
+                if isRequesting {
+                    ProgressView()
+                } else {
+                    Label("Request Missing Seasons", systemImage: "plus.rectangle.on.folder")
+                }
+            }
+            .buttonStyle(.bordered)
+            .disabled(isRequesting || requestableSeasons.isEmpty)
+
+            if let errorMessage {
+                Text(errorMessage)
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+            }
+        }
+    }
+
+    private func statusText(for season: MediaSeasonRequestState) -> String {
+        switch season.status {
+        case .processing:
+            "Processing"
+        case .available, .partiallyAvailable:
+            "Available"
+        case .pending:
+            "Requested"
+        case .unknown, .deleted:
+            season.requestFailed ? "Failed" : "Unavailable"
         }
     }
 }

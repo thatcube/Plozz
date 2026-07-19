@@ -564,7 +564,6 @@ struct HomeHeroView: View {
                 if isFrontmost { resetTrailer(stopPlayer: true) }
                 return
             }
-            trailerController.claimSurface(ownerID: "home-hero")
             if trailerController.isShowing(item.id) {
                 trailerController.setEndHandler(ownerID: "home-hero") { [itemID = item.id] in
                     guard current?.id == itemID, items.count > 1 else { return }

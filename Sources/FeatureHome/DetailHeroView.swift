@@ -1319,10 +1319,14 @@ private struct SeriesDetailHeroBackdrop: View {
             stillImageOpacity: showsTrailer ? 0 : 1
         ) {
             if showsTrailer {
-                HeroTrailerVideoLayer(
-                    controller: trailerController,
-                    ownerID: "detail-\(trailerController.currentItemID ?? "-")"
-                )
+                ZStack {
+                    if let handoffImage = trailerController.handoffImage {
+                        Image(uiImage: handoffImage)
+                            .resizable()
+                            .scaledToFill()
+                    }
+                    HeroTrailerVideoLayer(controller: trailerController)
+                }
                 .clipped()
                 .transition(.opacity)
             }

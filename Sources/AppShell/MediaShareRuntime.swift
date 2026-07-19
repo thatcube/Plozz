@@ -90,6 +90,10 @@ final class DefaultMediaShareRuntime: MediaShareRuntime {
     /// The shared provider runtime (result cache + per-source breakers) the pipeline
     /// runs on, retained so diagnostics can sample it (Step 6).
     private let providerRuntime: MetadataProviderRuntime
+    /// The same per-build TMDb access resolver the pipeline uses (Step 9), so diagnostics
+    /// can report the breaker for the *active* credential (a user's BYOK key) rather than
+    /// the unused built-in one.
+    private let providerConfig: @Sendable () -> MetadataProviderConfig
     let networkFileResolver: any MediaTransportNetworkFileResolving
 
     private init(
@@ -97,12 +101,14 @@ final class DefaultMediaShareRuntime: MediaShareRuntime {
         composition: MediaShareTransportComposition,
         artworkCacheLifecycle: any ShareLocalArtworkCacheLifecycle,
         providerRuntime: MetadataProviderRuntime,
+        providerConfig: @escaping @Sendable () -> MetadataProviderConfig,
         networkFileResolver: any MediaTransportNetworkFileResolving
     ) {
         self.coordinator = coordinator
         self.composition = composition
         self.artworkCacheLifecycle = artworkCacheLifecycle
         self.providerRuntime = providerRuntime
+        self.providerConfig = providerConfig
         self.networkFileResolver = networkFileResolver
     }
 
@@ -173,6 +179,7 @@ final class DefaultMediaShareRuntime: MediaShareRuntime {
             composition: composition,
             artworkCacheLifecycle: artworkCacheLifecycle,
             providerRuntime: providerRuntime,
+            providerConfig: providerConfig,
             networkFileResolver: resolver
         )
         // AppShell is the only layer that sees both the transport resolver and
@@ -252,7 +259,9 @@ final class DefaultMediaShareRuntime: MediaShareRuntime {
         let work = await coordinator.metadataWorkStatus()
         let artworkBytes = await ArtworkImageCache.shared.derivedArtworkCacheByteSize()
         let metadataBytes = await MetadataDiskCache.shared.currentByteSize()
-        let breakers = await providerRuntime.breakerStates()
+        let breakers = await providerRuntime.breakerStates(
+            tmdbCredentialID: providerConfig().tmdb.credentialID
+        )
         let resultCount = await providerRuntime.resultCacheEntryCount()
         return MetadataEnrichmentDiagnosticsSnapshot(
             capturedAt: capturedAt,
@@ -276,7 +285,7 @@ final class DefaultMediaShareRuntime: MediaShareRuntime {
     }
 
     func validateTMDBUserKey(_ token: String) async -> TMDBKeyValidationResult {
-        await TMDBKeyValidator(runtime: providerRuntime).validate(token)
+        await TMDBKeyValidator().validate(token)
     }
 
     func invalidateTMDBCredential(forToken token: String) async {

@@ -209,6 +209,11 @@ struct MetadataSettingsDetailView: View {
 
                 verifyStatusView
 
+                if let storageError = tmdbKey.storageErrorMessage {
+                    Label(storageError, systemImage: "exclamationmark.triangle.fill")
+                        .font(.callout.weight(.medium)).foregroundStyle(.red)
+                }
+
                 HStack(spacing: 12) {
                     Button {
                         Task { await tmdbKey.saveDraft() }

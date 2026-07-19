@@ -14,6 +14,28 @@ final class TMDBUserKeyModelTests: XCTestCase {
         func removeValue(for key: String) throws { storage[key] = nil }
     }
 
+    /// A store whose save/remove can be made to throw, to prove the model only flips its
+    /// opt-in/opt-out state when the write actually persisted.
+    private final class FailingKeyStore: TMDBUserKeyStoring, @unchecked Sendable {
+        struct Boom: Error {}
+        var stored: String?
+        var failWrites: Bool
+        var supersededCount = 0
+        init(stored: String? = nil, failWrites: Bool) {
+            self.stored = stored
+            self.failWrites = failWrites
+        }
+        func load() -> String? { stored }
+        func save(_ token: String) throws {
+            if failWrites { throw Boom() }
+            stored = token
+        }
+        func remove() throws {
+            if failWrites { throw Boom() }
+            stored = nil
+        }
+    }
+
     private func makeModel(
         result: TMDBKeyValidationResult = .valid,
         superseded: @escaping @Sendable (String) -> Void = { _ in }
@@ -98,5 +120,53 @@ final class TMDBUserKeyModelTests: XCTestCase {
         model.draftKey = "same"
         await model.saveDraft()
         XCTAssertEqual(superseded, [], "Re-saving the identical key isn't a credential change")
+    }
+
+    func testSaveFailureDoesNotFlipConfiguredAndSurfacesError() async {
+        var superseded = 0
+        let store = FailingKeyStore(failWrites: true)
+        let model = TMDBUserKeyModel(
+            store: store,
+            validator: { _ in .valid },
+            onCredentialSuperseded: { _ in superseded += 1 }
+        )
+        model.draftKey = "token"
+        await model.saveDraft()
+        XCTAssertFalse(model.isConfigured, "A failed Keychain write must not claim the key was saved")
+        XCTAssertNil(store.stored, "Nothing persisted")
+        XCTAssertNotNil(model.storageErrorMessage, "The failure is surfaced")
+        XCTAssertEqual(model.draftKey, "token", "The draft is kept so the user can retry")
+        XCTAssertEqual(superseded, 0)
+    }
+
+    func testRemoveFailureKeepsConfiguredAndSurfacesError() async {
+        var superseded = 0
+        // A key is stored, but the delete will fail.
+        let store = FailingKeyStore(stored: "token", failWrites: true)
+        let model = TMDBUserKeyModel(
+            store: store,
+            validator: { _ in .valid },
+            onCredentialSuperseded: { _ in superseded += 1 }
+        )
+        XCTAssertTrue(model.isConfigured)
+        await model.remove()
+        XCTAssertTrue(model.isConfigured, "A failed delete must not claim the key was removed")
+        XCTAssertEqual(store.stored, "token", "The key genuinely remains — no silent re-activation")
+        XCTAssertNotNil(model.storageErrorMessage)
+        XCTAssertEqual(superseded, 0, "No credential change when the removal didn't persist")
+    }
+
+    func testSuccessfulWriteClearsAPriorStorageError() async {
+        let store = FailingKeyStore(failWrites: true)
+        let model = TMDBUserKeyModel(store: store)
+        model.draftKey = "token"
+        await model.saveDraft()
+        XCTAssertNotNil(model.storageErrorMessage)
+        // Recover: writes now succeed.
+        store.failWrites = false
+        model.draftKey = "token"
+        await model.saveDraft()
+        XCTAssertTrue(model.isConfigured)
+        XCTAssertNil(model.storageErrorMessage, "A subsequent successful write clears the error")
     }
 }

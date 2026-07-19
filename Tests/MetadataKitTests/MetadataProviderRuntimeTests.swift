@@ -52,11 +52,31 @@ final class MetadataProviderRuntimeTests: XCTestCase {
         XCTAssertEqual(count, 1)
     }
 
-    func testPipelineUsesRuntimeProviders() async {
-        // A pipeline built with the shared runtime registers the default provider set.
+    func testBreakerStatesReflectActiveBYOKCredential() async {
+        // A user BYOK key's breaker is tripped; the built-in tmdb breaker stays healthy.
         let runtime = MetadataProviderRuntime.makeDefault()
-        let pipeline = ProductionMetadataProviders.makePipeline(runtime: runtime)
-        let sources = await pipeline.registeredSources
-        XCTAssertEqual(sources, Set(ProductionMetadataProviders.defaultSources))
+        let credentialID = "usercred"
+        let userBreaker = runtime.breakerRegistry.breaker(
+            for: ProviderBreakerKey(source: .tmdb, credentialID: credentialID)
+        )
+        _ = await userBreaker.record(.failure(.unauthorized))
+
+        // Without the active credential, diagnostics show the (healthy) built-in breaker.
+        let builtIn = await runtime.breakerStates()
+        XCTAssertEqual(builtIn.first { $0.source == .tmdb }?.isTripped, false)
+
+        // With the active credential, the tmdb row reflects the tripped user-key breaker.
+        let active = await runtime.breakerStates(tmdbCredentialID: credentialID)
+        XCTAssertEqual(active.first { $0.source == .tmdb }?.isTripped, true)
+        XCTAssertEqual(active.first { $0.source == .tmdb }?.trippedReason, "unauthorized")
+    }
+
+    func testBreakerStatesFallBackToBuiltInWhenActiveCredentialUnused() async {
+        // An active credential that has never been used has no breaker yet — fall back
+        // to the built-in row so the panel still lists tmdb.
+        let runtime = MetadataProviderRuntime.makeDefault()
+        let states = await runtime.breakerStates(tmdbCredentialID: "never-used")
+        XCTAssertEqual(states.first { $0.source == .tmdb }?.isTripped, false)
+        XCTAssertEqual(states.map(\.source), ProductionMetadataProviders.defaultSources)
     }
 }

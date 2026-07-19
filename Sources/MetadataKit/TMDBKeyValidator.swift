@@ -9,17 +9,14 @@ import CoreModels
 /// `401/403` means TMDb rejected it (invalid); anything else — offline, timeout, 429,
 /// 5xx — is inconclusive (unreachable), never a verdict against the key.
 ///
-/// When a shared ``MetadataProviderRuntime`` is supplied, the outcome is recorded into
-/// **that key's** circuit breaker (keyed by its credential identity), so a bad key opens
-/// only its own breaker — never the built-in path's or another key's — exactly as the
-/// pipeline would. Removing/replacing the key clears that state via
-/// ``MetadataProviderRuntime/invalidateCredential(_:)``.
+/// **Read-only by design.** Manual verification must not perturb the pipeline's live
+/// serving state, so this deliberately does NOT record its outcome into any shared
+/// circuit breaker: tapping "Verify" can neither close a breaker the pipeline
+/// legitimately opened (a real rate-limit/outage) nor nudge one toward open. The
+/// pipeline itself still trips a bad key's own credential-scoped breaker when it
+/// actually uses the key during enrichment; verify is purely diagnostic.
 public struct TMDBKeyValidator: Sendable {
-    private let runtime: MetadataProviderRuntime?
-
-    public init(runtime: MetadataProviderRuntime? = nil) {
-        self.runtime = runtime
-    }
+    public init() {}
 
     public func validate(_ token: String) async -> TMDBKeyValidationResult {
         let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -31,15 +28,6 @@ public struct TMDBKeyValidator: Sendable {
             url: url,
             headers: ["Authorization": "Bearer \(trimmed)"]
         )
-
-        if let runtime {
-            let credentialID = TMDbAccess.credentialID(forToken: trimmed)
-            let breaker = runtime.breakerRegistry.breaker(
-                for: ProviderBreakerKey(source: .tmdb, credentialID: credentialID)
-            )
-            await breaker.record(Self.health(for: outcome))
-        }
-
         switch outcome {
         case .success, .empty:
             return .valid
@@ -47,15 +35,6 @@ public struct TMDBKeyValidator: Sendable {
             return .invalid
         case .rateLimited, .transient:
             return .unreachable
-        }
-    }
-
-    private static func health<T>(for outcome: MetadataHTTP.Outcome<T>) -> ProviderHealth {
-        switch outcome {
-        case .success, .empty: return .ok
-        case .unauthorized: return .failure(.unauthorized)
-        case .rateLimited(let retryAfter): return .failure(.rateLimited(retryAfter: retryAfter))
-        case .transient: return .failure(.transient)
         }
     }
 

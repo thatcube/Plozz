@@ -141,10 +141,26 @@ public struct MetadataProviderRuntime: Sendable {
     /// A point-in-time projection of every known breaker's state, in the module-neutral
     /// diagnostics shape. Ordered by ``ProductionMetadataProviders/defaultSources`` so
     /// the UI list is stable; sources without a breaker are omitted.
-    public func breakerStates() async -> [MetadataEnrichmentDiagnosticsSnapshot.ProviderBreakerState] {
+    ///
+    /// When `tmdbCredentialID` is supplied (a user's BYOK key is active), the TMDb row
+    /// reflects **that credential's** breaker — the one the pipeline actually serves
+    /// from — so a tripped user key shows up in diagnostics instead of the healthy,
+    /// unused built-in breaker. It falls back to the built-in breaker when the active
+    /// credential has no breaker yet (nothing has used it).
+    public func breakerStates(
+        tmdbCredentialID: String? = nil
+    ) async -> [MetadataEnrichmentDiagnosticsSnapshot.ProviderBreakerState] {
         var states: [MetadataEnrichmentDiagnosticsSnapshot.ProviderBreakerState] = []
         for source in ProductionMetadataProviders.defaultSources {
-            guard let breaker = breakers[source] else { continue }
+            let breaker: ProviderCircuitBreaker?
+            if source == .tmdb, let credentialID = tmdbCredentialID {
+                breaker = breakerRegistry.existingBreaker(
+                    for: ProviderBreakerKey(source: .tmdb, credentialID: credentialID)
+                ) ?? breakers[source]
+            } else {
+                breaker = breakers[source]
+            }
+            guard let breaker else { continue }
             let state = await breaker.trippedState
             states.append(
                 MetadataEnrichmentDiagnosticsSnapshot.ProviderBreakerState(

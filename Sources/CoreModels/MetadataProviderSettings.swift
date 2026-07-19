@@ -17,8 +17,14 @@ public enum MetadataProviderState: String, Codable, Sendable, CaseIterable {
     case disabled
 }
 
-/// A persisted, per-profile **user override** layered on top of the build's
-/// Info.plist provider baseline (the Step 5 `MetadataEnrichmentConfig`).
+/// A persisted **user override** layered on top of the build's Info.plist provider
+/// baseline (the Step 5 `MetadataEnrichmentConfig`).
+///
+/// Scope note: the ``MetadataProviderSettingsStore`` below *supports* per-profile
+/// namespacing, but the app wires a single instance **household-global** (app-wide,
+/// un-namespaced) — see `AppState.metadataProviderSettingsModel` — because a share and
+/// its scan are household-global, so provider ordering/roles are too. Keep this in mind
+/// before assuming per-profile behavior.
 ///
 /// It is intentionally *sparse*: an empty value means "use the build defaults
 /// unchanged", and any source not named here inherits its baseline role and

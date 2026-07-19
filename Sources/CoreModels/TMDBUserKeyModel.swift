@@ -43,6 +43,12 @@ public final class TMDBUserKeyModel {
     /// The latest verification lifecycle state.
     public private(set) var verifyState: VerifyState = .idle
 
+    /// A user-facing message when the last save/remove failed to persist to the
+    /// Keychain, or `nil` when the last write succeeded. Surfaced so a silent Keychain
+    /// failure can't leave the UI claiming a key was saved/removed while the stored
+    /// (and pipeline-read) state actually didn't change.
+    public private(set) var storageErrorMessage: String?
+
     private let store: TMDBUserKeyStoring
     private let validator: @Sendable (String) async -> TMDBKeyValidationResult
     private let onCredentialSuperseded: @Sendable (String) async -> Void
@@ -67,13 +73,21 @@ public final class TMDBUserKeyModel {
     /// Whether the draft holds something savable.
     public var canSaveDraft: Bool { trimmedDraft != nil }
 
-    /// Stores the entered key, replacing any prior one. When it replaces a *different*
-    /// existing key, that old credential is superseded (its cached results + breaker
-    /// state are cleared) so a stale/bad key can never resurface.
+    /// Stores the entered key, replacing any prior one. The opt-in state only flips
+    /// (and the old credential is only superseded) when the write **actually persisted**
+    /// — a Keychain failure surfaces via ``storageErrorMessage`` and leaves the stored
+    /// state (which `providerConfig` re-reads on every pipeline build) unchanged, so the
+    /// UI can't claim a key was saved while the pipeline still sees the old one.
     public func saveDraft() async {
         guard let candidate = trimmedDraft else { return }
         let previous = store.load()
-        try? store.save(candidate)
+        do {
+            try store.save(candidate)
+        } catch {
+            storageErrorMessage = "Couldn't save the key to the Keychain. Please try again."
+            return
+        }
+        storageErrorMessage = nil
         isConfigured = store.load() != nil
         draftKey = ""
         verifyState = .idle
@@ -99,9 +113,20 @@ public final class TMDBUserKeyModel {
 
     /// Removes the stored key (opt out) and supersedes its credential so its cached
     /// results + breaker trip are cleared immediately.
+    ///
+    /// The opt-out only takes effect when the removal **actually succeeded** (a concrete
+    /// store treats "no such item" as success). If the Keychain delete genuinely fails,
+    /// the key is still stored and would silently re-activate on the next pipeline build,
+    /// so the state is left unchanged and the failure surfaces via ``storageErrorMessage``.
     public func remove() async {
         let previous = store.load()
-        try? store.remove()
+        do {
+            try store.remove()
+        } catch {
+            storageErrorMessage = "Couldn't remove the key from the Keychain. Please try again."
+            return
+        }
+        storageErrorMessage = nil
         isConfigured = false
         draftKey = ""
         verifyState = .idle

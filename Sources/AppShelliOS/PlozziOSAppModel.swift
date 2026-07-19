@@ -19,6 +19,11 @@ import TraktService
 @MainActor
 @Observable
 final class PlozziOSAppModel {
+    struct PendingLibrarySelection: Identifiable {
+        let id = UUID()
+        let accountIDs: [String]
+    }
+
     let accountsProviders: AccountsProvidersModel
     let profiles: ProfilesModel
     let authenticatedHTTPResolver: ManagedAuthenticatedHTTPResolver
@@ -37,6 +42,7 @@ final class PlozziOSAppModel {
     private(set) var seriesTrackStore: SeriesTrackPreferenceStore
     private(set) var versionPreferences: VersionPreferenceStore
     private(set) var downloads: PlozziOSDownloadsModel
+    private(set) var pendingLibrarySelection: PendingLibrarySelection?
     @ObservationIgnored
     private(set) var plexHomeUsers: PlexHomeUsersModel!
     @ObservationIgnored
@@ -68,6 +74,12 @@ final class PlozziOSAppModel {
     private let mediaShareRescanService: MediaShareRescanService
     @ObservationIgnored private var trackerProfileGeneration: UInt64 = 0
     @ObservationIgnored private var plexUserSelectionGeneration: UInt64 = 0
+    @ObservationIgnored private var appliesPlexIdentityAfterLibrarySelection = false
+    @ObservationIgnored private var isManagedServerPresentationActive = false
+    @ObservationIgnored
+    private var queuedPlexUserSelection: PlexHomeUsersModel.PendingPlexUserSelection?
+    @ObservationIgnored private var queuedLibraryAccountIDs: [String]?
+    @ObservationIgnored private var postAddPresentationGeneration: UInt64 = 0
     @ObservationIgnored private var watchReconcilers: [String: WatchStateReconciler] = [:]
     @ObservationIgnored
     private(set) lazy var identityIndex = IdentityIndexModel(
@@ -188,6 +200,7 @@ final class PlozziOSAppModel {
             accountsProviders: accountsProviders,
             authenticatedHTTPResolver: authenticatedHTTPResolver
         )
+        self.pendingLibrarySelection = nil
         self.mediaShareAccountService = MediaShareAccountService(runtime: mediaShareRuntime)
         self.mediaShareConfigurationService = MediaShareAccountConfigurationService(
             accountStore: accountStore
@@ -715,16 +728,19 @@ final class PlozziOSAppModel {
 
     func persist(_ sessions: [UserSession]) {
         do {
-            let plexAccounts = sessions
-                .filter { $0.server.provider == .plex }
-                .map { Account(from: $0) }
+            let existingIDs = Set(accountsProviders.accounts.map(\.id))
+            var addedAccounts: [Account] = []
             for session in sessions {
-                try accountStore.add(Account(from: session), token: session.accessToken)
+                let account = Account(from: session)
+                try accountStore.add(account, token: session.accessToken)
+                if !existingIDs.contains(account.id) {
+                    addedAccounts.append(account)
+                }
             }
             accountError = nil
             reloadAccountsAndCrashContext()
             identityIndex.warmIdentityIndex()
-            preparePlexUserSelection(for: plexAccounts)
+            preparePostSignInOnboarding(for: addedAccounts)
         } catch {
             accountError = error.localizedDescription
         }
@@ -746,19 +762,47 @@ final class PlozziOSAppModel {
             )
         }
         profiles.update(profile)
+        appliesPlexIdentityAfterLibrarySelection = true
         plexHomeUsers.clearUserSelection()
-        Task {
-            await Task.yield()
-            plexHomeUsers.ensurePlexIdentityForActiveProfile()
+        scheduleLibrarySelection(accountIDs: pending.applyToAccountIDs)
+    }
+
+    func beginManagedServerPresentation() {
+        postAddPresentationGeneration &+= 1
+        plexUserSelectionGeneration &+= 1
+        queuedPlexUserSelection = nil
+        queuedLibraryAccountIDs = nil
+        isManagedServerPresentationActive = true
+    }
+
+    func finishManagedServerPresentation() {
+        isManagedServerPresentationActive = false
+        if let selection = queuedPlexUserSelection {
+            queuedPlexUserSelection = nil
+            plexHomeUsers.presentUserSelection(selection)
+        } else if let accountIDs = queuedLibraryAccountIDs {
+            queuedLibraryAccountIDs = nil
+            scheduleLibrarySelection(accountIDs: accountIDs)
         }
     }
 
-    private func preparePlexUserSelection(for accounts: [Account]) {
+    func completeLibrarySelection() {
+        pendingLibrarySelection = nil
+        guard appliesPlexIdentityAfterLibrarySelection else { return }
+        appliesPlexIdentityAfterLibrarySelection = false
+        plexHomeUsers.ensurePlexIdentityForActiveProfile()
+    }
+
+    private func preparePostSignInOnboarding(for accounts: [Account]) {
         plexUserSelectionGeneration &+= 1
         let generation = plexUserSelectionGeneration
         guard let account = accounts.first(where: {
-            profiles.activeProfile.homeUserBinding(forPlexAccount: $0.id) == nil
+            $0.server.provider == .plex
+                && profiles.activeProfile.homeUserBinding(
+                    forPlexAccount: $0.id
+                ) == nil
         }) else {
+            scheduleLibrarySelection(accountIDs: accounts.map(\.id))
             return
         }
         Task {
@@ -770,9 +814,10 @@ final class PlozziOSAppModel {
                   accountsProviders.accounts.contains(where: {
                       $0.id == account.id
                   }) else {
+                scheduleLibrarySelection(accountIDs: accounts.map(\.id))
                 return
             }
-            plexHomeUsers.presentUserSelection(
+            schedulePlexUserSelection(
                 PlexHomeUsersModel.PendingPlexUserSelection(
                     accountID: account.id,
                     serverName: account.server.name,
@@ -818,7 +863,7 @@ final class PlozziOSAppModel {
         displayName: String
     ) -> Bool {
         do {
-            _ = try mediaShareConfigurationService.saveNFS(
+            let prepared = try mediaShareConfigurationService.saveNFS(
                 host: host,
                 port: port,
                 exportPath: exportPath,
@@ -826,6 +871,9 @@ final class PlozziOSAppModel {
             )
             reloadAccountsAndCrashContext()
             identityIndex.warmIdentityIndex()
+            if prepared.previousAccount == nil {
+                scheduleLibrarySelection(accountIDs: [prepared.account.id])
+            }
             accountError = nil
             return true
         } catch {
@@ -844,7 +892,7 @@ final class PlozziOSAppModel {
         displayName: String
     ) -> Bool {
         do {
-            _ = try mediaShareConfigurationService.saveSMB(
+            let prepared = try mediaShareConfigurationService.saveSMB(
                 host: host,
                 port: port,
                 share: share,
@@ -854,6 +902,9 @@ final class PlozziOSAppModel {
             )
             reloadAccountsAndCrashContext()
             identityIndex.warmIdentityIndex()
+            if prepared.previousAccount == nil {
+                scheduleLibrarySelection(accountIDs: [prepared.account.id])
+            }
             accountError = nil
             return true
         } catch {
@@ -870,7 +921,7 @@ final class PlozziOSAppModel {
         displayName: String
     ) -> Bool {
         do {
-            _ = try mediaShareConfigurationService.saveWebDAV(
+            let prepared = try mediaShareConfigurationService.saveWebDAV(
                 baseURL: baseURL,
                 auth: auth,
                 trustPin: trustPin,
@@ -878,6 +929,9 @@ final class PlozziOSAppModel {
             )
             reloadAccountsAndCrashContext()
             identityIndex.warmIdentityIndex()
+            if prepared.previousAccount == nil {
+                scheduleLibrarySelection(accountIDs: [prepared.account.id])
+            }
             accountError = nil
             return true
         } catch {
@@ -897,7 +951,7 @@ final class PlozziOSAppModel {
         displayName: String
     ) -> Bool {
         do {
-            _ = try mediaShareConfigurationService.saveSFTP(
+            let prepared = try mediaShareConfigurationService.saveSFTP(
                 host: host,
                 port: port,
                 path: path,
@@ -908,6 +962,9 @@ final class PlozziOSAppModel {
             )
             reloadAccountsAndCrashContext()
             identityIndex.warmIdentityIndex()
+            if prepared.previousAccount == nil {
+                scheduleLibrarySelection(accountIDs: [prepared.account.id])
+            }
             accountError = nil
             return true
         } catch {
@@ -923,18 +980,56 @@ final class PlozziOSAppModel {
         displayName: String
     ) -> Bool {
         do {
-            _ = try mediaShareConfigurationService.saveFTP(
+            let prepared = try mediaShareConfigurationService.saveFTP(
                 baseURL: baseURL,
                 auth: auth,
                 displayName: displayName
             )
             reloadAccountsAndCrashContext()
             identityIndex.warmIdentityIndex()
+            if prepared.previousAccount == nil {
+                scheduleLibrarySelection(accountIDs: [prepared.account.id])
+            }
             accountError = nil
             return true
         } catch {
             accountError = error.localizedDescription
             return false
+        }
+    }
+
+    private func presentLibrarySelection(accountIDs: [String]) {
+        let activeIDs = Set(accountsProviders.accounts.map(\.id))
+        let available = accountIDs.filter(activeIDs.contains)
+        guard !available.isEmpty else {
+            appliesPlexIdentityAfterLibrarySelection = false
+            return
+        }
+        pendingLibrarySelection = PendingLibrarySelection(accountIDs: available)
+    }
+
+    private func schedulePlexUserSelection(
+        _ selection: PlexHomeUsersModel.PendingPlexUserSelection
+    ) {
+        if isManagedServerPresentationActive {
+            queuedPlexUserSelection = selection
+        } else {
+            plexHomeUsers.presentUserSelection(selection)
+        }
+    }
+
+    private func scheduleLibrarySelection(accountIDs: [String]) {
+        guard !accountIDs.isEmpty else { return }
+        postAddPresentationGeneration &+= 1
+        let generation = postAddPresentationGeneration
+        if isManagedServerPresentationActive {
+            queuedLibraryAccountIDs = accountIDs
+            return
+        }
+        Task {
+            await Task.yield()
+            guard generation == postAddPresentationGeneration else { return }
+            presentLibrarySelection(accountIDs: accountIDs)
         }
     }
 }

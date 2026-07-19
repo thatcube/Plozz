@@ -14,6 +14,7 @@ public struct PlozziOSRootView: View {
     public var body: some View {
         let pinRequest = appModel.plexHomeUsers.pendingPlexPINRequest
         let plexUserSelection = appModel.plexHomeUsers.pendingPlexUserSelection
+        let librarySelection = appModel.pendingLibrarySelection
 
         Group {
             if appModel.requiresLaunchProfileSelection
@@ -30,18 +31,21 @@ public struct PlozziOSRootView: View {
                 PlozziOSSplitShell(
                     selection: $selection,
                     appModel: appModel,
-                    onAddServer: { showingAddServer = true }
+                    onAddServer: showAddServer
                 )
             } else {
                 PlozziOSTabShell(
                     appModel: appModel,
-                    onAddServer: { showingAddServer = true }
+                    onAddServer: showAddServer
                 )
             }
         }
         .environment(appModel)
         .id(shellIdentity)
-        .sheet(isPresented: $showingAddServer) {
+        .sheet(
+            isPresented: $showingAddServer,
+            onDismiss: appModel.finishManagedServerPresentation
+        ) {
             AddServerView(appModel: appModel)
         }
         .sheet(
@@ -74,6 +78,24 @@ public struct PlozziOSRootView: View {
                 request: request
             )
         }
+        .sheet(
+            item: Binding(
+                get: { librarySelection },
+                set: { selection in
+                    if selection == nil {
+                        appModel.completeLibrarySelection()
+                    }
+                }
+            )
+        ) { selection in
+            PlozziOSLibrarySelectionView(
+                accounts: appModel.accountsProviders.resolvedAccounts(
+                    withIDs: selection.accountIDs
+                ),
+                visibility: appModel.settings.homeVisibility,
+                onContinue: appModel.completeLibrarySelection
+            )
+        }
         .preferredColorScheme(appModel.settings.theme.theme.preferredColorScheme)
     }
 
@@ -84,6 +106,11 @@ public struct PlozziOSRootView: View {
         }
         return "\(appModel.profiles.activeProfileID)#"
             + "\(appModel.plexHomeUsers.plexIdentityGeneration)"
+    }
+
+    private func showAddServer() {
+        appModel.beginManagedServerPresentation()
+        showingAddServer = true
     }
 }
 

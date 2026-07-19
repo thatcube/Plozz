@@ -13,12 +13,15 @@ import CoreModels
 public enum ProductionMetadataProviders {
     /// The default provider set. Wikidata/Wikipedia are confined to idle backlog via
     /// their policy so they never sit on the foreground path. When `cache` is
-    /// supplied, every provider is wrapped so its results are cached under its own
-    /// provider+version namespace.
+    /// supplied, every provider is wrapped in a ``ResilientEnrichmentProvider`` — its
+    /// own circuit breaker plus the shared, provider+version-namespaced result cache —
+    /// so an outage in one source degrades gracefully to its cached/last-known data
+    /// without affecting the others.
     public static func make(
         providerConfig: MetadataProviderConfig = .resolved(),
         tvdbConfig: TVDBConfig = .resolved(),
-        cache: ProviderResultCache? = nil
+        cache: ProviderResultCache? = nil,
+        breakerPolicy: ProviderCircuitBreaker.Policy = ProviderCircuitBreaker.Policy()
     ) -> [any MetadataEnrichmentProvider] {
         let providers: [any MetadataEnrichmentProvider] = [
             TVDBEnrichmentProvider(client: TVDBClient(config: tvdbConfig)),
@@ -44,7 +47,14 @@ public enum ProductionMetadataProviders {
             ),
         ]
         guard let cache else { return providers }
-        return providers.map { CachedEnrichmentProvider(base: $0, cache: cache) }
+        // Each provider gets an INDEPENDENT breaker so outages are isolated per source.
+        return providers.map {
+            ResilientEnrichmentProvider(
+                base: $0,
+                breaker: ProviderCircuitBreaker(policy: breakerPolicy),
+                cache: cache
+            )
+        }
     }
 
     /// A pipeline wired with the production provider set (each result-cached under its

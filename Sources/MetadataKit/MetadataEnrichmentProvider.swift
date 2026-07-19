@@ -74,6 +74,43 @@ public struct ProviderPolicy: Sendable, Equatable {
     )
 }
 
+/// Why a provider call failed, so an independent per-provider circuit breaker can
+/// react with the right cooldown. Distinguishing these is the crux of graceful
+/// outage handling: an authoritative "nothing here" must never be treated as an
+/// outage, and a rate-limit must honor the server's own `Retry-After`.
+public enum ProviderFailureKind: Sendable, Equatable {
+    /// Offline / DNS / TLS / timeout / 5xx — retry after a short cooldown.
+    case transient
+    /// 401 / 403 — credentials rejected; open with an independent, longer cooldown
+    /// until they change.
+    case unauthorized
+    /// 429 — rate-limited; open honoring the server's `Retry-After` (seconds) when
+    /// provided, else a fallback cooldown.
+    case rateLimited(retryAfter: TimeInterval?)
+}
+
+/// The health signal a provider reports for one call, used to drive its breaker.
+public enum ProviderHealth: Sendable, Equatable {
+    /// A usable result was returned.
+    case ok
+    /// An authoritative "nothing found" (e.g. a definitive 404 / decoded-empty). This
+    /// is a valid negative — it does **not** trip the breaker.
+    case empty
+    /// The call failed; the kind selects the cooldown.
+    case failure(ProviderFailureKind)
+}
+
+/// A provider result paired with the health of the call that produced it.
+public struct ProviderResponse: Sendable {
+    public var enrichment: MetadataEnrichment
+    public var health: ProviderHealth
+
+    public init(enrichment: MetadataEnrichment, health: ProviderHealth) {
+        self.enrichment = enrichment
+        self.health = health
+    }
+}
+
 /// The single seam every external metadata source conforms to.
 ///
 /// The pipeline asks a provider to fill **only the fields still missing** for an
@@ -92,6 +129,12 @@ public protocol MetadataEnrichmentProvider: Sendable {
     /// Resolve as many of `missing` as possible for `query`. Never throws; returns an
     /// empty enrichment when nothing could be resolved.
     func enrich(_ query: MetadataQuery, missing: Set<MetadataField>) async -> MetadataEnrichment
+    /// Like ``enrich(_:missing:)`` but also reports the health of the underlying
+    /// call so a circuit breaker can distinguish an outage (transient / auth / rate)
+    /// from an authoritative "nothing found". Defaults to inferring `ok`/`empty` from
+    /// whether the result is non-empty; a network-backed adapter overrides it to
+    /// surface real HTTP status.
+    func enrichReporting(_ query: MetadataQuery, missing: Set<MetadataField>) async -> ProviderResponse
 }
 
 public extension MetadataEnrichmentProvider {
@@ -103,5 +146,13 @@ public extension MetadataEnrichmentProvider {
             guard let capability = MetadataCapability.covering(field) else { return false }
             return capabilities.contains(capability)
         }
+    }
+
+    /// Default health reporting: a non-empty result is `ok`, an empty one is treated
+    /// as an authoritative `empty`. Providers that can see real transport status
+    /// override this to report `failure` so their breaker trips on true outages.
+    func enrichReporting(_ query: MetadataQuery, missing: Set<MetadataField>) async -> ProviderResponse {
+        let enrichment = await enrich(query, missing: missing)
+        return ProviderResponse(enrichment: enrichment, health: enrichment.isEmpty ? .empty : .ok)
     }
 }

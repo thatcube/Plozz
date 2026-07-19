@@ -96,8 +96,15 @@ public enum PlozzTheme {
         public static let rowSpacing: CGFloat = 28
         /// Gap between a section's title and the row/grid beneath it.
         public static let sectionTitleSpacing = Spacing.medium
-        /// Standard horizontal inset from the screen edge.
-        public static let screenPadding = Spacing.xLarge
+        /// Horizontal inset of top-level content from the screen edge, applied *on
+        /// top of* the tvOS title-safe **safe area** the system already hands us.
+        /// `0` means "sit flush against the system safe area" — the same thing
+        /// Apple's own TV apps do, so our rails/hero/text sit as close to the edge
+        /// as the platform allows without adding a second, redundant margin. This
+        /// is the single shared value for the screen-edge inset; don't hard-code a
+        /// number at call sites. (Use `screenVerticalPadding` for top/bottom and
+        /// inner block spacing — that is a *different* concern and stays non-zero.)
+        public static let screenPadding: CGFloat = 0
         /// Max content width for the Settings screens so cards/lists don't
         /// stretch edge-to-edge on a wide TV. Shared by the root Settings page
         /// and the drill-in detail pages (Servers, Profiles) so they all read
@@ -303,8 +310,9 @@ public enum PlozzTheme {
 
         /// Leading inset for the detail hero's title/metadata block, shared by the
         /// rows beneath it (seasons, episodes, cast, chips) so the whole page lines
-        /// up on one edge. Matches the standard `screenPadding` used by the Home
-        /// rows so detail and Home content sit on the same left edge.
+        /// up on one edge. Tracks `screenPadding` (the shared screen-edge inset, now
+        /// deferring to the system safe area) so detail and Home content sit on the
+        /// same left edge.
         public static let heroLeadingPadding: CGFloat = screenPadding
     }
 

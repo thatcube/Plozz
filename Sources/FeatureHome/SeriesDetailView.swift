@@ -329,7 +329,7 @@ struct SeriesDetailView: View {
                     )
                         .padding(.top, 32)
                 }
-                .padding(.bottom, PlozzTheme.Metrics.screenPadding)
+                .padding(.bottom, PlozzTheme.Metrics.screenVerticalPadding)
                 // Cap the whole scroll column to the proposed (safe viewport)
                 // width. The hero backdrop still bleeds edge-to-edge via its own
                 // `.ignoresSafeArea`, but its layout footprint — and any over-wide
@@ -585,12 +585,12 @@ struct SeriesDetailView: View {
         guard let edge = SeriesSeasonRevealEdge.clippedEdge(
             frame: frame,
             viewportWidth: seasonBarViewportWidth,
-            clearance: PlozzTheme.Metrics.screenPadding
+            clearance: PlozzTheme.Metrics.screenVerticalPadding
         ) else { return }
         let anchor = edge.revealAnchor(
             targetWidth: frame.width,
             viewportWidth: seasonBarViewportWidth,
-            clearance: PlozzTheme.Metrics.screenPadding
+            clearance: PlozzTheme.Metrics.screenVerticalPadding
         )
         DispatchQueue.main.async {
             if reduceMotion {

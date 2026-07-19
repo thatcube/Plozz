@@ -480,7 +480,7 @@ public struct ItemDetailView: View {
                     }
                     DetailExtrasView(item: detail.item, leadingInset: PlozzTheme.Metrics.heroLeadingPadding)
                 }
-                .padding(.bottom, PlozzTheme.Metrics.screenPadding)
+                .padding(.bottom, PlozzTheme.Metrics.screenVerticalPadding)
                 // Cap the whole scroll column to the proposed (safe viewport)
                 // width so an over-wide row can't inflate the column past the
                 // viewport and pan the page sideways. The hero still bleeds
@@ -575,7 +575,7 @@ public struct ItemDetailView: View {
             .focused($emptyBackFocused)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(PlozzTheme.Metrics.screenPadding)
+        .padding(PlozzTheme.Metrics.screenVerticalPadding)
         .defaultFocus($emptyBackFocused, true)
     }
 
@@ -603,7 +603,7 @@ public struct ItemDetailView: View {
             .focused($emptyBackFocused)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(PlozzTheme.Metrics.screenPadding)
+        .padding(PlozzTheme.Metrics.screenVerticalPadding)
         .defaultFocus($emptyBackFocused, true)
     }
 

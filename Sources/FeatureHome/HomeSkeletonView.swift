@@ -259,7 +259,7 @@ struct HomeHeroSkeletonView: View {
             .padding(.top, 6)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.top, PlozzTheme.Metrics.screenPadding)
+        .padding(.top, PlozzTheme.Metrics.screenVerticalPadding)
         .padding(.trailing, PlozzTheme.Metrics.screenPadding)
         .padding(.leading, HomeHeroLayout.contentLeadingPadding)
         .padding(.bottom, HomeHeroLayout.contentBottomInset)

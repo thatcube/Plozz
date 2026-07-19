@@ -772,7 +772,7 @@ struct MusicDetailLayout<InfoColumn: View>: View {
     // so `body` measures the info column and centres it geometrically instead of
     // relying on these numbers (see `infoHeight` / `centeredTop`).
     private var legacyTopPadding: CGFloat {
-        let base = PlozzTheme.Metrics.screenPadding - 80
+        let base = PlozzTheme.Metrics.screenVerticalPadding - 80
         return hasNowPlaying ? base : base + 54
     }
 
@@ -787,7 +787,7 @@ struct MusicDetailLayout<InfoColumn: View>: View {
             // Give the album/playlist info column ~a third of the screen so the
             // Play and Shuffle buttons fit comfortably side by side.
             let infoWidth = max(480, geo.size.width * 0.33)
-            let bottomInset = PlozzTheme.Metrics.screenPadding
+            let bottomInset = PlozzTheme.Metrics.screenVerticalPadding
             // Sidebar: genuinely centre the info column in the available height
             // (both top and bottom gaps equal), clamped so it never rides above
             // the top inset. Top bar: keep the original tuned offset so that mode

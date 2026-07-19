@@ -1,5 +1,6 @@
 #if os(iOS)
 import CoreModels
+import CoreUI
 import SwiftUI
 
 public struct PlozziOSRootView: View {
@@ -97,6 +98,7 @@ public struct PlozziOSRootView: View {
             )
         }
         .preferredColorScheme(appModel.settings.theme.theme.preferredColorScheme)
+        .installNightShiftOverlay(appModel.settings.nightShift)
     }
 
     private var shellIdentity: String {

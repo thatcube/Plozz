@@ -1119,28 +1119,127 @@ private struct PlozziOSNightShiftSettingsView: View {
                         Text($0.displayName).tag($0)
                     }
                 }
+                .disabled(!model.settings.isEnabled)
+
+                if model.settings.isEnabled {
+                    scheduleDetails
+                }
+            } footer: {
+                Text(model.scheduleSummary())
             }
 
-            Section("Picture") {
-                Picker("Warmth", selection: $model.settings.warmth) {
-                    ForEach(NightShiftWarmth.allCases) {
-                        Text($0.displayName).tag($0)
+            if model.settings.isEnabled {
+                Section("Picture") {
+                    Picker("Warmth", selection: $model.settings.warmth) {
+                        ForEach(NightShiftWarmth.allCases) {
+                            Text($0.displayName).tag($0)
+                        }
+                    }
+                    Picker("Dimness", selection: $model.settings.dimness) {
+                        ForEach(NightShiftDimness.allCases) {
+                            Text($0.displayName).tag($0)
+                        }
+                    }
+                    if model.settings.scheduleMode != .alwaysOn {
+                        Picker("Fade", selection: $model.settings.fadeMinutes) {
+                            ForEach(fadeOptions, id: \.self) { minutes in
+                                Text(fadeLabel(minutes))
+                                    .tag(minutes)
+                            }
+                        }
                     }
                 }
-                Picker("Dimness", selection: $model.settings.dimness) {
-                    ForEach(NightShiftDimness.allCases) {
-                        Text($0.displayName).tag($0)
+
+                Section("Preview") {
+                    Toggle("Preview at Full Strength", isOn: $model.isPreviewing)
+                    Button("Preview a Day", systemImage: "sun.and.horizon") {
+                        model.runDayNightPreview()
+                    }
+                    if model.previewProgress != nil {
+                        LabeledContent("Simulated time") {
+                            Text(model.previewClockText)
+                                .monospacedDigit()
+                        }
+                        ProgressView(value: model.previewProgress ?? 0)
                     }
                 }
-                Stepper(
-                    "Fade: \(model.settings.fadeMinutes) minutes",
-                    value: $model.settings.fadeMinutes,
-                    in: 0...180,
-                    step: 15
-                )
             }
         }
         .navigationTitle("Night Shift")
+        .onChange(of: model.settings.isEnabled) { _, enabled in
+            if !enabled {
+                model.isPreviewing = false
+            }
+        }
+        .onDisappear {
+            model.isPreviewing = false
+        }
+    }
+
+    @ViewBuilder
+    private var scheduleDetails: some View {
+        switch model.settings.scheduleMode {
+        case .solar:
+            Picker("Location", selection: $model.settings.regionID) {
+                ForEach(NightShiftRegion.sortedCatalog) { region in
+                    Text(region.name).tag(region.id)
+                }
+            }
+        case .manual:
+            DatePicker(
+                "Turns on",
+                selection: timeBinding(for: \.manualOnMinutes),
+                displayedComponents: .hourAndMinute
+            )
+            DatePicker(
+                "Turns off",
+                selection: timeBinding(for: \.manualOffMinutes),
+                displayedComponents: .hourAndMinute
+            )
+        case .alwaysOn:
+            EmptyView()
+        }
+    }
+
+    private func timeBinding(
+        for keyPath: WritableKeyPath<NightShiftSettings, Int>
+    ) -> Binding<Date> {
+        Binding(
+            get: {
+                let minutes = model.settings[keyPath: keyPath]
+                var components = DateComponents()
+                components.year = 2001
+                components.month = 1
+                components.day = 1
+                components.hour = minutes / 60
+                components.minute = minutes % 60
+                return Calendar.current.date(from: components) ?? Date()
+            },
+            set: { date in
+                let components = Calendar.current.dateComponents(
+                    [.hour, .minute],
+                    from: date
+                )
+                model.settings[keyPath: keyPath] =
+                    (components.hour ?? 0) * 60 + (components.minute ?? 0)
+            }
+        )
+    }
+
+    private var fadeOptions: [Int] {
+        Array(
+            Set(
+                NightShiftSettingsModel.fadeOptions
+                    + [model.settings.fadeMinutes]
+            )
+        )
+        .sorted()
+    }
+
+    private func fadeLabel(_ minutes: Int) -> String {
+        minutes == 0
+            ? "Off"
+            : NightShiftSettingsModel.fadeLabel(minutes: minutes)
     }
 }
 

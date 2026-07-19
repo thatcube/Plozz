@@ -57,6 +57,10 @@ private struct NightShiftOverlayInstaller: UIViewRepresentable {
         context.coordinator.sync(model: model)
     }
 
+    static func dismantleUIView(_ uiView: UIView, coordinator: Coordinator) {
+        coordinator.invalidate()
+    }
+
     @MainActor
     final class Coordinator {
         /// The *current* profile-scoped model. Re-pointed by `sync(model:)`
@@ -65,6 +69,7 @@ private struct NightShiftOverlayInstaller: UIViewRepresentable {
         private var tintView: UIView?
         private var attempts = 0
         private var hasArmed = false
+        private var isInvalidated = false
         /// Bumped each time the observation loop is (re)armed so a loop left over
         /// from a previous model instance self-terminates the next time it fires.
         private var observationGeneration = 0
@@ -80,6 +85,7 @@ private struct NightShiftOverlayInstaller: UIViewRepresentable {
         /// switch) or we haven't armed yet — re-arms observation against it and
         /// repaints so the new profile's tint shows immediately.
         func sync(model newModel: NightShiftSettingsModel) {
+            guard !isInvalidated else { return }
             let changed = newModel !== model
             model = newModel
             installIfNeeded()
@@ -91,6 +97,7 @@ private struct NightShiftOverlayInstaller: UIViewRepresentable {
         }
 
         private func installIfNeeded() {
+            guard !isInvalidated else { return }
             // Already attached to a window — nothing to do.
             if let view = tintView, view.superview != nil { return }
 
@@ -145,6 +152,15 @@ private struct NightShiftOverlayInstaller: UIViewRepresentable {
                     self.armObservation()
                 }
             }
+
+        }
+
+        func invalidate() {
+            isInvalidated = true
+            observationGeneration &+= 1
+            hasArmed = false
+            tintView?.removeFromSuperview()
+            tintView = nil
         }
 
         /// Sets the tint layer's colour to the model's current per-channel

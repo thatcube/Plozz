@@ -56,7 +56,9 @@ public final class HomeContentStore: HomeContentStoring, @unchecked Sendable {
     /// v2: `MediaSourceRef` gained a `kind` field and the merger now drops
     /// cross-kind source refs — bumping evicts snapshots that froze a stale
     /// episode↔movie twin from a pre-fix build.
-    private static let schemaDirName = "plozz-home-content-v2"
+    /// v3 removes legacy direct-share relative paths and pre-validation hero
+    /// candidates from persisted `MediaItem.artworkSelections`.
+    private static let schemaDirName = "plozz-home-content-v3"
     private static let schemaDirPrefix = "plozz-home-content"
 
     /// Process-wide guards. `HomeContentStore` is (re)constructed inline in

@@ -77,7 +77,7 @@ actor ShareCatalogStore {
     /// Persisted only as an opaque hash of account identity + credential revision.
     /// This avoids rematerializing every item after a process relaunch while never
     /// storing credentials or artwork paths in catalog metadata.
-    private static let artworkReferenceContextMetaKey = "artwork_reference_context_v1"
+    private static let artworkReferenceContextMetaKey = "artwork_reference_context_v2"
     private var artworkAssociationMaterializationStats = ArtworkAssociationMaterializationStats(
         passes: 0,
         assetRowsLoaded: 0,
@@ -416,10 +416,18 @@ actor ShareCatalogStore {
             path: Self.artworkReferenceContextMetaKey,
             fingerprint: credentialRevision.rawValue.uuidString
         )
-        guard meta(Self.artworkReferenceContextMetaKey) != marker else { return }
+        let markerIsCurrent = meta(Self.artworkReferenceContextMetaKey) == marker
 
         let itemIDs = allArtworkAssociatedItemIDs().sorted()
-        guard exec("BEGIN IMMEDIATE;") else { return }
+        guard exec("BEGIN IMMEDIATE;"),
+              artworkRepo.ensureCatalogArtworkIDs() else {
+            _ = exec("ROLLBACK;")
+            return
+        }
+        if markerIsCurrent {
+            if !exec("COMMIT;") { _ = exec("ROLLBACK;") }
+            return
+        }
         for itemID in itemIDs {
             guard materializeArtworkSelectionsInTransaction(itemID: itemID) else {
                 _ = exec("ROLLBACK;")
@@ -428,6 +436,37 @@ actor ShareCatalogStore {
         }
         setMeta(Self.artworkReferenceContextMetaKey, marker)
         guard exec("COMMIT;") else { _ = exec("ROLLBACK;"); return }
+    }
+
+    func artworkLocator(for reference: NetworkArtworkReference) -> NetworkFileLocator? {
+        ensureOpen()
+        guard let context = artworkReferenceContext,
+              context.accountID == reference.accountID,
+              context.credentialRevision == reference.credentialRevision,
+              let resolved = artworkRepo.resolve(
+                catalogArtworkID: reference.catalogArtworkID
+              ),
+              reference.sourceRevision == opaqueArtworkRevision(
+                accountID: context.accountID,
+                path: resolved.relPath,
+                fingerprint: artworkSourceFingerprint(
+                    fingerprint: resolved.fingerprint,
+                    scanGenerationBound: resolved.scanGenerationBound,
+                    lastScan: resolved.lastScan
+                )
+              )
+        else { return nil }
+        return try? NetworkFileLocator(
+            accountID: reference.accountID,
+            sourceID: reference.accountID,
+            credentialRevision: reference.credentialRevision,
+            relativePath: resolved.relPath,
+            representation: reference.representation,
+            formatHint: MediaFormatHint(
+                container: (resolved.relPath as NSString).pathExtension,
+                mimeType: reference.contentType
+            )
+        )
     }
 
     // MARK: - Local artwork inventory (Step 4)
@@ -555,7 +594,11 @@ actor ShareCatalogStore {
         guard admits(scanGeneration), db != nil, !artwork.isEmpty,
               exec("BEGIN IMMEDIATE;") else { return }
         let priorItems = artworkAssociatedItemIDs(paths: artwork.map(\.relPath))
-        guard artworkRepo.upsert(artwork, scanID: scanID, now: now),
+        guard artworkRepo.upsert(
+                artwork,
+                scanID: scanID,
+                now: now
+              ),
               associateArtworkInTransaction(artwork) else {
             _ = exec("ROLLBACK;")
             return
@@ -839,32 +882,23 @@ actor ShareCatalogStore {
         ensureOpen()
         guard let context = artworkReferenceContext,
               context.accountID == reference.accountID,
-              context.credentialRevision == reference.credentialRevision
+              context.credentialRevision == reference.credentialRevision,
+              let resolved = artworkRepo.resolve(
+                catalogArtworkID: reference.catalogArtworkID
+              )
         else { return }
-        var fingerprint: String?
-        var scanGenerationBound = false
-        var lastScan: Int64 = 0
-        query("""
-        SELECT fingerprint,scan_generation_bound,last_scan
-        FROM local_artwork_files WHERE rel_path=?;
-        """, bind: { self.bindText($0, 1, reference.relativePath) }) { stmt in
-            fingerprint = self.columnText(stmt, 0)
-            scanGenerationBound = sqlite3_column_int64(stmt, 1) != 0
-            lastScan = sqlite3_column_int64(stmt, 2)
-        }
-        guard let fingerprint,
-              reference.sourceRevision == opaqueArtworkRevision(
+        guard reference.sourceRevision == opaqueArtworkRevision(
                 accountID: context.accountID,
-                path: reference.relativePath,
+                path: resolved.relPath,
                 fingerprint: artworkSourceFingerprint(
-                    fingerprint: fingerprint,
-                    scanGenerationBound: scanGenerationBound,
-                    lastScan: lastScan
+                    fingerprint: resolved.fingerprint,
+                    scanGenerationBound: resolved.scanGenerationBound,
+                    lastScan: resolved.lastScan
                 )
               ),
               exec("BEGIN IMMEDIATE;")
         else { return }
-        let affected = artworkAssociatedItemIDs(paths: [reference.relativePath])
+        let affected = artworkAssociatedItemIDs(paths: [resolved.relPath])
         guard connection.runUpdate("""
         UPDATE local_artwork_files
         SET probe_status='rejected',
@@ -874,8 +908,8 @@ actor ShareCatalogStore {
         WHERE rel_path=? AND fingerprint=?;
         """, bind: {
             sqlite3_bind_double($0, 1, Date().timeIntervalSince1970)
-            self.bindText($0, 2, reference.relativePath)
-            self.bindText($0, 3, fingerprint)
+            self.bindText($0, 2, resolved.relPath)
+            self.bindText($0, 3, resolved.fingerprint)
         }) else {
             _ = exec("ROLLBACK;")
             return
@@ -908,6 +942,7 @@ actor ShareCatalogStore {
         struct Row {
             var placement: ArtworkPlacement
             var path: String
+            var catalogArtworkID: String
             var size: Int64
             var modifiedAt: Date
             var stableID: String?
@@ -922,30 +957,35 @@ actor ShareCatalogStore {
         }
         var rows: [Row] = []
         query("""
-        SELECT a.placement,f.rel_path,f.size,f.modified_at,f.stable_file_id,f.strong_etag,
+        SELECT a.placement,f.rel_path,f.catalog_artwork_id,f.size,f.modified_at,f.stable_file_id,f.strong_etag,
                f.fingerprint,f.content_type,f.width,f.height,a.rank,
                f.scan_generation_bound,f.last_scan
         FROM local_artwork_associations a
         JOIN local_artwork_files f ON f.rel_path=a.artwork_rel_path
         WHERE a.item_id=? AND f.probe_status IN ('pending','unvalidated','validated')
-          AND NOT (
-            f.probe_status='validated'
-            AND f.width > 3 * f.height
-            AND a.placement IN ('homeHero','detailBackdrop')
+          AND (
+            a.placement NOT IN ('homeHero','detailBackdrop')
+            OR (
+              f.probe_status='validated'
+              AND f.width <= 3 * f.height
+            )
           )
         ORDER BY a.placement,a.rank,f.rel_path;
         """, bind: { self.bindText($0, 1, itemID) }) { stmt in
             guard let placement = self.columnText(stmt, 0).map(ArtworkPlacement.init(rawValue:)),
-                  let path = self.columnText(stmt, 1), let fingerprint = self.columnText(stmt, 6) else { return }
+                  let path = self.columnText(stmt, 1),
+                  let catalogArtworkID = self.columnText(stmt, 2),
+                  let fingerprint = self.columnText(stmt, 7) else { return }
             rows.append(.init(
-                placement: placement, path: path, size: sqlite3_column_int64(stmt, 2),
-                modifiedAt: Date(timeIntervalSince1970: sqlite3_column_double(stmt, 3)),
-                stableID: self.columnText(stmt, 4), etag: self.columnText(stmt, 5),
-                fingerprint: fingerprint, contentType: self.columnText(stmt, 7),
-                width: self.columnOptInt(stmt, 8), height: self.columnOptInt(stmt, 9),
-                rank: Int(sqlite3_column_int64(stmt, 10)),
-                scanGenerationBound: sqlite3_column_int64(stmt, 11) != 0,
-                lastScan: sqlite3_column_int64(stmt, 12)
+                placement: placement, path: path, catalogArtworkID: catalogArtworkID,
+                size: sqlite3_column_int64(stmt, 3),
+                modifiedAt: Date(timeIntervalSince1970: sqlite3_column_double(stmt, 4)),
+                stableID: self.columnText(stmt, 5), etag: self.columnText(stmt, 6),
+                fingerprint: fingerprint, contentType: self.columnText(stmt, 8),
+                width: self.columnOptInt(stmt, 9), height: self.columnOptInt(stmt, 10),
+                rank: Int(sqlite3_column_int64(stmt, 11)),
+                scanGenerationBound: sqlite3_column_int64(stmt, 12) != 0,
+                lastScan: sqlite3_column_int64(stmt, 13)
             ))
         }
         let byPlacement = Dictionary(grouping: rows, by: \.placement)
@@ -980,7 +1020,7 @@ actor ShareCatalogStore {
                       ),
                       let reference = try? NetworkArtworkReference(
                         accountID: context.accountID, credentialRevision: context.credentialRevision,
-                        relativePath: row.path, representation: representation,
+                        catalogArtworkID: row.catalogArtworkID, representation: representation,
                         sourceRevision: opaqueArtworkRevision(
                             accountID: context.accountID,
                             path: row.path,

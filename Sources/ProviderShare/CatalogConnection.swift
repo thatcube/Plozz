@@ -248,6 +248,7 @@ final class CatalogConnection {
         apply("""
         CREATE TABLE IF NOT EXISTS local_artwork_files(
             rel_path TEXT PRIMARY KEY,
+            catalog_artwork_id TEXT,
             parent_dir TEXT NOT NULL,
             basename TEXT NOT NULL,
             extension TEXT NOT NULL,
@@ -277,6 +278,10 @@ final class CatalogConnection {
             updated_at REAL
         );
         """)
+        if !hasColumn(table: "local_artwork_files", column: "catalog_artwork_id") {
+            apply("ALTER TABLE local_artwork_files ADD COLUMN catalog_artwork_id TEXT;")
+        }
+        apply("CREATE UNIQUE INDEX IF NOT EXISTS idx_local_artwork_files_catalog_id ON local_artwork_files(catalog_artwork_id);")
         apply("CREATE INDEX IF NOT EXISTS idx_local_artwork_files_status ON local_artwork_files(probe_status, last_scan);")
         apply("CREATE INDEX IF NOT EXISTS idx_local_artwork_files_parent ON local_artwork_files(parent_dir);")
         apply("CREATE INDEX IF NOT EXISTS idx_local_artwork_files_scan ON local_artwork_files(last_scan);")

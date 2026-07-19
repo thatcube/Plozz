@@ -418,7 +418,26 @@ final class ShareLocalArtworkTests: XCTestCase {
             SELECT source_url FROM metadata_values
             WHERE item_id='\(itemID)' AND source='localArtwork' LIMIT 1;
             """))
+        let storedSelection = try XCTUnwrap(fixture.text("""
+            SELECT value_json FROM metadata_values
+            WHERE item_id='\(itemID)' AND source='localArtwork' LIMIT 1;
+            """))
+        XCTAssertFalse(storedSelection.contains("Movies/Film/poster.jpg"))
+        XCTAssertFalse(storedSelection.contains("relativePath"))
+        XCTAssertTrue(storedSelection.contains("catalogArtworkID"))
         XCTAssertEqual(try fixture.integer("SELECT COUNT(*) FROM enrichment WHERE item_id='\(itemID)';"), 1)
+        guard case .networkFile(let localReference) = try XCTUnwrap(
+            item?.artworkReferences(for: .poster).first
+        ) else {
+            return XCTFail("Expected local artwork first")
+        }
+        let encodedItem = try JSONEncoder().encode(try XCTUnwrap(item))
+        XCTAssertFalse(
+            String(decoding: encodedItem, as: UTF8.self)
+                .contains("Movies/Film/poster.jpg")
+        )
+        let locator = await store.artworkLocator(for: localReference)
+        XCTAssertEqual(locator?.relativePath, "Movies/Film/poster.jpg")
 
         let refreshed = await store.saveEnrichment(
             itemID: itemID,
@@ -602,6 +621,13 @@ final class ShareLocalArtworkTests: XCTestCase {
         await store.configureArtworkReferenceContext(accountID: "art-account", credentialRevision: first)
         await store.upsert([asset], scanID: 1)
         await store.upsertArtwork([candidate("Movies/Film/poster.jpg")], scanID: 1)
+        let loadedFirstItem = await store.item(id: itemID)
+        let firstItem = try XCTUnwrap(loadedFirstItem)
+        guard case .networkFile(let firstReference) = try XCTUnwrap(
+            firstItem.artworkReferences(for: .poster).first
+        ) else {
+            return XCTFail("Expected an initial network-file artwork reference")
+        }
 
         await store.configureArtworkReferenceContext(accountID: "art-account", credentialRevision: second)
 
@@ -613,11 +639,99 @@ final class ShareLocalArtworkTests: XCTestCase {
             return XCTFail("Expected a network-file artwork reference")
         }
         XCTAssertEqual(reference.credentialRevision, second)
+        XCTAssertEqual(reference.catalogArtworkID, firstReference.catalogArtworkID)
+        let staleLocator = await store.artworkLocator(for: firstReference)
+        let currentLocator = await store.artworkLocator(for: reference)
+        XCTAssertNil(staleLocator)
+        XCTAssertEqual(currentLocator?.relativePath, "Movies/Film/poster.jpg")
         XCTAssertEqual(
             try fixture.integer("SELECT COUNT(*) FROM local_artwork_files;"),
             1,
             "credential rotation must rematerialize catalog state without rereading artwork"
         )
+    }
+
+    func testUnknownOpaqueArtworkReferenceFailsClosed() async throws {
+        let fixture = ShareCatalogSQLiteFixture()
+        defer { fixture.cleanup() }
+        let store = fixture.makeStore()
+        let revision = CredentialRevision()
+        await store.configureArtworkReferenceContext(
+            accountID: "art-account",
+            credentialRevision: revision
+        )
+        let reference = try NetworkArtworkReference(
+            accountID: "art-account",
+            credentialRevision: revision,
+            catalogArtworkID: "art-unknown",
+            representation: RemoteFileRepresentation(
+                size: 100,
+                identity: RemoteFileIdentity(
+                    kind: .modificationTime,
+                    modifiedAt: Date(timeIntervalSince1970: 100)
+                ),
+                consistency: .changeDetecting
+            ),
+            sourceRevision: "unknown"
+        )
+
+        let locator = await store.artworkLocator(for: reference)
+        XCTAssertNil(locator)
+    }
+
+    func testUnvalidatedArtworkCannotBecomeHeroButSafePlacementsRemain() async throws {
+        let fixture = ShareCatalogSQLiteFixture()
+        defer { fixture.cleanup() }
+        let store = fixture.makeStore()
+        await store.configureArtworkReferenceContext(
+            accountID: "art-account",
+            credentialRevision: CredentialRevision()
+        )
+        let asset = movie()
+        await store.upsert([asset], scanID: 1)
+        await store.upsertArtwork(
+            [
+                candidate("Movies/Film/fanart.jpg"),
+                candidate("Movies/Film/poster.jpg"),
+                candidate("Movies/Film/logo.png"),
+            ],
+            scanID: 1
+        )
+
+        let pendingItem = await store.item(id: ShareCatalogID.file(asset.relPath))
+        let pending = try XCTUnwrap(pendingItem)
+        XCTAssertTrue(pending.artworkReferences(for: .homeHero).isEmpty)
+        XCTAssertTrue(pending.artworkReferences(for: .detailBackdrop).isEmpty)
+        XCTAssertFalse(pending.artworkReferences(for: .poster).isEmpty)
+        XCTAssertFalse(pending.artworkReferences(for: .logo).isEmpty)
+
+        let probeFiles = await store.pendingArtworkProbes(limit: 10)
+        for file in probeFiles {
+            await store.setArtworkProbeResult(
+                file,
+                result: file.relPath.hasSuffix("fanart.jpg")
+                    ? .incomplete
+                    : .validated(width: 1_000, height: 1_500, contentType: "image/jpeg")
+            )
+        }
+        let incompleteItem = await store.item(id: ShareCatalogID.file(asset.relPath))
+        let incomplete = try XCTUnwrap(incompleteItem)
+        XCTAssertTrue(incomplete.artworkReferences(for: .homeHero).isEmpty)
+        XCTAssertTrue(incomplete.artworkReferences(for: .detailBackdrop).isEmpty)
+        XCTAssertFalse(incomplete.artworkReferences(for: .poster).isEmpty)
+        XCTAssertFalse(incomplete.artworkReferences(for: .logo).isEmpty)
+
+        let fanart = try XCTUnwrap(
+            probeFiles.first(where: { $0.relPath.hasSuffix("fanart.jpg") })
+        )
+        await store.setArtworkProbeResult(
+            fanart,
+            result: .validated(width: 1_920, height: 1_080, contentType: "image/jpeg")
+        )
+        let validatedItem = await store.item(id: ShareCatalogID.file(asset.relPath))
+        let validated = try XCTUnwrap(validatedItem)
+        XCTAssertFalse(validated.artworkReferences(for: .homeHero).isEmpty)
+        XCTAssertFalse(validated.artworkReferences(for: .detailBackdrop).isEmpty)
     }
 
     func testCredentialRecoveryRevivesOnlyTransientlyExhaustedProbes() async throws {
@@ -796,7 +910,7 @@ final class ShareLocalArtworkTests: XCTestCase {
             WHERE item_id='\(itemID)' AND field='artwork.poster' AND source='localArtwork';
             """)
         let marker = try fixture.text("""
-            SELECT value FROM meta WHERE key='artwork_reference_context_v1';
+            SELECT value FROM meta WHERE key='artwork_reference_context_v2';
             """)
 
         // A new store models a process relaunch. The persisted marker must avoid a
@@ -815,7 +929,7 @@ final class ShareLocalArtworkTests: XCTestCase {
             before
         )
         XCTAssertEqual(
-            try fixture.text("SELECT value FROM meta WHERE key='artwork_reference_context_v1';"),
+            try fixture.text("SELECT value FROM meta WHERE key='artwork_reference_context_v2';"),
             marker
         )
     }

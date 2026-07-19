@@ -74,7 +74,10 @@ public final class DetailSnapshotCache: Sendable {
     /// v4: `MediaSourceRef` gained a `kind` field and sources are now cross-kind
     /// sanitized — bumping evicts snapshots that froze a stale episode↔movie twin
     /// in `sources` from a pre-fix build.
-    private static let schemaDirName = "plozz-detail-cache-v4"
+    ///
+    /// v5 removes legacy direct-share relative paths and pre-validation hero
+    /// candidates from persisted `MediaItem.artworkSelections`.
+    private static let schemaDirName = "plozz-detail-cache-v5"
     private static let schemaDirPrefix = "plozz-detail-cache"
     private static let defaultScopeComponent = "default"
 

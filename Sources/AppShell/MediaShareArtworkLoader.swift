@@ -8,13 +8,18 @@ import ProviderShare
 /// URL, or credential leaves this type.
 struct MediaShareArtworkLoader: ArtworkNetworkFileLoading {
     let resolver: any MediaTransportNetworkFileResolving
+    let catalogCoordinator: ShareCatalogCoordinator
 
     func loadArtwork(
         _ reference: NetworkArtworkReference,
         maximumBytes: Int
     ) async throws -> Data {
         try Task.checkCancellation()
-        let resolved = try await resolver.resolve(try reference.networkFileLocator())
+        guard let locator = await catalogCoordinator.artworkLocator(for: reference) else {
+            throw ArtworkNetworkFileLoadError(.unavailable)
+        }
+        try Task.checkCancellation()
+        let resolved = try await resolver.resolve(locator)
         guard let cursor = resolved.sourceLease.makeCursor() else {
             await resolved.waitForFinalShutdown()
             throw ArtworkNetworkFileLoadError(.unavailable)

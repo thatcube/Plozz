@@ -2,6 +2,13 @@ import Foundation
 import SQLite3
 import CoreModels
 
+struct ResolvedLocalArtworkFile: Sendable, Equatable {
+    let relPath: String
+    let fingerprint: String
+    let scanGenerationBound: Bool
+    let lastScan: Int64
+}
+
 /// Leaf persistence for listing-only local-artwork inventory and its deterministic
 /// associations. The store remains the transaction/lifecycle owner.
 struct LocalArtworkRepository {
@@ -9,7 +16,11 @@ struct LocalArtworkRepository {
     private var db: OpaquePointer? { connection.db }
 
     @discardableResult
-    func upsert(_ artwork: [LocalArtworkCandidate], scanID: Int64, now: Date) -> Bool {
+    func upsert(
+        _ artwork: [LocalArtworkCandidate],
+        scanID: Int64,
+        now: Date
+    ) -> Bool {
         guard db != nil else { return false }
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, """
@@ -17,8 +28,8 @@ struct LocalArtworkRepository {
           rel_path,parent_dir,basename,extension,name_stem,name_role,explicit_media_stem,
           numbered_alternative,language,season,is_specials,folder_kind,size,modified_at,
           stable_file_id,strong_etag,change_token,fingerprint,scan_generation_bound,last_scan,
-          probe_status,probe_attempts,updated_at
-        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'pending',0,?)
+          probe_status,probe_attempts,updated_at,catalog_artwork_id
+        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'pending',0,?,?)
         ON CONFLICT(rel_path) DO UPDATE SET
           parent_dir=excluded.parent_dir,basename=excluded.basename,extension=excluded.extension,
           name_stem=excluded.name_stem,name_role=excluded.name_role,
@@ -43,6 +54,7 @@ struct LocalArtworkRepository {
                         OR excluded.scan_generation_bound=1 THEN NULL ELSE local_artwork_files.height END,
           content_type=CASE WHEN local_artwork_files.fingerprint IS NOT excluded.fingerprint
                               OR excluded.scan_generation_bound=1 THEN NULL ELSE local_artwork_files.content_type END,
+          catalog_artwork_id=COALESCE(local_artwork_files.catalog_artwork_id,excluded.catalog_artwork_id),
           updated_at=excluded.updated_at;
         """, -1, &stmt, nil) == SQLITE_OK else { return false }
         defer { sqlite3_finalize(stmt) }
@@ -74,9 +86,57 @@ struct LocalArtworkRepository {
             sqlite3_bind_int64(stmt, 19, fingerprint.scanGenerationBound ? 1 : 0)
             sqlite3_bind_int64(stmt, 20, scanID)
             sqlite3_bind_double(stmt, 21, now.timeIntervalSince1970)
+            bindText(stmt, 22, Self.makeCatalogArtworkID())
             guard sqlite3_step(stmt) == SQLITE_DONE else { return false }
         }
         return true
+    }
+
+    @discardableResult
+    func ensureCatalogArtworkIDs() -> Bool {
+        var paths: [String] = []
+        connection.query("""
+        SELECT rel_path FROM local_artwork_files
+        WHERE catalog_artwork_id IS NULL OR catalog_artwork_id='';
+        """) {
+            guard let path = CatalogConnection.columnText($0, 0) else { return }
+            paths.append(path)
+        }
+        for path in paths {
+            guard connection.runUpdate(
+                "UPDATE local_artwork_files SET catalog_artwork_id=? WHERE rel_path=?;",
+                bind: {
+                    bindText($0, 1, Self.makeCatalogArtworkID())
+                    bindText($0, 2, path)
+                }
+            ) else { return false }
+        }
+        return true
+    }
+
+    private static func makeCatalogArtworkID() -> String {
+        "art-\(UUID().uuidString.lowercased())"
+    }
+
+    func resolve(catalogArtworkID: String) -> ResolvedLocalArtworkFile? {
+        var result: ResolvedLocalArtworkFile?
+        connection.query("""
+        SELECT rel_path,fingerprint,scan_generation_bound,last_scan
+        FROM local_artwork_files
+        WHERE catalog_artwork_id=?
+          AND probe_status IN ('pending','unvalidated','validated')
+        LIMIT 1;
+        """, bind: { bindText($0, 1, catalogArtworkID) }) {
+            guard let path = CatalogConnection.columnText($0, 0),
+                  let fingerprint = CatalogConnection.columnText($0, 1) else { return }
+            result = .init(
+                relPath: path,
+                fingerprint: fingerprint,
+                scanGenerationBound: sqlite3_column_int64($0, 2) != 0,
+                lastScan: sqlite3_column_int64($0, 3)
+            )
+        }
+        return result
     }
 
     func staleAssociatedItemIDs(scanID: Int64) -> Set<String> {

@@ -123,6 +123,17 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
         await store.rejectArtworkReference(reference)
     }
 
+    /// Resolves a portable opaque artwork identity through the live account-local
+    /// catalog. No path leaves ProviderShare except inside the transport locator.
+    public func artworkLocator(
+        for reference: NetworkArtworkReference
+    ) async -> NetworkFileLocator? {
+        guard let runtime = runtimes[reference.accountID],
+              runtime.isActive,
+              runtime.invalidationTask == nil else { return nil }
+        return await runtime.store.artworkLocator(for: reference)
+    }
+
     /// Public capability seam: vends the read-only catalog for a share without
     /// exposing the concrete `ShareCatalogStore`. Delegates to the internal
     /// `store(...)` factory so registration/scan/enrich lifecycle is identical.

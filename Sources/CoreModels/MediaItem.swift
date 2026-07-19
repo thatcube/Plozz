@@ -482,6 +482,13 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         var references = artworkSelections
             .first(where: { $0.placement == placement })?
             .references ?? []
+        if placement == .homeHero || placement == .detailBackdrop {
+            references = references.filter { reference in
+                guard case .networkFile(let network) = reference else { return true }
+                guard let dimensions = network.dimensions else { return false }
+                return dimensions.aspectRatio <= 3
+            }
+        }
         references.append(contentsOf: legacyArtworkURLs(for: placement).map(ArtworkReference.remote))
         var seen = Set<ArtworkReference>()
         return references.filter { seen.insert($0).inserted }

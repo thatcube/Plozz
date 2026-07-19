@@ -183,6 +183,67 @@ final class DetailSnapshotCacheTests: XCTestCase {
         XCTAssertNil(restored)
     }
 
+    func testSerializedSnapshotNeverContainsLocalArtworkPath() async throws {
+        let dir = makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let path = "Private Library/Shows/Series/fanart.jpg"
+        let accountID = "share-account"
+        let reference = try NetworkArtworkReference(
+            accountID: accountID,
+            credentialRevision: CredentialRevision(),
+            catalogArtworkID: "art-detail-snapshot",
+            representation: RemoteFileRepresentation(
+                size: 100,
+                identity: RemoteFileIdentity(
+                    kind: .modificationTime,
+                    modifiedAt: Date(timeIntervalSince1970: 100)
+                ),
+                consistency: .changeDetecting
+            ),
+            sourceRevision: "opaque-revision"
+        )
+        let item = MediaItem(
+            id: "private",
+            title: "Private",
+            kind: .series,
+            artworkSelections: [
+                ArtworkSelection(
+                    placement: .detailBackdrop,
+                    references: [.networkFile(reference)]
+                )
+            ]
+        )
+        let cache = DetailSnapshotCache(directory: dir)
+        await cache.store(.init(item: item, children: []), for: "privacy")
+        let data = try XCTUnwrap(
+            try FileManager.default
+                .contentsOfDirectory(
+                    at: dir,
+                    includingPropertiesForKeys: nil,
+                    options: [.skipsHiddenFiles]
+                )
+                .first
+                .flatMap {
+                    try FileManager.default.contentsOfDirectory(
+                        at: $0,
+                        includingPropertiesForKeys: nil
+                    ).first
+                }
+                .flatMap {
+                    try FileManager.default.contentsOfDirectory(
+                        at: $0,
+                        includingPropertiesForKeys: nil
+                    ).first
+                }
+                .map { try Data(contentsOf: $0) }
+        )
+        let text = String(decoding: data, as: UTF8.self)
+
+        XCTAssertFalse(text.contains(path))
+        XCTAssertFalse(text.contains("relativePath"))
+        XCTAssertTrue(text.contains("catalogArtworkID"))
+    }
+
     func testPrunesLeastRecentlyUsedBeyondCap() async {
         let dir = makeTempDirectory()
         defer { try? FileManager.default.removeItem(at: dir) }
@@ -200,7 +261,7 @@ final class DetailSnapshotCacheTests: XCTestCase {
         // serial queue runs after every enqueued prune) instead of racing it.
         await cache.awaitPendingPrune()
         let files = (try? FileManager.default.contentsOfDirectory(
-            at: dir.appendingPathComponent("plozz-detail-cache-v4").appendingPathComponent("default"),
+            at: dir.appendingPathComponent("plozz-detail-cache-v5").appendingPathComponent("default"),
             includingPropertiesForKeys: nil
         )) ?? []
         XCTAssertLessThanOrEqual(files.count, 2)
@@ -229,7 +290,7 @@ final class DetailSnapshotCacheTests: XCTestCase {
         }
         await cache.awaitPendingPrune()
         let files = (try? FileManager.default.contentsOfDirectory(
-            at: dir.appendingPathComponent("plozz-detail-cache-v4").appendingPathComponent("default"),
+            at: dir.appendingPathComponent("plozz-detail-cache-v5").appendingPathComponent("default"),
             includingPropertiesForKeys: [.fileSizeKey]
         )) ?? []
         let totalBytes = files.reduce(0) { partial, file in
@@ -267,7 +328,7 @@ final class DetailSnapshotCacheTests: XCTestCase {
         )
         await reader.awaitPendingPrune()
         let files = (try? FileManager.default.contentsOfDirectory(
-            at: dir.appendingPathComponent("plozz-detail-cache-v4").appendingPathComponent("default"),
+            at: dir.appendingPathComponent("plozz-detail-cache-v5").appendingPathComponent("default"),
             includingPropertiesForKeys: [.fileSizeKey]
         )) ?? []
         let totalBytes = files.reduce(0) { partial, file in

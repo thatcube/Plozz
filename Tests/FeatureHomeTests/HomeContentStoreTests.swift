@@ -101,4 +101,64 @@ final class HomeContentStoreTests: XCTestCase {
         store.save(content(cw: 5))
         XCTAssertNil(store.load())
     }
+
+    func testSerializedSnapshotNeverContainsLocalArtworkPath() throws {
+        let path = "Private Library/Movies/Film/poster.jpg"
+        let accountID = "share-account"
+        let reference = try NetworkArtworkReference(
+            accountID: accountID,
+            credentialRevision: CredentialRevision(),
+            catalogArtworkID: "art-home-snapshot",
+            representation: RemoteFileRepresentation(
+                size: 100,
+                identity: RemoteFileIdentity(
+                    kind: .modificationTime,
+                    modifiedAt: Date(timeIntervalSince1970: 100)
+                ),
+                consistency: .changeDetecting
+            ),
+            sourceRevision: "opaque-revision"
+        )
+        let item = MediaItem(
+            id: "private",
+            title: "Private",
+            kind: .movie,
+            artworkSelections: [
+                ArtworkSelection(
+                    placement: .poster,
+                    references: [.networkFile(reference)]
+                )
+            ]
+        )
+        let store = HomeContentStore(namespace: "privacy", directory: tempDir)
+        store.save(
+            HomeViewModel.Content(
+                continueWatching: [item],
+                latest: [],
+                watchlist: [],
+                libraries: []
+            )
+        )
+        let data = try XCTUnwrap(
+            try FileManager.default
+                .contentsOfDirectory(
+                    at: tempDir,
+                    includingPropertiesForKeys: nil,
+                    options: [.skipsHiddenFiles]
+                )
+                .first
+                .flatMap {
+                    try FileManager.default.contentsOfDirectory(
+                        at: $0,
+                        includingPropertiesForKeys: nil
+                    ).first
+                }
+                .map { try Data(contentsOf: $0) }
+        )
+        let text = String(decoding: data, as: UTF8.self)
+
+        XCTAssertFalse(text.contains(path))
+        XCTAssertFalse(text.contains("relativePath"))
+        XCTAssertTrue(text.contains("catalogArtworkID"))
+    }
 }

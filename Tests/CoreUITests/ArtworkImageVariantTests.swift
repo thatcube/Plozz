@@ -176,7 +176,7 @@ final class ArtworkImageVariantTests: XCTestCase {
         try NetworkArtworkReference(
             accountID: accountID,
             credentialRevision: revision,
-            relativePath: "Private/poster.jpg",
+            catalogArtworkID: "art-\(sourceRevision)",
             representation: RemoteFileRepresentation(
                 size: 1_024,
                 identity: RemoteFileIdentity(kind: .modificationTime, modifiedAt: .distantPast),

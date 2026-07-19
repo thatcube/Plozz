@@ -24,7 +24,9 @@ public struct ArtworkDimensions: Codable, Hashable, Sendable {
     public let height: Int
 
     public init(width: Int, height: Int) throws {
-        guard width > 0, height > 0 else {
+        guard width > 0, height > 0,
+              width <= 16_384, height <= 16_384,
+              Int64(width) * Int64(height) <= 64_000_000 else {
             throw ArtworkReferenceError.invalidDimensions
         }
         self.width = width
@@ -33,6 +35,19 @@ public struct ArtworkDimensions: Codable, Hashable, Sendable {
 
     public var aspectRatio: Double {
         Double(width) / Double(height)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case width
+        case height
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        try self.init(
+            width: container.decode(Int.self, forKey: .width),
+            height: container.decode(Int.self, forKey: .height)
+        )
     }
 }
 
@@ -44,7 +59,7 @@ public struct ArtworkDimensions: Codable, Hashable, Sendable {
 public struct NetworkArtworkReference: Codable, Hashable, Sendable {
     public let accountID: String
     public let credentialRevision: CredentialRevision
-    public let relativePath: String
+    public let catalogArtworkID: String
     public let representation: RemoteFileRepresentation
     public let sourceRevision: String
     public let contentType: String?
@@ -53,7 +68,7 @@ public struct NetworkArtworkReference: Codable, Hashable, Sendable {
     public init(
         accountID: String,
         credentialRevision: CredentialRevision,
-        relativePath: String,
+        catalogArtworkID: String,
         representation: RemoteFileRepresentation,
         sourceRevision: String,
         contentType: String? = nil,
@@ -61,7 +76,11 @@ public struct NetworkArtworkReference: Codable, Hashable, Sendable {
     ) throws {
         self.accountID = try ModelIdentifier.validated(accountID, field: "accountID")
         self.credentialRevision = credentialRevision
-        self.relativePath = try MediaPathPolicy.normalizedRelative(relativePath)
+        let normalizedArtworkID = catalogArtworkID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedArtworkID.isEmpty else {
+            throw ArtworkReferenceError.invalidCatalogArtworkID
+        }
+        self.catalogArtworkID = normalizedArtworkID
         let normalizedRevision = sourceRevision.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalizedRevision.isEmpty else {
             throw ArtworkReferenceError.invalidSourceRevision
@@ -73,18 +92,53 @@ public struct NetworkArtworkReference: Codable, Hashable, Sendable {
         self.dimensions = dimensions
     }
 
-    public func networkFileLocator() throws -> NetworkFileLocator {
-        try NetworkFileLocator(
+    private enum CodingKeys: String, CodingKey {
+        case accountID
+        case credentialRevision
+        case catalogArtworkID
+        case relativePath
+        case representation
+        case sourceRevision
+        case contentType
+        case dimensions
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let accountID = try container.decode(String.self, forKey: .accountID)
+        guard let catalogArtworkID = try container.decodeIfPresent(
+            String.self,
+            forKey: .catalogArtworkID
+        ) else {
+            _ = try container.decodeIfPresent(String.self, forKey: .relativePath)
+            throw ArtworkReferenceError.legacyPathOnlyReference
+        }
+        try self.init(
             accountID: accountID,
-            sourceID: accountID,
-            credentialRevision: credentialRevision,
-            relativePath: relativePath,
-            representation: representation,
-            formatHint: MediaFormatHint(
-                container: (relativePath as NSString).pathExtension,
-                mimeType: contentType
-            )
+            credentialRevision: container.decode(
+                CredentialRevision.self,
+                forKey: .credentialRevision
+            ),
+            catalogArtworkID: catalogArtworkID,
+            representation: container.decode(
+                RemoteFileRepresentation.self,
+                forKey: .representation
+            ),
+            sourceRevision: container.decode(String.self, forKey: .sourceRevision),
+            contentType: container.decodeIfPresent(String.self, forKey: .contentType),
+            dimensions: container.decodeIfPresent(ArtworkDimensions.self, forKey: .dimensions)
         )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(accountID, forKey: .accountID)
+        try container.encode(credentialRevision, forKey: .credentialRevision)
+        try container.encode(catalogArtworkID, forKey: .catalogArtworkID)
+        try container.encode(representation, forKey: .representation)
+        try container.encode(sourceRevision, forKey: .sourceRevision)
+        try container.encodeIfPresent(contentType, forKey: .contentType)
+        try container.encodeIfPresent(dimensions, forKey: .dimensions)
     }
 }
 
@@ -136,7 +190,7 @@ public extension ArtworkReference {
         case .remote(let url):
             return "remote|\(url.absoluteString)"
         case .networkFile(let reference):
-            return "network|\(reference.accountID)|\(reference.credentialRevision.rawValue.uuidString)|\(reference.sourceRevision)"
+            return "network|\(reference.accountID)|\(reference.credentialRevision.rawValue.uuidString)|\(reference.catalogArtworkID)|\(reference.sourceRevision)"
         }
     }
 }
@@ -152,9 +206,39 @@ public struct ArtworkSelection: Codable, Hashable, Sendable {
         var seen = Set<ArtworkReference>()
         self.references = references.filter { seen.insert($0).inserted }
     }
+
+    private enum CodingKeys: String, CodingKey {
+        case placement
+        case references
+    }
+
+    private struct TolerantReference: Decodable {
+        let value: ArtworkReference?
+
+        init(from decoder: Decoder) {
+            value = try? ArtworkReference(from: decoder)
+        }
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            placement: try container.decode(ArtworkPlacement.self, forKey: .placement),
+            references: try container.decode([TolerantReference].self, forKey: .references)
+                .compactMap(\.value)
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(placement, forKey: .placement)
+        try container.encode(references, forKey: .references)
+    }
 }
 
 public enum ArtworkReferenceError: Error, Equatable {
     case invalidDimensions
+    case invalidCatalogArtworkID
+    case legacyPathOnlyReference
     case invalidSourceRevision
 }

@@ -109,7 +109,10 @@ final class DefaultMediaShareRuntime: MediaShareRuntime {
         // MediaTransportCore and remote URLs remain on ArtworkSession.
         ArtworkImageCache.shared.configure(
             networkFileService: ArtworkNetworkFileService(
-                loader: MediaShareArtworkLoader(resolver: resolver),
+                loader: MediaShareArtworkLoader(
+                    resolver: resolver,
+                    catalogCoordinator: coordinator
+                ),
                 failureReporter: MediaShareArtworkFailureReporter(coordinator: coordinator)
             )
         )

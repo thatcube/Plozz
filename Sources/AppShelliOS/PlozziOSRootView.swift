@@ -250,8 +250,6 @@ private struct PlozziOSTabShell: View {
                 onAddServer: showAddServerFromSettings,
                 onClose: { showingSettings = false }
             )
-            .presentationSizing(.page)
-            .presentationDragIndicator(.visible)
         }
     }
 

@@ -33,6 +33,9 @@ public struct MetadataEnrichmentConfig: Sendable {
     /// follows the per-field recommended policy (byte-identical to the pre-reorder
     /// behavior). When `true`, the single global ``order`` drives every field.
     public var usesGlobalOrder: Bool
+    /// Whether configured online artwork outranks local/server/embedded artwork.
+    /// This never changes text or identity precedence.
+    public var preferOnlineArtwork: Bool
     /// The per-field / per-content-type source-priority tables (the Step 3 policy).
     public var priority: MetadataPriorityPolicy
 
@@ -40,11 +43,13 @@ public struct MetadataEnrichmentConfig: Sendable {
         disabledSources: Set<MetadataSource> = [],
         order: [MetadataSource] = MetadataEnrichmentConfig.defaultBaseOrder,
         usesGlobalOrder: Bool = false,
+        preferOnlineArtwork: Bool = false,
         priority: MetadataPriorityPolicy = MetadataEnrichmentConfig.defaultPriority
     ) {
         self.disabledSources = disabledSources
         self.order = order
         self.usesGlobalOrder = usesGlobalOrder
+        self.preferOnlineArtwork = preferOnlineArtwork
         self.priority = priority
     }
 
@@ -88,6 +93,29 @@ public struct MetadataEnrichmentConfig: Sendable {
         return ordered.filter { !disabledSources.contains($0) }
     }
 
+    /// Full source precedence for one field, including local/server sources that sit
+    /// outside the external-provider pipeline. OFF preserves today's local-authoritative
+    /// order. ON moves configured, enabled external providers ahead for artwork only.
+    public func precedenceSources(for field: MetadataField, query: MetadataQuery) -> [MetadataSource] {
+        let online = orderedSources(for: field, query: query)
+        let local: [MetadataSource] = [.localNFO, .server, .localArtwork, .embedded]
+        guard Self.isArtwork(field), preferOnlineArtwork else {
+            return local + online
+        }
+        return online + local
+    }
+
+    public static func isArtwork(_ field: MetadataField) -> Bool {
+        field == .posterURL
+            || field == .backdropURL
+            || field == .homeHero
+            || field == .detailBackdrop
+            || field == .logoURL
+            || field == .episodeThumbnail
+            || field == .seasonPoster
+            || field == .banner
+    }
+
     /// The raw priority-context string for a `field` + `query`, mirroring the scheme
     /// ``CurrentMetadataPriority`` builds (`artwork.<type>.<kind>`,
     /// `overview.<type>`). Fields without a dedicated table fall back to
@@ -108,8 +136,8 @@ public struct MetadataEnrichmentConfig: Sendable {
     /// `hero` chain (one backdrop response serves both screens).
     static func artworkKind(for field: MetadataField) -> ArtworkKind? {
         switch field {
-        case .posterURL: return .poster
-        case .backdropURL, .homeHero, .detailBackdrop: return .hero
+        case .posterURL, .seasonPoster: return .poster
+        case .backdropURL, .homeHero, .detailBackdrop, .banner: return .hero
         case .logoURL: return .logo
         case .episodeThumbnail: return .thumbnail
         default: return nil
@@ -157,7 +185,11 @@ public struct MetadataEnrichmentConfig: Sendable {
     ///
     /// A Recommended override returns `self` unchanged.
     public func merged(withUserOverrides overrides: MetadataProviderSettings) -> MetadataEnrichmentConfig {
-        guard overrides.orderMode == .custom else { return self }
+        guard overrides.orderMode == .custom else {
+            var recommended = self
+            recommended.preferOnlineArtwork = overrides.preferOnlineArtwork
+            return recommended
+        }
 
         let known = Set(order)
         let userEnabled = overrides.enabledOrder.map { MetadataSource(rawValue: $0) }.filter { known.contains($0) }
@@ -192,6 +224,7 @@ public struct MetadataEnrichmentConfig: Sendable {
             disabledSources: effectiveDisabled,
             order: effectiveOrder,
             usesGlobalOrder: true,
+            preferOnlineArtwork: overrides.preferOnlineArtwork,
             priority: priority
         )
     }

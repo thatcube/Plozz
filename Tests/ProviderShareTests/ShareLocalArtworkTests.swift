@@ -1,6 +1,7 @@
 import XCTest
 import CoreModels
 import MediaTransportCore
+import MetadataKit
 @testable import ProviderShare
 
 final class ShareLocalArtworkTests: XCTestCase {
@@ -389,6 +390,113 @@ final class ShareLocalArtworkTests: XCTestCase {
         let detail = (landscape + backdrop).filter { $0.placement == .detailBackdrop }.sorted { $0.rank < $1.rank }
         XCTAssertEqual(home.first?.artworkRelPath, "Movies/Film/landscape.jpg")
         XCTAssertEqual(detail.first?.artworkRelPath, "Movies/Film/fanart.jpg")
+    }
+
+    func testOnlineArtworkPreferenceOffKeepsLocalArtworkFirst() throws {
+        let onlineURL = try XCTUnwrap(URL(string: "https://example.invalid/online.jpg"))
+        let localURL = try XCTUnwrap(URL(string: "https://example.invalid/local.jpg"))
+        var item = MediaItem(id: "movie", title: "Movie", kind: .movie)
+        item.posterURL = onlineURL
+        item.metadataProvenance[.posterURL] = MetadataAttribution(source: .tmdb)
+
+        let projected = ShareCatalogReadProjection.applyLocalArtwork(
+            item,
+            [ArtworkSelection(placement: .poster, references: [.remote(localURL)])]
+        )
+
+        XCTAssertEqual(projected.artworkReferences(for: .poster), [.remote(localURL), .remote(onlineURL)])
+        XCTAssertEqual(projected.metadataProvenance[.posterURL]?.source, .localArtwork)
+    }
+
+    func testOnlineArtworkPreferenceOverridesOnlyArtwork() throws {
+        let onlineURL = try XCTUnwrap(URL(string: "https://example.invalid/online.jpg"))
+        let localURL = try XCTUnwrap(URL(string: "https://example.invalid/local.jpg"))
+        var item = MediaItem(id: "movie", title: "Movie", kind: .movie)
+        item.overview = "Online overview"
+        item.posterURL = onlineURL
+        item.metadataProvenance[.overview] = MetadataAttribution(source: .wikipedia)
+        item.metadataProvenance[.posterURL] = MetadataAttribution(source: .tmdb)
+
+        let localOverviewJSON = String(
+            decoding: try JSONEncoder().encode("Local overview"),
+            as: UTF8.self
+        )
+        let withLocalText = ShareCatalogReadProjection.applyLocalMetadata(
+            item,
+            [
+                .overview: .init(
+                    source: .localNFO,
+                    valueJSON: localOverviewJSON
+                )
+            ]
+        )
+        let projected = ShareCatalogReadProjection.applyLocalArtwork(
+            withLocalText,
+            [ArtworkSelection(placement: .poster, references: [.remote(localURL)])],
+            metadataConfig: MetadataEnrichmentConfig(preferOnlineArtwork: true)
+        )
+
+        XCTAssertEqual(projected.artworkReferences(for: .poster), [.remote(onlineURL)])
+        XCTAssertEqual(projected.metadataProvenance[.posterURL]?.source, .tmdb)
+        XCTAssertEqual(projected.overview, "Local overview")
+        XCTAssertEqual(projected.metadataProvenance[.overview]?.source, .localNFO)
+    }
+
+    func testDisabledOnlineProviderCannotOverrideLocalArtwork() throws {
+        let onlineURL = try XCTUnwrap(URL(string: "https://example.invalid/online.jpg"))
+        let localURL = try XCTUnwrap(URL(string: "https://example.invalid/local.jpg"))
+        var item = MediaItem(id: "movie", title: "Movie", kind: .movie)
+        item.posterURL = onlineURL
+        item.metadataProvenance[.posterURL] = MetadataAttribution(source: .tmdb)
+        let config = MetadataEnrichmentConfig(
+            disabledSources: [.tmdb],
+            preferOnlineArtwork: true
+        )
+
+        let projected = ShareCatalogReadProjection.applyLocalArtwork(
+            item,
+            [ArtworkSelection(placement: .poster, references: [.remote(localURL)])],
+            metadataConfig: config
+        )
+
+        XCTAssertEqual(projected.artworkReferences(for: .poster).first, .remote(localURL))
+        XCTAssertEqual(projected.metadataProvenance[.posterURL]?.source, .localArtwork)
+    }
+
+    func testCatalogReadAppliesOnlineArtworkPreference() async throws {
+        let fixture = ShareCatalogSQLiteFixture()
+        defer { fixture.cleanup() }
+        let store = ShareCatalogStore(
+            accountKey: fixture.accountKey,
+            directory: fixture.directory,
+            metadataConfig: { MetadataEnrichmentConfig(preferOnlineArtwork: true) }
+        )
+        await store.configureArtworkReferenceContext(
+            accountID: "art-account",
+            credentialRevision: CredentialRevision()
+        )
+        let asset = movie()
+        let itemID = ShareCatalogID.file(asset.relPath)
+        await store.upsert([asset], scanID: 1)
+        let saved = await store.saveEnrichment(
+            itemID: itemID,
+            .init(posterURL: URL(string: "https://example.invalid/online.jpg")),
+            version: ShareEnricher.version
+        )
+        XCTAssertTrue(saved)
+        await store.upsertArtwork([candidate("Movies/Film/poster.jpg")], scanID: 1)
+
+        let loaded = await store.item(id: itemID)
+        let item = try XCTUnwrap(loaded)
+        XCTAssertEqual(
+            item.artworkReferences(for: .poster),
+            [.remote(try XCTUnwrap(URL(string: "https://example.invalid/online.jpg")))]
+        )
+        XCTAssertEqual(
+            try fixture.integer("SELECT COUNT(*) FROM metadata_values WHERE source='localArtwork';"),
+            1,
+            "preference changes projection, not the independently persisted local lane"
+        )
     }
 
     func testArtworkRoundTripIsPathFreeInProvenanceAndDoesNotTouchExternalLane() async throws {

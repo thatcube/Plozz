@@ -36,6 +36,10 @@ public struct MetadataProviderSettings: Codable, Equatable, Sendable {
     /// Custom activates the saved single global order.
     public var orderMode: MetadataProviderOrderMode
 
+    /// When enabled, configured online providers may replace local/server artwork.
+    /// Text, identity, and all other metadata remain local-authoritative.
+    public var preferOnlineArtwork: Bool
+
     /// Enabled sources, highest-priority first (above the divider), as
     /// `MetadataSource.rawValue`s. A source absent from both lists inherits the
     /// baseline's position + enabled state.
@@ -46,17 +50,22 @@ public struct MetadataProviderSettings: Codable, Equatable, Sendable {
 
     public init(
         orderMode: MetadataProviderOrderMode = .recommended,
+        preferOnlineArtwork: Bool = false,
         enabledOrder: [String] = [],
         disabledOrder: [String] = []
     ) {
         self.orderMode = orderMode
+        self.preferOnlineArtwork = preferOnlineArtwork
         self.enabledOrder = enabledOrder
         self.disabledOrder = disabledOrder
     }
 
     /// Whether there is neither an active mode override nor a saved custom list.
     public var isEmpty: Bool {
-        orderMode == .recommended && enabledOrder.isEmpty && disabledOrder.isEmpty
+        orderMode == .recommended
+            && !preferOnlineArtwork
+            && enabledOrder.isEmpty
+            && disabledOrder.isEmpty
     }
 
     /// Whether the user has explicitly disabled `source`.
@@ -91,7 +100,7 @@ public struct MetadataProviderSettings: Codable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         // Current schema.
-        case orderMode, enabledOrder, disabledOrder
+        case orderMode, preferOnlineArtwork, enabledOrder, disabledOrder
         // Legacy Step-6 schema (role model) — decoded for one-way migration only.
         case roleOverrides, order
     }
@@ -99,6 +108,7 @@ public struct MetadataProviderSettings: Codable, Equatable, Sendable {
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(orderMode, forKey: .orderMode)
+        try container.encode(preferOnlineArtwork, forKey: .preferOnlineArtwork)
         try container.encode(enabledOrder, forKey: .enabledOrder)
         try container.encode(disabledOrder, forKey: .disabledOrder)
     }
@@ -109,6 +119,7 @@ public struct MetadataProviderSettings: Codable, Equatable, Sendable {
         // decodes to its default instead of failing the whole decode.
         enabledOrder = try container.decodeIfPresent([String].self, forKey: .enabledOrder) ?? []
         disabledOrder = try container.decodeIfPresent([String].self, forKey: .disabledOrder) ?? []
+        preferOnlineArtwork = try container.decodeIfPresent(Bool.self, forKey: .preferOnlineArtwork) ?? false
         let persistedMode = try container.decodeIfPresent(String.self, forKey: .orderMode)
             .flatMap(MetadataProviderOrderMode.init(rawValue:))
 

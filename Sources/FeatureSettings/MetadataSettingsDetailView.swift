@@ -284,6 +284,13 @@ struct MetadataSettingsDetailView: View {
         )
     }
 
+    private var preferOnlineArtworkBinding: Binding<Bool> {
+        Binding(
+            get: { providers.settings.preferOnlineArtwork },
+            set: { providers.settings.preferOnlineArtwork = $0 }
+        )
+    }
+
     private func setOrderMode(_ mode: MetadataProviderOrderMode) {
         providers.settings = MetadataProviderListLogic.settings(
             providers.settings,
@@ -313,6 +320,9 @@ struct MetadataSettingsDetailView: View {
                     selection: orderModeBinding,
                     title: orderModeTitle
                 )
+
+                Toggle("Prefer online artwork", isOn: preferOnlineArtworkBinding)
+                    .toggleStyle(SettingsSwitchToggleStyle())
 
                 if providers.settings.orderMode == .custom {
                     VStack(spacing: 6) {
@@ -443,6 +453,9 @@ struct MetadataSettingsDetailView: View {
                     selection: orderModeBinding,
                     title: orderModeTitle
                 )
+
+                Toggle("Prefer online artwork", isOn: preferOnlineArtworkBinding)
+                    .toggleStyle(SettingsSwitchToggleStyle())
 
                 if providers.settings.orderMode == .custom {
                     List {

@@ -8,6 +8,7 @@ final class MetadataProviderSettingsTests: XCTestCase {
     func testDefaultIsEmpty() {
         XCTAssertTrue(MetadataProviderSettings.default.isEmpty)
         XCTAssertEqual(MetadataProviderSettings.default.orderMode, .recommended)
+        XCTAssertFalse(MetadataProviderSettings.default.preferOnlineArtwork)
         XCTAssertTrue(MetadataProviderSettings().enabledOrder.isEmpty)
         XCTAssertTrue(MetadataProviderSettings().disabledOrder.isEmpty)
     }
@@ -23,7 +24,10 @@ final class MetadataProviderSettingsTests: XCTestCase {
     }
 
     func testRoundTrips() throws {
-        var original = MetadataProviderSettings(orderMode: .custom)
+        var original = MetadataProviderSettings(
+            orderMode: .custom,
+            preferOnlineArtwork: true
+        )
         original.setLists(enabled: [.anilist, .tvdb, .tmdb], disabled: [.omdb, .wikipedia])
         let data = try JSONEncoder().encode(original)
         let decoded = try JSONDecoder().decode(MetadataProviderSettings.self, from: data)
@@ -35,6 +39,7 @@ final class MetadataProviderSettingsTests: XCTestCase {
         settings.setLists(enabled: [.tvdb], disabled: [.omdb])
         let json = String(data: try JSONEncoder().encode(settings), encoding: .utf8)!
         XCTAssertTrue(json.contains(#""orderMode":"recommended""#))
+        XCTAssertTrue(json.contains(#""preferOnlineArtwork":false"#))
         XCTAssertTrue(json.contains("enabledOrder"))
         XCTAssertTrue(json.contains("disabledOrder"))
         XCTAssertFalse(json.contains("roleOverrides"), "legacy schema must not be re-emitted")
@@ -109,6 +114,12 @@ final class MetadataProviderSettingsTests: XCTestCase {
         let decoded = try JSONDecoder().decode(MetadataProviderSettings.self, from: data)
         XCTAssertEqual(decoded.orderMode, .custom)
         XCTAssertEqual(decoded.disabledOrder, ["tmdb"])
+    }
+
+    func testMissingArtworkPreferenceMigratesOff() throws {
+        let data = Data(#"{"orderMode":"recommended","enabledOrder":[],"disabledOrder":[]}"#.utf8)
+        let decoded = try JSONDecoder().decode(MetadataProviderSettings.self, from: data)
+        XCTAssertFalse(decoded.preferOnlineArtwork)
     }
 
     func testStoreRoundTripAndScoping() {

@@ -1,5 +1,6 @@
 import XCTest
 import CoreModels
+import MetadataKit
 @testable import ProviderShare
 
 /// Locks the Step 6 `metadataCountPerSource` provenance-row counting used by the
@@ -17,6 +18,7 @@ final class CatalogReadQueriesCountPerSourceTests: XCTestCase {
         CatalogReadQueries(
             connection: conn,
             normalizedMetadataReady: true,
+            metadataConfig: MetadataEnrichmentConfig(),
             localMetadataPresence: LocalMetadataPresence()
         )
     }

@@ -45,6 +45,67 @@ final class MetadataEnrichmentConfigOverrideTests: XCTestCase {
         XCTAssertFalse(merged.usesGlobalOrder)
     }
 
+    func testArtworkPreferenceAppliesInRecommendedMode() {
+        let baseline = MetadataEnrichmentConfig(order: [.tvdb, .tmdb])
+        let overrides = MetadataProviderSettings(preferOnlineArtwork: true)
+        let merged = baseline.merged(withUserOverrides: overrides)
+
+        XCTAssertFalse(merged.usesGlobalOrder)
+        XCTAssertTrue(merged.preferOnlineArtwork)
+        XCTAssertEqual(
+            Array(merged.precedenceSources(for: .posterURL, query: makeQuery()).prefix(2)),
+            [.tmdb, .tvdb]
+        )
+    }
+
+    func testArtworkPreferenceOffKeepsLocalAheadOfOnline() throws {
+        let config = MetadataEnrichmentConfig(order: [.tvdb, .tmdb])
+        let sources = config.precedenceSources(for: .posterURL, query: makeQuery())
+        XCTAssertLessThan(
+            try XCTUnwrap(sources.firstIndex(of: .localArtwork)),
+            try XCTUnwrap(sources.firstIndex(of: .tmdb))
+        )
+    }
+
+    func testArtworkPreferenceNeverChangesTextPrecedence() throws {
+        let config = MetadataEnrichmentConfig(
+            order: [.tvdb, .tmdb],
+            preferOnlineArtwork: true
+        )
+        let sources = config.precedenceSources(for: .overview, query: makeQuery())
+        XCTAssertLessThan(
+            try XCTUnwrap(sources.firstIndex(of: .localNFO)),
+            try XCTUnwrap(sources.firstIndex(of: .tvdb))
+        )
+    }
+
+    func testArtworkPreferenceIsScopedToEveryArtworkField() {
+        let artworkFields: [MetadataField] = [
+            .posterURL, .backdropURL, .homeHero, .detailBackdrop, .logoURL,
+            .episodeThumbnail, .seasonPoster, .banner,
+        ]
+        XCTAssertTrue(artworkFields.allSatisfy(MetadataEnrichmentConfig.isArtwork))
+        XCTAssertFalse([
+            .title, .overview, .genres, .taglines, .providerID("tmdb"),
+        ].contains(where: MetadataEnrichmentConfig.isArtwork))
+    }
+
+    func testArtworkPreferenceAppliesInCustomMode() {
+        let baseline = MetadataEnrichmentConfig(order: [.tvdb, .tmdb])
+        let overrides = MetadataProviderSettings(
+            orderMode: .custom,
+            preferOnlineArtwork: true,
+            enabledOrder: ["tmdb", "tvdb"]
+        )
+        let merged = baseline.merged(withUserOverrides: overrides)
+        XCTAssertTrue(merged.usesGlobalOrder)
+        XCTAssertTrue(merged.preferOnlineArtwork)
+        XCTAssertEqual(
+            Array(merged.precedenceSources(for: .posterURL, query: makeQuery()).prefix(2)),
+            [.tmdb, .tvdb]
+        )
+    }
+
     func testCustomDisablingExcludesSourceAndUsesGlobalOrder() {
         let baseline = MetadataEnrichmentConfig(order: [.tvdb, .tmdb, .anilist])
         var overrides = MetadataProviderSettings(orderMode: .custom)

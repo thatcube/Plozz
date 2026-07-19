@@ -49,6 +49,8 @@ public struct MetadataField: RawRepresentable, Codable, Hashable, Sendable {
     public static let homeHero = Self(rawValue: "homeHero")
     public static let detailBackdrop = Self(rawValue: "detailBackdrop")
     public static let episodeThumbnail = Self(rawValue: "episodeThumbnail")
+    public static let seasonPoster = Self(rawValue: "seasonPoster")
+    public static let banner = Self(rawValue: "banner")
 
     // MARK: - NFO / local-sidecar descriptive fields (Step 3)
     //

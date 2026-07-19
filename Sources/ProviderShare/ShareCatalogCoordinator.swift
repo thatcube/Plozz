@@ -87,6 +87,7 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
         self.pipelineFactory = DefaultShareMetadataPipelineFactory(
             clients: .production(
                 enrichmentConfig: metadataComposition.enrichmentConfig,
+                providerConfig: metadataComposition.providerConfig,
                 providerRuntime: metadataComposition.providerRuntime
             )
         )

@@ -33,7 +33,7 @@ public enum ProductionMetadataProviders {
         tvdbConfig: TVDBConfig = .resolved(),
         cache: ProviderResultCache? = nil,
         breakerPolicy: ProviderCircuitBreaker.Policy = ProviderCircuitBreaker.Policy(),
-        breakers: [MetadataSource: ProviderCircuitBreaker] = [:]
+        breakerRegistry: ProviderBreakerRegistry? = nil
     ) -> [any MetadataEnrichmentProvider] {
         let providers: [any MetadataEnrichmentProvider] = [
             TVDBEnrichmentProvider(client: TVDBClient(config: tvdbConfig)),
@@ -60,15 +60,31 @@ public enum ProductionMetadataProviders {
         ]
         guard let cache else { return providers }
         // Each provider gets an INDEPENDENT breaker so outages are isolated per
-        // source. A shared runtime supplies stable per-source breakers (for
-        // diagnostics); otherwise a fresh one is minted per provider.
-        return providers.map {
-            ResilientEnrichmentProvider(
-                base: $0,
-                breaker: breakers[$0.id] ?? ProviderCircuitBreaker(policy: breakerPolicy),
-                cache: cache
+        // source. A shared registry supplies stable per-(source, credential) breakers
+        // (for diagnostics + BYOK isolation); otherwise a fresh one is minted per
+        // provider. The only credentialed source today is TMDb under a user's BYOK
+        // key: its credential identity (a hash — never the raw key) scopes both its
+        // breaker and its result-cache entries, so a bad/other key can't bleed in.
+        return providers.map { provider in
+            let credentialID = self.credentialID(for: provider.id, providerConfig: providerConfig)
+            let breaker = breakerRegistry?.breaker(
+                for: ProviderBreakerKey(source: provider.id, credentialID: credentialID)
+            ) ?? ProviderCircuitBreaker(policy: breakerPolicy)
+            return ResilientEnrichmentProvider(
+                base: provider,
+                breaker: breaker,
+                cache: cache,
+                credentialID: credentialID
             )
         }
+    }
+
+    /// The active credential identity for `source` under `providerConfig`, or `nil`
+    /// for the built-in / app-global path. Only TMDb (via a user's BYOK key) is
+    /// credentialed today; every other source stays `nil` so its namespaces are
+    /// byte-identical to pre-Step-9.
+    static func credentialID(for source: MetadataSource, providerConfig: MetadataProviderConfig) -> String? {
+        source == .tmdb ? providerConfig.tmdb.credentialID : nil
     }
 
     /// A pipeline wired with the production provider set (each result-cached under its
@@ -89,7 +105,7 @@ public enum ProductionMetadataProviders {
                 providerConfig: providerConfig,
                 tvdbConfig: tvdbConfig,
                 cache: runtime?.resultCache ?? cache,
-                breakers: runtime?.breakers ?? [:]
+                breakerRegistry: runtime?.breakerRegistry
             ),
             config: enrichmentConfig
         )

@@ -22,15 +22,22 @@ public struct ResilientEnrichmentProvider: MetadataEnrichmentProvider {
     private let base: any MetadataEnrichmentProvider
     private let breaker: ProviderCircuitBreaker
     private let cache: ProviderResultCache?
+    /// Opaque identity of the active credential (e.g. a user's BYOK TMDB key), or
+    /// `nil` for the built-in/app-global path. Folded into every result-cache key so
+    /// one credential's results / negatives never bleed into another's — see
+    /// ``ProviderResultCache/key(source:version:requestKey:credential:)``.
+    private let credentialID: String?
 
     public init(
         base: any MetadataEnrichmentProvider,
         breaker: ProviderCircuitBreaker,
-        cache: ProviderResultCache? = nil
+        cache: ProviderResultCache? = nil,
+        credentialID: String? = nil
     ) {
         self.base = base
         self.breaker = breaker
         self.cache = cache
+        self.credentialID = credentialID
     }
 
     public var id: MetadataSource { base.id }
@@ -49,7 +56,7 @@ public struct ResilientEnrichmentProvider: MetadataEnrichmentProvider {
         let requestKey = CachedEnrichmentProvider.requestKey(query: query, missing: missing)
 
         // 1. Warm cache short-circuits everything (served even mid-outage).
-        if let cache, let hit = await cache.cached(source: base.id, version: version, requestKey: requestKey) {
+        if let cache, let hit = await cache.cached(source: base.id, version: version, requestKey: requestKey, credential: credentialID) {
             let enrichment = hit ?? MetadataEnrichment()
             return ProviderResponse(enrichment: enrichment, health: enrichment.isEmpty ? .empty : .ok)
         }
@@ -62,16 +69,16 @@ public struct ResilientEnrichmentProvider: MetadataEnrichmentProvider {
         let response = await base.enrichReporting(query, missing: missing)
         let recovered = await breaker.record(response.health)
         if recovered, let cache {
-            await cache.invalidateNegatives(source: base.id, version: version)
+            await cache.invalidateNegatives(source: base.id, version: version, credential: credentialID)
         }
 
         // 3. Cache only authoritative outcomes.
         if let cache {
             switch response.health {
             case .ok:
-                await cache.store(response.enrichment, source: base.id, version: version, requestKey: requestKey)
+                await cache.store(response.enrichment, source: base.id, version: version, requestKey: requestKey, credential: credentialID)
             case .empty:
-                await cache.store(nil, source: base.id, version: version, requestKey: requestKey)
+                await cache.store(nil, source: base.id, version: version, requestKey: requestKey, credential: credentialID)
             case .failure:
                 break
             }

@@ -1,6 +1,78 @@
 import Foundation
 import CoreModels
 
+/// Composite identity for a per-source circuit breaker: the ``MetadataSource`` plus an
+/// optional **credential** identity.
+///
+/// A `nil` `credentialID` is the built-in / app-global credential — byte-identical to
+/// the pre-Step-9 source-only key, so every bundled provider's breaker is unchanged. A
+/// non-`nil` value (e.g. a hash of a user's BYOK TMDB key — never the raw key) scopes
+/// the breaker to exactly that credential, so one key's 401/credential failure trips
+/// only its own breaker and can never open (or be masked by) another key's — or the
+/// built-in path's — breaker.
+public struct ProviderBreakerKey: Hashable, Sendable {
+    public let source: MetadataSource
+    public let credentialID: String?
+
+    public init(source: MetadataSource, credentialID: String? = nil) {
+        self.source = source
+        self.credentialID = credentialID
+    }
+}
+
+/// A thread-safe registry that vends a **stable** ``ProviderCircuitBreaker`` per
+/// ``ProviderBreakerKey``, creating one lazily on first use and caching it thereafter.
+///
+/// The pipeline is rebuilt per share, but the breaker for a given (source, credential)
+/// must be the *same* instance across those rebuilds so a source's — or a specific
+/// BYOK key's — health persists. Seeded with the built-in (nil-credential) breakers so
+/// looking one up by `ProviderBreakerKey(source:)` returns the exact instance the
+/// shared runtime exposes to diagnostics; a new credential (a user's BYOK key) gets a
+/// fresh, isolated breaker the first time it is used.
+///
+/// Reference vending is synchronous (a plain lock), even though the breaker's own
+/// methods are `async` — so it slots into the synchronous provider-wrapping map without
+/// forcing that path to become async.
+public final class ProviderBreakerRegistry: @unchecked Sendable {
+    private let lock = NSLock()
+    private var breakers: [ProviderBreakerKey: ProviderCircuitBreaker]
+    private let makeBreaker: @Sendable () -> ProviderCircuitBreaker
+
+    public init(
+        seed: [ProviderBreakerKey: ProviderCircuitBreaker] = [:],
+        makeBreaker: @escaping @Sendable () -> ProviderCircuitBreaker = { ProviderCircuitBreaker() }
+    ) {
+        self.breakers = seed
+        self.makeBreaker = makeBreaker
+    }
+
+    /// The stable breaker for `key`, creating and caching one on first use.
+    public func breaker(for key: ProviderBreakerKey) -> ProviderCircuitBreaker {
+        lock.lock(); defer { lock.unlock() }
+        if let existing = breakers[key] { return existing }
+        let created = makeBreaker()
+        breakers[key] = created
+        return created
+    }
+
+    /// The already-registered breaker for `key`, or `nil` if none has been vended —
+    /// used to reset a credential's breaker on key removal without materializing one.
+    public func existingBreaker(for key: ProviderBreakerKey) -> ProviderCircuitBreaker? {
+        lock.lock(); defer { lock.unlock() }
+        return breakers[key]
+    }
+
+    /// Resets every registered breaker scoped to `credentialID` — used when a user
+    /// replaces or removes their BYOK key so its bad-key auth trip doesn't linger the
+    /// full auth cooldown before the (new/removed) credential is retried.
+    public func resetBreakers(credentialID: String) async {
+        lock.lock()
+        let matching = breakers.filter { $0.key.credentialID == credentialID }.map(\.value)
+        lock.unlock()
+        for breaker in matching { await breaker.reset() }
+    }
+}
+
 /// A **shared** set of the live resilience objects a metadata pipeline runs on —
 /// the provider-and-version-namespaced ``ProviderResultCache`` and one
 /// ``ProviderCircuitBreaker`` per source.
@@ -21,24 +93,32 @@ import CoreModels
 public struct MetadataProviderRuntime: Sendable {
     /// The shared result cache used by every wrapped provider.
     public let resultCache: ProviderResultCache
-    /// One breaker per source. A source absent here is given a fresh breaker at
-    /// wrap time (so an incomplete map still works, just without diagnostics for it).
-    ///
-    /// - TODO(Step 9, per-profile BYOK): this registry is keyed on `MetadataSource`
-    ///   alone, so a source's breaker state is a per-provider-global fact (correct
-    ///   today — a TheTVDB 429 applies to every share). Once per-profile credentials
-    ///   land, a 401/credential failure is specific to *that key*, not the source, so
-    ///   this key MUST gain a credential/profile dimension to avoid conflating one
-    ///   profile's bad key with another's healthy one. Safe while credentials are
-    ///   app-global; extend alongside the ``ProviderResultCache`` key.
+    /// One breaker per **built-in** source, keyed by ``MetadataSource``. This is the
+    /// app-global (credential-less) health map diagnostics project from, unchanged
+    /// since Step 6 — a TheTVDB 429 applies to every share, so it is a per-source fact.
     public let breakers: [MetadataSource: ProviderCircuitBreaker]
+    /// Step 9: the credential-aware breaker registry the pipeline actually draws from.
+    /// It is seeded with `breakers` (as `nil`-credential keys), so the built-in path is
+    /// byte-identical, and vends a fresh, isolated breaker the first time a user's BYOK
+    /// credential is used — so a 401 from one key can't trip another key's (or the
+    /// built-in) breaker.
+    public let breakerRegistry: ProviderBreakerRegistry
 
     public init(
         resultCache: ProviderResultCache,
-        breakers: [MetadataSource: ProviderCircuitBreaker]
+        breakers: [MetadataSource: ProviderCircuitBreaker],
+        breakerPolicy: ProviderCircuitBreaker.Policy = ProviderCircuitBreaker.Policy()
     ) {
         self.resultCache = resultCache
         self.breakers = breakers
+        var seed: [ProviderBreakerKey: ProviderCircuitBreaker] = [:]
+        for (source, breaker) in breakers {
+            seed[ProviderBreakerKey(source: source)] = breaker
+        }
+        self.breakerRegistry = ProviderBreakerRegistry(
+            seed: seed,
+            makeBreaker: { ProviderCircuitBreaker(policy: breakerPolicy) }
+        )
     }
 
     /// The default production runtime: a fresh shared result cache and one breaker
@@ -51,7 +131,11 @@ public struct MetadataProviderRuntime: Sendable {
         for source in ProductionMetadataProviders.defaultSources {
             breakers[source] = ProviderCircuitBreaker(policy: breakerPolicy)
         }
-        return MetadataProviderRuntime(resultCache: resultCache, breakers: breakers)
+        return MetadataProviderRuntime(
+            resultCache: resultCache,
+            breakers: breakers,
+            breakerPolicy: breakerPolicy
+        )
     }
 
     /// A point-in-time projection of every known breaker's state, in the module-neutral
@@ -76,6 +160,16 @@ public struct MetadataProviderRuntime: Sendable {
     /// Current live entry count of the shared result cache.
     public func resultCacheEntryCount() async -> Int {
         await resultCache.count
+    }
+
+    /// Clears all shared state for a specific BYOK `credentialID` — its cached results
+    /// (and bad-key negatives) plus its circuit-breaker trip. `AppShell` calls this
+    /// when a user replaces or removes their TMDB key, so the old credential can never
+    /// resurface and re-adding the same key refills immediately instead of waiting out
+    /// the negative TTL / auth cooldown.
+    public func invalidateCredential(_ credentialID: String) async {
+        await resultCache.invalidate(credential: credentialID)
+        await breakerRegistry.resetBreakers(credentialID: credentialID)
     }
 
     private static func describe(_ kind: ProviderFailureKind) -> String {

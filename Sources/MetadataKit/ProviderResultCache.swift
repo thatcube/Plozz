@@ -41,39 +41,46 @@ public actor ProviderResultCache {
         self.now = now
     }
 
-    /// The namespaced key: `source#version|requestKey`.
+    /// The namespaced key: `source#version|requestKey`, or, when a `credential` is
+    /// supplied, `source#version@credential|requestKey`.
     ///
-    /// - TODO(Step 9, per-profile BYOK): this key is keyed on `source` alone. Once
-    ///   per-profile credentials/API keys land (e.g. a user's own TMDB key), the key
-    ///   MUST gain a credential/profile dimension — otherwise a private result
-    ///   resolved with one profile's key could be served to another profile, and a
-    ///   bad key's negative could mask a good key. App-global credentials today make
-    ///   this safe; do not let Step 9 forget to extend the key.
-    static func key(source: MetadataSource, version: Int, requestKey: String) -> String {
-        "\(source.rawValue)#\(version)|\(requestKey)"
+    /// - Step 9 (per-user BYOK): `credential` is a short **opaque** identity for the
+    ///   active credential (e.g. a hash of a user's TMDB key — never the raw key), or
+    ///   `nil` for the built-in/app-global path. A `nil` credential reproduces the
+    ///   pre-Step-9 key byte-for-byte, so every built-in provider's entries are
+    ///   unchanged; a non-`nil` credential gives that key its own disjoint namespace,
+    ///   so a private result resolved with one key is never served to another, and a
+    ///   bad key's negative can't mask a good key's data.
+    static func key(source: MetadataSource, version: Int, requestKey: String, credential: String? = nil) -> String {
+        "\(namespacePrefix(source: source, version: version, credential: credential))\(requestKey)"
     }
 
-    static func namespacePrefix(source: MetadataSource, version: Int) -> String {
-        "\(source.rawValue)#\(version)|"
+    static func namespacePrefix(source: MetadataSource, version: Int, credential: String? = nil) -> String {
+        if let credential {
+            return "\(source.rawValue)#\(version)@\(credential)|"
+        }
+        return "\(source.rawValue)#\(version)|"
     }
 
     /// Looks up a cached result. Returns `nil` for a miss/expired entry, `.some(nil)`
     /// for a fresh remembered negative, and `.some(enrichment)` for a positive hit.
-    public func cached(source: MetadataSource, version: Int, requestKey: String) -> MetadataEnrichment?? {
-        let key = Self.key(source: source, version: version, requestKey: requestKey)
+    public func cached(source: MetadataSource, version: Int, requestKey: String, credential: String? = nil) -> MetadataEnrichment?? {
+        let key = Self.key(source: source, version: version, requestKey: requestKey, credential: credential)
         guard let entry = entries[key], entry.expires > now() else { return nil }
         return .some(entry.enrichment)
     }
 
     /// Stores a positive (`enrichment`) or negative (`nil`) result under the provider's
-    /// namespace, then enforces the entry budget.
+    /// (and, for a BYOK credential, that credential's) namespace, then enforces the
+    /// entry budget.
     public func store(
         _ enrichment: MetadataEnrichment?,
         source: MetadataSource,
         version: Int,
-        requestKey: String
+        requestKey: String,
+        credential: String? = nil
     ) {
-        let key = Self.key(source: source, version: version, requestKey: requestKey)
+        let key = Self.key(source: source, version: version, requestKey: requestKey, credential: credential)
         let isNegative = enrichment == nil
         let ttl = isNegative ? negativeTTL : positiveTTL
         entries[key] = Entry(
@@ -85,18 +92,36 @@ public actor ProviderResultCache {
     }
 
     /// Drops **all** cached entries (positive and negative) for a provider version —
-    /// used when its credentials change so nothing stale can be served.
-    public func invalidate(source: MetadataSource, version: Int) {
-        let prefix = Self.namespacePrefix(source: source, version: version)
+    /// used when its credentials change so nothing stale can be served. Scoped to the
+    /// given `credential` namespace when supplied (so replacing/removing a BYOK key
+    /// clears only that key's entries, never the built-in path's or another key's).
+    public func invalidate(source: MetadataSource, version: Int, credential: String? = nil) {
+        let prefix = Self.namespacePrefix(source: source, version: version, credential: credential)
         entries = entries.filter { !$0.key.hasPrefix(prefix) }
     }
 
     /// Drops only the **negative** entries for a provider version, so a recovered
     /// source refills the gaps it previously couldn't fill without waiting the normal
-    /// negative TTL.
-    public func invalidateNegatives(source: MetadataSource, version: Int) {
-        let prefix = Self.namespacePrefix(source: source, version: version)
+    /// negative TTL. Scoped to `credential` when supplied.
+    public func invalidateNegatives(source: MetadataSource, version: Int, credential: String? = nil) {
+        let prefix = Self.namespacePrefix(source: source, version: version, credential: credential)
         entries = entries.filter { !($0.key.hasPrefix(prefix) && $0.value.isNegative) }
+    }
+
+    /// Drops **every** entry (any source, any version) belonging to a specific BYOK
+    /// `credential` — used when a user replaces or removes their key so its results and
+    /// bad-key negatives can never resurface (Step 9 credential-change invalidation).
+    ///
+    /// A key is `source#version[@credential]|requestKey`; the credential, when present,
+    /// is the suffix of the namespace segment before the first `|`, so this matches it
+    /// unambiguously (a `requestKey` after the `|` can never be mistaken for it) and
+    /// version-agnostically.
+    public func invalidate(credential: String) {
+        let marker = "@\(credential)"
+        entries = entries.filter { key, _ in
+            guard let bar = key.firstIndex(of: "|") else { return true }
+            return !key[key.startIndex..<bar].hasSuffix(marker)
+        }
     }
 
     /// Test/diagnostic: current live entry count.
@@ -124,10 +149,12 @@ public actor ProviderResultCache {
 public struct CachedEnrichmentProvider: MetadataEnrichmentProvider {
     private let base: any MetadataEnrichmentProvider
     private let cache: ProviderResultCache
+    private let credentialID: String?
 
-    public init(base: any MetadataEnrichmentProvider, cache: ProviderResultCache) {
+    public init(base: any MetadataEnrichmentProvider, cache: ProviderResultCache, credentialID: String? = nil) {
         self.base = base
         self.cache = cache
+        self.credentialID = credentialID
     }
 
     public var id: MetadataSource { base.id }
@@ -136,7 +163,7 @@ public struct CachedEnrichmentProvider: MetadataEnrichmentProvider {
 
     public func enrich(_ query: MetadataQuery, missing: Set<MetadataField>) async -> MetadataEnrichment {
         let requestKey = Self.requestKey(query: query, missing: missing)
-        if let hit = await cache.cached(source: base.id, version: base.policy.version, requestKey: requestKey) {
+        if let hit = await cache.cached(source: base.id, version: base.policy.version, requestKey: requestKey, credential: credentialID) {
             return hit ?? MetadataEnrichment()
         }
         let result = await base.enrich(query, missing: missing)
@@ -144,7 +171,8 @@ public struct CachedEnrichmentProvider: MetadataEnrichmentProvider {
             result.isEmpty ? nil : result,
             source: base.id,
             version: base.policy.version,
-            requestKey: requestKey
+            requestKey: requestKey,
+            credential: credentialID
         )
         return result
     }

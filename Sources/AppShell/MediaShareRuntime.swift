@@ -111,10 +111,21 @@ final class DefaultMediaShareRuntime: MediaShareRuntime {
                 withUserOverrides: providerSettingsStore.load()
             )
         }
+        // Step 9: the household-global TMDB BYOK key. Read per pipeline build (like the
+        // enrichment override) so entering/removing a key applies on the next share
+        // refresh. Absent key => `.withUserToken(nil)` is a no-op, so the built-in
+        // (proxy/maintainer-token/disabled) TMDb path is byte-identical to pre-Step-9.
+        let tmdbKeyStore = TMDBUserKeyStore(
+            secureStore: KeychainStore(service: "com.plozz.app.household")
+        )
+        let providerConfig: @Sendable () -> MetadataProviderConfig = {
+            MetadataProviderConfig.resolved().withUserToken(tmdbKeyStore.load())
+        }
         let coordinator = ShareCatalogCoordinator(
             artworkCacheLifecycle: artworkCacheLifecycle,
             metadataComposition: ShareMetadataComposition(
                 enrichmentConfig: enrichmentConfig,
+                providerConfig: providerConfig,
                 providerRuntime: providerRuntime
             )
         )

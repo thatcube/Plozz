@@ -18,17 +18,17 @@ public struct TMDbMetadataProvider: ArtworkProvider {
     private var apiBase: String {
         switch access {
         case .proxy(let url): return url.absoluteString.hasSuffix("/") ? String(url.absoluteString.dropLast()) : url.absoluteString
-        case .directToken, .disabled: return "https://api.themoviedb.org"
+        case .directToken, .userToken, .disabled: return "https://api.themoviedb.org"
         }
     }
 
     private let imageBase = "https://image.tmdb.org/t/p"
 
-    /// Auth header for the JSON API: a v4 bearer in direct-token mode; none in
-    /// proxy mode (the proxy injects the key server-side).
+    /// Auth header for the JSON API: a v4 bearer in direct-token / user BYOK mode;
+    /// none in proxy mode (the proxy injects the key server-side).
     private var authHeaders: [String: String] {
         switch access {
-        case .directToken(let token): return ["Authorization": "Bearer \(token)"]
+        case .directToken(let token), .userToken(let token): return ["Authorization": "Bearer \(token)"]
         case .proxy, .disabled: return [:]
         }
     }

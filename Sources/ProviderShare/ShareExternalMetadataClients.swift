@@ -158,8 +158,13 @@ extension ShareExternalMetadataClients {
     /// is read per pipeline build, so a newly registered share picks up the latest
     /// merged override; `providerRuntime`, when present, shares one result cache +
     /// breaker set across shares so `AppShell` can surface them in diagnostics.
+    ///
+    /// `providerConfig` is likewise read per build so a user entering/removing their
+    /// Step 9 TMDB BYOK key takes effect on the next share refresh without a relaunch;
+    /// its default reproduces the built-in (Info.plist) TMDb access exactly.
     static func production(
         enrichmentConfig: @escaping @Sendable () -> MetadataEnrichmentConfig,
+        providerConfig: @escaping @Sendable () -> MetadataProviderConfig = { .resolved() },
         providerRuntime: MetadataProviderRuntime?
     ) -> ShareExternalMetadataClients {
         ShareExternalMetadataClients(
@@ -170,6 +175,7 @@ extension ShareExternalMetadataClients {
             makeTVDBClient: { TVDBClientMetadataResolver(client: TVDBClient(config: $0)) },
             makePipeline: {
                 ProductionMetadataProviders.makePipeline(
+                    providerConfig: providerConfig(),
                     enrichmentConfig: enrichmentConfig(),
                     runtime: providerRuntime
                 )
@@ -187,13 +193,19 @@ extension ShareExternalMetadataClients {
 /// unchanged.
 public struct ShareMetadataComposition: Sendable {
     public var enrichmentConfig: @Sendable () -> MetadataEnrichmentConfig
+    /// Step 9: how the TMDb tier is reached, read per pipeline build so a user's BYOK
+    /// key (or its removal) applies on the next share refresh. Defaults to the built-in
+    /// Info.plist resolution, so an app that doesn't wire BYOK is unchanged.
+    public var providerConfig: @Sendable () -> MetadataProviderConfig
     public var providerRuntime: MetadataProviderRuntime?
 
     public init(
         enrichmentConfig: @escaping @Sendable () -> MetadataEnrichmentConfig = { .resolved() },
+        providerConfig: @escaping @Sendable () -> MetadataProviderConfig = { .resolved() },
         providerRuntime: MetadataProviderRuntime? = nil
     ) {
         self.enrichmentConfig = enrichmentConfig
+        self.providerConfig = providerConfig
         self.providerRuntime = providerRuntime
     }
 }
